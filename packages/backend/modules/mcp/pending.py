@@ -7,11 +7,13 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from modules.mcp.models import MCPHttpMethod
+
 
 @dataclass(slots=True)
 class PendingEntry:
     tool_id: str
-    method: str
+    method: MCPHttpMethod
     path: str
     args: dict[str, Any]
     context: dict[str, Any]
@@ -29,7 +31,7 @@ class PendingStore:
     def create(
         self,
         tool_id: str,
-        method: str,
+        method: str | MCPHttpMethod,
         path: str,
         args: dict[str, Any],
         context: dict[str, Any] | None = None,
@@ -37,7 +39,7 @@ class PendingStore:
         token = secrets.token_urlsafe(24)
         self._store[token] = PendingEntry(
             tool_id=tool_id,
-            method=method,
+            method=MCPHttpMethod.require(method),
             path=path,
             args=dict(args),
             context=dict(context or {}),

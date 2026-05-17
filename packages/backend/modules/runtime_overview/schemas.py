@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
+from contracts.engine_instances.models import EngineInstanceStatus
+from contracts.runtime_workers.models import RuntimeWorkerKind
 from pydantic import BaseModel
 
 RuntimeMode = Literal["single_process", "durable_single_node", "distributed"]
@@ -17,7 +19,7 @@ class ApiProcessSummary(BaseModel):
 
 class RuntimeWorkerSummary(BaseModel):
     id: str
-    kind: str
+    kind: RuntimeWorkerKind
     hostname: str
     pid: int
     capacity: int
@@ -34,7 +36,7 @@ class EngineInstanceSummary(BaseModel):
     namespace: str
     analysis_id: str
     process_id: int | None
-    status: str
+    status: EngineInstanceStatus
     current_job_id: str | None
     current_build_id: str | None
     current_engine_run_id: str | None

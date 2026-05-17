@@ -6,6 +6,7 @@ import polars as pl
 import pytest
 from core.ai_clients import (
     AIError,
+    HuggingFaceClient,
     OllamaClient,
     OpenAIClient,
     get_ai_client,
@@ -180,6 +181,10 @@ class TestGetAIClient:
             mock_settings.openai_api_key = ""
             with pytest.raises(ValueError, match="OPENAI_API_KEY"):
                 get_ai_client("openai")
+
+    def test_huggingface_api_alias_uses_huggingface_client(self):
+        client = get_ai_client("huggingface-api")
+        assert isinstance(client, HuggingFaceClient)
 
     def test_unknown_provider_raises(self):
         with pytest.raises(ValueError, match="Unknown AI provider"):

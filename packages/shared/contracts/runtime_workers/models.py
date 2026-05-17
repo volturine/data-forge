@@ -16,6 +16,11 @@ class RuntimeWorkerKind(DataForgeStrEnum):
 class RuntimeWorker(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     __tablename__ = 'runtime_workers'  # type: ignore[assignment]
 
+    def heartbeat_age_seconds(self, *, now: dt.datetime) -> float:
+        heartbeat = self.last_heartbeat_at.astimezone(dt.UTC) if self.last_heartbeat_at.tzinfo is not None else self.last_heartbeat_at.replace(tzinfo=dt.UTC)
+        current = now.astimezone(dt.UTC) if now.tzinfo is not None else now.replace(tzinfo=dt.UTC)
+        return max((current - heartbeat).total_seconds(), 0.0)
+
     id: str = Field(sa_column=Column(String, primary_key=True))
     kind: RuntimeWorkerKind = Field(
         sa_column=Column(SAEnum(RuntimeWorkerKind, native_enum=False, values_callable=lambda enum_cls: enum_cls.values()), nullable=False, index=True)

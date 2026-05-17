@@ -29,6 +29,19 @@ from contracts.analysis.step_types import (
     is_step_type,
     normalize_step_type,
 )
+from contracts.step_config_enums import (
+    AIProvider,
+    ChartAggregation,
+    DeduplicateKeep,
+    DisplayUnits,
+    FillNullStrategy,
+    FilterLogic,
+    JoinHow,
+    LegendPosition,
+    NotificationMethod,
+    PivotAggregateFunction,
+    SortDirection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +152,7 @@ def convert_filter_config(config: dict) -> dict:
 
     return {
         "conditions": FilterCondition.normalize_many(config.get("conditions")),
-        "logic": config.get("logic", "AND"),
+        "logic": config.get("logic", FilterLogic.AND.value),
     }
 
 
@@ -167,7 +180,7 @@ def convert_join_config(config: dict) -> dict:
     join_columns = config.get("join_columns", [])
     right_columns = config.get("right_columns", [])
 
-    how = config.get("how", "inner")
+    how = config.get("how", JoinHow.INNER.value)
     return {
         "right_source": config.get("right_source"),
         "join_columns": join_columns,
@@ -185,7 +198,7 @@ def convert_fillnull_config(config: dict) -> dict:
 
     Normalizes frontend strategy "value" to backend strategy "literal".
     """
-    strategy = config.get("strategy", "literal")
+    strategy = config.get("strategy", FillNullStrategy.LITERAL.value)
     return {
         "strategy": strategy,
         "value": config.get("value"),
@@ -204,7 +217,7 @@ def convert_pivot_config(config: dict) -> dict:
         "index": config.get("index"),
         "columns": config.get("columns"),
         "values": config.get("values"),
-        "aggregate_function": config.get("aggregate_function", "first"),
+        "aggregate_function": config.get("aggregate_function", PivotAggregateFunction.FIRST.value),
     }
 
 
@@ -245,7 +258,7 @@ def convert_deduplicate_config(config: dict) -> dict:
     """
     return {
         "subset": config.get("columns") or config.get("subset"),
-        "keep": config.get("keep", "first"),
+        "keep": config.get("keep", DeduplicateKeep.FIRST.value),
     }
 
 
@@ -318,26 +331,26 @@ def convert_plot_config(config: dict) -> dict:
         "x_column": config.get("x_column", ""),
         "y_column": config.get("y_column"),
         "bins": config.get("bins", 10),
-        "aggregation": config.get("aggregation", "sum"),
+        "aggregation": config.get("aggregation", ChartAggregation.SUM.value),
         "group_column": config.get("group_column"),
         "group_sort_by": config.get("group_sort_by"),
-        "group_sort_order": config.get("group_sort_order", "asc"),
+        "group_sort_order": config.get("group_sort_order", SortDirection.ASC.value),
         "group_sort_column": config.get("group_sort_column"),
         "stack_mode": config.get("stack_mode", "grouped"),
         "area_opacity": config.get("area_opacity", 0.35),
         "date_bucket": config.get("date_bucket"),
         "date_ordinal": config.get("date_ordinal"),
         "sort_by": config.get("sort_by"),
-        "sort_order": config.get("sort_order", "asc"),
+        "sort_order": config.get("sort_order", SortDirection.ASC.value),
         "sort_column": config.get("sort_column"),
         "x_axis_label": config.get("x_axis_label"),
         "y_axis_label": config.get("y_axis_label"),
         "y_axis_scale": config.get("y_axis_scale", "linear"),
         "y_axis_min": config.get("y_axis_min"),
         "y_axis_max": config.get("y_axis_max"),
-        "display_units": config.get("display_units", ""),
+        "display_units": config.get("display_units", DisplayUnits.NONE.value),
         "decimal_places": config.get("decimal_places", 2),
-        "legend_position": config.get("legend_position", "right"),
+        "legend_position": config.get("legend_position", LegendPosition.RIGHT.value),
         "title": config.get("title"),
         "series_colors": config.get("series_colors", []),
         "overlays": config.get("overlays", []),
@@ -357,7 +370,7 @@ def convert_ai_config(config: dict) -> dict:
     input_columns: list[str] = config.get("input_columns") or []
 
     result: dict[str, object] = {
-        "provider": config.get("provider", "ollama"),
+        "provider": config.get("provider", AIProvider.OLLAMA.value),
         "model": config.get("model", "llama2"),
         "input_columns": input_columns,
         "output_column": config.get("output_column", "ai_result"),
@@ -383,7 +396,7 @@ def convert_notification_config(config: dict) -> dict:
     recipients = config.get("recipient", "") or (",".join(str(cid) for cid in selected) if isinstance(selected, list) else "")
 
     return {
-        "method": config.get("method", "email"),
+        "method": config.get("method", NotificationMethod.EMAIL.value),
         "recipient": recipients,
         "bot_token": config.get("bot_token", ""),
         "subscriber_ids": config.get("subscriber_ids") or [],

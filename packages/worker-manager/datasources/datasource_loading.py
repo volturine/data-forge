@@ -4,6 +4,7 @@ from typing import Any
 
 import polars as pl
 import psycopg
+from contracts.datasource.source_types import DataSourceFileType
 from contracts.enums import DataForgeStrEnum
 from core.iceberg_metadata import resolve_iceberg_branch_metadata_path
 from core.iceberg_snapshot_reader import scan_iceberg_snapshot
@@ -132,26 +133,27 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
     source_type = str(config.get("source_type") or "")
     if source_type == DatasourceSourceType.FILE.value:
         file_path = config.get("file_path")
-        file_type = config.get("file_type")
-        if not file_path or not file_type:
+        file_type = DataSourceFileType.read(config.get("file_type"), default=None)
+        if not file_path or file_type is None:
             raise ValueError("Datasource file loading requires file_path and file_type")
-        if file_type == "excel" and _has_bounds(config):
+        if file_type == DataSourceFileType.EXCEL and _has_bounds(config):
             return _read_excel_bounds(config)
         opts = config.get("csv_options") or config.get("options") or {}
         if not isinstance(opts, dict):
             opts = {}
         opts = _merge_excel_opts(config, opts)
-        if file_type == "csv":
-            return pl.scan_csv(file_path, **_csv_opts(opts))
-        if file_type == "parquet":
-            return pl.scan_parquet(file_path)
-        if file_type == "json":
-            return pl.read_json(file_path).lazy()
-        if file_type == "ndjson":
-            return pl.scan_ndjson(file_path)
-        if file_type == "excel":
-            return _read_excel(file_path, opts)
-        raise ValueError(f"Unsupported file type: {file_type}")
+        match file_type:
+            case DataSourceFileType.CSV:
+                return pl.scan_csv(file_path, **_csv_opts(opts))
+            case DataSourceFileType.PARQUET:
+                return pl.scan_parquet(file_path)
+            case DataSourceFileType.JSON:
+                return pl.read_json(file_path).lazy()
+            case DataSourceFileType.NDJSON:
+                return pl.scan_ndjson(file_path)
+            case DataSourceFileType.EXCEL:
+                return _read_excel(file_path, opts)
+        raise ValueError(f"Unsupported file type: {file_type.value}")
 
     if source_type == DatasourceSourceType.DATABASE.value:
         connection_string = config.get("connection_string")

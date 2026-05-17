@@ -2,6 +2,12 @@
 	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import type { QueryPlan, BuildLogEntry } from '$lib/types/build-stream';
 	import {
+		buildStatusLabel,
+		buildStatusTone,
+		buildTabStatusLabel,
+		buildTabStatusTone
+	} from '$lib/types/build-stream';
+	import {
 		CircleCheckBig,
 		CircleX,
 		Loader,
@@ -76,21 +82,8 @@
 		store.logs.filter((e) => e.level === 'warning' || e.level === 'error').length
 	);
 
-	const statusLabel = $derived.by(() => {
-		if (store.status === 'connecting') return 'Connecting';
-		if (store.status === 'running') return store.currentStep ?? 'Running';
-		if (store.status === 'completed') return 'Complete';
-		if (store.status === 'failed') return 'Failed';
-		if (store.status === 'cancelled') return 'Cancelled';
-		return 'Disconnected';
-	});
-
-	const statusTone = $derived.by(() => {
-		if (store.status === 'completed') return 'success' as const;
-		if (store.status === 'cancelled') return 'warning' as const;
-		if (store.status === 'failed' || store.status === 'disconnected') return 'error' as const;
-		return 'accent' as const;
-	});
+	const statusLabel = $derived(buildStatusLabel(store.status, store.currentStep));
+	const statusTone = $derived(buildStatusTone(store.status));
 	const showCancel = $derived(!!onCancel && canCancel);
 
 	const memoryWarning = $derived(store.memoryPercent > MEMORY_WARN_THRESHOLD);
@@ -1038,7 +1031,7 @@
 				>
 					{#each store.results as result (result.tab_id)}
 						<div class={css({ display: 'flex', alignItems: 'center', gap: '2', fontSize: 'sm' })}>
-							{#if result.status === 'success'}
+							{#if buildTabStatusTone(result.status) === 'success'}
 								<CircleCheckBig size={12} class={css({ color: 'fg.success' })} />
 							{:else}
 								<CircleX size={12} class={css({ color: 'fg.error' })} />
@@ -1046,10 +1039,10 @@
 							<span>{result.tab_name}</span>
 							<span
 								class={chip({
-									tone: result.status === 'success' ? 'success' : 'error'
+									tone: buildTabStatusTone(result.status)
 								})}
 							>
-								{result.status}
+								{buildTabStatusLabel(result.status)}
 							</span>
 							{#if result.output_name}
 								<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>{result.output_name}</span>

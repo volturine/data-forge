@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from shutil import copy2
 
-from contracts.datasource.source_types import DataSourceType
+from contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from core.config import settings
 from core.database import get_db
 from core.exceptions import AppError
@@ -63,15 +63,6 @@ logger = logging.getLogger(__name__)
 
 router = MCPRouter(prefix="/datasource", tags=["datasource"])
 
-_FILE_TYPE_MAPPING: dict[str, str] = {
-    ".csv": "csv",
-    ".parquet": "parquet",
-    ".json": "json",
-    ".ndjson": "ndjson",
-    ".jsonl": "ndjson",
-    ".xlsx": "excel",
-}
-
 
 def _write_chunk(path: Path, chunk: bytes) -> None:
     with open(path, "ab") as handle:
@@ -115,16 +106,6 @@ def _list_export_branches(metadata_path: str) -> list[str]:
     return branches
 
 
-def _matches_magic_number(file_extension: str, upload: UploadFile) -> bool:
-    header = upload.file.read(8)
-    upload.file.seek(0)
-    if file_extension == ".parquet":
-        return header.startswith(b"PAR1")
-    if file_extension == ".xlsx":
-        return header.startswith(b"PK")
-    return file_extension in {".csv", ".json", ".ndjson", ".jsonl"}
-
-
 @router.post("/upload", response_model=schemas.DataSourceResponse)
 @handle_errors(operation="upload datasource", value_error_status=400)
 async def upload_file(
@@ -143,17 +124,17 @@ async def upload_file(
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
 
-    file_extension = Path(file.filename).suffix.lower()
-    if file_extension not in _FILE_TYPE_MAPPING:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type: {file_extension}. Supported types: {', '.join(_FILE_TYPE_MAPPING.keys())}",
-        )
+    file_type = DataSourceFileType.from_upload_filename(file.filename)
+    if file_type is None:
+        file_extension = Path(file.filename).suffix.lower()
+        supported = ", ".join(DataSourceFileType.supported_upload_suffixes())
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_extension}. Supported types: {supported}")
 
-    if not _matches_magic_number(file_extension, file):
+    header = file.file.read(8)
+    file.file.seek(0)
+    if not file_type.matches_magic_number(header):
         raise HTTPException(status_code=400, detail="File content does not match extension")
-    file_type = _FILE_TYPE_MAPPING[file_extension]
-    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    unique_filename = f"{uuid.uuid4()}{Path(file.filename).suffix.lower()}"
     file_path = namespace_paths().upload_dir / unique_filename
 
     try:
@@ -169,7 +150,7 @@ async def upload_file(
         raise HTTPException(status_code=500, detail="Failed to save file") from e
 
     csv_options = None
-    if file_type == "csv":
+    if file_type.uses_csv_options:
         csv_options = schemas.CSVOptions(
             delimiter=delimiter,
             quote_char=quote_char,
@@ -186,7 +167,7 @@ async def upload_file(
             name=name,
             description=description,
             file_path=str(file_path),
-            file_type=file_type,
+            file_type=file_type.value,
             csv_options=csv_options.model_dump() if csv_options else None,
             owner_id=owner_id,
         )
@@ -225,14 +206,12 @@ async def upload_bulk(
         encoding=encoding,
     )
 
-    selected_extensions = [Path(file.filename).suffix.lower() for file in files if file.filename]
-    if selected_extensions:
-        unique_extensions = set(selected_extensions)
-        if len(unique_extensions) > 1:
-            raise HTTPException(
-                status_code=400,
-                detail="Bulk upload must use a single file type per batch",
-            )
+    selected_file_types = [file_type for file in files if file.filename and (file_type := DataSourceFileType.from_upload_filename(file.filename)) is not None]
+    if selected_file_types and len(set(selected_file_types)) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Bulk upload must use a single file type per batch",
+        )
 
     results: list[schemas.BulkUploadResult] = []
 
@@ -241,9 +220,9 @@ async def upload_bulk(
             results.append(schemas.BulkUploadResult(name="unknown", success=False, error="No filename provided"))
             continue
 
+        file_type = DataSourceFileType.from_upload_filename(file.filename)
         file_extension = Path(file.filename).suffix.lower()
-
-        if file_extension not in _FILE_TYPE_MAPPING:
+        if file_type is None:
             results.append(
                 schemas.BulkUploadResult(
                     name=file.filename,
@@ -253,7 +232,9 @@ async def upload_bulk(
             )
             continue
 
-        if not _matches_magic_number(file_extension, file):
+        header = file.file.read(8)
+        file.file.seek(0)
+        if not file_type.matches_magic_number(header):
             results.append(
                 schemas.BulkUploadResult(
                     name=file.filename,
@@ -262,7 +243,6 @@ async def upload_bulk(
                 ),
             )
             continue
-        file_type = _FILE_TYPE_MAPPING[file_extension]
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         file_path = namespace_paths().upload_dir / unique_filename
         name = Path(file.filename).stem
@@ -286,7 +266,7 @@ async def upload_bulk(
             )
             continue
 
-        file_csv_options = csv_options if file_type == "csv" else None
+        file_csv_options = csv_options if file_type.uses_csv_options else None
         try:
             owner_id = user.id if user else None
             datasource = await create_remote_file_datasource(
@@ -295,7 +275,7 @@ async def upload_bulk(
                 name=name,
                 description=None,
                 file_path=str(file_path),
-                file_type=file_type,
+                file_type=file_type.value,
                 csv_options=file_csv_options.model_dump() if file_csv_options else None,
                 owner_id=owner_id,
             )
@@ -345,13 +325,15 @@ async def preflight_excel(
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
-    file_extension = Path(file.filename).suffix.lower()
-    if file_extension != ".xlsx":
+    file_type = DataSourceFileType.from_upload_filename(file.filename)
+    if file_type != DataSourceFileType.EXCEL:
         raise HTTPException(status_code=400, detail="Only .xlsx files are supported for preflight")
-    if not _matches_magic_number(file_extension, file):
+    header = file.file.read(8)
+    file.file.seek(0)
+    if not file_type.matches_magic_number(header):
         raise HTTPException(status_code=400, detail="File content does not match extension")
 
-    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    unique_filename = f"{uuid.uuid4()}{Path(file.filename).suffix.lower()}"
     file_path = namespace_paths().upload_dir / unique_filename
     try:
         await _save_upload_file(file, file_path, settings.upload_max_file_size_bytes)
@@ -410,7 +392,7 @@ async def preflight_excel_path(payload: schemas.ExcelPreflightPathRequest):
         raise HTTPException(status_code=400, detail="Excel file must be inside the data directory")
     if not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=400, detail="Excel file not found")
-    if resolved.suffix.lower() != ".xlsx":
+    if DataSourceFileType.from_upload_suffix(resolved.suffix.lower()) != DataSourceFileType.EXCEL:
         raise HTTPException(status_code=400, detail="Only .xlsx files are supported for preflight")
 
     preflight_id, preflight = await create_preflight(file_path)
@@ -558,7 +540,7 @@ async def confirm_excel(
             name=name,
             description=description,
             file_path=str(target_path),
-            file_type="excel",
+            file_type=DataSourceFileType.EXCEL.value,
             sheet_name=resolved_sheet,
             start_row=resolved_start_row,
             start_col=resolved_start_col,
@@ -602,11 +584,9 @@ async def connect_datasource(
     Use GET /datasource to verify creation.
     """
     source_type = datasource.source_type
-    if source_type == DataSourceType.FILE:
-        raise HTTPException(
-            status_code=400,
-            detail="File datasource creation must use upload",
-        )
+    if (error_message := source_type.connect_api_error_message) is not None:
+        raise HTTPException(status_code=400, detail=error_message)
+
     owner_id = user.id if user else None
     if source_type == DataSourceType.DATABASE:
         db_config = schemas.DatabaseDataSourceConfig.model_validate(datasource.config)
@@ -630,11 +610,6 @@ async def connect_datasource(
             source=iceberg_config.source,
             branch=iceberg_config.branch,
             owner_id=owner_id,
-        )
-    if source_type == DataSourceType.ANALYSIS:
-        raise HTTPException(
-            status_code=400,
-            detail="Direct creation of analysis datasources is no longer supported. Use analysis tabs with analysis_tab_id.",
         )
     raise HTTPException(
         status_code=400,
@@ -721,14 +696,13 @@ async def get_datasource_schema(
     if refresh:
         datasource = service.get_datasource(session, datasource_id_value)
         source = datasource.config.get("source") if isinstance(datasource.config, dict) else None
-        if datasource.source_type == DataSourceType.ICEBERG and isinstance(source, dict):
-            source_type = source.get("source_type")
-            if source_type in {DataSourceType.DATABASE, DataSourceType.FILE}:
-                await refresh_remote_datasource(
-                    session,
-                    datasource_id=datasource_id_value,
-                    runtime_probe=runtime_probe,
-                )
+        source_type = DataSourceType.read(source.get("source_type") if isinstance(source, dict) else None, default=None)
+        if datasource.source_type == DataSourceType.ICEBERG and source_type is not None and source_type.supports_external_ingestion:
+            await refresh_remote_datasource(
+                session,
+                datasource_id=datasource_id_value,
+                runtime_probe=runtime_probe,
+            )
     schema = await get_remote_datasource_schema(
         session,
         datasource_id=datasource_id_value,

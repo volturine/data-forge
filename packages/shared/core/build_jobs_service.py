@@ -52,8 +52,9 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
     queued_clause = table.c.status == BuildJobStatus.QUEUED
+    reclaimable_statuses = [status for status in BuildJobStatus if status.is_reclaimable]
     reclaimable_clause = and_(
-        table.c.status.in_([BuildJobStatus.LEASED, BuildJobStatus.RUNNING]),
+        table.c.status.in_(reclaimable_statuses),
         or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable)),
         table.c.attempts < table.c.max_attempts,
     )
@@ -114,8 +115,7 @@ def mark_job_completed(session: Session, job_id: str) -> BuildJob:
     if job is None:
         raise ValueError(f'Build job {job_id} not found')
     job.status = BuildJobStatus.COMPLETED
-    job.lease_owner = None
-    job.lease_expires_at = None
+    job.clear_lease()
     job.updated_at = _utcnow()
     session.add(job)
     session.commit()
@@ -129,8 +129,7 @@ def mark_job_failed(session: Session, job_id: str, *, error: str | None = None) 
         raise ValueError(f'Build job {job_id} not found')
     job.status = BuildJobStatus.FAILED
     job.last_error = error
-    job.lease_owner = None
-    job.lease_expires_at = None
+    job.clear_lease()
     job.updated_at = _utcnow()
     session.add(job)
     session.commit()
@@ -143,8 +142,7 @@ def mark_job_cancelled(session: Session, job_id: str) -> BuildJob:
     if job is None:
         raise ValueError(f'Build job {job_id} not found')
     job.status = BuildJobStatus.CANCELLED
-    job.lease_owner = None
-    job.lease_expires_at = None
+    job.clear_lease()
     job.updated_at = _utcnow()
     session.add(job)
     session.commit()
@@ -163,13 +161,12 @@ def release_worker_jobs(session: Session, *, worker_id: str) -> list[BuildJob]:
     stmt = (
         select(BuildJob)
         .where(BuildJob.lease_owner == worker_id)  # type: ignore[arg-type]
-        .where(table.c.status.in_([BuildJobStatus.LEASED, BuildJobStatus.RUNNING]))
+        .where(table.c.status.in_([status for status in BuildJobStatus if status.is_reclaimable]))
     )
     jobs = list(session.execute(stmt).scalars().all())
     for job in jobs:
         job.status = BuildJobStatus.QUEUED
-        job.lease_owner = None
-        job.lease_expires_at = None
+        job.clear_lease()
         job.updated_at = now
         session.add(job)
     session.commit()

@@ -8,11 +8,13 @@ import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from core.ai_clients import get_ai_client
+from contracts.step_config_enums import AIProvider
+from core.ai_clients import get_ai_client, resolve_ai_provider
 from core.namespace import get_namespace
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -24,15 +26,59 @@ from modules.auth.models import User
 from modules.chat.openrouter import OpenRouterError, chat_with_tools, list_models
 from modules.chat.sessions import LiveSession, session_store
 from modules.mcp.executor import build_tool_context, call_tool
-from modules.mcp.models import MCPToolSafety
+from modules.mcp.models import MCPToolDefinition, MCPToolSafety
 from modules.mcp.tool_output import format_output_hint
-from modules.mcp.validation import validate_args
 
 router = APIRouter(prefix="/ai/chat", tags=["ai-chat"])
 
 logger = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL = 15
+
+
+@dataclass(frozen=True, slots=True)
+class ChatProviderDefinition:
+    provider: AIProvider
+    requires_session_api_key: bool = False
+    requires_model_list_api_key: bool = False
+    supports_mcp_tool_calls: bool = False
+
+    @classmethod
+    def require(cls, provider: str | AIProvider) -> "ChatProviderDefinition":
+        normalized = resolve_ai_provider(provider)
+        return CHAT_PROVIDER_DEFINITIONS[normalized]
+
+    async def list_models(self, body: "ChatModelsRequest") -> list[dict]:
+        match self.provider:
+            case AIProvider.OPENROUTER:
+                if not body.api_key:
+                    raise HTTPException(status_code=400, detail="API key is required")
+                return await list_models(body.api_key)
+            case _:
+                client = get_ai_client(
+                    self.provider,
+                    endpoint_url=body.endpoint_url,
+                    api_key=body.api_key or None,
+                    organization_id=body.organization_id,
+                )
+                return await asyncio.to_thread(client.list_models)
+
+
+CHAT_PROVIDER_DEFINITIONS: dict[AIProvider, ChatProviderDefinition] = {
+    AIProvider.OPENROUTER: ChatProviderDefinition(
+        provider=AIProvider.OPENROUTER,
+        requires_session_api_key=True,
+        requires_model_list_api_key=True,
+        supports_mcp_tool_calls=True,
+    ),
+    AIProvider.OPENAI: ChatProviderDefinition(provider=AIProvider.OPENAI),
+    AIProvider.OLLAMA: ChatProviderDefinition(provider=AIProvider.OLLAMA),
+    AIProvider.HUGGINGFACE: ChatProviderDefinition(
+        provider=AIProvider.HUGGINGFACE,
+        requires_session_api_key=True,
+        requires_model_list_api_key=True,
+    ),
+}
 
 
 class CreateSessionRequest(BaseModel):
@@ -128,7 +174,7 @@ def _format_fallback_param_details(schema: dict) -> list[str]:
     return [_format_param_details(name, prop, name in required, "arg", prop.get("description", "")) for name, prop in props.items()]
 
 
-def _build_tool_system_message(tools: list[dict]) -> str:
+def _build_tool_system_message(tools: Sequence[MCPToolDefinition | dict[str, Any]]) -> str:
     """Build a system message describing available tools and how to call them."""
     lines = [
         "You have access to the following tools. To call a tool, output EXACTLY this format on its own line:",
@@ -288,9 +334,9 @@ async def _run_agent_turn(
     """Run one agent turn: send message, handle tool calls, push SSE events."""
     from modules.mcp.routes import get_registry
 
-    provider_name = session.provider.strip().lower()
+    provider = ChatProviderDefinition.require(session.provider)
     api_key = session.api_key
-    if provider_name in {"openrouter", "huggingface", "huggingface-api"} and not api_key:
+    if provider.requires_session_api_key and not api_key:
         session.push_event({"type": "error", "content": "No API key configured"})
         session.push_event({"type": "done"})
         await session.set_busy(False)
@@ -310,7 +356,7 @@ async def _run_agent_turn(
     session.push_event({"type": "message", "role": "user", "content": user_content})
 
     try:
-        if provider_name != "openrouter":
+        if not provider.supports_mcp_tool_calls:
             prompt_lines: list[str] = []
             for history_msg in session.messages:
                 role = str(history_msg.get("role", "user")).lower()
@@ -322,7 +368,7 @@ async def _run_agent_turn(
                 prompt_lines.append(f"{role}: {content}")
             prompt_lines.append("assistant:")
             prompt = "\n".join(prompt_lines)
-            client = get_ai_client(provider_name, api_key=api_key)
+            client = get_ai_client(provider.provider, api_key=api_key)
             assistant_content = await asyncio.to_thread(
                 client.generate,
                 prompt,
@@ -333,12 +379,12 @@ async def _run_agent_turn(
             session.push_event({"type": "message", "role": "assistant", "content": assistant_content})
             return
 
-        registry = get_registry(app)
+        registry = [MCPToolDefinition.coerce(item) for item in get_registry(app)]
         if tool_ids:
             id_set = set(tool_ids)
-            registry = [t for t in registry if t["id"] in id_set]
-        safe_tools = [t for t in registry if t["safety"] == MCPToolSafety.SAFE.value]
-        mutating_tools = [t for t in registry if t["safety"] == MCPToolSafety.MUTATING.value]
+            registry = [t for t in registry if t.id in id_set]
+        safe_tools = [t for t in registry if t.safety == MCPToolSafety.SAFE]
+        mutating_tools = [t for t in registry if t.safety == MCPToolSafety.MUTATING]
         all_tools = safe_tools + mutating_tools
 
         tool_system_msg = {"role": "system", "content": _build_tool_system_message(all_tools)} if all_tools else None
@@ -402,14 +448,14 @@ async def _run_agent_turn(
                 tool_id = fn.get("name", "")
                 raw_args = fn.get("arguments", "{}")
 
-                tool = next((t for t in all_tools if t["id"] == tool_id), None)
+                tool = next((t for t in all_tools if t.id == tool_id), None)
                 if tool is None:
                     logger.warning("Unknown tool_id session=%s tool=%s", session.id, tool_id)
                     _push_tool_error(session, tc, tool_id, "", "", {}, f"Unknown tool '{tool_id}'")
                     continue
 
-                method = tool["method"]
-                path = tool["path"]
+                method = tool.method.value
+                path = tool.path
 
                 try:
                     args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
@@ -442,7 +488,7 @@ async def _run_agent_turn(
                     }
                 )
 
-                valid, errors, normalized = validate_args(tool["input_schema"], args)
+                valid, errors, normalized = tool.validate_arguments(args)
                 if not valid:
                     session.push_event(
                         {
@@ -463,7 +509,7 @@ async def _run_agent_turn(
                     )
                     continue
 
-                if tool.get("confirm_required"):
+                if tool.confirm_required:
                     session.push_event(
                         {
                             "type": "tool_confirm",
@@ -562,7 +608,8 @@ def list_sessions(user: User = Depends(get_current_user)) -> list[dict]:
 def create_session(body: CreateSessionRequest, user: User = Depends(get_current_user)) -> dict:
     """Create a new chat session with the given provider/model/key."""
     del user
-    session = session_store.create(body.provider, body.model, body.api_key or "", body.system_prompt or "")
+    provider = ChatProviderDefinition.require(body.provider).provider
+    session = session_store.create(provider.value, body.model, body.api_key or "", body.system_prompt or "")
     return {
         "session_id": session.id,
         "model": session.model,
@@ -579,7 +626,7 @@ def update_session(session_id: str, body: UpdateSessionRequest, user: User = Dep
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if body.provider is not None:
-        session.provider = body.provider
+        session.provider = ChatProviderDefinition.require(body.provider).provider.value
     if body.model is not None:
         session.model = body.model
     if body.api_key is not None:
@@ -730,21 +777,10 @@ def delete_session(session_id: str, user: User = Depends(get_current_user)) -> d
 async def get_models(body: ChatModelsRequest, user: User = Depends(get_current_user)) -> list[dict]:
     """List models available for a chat provider."""
     del user
-    provider = body.provider.strip().lower()
-    key = body.api_key
+    provider = ChatProviderDefinition.require(body.provider)
+    if provider.requires_model_list_api_key and not body.api_key:
+        raise HTTPException(status_code=400, detail="API key is required")
     try:
-        if provider in {"openrouter", "huggingface", "huggingface-api"} and not key:
-            raise HTTPException(status_code=400, detail="API key is required")
-        if provider == "openrouter":
-            if not key:
-                raise HTTPException(status_code=400, detail="API key is required")
-            return await list_models(key)
-        client = get_ai_client(
-            provider,
-            endpoint_url=body.endpoint_url,
-            api_key=key or None,
-            organization_id=body.organization_id,
-        )
-        return await asyncio.to_thread(client.list_models)
+        return await provider.list_models(body)
     except (OpenRouterError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

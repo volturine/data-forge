@@ -1,4 +1,5 @@
 import datetime as dt
+from typing import Any
 
 from sqlalchemy import JSON, Column, DateTime, Enum as SAEnum, Float, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
@@ -35,6 +36,120 @@ class BuildRunStatus(DataForgeStrEnum):
 
 class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     __tablename__ = 'build_runs'  # type: ignore[assignment]
+
+    def apply_event_context(self, event: compute_schemas.BuildEvent) -> None:
+        if event.current_datasource_id is not None:
+            self.current_datasource_id = event.current_datasource_id
+        if event.tab_id is not None:
+            self.current_tab_id = event.tab_id
+        if event.tab_name is not None:
+            self.current_tab_name = event.tab_name
+        if event.current_output_id is not None:
+            self.current_output_id = event.current_output_id
+        if event.current_output_name is not None:
+            self.current_output_name = event.current_output_name
+        if event.engine_run_id is not None:
+            self.current_engine_run_id = event.engine_run_id
+
+    def apply_runtime_event(self, event: compute_schemas.BuildEvent) -> None:
+        if isinstance(event, compute_schemas.BuildProgressEvent):
+            self.progress = event.progress
+            self.elapsed_ms = event.elapsed_ms
+            self.estimated_remaining_ms = event.estimated_remaining_ms
+            self.current_step = event.current_step
+            self.current_step_index = event.current_step_index
+            self.total_steps = event.total_steps
+        elif isinstance(event, compute_schemas.BuildStepStartEvent | compute_schemas.BuildStepCompleteEvent | compute_schemas.BuildStepFailedEvent):
+            self.current_step = event.step_name
+            self.current_step_index = event.build_step_index
+            self.total_steps = event.total_steps
+
+    def apply_terminal_event(self, event: compute_schemas.BuildEvent) -> bool:
+        if self.status.is_terminal:
+            return False
+        if isinstance(event, compute_schemas.BuildCompleteEvent):
+            self.status = BuildRunStatus.COMPLETED
+            self.progress = event.progress
+            self.elapsed_ms = event.elapsed_ms
+            self.total_steps = event.total_steps
+            self.duration_ms = event.duration_ms
+            self.error_message = None
+            self.completed_at = event.emitted_at
+            return True
+        if isinstance(event, compute_schemas.BuildFailedEvent):
+            self.status = BuildRunStatus.FAILED
+            self.progress = event.progress
+            self.elapsed_ms = event.elapsed_ms
+            self.total_steps = event.total_steps
+            self.duration_ms = event.duration_ms
+            self.error_message = event.error
+            self.completed_at = event.emitted_at
+            return True
+        if isinstance(event, compute_schemas.BuildCancelledEvent):
+            self.status = BuildRunStatus.CANCELLED
+            self.progress = event.progress
+            self.elapsed_ms = event.elapsed_ms
+            self.total_steps = event.total_steps
+            self.duration_ms = event.duration_ms
+            self.error_message = 'Build cancelled'
+            self.cancelled_at = event.cancelled_at
+            self.cancelled_by = event.cancelled_by
+            self.completed_at = event.emitted_at
+            return True
+        return True
+
+    @staticmethod
+    def terminal_status_for_event(event: compute_schemas.BuildEvent) -> BuildRunStatus | None:
+        if isinstance(event, compute_schemas.BuildCompleteEvent):
+            return BuildRunStatus.COMPLETED
+        if isinstance(event, compute_schemas.BuildFailedEvent):
+            return BuildRunStatus.FAILED
+        if isinstance(event, compute_schemas.BuildCancelledEvent):
+            return BuildRunStatus.CANCELLED
+        return None
+
+    @staticmethod
+    def terminal_update_values(event: compute_schemas.BuildEvent) -> dict[str, Any] | None:
+        if isinstance(event, compute_schemas.BuildCompleteEvent):
+            return {
+                'status': BuildRunStatus.COMPLETED,
+                'progress': event.progress,
+                'elapsed_ms': event.elapsed_ms,
+                'total_steps': event.total_steps,
+                'duration_ms': event.duration_ms,
+                'error_message': None,
+                'cancelled_at': None,
+                'cancelled_by': None,
+                'completed_at': event.emitted_at,
+                'updated_at': event.emitted_at,
+            }
+        if isinstance(event, compute_schemas.BuildFailedEvent):
+            return {
+                'status': BuildRunStatus.FAILED,
+                'progress': event.progress,
+                'elapsed_ms': event.elapsed_ms,
+                'total_steps': event.total_steps,
+                'duration_ms': event.duration_ms,
+                'error_message': event.error,
+                'cancelled_at': None,
+                'cancelled_by': None,
+                'completed_at': event.emitted_at,
+                'updated_at': event.emitted_at,
+            }
+        if isinstance(event, compute_schemas.BuildCancelledEvent):
+            return {
+                'status': BuildRunStatus.CANCELLED,
+                'progress': event.progress,
+                'elapsed_ms': event.elapsed_ms,
+                'total_steps': event.total_steps,
+                'duration_ms': event.duration_ms,
+                'error_message': 'Build cancelled',
+                'cancelled_at': event.cancelled_at,
+                'cancelled_by': event.cancelled_by,
+                'completed_at': event.emitted_at,
+                'updated_at': event.emitted_at,
+            }
+        return None
 
     id: str = Field(sa_column=Column(String, primary_key=True))
     namespace: str = Field(sa_column=Column(String, nullable=False, index=True))

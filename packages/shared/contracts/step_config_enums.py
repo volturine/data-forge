@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
 from contracts.enums import DataForgeStrEnum
@@ -212,17 +212,19 @@ class DurationUnit(DataForgeStrEnum):
 
     @property
     def every_token(self) -> str:
-        if self == DurationUnit.SECONDS:
-            return '1s'
-        if self == DurationUnit.MINUTES:
-            return '1m'
-        if self == DurationUnit.HOURS:
-            return '1h'
-        if self == DurationUnit.DAYS:
-            return '1d'
-        if self == DurationUnit.WEEKS:
-            return '1w'
-        return '1mo'
+        match self:
+            case DurationUnit.SECONDS:
+                return '1s'
+            case DurationUnit.MINUTES:
+                return '1m'
+            case DurationUnit.HOURS:
+                return '1h'
+            case DurationUnit.DAYS:
+                return '1d'
+            case DurationUnit.WEEKS:
+                return '1w'
+            case DurationUnit.MONTHS:
+                return '1mo'
 
 
 class TimeDirection(DataForgeStrEnum):
@@ -234,6 +236,239 @@ class WithColumnsExprType(DataForgeStrEnum):
     LITERAL = 'literal'
     COLUMN = 'column'
     UDF = 'udf'
+
+
+class NotificationMethod(DataForgeStrEnum):
+    EMAIL = 'email'
+    TELEGRAM = 'telegram'
+
+
+class JoinHow(DataForgeStrEnum):
+    INNER = 'inner'
+    LEFT = 'left'
+    RIGHT = 'right'
+    OUTER = 'outer'
+    CROSS = 'cross'
+
+    @property
+    def polars_how(self) -> Literal['inner', 'left', 'right', 'full', 'cross']:
+        if self == JoinHow.OUTER:
+            return 'full'
+        return cast(Literal['inner', 'left', 'right', 'cross'], self.value)
+
+    @property
+    def sql_join_type(self) -> Literal['INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL OUTER JOIN', 'CROSS JOIN']:
+        if self == JoinHow.OUTER:
+            return 'FULL OUTER JOIN'
+        return cast(Literal['INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'CROSS JOIN'], f'{self.value.upper()} JOIN')
+
+    @property
+    def requires_join_keys(self) -> bool:
+        return self != JoinHow.CROSS
+
+
+class GroupByAggregationFunction(DataForgeStrEnum):
+    SUM = 'sum'
+    MEAN = 'mean'
+    COUNT = 'count'
+    MIN = 'min'
+    MAX = 'max'
+    FIRST = 'first'
+    LAST = 'last'
+    MEDIAN = 'median'
+    STD = 'std'
+    N_UNIQUE = 'n_unique'
+    COLLECT_LIST = 'collect_list'
+    COLLECT_SET = 'collect_set'
+
+    def default_alias(self, column: str) -> str:
+        return f'{column}_{self.value}'
+
+    def render_polars_export(self, column_expr: str, alias_expr: str) -> str:
+        match self:
+            case GroupByAggregationFunction.COLLECT_LIST:
+                return f'{column_expr}.implode().alias({alias_expr})'
+            case GroupByAggregationFunction.COLLECT_SET:
+                return f'{column_expr}.implode().list.unique().alias({alias_expr})'
+            case _:
+                return f'{column_expr}.{self.polars_method_name}().alias({alias_expr})'
+
+    def render_sql_export(self, column_expr: str, alias_expr: str) -> str | None:
+        match self:
+            case GroupByAggregationFunction.MEDIAN:
+                return f'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {column_expr}) AS {alias_expr}'
+            case GroupByAggregationFunction.N_UNIQUE:
+                return f'COUNT(DISTINCT {column_expr}) AS {alias_expr}'
+            case GroupByAggregationFunction.COLLECT_LIST:
+                return f'ARRAY_AGG({column_expr}) AS {alias_expr}'
+            case GroupByAggregationFunction.COLLECT_SET:
+                return f'ARRAY_AGG(DISTINCT {column_expr}) AS {alias_expr}'
+            case _:
+                if (sql_function := self.sql_function_name) is None:
+                    return None
+                return f'{sql_function}({column_expr}) AS {alias_expr}'
+
+    @property
+    def polars_method_name(self) -> str:
+        match self:
+            case GroupByAggregationFunction.COLLECT_LIST | GroupByAggregationFunction.COLLECT_SET:
+                raise ValueError(f'GroupBy aggregation {self.value} does not define a Polars method name')
+            case _:
+                return self.value
+
+    @property
+    def sql_function_name(self) -> str | None:
+        match self:
+            case GroupByAggregationFunction.MEAN:
+                return 'AVG'
+            case GroupByAggregationFunction.STD:
+                return 'STDDEV_POP'
+            case GroupByAggregationFunction.SUM | GroupByAggregationFunction.COUNT | GroupByAggregationFunction.MIN | GroupByAggregationFunction.MAX:
+                return self.value.upper()
+            case _:
+                return None
+
+
+class ChartAggregation(DataForgeStrEnum):
+    SUM = 'sum'
+    MEAN = 'mean'
+    COUNT = 'count'
+    MIN = 'min'
+    MAX = 'max'
+    MEDIAN = 'median'
+    STD = 'std'
+    VARIANCE = 'variance'
+    UNIQUE_COUNT = 'unique_count'
+
+
+class OverlayChartType(DataForgeStrEnum):
+    LINE = 'line'
+    AREA = 'area'
+    BAR = 'bar'
+    SCATTER = 'scatter'
+
+
+class YAxisPosition(DataForgeStrEnum):
+    LEFT = 'left'
+    RIGHT = 'right'
+
+
+class ReferenceAxis(DataForgeStrEnum):
+    X = 'x'
+    Y = 'y'
+
+
+class SortDirection(DataForgeStrEnum):
+    ASC = 'asc'
+    DESC = 'desc'
+
+
+class GroupSortBy(DataForgeStrEnum):
+    NAME = 'name'
+    VALUE = 'value'
+    CUSTOM = 'custom'
+
+
+class SortBy(DataForgeStrEnum):
+    X = 'x'
+    Y = 'y'
+    CUSTOM = 'custom'
+
+
+class StackMode(DataForgeStrEnum):
+    GROUPED = 'grouped'
+    STACKED = 'stacked'
+    STACKED_100 = '100%'
+
+
+class DateBucket(DataForgeStrEnum):
+    EXACT = 'exact'
+    YEAR = 'year'
+    QUARTER = 'quarter'
+    MONTH = 'month'
+    WEEK = 'week'
+    DAY = 'day'
+    HOUR = 'hour'
+
+
+class DateOrdinal(DataForgeStrEnum):
+    DAY_OF_WEEK = 'day_of_week'
+    MONTH_OF_YEAR = 'month_of_year'
+    QUARTER_OF_YEAR = 'quarter_of_year'
+
+
+class AxisScale(DataForgeStrEnum):
+    LINEAR = 'linear'
+    LOG = 'log'
+
+
+class DisplayUnits(DataForgeStrEnum):
+    NONE = ''
+    THOUSANDS = 'K'
+    MILLIONS = 'M'
+    BILLIONS = 'B'
+    PERCENT = '%'
+
+
+class LegendPosition(DataForgeStrEnum):
+    TOP = 'top'
+    BOTTOM = 'bottom'
+    LEFT = 'left'
+    RIGHT = 'right'
+    NONE = 'none'
+
+
+class ChartHeight(DataForgeStrEnum):
+    SMALL = 'small'
+    MEDIUM = 'medium'
+    LARGE = 'large'
+    XLARGE = 'xlarge'
+
+
+class ChartWidth(DataForgeStrEnum):
+    NORMAL = 'normal'
+    WIDE = 'wide'
+    FULL = 'full'
+
+
+class RecipientSource(DataForgeStrEnum):
+    MANUAL = 'manual'
+    COLUMN = 'column'
+
+
+class AIProvider(DataForgeStrEnum):
+    OLLAMA = 'ollama'
+    OPENAI = 'openai'
+    OPENROUTER = 'openrouter'
+    HUGGINGFACE = 'huggingface'
+
+
+class DeduplicateKeep(DataForgeStrEnum):
+    FIRST = 'first'
+    LAST = 'last'
+    ANY = 'any'
+    NONE = 'none'
+
+    @property
+    def polars_keep(self) -> Literal['first', 'last', 'any', 'none']:
+        return self.value
+
+
+class PivotAggregateFunction(DataForgeStrEnum):
+    FIRST = 'first'
+    LAST = 'last'
+    SUM = 'sum'
+    MEAN = 'mean'
+    MEDIAN = 'median'
+    MIN = 'min'
+    MAX = 'max'
+    COUNT = 'count'
+
+    @property
+    def polars_aggregate_function(self) -> Literal['first', 'last', 'sum', 'mean', 'median', 'min', 'max', 'len']:
+        if self == PivotAggregateFunction.COUNT:
+            return 'len'
+        return cast(Literal['first', 'last', 'sum', 'mean', 'median', 'min', 'max'], self.value)
 
 
 class FillNullStrategy(DataForgeStrEnum):

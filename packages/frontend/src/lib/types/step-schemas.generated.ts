@@ -47,9 +47,23 @@ export interface FilterConfig {
 	logic?: FilterLogic;
 }
 
+export type GroupByAggregationFunction =
+	| 'sum'
+	| 'mean'
+	| 'count'
+	| 'min'
+	| 'max'
+	| 'first'
+	| 'last'
+	| 'median'
+	| 'std'
+	| 'n_unique'
+	| 'collect_list'
+	| 'collect_set';
+
 export interface AggregationSchema {
 	column: string;
-	function: string;
+	function: GroupByAggregationFunction;
 	alias: string;
 }
 
@@ -103,13 +117,24 @@ export interface TopKConfig {
 	descending?: boolean;
 }
 
+export type DeduplicateKeep = 'first' | 'last' | 'any' | 'none';
+
 export interface DeduplicateConfig {
 	subset?: string[] | null;
-	keep?: string;
+	keep?: DeduplicateKeep;
 }
 
+export type FillNullStrategy =
+	| 'forward'
+	| 'backward'
+	| 'mean'
+	| 'median'
+	| 'zero'
+	| 'literal'
+	| 'drop_rows';
+
 export interface FillNullConfig {
-	strategy?: string;
+	strategy?: FillNullStrategy;
 	columns?: string[] | null;
 	value?: string | number | null;
 	value_type?: string | null;
@@ -126,11 +151,21 @@ export interface ExplodeConfig {
 	columns?: string[];
 }
 
+export type PivotAggregateFunction =
+	| 'first'
+	| 'last'
+	| 'sum'
+	| 'mean'
+	| 'median'
+	| 'min'
+	| 'max'
+	| 'count';
+
 export interface PivotConfig {
 	index?: string[];
 	columns?: string;
 	values?: string | null;
-	aggregate_function?: string;
+	aggregate_function?: PivotAggregateFunction;
 }
 
 export interface UnionByNameConfig {
@@ -171,12 +206,23 @@ export interface DownloadConfig {
 
 export type OverlayChartType = 'line' | 'area' | 'bar' | 'scatter';
 
+export type ChartAggregation =
+	| 'sum'
+	| 'mean'
+	| 'count'
+	| 'min'
+	| 'max'
+	| 'median'
+	| 'std'
+	| 'variance'
+	| 'unique_count';
+
 export type YAxisPosition = 'left' | 'right';
 
 export interface OverlaySchema {
 	chart_type?: OverlayChartType;
 	y_column?: string;
-	aggregation?: string;
+	aggregation?: ChartAggregation;
 	y_axis_position?: YAxisPosition;
 }
 
@@ -200,11 +246,21 @@ export type ChartType =
 	| 'pie'
 	| 'boxplot';
 
+export type GroupSortBy = 'name' | 'value' | 'custom';
+
 export type SortDirection = 'asc' | 'desc';
 
 export type StackMode = 'grouped' | 'stacked' | '100%';
 
+export type DateBucket = 'exact' | 'year' | 'quarter' | 'month' | 'week' | 'day' | 'hour';
+
+export type DateOrdinal = 'day_of_week' | 'month_of_year' | 'quarter_of_year';
+
+export type SortBy = 'x' | 'y' | 'custom';
+
 export type AxisScale = 'linear' | 'log';
+
+export type DisplayUnits = '' | 'K' | 'M' | 'B' | '%';
 
 export type LegendPosition = 'top' | 'bottom' | 'left' | 'right' | 'none';
 
@@ -217,19 +273,19 @@ export interface ChartConfig {
 	x_column?: string;
 	y_column?: string;
 	bins?: number;
-	aggregation?: string;
+	aggregation?: ChartAggregation;
 	group_column?: string | null;
-	group_sort_by?: string | null;
+	group_sort_by?: GroupSortBy | null;
 	group_sort_order?: SortDirection;
 	group_sort_column?: string | null;
 	stack_mode?: StackMode;
 	area_opacity?: number;
-	date_bucket?: string | null;
-	date_ordinal?: string | null;
+	date_bucket?: DateBucket | null;
+	date_ordinal?: DateOrdinal | null;
 	pan_zoom_enabled?: boolean;
 	selection_enabled?: boolean;
 	area_selection_enabled?: boolean;
-	sort_by?: string | null;
+	sort_by?: SortBy | null;
 	sort_order?: SortDirection;
 	sort_column?: string | null;
 	x_axis_label?: string | null;
@@ -237,7 +293,7 @@ export interface ChartConfig {
 	y_axis_scale?: AxisScale;
 	y_axis_min?: number | null;
 	y_axis_max?: number | null;
-	display_units?: string;
+	display_units?: DisplayUnits;
 	decimal_places?: number;
 	legend_position?: LegendPosition;
 	title?: string | null;

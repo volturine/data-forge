@@ -2,7 +2,7 @@ import logging
 
 import polars as pl
 from contracts.compute.base import OperationHandler, OperationParams
-from contracts.enums import DataForgeStrEnum
+from contracts.step_config_enums import NotificationMethod
 from core.settings_projection import get_resolved_telegram_settings
 from pydantic import ConfigDict, Field, model_validator
 
@@ -10,11 +10,6 @@ from operations.template_placeholders import render_template_placeholders
 from runtime.notification_delivery import notification_service
 
 logger = logging.getLogger(__name__)
-
-
-class NotificationMethod(DataForgeStrEnum):
-    EMAIL = "email"
-    TELEGRAM = "telegram"
 
 
 class NotificationParams(OperationParams):

@@ -2,8 +2,10 @@ from typing import Any
 
 import polars as pl
 import pytest
+from contracts.datasource.source_types import DataSourceType
 from pydantic import ValidationError
 
+from operations.datasource import _resolve_pipeline_datasource
 from operations.expression import parse_expression
 from operations.fill_null import FillNullHandler
 from operations.filter import FilterHandler
@@ -34,6 +36,24 @@ def _frame() -> pl.LazyFrame:
         pl.datetime(2024, 1, 1).alias("date"),
         pl.datetime(2024, 1, 2).alias("date2"),
     ).lazy()
+
+
+def test_resolve_pipeline_datasource_uses_shared_analysis_source_type() -> None:
+    pipeline = {"analysis_id": "analysis-1"}
+    datasource = {
+        "id": "ds-1",
+        "analysis_tab_id": "tab-1",
+        "config": {"branch": "master"},
+    }
+
+    resolved = _resolve_pipeline_datasource(pipeline, datasource)
+
+    assert resolved == {
+        "source_type": DataSourceType.ANALYSIS.value,
+        "analysis_id": "analysis-1",
+        "analysis_tab_id": "tab-1",
+        "branch": "master",
+    }
 
 
 def test_filter_handler():
@@ -526,6 +546,24 @@ def test_join_handler_inner_correctness():
     assert result.height == 1
     assert result["val"].to_list() == ["b"]
     assert result["val2"].to_list() == ["x"]
+
+
+def test_join_handler_outer_uses_shared_join_how() -> None:
+    handler = JoinHandler()
+    left = pl.DataFrame({"id": [1, 2], "val": ["a", "b"]}).lazy()
+    right = pl.DataFrame({"id": [2, 3], "val2": ["x", "y"]}).lazy()
+
+    result = handler(
+        left,
+        {
+            "join_columns": [{"left_column": "id", "right_column": "id"}],
+            "how": "outer",
+            "right_source": "right",
+        },
+        right_lf=right,
+    ).collect()
+
+    assert result.height == 3
 
 
 def test_with_columns_zero_arg_udf_uses_row_count(monkeypatch: pytest.MonkeyPatch):

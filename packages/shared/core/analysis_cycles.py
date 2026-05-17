@@ -21,7 +21,7 @@ def detect_analysis_cycle(session: Session, analysis_id: str, source_analysis_id
         links = session.execute(stmt).scalars().all()  # type: ignore[arg-type]
         datasources = [session.get(DataSource, link.datasource_id) for link in links]
         for datasource in datasources:
-            if datasource is None or datasource.source_type != 'analysis':
+            if datasource is None or not datasource.is_analysis_source:
                 continue
             if visit(datasource.analysis_source_id()):
                 return True

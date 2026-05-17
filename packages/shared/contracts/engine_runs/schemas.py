@@ -19,6 +19,13 @@ class EngineRunStatus(DataForgeStrEnum):
     FAILED = 'failed'
     CANCELLED = 'cancelled'
 
+    @property
+    def is_terminal(self) -> bool:
+        return self in {EngineRunStatus.SUCCESS, EngineRunStatus.FAILED, EngineRunStatus.CANCELLED}
+
+    def blocks_transition_to(self, next_status: 'EngineRunStatus') -> bool:
+        return self.is_terminal and next_status != self
+
 
 class EngineRunExecutionCategory(DataForgeStrEnum):
     READ = 'read'
@@ -26,6 +33,18 @@ class EngineRunExecutionCategory(DataForgeStrEnum):
     PLAN = 'plan'
     COMPUTE = 'compute'
     WRITE = 'write'
+
+    @property
+    def is_query_plan(self) -> bool:
+        return self == EngineRunExecutionCategory.PLAN
+
+    @property
+    def default_step_type(self) -> str:
+        match self:
+            case EngineRunExecutionCategory.READ | EngineRunExecutionCategory.WRITE:
+                return self.value
+            case _:
+                return 'unknown'
 
 
 class SchemaDiffStatus(DataForgeStrEnum):

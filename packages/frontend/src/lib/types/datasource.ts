@@ -20,10 +20,13 @@ export interface CSVOptions {
 	encoding: string;
 }
 
+export type DataSourceFileType = 'csv' | 'parquet' | 'json' | 'ndjson' | 'excel';
+export type DataSourceCreatedBy = 'import' | 'analysis';
+
 export interface FileDataSourceConfig {
 	[key: string]: unknown;
 	file_path: string;
-	file_type: string;
+	file_type: DataSourceFileType;
 	options?: Record<string, unknown>;
 	csv_options?: CSVOptions | null;
 	sheet_name?: string | null;
@@ -82,7 +85,7 @@ interface DataSourceBase {
 	description: string | null;
 	schema_cache?: Record<string, unknown> | null;
 	created_by_analysis_id?: string | null;
-	created_by: string;
+	created_by: DataSourceCreatedBy;
 	is_hidden: boolean;
 	created_at: string;
 	output_of_tab_id?: string | null;
@@ -119,4 +122,99 @@ export interface DataSourceCreate {
 	description?: string | null;
 	source_type: SourceType;
 	config: DataSourceConfig;
+}
+
+const SOURCE_TYPES = new Set<SourceType>(['file', 'database', 'iceberg', 'analysis']);
+const DATASOURCE_FILE_TYPES = new Set<DataSourceFileType>([
+	'csv',
+	'parquet',
+	'json',
+	'ndjson',
+	'excel'
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function readSourceType(value: unknown): SourceType | null {
+	return typeof value === 'string' && SOURCE_TYPES.has(value as SourceType)
+		? (value as SourceType)
+		: null;
+}
+
+export function readDataSourceFileType(value: unknown): DataSourceFileType | null {
+	return typeof value === 'string' && DATASOURCE_FILE_TYPES.has(value as DataSourceFileType)
+		? (value as DataSourceFileType)
+		: null;
+}
+
+export function datasourceIsFile(datasource: DataSource): datasource is FileDataSource {
+	return datasource.source_type === 'file';
+}
+
+export function datasourceIsDatabase(datasource: DataSource): datasource is DatabaseDataSource {
+	return datasource.source_type === 'database';
+}
+
+export function datasourceIsIceberg(datasource: DataSource): datasource is IcebergDataSource {
+	return datasource.source_type === 'iceberg';
+}
+
+export function datasourceIsAnalysis(datasource: DataSource): datasource is AnalysisDataSource {
+	return datasource.source_type === 'analysis';
+}
+
+export function datasourceIsAnalysisOutput(datasource: DataSource): boolean {
+	return datasource.created_by === 'analysis';
+}
+
+export function datasourceExternalSourceConfig(
+	datasource: DataSource
+): Record<string, unknown> | null {
+	if (!datasourceIsIceberg(datasource)) return null;
+	return isRecord(datasource.config.source) ? datasource.config.source : null;
+}
+
+export function datasourceExternalSourceType(datasource: DataSource): SourceType | null {
+	return readSourceType(datasourceExternalSourceConfig(datasource)?.source_type);
+}
+
+export function datasourceFileConfig(datasource: DataSource): FileDataSourceConfig | null {
+	if (datasourceIsFile(datasource)) return datasource.config;
+	if (datasourceExternalSourceType(datasource) !== 'file') return null;
+	return datasourceExternalSourceConfig(datasource) as FileDataSourceConfig;
+}
+
+export function datasourceFileType(datasource: DataSource): DataSourceFileType | null {
+	return readDataSourceFileType(datasourceFileConfig(datasource)?.file_type);
+}
+
+export function datasourceIsCsv(datasource: DataSource): boolean {
+	return datasourceFileType(datasource) === 'csv';
+}
+
+export function datasourceIsExcel(datasource: DataSource): boolean {
+	return datasourceFileType(datasource) === 'excel';
+}
+
+export function datasourceIsRefreshableExternal(datasource: DataSource): boolean {
+	const sourceType = datasourceExternalSourceType(datasource);
+	return sourceType === 'file' || sourceType === 'database';
+}
+
+export function datasourceNeedsExternalRefresh(datasource: DataSource): boolean {
+	return datasourceIsIceberg(datasource) && datasourceIsRefreshableExternal(datasource);
+}
+
+export function datasourceSupportsSchemaRefresh(datasource: DataSource): boolean {
+	return !datasourceIsAnalysis(datasource);
+}
+
+export function datasourceIsSchedulableRaw(datasource: DataSource): boolean {
+	return (
+		datasourceIsIceberg(datasource) &&
+		!datasourceIsAnalysisOutput(datasource) &&
+		datasourceIsRefreshableExternal(datasource)
+	);
 }

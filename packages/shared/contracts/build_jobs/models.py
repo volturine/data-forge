@@ -14,9 +14,29 @@ class BuildJobStatus(DataForgeStrEnum):
     FAILED = 'failed'
     CANCELLED = 'cancelled'
 
+    @property
+    def is_active(self) -> bool:
+        return self in {BuildJobStatus.LEASED, BuildJobStatus.RUNNING}
+
+    @property
+    def is_reclaimable(self) -> bool:
+        return self.is_active
+
 
 class BuildJob(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     __tablename__ = 'build_jobs'  # type: ignore[assignment]
+
+    def clear_lease(self) -> None:
+        self.lease_owner = None
+        self.lease_expires_at = None
+
+    def is_orphaned(self, reclaimable_owner_ids: set[str]) -> bool:
+        return self.status.is_active and (self.lease_owner is None or self.lease_owner in reclaimable_owner_ids)
+
+    def age_seconds(self, *, now: dt.datetime) -> float:
+        created_at = self.created_at.astimezone(dt.UTC) if self.created_at.tzinfo is not None else self.created_at.replace(tzinfo=dt.UTC)
+        current = now.astimezone(dt.UTC) if now.tzinfo is not None else now.replace(tzinfo=dt.UTC)
+        return max((current - created_at).total_seconds(), 0.0)
 
     id: str = Field(sa_column=Column(String, primary_key=True))
     build_id: str = Field(sa_column=Column(String, nullable=False, index=True, unique=True))

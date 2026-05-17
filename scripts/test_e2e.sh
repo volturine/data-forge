@@ -120,15 +120,16 @@ echo "Frontend is ready"
 echo "Starting Playwright e2e tests across 4 shards"
 mkdir -p packages/frontend/tests/.artifacts/playwright
 for shard_index in 1 2 3 4; do
-    mkdir -p "packages/frontend/tests/.artifacts/playwright/test-results-shard-${shard_index}-of-4"
-    mkdir -p "packages/frontend/tests/.artifacts/playwright/playwright-report-shard-${shard_index}-of-4"
+    mkdir -p "packages/frontend/tests/.artifacts/playwright/shard-${shard_index}-of-4/test-results"
 done
 set +e
 pids=()
 (
     echo "Starting Playwright shard 1/4"
     cd packages/frontend
-    PLAYWRIGHT_DISABLE_WEB_SERVER=true exec python3 ../../scripts/run_with_timeout.py \
+    PLAYWRIGHT_DISABLE_WEB_SERVER=true \
+    PLAYWRIGHT_OUTPUT_DIR="$PWD/tests/.artifacts/playwright/shard-1-of-4/test-results" \
+    exec python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
         --heartbeat-seconds "${E2E_HEARTBEAT_SECONDS:-0}" \
@@ -137,7 +138,9 @@ pids=()
 (
     echo "Starting Playwright shard 2/4"
     cd packages/frontend
-    PLAYWRIGHT_DISABLE_WEB_SERVER=true exec python3 ../../scripts/run_with_timeout.py \
+    PLAYWRIGHT_DISABLE_WEB_SERVER=true \
+    PLAYWRIGHT_OUTPUT_DIR="$PWD/tests/.artifacts/playwright/shard-2-of-4/test-results" \
+    exec python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
         --heartbeat-seconds "${E2E_HEARTBEAT_SECONDS:-0}" \
@@ -146,7 +149,9 @@ pids=()
 (
     echo "Starting Playwright shard 3/4"
     cd packages/frontend
-    PLAYWRIGHT_DISABLE_WEB_SERVER=true exec python3 ../../scripts/run_with_timeout.py \
+    PLAYWRIGHT_DISABLE_WEB_SERVER=true \
+    PLAYWRIGHT_OUTPUT_DIR="$PWD/tests/.artifacts/playwright/shard-3-of-4/test-results" \
+    exec python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
         --heartbeat-seconds "${E2E_HEARTBEAT_SECONDS:-0}" \
@@ -155,7 +160,9 @@ pids=()
 (
     echo "Starting Playwright shard 4/4"
     cd packages/frontend
-    PLAYWRIGHT_DISABLE_WEB_SERVER=true exec python3 ../../scripts/run_with_timeout.py \
+    PLAYWRIGHT_DISABLE_WEB_SERVER=true \
+    PLAYWRIGHT_OUTPUT_DIR="$PWD/tests/.artifacts/playwright/shard-4-of-4/test-results" \
+    exec python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
         --heartbeat-seconds "${E2E_HEARTBEAT_SECONDS:-0}" \

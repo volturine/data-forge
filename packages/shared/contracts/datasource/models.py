@@ -35,29 +35,39 @@ class DataSource(SQLModel, table=True):  # type: ignore[call-arg]
     def is_analysis_source(self) -> bool:
         return self.source_type_kind() == DataSourceType.ANALYSIS
 
+    @property
+    def is_iceberg(self) -> bool:
+        return self.source_type_kind() == DataSourceType.ICEBERG
+
     def analysis_source_id(self) -> str:
         analysis_id = self.created_by_analysis_id
         if not analysis_id:
             raise ValueError(f'Analysis datasource {self.id} missing created_by_analysis_id')
         return str(analysis_id)
 
+    def external_source_config(self) -> dict[str, object] | None:
+        if not self.is_iceberg or not isinstance(self.config, dict):
+            return None
+        source = self.config.get('source')
+        return source if isinstance(source, dict) else None
+
+    def external_source_type(self) -> DataSourceType | None:
+        source = self.external_source_config()
+        if source is None:
+            return None
+        return DataSourceType.read(source.get('source_type'), default=None)
+
+    @property
+    def is_refreshable_external(self) -> bool:
+        source_type = self.external_source_type()
+        return source_type.supports_external_ingestion if source_type is not None else False
+
     def is_reingestable_raw(self) -> bool:
-        if self.source_type_kind() != DataSourceType.ICEBERG:
+        if not self.is_iceberg:
             return False
         if self.is_analysis_output:
             return False
-        if not isinstance(self.config, dict):
-            return False
-        source = self.config.get('source')
-        if not isinstance(source, dict):
-            return False
-        source_type = source.get('source_type')
-        return source_type in {
-            DataSourceType.FILE,
-            DataSourceType.FILE.value,
-            DataSourceType.DATABASE,
-            DataSourceType.DATABASE.value,
-        }
+        return self.is_refreshable_external
 
     def target_kind(self) -> DataSourceTargetKind:
         if self.is_analysis_output and self.created_by_analysis_id:

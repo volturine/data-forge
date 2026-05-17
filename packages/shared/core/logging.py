@@ -19,6 +19,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 
+from contracts.enums import DataForgeStrEnum
 from core.config import settings
 
 _writer: DatabaseLogWriter | None = None
@@ -50,6 +51,95 @@ class RequestLogWriter(Protocol):
     def write_request_log(self, payload: dict[str, Any]) -> None: ...
 
 
+class DatabaseLogKind(DataForgeStrEnum):
+    REQUEST = 'request_logs'
+    APP = 'app_logs'
+    CLIENT = 'client_logs'
+    FLUSH = '__flush__'
+    STOP = '__stop__'
+
+    @property
+    def is_control(self) -> bool:
+        return self in {DatabaseLogKind.FLUSH, DatabaseLogKind.STOP}
+
+    def insert_rows(self, conn: psycopg.Connection, rows: list[dict[str, Any]], day: date) -> None:
+        day_str = day.isoformat()
+        with conn.cursor() as cursor:
+            match self:
+                case DatabaseLogKind.REQUEST:
+                    cursor.executemany(
+                        """INSERT INTO request_logs
+                   (ts, method, path, status, duration_ms, request_id, client_id,
+                    user_agent, ip, referer, error, request_json, response_json,
+                    chunk_index, day)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        [
+                            (
+                                row.get('ts'),
+                                row.get('method'),
+                                row.get('path'),
+                                row.get('status'),
+                                row.get('duration_ms'),
+                                row.get('request_id'),
+                                row.get('client_id'),
+                                row.get('user_agent'),
+                                row.get('ip'),
+                                row.get('referer'),
+                                row.get('error'),
+                                row.get('request_json'),
+                                row.get('response_json'),
+                                row.get('chunk_index'),
+                                day_str,
+                            )
+                            for row in rows
+                        ],
+                    )
+                case DatabaseLogKind.APP:
+                    cursor.executemany(
+                        """INSERT INTO app_logs
+                   (ts, level, logger, message, module, func, line, extra_json, day)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        [
+                            (
+                                row.get('ts'),
+                                row.get('level'),
+                                row.get('logger'),
+                                row.get('message'),
+                                row.get('module'),
+                                row.get('func'),
+                                row.get('line'),
+                                row.get('extra_json'),
+                                day_str,
+                            )
+                            for row in rows
+                        ],
+                    )
+                case DatabaseLogKind.CLIENT:
+                    cursor.executemany(
+                        """INSERT INTO client_logs
+                   (ts, event, action, page, target, form_id, fields_json, client_id, session_id, meta_json, day)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        [
+                            (
+                                row.get('ts'),
+                                row.get('event'),
+                                row.get('action'),
+                                row.get('page'),
+                                row.get('target'),
+                                row.get('form_id'),
+                                row.get('fields_json'),
+                                row.get('client_id'),
+                                row.get('session_id'),
+                                row.get('meta_json'),
+                                day_str,
+                            )
+                            for row in rows
+                        ],
+                    )
+                case _:
+                    return
+
+
 def _client_ip(request: Request) -> str | None:
     forwarded = request.headers.get('x-forwarded-for')
     if forwarded and settings.trusted_proxy_hops > 0:
@@ -77,7 +167,7 @@ def _day_from_ts(ts: datetime | None) -> date:
 class DatabaseLogWriter:
     def __init__(self, database_url: str, *, flush_interval: float = _DEFAULT_FLUSH_INTERVAL, overflow_policy: str = 'block'):
         self._lock = threading.Lock()
-        self._queue: queue.Queue[tuple[str, list[dict[str, Any]]]] = queue.Queue(maxsize=settings.log_queue_max_size)
+        self._queue: queue.Queue[tuple[DatabaseLogKind, list[dict[str, Any]]]] = queue.Queue(maxsize=settings.log_queue_max_size)
         self._stop_event = threading.Event()
         self._flush_timer_lock = threading.Lock()
         self._flush_timer: threading.Timer | None = None
@@ -85,7 +175,7 @@ class DatabaseLogWriter:
         self._dropped_count = 0
         self._database_url = database_url.replace('postgresql+psycopg://', 'postgresql://', 1)
         self._conn: psycopg.Connection | None = None
-        self._buffers: dict[tuple[str, date], list[dict[str, Any]]] = {}
+        self._buffers: dict[tuple[DatabaseLogKind, date], list[dict[str, Any]]] = {}
         self._flush_interval = flush_interval
         self._last_flush = time.monotonic()
         self._worker = threading.Thread(target=self._run, name='postgres-log-writer', daemon=True)
@@ -172,7 +262,7 @@ class DatabaseLogWriter:
             'response_json': payload.get('response_json'),
             'chunk_index': payload.get('chunk_index'),
         }
-        self._enqueue_rows('request_logs', [row])
+        self._enqueue_rows(DatabaseLogKind.REQUEST, [row])
 
     def write_app_log(self, payload: dict[str, Any]) -> None:
         row = {
@@ -185,7 +275,7 @@ class DatabaseLogWriter:
             'line': payload.get('line'),
             'extra_json': payload.get('extra_json'),
         }
-        self._enqueue_rows('app_logs', [row])
+        self._enqueue_rows(DatabaseLogKind.APP, [row])
 
     def write_client_logs(self, payloads: list[dict[str, Any]]) -> None:
         if not payloads:
@@ -205,7 +295,7 @@ class DatabaseLogWriter:
             }
             for item in payloads
         ]
-        self._enqueue_rows('client_logs', rows)
+        self._enqueue_rows(DatabaseLogKind.CLIENT, rows)
 
     def flush(self) -> None:
         with self._lock:
@@ -218,13 +308,13 @@ class DatabaseLogWriter:
     def stop(self) -> None:
         self._stop_event.set()
         self._cancel_flush_timer()
-        self._queue.put(('__stop__', []))
+        self._queue.put((DatabaseLogKind.STOP, []))
         self._worker.join()
         self.flush()
         if self._conn:
             self._conn.close()
 
-    def _enqueue_rows(self, kind: str, rows: list[dict[str, Any]]) -> None:
+    def _enqueue_rows(self, kind: DatabaseLogKind, rows: list[dict[str, Any]]) -> None:
         if not rows:
             return
         if self._overflow_policy == 'drop':
@@ -246,7 +336,7 @@ class DatabaseLogWriter:
             self._flush_timer = None
         if self._stop_event.is_set():
             return
-        self._queue.put(('__flush__', []))
+        self._queue.put((DatabaseLogKind.FLUSH, []))
 
     def _ensure_flush_timer(self) -> None:
         if self._flush_interval <= 0:
@@ -269,9 +359,9 @@ class DatabaseLogWriter:
     def _run(self) -> None:
         while True:
             kind, rows = self._queue.get()
-            if kind == '__stop__':
+            if kind == DatabaseLogKind.STOP:
                 break
-            if kind == '__flush__':
+            if kind == DatabaseLogKind.FLUSH:
                 self.flush()
                 continue
             if rows:
@@ -279,7 +369,7 @@ class DatabaseLogWriter:
         self._cancel_flush_timer()
         self.flush()
 
-    def _buffer_rows(self, kind: str, rows: list[dict[str, Any]]) -> None:
+    def _buffer_rows(self, kind: DatabaseLogKind, rows: list[dict[str, Any]]) -> None:
         with self._lock:
             for row in rows:
                 day = _day_from_ts(row.get('ts'))
@@ -287,19 +377,14 @@ class DatabaseLogWriter:
                 buffer = self._buffers.setdefault(key, [])
                 buffer.append(row)
 
-    def _insert_rows(self, kind: str, day: date, rows: list[dict[str, Any]]) -> None:
+    def _insert_rows(self, kind: DatabaseLogKind, day: date, rows: list[dict[str, Any]]) -> None:
         if not rows:
             return
         try:
             with self._lock_for_insert() as conn:
-                if kind == 'request_logs':
-                    self._insert_request_logs(conn, rows, day)
-                elif kind == 'app_logs':
-                    self._insert_app_logs(conn, rows, day)
-                elif kind == 'client_logs':
-                    self._insert_client_logs(conn, rows, day)
+                kind.insert_rows(conn, rows, day)
         except Exception as e:
-            _logger.error(f'Failed to insert {len(rows)} rows to {kind}/{day}: {e}', exc_info=True)
+            _logger.error(f'Failed to insert {len(rows)} rows to {kind.value}/{day}: {e}', exc_info=True)
 
     @contextmanager
     def _lock_for_insert(self):
@@ -309,85 +394,6 @@ class DatabaseLogWriter:
             conn.commit()
         finally:
             conn.close()
-
-    def _insert_request_logs(self, conn: psycopg.Connection, rows: list[dict[str, Any]], day: date) -> None:
-        day_str = day.isoformat()
-        with conn.cursor() as cursor:
-            cursor.executemany(
-                """INSERT INTO request_logs
-                   (ts, method, path, status, duration_ms, request_id, client_id,
-                    user_agent, ip, referer, error, request_json, response_json,
-                    chunk_index, day)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                [
-                    (
-                        r.get('ts'),
-                        r.get('method'),
-                        r.get('path'),
-                        r.get('status'),
-                        r.get('duration_ms'),
-                        r.get('request_id'),
-                        r.get('client_id'),
-                        r.get('user_agent'),
-                        r.get('ip'),
-                        r.get('referer'),
-                        r.get('error'),
-                        r.get('request_json'),
-                        r.get('response_json'),
-                        r.get('chunk_index'),
-                        day_str,
-                    )
-                    for r in rows
-                ],
-            )
-
-    def _insert_app_logs(self, conn: psycopg.Connection, rows: list[dict[str, Any]], day: date) -> None:
-        day_str = day.isoformat()
-        with conn.cursor() as cursor:
-            cursor.executemany(
-                """INSERT INTO app_logs 
-                   (ts, level, logger, message, module, func, line, extra_json, day)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                [
-                    (
-                        r.get('ts'),
-                        r.get('level'),
-                        r.get('logger'),
-                        r.get('message'),
-                        r.get('module'),
-                        r.get('func'),
-                        r.get('line'),
-                        r.get('extra_json'),
-                        day_str,
-                    )
-                    for r in rows
-                ],
-            )
-
-    def _insert_client_logs(self, conn: psycopg.Connection, rows: list[dict[str, Any]], day: date) -> None:
-        day_str = day.isoformat()
-        with conn.cursor() as cursor:
-            cursor.executemany(
-                """INSERT INTO client_logs 
-                   (ts, event, action, page, target, form_id, fields_json, client_id, session_id, meta_json, day)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                [
-                    (
-                        r.get('ts'),
-                        r.get('event'),
-                        r.get('action'),
-                        r.get('page'),
-                        r.get('target'),
-                        r.get('form_id'),
-                        r.get('fields_json'),
-                        r.get('client_id'),
-                        r.get('session_id'),
-                        r.get('meta_json'),
-                        day_str,
-                    )
-                    for r in rows
-                ],
-            )
 
 
 class DatabaseLogHandler(logging.Handler):

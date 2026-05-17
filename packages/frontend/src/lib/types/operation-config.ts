@@ -1,10 +1,45 @@
 // Type definitions for operation configuration objects
 
-export type FilterValueType = 'string' | 'number' | 'date' | 'datetime' | 'column' | 'boolean';
+import type {
+	AIProvider as StepAIProvider,
+	AxisScale,
+	CastMapType,
+	ChartAggregation,
+	ChartHeight,
+	ChartType,
+	DateBucket,
+	DateOrdinal,
+	DeduplicateKeep,
+	DisplayUnits,
+	DurationUnit,
+	FillNullStrategy,
+	FilterLogic,
+	FilterOperator,
+	FilterValueType as StepFilterValueType,
+	GroupByAggregationFunction,
+	GroupSortBy,
+	JoinHow,
+	LegendPosition,
+	NotificationMethod,
+	OverlayChartType,
+	PivotAggregateFunction,
+	RecipientSource,
+	ReferenceAxis,
+	SortBy,
+	SortDirection,
+	StackMode,
+	StringTransformMethod,
+	TimeComponent,
+	TimeseriesOperationType,
+	WithColumnsExprType,
+	YAxisPosition
+} from '$lib/types/step-schemas.generated';
+
+export type FilterValueType = StepFilterValueType;
 
 export interface FilterCondition {
 	column: string;
-	operator: string;
+	operator: FilterOperator;
 	value: string | number | boolean | string[] | null;
 	value_type: FilterValueType;
 	compare_column?: string;
@@ -12,17 +47,17 @@ export interface FilterCondition {
 
 export interface FilterConfigData {
 	conditions: FilterCondition[];
-	logic: 'AND' | 'OR';
+	logic: FilterLogic;
 }
 
 export interface SelectConfigData {
 	columns: string[];
-	cast_map?: Record<string, string>;
+	cast_map?: Record<string, CastMapType>;
 }
 
 export interface Aggregation {
 	column: string;
-	function: string;
+	function: GroupByAggregationFunction;
 	alias: string;
 }
 
@@ -51,7 +86,7 @@ export interface JoinColumn {
 }
 
 export interface JoinConfigData {
-	how: 'inner' | 'left' | 'right' | 'outer' | 'cross';
+	how: JoinHow;
 	right_source?: string;
 	join_columns: JoinColumn[];
 	right_columns: string[];
@@ -65,7 +100,7 @@ export interface ExpressionConfigData {
 
 export interface WithColumnsExpr {
 	name: string;
-	type: 'literal' | 'column' | 'udf';
+	type: WithColumnsExprType;
 	value?: string | number | null;
 	column?: string | null;
 	args?: string[] | null;
@@ -79,14 +114,14 @@ export interface WithColumnsConfigData {
 
 export interface DeduplicateConfigData {
 	subset: string[] | null;
-	keep: string;
+	keep: DeduplicateKeep;
 }
 
 export interface FillNullConfigData {
-	strategy: string;
+	strategy: FillNullStrategy;
 	columns: string[] | null;
 	value?: string | number;
-	value_type?: string;
+	value_type?: CastMapType;
 }
 
 export interface ExplodeConfigData {
@@ -97,22 +132,22 @@ export interface PivotConfigData {
 	index: string[];
 	columns: string;
 	values?: string | null;
-	aggregate_function: string;
+	aggregate_function: PivotAggregateFunction;
 }
 
 export interface TimeSeriesConfigData {
 	column: string;
-	operation_type: string;
+	operation_type: TimeseriesOperationType;
 	new_column: string;
-	component?: string;
+	component?: TimeComponent;
 	value?: number;
-	unit?: string;
+	unit?: DurationUnit;
 	column2?: string;
 }
 
 export interface StringMethodsConfigData {
 	column: string;
-	method: string;
+	method: StringTransformMethod;
 	new_column: string;
 	start?: number;
 	end?: number | null;
@@ -155,87 +190,60 @@ export interface UnionByNameConfigData {
 }
 
 export interface PlotConfigData {
-	chart_type:
-		| 'bar'
-		| 'horizontal_bar'
-		| 'area'
-		| 'heatgrid'
-		| 'histogram'
-		| 'scatter'
-		| 'line'
-		| 'pie'
-		| 'boxplot';
+	chart_type: ChartType;
 	x_column: string;
 	y_column: string;
 	bins: number;
-	aggregation:
-		| 'sum'
-		| 'mean'
-		| 'count'
-		| 'min'
-		| 'max'
-		| 'median'
-		| 'std'
-		| 'variance'
-		| 'unique_count';
+	aggregation: ChartAggregation;
 	group_column: string | null;
-	group_sort_by: 'name' | 'value' | 'custom' | null;
-	group_sort_order: 'asc' | 'desc';
+	group_sort_by: GroupSortBy | null;
+	group_sort_order: SortDirection;
 	group_sort_column: string | null;
-	stack_mode: 'grouped' | 'stacked' | '100%';
+	stack_mode: StackMode;
 	area_opacity: number;
-	date_bucket: 'exact' | 'year' | 'quarter' | 'month' | 'week' | 'day' | 'hour' | null;
-	date_ordinal: 'day_of_week' | 'month_of_year' | 'quarter_of_year' | null;
+	date_bucket: DateBucket | null;
+	date_ordinal: DateOrdinal | null;
 	pan_zoom_enabled: boolean;
 	selection_enabled: boolean;
 	area_selection_enabled: boolean;
-	sort_by: 'x' | 'y' | 'custom' | null;
-	sort_order: 'asc' | 'desc';
+	sort_by: SortBy | null;
+	sort_order: SortDirection;
 	sort_column: string | null;
 	x_axis_label: string | null;
 	y_axis_label: string | null;
-	y_axis_scale: 'linear' | 'log';
+	y_axis_scale: AxisScale;
 	y_axis_min: number | null;
 	y_axis_max: number | null;
-	display_units: '' | 'K' | 'M' | 'B' | '%';
+	display_units: DisplayUnits;
 	decimal_places: number;
-	legend_position: 'top' | 'bottom' | 'left' | 'right' | 'none';
+	legend_position: LegendPosition;
 	title: string | null;
 	series_colors: string[];
 	overlays: OverlayConfig[];
 	reference_lines: ReferenceLineConfig[];
-	chart_height: 'small' | 'medium' | 'large' | 'xlarge';
+	chart_height: ChartHeight;
 }
 
 export interface OverlayConfig {
-	chart_type: 'line' | 'area' | 'bar' | 'scatter';
+	chart_type: OverlayChartType;
 	y_column: string;
-	aggregation:
-		| 'sum'
-		| 'mean'
-		| 'count'
-		| 'min'
-		| 'max'
-		| 'median'
-		| 'std'
-		| 'variance'
-		| 'unique_count';
-	y_axis_position: 'left' | 'right';
+	aggregation: ChartAggregation;
+	y_axis_position: YAxisPosition;
 }
 
 export interface ReferenceLineConfig {
-	axis: 'x' | 'y';
+	axis: ReferenceAxis;
 	value: number | null;
 	label: string;
 	color: string;
 }
 
 export interface NotificationConfigData {
-	method: 'email' | 'telegram';
+	method: NotificationMethod;
 	recipient: string;
 	subscriber_ids: string[];
 	bot_token: string;
-	recipient_source: 'manual' | 'column';
+	recipient_source: RecipientSource;
 	recipient_column: string;
 	input_columns: string[];
 	output_column: string;
@@ -245,7 +253,7 @@ export interface NotificationConfigData {
 }
 
 export interface AIConfigData {
-	provider: 'ollama' | 'openai' | 'openrouter' | 'huggingface';
+	provider: StepAIProvider;
 	model: string;
 	input_columns: string[];
 	output_column: string;

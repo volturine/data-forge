@@ -8,9 +8,18 @@ from dataclasses import dataclass
 from typing import Any
 
 from contracts.analysis.pipeline_types import PipelineDefinition, PipelineTab
-from contracts.analysis.step_types import get_step_dependency_values
+from contracts.analysis.step_types import STEP_TYPES, get_step_dependency_values
 from contracts.datasource.models import DataSource
-from contracts.step_config_enums import FilterLogic, FilterOperator, FilterValueType
+from contracts.datasource.source_types import DataSourceFileType, DataSourceType
+from contracts.step_config_enums import (
+    DeduplicateKeep,
+    FilterLogic,
+    FilterOperator,
+    FilterValueType,
+    GroupByAggregationFunction,
+    JoinHow,
+    PivotAggregateFunction,
+)
 
 from modules.analysis.step_schemas import FilterConfig
 from modules.export.models import CodeExportFormat
@@ -34,18 +43,6 @@ _SQL_CAST_MAP = {
     "Utf8": "TEXT",
     "Date": "DATE",
     "Datetime": "TIMESTAMP",
-}
-
-_SQL_AGG_MAP = {
-    "sum": "SUM",
-    "mean": "AVG",
-    "avg": "AVG",
-    "min": "MIN",
-    "max": "MAX",
-    "count": "COUNT",
-    "median": "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {expr})",
-    "std": "STDDEV_POP",
-    "n_unique": "COUNT_DISTINCT",
 }
 
 
@@ -215,22 +212,28 @@ def _scan_expression(datasource: DataSource | None, path_const: str) -> tuple[st
             "datasource metadata is missing; defaulting to parquet scanner",
         )
     config = datasource.config if isinstance(datasource.config, dict) else {}
-    source_type = datasource.source_type
-    file_type = str(config.get("file_type", "")).lower()
-    if source_type == "file":
-        if file_type == "csv":
-            return f"pl.scan_csv({path_const})", None
-        if file_type == "parquet":
-            return f"pl.scan_parquet({path_const})", None
-        if file_type in {"ndjson", "jsonl"}:
-            return f"pl.scan_ndjson({path_const})", None
-        return (
-            f"pl.scan_parquet({path_const})",
-            f"unsupported file_type '{file_type or 'unknown'}'; defaulting to parquet scanner",
-        )
+    source_type = DataSourceType.read(datasource.source_type, default=None)
+    file_type = DataSourceFileType.read(config.get("file_type"), default=None)
+    if source_type == DataSourceType.FILE:
+        match file_type:
+            case DataSourceFileType.CSV:
+                return f"pl.scan_csv({path_const})", None
+            case DataSourceFileType.PARQUET:
+                return f"pl.scan_parquet({path_const})", None
+            case DataSourceFileType.JSON:
+                return f"pl.read_json({path_const}).lazy()", None
+            case DataSourceFileType.NDJSON:
+                return f"pl.scan_ndjson({path_const})", None
+            case DataSourceFileType.EXCEL:
+                return f"pl.read_excel({path_const}).lazy()", None
+            case _:
+                return (
+                    f"pl.scan_parquet({path_const})",
+                    f"unsupported file_type '{config.get('file_type') or 'unknown'}'; defaulting to parquet scanner",
+                )
     return (
         f"pl.scan_parquet({path_const})",
-        f"source type '{source_type}' is not directly exportable; replace scanner with your own loader",
+        f"source type '{datasource.source_type}' is not directly exportable; replace scanner with your own loader",
     )
 
 
@@ -317,40 +320,495 @@ def _sql_filter_expr(condition: dict[str, Any]) -> str | None:
 
 def _polars_group_agg_expr(aggregation: dict[str, Any]) -> str | None:
     column = aggregation.get("column")
-    function = aggregation.get("function")
+    function_raw = aggregation.get("function")
     alias = aggregation.get("alias")
     if not isinstance(column, str) or not column:
         return None
-    if not isinstance(function, str) or not function:
+    if not isinstance(function_raw, (str, GroupByAggregationFunction)):
         return None
-    alias_name = alias if isinstance(alias, str) and alias else f"{column}_{function}"
-    func = function.lower()
-    if func == "n_unique":
-        return f"pl.col({json.dumps(column)}).n_unique().alias({json.dumps(alias_name)})"
-    return f"pl.col({json.dumps(column)}).{func}().alias({json.dumps(alias_name)})"
+    try:
+        function = GroupByAggregationFunction.require(function_raw)
+    except ValueError:
+        return None
+    alias_name = alias if isinstance(alias, str) and alias else function.default_alias(column)
+    return function.render_polars_export(f"pl.col({json.dumps(column)})", json.dumps(alias_name))
 
 
 def _sql_group_agg_expr(aggregation: dict[str, Any]) -> str | None:
     column = aggregation.get("column")
-    function = aggregation.get("function")
+    function_raw = aggregation.get("function")
     alias = aggregation.get("alias")
     if not isinstance(column, str) or not column:
         return None
-    if not isinstance(function, str) or not function:
+    if not isinstance(function_raw, (str, GroupByAggregationFunction)):
         return None
-    alias_name = alias if isinstance(alias, str) and alias else f"{column}_{function}"
-    func = function.lower()
-    template = _SQL_AGG_MAP.get(func)
-    if template is None:
+    try:
+        function = GroupByAggregationFunction.require(function_raw)
+    except ValueError:
         return None
-    expr = _sql_quote(column)
-    if template == "COUNT_DISTINCT":
-        rendered = f"COUNT(DISTINCT {expr})"
-    elif "{expr}" in template:
-        rendered = template.format(expr=expr)
+    alias_name = alias if isinstance(alias, str) and alias else function.default_alias(column)
+    return function.render_sql_export(_sql_quote(column), _sql_quote(alias_name))
+
+
+@dataclass(slots=True)
+class PolarsStepRenderContext:
+    tab: PipelineTab
+    step_type: str
+    config: dict[str, Any]
+    current_var: str
+    next_var: str
+    tab_last_var: dict[str, str]
+    lines: list[str]
+    warnings: list[str]
+
+    def warn(self, message: str) -> None:
+        if message not in self.warnings:
+            self.warnings.append(message)
+
+    def assign(self, expression: str) -> str:
+        self.lines.append(f"{self.next_var} = {expression}")
+        return self.next_var
+
+    def alias_current(self, *, warning: str | None = None) -> str:
+        if warning is not None:
+            self.warn(warning)
+        return self.assign(self.current_var)
+
+    def keep_current(self, *, warning: str | None = None) -> str:
+        if warning is not None:
+            self.warn(warning)
+        return self.current_var
+
+
+@dataclass(frozen=True, slots=True)
+class SqlStepRenderResult:
+    body: str
+    comments: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class SqlStepRenderContext:
+    tab: PipelineTab
+    step_type: str
+    config: dict[str, Any]
+    current_cte: str
+    tab_final_cte: dict[str, str]
+    warnings: list[str]
+
+    def warn(self, message: str) -> None:
+        if message not in self.warnings:
+            self.warnings.append(message)
+
+    def select_all(self) -> str:
+        return f"SELECT * FROM {self.current_cte}"
+
+    def result(self, body: str | None = None, *, comments: tuple[str, ...] = (), warning: str | None = None) -> SqlStepRenderResult:
+        if warning is not None:
+            self.warn(warning)
+        return SqlStepRenderResult(body=body or self.select_all(), comments=comments)
+
+
+PolarsStepRenderer = Callable[[PolarsStepRenderContext], str]
+SqlStepRenderer = Callable[[SqlStepRenderContext], SqlStepRenderResult]
+POLARS_STEP_RENDERERS: dict[str, PolarsStepRenderer] = {}
+SQL_STEP_RENDERERS: dict[str, SqlStepRenderer] = {}
+
+
+def polars_step_renderer(*step_types: str) -> Callable[[PolarsStepRenderer], PolarsStepRenderer]:
+    def register(renderer: PolarsStepRenderer) -> PolarsStepRenderer:
+        for step_type in step_types:
+            POLARS_STEP_RENDERERS[step_type] = renderer
+        return renderer
+
+    return register
+
+
+def sql_step_renderer(*step_types: str) -> Callable[[SqlStepRenderer], SqlStepRenderer]:
+    def register(renderer: SqlStepRenderer) -> SqlStepRenderer:
+        for step_type in step_types:
+            SQL_STEP_RENDERERS[step_type] = renderer
+        return renderer
+
+    return register
+
+
+@polars_step_renderer(STEP_TYPES.filter.value)
+def render_polars_filter(context: PolarsStepRenderContext) -> str:
+    conditions = [condition.model_dump(mode="json", exclude_none=True) for condition in FilterConfig.model_validate(context.config).conditions]
+    logic = FilterLogic.read(str(context.config.get("logic", FilterLogic.AND.value)).upper(), default=FilterLogic.AND)
+    exprs = [expr for cond in conditions if isinstance(cond, dict) if (expr := _polars_filter_expr(cond))]
+    if not exprs:
+        return context.alias_current(warning=f"Filter step in tab '{context.tab.name}' has no valid conditions")
+    joiner = " & " if logic == FilterLogic.AND else " | "
+    return context.assign(f"{context.current_var}.filter({joiner.join(exprs)})")
+
+
+@polars_step_renderer(STEP_TYPES.select.value)
+def render_polars_select(context: PolarsStepRenderContext) -> str:
+    columns = context.config.get("columns")
+    cast_map = context.config.get("cast_map")
+    current = context.current_var
+    if isinstance(columns, list) and columns:
+        quoted = "[" + ", ".join(json.dumps(col) for col in columns if isinstance(col, str)) + "]"
+        current = context.assign(f"{context.current_var}.select({quoted})")
     else:
-        rendered = f"{template}({expr})"
-    return f"{rendered} AS {_sql_quote(alias_name)}"
+        current = context.alias_current(warning=f"Select step in tab '{context.tab.name}' has no columns and was treated as pass-through")
+    if isinstance(cast_map, dict) and cast_map:
+        casts: list[str] = []
+        for column, dtype in cast_map.items():
+            if not isinstance(column, str):
+                continue
+            mapped = _POLARS_CAST_MAP.get(str(dtype))
+            if not mapped:
+                context.warn(f"Select step in tab '{context.tab.name}' has unsupported cast type '{dtype}' for '{column}'")
+                continue
+            casts.append(f"pl.col({json.dumps(column)}).cast(pl.{mapped}).alias({json.dumps(column)})")
+        if casts:
+            cast_expr = "[" + ", ".join(casts) + "]"
+            context.lines.append(f"{current} = {current}.with_columns({cast_expr})")
+    return current
+
+
+@polars_step_renderer(STEP_TYPES.drop.value)
+def render_polars_drop(context: PolarsStepRenderContext) -> str:
+    columns = context.config.get("columns")
+    if not isinstance(columns, list) or not columns:
+        return context.alias_current()
+    quoted = "[" + ", ".join(json.dumps(col) for col in columns if isinstance(col, str)) + "]"
+    return context.assign(f"{context.current_var}.drop({quoted})")
+
+
+@polars_step_renderer(STEP_TYPES.sort.value)
+def render_polars_sort(context: PolarsStepRenderContext) -> str:
+    columns = context.config.get("columns")
+    descending = context.config.get("descending")
+    if not isinstance(columns, list) or not columns:
+        return context.alias_current()
+    cols = "[" + ", ".join(json.dumps(col) for col in columns if isinstance(col, str)) + "]"
+    if isinstance(descending, list) and descending:
+        desc = "[" + ", ".join("True" if bool(item) else "False" for item in descending) + "]"
+        return context.assign(f"{context.current_var}.sort({cols}, descending={desc})")
+    if isinstance(descending, bool):
+        return context.assign(f"{context.current_var}.sort({cols}, descending={'True' if descending else 'False'})")
+    return context.assign(f"{context.current_var}.sort({cols})")
+
+
+@polars_step_renderer(STEP_TYPES.rename.value)
+def render_polars_rename(context: PolarsStepRenderContext) -> str:
+    mapping = context.config.get("column_mapping")
+    if not isinstance(mapping, dict) or not mapping:
+        return context.alias_current()
+    return context.assign(f"{context.current_var}.rename({_safe_py(mapping)})")
+
+
+@polars_step_renderer(STEP_TYPES.groupby.value)
+def render_polars_groupby(context: PolarsStepRenderContext) -> str:
+    group_by = context.config.get("group_by")
+    aggregations = context.config.get("aggregations")
+    agg_exprs = [expr for agg in aggregations if isinstance(agg, dict) if (expr := _polars_group_agg_expr(agg))] if isinstance(aggregations, list) else []
+    if not (isinstance(group_by, list) and group_by and agg_exprs):
+        return context.alias_current(warning=f"GroupBy step in tab '{context.tab.name}' is missing group_by or aggregations")
+    group_cols = "[" + ", ".join(json.dumps(col) for col in group_by if isinstance(col, str)) + "]"
+    agg_list = "[" + ", ".join(agg_exprs) + "]"
+    return context.assign(f"{context.current_var}.group_by({group_cols}).agg({agg_list})")
+
+
+@polars_step_renderer(STEP_TYPES.join.value)
+def render_polars_join(context: PolarsStepRenderContext) -> str:
+    right_source = context.config.get("right_source")
+    join_columns = context.config.get("join_columns")
+    raw_how = context.config.get("how")
+    try:
+        how = JoinHow.INNER if raw_how is None else JoinHow.require(raw_how)
+    except ValueError:
+        return context.alias_current(warning=f"Join step in tab '{context.tab.name}' has unsupported join type '{raw_how}'")
+    suffix = str(context.config.get("suffix", "_right"))
+    right_var = context.tab_last_var.get(str(right_source)) if isinstance(right_source, str) else None
+    if right_var is None:
+        return context.alias_current(warning=f"Join step in tab '{context.tab.name}' could not resolve right source '{right_source}'")
+    if not how.requires_join_keys:
+        return context.assign(f"{context.current_var}.join({right_var}, how={json.dumps(how.polars_how)})")
+    if not (isinstance(join_columns, list) and join_columns):
+        return context.alias_current(warning=f"Join step in tab '{context.tab.name}' has no join column mappings")
+    left_cols = [
+        pair.get("left_column") for pair in join_columns if isinstance(pair, dict) and isinstance(pair.get("left_column"), str) and pair.get("left_column")
+    ]
+    right_cols = [
+        pair.get("right_column") for pair in join_columns if isinstance(pair, dict) and isinstance(pair.get("right_column"), str) and pair.get("right_column")
+    ]
+    if not (left_cols and right_cols):
+        return context.alias_current(warning=f"Join step in tab '{context.tab.name}' has empty join column mappings")
+    left_list = "[" + ", ".join(json.dumps(col) for col in left_cols) + "]"
+    right_list = "[" + ", ".join(json.dumps(col) for col in right_cols) + "]"
+    return context.assign(
+        f"{context.current_var}.join({right_var}, left_on={left_list}, right_on={right_list}, how={json.dumps(how.polars_how)}, suffix={json.dumps(suffix)})",
+    )
+
+
+@polars_step_renderer(STEP_TYPES.expression.value)
+def render_polars_expression(context: PolarsStepRenderContext) -> str:
+    expression = context.config.get("expression")
+    column_name = context.config.get("column_name")
+    if not (isinstance(expression, str) and expression.strip() and isinstance(column_name, str) and column_name):
+        return context.alias_current(warning=f"Expression step in tab '{context.tab.name}' is missing expression or column_name")
+    return context.assign(f"{context.current_var}.with_columns(({expression}).alias({json.dumps(column_name)}))")
+
+
+@polars_step_renderer(STEP_TYPES.with_columns.value)
+def render_polars_with_columns(context: PolarsStepRenderContext) -> str:
+    expressions = context.config.get("expressions")
+    rendered: list[str] = []
+    if isinstance(expressions, list):
+        for expression in expressions:
+            if not isinstance(expression, dict):
+                continue
+            name = expression.get("name")
+            expr_type = expression.get("type")
+            if not isinstance(name, str) or not name:
+                continue
+            if expr_type == "literal":
+                rendered.append(f"pl.lit({_safe_py(expression.get('value'))}).alias({json.dumps(name)})")
+            elif expr_type == "column" and isinstance(expression.get("column"), str):
+                rendered.append(f"pl.col({json.dumps(expression['column'])}).alias({json.dumps(name)})")
+            elif expr_type == "udf":
+                context.warn(f"With Columns UDF expression '{name}' in tab '{context.tab.name}' is not exportable as pure Polars and was skipped")
+            else:
+                context.warn(f"With Columns expression '{name}' in tab '{context.tab.name}' has unsupported type '{expr_type}'")
+    if not rendered:
+        return context.alias_current()
+    return context.assign(f"{context.current_var}.with_columns([{', '.join(rendered)}])")
+
+
+@polars_step_renderer(STEP_TYPES.pivot.value)
+def render_polars_pivot(context: PolarsStepRenderContext) -> str:
+    on_col = context.config.get("columns")
+    values = context.config.get("values")
+    index = context.config.get("index")
+    aggregate_function = str(context.config.get("aggregate_function", PivotAggregateFunction.FIRST.value))
+    if not (isinstance(on_col, str) and on_col):
+        return context.alias_current(warning=f"Pivot step in tab '{context.tab.name}' is missing columns")
+    index_expr = "[" + ", ".join(json.dumps(col) for col in index if isinstance(col, str)) + "]" if isinstance(index, list) else "[]"
+    values_expr = json.dumps(values) if isinstance(values, str) and values else "None"
+    return context.assign(
+        f"{context.current_var}.pivot(on={json.dumps(on_col)}, values={values_expr}, index={index_expr}, aggregate_function={json.dumps(aggregate_function)})",
+    )
+
+
+@polars_step_renderer(STEP_TYPES.unpivot.value)
+def render_polars_unpivot(context: PolarsStepRenderContext) -> str:
+    id_vars = context.config.get("id_vars")
+    value_vars = context.config.get("value_vars")
+    variable_name = str(context.config.get("variable_name", "variable"))
+    value_name = str(context.config.get("value_name", "value"))
+    if not (isinstance(value_vars, list) and value_vars):
+        return context.alias_current(warning=f"Unpivot step in tab '{context.tab.name}' is missing value_vars")
+    ids_expr = "[" + ", ".join(json.dumps(col) for col in id_vars if isinstance(col, str)) + "]" if isinstance(id_vars, list) else "[]"
+    value_expr = "[" + ", ".join(json.dumps(col) for col in value_vars if isinstance(col, str)) + "]"
+    return context.assign(
+        f"{context.current_var}.unpivot(on={value_expr}, index={ids_expr}, variable_name={json.dumps(variable_name)}, value_name={json.dumps(value_name)})",
+    )
+
+
+@polars_step_renderer(STEP_TYPES.deduplicate.value)
+def render_polars_deduplicate(context: PolarsStepRenderContext) -> str:
+    subset = context.config.get("subset")
+    keep = str(context.config.get("keep", DeduplicateKeep.FIRST.value))
+    if isinstance(subset, list) and subset:
+        subset_expr = "[" + ", ".join(json.dumps(col) for col in subset if isinstance(col, str)) + "]"
+        return context.assign(f"{context.current_var}.unique(subset={subset_expr}, keep={json.dumps(keep)})")
+    return context.assign(f"{context.current_var}.unique(keep={json.dumps(keep)})")
+
+
+@polars_step_renderer(STEP_TYPES.sample.value)
+def render_polars_sample(context: PolarsStepRenderContext) -> str:
+    fraction = context.config.get("fraction", 0.5)
+    seed = context.config.get("seed")
+    if isinstance(seed, int):
+        return context.assign(f"{context.current_var}.sample(fraction={_safe_py(fraction)}, seed={seed})")
+    return context.assign(f"{context.current_var}.sample(fraction={_safe_py(fraction)})")
+
+
+@polars_step_renderer(STEP_TYPES.limit.value)
+def render_polars_limit(context: PolarsStepRenderContext) -> str:
+    n = context.config.get("n", 100)
+    return context.assign(f"{context.current_var}.limit({int(n) if isinstance(n, int) else 100})")
+
+
+@polars_step_renderer(STEP_TYPES.view.value)
+def render_polars_view(context: PolarsStepRenderContext) -> str:
+    context.lines.append(f"{context.current_var}.show(limit=5)")
+    return context.current_var
+
+
+@polars_step_renderer(
+    STEP_TYPES.download.value,
+    STEP_TYPES.export.value,
+    STEP_TYPES.chart.value,
+    STEP_TYPES.plot_bar.value,
+    STEP_TYPES.plot_horizontal_bar.value,
+    STEP_TYPES.plot_area.value,
+    STEP_TYPES.plot_heatgrid.value,
+    STEP_TYPES.plot_histogram.value,
+    STEP_TYPES.plot_scatter.value,
+    STEP_TYPES.plot_line.value,
+    STEP_TYPES.plot_pie.value,
+    STEP_TYPES.plot_boxplot.value,
+)
+def render_polars_passthrough(context: PolarsStepRenderContext) -> str:
+    return context.alias_current()
+
+
+def render_unsupported_polars_step(context: PolarsStepRenderContext) -> str:
+    context.lines.append(f'# Step type "{context.step_type}" is not directly exportable; keeping previous frame')
+    return context.alias_current(
+        warning=f'Step "{context.step_type}" in tab "{context.tab.name}" is not fully exportable to pure Polars. Original config: {_safe_json(context.config)}',
+    )
+
+
+@sql_step_renderer(STEP_TYPES.filter.value)
+def render_sql_filter(context: SqlStepRenderContext) -> SqlStepRenderResult:
+    conditions = [condition.model_dump(mode="json", exclude_none=True) for condition in FilterConfig.model_validate(context.config).conditions]
+    logic = FilterLogic.read(str(context.config.get("logic", FilterLogic.AND.value)).upper(), default=FilterLogic.AND)
+    exprs = [expr for cond in conditions if isinstance(cond, dict) if (expr := _sql_filter_expr(cond))]
+    if not exprs:
+        return context.result(warning=f"Filter step in tab '{context.tab.name}' has no valid SQL conditions")
+    joiner = " AND " if logic == FilterLogic.AND else " OR "
+    return context.result(f"SELECT * FROM {context.current_cte} WHERE " + joiner.join(exprs))
+
+
+@sql_step_renderer(STEP_TYPES.select.value)
+def render_sql_select(context: SqlStepRenderContext) -> SqlStepRenderResult:
+    columns = context.config.get("columns")
+    cast_map = context.config.get("cast_map")
+    if not (isinstance(columns, list) and columns):
+        return context.result(warning=f"Select step in tab '{context.tab.name}' has no columns and was treated as pass-through")
+    rendered: list[str] = []
+    for column in columns:
+        if not isinstance(column, str):
+            continue
+        cast_type = cast_map.get(column) if isinstance(cast_map, dict) else None
+        sql_type = _SQL_CAST_MAP.get(str(cast_type)) if cast_type else None
+        if sql_type:
+            rendered.append(f"CAST({_sql_quote(column)} AS {sql_type}) AS {_sql_quote(column)}")
+        else:
+            rendered.append(_sql_quote(column))
+    return context.result(f"SELECT {', '.join(rendered)} FROM {context.current_cte}") if rendered else context.result()
+
+
+@sql_step_renderer(STEP_TYPES.sort.value)
+def render_sql_sort(context: SqlStepRenderContext) -> SqlStepRenderResult:
+    columns = context.config.get("columns")
+    descending = context.config.get("descending")
+    if not (isinstance(columns, list) and columns):
+        return context.result()
+    clauses: list[str] = []
+    for idx, column in enumerate(columns):
+        if not isinstance(column, str):
+            continue
+        desc = False
+        if isinstance(descending, list):
+            desc = bool(descending[idx]) if idx < len(descending) else False
+        elif isinstance(descending, bool):
+            desc = descending
+        clauses.append(f"{_sql_quote(column)} {'DESC' if desc else 'ASC'}")
+    return context.result(f"SELECT * FROM {context.current_cte} ORDER BY " + ", ".join(clauses)) if clauses else context.result()
+
+
+@sql_step_renderer(STEP_TYPES.groupby.value)
+def render_sql_groupby(context: SqlStepRenderContext) -> SqlStepRenderResult:
+    group_by = context.config.get("group_by")
+    aggregations = context.config.get("aggregations")
+    if not (isinstance(group_by, list) and group_by and isinstance(aggregations, list) and aggregations):
+        return context.result(warning=f"GroupBy step in tab '{context.tab.name}' is missing group_by or aggregations")
+    group_cols = [_sql_quote(col) for col in group_by if isinstance(col, str)]
+    agg_exprs = [expr for agg in aggregations if isinstance(agg, dict) if (expr := _sql_group_agg_expr(agg))]
+    if not (group_cols and agg_exprs):
+        return context.result(warning=f"GroupBy step in tab '{context.tab.name}' has unsupported aggregation functions")
+    return context.result("SELECT " + ", ".join(group_cols + agg_exprs) + f" FROM {context.current_cte} GROUP BY " + ", ".join(group_cols))
+
+
+@sql_step_renderer(STEP_TYPES.join.value)
+def render_sql_join(context: SqlStepRenderContext) -> SqlStepRenderResult:
+    right_source = context.config.get("right_source")
+    join_columns = context.config.get("join_columns")
+    raw_how = context.config.get("how")
+    try:
+        how = JoinHow.INNER if raw_how is None else JoinHow.require(raw_how)
+    except ValueError:
+        return context.result(warning=f"Join step in tab '{context.tab.name}' has unsupported join type '{raw_how}'")
+    right_columns = context.config.get("right_columns")
+    right_cte = context.tab_final_cte.get(str(right_source)) if isinstance(right_source, str) else None
+    if right_cte is None:
+        return context.result(warning=f"Join step in tab '{context.tab.name}' could not resolve right source '{right_source}'")
+    if not how.requires_join_keys:
+        return context.result(f"SELECT l.*, r.* FROM {context.current_cte} AS l {how.sql_join_type} {right_cte} AS r")
+    if not (isinstance(join_columns, list) and join_columns):
+        return context.result(warning=f"Join step in tab '{context.tab.name}' has no join column mappings")
+    on_parts: list[str] = []
+    for pair in join_columns:
+        if not isinstance(pair, dict):
+            continue
+        left_col = pair.get("left_column")
+        right_col = pair.get("right_column")
+        if isinstance(left_col, str) and isinstance(right_col, str) and left_col and right_col:
+            on_parts.append(f"l.{_sql_quote(left_col)} = r.{_sql_quote(right_col)}")
+    if not on_parts:
+        return context.result(warning=f"Join step in tab '{context.tab.name}' has empty join column mappings")
+    if isinstance(right_columns, list) and right_columns:
+        right_select = ", ".join(f"r.{_sql_quote(col)} AS {_sql_quote(col)}" for col in right_columns if isinstance(col, str))
+        select_clause = f"l.*, {right_select}" if right_select else "l.*, r.*"
+    else:
+        select_clause = "l.*, r.*"
+    body = f"SELECT {select_clause} FROM {context.current_cte} AS l {how.sql_join_type} {right_cte} AS r ON " + " AND ".join(on_parts)
+    return context.result(body)
+
+
+@sql_step_renderer(STEP_TYPES.expression.value)
+def render_sql_expression(context: SqlStepRenderContext) -> SqlStepRenderResult:
+    expression = context.config.get("expression")
+    column_name = context.config.get("column_name")
+    if not (isinstance(expression, str) and expression.strip() and isinstance(column_name, str) and column_name):
+        return context.result(warning=f"Expression step in tab '{context.tab.name}' is missing expression or column_name")
+    return context.result(f"SELECT *, ({expression}) AS {_sql_quote(column_name)} FROM {context.current_cte}")
+
+
+@sql_step_renderer(STEP_TYPES.limit.value)
+def render_sql_limit(context: SqlStepRenderContext) -> SqlStepRenderResult:
+    n = context.config.get("n", 100)
+    n_value = int(n) if isinstance(n, int) else 100
+    return context.result(f"SELECT * FROM {context.current_cte} LIMIT {n_value}")
+
+
+@sql_step_renderer(STEP_TYPES.deduplicate.value)
+def render_sql_deduplicate(context: SqlStepRenderContext) -> SqlStepRenderResult:
+    subset = context.config.get("subset")
+    keep = str(context.config.get("keep", DeduplicateKeep.FIRST.value))
+    if isinstance(subset, list) and subset and keep == DeduplicateKeep.FIRST.value:
+        cols = ", ".join(_sql_quote(col) for col in subset if isinstance(col, str))
+        return context.result(f"SELECT DISTINCT ON ({cols}) * FROM {context.current_cte} ORDER BY {cols}")
+    return context.result(
+        comments=(
+            f'-- WARNING: step "{context.step_type}" in tab "{context.tab.name}" cannot be represented exactly in SQL',
+            f"-- Original config: {_safe_json(context.config)}",
+        )
+    )
+
+
+@sql_step_renderer(STEP_TYPES.view.value, STEP_TYPES.download.value, STEP_TYPES.export.value)
+def render_sql_passthrough(context: SqlStepRenderContext) -> SqlStepRenderResult:
+    return context.result()
+
+
+def render_unsupported_sql_step(context: SqlStepRenderContext) -> SqlStepRenderResult:
+    context.warn(
+        f'Step "{context.step_type}" in tab "{context.tab.name}" is not fully exportable to SQL. Original config: {_safe_json(context.config)}',
+    )
+    return context.result(
+        comments=(
+            f'-- WARNING: step "{context.step_type}" in tab "{context.tab.name}" is not directly translatable to SQL',
+            f"-- Original config: {_safe_json(context.config)}",
+        )
+    )
 
 
 @code_generator(CodeExportFormat.POLARS)
@@ -419,229 +877,19 @@ def generate_polars_code(
         current_var = source_var
         for step_index, step in enumerate(tab.steps, start=1):
             next_var = f"{tab_slug}_step_{step_index}"
-            advance_var = True
             lines.append(f"# Step {step_index}: {step.type}")
-            config = step.config if isinstance(step.config, dict) else {}
-
-            if step.type == "filter":
-                conditions = [condition.model_dump(mode="json", exclude_none=True) for condition in FilterConfig.model_validate(config).conditions]
-                logic = FilterLogic.read(str(config.get("logic", FilterLogic.AND.value)).upper(), default=FilterLogic.AND)
-                exprs = [expr for cond in conditions if isinstance(cond, dict) if (expr := _polars_filter_expr(cond))]
-                if exprs:
-                    joiner = " & " if logic == FilterLogic.AND else " | "
-                    lines.append(f"{next_var} = {current_var}.filter({joiner.join(exprs)})")
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-                    warn(f"Filter step in tab '{tab.name}' has no valid conditions")
-            elif step.type == "select":
-                columns = config.get("columns")
-                cast_map = config.get("cast_map")
-                if isinstance(columns, list) and columns:
-                    quoted = "[" + ", ".join(json.dumps(col) for col in columns if isinstance(col, str)) + "]"
-                    lines.append(f"{next_var} = {current_var}.select({quoted})")
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-                    warn(f"Select step in tab '{tab.name}' has no columns and was treated as pass-through")
-                if isinstance(cast_map, dict) and cast_map:
-                    casts: list[str] = []
-                    for column, dtype in cast_map.items():
-                        if not isinstance(column, str):
-                            continue
-                        mapped = _POLARS_CAST_MAP.get(str(dtype))
-                        if not mapped:
-                            warn(f"Select step in tab '{tab.name}' has unsupported cast type '{dtype}' for '{column}'")
-                            continue
-                        casts.append(f"pl.col({json.dumps(column)}).cast(pl.{mapped}).alias({json.dumps(column)})")
-                    if casts:
-                        cast_expr = "[" + ", ".join(casts) + "]"
-                        lines.append(f"{next_var} = {next_var}.with_columns({cast_expr})")
-            elif step.type == "drop":
-                columns = config.get("columns")
-                if isinstance(columns, list) and columns:
-                    quoted = "[" + ", ".join(json.dumps(col) for col in columns if isinstance(col, str)) + "]"
-                    lines.append(f"{next_var} = {current_var}.drop({quoted})")
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-            elif step.type == "sort":
-                columns = config.get("columns")
-                descending = config.get("descending")
-                if isinstance(columns, list) and columns:
-                    cols = "[" + ", ".join(json.dumps(col) for col in columns if isinstance(col, str)) + "]"
-                    if isinstance(descending, list) and descending:
-                        desc = "[" + ", ".join("True" if bool(item) else "False" for item in descending) + "]"
-                        lines.append(f"{next_var} = {current_var}.sort({cols}, descending={desc})")
-                    elif isinstance(descending, bool):
-                        lines.append(
-                            f"{next_var} = {current_var}.sort({cols}, descending={'True' if descending else 'False'})",
-                        )
-                    else:
-                        lines.append(f"{next_var} = {current_var}.sort({cols})")
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-            elif step.type == "rename":
-                mapping = config.get("column_mapping")
-                if isinstance(mapping, dict) and mapping:
-                    lines.append(f"{next_var} = {current_var}.rename({_safe_py(mapping)})")
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-            elif step.type == "groupby":
-                group_by = config.get("group_by")
-                aggregations = config.get("aggregations")
-                agg_exprs: list[str] = []
-                if isinstance(aggregations, list):
-                    for agg in aggregations:
-                        if not isinstance(agg, dict):
-                            continue
-                        expr = _polars_group_agg_expr(agg)
-                        if expr:
-                            agg_exprs.append(expr)
-                if isinstance(group_by, list) and group_by and agg_exprs:
-                    group_cols = "[" + ", ".join(json.dumps(col) for col in group_by if isinstance(col, str)) + "]"
-                    agg_list = "[" + ", ".join(agg_exprs) + "]"
-                    lines.append(f"{next_var} = {current_var}.group_by({group_cols}).agg({agg_list})")
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-                    warn(f"GroupBy step in tab '{tab.name}' is missing group_by or aggregations")
-            elif step.type == "join":
-                right_source = config.get("right_source")
-                join_columns = config.get("join_columns")
-                how = str(config.get("how", "inner")).lower()
-                suffix = str(config.get("suffix", "_right"))
-                right_var = tab_last_var.get(str(right_source)) if isinstance(right_source, str) else None
-                if right_var and isinstance(join_columns, list) and join_columns:
-                    left_on = [pair.get("left_column") for pair in join_columns if isinstance(pair, dict)]
-                    right_on = [pair.get("right_column") for pair in join_columns if isinstance(pair, dict)]
-                    left_cols = [col for col in left_on if isinstance(col, str) and col]
-                    right_cols = [col for col in right_on if isinstance(col, str) and col]
-                    if left_cols and right_cols:
-                        left_list = "[" + ", ".join(json.dumps(col) for col in left_cols) + "]"
-                        right_list = "[" + ", ".join(json.dumps(col) for col in right_cols) + "]"
-                        mapped_how = "full" if how == "outer" else how
-                        lines.append(
-                            f"{next_var} = {current_var}.join("
-                            f"{right_var}, left_on={left_list}, right_on={right_list}, "
-                            f"how={json.dumps(mapped_how)}, suffix={json.dumps(suffix)})",
-                        )
-                    else:
-                        lines.append(f"{next_var} = {current_var}")
-                        warn(f"Join step in tab '{tab.name}' has empty join column mappings")
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-                    warn(f"Join step in tab '{tab.name}' could not resolve right source '{right_source}'")
-            elif step.type == "expression":
-                expression = config.get("expression")
-                column_name = config.get("column_name")
-                if isinstance(expression, str) and expression.strip() and isinstance(column_name, str) and column_name:
-                    lines.append(
-                        f"{next_var} = {current_var}.with_columns(({expression}).alias({json.dumps(column_name)}))",
-                    )
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-                    warn(f"Expression step in tab '{tab.name}' is missing expression or column_name")
-            elif step.type == "with_columns":
-                expressions = config.get("expressions")
-                rendered: list[str] = []
-                if isinstance(expressions, list):
-                    for expression in expressions:
-                        if not isinstance(expression, dict):
-                            continue
-                        name = expression.get("name")
-                        expr_type = expression.get("type")
-                        if not isinstance(name, str) or not name:
-                            continue
-                        if expr_type == "literal":
-                            rendered.append(f"pl.lit({_safe_py(expression.get('value'))}).alias({json.dumps(name)})")
-                        elif expr_type == "column" and isinstance(expression.get("column"), str):
-                            rendered.append(
-                                f"pl.col({json.dumps(expression['column'])}).alias({json.dumps(name)})",
-                            )
-                        elif expr_type == "udf":
-                            warn(
-                                f"With Columns UDF expression '{name}' in tab '{tab.name}' is not exportable as pure Polars and was skipped",
-                            )
-                        else:
-                            warn(f"With Columns expression '{name}' in tab '{tab.name}' has unsupported type '{expr_type}'")
-                if rendered:
-                    lines.append(f"{next_var} = {current_var}.with_columns([{', '.join(rendered)}])")
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-            elif step.type == "pivot":
-                on_col = config.get("columns")
-                values = config.get("values")
-                index = config.get("index")
-                aggregate_function = str(config.get("aggregate_function", "first"))
-                if isinstance(on_col, str) and on_col:
-                    index_expr = "[" + ", ".join(json.dumps(col) for col in index if isinstance(col, str)) + "]" if isinstance(index, list) else "[]"
-                    values_expr = json.dumps(values) if isinstance(values, str) and values else "None"
-                    lines.append(
-                        f"{next_var} = {current_var}.pivot("
-                        f"on={json.dumps(on_col)}, values={values_expr}, index={index_expr}, "
-                        f"aggregate_function={json.dumps(aggregate_function)})",
-                    )
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-                    warn(f"Pivot step in tab '{tab.name}' is missing columns")
-            elif step.type == "unpivot":
-                id_vars = config.get("id_vars")
-                value_vars = config.get("value_vars")
-                variable_name = str(config.get("variable_name", "variable"))
-                value_name = str(config.get("value_name", "value"))
-                if isinstance(value_vars, list) and value_vars:
-                    ids_expr = "[" + ", ".join(json.dumps(col) for col in id_vars if isinstance(col, str)) + "]" if isinstance(id_vars, list) else "[]"
-                    value_expr = "[" + ", ".join(json.dumps(col) for col in value_vars if isinstance(col, str)) + "]"
-                    lines.append(
-                        f"{next_var} = {current_var}.unpivot("
-                        f"on={value_expr}, index={ids_expr}, variable_name={json.dumps(variable_name)}, "
-                        f"value_name={json.dumps(value_name)})",
-                    )
-                else:
-                    lines.append(f"{next_var} = {current_var}")
-                    warn(f"Unpivot step in tab '{tab.name}' is missing value_vars")
-            elif step.type == "deduplicate":
-                subset = config.get("subset")
-                keep = str(config.get("keep", "first"))
-                if isinstance(subset, list) and subset:
-                    subset_expr = "[" + ", ".join(json.dumps(col) for col in subset if isinstance(col, str)) + "]"
-                    lines.append(f"{next_var} = {current_var}.unique(subset={subset_expr}, keep={json.dumps(keep)})")
-                else:
-                    lines.append(f"{next_var} = {current_var}.unique(keep={json.dumps(keep)})")
-            elif step.type == "sample":
-                fraction = config.get("fraction", 0.5)
-                seed = config.get("seed")
-                if isinstance(seed, int):
-                    lines.append(f"{next_var} = {current_var}.sample(fraction={_safe_py(fraction)}, seed={seed})")
-                else:
-                    lines.append(f"{next_var} = {current_var}.sample(fraction={_safe_py(fraction)})")
-            elif step.type == "limit":
-                n = config.get("n", 100)
-                lines.append(f"{next_var} = {current_var}.limit({int(n) if isinstance(n, int) else 100})")
-            elif step.type == "view":
-                lines.append(f"{current_var}.show(limit=5)")
-                advance_var = False
-            elif step.type in {
-                "download",
-                "export",
-                "chart",
-                "plot_bar",
-                "plot_horizontal_bar",
-                "plot_area",
-                "plot_heatgrid",
-                "plot_histogram",
-                "plot_scatter",
-                "plot_line",
-                "plot_pie",
-                "plot_boxplot",
-            }:
-                lines.append(f"{next_var} = {current_var}")
-            else:
-                lines.append(f'# Step type "{step.type}" is not directly exportable; keeping previous frame')
-                lines.append(f"{next_var} = {current_var}")
-                warn(
-                    f'Step "{step.type}" in tab "{tab.name}" is not fully exportable to pure Polars. Original config: {_safe_json(config)}',
-                )
-
-            if advance_var:
-                current_var = next_var
+            context = PolarsStepRenderContext(
+                tab=tab,
+                step_type=step.type,
+                config=step.config if isinstance(step.config, dict) else {},
+                current_var=current_var,
+                next_var=next_var,
+                tab_last_var=tab_last_var,
+                lines=lines,
+                warnings=warnings,
+            )
+            renderer = POLARS_STEP_RENDERERS.get(step.type, render_unsupported_polars_step)
+            current_var = renderer(context)
 
         tab_last_var[tab.id] = current_var
         lines.append(f"{tab_slug}_result = {current_var}")
@@ -723,134 +971,21 @@ def generate_sql_code(
 
         for step_index, step in enumerate(tab.steps, start=1):
             step_cte = f"{tab_alias}_step_{step_index}"
-            config = step.config if isinstance(step.config, dict) else {}
-            comments: list[str] = []
-            body = f"SELECT * FROM {current_cte}"
-
-            if step.type == "filter":
-                conditions = [condition.model_dump(mode="json", exclude_none=True) for condition in FilterConfig.model_validate(config).conditions]
-                logic = FilterLogic.read(str(config.get("logic", FilterLogic.AND.value)).upper(), default=FilterLogic.AND)
-                exprs = [expr for cond in conditions if isinstance(cond, dict) if (expr := _sql_filter_expr(cond))]
-                if exprs:
-                    joiner = " AND " if logic == FilterLogic.AND else " OR "
-                    body = f"SELECT * FROM {current_cte} WHERE " + joiner.join(exprs)
-                else:
-                    warn(f"Filter step in tab '{tab.name}' has no valid SQL conditions")
-            elif step.type == "select":
-                columns = config.get("columns")
-                cast_map = config.get("cast_map")
-                if isinstance(columns, list) and columns:
-                    rendered: list[str] = []
-                    for column in columns:
-                        if not isinstance(column, str):
-                            continue
-                        cast_type = cast_map.get(column) if isinstance(cast_map, dict) else None
-                        sql_type = _SQL_CAST_MAP.get(str(cast_type)) if cast_type else None
-                        if sql_type:
-                            rendered.append(f"CAST({_sql_quote(column)} AS {sql_type}) AS {_sql_quote(column)}")
-                        else:
-                            rendered.append(_sql_quote(column))
-                    if rendered:
-                        body = f"SELECT {', '.join(rendered)} FROM {current_cte}"
-                else:
-                    warn(f"Select step in tab '{tab.name}' has no columns and was treated as pass-through")
-            elif step.type == "sort":
-                columns = config.get("columns")
-                descending = config.get("descending")
-                if isinstance(columns, list) and columns:
-                    clauses: list[str] = []
-                    for idx, column in enumerate(columns):
-                        if not isinstance(column, str):
-                            continue
-                        desc = False
-                        if isinstance(descending, list):
-                            desc = bool(descending[idx]) if idx < len(descending) else False
-                        elif isinstance(descending, bool):
-                            desc = descending
-                        clauses.append(f"{_sql_quote(column)} {'DESC' if desc else 'ASC'}")
-                    if clauses:
-                        body = f"SELECT * FROM {current_cte} ORDER BY " + ", ".join(clauses)
-            elif step.type == "groupby":
-                group_by = config.get("group_by")
-                aggregations = config.get("aggregations")
-                if isinstance(group_by, list) and group_by and isinstance(aggregations, list) and aggregations:
-                    group_cols = [_sql_quote(col) for col in group_by if isinstance(col, str)]
-                    agg_exprs = [expr for agg in aggregations if isinstance(agg, dict) if (expr := _sql_group_agg_expr(agg))]
-                    if group_cols and agg_exprs:
-                        body = "SELECT " + ", ".join(group_cols + agg_exprs) + f" FROM {current_cte} GROUP BY " + ", ".join(group_cols)
-                    else:
-                        warn(f"GroupBy step in tab '{tab.name}' has unsupported aggregation functions")
-                else:
-                    warn(f"GroupBy step in tab '{tab.name}' is missing group_by or aggregations")
-            elif step.type == "join":
-                right_source = config.get("right_source")
-                join_columns = config.get("join_columns")
-                how = str(config.get("how", "inner")).lower()
-                right_columns = config.get("right_columns")
-                right_cte = tab_final_cte.get(str(right_source)) if isinstance(right_source, str) else None
-                if how == "cross" and right_cte:
-                    body = f"SELECT l.*, r.* FROM {current_cte} AS l CROSS JOIN {right_cte} AS r"
-                elif right_cte and isinstance(join_columns, list) and join_columns:
-                    on_parts: list[str] = []
-                    for pair in join_columns:
-                        if not isinstance(pair, dict):
-                            continue
-                        left_col = pair.get("left_column")
-                        right_col = pair.get("right_column")
-                        if isinstance(left_col, str) and isinstance(right_col, str) and left_col and right_col:
-                            on_parts.append(f"l.{_sql_quote(left_col)} = r.{_sql_quote(right_col)}")
-                    if on_parts:
-                        join_type = {
-                            "inner": "INNER JOIN",
-                            "left": "LEFT JOIN",
-                            "right": "RIGHT JOIN",
-                            "outer": "FULL OUTER JOIN",
-                        }.get(how, "INNER JOIN")
-                        if isinstance(right_columns, list) and right_columns:
-                            right_select = ", ".join(f"r.{_sql_quote(col)} AS {_sql_quote(col)}" for col in right_columns if isinstance(col, str))
-                            select_clause = f"l.*, {right_select}" if right_select else "l.*, r.*"
-                        else:
-                            select_clause = "l.*, r.*"
-                        body = f"SELECT {select_clause} FROM {current_cte} AS l {join_type} {right_cte} AS r ON " + " AND ".join(on_parts)
-                    else:
-                        warn(f"Join step in tab '{tab.name}' has empty join column mappings")
-                else:
-                    warn(f"Join step in tab '{tab.name}' could not resolve right source '{right_source}'")
-            elif step.type == "expression":
-                expression = config.get("expression")
-                column_name = config.get("column_name")
-                if isinstance(expression, str) and expression.strip() and isinstance(column_name, str) and column_name:
-                    body = f"SELECT *, ({expression}) AS {_sql_quote(column_name)} FROM {current_cte}"
-                else:
-                    warn(f"Expression step in tab '{tab.name}' is missing expression or column_name")
-            elif step.type == "limit":
-                n = config.get("n", 100)
-                n_value = int(n) if isinstance(n, int) else 100
-                body = f"SELECT * FROM {current_cte} LIMIT {n_value}"
-            elif step.type == "deduplicate":
-                subset = config.get("subset")
-                keep = str(config.get("keep", "first"))
-                if isinstance(subset, list) and subset and keep == "first":
-                    cols = ", ".join(_sql_quote(col) for col in subset if isinstance(col, str))
-                    body = f"SELECT DISTINCT ON ({cols}) * FROM {current_cte} ORDER BY {cols}"
-                else:
-                    comments.append(
-                        f'-- WARNING: step "{step.type}" in tab "{tab.name}" cannot be represented exactly in SQL',
-                    )
-                    comments.append(f"-- Original config: {_safe_json(config)}")
-            elif step.type in {"view", "download", "export"}:
-                pass
-            else:
-                comments.append(f'-- WARNING: step "{step.type}" in tab "{tab.name}" is not directly translatable to SQL')
-                comments.append(f"-- Original config: {_safe_json(config)}")
-                warn(
-                    f'Step "{step.type}" in tab "{tab.name}" is not fully exportable to SQL. Original config: {_safe_json(config)}',
-                )
+            context = SqlStepRenderContext(
+                tab=tab,
+                step_type=step.type,
+                config=step.config if isinstance(step.config, dict) else {},
+                current_cte=current_cte,
+                tab_final_cte=tab_final_cte,
+                warnings=warnings,
+            )
+            renderer = SQL_STEP_RENDERERS.get(step.type, render_unsupported_sql_step)
+            rendered = renderer(context)
 
             step_cte_block = ""
-            if comments:
-                step_cte_block += "\n".join(comments) + "\n"
-            step_cte_block += f"{step_cte} AS (\n    {body}\n)"
+            if rendered.comments:
+                step_cte_block += "\n".join(rendered.comments) + "\n"
+            step_cte_block += f"{step_cte} AS (\n    {rendered.body}\n)"
             ctes.append(step_cte_block)
             current_cte = step_cte
 

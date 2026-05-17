@@ -9,7 +9,7 @@ from typing import Any, cast
 import polars as pl
 import psycopg
 from contracts.datasource.models import DataSource, DataSourceColumnMetadata
-from contracts.datasource.source_types import DataSourceType
+from contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from core.config import settings
 from core.exceptions import (
     DataSourceConnectionError,
@@ -138,7 +138,7 @@ def _schema_from_database(datasource: DataSource, sheet_name: str | None) -> Sch
             frame = pl.read_database(query, connection)
     except Exception as exc:
         raise DataSourceConnectionError(
-            "Failed to query database datasource",
+            DataSourceType.DATABASE.ingestion_error_message,
             details={
                 "datasource_id": datasource.id,
                 "source_type": datasource.source_type,
@@ -255,15 +255,13 @@ def create_file_datasource(
     within_upload_root = upload_root in resolved_path.parents or upload_root == resolved_path
     if not (within_data_root or within_upload_root):
         raise ValueError(f"Path must be inside data directory: {data_root}")
-    if file_type in {"csv", "json", "ndjson", "excel"} and not resolved_path.is_file():
-        raise ValueError(f"Path must be a file for type: {file_type}")
-    if file_type == "parquet" and not (resolved_path.is_file() or resolved_path.is_dir()):
-        raise ValueError("Parquet path must be a file or directory")
+    resolved_file_type = DataSourceFileType.require(file_type)
+    resolved_file_type.validate_local_path(resolved_path)
 
     source_config = {
         "source_type": DataSourceType.FILE,
         "file_path": str(resolved_path),
-        "file_type": file_type,
+        "file_type": resolved_file_type.value,
         "options": options or {},
         "csv_options": csv_options.model_dump() if csv_options else None,
         "sheet_name": sheet_name,
@@ -281,7 +279,7 @@ def create_file_datasource(
     except Exception as exc:
         raise DataSourceValidationError(
             f"Failed to load file datasource for ingestion: {exc}",
-            details={"file_path": str(resolved_path), "file_type": file_type},
+            details={"file_path": str(resolved_path), "file_type": resolved_file_type.value},
         ) from exc
     target_path = _prepare_clean_target(paths.clean_dir, datasource_id, "master")
     snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
@@ -349,7 +347,7 @@ def create_database_datasource(
             session.refresh(datasource)
             return DataSourceResponse.model_validate(datasource)
         raise DataSourceConnectionError(
-            "Failed to query database datasource",
+            DataSourceType.DATABASE.ingestion_error_message,
             details={"connection_string": connection_string},
         ) from exc
     paths = namespace_paths()
@@ -388,8 +386,8 @@ def create_iceberg_datasource(
     branch: str = "master",
     owner_id: str | None = None,
 ) -> DataSourceResponse:
-    source_type = source.get("source_type") if isinstance(source, dict) else None
-    if source_type not in {DataSourceType.FILE, DataSourceType.DATABASE}:
+    source_type = DataSourceType.read(source.get("source_type") if isinstance(source, dict) else None, default=None)
+    if source_type is None or not source_type.supports_external_ingestion:
         raise DataSourceValidationError(
             "Iceberg datasource source_type is not supported for ingestion",
             details={"source_type": source_type},
@@ -418,8 +416,7 @@ def create_iceberg_datasource(
     except DataSourceValidationError:
         raise
     except Exception as exc:
-        message = "Failed to query database datasource" if source_type == DataSourceType.DATABASE else "Failed to read file datasource"
-        raise DataSourceConnectionError(message, details={"source_type": source_type}) from exc
+        raise DataSourceConnectionError(source_type.ingestion_error_message, details={"source_type": source_type}) from exc
     datasource_id = str(uuid.uuid4())
     paths = namespace_paths()
     target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch_name)
@@ -453,19 +450,19 @@ def refresh_external_datasource(session: Session, datasource_id: str) -> DataSou
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
         raise DataSourceNotFoundError(datasource_id)
-    if datasource.source_type != DataSourceType.ICEBERG:
+    if not datasource.is_iceberg:
         raise DataSourceValidationError(
             "Refresh is only available for Iceberg datasources",
             details={"datasource_id": datasource_id},
         )
-    source = datasource.config.get("source") if isinstance(datasource.config, dict) else None
-    if not isinstance(source, dict):
+    source = datasource.external_source_config()
+    if source is None:
         raise DataSourceValidationError(
             "Datasource has no external source configuration",
             details={"datasource_id": datasource_id},
         )
-    source_type = source.get("source_type")
-    if source_type not in {DataSourceType.DATABASE, DataSourceType.FILE}:
+    source_type = datasource.external_source_type()
+    if source_type is None or not datasource.is_refreshable_external:
         raise DataSourceValidationError(
             "Datasource source is not refreshable",
             details={"datasource_id": datasource_id, "source_type": source_type},
@@ -497,8 +494,7 @@ def refresh_external_datasource(session: Session, datasource_id: str) -> DataSou
     except DataSourceValidationError:
         raise
     except Exception as exc:
-        message = "Failed to query database datasource" if source_type == DataSourceType.DATABASE else "Failed to read file datasource"
-        raise DataSourceConnectionError(message, details={"datasource_id": datasource_id}) from exc
+        raise DataSourceConnectionError(source_type.ingestion_error_message, details={"datasource_id": datasource_id}) from exc
     metadata_path = datasource.config.get("metadata_path")
     if not isinstance(metadata_path, str) or not metadata_path:
         raise DataSourceValidationError(
@@ -525,17 +521,7 @@ def refresh_external_datasource(session: Session, datasource_id: str) -> DataSou
 
 
 def is_reingestable_raw_datasource(datasource: DataSource) -> bool:
-    if datasource.source_type != DataSourceType.ICEBERG:
-        return False
-    if datasource.is_analysis_output:
-        return False
-    if not isinstance(datasource.config, dict):
-        return False
-    source = datasource.config.get("source")
-    if not isinstance(source, dict):
-        return False
-    source_type = source.get("source_type")
-    return source_type in {DataSourceType.FILE, DataSourceType.DATABASE}
+    return datasource.is_reingestable_raw()
 
 
 def refresh_datasource_for_schedule(session: Session, datasource_id: str) -> DataSourceResponse:
@@ -730,7 +716,7 @@ def compare_iceberg_snapshots(
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
         raise DataSourceNotFoundError(datasource_id)
-    if datasource.source_type != DataSourceType.ICEBERG:
+    if not datasource.is_iceberg:
         raise DataSourceValidationError(
             "Snapshot comparison is only available for Iceberg datasources",
             details={"datasource_id": datasource_id},

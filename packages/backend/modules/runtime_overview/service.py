@@ -54,14 +54,14 @@ def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary
     return [
         schemas.RuntimeWorkerSummary(
             id=row.id,
-            kind=row.kind.value,
+            kind=row.kind,
             hostname=row.hostname,
             pid=row.pid,
             capacity=row.capacity,
             active_jobs=row.active_jobs,
             started_at=row.started_at,
             last_heartbeat_at=row.last_heartbeat_at,
-            heartbeat_age_seconds=_age_seconds(row.last_heartbeat_at, now=now),
+            heartbeat_age_seconds=row.heartbeat_age_seconds(now=now),
             stopped_at=row.stopped_at,
         )
         for row in rows
@@ -78,7 +78,7 @@ def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummar
             namespace=row.namespace,
             analysis_id=row.analysis_id,
             process_id=row.process_id,
-            status=row.status.value,
+            status=row.status,
             current_job_id=row.current_job_id,
             current_build_id=row.current_build_id,
             current_engine_run_id=row.current_engine_run_id,
@@ -131,16 +131,16 @@ def _read_queue_namespace_summary(
     stmt = select(BuildJob).where(BuildJob.namespace == namespace)  # type: ignore[arg-type]
     rows = list(session.execute(stmt).scalars().all())
     queued = [row for row in rows if row.status == BuildJobStatus.QUEUED]
-    oldest = min((row.created_at for row in queued), default=None)
-    active_rows = [row for row in rows if row.status in {BuildJobStatus.LEASED, BuildJobStatus.RUNNING}]
-    orphaned = [row for row in active_rows if row.lease_owner is None or row.lease_owner in reclaimable_worker_ids]
-    age = None if oldest is None else _age_seconds(oldest, now=now)
+    oldest = min(queued, key=lambda row: row.created_at, default=None)
+    active_rows = [row for row in rows if row.status.is_active]
+    orphaned = [row for row in active_rows if row.is_orphaned(reclaimable_worker_ids)]
+    age = None if oldest is None else oldest.age_seconds(now=now)
     return schemas.QueueNamespaceSummary(
         namespace=namespace,
         queued=len(queued),
         running=len(active_rows) - len(orphaned),
         orphaned=len(orphaned),
-        oldest_queued_at=oldest,
+        oldest_queued_at=oldest.created_at if oldest is not None else None,
         oldest_queued_age_seconds=age,
     )
 
@@ -148,10 +148,7 @@ def _read_queue_namespace_summary(
 def _queue_totals(
     items: list[schemas.QueueNamespaceSummary],
 ) -> schemas.QueueTotalsSummary:
-    oldest = min(
-        (item.oldest_queued_at for item in items if item.oldest_queued_at is not None),
-        default=None,
-    )
+    oldest = min((item.oldest_queued_at for item in items if item.oldest_queued_at is not None), default=None)
     now = _utcnow()
     age = None if oldest is None else _age_seconds(oldest, now=now)
     return schemas.QueueTotalsSummary(

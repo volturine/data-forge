@@ -8,8 +8,12 @@ import type {
 	BuildLogEntry,
 	ActiveBuildDetail,
 	BuildDetailSnapshot,
-	QueryPlan,
-	BuildStepState
+	QueryPlan
+} from '$lib/types/build-stream';
+import {
+	buildStatusFromActiveBuild,
+	coerceBuildStepState,
+	isTerminalBuildStatus
 } from '$lib/types/build-stream';
 import { connectBuildDetailStream, startActiveBuild } from '$lib/api/build-stream';
 import type { BuildRequest, CancelBuildResponse } from '$lib/api/compute';
@@ -19,18 +23,6 @@ const MAX_LOGS = 500;
 const MAX_RESOURCE_HISTORY = 120;
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
-
-function wireStepState(raw: string): BuildStepState {
-	if (
-		raw === 'pending' ||
-		raw === 'running' ||
-		raw === 'completed' ||
-		raw === 'failed' ||
-		raw === 'skipped'
-	)
-		return raw;
-	return 'pending';
-}
 
 export class BuildStreamStore {
 	status = $state<BuildStatus>('disconnected');
@@ -64,9 +56,7 @@ export class BuildStreamStore {
 	private pendingError: string | null = null;
 	private releaseActivity: (() => void) | null = null;
 
-	done = $derived(
-		this.status === 'completed' || this.status === 'failed' || this.status === 'cancelled'
-	);
+	done = $derived(isTerminalBuildStatus(this.status));
 	succeeded = $derived(this.status === 'completed');
 	memoryPercent = $derived(
 		this.latestResources &&
@@ -254,7 +244,7 @@ export class BuildStreamStore {
 			stepType: s.step_type,
 			tabId: s.tab_id ?? null,
 			tabName: s.tab_name ?? null,
-			state: wireStepState(s.state),
+			state: coerceBuildStepState(s.state),
 			duration: s.duration_ms ?? null,
 			rowCount: s.row_count ?? null,
 			error: s.error ?? null
@@ -272,15 +262,7 @@ export class BuildStreamStore {
 		this.results = build.results ?? [];
 		this.duration = build.duration_ms ?? null;
 		this.error = build.error ?? null;
-		if (build.status === 'cancelled') {
-			this.status = 'cancelled';
-		} else if (build.status === 'failed') {
-			this.status = 'failed';
-		} else if (build.status === 'queued') {
-			this.status = 'queued';
-		} else {
-			this.status = build.status === 'completed' ? 'completed' : 'running';
-		}
+		this.status = buildStatusFromActiveBuild(build.status);
 		if (this.done) {
 			this.shouldReconnect = false;
 			this.clearReconnectTimer();

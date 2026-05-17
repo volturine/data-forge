@@ -10,15 +10,38 @@ from contracts.analysis.step_types import (
 )
 from contracts.enums import DataForgeStrEnum
 from contracts.step_config_enums import (
+    AIProvider,
+    AxisScale,
+    ChartAggregation,
+    ChartHeight,
+    ChartWidth,
+    DateBucket,
+    DateOrdinal,
+    DeduplicateKeep,
+    DisplayUnits,
     DurationUnit,
+    FillNullStrategy,
     FilterLogic,
     FilterOperator,
     FilterValueType,
+    GroupByAggregationFunction,
+    GroupSortBy,
+    JoinHow,
+    LegendPosition,
+    NotificationMethod,
+    OverlayChartType,
+    PivotAggregateFunction,
+    RecipientSource,
+    ReferenceAxis,
+    SortBy,
+    SortDirection,
+    StackMode,
     StringTransformMethod,
     TimeComponent,
     TimeDirection,
     TimeseriesOperationType,
     WithColumnsExprType,
+    YAxisPosition,
 )
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -47,85 +70,6 @@ class CastMapType(DataForgeStrEnum):
     UTF8 = "Utf8"
     DATE = "Date"
     DATETIME = "Datetime"
-
-
-class JoinHow(DataForgeStrEnum):
-    INNER = "inner"
-    LEFT = "left"
-    RIGHT = "right"
-    OUTER = "outer"
-    CROSS = "cross"
-
-
-class OverlayChartType(DataForgeStrEnum):
-    LINE = "line"
-    AREA = "area"
-    BAR = "bar"
-    SCATTER = "scatter"
-
-
-class YAxisPosition(DataForgeStrEnum):
-    LEFT = "left"
-    RIGHT = "right"
-
-
-class ReferenceAxis(DataForgeStrEnum):
-    X = "x"
-    Y = "y"
-
-
-class SortDirection(DataForgeStrEnum):
-    ASC = "asc"
-    DESC = "desc"
-
-
-class StackMode(DataForgeStrEnum):
-    GROUPED = "grouped"
-    STACKED = "stacked"
-    STACKED_100 = "100%"
-
-
-class AxisScale(DataForgeStrEnum):
-    LINEAR = "linear"
-    LOG = "log"
-
-
-class LegendPosition(DataForgeStrEnum):
-    TOP = "top"
-    BOTTOM = "bottom"
-    LEFT = "left"
-    RIGHT = "right"
-    NONE = "none"
-
-
-class ChartHeight(DataForgeStrEnum):
-    SMALL = "small"
-    MEDIUM = "medium"
-    LARGE = "large"
-    XLARGE = "xlarge"
-
-
-class ChartWidth(DataForgeStrEnum):
-    NORMAL = "normal"
-    WIDE = "wide"
-    FULL = "full"
-
-
-class NotificationMethod(DataForgeStrEnum):
-    EMAIL = "email"
-    TELEGRAM = "telegram"
-
-
-class RecipientSource(DataForgeStrEnum):
-    MANUAL = "manual"
-    COLUMN = "column"
-
-
-class AIProvider(DataForgeStrEnum):
-    OLLAMA = "ollama"
-    OPENAI = "openai"
-    OPENROUTER = "openrouter"
-    HUGGINGFACE = "huggingface"
 
 
 StepCatalogEntry: TypeAlias = dict[str, str | type[BaseModel]]
@@ -190,7 +134,7 @@ class AggregationSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     column: str = Field(description="Column to aggregate")
-    function: str = Field(description="Aggregation function")
+    function: GroupByAggregationFunction = Field(description="Aggregation function")
     alias: str = Field(description="Output column name")
 
 
@@ -299,14 +243,14 @@ class DeduplicateConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     subset: list[str] | None = Field(None, description="Columns to check for duplicates")
-    keep: str = Field("first", description="Which duplicate to keep: first, last, none")
+    keep: DeduplicateKeep = Field(DeduplicateKeep.FIRST, description="Which duplicate to keep: first, last, none")
 
 
 class FillNullConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    strategy: str = Field(
-        "literal",
+    strategy: FillNullStrategy = Field(
+        FillNullStrategy.LITERAL,
         description="Fill strategy: literal, forward, backward, mean, min, max",
     )
     columns: list[str] | None = None
@@ -357,8 +301,8 @@ class PivotConfig(BaseModel):
     index: list[str] = Field(default_factory=list, description="Row identifier columns")
     columns: str = Field("", description="Column to pivot on")
     values: str | None = Field(None, description="Values to aggregate")
-    aggregate_function: str = Field(
-        "first",
+    aggregate_function: PivotAggregateFunction = Field(
+        PivotAggregateFunction.FIRST,
         description="Aggregation function for pivoted values",
     )
 
@@ -437,7 +381,7 @@ class OverlaySchema(BaseModel):
 
     chart_type: OverlayChartType = OverlayChartType.LINE
     y_column: str = ""
-    aggregation: str = "sum"
+    aggregation: ChartAggregation = ChartAggregation.SUM
     y_axis_position: YAxisPosition = YAxisPosition.LEFT
 
 
@@ -457,19 +401,19 @@ class ChartConfig(BaseModel):
     x_column: str = Field("", description="X-axis column")
     y_column: str = Field("", description="Y-axis column")
     bins: int = 10
-    aggregation: str = "sum"
+    aggregation: ChartAggregation = ChartAggregation.SUM
     group_column: str | None = None
-    group_sort_by: str | None = None
+    group_sort_by: GroupSortBy | None = None
     group_sort_order: SortDirection = SortDirection.ASC
     group_sort_column: str | None = None
     stack_mode: StackMode = StackMode.GROUPED
     area_opacity: float = 0.35
-    date_bucket: str | None = None
-    date_ordinal: str | None = None
+    date_bucket: DateBucket | None = None
+    date_ordinal: DateOrdinal | None = None
     pan_zoom_enabled: bool = False
     selection_enabled: bool = False
     area_selection_enabled: bool = False
-    sort_by: str | None = None
+    sort_by: SortBy | None = None
     sort_order: SortDirection = SortDirection.ASC
     sort_column: str | None = None
     x_axis_label: str | None = ""
@@ -477,7 +421,7 @@ class ChartConfig(BaseModel):
     y_axis_scale: AxisScale = AxisScale.LINEAR
     y_axis_min: float | None = None
     y_axis_max: float | None = None
-    display_units: str = ""
+    display_units: DisplayUnits = DisplayUnits.NONE
     decimal_places: int = 2
     legend_position: LegendPosition = LegendPosition.RIGHT
     title: str | None = ""
@@ -638,7 +582,9 @@ STEP_CATALOG: dict[str, StepCatalogEntry] = {
         "config": SampleConfig,
     },
     "groupby": {
-        "description": ("Group rows by columns and compute aggregations. Supported functions: sum, mean, min, max, count, first, last, std, median, n_unique."),
+        "description": (
+            "Group rows by columns and compute aggregations. Supported functions: sum, mean, count, min, max, first, last, median, std, n_unique, collect_list, collect_set."
+        ),
         "category": "aggregate",
         "config": GroupByConfig,
     },

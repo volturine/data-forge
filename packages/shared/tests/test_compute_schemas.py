@@ -5,11 +5,13 @@ import pytest
 from pydantic import ValidationError
 
 from contracts.compute.schemas import (
+    ActiveBuildStatus,
     BuildCancelledEvent,
     BuildCompleteEvent,
     BuildEventAdapter,
     BuildEventType,
     BuildFailedEvent,
+    BuildStepState,
     BuildTabResult,
     BuildTabStatus,
     ComputeRunStatus,
@@ -49,6 +51,17 @@ def test_build_event_type_enum_values_are_explicit() -> None:
     assert BuildEventType.COMPLETE.value == 'complete'
     assert BuildEventType.FAILED.value == 'failed'
     assert BuildEventType.CANCELLED.value == 'cancelled'
+
+
+def test_build_event_type_owns_live_build_mappings() -> None:
+    assert BuildEventType.STEP_START.step_state == BuildStepState.RUNNING
+    assert BuildEventType.STEP_COMPLETE.step_state == BuildStepState.COMPLETED
+    assert BuildEventType.STEP_FAILED.step_state == BuildStepState.FAILED
+    assert BuildEventType.COMPLETE.terminal_build_status == ActiveBuildStatus.COMPLETED
+    assert BuildEventType.CANCELLED.terminal_build_status == ActiveBuildStatus.CANCELLED
+    assert BuildEventType.CANCELLED.terminal_error_message == 'Build cancelled'
+    assert ActiveBuildStatus.RUNNING.is_terminal is False
+    assert ActiveBuildStatus.FAILED.is_terminal is True
 
 
 def test_build_event_union_validates_terminal_events() -> None:

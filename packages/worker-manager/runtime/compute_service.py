@@ -22,7 +22,7 @@ from contracts.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunSta
 from contracts.datasource.models import DataSource, DataSourceCreatedBy
 from contracts.datasource.source_types import DataSourceType
 from contracts.engine_runs.models import EngineRun
-from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from contracts.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
 from contracts.healthcheck_models import HealthCheck, HealthCheckResult
 from contracts.udf_models import Udf
 from core import (
@@ -396,8 +396,8 @@ def _preflight_datasource_for_compute(
     operation: str,
     datasource_id: str,
 ) -> None:
-    source_type = str(config.get("source_type") or "")
-    if source_type != DataSourceType.ICEBERG and source_type != str(DataSourceType.ICEBERG):
+    source_type = DataSourceType.read(config.get("source_type"), default=None)
+    if source_type != DataSourceType.ICEBERG:
         return
 
     metadata_path = config.get("metadata_path")
@@ -772,12 +772,8 @@ def _step_type_from_execution_entry(entry: dict[str, object]) -> str:
         step_type = metadata.get("step_type")
         if isinstance(step_type, str) and step_type:
             return step_type
-    category = entry.get("category")
-    if category == "read":
-        return "read"
-    if category == "write":
-        return "write"
-    return "unknown"
+    category = EngineRunExecutionCategory.read(entry.get("category"), default=None)
+    return category.default_step_type if category is not None else "unknown"
 
 
 def _build_step_snapshots_from_execution_entries(
@@ -786,7 +782,7 @@ def _build_step_snapshots_from_execution_entries(
     tab_id: str | None,
     tab_name: str | None,
 ) -> list[dict[str, object]]:
-    steps = [entry for entry in execution_entries if entry.get("category") != "plan"]
+    steps = [entry for entry in execution_entries if EngineRunExecutionCategory.read(entry.get("category"), default=None) != EngineRunExecutionCategory.PLAN]
 
     def sort_order(entry: dict[str, object]) -> int:
         order = entry.get("order")
@@ -806,7 +802,7 @@ def _build_step_snapshots_from_execution_entries(
                 "step_type": _step_type_from_execution_entry(entry),
                 "tab_id": tab_id,
                 "tab_name": tab_name,
-                "state": "completed",
+                "state": compute_schemas.BuildStepState.COMPLETED.value,
                 "duration_ms": entry.get("duration_ms") if isinstance(entry.get("duration_ms"), (int, float)) else None,
                 "row_count": None,
                 "error": None,
@@ -1150,7 +1146,7 @@ def _get_additional_datasources(
             )
             if config_override is None:
                 continue
-            if analysis_id and config_override.get("source_type") == "analysis":
+            if analysis_id and DataSourceType.read(config_override.get("source_type"), default=None) == DataSourceType.ANALYSIS:
                 config_override = {
                     **config_override,
                     "analysis_pipeline": analysis_pipeline,
@@ -1357,7 +1353,11 @@ def _resolve_pipeline_request(
     merged = _resolve_pipeline_datasource_config(session, pipeline, datasource)
     analysis_id = pipeline.get("analysis_id")
     analysis_id = str(analysis_id) if analysis_id is not None else None
-    if analysis_id and merged.get("source_type") == "analysis" and str(merged.get("analysis_id")) == analysis_id:
+    if (
+        analysis_id
+        and DataSourceType.read(merged.get("source_type"), default=None) == DataSourceType.ANALYSIS
+        and str(merged.get("analysis_id")) == analysis_id
+    ):
         merged = {**merged, "analysis_pipeline": pipeline}
 
     resolved_target = resolve_applied_target(steps, target_step_id)
@@ -3558,7 +3558,7 @@ def list_iceberg_snapshots(session: Session, datasource_id: str, branch: str | N
 
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
-    if datasource.source_type != "iceberg":
+    if not datasource.is_iceberg:
         raise ValueError("Snapshots are only available for Iceberg datasources")
 
     metadata_path = datasource.config.get("metadata_path")
@@ -3620,7 +3620,7 @@ def delete_iceberg_snapshot(session: Session, datasource_id: str, snapshot_id: s
 
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
-    if datasource.source_type != "iceberg":
+    if not datasource.is_iceberg:
         raise ValueError("Snapshots are only available for Iceberg datasources")
 
     try:

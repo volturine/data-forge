@@ -15,14 +15,21 @@ class TestAIRoutes:
             assert data[0]["name"] == "llama2"
 
     def test_list_models_invalid_provider(self, client):
-        with patch(
-            "modules.ai.routes.get_ai_client",
-            side_effect=ValueError("Unknown provider"),
-        ):
-            response = client.post("/api/v1/ai/models", json={"provider": "bad"})
-            assert response.status_code == 400
-            data = response.json()
-            assert "Unknown provider" in data["detail"]
+        response = client.post("/api/v1/ai/models", json={"provider": "bad"})
+        assert response.status_code == 400
+        data = response.json()
+        assert "Unknown AI provider" in data["detail"]
+
+    def test_list_providers_returns_ordered_statuses(self, client):
+        response = client.post("/api/v1/ai/providers", json={})
+        assert response.status_code == 200
+        data = response.json()
+        assert [entry["provider"] for entry in data] == [
+            "openrouter",
+            "openai",
+            "ollama",
+            "huggingface",
+        ]
 
     def test_test_connection_success(self, client):
         with patch("modules.ai.routes.get_ai_client") as mock_get:

@@ -7,7 +7,14 @@
 	import { listAnalyses } from '$lib/api/analysis';
 	import { listEngineRuns, type EngineRun, type ListEngineRunsParams } from '$lib/api/engine-runs';
 	import type { ActiveBuildDetail, ActiveBuildSummary } from '$lib/types/build-stream';
-	import { readEngineRunKind } from '$lib/types/build-stream';
+	import {
+		activeBuildStatusLabel,
+		canCancelActiveBuildStatus,
+		engineRunKindLabel,
+		engineRunStatusFilterValue,
+		engineRunStatusToActiveBuildStatus,
+		readEngineRunKind
+	} from '$lib/types/build-stream';
 	import { engineRunBuildDetail } from '$lib/utils/engine-run-build-detail';
 	import { BuildsStore } from '$lib/stores/builds.svelte';
 	import { page as pageState } from '$app/state';
@@ -136,7 +143,7 @@
 		analysis_id: queryParams.analysis_id,
 		datasource_id: queryParams.datasource_id,
 		kind: kindFilter && kindFilter !== 'build' ? kindFilter : undefined,
-		status: engineRunStatusFilter(statusFilter),
+		status: engineRunStatusFilterValue(statusFilter),
 		limit,
 		offset: (page - 1) * limit
 	});
@@ -268,11 +275,6 @@
 		});
 	}
 
-	function engineRunStatus(run: EngineRun): ActiveBuildSummary['status'] {
-		if (run.status === 'success') return 'completed';
-		return run.status;
-	}
-
 	function engineRunSummary(run: EngineRun): ActiveBuildSummary {
 		const kind = readEngineRunKind(run.kind);
 		return {
@@ -280,7 +282,7 @@
 			analysis_id: run.analysis_id ?? run.id,
 			analysis_name: run.analysis_id ?? run.id,
 			namespace: '',
-			status: engineRunStatus(run),
+			status: engineRunStatusToActiveBuildStatus(run.status),
 			started_at: run.created_at,
 			starter: { user_id: null, display_name: null, email: null, triggered_by: run.triggered_by },
 			resource_config: null,
@@ -302,14 +304,6 @@
 			cancelled_by: null,
 			result_json: null
 		};
-	}
-
-	function engineRunStatusFilter(
-		status: 'all' | 'running' | 'completed' | 'failed' | 'cancelled'
-	): ListEngineRunsParams['status'] {
-		if (status === 'all') return undefined;
-		if (status === 'completed') return 'success';
-		return status;
 	}
 
 	function toggleSort(col: string) {
@@ -350,14 +344,6 @@
 
 	function effectiveKind(run: ActiveBuildSummary): string {
 		return run.current_kind ?? '';
-	}
-
-	function getKindLabel(kind: string): string {
-		if (kind === 'build') return 'Build';
-		if (kind === 'preview') return 'Preview';
-		if (kind === 'download') return 'Download';
-		if (kind === 'row_count') return 'Row Count';
-		return kind;
 	}
 
 	function buildDatasourceId(run: ActiveBuildSummary): string {
@@ -410,15 +396,6 @@
 		return run.status;
 	}
 
-	function runStatusLabel(run: ActiveBuildSummary): string {
-		const status = currentStatus(run);
-		if (status === 'queued') return 'Queued';
-		if (status === 'running') return 'Running';
-		if (status === 'completed') return 'Success';
-		if (status === 'cancelled') return 'Cancelled';
-		return 'Failed';
-	}
-
 	function cancelledAt(run: ActiveBuildSummary): string | null {
 		return pendingCancelled.get(run.build_id)?.cancelled_at ?? run.cancelled_at ?? null;
 	}
@@ -437,7 +414,7 @@
 	}
 
 	function canCancelRun(run: ActiveBuildSummary): boolean {
-		return currentStatus(run) === 'queued' || currentStatus(run) === 'running';
+		return canCancelActiveBuildStatus(currentStatus(run));
 	}
 
 	function requestCancelRun(run: ActiveBuildSummary): void {
@@ -471,7 +448,7 @@
 				pendingCancelled.delete(buildId);
 				continue;
 			}
-			if (run.status !== 'queued' && run.status !== 'running') {
+			if (!canCancelActiveBuildStatus(run.status)) {
 				pendingCancelled.delete(buildId);
 			}
 		}
@@ -585,7 +562,7 @@
 		if (expandedId !== buildId || !detail) return;
 		replaceRun(detail);
 		setDetailPayload(detail);
-		if (detail.status === 'queued' || detail.status === 'running') {
+		if (canCancelActiveBuildStatus(detail.status)) {
 			store.watch(detail.build_id);
 			store.applySnapshot(detail);
 			expandedLiveId = detail.build_id;
@@ -1055,16 +1032,16 @@
 								>
 									{#if effectiveKind(run) === 'build'}
 										<Database size={14} class={css({ color: 'accent.primary' })} />
-										<span>{getKindLabel(effectiveKind(run))}</span>
+										<span>{engineRunKindLabel(effectiveKind(run))}</span>
 									{:else if effectiveKind(run) === 'download'}
 										<Download size={14} class={css({ color: 'fg.success' })} />
-										<span>{getKindLabel(effectiveKind(run))}</span>
+										<span>{engineRunKindLabel(effectiveKind(run))}</span>
 									{:else if effectiveKind(run) === 'row_count'}
 										<Hash size={14} class={css({ color: 'fg.muted' })} />
-										<span>{getKindLabel(effectiveKind(run))}</span>
+										<span>{engineRunKindLabel(effectiveKind(run))}</span>
 									{:else}
 										<Database size={14} class={css({ color: 'fg.muted' })} />
-										<span>{getKindLabel(effectiveKind(run))}</span>
+										<span>{engineRunKindLabel(effectiveKind(run))}</span>
 									{/if}
 									{#if run.starter.triggered_by === 'schedule'}
 										<span
@@ -1124,7 +1101,9 @@
 													animation: 'spin 1s linear infinite'
 												})}
 											/>
-											<span class={css({ color: 'fg.secondary' })}>{runStatusLabel(run)}</span>
+											<span class={css({ color: 'fg.secondary' })}
+												>{activeBuildStatusLabel(currentStatus(run))}</span
+											>
 										{:else if currentStatus(run) === 'running'}
 											<Loader
 												size={14}
@@ -1133,16 +1112,24 @@
 													animation: 'spin 1s linear infinite'
 												})}
 											/>
-											<span class={css({ color: 'accent.primary' })}>{runStatusLabel(run)}</span>
+											<span class={css({ color: 'accent.primary' })}
+												>{activeBuildStatusLabel(currentStatus(run))}</span
+											>
 										{:else if currentStatus(run) === 'completed'}
 											<CircleCheck size={14} class={css({ color: 'fg.success' })} />
-											<span class={css({ color: 'fg.success' })}>{runStatusLabel(run)}</span>
+											<span class={css({ color: 'fg.success' })}
+												>{activeBuildStatusLabel(currentStatus(run))}</span
+											>
 										{:else if currentStatus(run) === 'cancelled'}
 											<CircleX size={14} class={css({ color: 'fg.warning' })} />
-											<span class={css({ color: 'fg.warning' })}>{runStatusLabel(run)}</span>
+											<span class={css({ color: 'fg.warning' })}
+												>{activeBuildStatusLabel(currentStatus(run))}</span
+											>
 										{:else}
 											<CircleX size={14} class={css({ color: 'fg.error' })} />
-											<span class={css({ color: 'fg.error' })}>{runStatusLabel(run)}</span>
+											<span class={css({ color: 'fg.error' })}
+												>{activeBuildStatusLabel(currentStatus(run))}</span
+											>
 										{/if}
 									</span>
 									{#if canCancelRun(run)}
@@ -1310,7 +1297,7 @@
 										<div class={css({ width: '100%', overflowX: 'hidden' })}>
 											<BuildPreview
 												store={expandedStore}
-												title={getKindLabel(run.current_kind ?? '')}
+												title={engineRunKindLabel(run.current_kind ?? '')}
 												requestJson={expandedPayload?.requestJson ?? null}
 												resultJson={expandedPayload?.resultJson ?? null}
 											/>

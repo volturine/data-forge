@@ -1,6 +1,6 @@
 import polars as pl
 from contracts.compute.base import OperationHandler, OperationParams
-from contracts.enums import DataForgeStrEnum
+from contracts.step_config_enums import JoinHow
 from pydantic import BaseModel, ConfigDict
 
 
@@ -10,16 +10,6 @@ class JoinColumn(BaseModel):
     id: str | None = None
     left_column: str
     right_column: str
-
-
-class JoinHow(DataForgeStrEnum):
-    INNER = "inner"
-    LEFT = "left"
-    RIGHT = "right"
-    FULL = "full"
-    SEMI = "semi"
-    ANTI = "anti"
-    CROSS = "cross"
 
 
 class JoinParams(OperationParams):
@@ -33,30 +23,6 @@ class JoinParams(OperationParams):
 
 
 class JoinHandler(OperationHandler):
-    @staticmethod
-    def _join_with_how(
-        lf: pl.LazyFrame,
-        right_lf: pl.LazyFrame,
-        left_on: list[str],
-        right_on: list[str],
-        *,
-        how: JoinHow,
-        suffix: str,
-    ) -> pl.LazyFrame:
-        if how == JoinHow.INNER:
-            return lf.join(right_lf, left_on=left_on, right_on=right_on, how="inner", suffix=suffix)
-        if how == JoinHow.LEFT:
-            return lf.join(right_lf, left_on=left_on, right_on=right_on, how="left", suffix=suffix)
-        if how == JoinHow.RIGHT:
-            return lf.join(right_lf, left_on=left_on, right_on=right_on, how="right", suffix=suffix)
-        if how == JoinHow.FULL:
-            return lf.join(right_lf, left_on=left_on, right_on=right_on, how="full", suffix=suffix)
-        if how == JoinHow.SEMI:
-            return lf.join(right_lf, left_on=left_on, right_on=right_on, how="semi", suffix=suffix)
-        if how == JoinHow.ANTI:
-            return lf.join(right_lf, left_on=left_on, right_on=right_on, how="anti", suffix=suffix)
-        raise ValueError(f"Unsupported join type: {how}")
-
     def __call__(
         self,
         lf: pl.LazyFrame,
@@ -71,8 +37,8 @@ class JoinHandler(OperationHandler):
         if right_lf is None:
             raise ValueError("Join requires a right datasource")
 
-        if validated.how == JoinHow.CROSS:
-            return lf.join(right_lf, how="cross")
+        if not validated.how.requires_join_keys:
+            return lf.join(right_lf, how=validated.how.polars_how)
 
         join_columns = validated.join_columns or []
         left_on = validated.left_on or []
@@ -84,12 +50,11 @@ class JoinHandler(OperationHandler):
         if not left_on or not right_on:
             raise ValueError("Join requires at least one join column pair")
 
-        joined = self._join_with_how(
-            lf,
+        joined = lf.join(
             right_lf,
-            left_on,
-            right_on,
-            how=validated.how,
+            left_on=left_on,
+            right_on=right_on,
+            how=validated.how.polars_how,
             suffix=validated.suffix,
         )
 

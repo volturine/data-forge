@@ -2,14 +2,7 @@
 
 import polars as pl
 from contracts.compute.base import OperationHandler, OperationParams
-from contracts.enums import DataForgeStrEnum
-
-
-class DeduplicateKeep(DataForgeStrEnum):
-    FIRST = "first"
-    LAST = "last"
-    ANY = "any"
-    NONE = "none"
+from contracts.step_config_enums import DeduplicateKeep
 
 
 class DeduplicateParams(OperationParams):
@@ -25,10 +18,4 @@ class DeduplicateHandler(OperationHandler):
         **_,
     ) -> pl.LazyFrame:
         validated = DeduplicateParams.model_validate(params)
-        if validated.keep == DeduplicateKeep.FIRST:
-            return lf.unique(subset=validated.subset, keep="first", maintain_order=True)
-        if validated.keep == DeduplicateKeep.LAST:
-            return lf.unique(subset=validated.subset, keep="last", maintain_order=True)
-        if validated.keep == DeduplicateKeep.ANY:
-            return lf.unique(subset=validated.subset, keep="any", maintain_order=True)
-        return lf.unique(subset=validated.subset, keep="none", maintain_order=True)
+        return lf.unique(subset=validated.subset, keep=validated.keep.polars_keep, maintain_order=True)

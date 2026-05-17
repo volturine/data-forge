@@ -10,6 +10,8 @@ from urllib.parse import quote
 import httpx
 from fastapi import FastAPI
 
+from modules.mcp.models import MCPHttpMethod
+
 
 def build_tool_context(
     headers: dict[str, str] | None = None,
@@ -42,13 +44,15 @@ def _interpolate_path(path: str, args: dict) -> tuple[str, dict]:
 
 async def call_tool(
     app: FastAPI,
-    method: str,
+    method: str | MCPHttpMethod,
     path: str,
     args: dict,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute a tool call by invoking the app's route in-process."""
     url, remaining = _interpolate_path(path, {k: v for k, v in args.items() if k != "payload"})
+
+    method_name = method.value if isinstance(method, MCPHttpMethod) else method
 
     transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -63,18 +67,18 @@ async def call_tool(
 
         query_params = {k: v for k, v in remaining.items() if k != "payload"}
 
-        if method in ("POST", "PUT", "PATCH"):
+        if method_name in ("POST", "PUT", "PATCH"):
             resp = await client.request(
-                method,
+                method_name,
                 url,
                 content=json.dumps(payload) if payload is not None else b"",
                 headers=headers,
                 params=query_params,
             )
-        elif method == "DELETE":
-            resp = await client.request(method, url, params=query_params, headers=headers)
+        elif method_name == "DELETE":
+            resp = await client.request(method_name, url, params=query_params, headers=headers)
         else:
-            resp = await client.request(method, url, params=query_params, headers=headers)
+            resp = await client.request(method_name, url, params=query_params, headers=headers)
 
     status = resp.status_code
     body: Any = None

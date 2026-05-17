@@ -9,6 +9,7 @@ from sqlmodel import Session
 
 from contracts.analysis.step_types import get_step_timing_key
 from contracts.compute import schemas as compute_schemas
+from contracts.compute.schemas import BuildLogLevel, BuildStepState
 from contracts.engine_runs.models import EngineRun
 from contracts.engine_runs.schemas import (
     BuildComparisonResponse,
@@ -27,8 +28,6 @@ from core.engine_runs_utils import normalize_step_timings
 from core.exceptions import EngineRunComparisonError, EngineRunNotFoundError
 
 logger = logging.getLogger(__name__)
-
-_TERMINAL_STATUSES = frozenset({EngineRunStatus.SUCCESS, EngineRunStatus.FAILED, EngineRunStatus.CANCELLED})
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,7 +141,9 @@ def _latest_completed_step_name(result_json: dict[str, Any]) -> str | None:
     raw_steps = result_json.get('steps')
     if not isinstance(raw_steps, list):
         return None
-    completed_steps = [step for step in raw_steps if isinstance(step, dict) and step.get('state') == 'completed']
+    completed_steps = [
+        step for step in raw_steps if isinstance(step, dict) and BuildStepState.read(step.get('state'), default=None) == BuildStepState.COMPLETED
+    ]
     if not completed_steps:
         return None
 
@@ -161,7 +162,7 @@ def cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str | None
     if run is None:
         raise ValueError('Engine run not found')
     session.refresh(run)
-    if EngineRunStatus.require(run.status) != EngineRunStatus.RUNNING:
+    if run.status_kind() != EngineRunStatus.RUNNING:
         raise ValueError('Only running builds can be cancelled')
 
     now = datetime.now(UTC)
@@ -177,7 +178,17 @@ def cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str | None
         existing['last_completed_step'] = last_completed_step
     existing_logs = existing.get('logs')
     logs = [entry for entry in existing_logs if isinstance(entry, dict)] if isinstance(existing_logs, list) else []
-    logs.append({'timestamp': now.isoformat(), 'level': 'warning', 'message': reason, 'step_name': None, 'step_id': None, 'tab_id': None, 'tab_name': None})
+    logs.append(
+        {
+            'timestamp': now.isoformat(),
+            'level': BuildLogLevel.WARNING.value,
+            'message': reason,
+            'step_name': None,
+            'step_id': None,
+            'tab_id': None,
+            'tab_name': None,
+        }
+    )
     existing['logs'] = logs
 
     created_at = run.created_at if run.created_at.tzinfo is not None else run.created_at.replace(tzinfo=UTC)
@@ -284,8 +295,8 @@ def update_engine_run(
         run.kind = EngineRunKind.require(kind).value if isinstance(kind, (EngineRunKind, str)) else run.kind
     if not isinstance(status, _UnsetType):
         new_status = EngineRunStatus.require(status) if isinstance(status, (EngineRunStatus, str)) else None
-        current_status = EngineRunStatus.require(run.status)
-        if new_status is not None and current_status in _TERMINAL_STATUSES and new_status != current_status:
+        current_status = run.status_kind()
+        if new_status is not None and current_status.blocks_transition_to(new_status):
             logger.warning(f'Ignoring status transition from {current_status} to {new_status} for run {run_id}')
         elif new_status is not None:
             run.status = new_status.value

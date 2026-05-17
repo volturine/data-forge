@@ -1,9 +1,12 @@
 import json
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
 import httpx
 
+from contracts.step_config_enums import AIProvider
 from core import http as http_client
 from core.config import settings
 
@@ -235,46 +238,115 @@ class HuggingFaceClient(AIClient):
             return {'ok': False, 'detail': str(exc)}
 
 
-def get_ai_client(provider: str, *, endpoint_url: str | None = None, api_key: str | None = None, organization_id: str | None = None) -> AIClient:
-    normalized = provider.strip().lower()
+class AIClientBuilder(Protocol):
+    def __call__(
+        self,
+        *,
+        endpoint_url: str | None,
+        api_key: str | None,
+        organization_id: str | None,
+    ) -> AIClient: ...
 
-    if normalized == 'ollama':
-        from core.settings_projection import get_resolved_ollama_settings
 
-        resolved = get_resolved_ollama_settings()
-        return OllamaClient(endpoint_url or resolved['endpoint_url'] or settings.ollama_base_url)
+@dataclass(frozen=True, slots=True)
+class AIClientProviderDefinition:
+    provider: AIProvider
+    aliases: tuple[str, ...]
+    build: AIClientBuilder
 
-    if normalized == 'openai':
-        from core.settings_projection import get_resolved_openai_settings
+    @classmethod
+    def require(cls, provider: str | AIProvider) -> 'AIClientProviderDefinition':
+        normalized = str(provider).strip().lower()
+        for definition in AI_CLIENT_PROVIDER_DEFINITIONS.values():
+            if normalized == definition.provider.value or normalized in definition.aliases:
+                return definition
+        raise ValueError(f'Unknown AI provider: {provider}')
 
-        resolved = get_resolved_openai_settings()
-        resolved_key = api_key if api_key is not None else resolved['api_key'] or settings.openai_api_key
-        if not resolved_key:
-            raise ValueError('OPENAI_API_KEY not configured')
-        return OpenAIClient(
-            api_key=resolved_key,
-            base_url=endpoint_url or resolved['endpoint_url'] or settings.openai_base_url,
-            organization_id=organization_id if organization_id is not None else resolved['organization_id'],
-        )
 
-    if normalized == 'openrouter':
-        from core.settings_projection import get_resolved_openrouter_key
+def build_ollama_client(*, endpoint_url: str | None, api_key: str | None, organization_id: str | None) -> AIClient:
+    del api_key, organization_id
+    from core.settings_projection import get_resolved_ollama_settings
 
-        resolved_key = api_key if api_key is not None else get_resolved_openrouter_key() or settings.openrouter_api_key
-        if not resolved_key:
-            raise ValueError('OPENROUTER_API_KEY not configured')
-        return OpenRouterClient(resolved_key)
+    resolved = get_resolved_ollama_settings()
+    return OllamaClient(endpoint_url or resolved['endpoint_url'] or settings.ollama_base_url)
 
-    if normalized in {'huggingface', 'huggingface-api'}:
-        from core.settings_projection import get_resolved_huggingface_settings
 
-        resolved = get_resolved_huggingface_settings()
-        return HuggingFaceClient(
-            api_token=api_key if api_key is not None else resolved['api_token'] or settings.huggingface_api_token,
-            base_url=endpoint_url or settings.huggingface_api_base_url,
-        )
+def build_openai_client(*, endpoint_url: str | None, api_key: str | None, organization_id: str | None) -> AIClient:
+    from core.settings_projection import get_resolved_openai_settings
 
-    raise ValueError(f'Unknown AI provider: {provider}')
+    resolved = get_resolved_openai_settings()
+    resolved_key = api_key if api_key is not None else resolved['api_key'] or settings.openai_api_key
+    if not resolved_key:
+        raise ValueError('OPENAI_API_KEY not configured')
+    return OpenAIClient(
+        api_key=resolved_key,
+        base_url=endpoint_url or resolved['endpoint_url'] or settings.openai_base_url,
+        organization_id=organization_id if organization_id is not None else resolved['organization_id'],
+    )
+
+
+def build_openrouter_client(*, endpoint_url: str | None, api_key: str | None, organization_id: str | None) -> AIClient:
+    del endpoint_url, organization_id
+    from core.settings_projection import get_resolved_openrouter_key
+
+    resolved_key = api_key if api_key is not None else get_resolved_openrouter_key() or settings.openrouter_api_key
+    if not resolved_key:
+        raise ValueError('OPENROUTER_API_KEY not configured')
+    return OpenRouterClient(resolved_key)
+
+
+def build_huggingface_client(*, endpoint_url: str | None, api_key: str | None, organization_id: str | None) -> AIClient:
+    del organization_id
+    from core.settings_projection import get_resolved_huggingface_settings
+
+    resolved = get_resolved_huggingface_settings()
+    return HuggingFaceClient(
+        api_token=api_key if api_key is not None else resolved['api_token'] or settings.huggingface_api_token,
+        base_url=endpoint_url or settings.huggingface_api_base_url,
+    )
+
+
+AI_CLIENT_PROVIDER_DEFINITIONS: dict[AIProvider, AIClientProviderDefinition] = {
+    AIProvider.OLLAMA: AIClientProviderDefinition(
+        provider=AIProvider.OLLAMA,
+        aliases=(),
+        build=build_ollama_client,
+    ),
+    AIProvider.OPENAI: AIClientProviderDefinition(
+        provider=AIProvider.OPENAI,
+        aliases=(),
+        build=build_openai_client,
+    ),
+    AIProvider.OPENROUTER: AIClientProviderDefinition(
+        provider=AIProvider.OPENROUTER,
+        aliases=(),
+        build=build_openrouter_client,
+    ),
+    AIProvider.HUGGINGFACE: AIClientProviderDefinition(
+        provider=AIProvider.HUGGINGFACE,
+        aliases=('huggingface-api',),
+        build=build_huggingface_client,
+    ),
+}
+
+
+def resolve_ai_provider(provider: str | AIProvider) -> AIProvider:
+    return AIClientProviderDefinition.require(provider).provider
+
+
+def get_ai_client(
+    provider: str | AIProvider,
+    *,
+    endpoint_url: str | None = None,
+    api_key: str | None = None,
+    organization_id: str | None = None,
+) -> AIClient:
+    definition = AIClientProviderDefinition.require(provider)
+    return definition.build(
+        endpoint_url=endpoint_url,
+        api_key=api_key,
+        organization_id=organization_id,
+    )
 
 
 def parse_request_options(raw: str | dict | None) -> dict | None:

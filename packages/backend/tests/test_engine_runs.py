@@ -224,6 +224,33 @@ def test_update_engine_run_replaces_result_json_when_merge_disabled(test_db_sess
     assert "logs" not in updated.result_json
 
 
+def test_update_engine_run_ignores_terminal_status_transition(test_db_session):
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id="analysis-terminal",
+            datasource_id="ds-terminal",
+            kind=EngineRunKind.PREVIEW,
+            status=EngineRunStatus.SUCCESS,
+            request_json={"kind": "preview"},
+            result_json={"row_count": 1},
+            created_at=datetime.now(UTC),
+        ),
+    )
+
+    updated = engine_run_service.update_engine_run(
+        test_db_session,
+        created.id,
+        status=EngineRunStatus.FAILED,
+        error_message="should be ignored",
+    )
+
+    assert updated.status == EngineRunStatus.SUCCESS
+    stored = test_db_session.get(EngineRun, created.id)
+    assert stored is not None
+    assert stored.status == EngineRunStatus.SUCCESS
+
+
 def test_list_engine_runs_http_returns_filtered_runs(client, test_db_session) -> None:
     analysis_id = str(uuid.uuid4())
     engine_run_service.create_engine_run(

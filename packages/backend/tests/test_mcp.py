@@ -10,9 +10,39 @@ from modules.mcp.decorators import (
     deterministic_tool,
     get_mcp_tool_meta,
 )
-from modules.mcp.models import MCPToolSafety
+from modules.mcp.models import MCPHttpMethod, MCPToolDefinition, MCPToolSafety
 from modules.mcp.registry import _build_tool, _openapi_to_json_schema
 from modules.mcp.router import MCP_ROUTE_META, MCPRouter, get_mcp_route_meta
+
+
+class TestMCPToolDefinition:
+    def test_tool_definition_owns_validation_and_response_payloads(self) -> None:
+        tool = MCPToolDefinition(
+            id="create_item",
+            method=MCPHttpMethod.POST,
+            path="/api/v1/items",
+            description="Create item",
+            confirm_required=True,
+            input_schema={
+                "type": "object",
+                "properties": {"payload": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+                "required": ["payload"],
+                "additionalProperties": False,
+            },
+            arg_metadata={"path": [], "query": [], "payload": {"required": True, "content_type": "application/json", "description": ""}},
+            output_schema={"status_code": "200", "content_type": "application/json", "schema": {"type": "object"}, "fields": []},
+        )
+
+        valid, errors, normalized = tool.validate_arguments({})
+
+        assert valid is False
+        assert errors
+        assert tool.safety == MCPToolSafety.MUTATING
+        assert tool.pending_response("token-1", {"payload": {"name": "demo"}})["confirm_required"] is True
+        assert tool.executed_response({"status": 200}) == {"status": "executed", "result": {"status": 200}}
+        assert tool.validation_error_response(errors, {})["status"] == "validation_error"
+        assert tool.capability_report()["supported"] is True
+        assert normalized == {}
 
 
 class TestMCPToolListing:
@@ -1396,7 +1426,7 @@ class TestStartupEnforcement:
         build_calls: list[int] = []
         original_build = routes_mod.build_tool_registry
 
-        def counting_build(a: FastAPI) -> list[dict]:
+        def counting_build(a: FastAPI) -> list[MCPToolDefinition]:
             build_calls.append(1)
             return original_build(a)
 

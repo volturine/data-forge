@@ -7,10 +7,9 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
-from modules.mcp.models import MCPHttpMethod
+from modules.mcp.models import MCPHttpMethod, MCPToolDefinition
 from modules.mcp.router import get_mcp_route_meta
 from modules.mcp.tool_output import format_output_hint, top_level_output_fields
-from modules.mcp.validation import check_schema_supported
 
 
 def _route_openapi_operation(route: APIRoute, schema: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
@@ -29,7 +28,7 @@ def _route_openapi_operation(route: APIRoute, schema: dict[str, Any]) -> tuple[s
     return None
 
 
-def _description(op: dict[str, Any], meta: dict[str, Any], method: str, path: str) -> str:
+def _description(op: dict[str, Any], meta: dict[str, Any], method: MCPHttpMethod, path: str) -> str:
     text = op.get("description") or op.get("summary") or meta.get("docstring")
     if isinstance(text, str) and text.strip():
         return text
@@ -119,7 +118,7 @@ def _output_schema(op: dict[str, Any], meta: dict[str, Any], components: dict) -
     return None
 
 
-def _build_tool(route_data: dict, components: dict) -> dict:
+def _build_tool(route_data: dict, components: dict) -> MCPToolDefinition:
     method = MCPHttpMethod.from_route_method(route_data["method"])
     if method is None:
         raise ValueError(f"Unsupported MCP route method: {route_data['method']!r}")
@@ -193,15 +192,14 @@ def _build_tool(route_data: dict, components: dict) -> dict:
         tags = _tag_list(route, op)
     output_schema = _output_schema(op, onboard, components)
 
-    return {
-        "id": tool_id,
-        "method": method.value,
-        "path": path,
-        "description": description,
-        "safety": method.safety.value,
-        "confirm_required": _confirm_required(method, path, onboard),
-        "input_schema": tool_schema,
-        "arg_metadata": {
+    return MCPToolDefinition(
+        id=tool_id,
+        method=method,
+        path=path,
+        description=description,
+        confirm_required=_confirm_required(method, path, onboard),
+        input_schema=tool_schema,
+        arg_metadata={
             "path": path_params,
             "query": query_params,
             "payload": {
@@ -212,9 +210,9 @@ def _build_tool(route_data: dict, components: dict) -> dict:
             if body_schema is not None
             else None,
         },
-        "output_schema": output_schema,
-        "tags": tags,
-    }
+        output_schema=output_schema,
+        tags=tags,
+    )
 
 
 def _marked_routes(app: FastAPI) -> list[dict[str, Any]]:
@@ -243,12 +241,12 @@ def _marked_routes(app: FastAPI) -> list[dict[str, Any]]:
     return marked
 
 
-def build_tool_registry(app: FastAPI) -> list[dict]:
+def build_tool_registry(app: FastAPI) -> list[MCPToolDefinition]:
     """Extract MCPRouter mcp=True onboarded routes as MCP tool definitions."""
     marked = _marked_routes(app)
     schema = app.openapi()
     components = schema.get("components", {})
-    tools: list[dict[str, Any]] = []
+    tools: list[MCPToolDefinition] = []
     for item in marked:
         route = item["route"]
         op_item = _route_openapi_operation(route, schema)
@@ -266,8 +264,8 @@ def build_tool_registry(app: FastAPI) -> list[dict]:
             },
             components,
         )
-        issues = check_schema_supported(tool["input_schema"])
+        issues = tool.schema_support_issues()
         if issues:
-            raise ValueError(f"Tool {tool['id']!r} has unsupported schema: {', '.join(issues)}")
+            raise ValueError(f"Tool {tool.id!r} has unsupported schema: {', '.join(issues)}")
         tools.append(tool)
     return tools

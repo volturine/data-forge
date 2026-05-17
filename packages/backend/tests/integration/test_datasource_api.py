@@ -97,6 +97,20 @@ class TestDataSourceUpload:
         assert result["source_type"] == "iceberg"
         assert result["config"]["branch"] == "master"
 
+    def test_upload_jsonl_file_success(self, client, temp_upload_dir: Path, sample_ndjson_file: Path):
+        with open(sample_ndjson_file, "rb") as f:
+            files = {"file": ("test.jsonl", f, "application/json")}
+            data = {"name": "Test JSONL Upload"}
+
+            response = client.post("/api/v1/datasource/upload", files=files, data=data)
+
+        assert response.status_code == 200
+        result = response.json()
+
+        assert result["name"] == "Test JSONL Upload"
+        assert result["source_type"] == "iceberg"
+        assert result["config"]["branch"] == "master"
+
     def test_upload_without_filename(self, client, temp_upload_dir: Path):
         files = {"file": ("", b"content", "text/csv")}
         data = {"name": "Test Upload"}
@@ -242,6 +256,30 @@ class TestDataSourceConnect:
         response = client.post("/api/v1/datasource/connect", json=payload)
 
         assert response.status_code == 422
+
+    def test_connect_file_datasource_rejects_upload_only_creation(self, client):
+        payload = {
+            "name": "File Connect",
+            "source_type": "file",
+            "config": {"file_path": "/tmp/test.csv", "file_type": "csv"},
+        }
+
+        response = client.post("/api/v1/datasource/connect", json=payload)
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "File datasource creation must use upload"
+
+    def test_connect_analysis_datasource_rejects_direct_creation(self, client):
+        payload = {
+            "name": "Analysis Connect",
+            "source_type": "analysis",
+            "config": {},
+        }
+
+        response = client.post("/api/v1/datasource/connect", json=payload)
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Direct creation of analysis datasources is no longer supported. Use analysis tabs with analysis_tab_id."
 
     def test_connect_iceberg_rejects_direct_metadata_path(self, client):
         payload = {

@@ -1,6 +1,10 @@
 import uuid
+from datetime import UTC, datetime
 
 from contracts.datasource.models import DataSource
+from contracts.datasource.source_types import DataSourceFileType, DataSourceType
+
+from modules.export.generators import _scan_expression
 
 
 def _create_analysis_with_join(client, left_ds_id: str, right_ds_id: str) -> str:
@@ -148,6 +152,31 @@ def test_export_code_sql_tab_scope_uses_tab_filename(client, sample_datasources:
     assert "JOIN" in payload["code"]
     assert "GROUP BY" in payload["code"]
     assert "ORDER BY" in payload["code"]
+
+
+def test_scan_expression_supports_owned_json_and_excel_file_types() -> None:
+    json_datasource = DataSource(
+        id="ds-json",
+        name="JSON Source",
+        source_type=DataSourceType.FILE.value,
+        config={"file_type": DataSourceFileType.JSON.value},
+        created_at=datetime.now(UTC),
+    )
+    excel_datasource = DataSource(
+        id="ds-excel",
+        name="Excel Source",
+        source_type=DataSourceType.FILE.value,
+        config={"file_type": DataSourceFileType.EXCEL.value},
+        created_at=datetime.now(UTC),
+    )
+
+    json_expr, json_warning = _scan_expression(json_datasource, "DATA_PATH")
+    excel_expr, excel_warning = _scan_expression(excel_datasource, "DATA_PATH")
+
+    assert json_expr == "pl.read_json(DATA_PATH).lazy()"
+    assert json_warning is None
+    assert excel_expr == "pl.read_excel(DATA_PATH).lazy()"
+    assert excel_warning is None
 
 
 def test_export_code_warns_for_untranslatable_step(client, sample_datasource: DataSource) -> None:

@@ -11,20 +11,13 @@ import time
 
 import polars as pl
 from contracts.compute.base import OperationHandler, OperationParams
-from contracts.enums import DataForgeStrEnum
+from contracts.step_config_enums import AIProvider
 from core.ai_clients import AIError, get_ai_client, parse_request_options
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from operations.template_placeholders import render_template_placeholders
 
 logger = logging.getLogger(__name__)
-
-
-class AIProvider(DataForgeStrEnum):
-    OLLAMA = "ollama"
-    OPENAI = "openai"
-    OPENROUTER = "openrouter"
-    HUGGINGFACE = "huggingface"
 
 
 class AIParams(OperationParams):

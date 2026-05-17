@@ -12,14 +12,6 @@ router = APIRouter(prefix="/logs", tags=["logs"])
 async def ingest_client_logs(batch: ClientLogBatch, request: Request):
     client_id = request.headers.get("x-client-id")
     session_id = request.headers.get("x-client-session")
-    items = [
-        log.model_copy(
-            update={
-                "client_id": log.client_id or client_id,
-                "session_id": log.session_id or session_id,
-            }
-        )
-        for log in batch.logs
-    ]
+    items = [log.with_request_context(client_id=client_id, session_id=session_id) for log in batch.logs]
     total = save_client_logs(items)
     return {"accepted": total}

@@ -15,7 +15,7 @@ def list_iceberg_snapshots(session: Session, datasource_id: str, branch: str | N
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
         raise DataSourceNotFoundError(datasource_id)
-    if datasource.source_type != "iceberg":
+    if not datasource.is_iceberg:
         raise ValueError("Snapshots are only available for Iceberg datasources")
 
     metadata_path = datasource.config.get("metadata_path")
@@ -67,7 +67,7 @@ def delete_iceberg_snapshot(session: Session, datasource_id: str, snapshot_id: s
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
         raise DataSourceNotFoundError(datasource_id)
-    if datasource.source_type != "iceberg":
+    if not datasource.is_iceberg:
         raise ValueError("Snapshots are only available for Iceberg datasources")
 
     try:

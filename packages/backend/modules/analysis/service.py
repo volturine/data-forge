@@ -1,7 +1,9 @@
 import json
 import re
 import uuid
+from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,6 +16,7 @@ from contracts.analysis.pipeline_types import (
     TabOutput,
 )
 from contracts.datasource.models import DataSource
+from contracts.step_config_enums import AIProvider
 from core.ai_clients import AIError, get_ai_client
 from core.analysis_cycles import assert_no_analysis_cycle
 from core.exceptions import (
@@ -318,73 +321,171 @@ def _collect_missing_import_datasources(session: Session, pipeline: dict[str, An
     return sorted(missing)
 
 
+@dataclass(frozen=True, slots=True)
+class GenerationProviderResolution:
+    provider: AIProvider
+    model: str
+    client_kwargs: dict[str, str]
+
+    def as_tuple(self) -> tuple[str, str, dict[str, str]]:
+        return self.provider.value, self.model, self.client_kwargs
+
+
+GenerationProviderResolver = Callable[[], GenerationProviderResolution | None]
+GenerationProviderRequiredResolver = Callable[[], GenerationProviderResolution]
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisGenerationProviderDefinition:
+    provider: AIProvider
+    resolve_requested: GenerationProviderRequiredResolver
+    resolve_default: GenerationProviderResolver
+
+    @classmethod
+    def require(cls, provider: str | AIProvider) -> "AnalysisGenerationProviderDefinition":
+        try:
+            normalized = AIProvider.require(provider)
+        except ValueError as exc:
+            raise ValueError(f"Unknown AI provider: {provider}") from exc
+        return ANALYSIS_GENERATION_PROVIDER_DEFINITIONS[normalized]
+
+
+def resolve_requested_openrouter_generation_provider() -> GenerationProviderResolution:
+    api_key = get_resolved_openrouter_key()
+    if not api_key:
+        raise ValueError("OpenRouter is not configured")
+    return GenerationProviderResolution(
+        provider=AIProvider.OPENROUTER,
+        model="",
+        client_kwargs={"api_key": api_key},
+    )
+
+
+def resolve_default_openrouter_generation_provider() -> GenerationProviderResolution | None:
+    api_key = get_resolved_openrouter_key()
+    if not api_key:
+        return None
+    return GenerationProviderResolution(
+        provider=AIProvider.OPENROUTER,
+        model="",
+        client_kwargs={"api_key": api_key},
+    )
+
+
+def resolve_requested_openai_generation_provider() -> GenerationProviderResolution:
+    resolved = get_resolved_openai_settings()
+    if not resolved["api_key"]:
+        raise ValueError("OpenAI is not configured")
+    return GenerationProviderResolution(
+        provider=AIProvider.OPENAI,
+        model=str(resolved["default_model"]),
+        client_kwargs={
+            "api_key": str(resolved["api_key"]),
+            "endpoint_url": str(resolved["endpoint_url"]),
+            "organization_id": str(resolved["organization_id"]),
+        },
+    )
+
+
+def resolve_default_openai_generation_provider() -> GenerationProviderResolution | None:
+    resolved = get_resolved_openai_settings()
+    if not resolved["api_key"]:
+        return None
+    return GenerationProviderResolution(
+        provider=AIProvider.OPENAI,
+        model=str(resolved["default_model"]),
+        client_kwargs={
+            "api_key": str(resolved["api_key"]),
+            "endpoint_url": str(resolved["endpoint_url"]),
+            "organization_id": str(resolved["organization_id"]),
+        },
+    )
+
+
+def resolve_requested_ollama_generation_provider() -> GenerationProviderResolution:
+    resolved = get_resolved_ollama_settings()
+    return GenerationProviderResolution(
+        provider=AIProvider.OLLAMA,
+        model=str(resolved["default_model"]),
+        client_kwargs={"endpoint_url": str(resolved["endpoint_url"])},
+    )
+
+
+def resolve_default_ollama_generation_provider() -> GenerationProviderResolution | None:
+    resolved = get_resolved_ollama_settings()
+    if not resolved["endpoint_url"]:
+        return None
+    return GenerationProviderResolution(
+        provider=AIProvider.OLLAMA,
+        model=str(resolved["default_model"]),
+        client_kwargs={"endpoint_url": str(resolved["endpoint_url"])},
+    )
+
+
+def resolve_requested_huggingface_generation_provider() -> GenerationProviderResolution:
+    resolved = get_resolved_huggingface_settings()
+    if not resolved["api_token"]:
+        raise ValueError("Hugging Face is not configured")
+    return GenerationProviderResolution(
+        provider=AIProvider.HUGGINGFACE,
+        model=str(resolved["default_model"]),
+        client_kwargs={"api_key": str(resolved["api_token"])},
+    )
+
+
+def resolve_default_huggingface_generation_provider() -> GenerationProviderResolution | None:
+    resolved = get_resolved_huggingface_settings()
+    if not resolved["api_token"]:
+        return None
+    return GenerationProviderResolution(
+        provider=AIProvider.HUGGINGFACE,
+        model=str(resolved["default_model"]),
+        client_kwargs={"api_key": str(resolved["api_token"])},
+    )
+
+
+ANALYSIS_GENERATION_PROVIDER_DEFINITIONS: dict[AIProvider, AnalysisGenerationProviderDefinition] = {
+    AIProvider.OPENROUTER: AnalysisGenerationProviderDefinition(
+        provider=AIProvider.OPENROUTER,
+        resolve_requested=resolve_requested_openrouter_generation_provider,
+        resolve_default=resolve_default_openrouter_generation_provider,
+    ),
+    AIProvider.OPENAI: AnalysisGenerationProviderDefinition(
+        provider=AIProvider.OPENAI,
+        resolve_requested=resolve_requested_openai_generation_provider,
+        resolve_default=resolve_default_openai_generation_provider,
+    ),
+    AIProvider.OLLAMA: AnalysisGenerationProviderDefinition(
+        provider=AIProvider.OLLAMA,
+        resolve_requested=resolve_requested_ollama_generation_provider,
+        resolve_default=resolve_default_ollama_generation_provider,
+    ),
+    AIProvider.HUGGINGFACE: AnalysisGenerationProviderDefinition(
+        provider=AIProvider.HUGGINGFACE,
+        resolve_requested=resolve_requested_huggingface_generation_provider,
+        resolve_default=resolve_default_huggingface_generation_provider,
+    ),
+}
+
+ANALYSIS_GENERATION_PROVIDER_PRIORITY: tuple[AIProvider, ...] = (
+    AIProvider.OPENROUTER,
+    AIProvider.OPENAI,
+    AIProvider.OLLAMA,
+    AIProvider.HUGGINGFACE,
+)
+
+
 def _resolved_generation_provider(
     provider: str | None = None,
 ) -> tuple[str, str, dict[str, str]]:
-    requested = provider.strip().lower() if provider else ""
-    if requested == "openrouter":
-        api_key = get_resolved_openrouter_key()
-        if not api_key:
-            raise ValueError("OpenRouter is not configured")
-        return "openrouter", "", {"api_key": api_key}
-    if requested == "openai":
-        resolved = get_resolved_openai_settings()
-        if not resolved["api_key"]:
-            raise ValueError("OpenAI is not configured")
-        return (
-            "openai",
-            str(resolved["default_model"]),
-            {
-                "api_key": str(resolved["api_key"]),
-                "endpoint_url": str(resolved["endpoint_url"]),
-                "organization_id": str(resolved["organization_id"]),
-            },
-        )
-    if requested == "ollama":
-        resolved = get_resolved_ollama_settings()
-        return (
-            "ollama",
-            str(resolved["default_model"]),
-            {"endpoint_url": str(resolved["endpoint_url"])},
-        )
-    if requested == "huggingface":
-        resolved = get_resolved_huggingface_settings()
-        if not resolved["api_token"]:
-            raise ValueError("Hugging Face is not configured")
-        return (
-            "huggingface",
-            str(resolved["default_model"]),
-            {"api_key": str(resolved["api_token"])},
-        )
+    if provider:
+        definition = AnalysisGenerationProviderDefinition.require(provider.strip().lower())
+        return definition.resolve_requested().as_tuple()
 
-    openrouter_key = get_resolved_openrouter_key()
-    if openrouter_key:
-        return "openrouter", "", {"api_key": openrouter_key}
-    openai = get_resolved_openai_settings()
-    if openai["api_key"]:
-        return (
-            "openai",
-            str(openai["default_model"]),
-            {
-                "api_key": str(openai["api_key"]),
-                "endpoint_url": str(openai["endpoint_url"]),
-                "organization_id": str(openai["organization_id"]),
-            },
-        )
-    ollama = get_resolved_ollama_settings()
-    if ollama["endpoint_url"]:
-        return (
-            "ollama",
-            str(ollama["default_model"]),
-            {"endpoint_url": str(ollama["endpoint_url"])},
-        )
-    huggingface = get_resolved_huggingface_settings()
-    if huggingface["api_token"]:
-        return (
-            "huggingface",
-            str(huggingface["default_model"]),
-            {"api_key": str(huggingface["api_token"])},
-        )
+    for candidate in ANALYSIS_GENERATION_PROVIDER_PRIORITY:
+        resolution = ANALYSIS_GENERATION_PROVIDER_DEFINITIONS[candidate].resolve_default()
+        if resolution is not None:
+            return resolution.as_tuple()
     raise ValueError("No AI provider is configured")
 
 

@@ -12,6 +12,12 @@
 	import { BuildsStore } from '$lib/stores/builds.svelte';
 	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
 	import type { ActiveBuildSummary } from '$lib/types/build-stream';
+	import {
+		activeBuildStatusLabel,
+		activeBuildStatusTone,
+		engineRunStatusToActiveBuildStatus,
+		readActiveBuildStatus
+	} from '$lib/types/build-stream';
 	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
 	import {
 		Save,
@@ -33,8 +39,19 @@
 		FileDataSource,
 		IcebergDataSource,
 		SchemaInfo,
-		ColumnSchema,
-		FileDataSourceConfig
+		ColumnSchema
+	} from '$lib/types/datasource';
+	import {
+		datasourceFileConfig,
+		datasourceIsAnalysisOutput,
+		datasourceIsCsv,
+		datasourceIsDatabase,
+		datasourceIsExcel,
+		datasourceIsFile,
+		datasourceIsIceberg,
+		datasourceIsSchedulableRaw,
+		datasourceNeedsExternalRefresh,
+		datasourceSupportsSchemaRefresh
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
@@ -342,37 +359,28 @@
 		}
 	}
 
-	function getFileSource(ds: DataSource): FileDataSourceConfig | null {
-		if (ds.source_type === 'file') {
-			return ds.config;
-		}
-		if (ds.source_type === 'iceberg') {
-			const source = ds.config.source as Record<string, unknown> | undefined;
-			if (source?.source_type === 'file') {
-				return source as FileDataSourceConfig;
-			}
-		}
-		return null;
+	function getFileSource(ds: DataSource) {
+		return datasourceFileConfig(ds);
 	}
 
 	function isCsv(ds: DataSource): boolean {
-		return getFileSource(ds)?.file_type === 'csv';
+		return datasourceIsCsv(ds);
 	}
 
 	function isExcel(ds: DataSource): boolean {
-		return getFileSource(ds)?.file_type === 'excel';
+		return datasourceIsExcel(ds);
 	}
 
-	function isFile(ds: DataSource): boolean {
-		return ds.source_type === 'file';
+	function isFile(ds: DataSource): ds is FileDataSource {
+		return datasourceIsFile(ds);
 	}
 
 	function isDatabase(ds: DataSource): ds is DatabaseDataSource {
-		return ds.source_type === 'database';
+		return datasourceIsDatabase(ds);
 	}
 
-	function isIceberg(ds: DataSource): boolean {
-		return ds.source_type === 'iceberg';
+	function isIceberg(ds: DataSource): ds is IcebergDataSource {
+		return datasourceIsIceberg(ds);
 	}
 
 	function handleNameChange(newName: string) {
@@ -450,7 +458,7 @@
 					skip_rows: csvConfig.skip_rows,
 					encoding: csvConfig.encoding
 				};
-				if (datasourceQuery.data.source_type === 'iceberg') {
+				if (isIceberg(datasourceQuery.data)) {
 					const existingSource = (datasourceQuery.data.config as Record<string, unknown>)
 						?.source as Record<string, unknown> | undefined;
 					update.config = stripProtectedKeys({
@@ -475,7 +483,7 @@
 					end_row: excelConfig.end_row,
 					has_header: excelConfig.has_header
 				};
-				if (datasourceQuery.data.source_type === 'iceberg') {
+				if (isIceberg(datasourceQuery.data)) {
 					const existingSource = (datasourceQuery.data.config as Record<string, unknown>)
 						?.source as Record<string, unknown> | undefined;
 					update.config = stripProtectedKeys({
@@ -497,22 +505,16 @@
 		hasChanges = false;
 		configDirty = false;
 
-		if (update.config && ds.source_type === 'iceberg') {
-			const source = (ds.config as Record<string, unknown>)?.source as
-				| Record<string, unknown>
-				| undefined;
-			const sourceType = source?.source_type as string | undefined;
-			if (sourceType === 'database' || sourceType === 'file') {
-				const refreshResult = await refreshDatasource(ds.id);
-				if (refreshResult.isErr()) {
-					refreshError = refreshResult.error.message || 'Failed to re-ingest datasource';
-					return;
-				}
-				queryClient.invalidateQueries({ queryKey: ['datasource', ds.id] });
-				queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] });
-				queryClient.invalidateQueries({ queryKey: ['datasource-preview', ds.id] });
-				queryClient.invalidateQueries({ queryKey: ['datasources'] });
+		if (update.config && datasourceNeedsExternalRefresh(ds)) {
+			const refreshResult = await refreshDatasource(ds.id);
+			if (refreshResult.isErr()) {
+				refreshError = refreshResult.error.message || 'Failed to re-ingest datasource';
+				return;
 			}
+			queryClient.invalidateQueries({ queryKey: ['datasource', ds.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ds.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasources'] });
 		}
 	}
 
@@ -521,17 +523,13 @@
 		isRefreshing = true;
 		const previousColumns = new Map(columns.map((col) => [col.name, col.dtype]));
 
-		if (datasource.source_type === 'analysis') {
+		if (!datasourceSupportsSchemaRefresh(datasource)) {
 			refreshError = 'Schema refresh is unavailable for analysis datasources';
 			isRefreshing = false;
 			return;
 		}
 		try {
-			const config = datasource.config as Record<string, unknown> | null;
-			const source = config?.source as Record<string, unknown> | undefined;
-			const reingested =
-				datasource.source_type === 'iceberg' &&
-				(source?.source_type === 'database' || source?.source_type === 'file');
+			const reingested = datasourceNeedsExternalRefresh(datasource);
 			if (reingested) {
 				const refreshResult = await refreshDatasource(datasource.id);
 				if (refreshResult.isErr()) {
@@ -589,7 +587,7 @@
 	type DatasourceRunRow = {
 		id: string;
 		kind: string;
-		status: string;
+		status: EngineRun['status'] | ActiveBuildSummary['status'];
 		durationMs: number | null;
 		createdAt: string;
 		builtTag: boolean;
@@ -623,22 +621,13 @@
 		);
 		return rows.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 	});
-	const isOutputDatasource = $derived(ds.created_by === 'analysis');
+	const isOutputDatasource = $derived(datasourceIsAnalysisOutput(ds));
 	const scheduleAnalysisId = $derived(
 		isOutputDatasource
 			? (ds.created_by_analysis_id ?? (ds.config?.analysis_id as string | undefined) ?? null)
 			: null
 	);
-	const rawSchedulable = $derived.by(() => {
-		if (ds.source_type !== 'iceberg') return false;
-		if (ds.created_by === 'analysis') return false;
-		const source = (ds.config as Record<string, unknown>)?.source as
-			| Record<string, unknown>
-			| undefined;
-		if (!source) return false;
-		const st = source.source_type;
-		return st === 'file' || st === 'database';
-	});
+	const rawSchedulable = $derived(datasourceIsSchedulableRaw(ds));
 
 	function formatDuration(ms: number | null): string {
 		if (ms === null) return '-';
@@ -646,18 +635,20 @@
 		return `${(ms / 1000).toFixed(2)}s`;
 	}
 
-	function runStatusLabel(status: string): string {
-		if (status === 'completed' || status === 'success') return 'Success';
-		if (status === 'running') return 'Running';
-		if (status === 'queued') return 'Queued';
-		if (status === 'cancelled') return 'Cancelled';
-		return 'Failed';
+	function runStatusLabel(status: DatasourceRunRow['status']): string {
+		const activeStatus = readActiveBuildStatus(status);
+		if (activeStatus !== null) return activeBuildStatusLabel(activeStatus);
+		return activeBuildStatusLabel(
+			engineRunStatusToActiveBuildStatus(status as EngineRun['status'])
+		);
 	}
 
-	function runStatusTone(status: string): 'success' | 'active' | 'error' {
-		if (status === 'completed' || status === 'success') return 'success';
-		if (status === 'running' || status === 'queued') return 'active';
-		return 'error';
+	function runStatusTone(
+		status: DatasourceRunRow['status']
+	): 'success' | 'active' | 'warning' | 'error' {
+		const activeStatus = readActiveBuildStatus(status);
+		if (activeStatus !== null) return activeBuildStatusTone(activeStatus);
+		return activeBuildStatusTone(engineRunStatusToActiveBuildStatus(status as EngineRun['status']));
 	}
 </script>
 
@@ -931,7 +922,7 @@
 									color: 'fg.muted'
 								})}>Source</span
 							>
-							{#if ds.created_by === 'analysis'}
+							{#if isOutputDatasource}
 								<span
 									class={css({
 										display: 'inline-flex',
@@ -1797,6 +1788,9 @@
 										<span class={css({ color: 'accent.primary' })}
 											>{runStatusLabel(run.status)}</span
 										>
+									{:else if runStatusTone(run.status) === 'warning'}
+										<CircleX size={14} class={css({ color: 'fg.warning' })} />
+										<span class={css({ color: 'fg.warning' })}>{runStatusLabel(run.status)}</span>
 									{:else}
 										<CircleX size={14} class={css({ color: 'fg.error' })} />
 										<span class={css({ color: 'fg.error' })}>{runStatusLabel(run.status)}</span>

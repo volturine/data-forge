@@ -29,7 +29,9 @@ export default defineConfig({
 	globalSetup: './tests/global-setup.ts',
 	workers: DEFAULT_E2E_WORKERS,
 	retries: 1,
-	outputDir: path.join(artifactsRoot, 'playwright', `test-results${shardSuffix}`),
+	outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR
+		? path.resolve(process.env.PLAYWRIGHT_OUTPUT_DIR)
+		: path.join(artifactsRoot, 'playwright', `test-results${shardSuffix}`),
 	reporter,
 	use: {
 		baseURL,

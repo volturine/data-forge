@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
 from core import http as http_client
 
+from modules.mcp.models import MCPToolDefinition
 from modules.mcp.tool_output import format_output_hint
 
 logger = logging.getLogger(__name__)
@@ -29,7 +31,10 @@ def _headers(api_key: str) -> dict[str, str]:
     }
 
 
-def _mcp_tool_to_openai(tool: dict) -> dict:
+def _mcp_tool_to_openai(tool: MCPToolDefinition | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(tool, MCPToolDefinition):
+        return tool.openai_tool()
+
     desc = tool["description"]
     hint = format_output_hint(tool.get("output_schema"))
     if hint:
@@ -48,7 +53,7 @@ async def chat_with_tools(
     api_key: str,
     model: str,
     messages: list[dict[str, Any]],
-    tools: list[dict],
+    tools: Sequence[MCPToolDefinition | dict[str, Any]],
 ) -> dict[str, Any]:
     """Send a chat completion request with tool definitions."""
     logger.debug(

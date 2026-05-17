@@ -9,7 +9,15 @@ import type {
 	BuildStepSnapshot,
 	BuildTabResult
 } from '$lib/types/build-stream';
-import { readEngineRunKind } from '$lib/types/build-stream';
+import {
+	buildStepStateFromEngineRunStatus,
+	buildStepTypeFromExecutionEntry,
+	countEngineRunSteps,
+	engineRunStatusToActiveBuildStatus,
+	isPlanExecutionEntry,
+	readBuildTabStatus,
+	readEngineRunKind
+} from '$lib/types/build-stream';
 
 function readArray<T>(value: unknown): T[] {
 	return Array.isArray(value) ? (value as T[]) : [];
@@ -72,9 +80,8 @@ function readBuildResults(
 	return results.flatMap((item): BuildTabResult[] => {
 		const tabId = readString(item.tab_id);
 		const tabName = readString(item.tab_name);
-		const status = readString(item.status);
-		if (tabId === null || tabName === null) return [];
-		if (status !== 'success' && status !== 'failed') return [];
+		const status = readBuildTabStatus(item.status);
+		if (tabId === null || tabName === null || status === null) return [];
 		return [
 			{
 				tab_id: tabId,
@@ -89,9 +96,7 @@ function readBuildResults(
 }
 
 export function engineRunStatus(run: EngineRun): 'running' | 'completed' | 'failed' | 'cancelled' {
-	if (run.status === 'running') return 'running';
-	if (run.status === 'cancelled') return 'cancelled';
-	return run.status === 'success' ? 'completed' : 'failed';
+	return engineRunStatusToActiveBuildStatus(run.status);
 }
 
 export function engineRunOutputName(run: EngineRun): string | null {
@@ -128,10 +133,7 @@ export function engineRunCurrentStepIndex(run: EngineRun): number | null {
 
 export function engineRunTotalSteps(run: EngineRun): number {
 	const result = readObject(run.result_json);
-	return (
-		readNumber(result?.total_steps) ??
-		run.execution_entries.filter((entry) => entry.category !== 'plan').length
-	);
+	return readNumber(result?.total_steps) ?? countEngineRunSteps(run.execution_entries);
 }
 
 export function engineRunTotalTabs(run: EngineRun): number {
@@ -148,19 +150,23 @@ function stepsFromExecutionEntries(
 	entries: EngineRunExecutionEntry[],
 	tabId: string | null,
 	tabName: string | null,
-	runStatus: string
+	runStatus: EngineRun['status']
 ): BuildStepSnapshot[] {
-	const nonPlan = entries.filter((e) => e.category !== 'plan').sort((a, b) => a.order - b.order);
-	return nonPlan.map(
+	const steps = entries
+		.filter((entry) => !isPlanExecutionEntry(entry))
+		.sort((a, b) => a.order - b.order);
+	return steps.map(
 		(entry, index): BuildStepSnapshot => ({
 			build_step_index: index,
 			step_index: index,
 			step_id: entry.key,
 			step_name: entry.label,
-			step_type: entry.category,
+			step_type: buildStepTypeFromExecutionEntry(entry),
 			tab_id: tabId,
 			tab_name: tabName,
-			state: runStatus === 'failed' && index === nonPlan.length - 1 ? 'failed' : 'completed',
+			state: buildStepStateFromEngineRunStatus(runStatus, {
+				isLastStep: index === steps.length - 1
+			}),
 			duration_ms: entry.duration_ms,
 			row_count: null,
 			error: null
@@ -174,7 +180,7 @@ function queryPlansFromExecutionEntries(
 	tabName: string | null
 ): BuildQueryPlanSnapshot[] {
 	return entries
-		.filter((e) => e.category === 'plan')
+		.filter((entry) => isPlanExecutionEntry(entry))
 		.filter((e) => e.optimized_plan || e.unoptimized_plan)
 		.map(
 			(entry): BuildQueryPlanSnapshot => ({

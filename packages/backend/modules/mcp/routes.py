@@ -10,12 +10,15 @@ from backend_core.error_handlers import handle_errors
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.mcp.executor import build_tool_context, call_tool
-from modules.mcp.models import MCPHttpMethod
+from modules.mcp.models import MCPToolDefinition
 from modules.mcp.pending import pending_store
 from modules.mcp.registry import build_tool_registry
-from modules.mcp.validation import check_schema_supported, validate_args
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
+
+
+def _coerce_tool(item: MCPToolDefinition | dict[str, Any]) -> MCPToolDefinition:
+    return MCPToolDefinition.coerce(item)
 
 
 def _request_tool_context(request: Request) -> dict[str, dict[str, str]]:
@@ -27,20 +30,26 @@ def _request_tool_context(request: Request) -> dict[str, dict[str, str]]:
     )
 
 
-def get_registry(app: FastAPI) -> list[dict]:
+def get_registry(app: FastAPI) -> list[MCPToolDefinition]:
     """Return cached tool registry, building on first call."""
     if not hasattr(app.state, "mcp_registry"):
         app.state.mcp_registry = build_tool_registry(app)
-    return app.state.mcp_registry  # type: ignore[no-any-return]
+    registry = getattr(app.state, "mcp_registry")
+    if not isinstance(registry, list):
+        app.state.mcp_registry = []
+        return []
+    normalized = [_coerce_tool(item) for item in registry]
+    app.state.mcp_registry = normalized
+    return normalized
 
 
-def _resolve_tool(app: FastAPI, tool_id: str, args: dict) -> tuple[dict, bool, list[dict], dict]:
+def _resolve_tool(app: FastAPI, tool_id: str, args: dict) -> tuple[MCPToolDefinition, bool, list[dict], dict]:
     """Look up a tool and validate args. Raises 404 if tool not found."""
     registry = get_registry(app)
-    tool = next((t for t in registry if t["id"] == tool_id), None)
+    tool = next((t for t in registry if t.id == tool_id), None)
     if tool is None:
         raise HTTPException(status_code=404, detail=f"Tool {tool_id!r} not found")
-    valid, errors, normalized = validate_args(tool["input_schema"], args)
+    valid, errors, normalized = tool.validate_arguments(args)
     return tool, valid, errors, normalized
 
 
@@ -65,7 +74,7 @@ class CapabilitiesRequest(BaseModel):
 
 @router.get("/tools")
 @handle_errors("list MCP tools")
-def list_tools(request: Request, user: User = Depends(get_current_user)) -> list[dict]:
+def list_tools(request: Request, user: User = Depends(get_current_user)) -> list[MCPToolDefinition]:
     """List all available MCP tools derived from /api/v1 routes."""
     del user
     return get_registry(request.app)
@@ -89,40 +98,19 @@ async def call(request: Request, body: ToolRequest, user: User = Depends(get_cur
     del user
     tool, valid, errors, normalized = _resolve_tool(request.app, body.tool_id, body.args)
     if not valid:
-        return {
-            "status": "validation_error",
-            "valid": False,
-            "errors": errors,
-            "args": body.args,
-        }
+        return tool.validation_error_response(errors, body.args)
 
-    method = tool["method"]
-    path = tool["path"]
     context = _request_tool_context(request)
 
-    if MCPHttpMethod.require(method).is_mutating:
-        token = pending_store.create(body.tool_id, method, path, normalized, context)
-        return {
-            "status": "pending",
-            "token": token,
-            "tool_id": body.tool_id,
-            "method": method,
-            "path": path,
-            "args": normalized,
-            "confirm_required": tool.get("confirm_required", False),
-        }
+    if tool.method.is_mutating:
+        token = pending_store.create(tool.id, tool.method, tool.path, normalized, context)
+        return tool.pending_response(token, normalized)
 
     try:
-        result = await call_tool(request.app, method, path, normalized, context)
+        result = await call_tool(request.app, tool.method, tool.path, normalized, context)
     except ValueError as exc:
-        return {
-            "status": "validation_error",
-            "valid": False,
-            "errors": [{"path": "$", "message": str(exc), "validator": "path_params"}],
-            "tool_id": body.tool_id,
-            "args": normalized,
-        }
-    return {"status": "executed", "result": result}
+        return tool.path_param_error_response(str(exc), normalized)
+    return tool.executed_response(result)
 
 
 @router.post("/confirm")
@@ -134,17 +122,17 @@ async def confirm(request: Request, body: ConfirmRequest, user: User = Depends(g
     if entry is None:
         raise HTTPException(status_code=404, detail="Token not found or expired")
 
+    tool = next((item for item in get_registry(request.app) if item.id == entry.tool_id), None)
+    if tool is None:
+        raise HTTPException(status_code=404, detail=f"Tool {entry.tool_id!r} not found")
+
     try:
         result = await call_tool(request.app, entry.method, entry.path, entry.args, entry.context)
     except ValueError as exc:
-        return {
-            "status": "validation_error",
-            "valid": False,
-            "errors": [{"path": "$", "message": str(exc), "validator": "path_params"}],
-            "tool_id": entry.tool_id,
-            "args": entry.args,
-        }
-    return {"status": "executed", "result": result, "tool_id": entry.tool_id}
+        return tool.path_param_error_response(str(exc), entry.args)
+    response = tool.executed_response(result)
+    response["tool_id"] = entry.tool_id
+    return response
 
 
 @router.post("/capabilities")
@@ -154,11 +142,4 @@ def capabilities(request: Request, body: CapabilitiesRequest, user: User = Depen
     del user
     registry = get_registry(request.app)
     tools = registry if not body.tool_ids else [t for t in registry if t["id"] in body.tool_ids]
-    return [
-        {
-            "tool_id": tool["id"],
-            "supported": not (unsupported := check_schema_supported(tool["input_schema"])),
-            "issues": [{"path": p, "message": "unsupported schema"} for p in unsupported],
-        }
-        for tool in tools
-    ]
+    return [tool.capability_report() for tool in tools]

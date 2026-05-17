@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from contracts.datasource.models import DataSource, DataSourceColumnMetadata, DataSourceCreatedBy
-from contracts.datasource.source_types import DataSourceType
+from contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from core.exceptions import (
     DataSourceNotFoundError,
     DataSourceValidationError,
@@ -650,7 +650,7 @@ def update_datasource(
                 "cell_range",
             ]
         )
-        is_excel_file = next_config.get("file_type") == "excel"
+        is_excel_file = DataSourceFileType.read(next_config.get("file_type"), default=None) == DataSourceFileType.EXCEL
         if source_type == DataSourceType.FILE and is_excel_file and has_excel_bounds:
             file_path = next_config.get("file_path")
             if not file_path:

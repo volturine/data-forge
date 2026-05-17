@@ -15,6 +15,16 @@ class EngineInstanceStatus(DataForgeStrEnum):
     STOPPED = 'stopped'
     FAILED = 'failed'
 
+    @property
+    def is_active(self) -> bool:
+        return self in {EngineInstanceStatus.IDLE, EngineInstanceStatus.RUNNING, EngineInstanceStatus.STARTING, EngineInstanceStatus.STOPPING}
+
+    @property
+    def overview_status(self) -> str:
+        if self in {EngineInstanceStatus.IDLE, EngineInstanceStatus.RUNNING, EngineInstanceStatus.STARTING}:
+            return 'healthy'
+        return 'terminated'
+
     @classmethod
     def from_engine_status(cls, value: str, current_job_id: str | None) -> 'EngineInstanceStatus':
         engine_status = EngineStatus.require(value)

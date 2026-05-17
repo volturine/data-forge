@@ -96,7 +96,7 @@ def mark_namespace_engines_stopped(session: Session, *, worker_id: str, namespac
 
 
 def list_engine_instances(session: Session, *, namespace: str) -> list[EngineInstance]:
-    active = [EngineInstanceStatus.IDLE, EngineInstanceStatus.RUNNING, EngineInstanceStatus.STARTING, EngineInstanceStatus.STOPPING]
+    active = [status for status in EngineInstanceStatus if status.is_active]
     stmt = (
         select(EngineInstance)
         .where(EngineInstance.namespace == namespace)  # type: ignore[arg-type]
@@ -142,7 +142,7 @@ def latest_namespace_update(session: Session, *, namespace: str) -> datetime | N
 def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object]) -> dict[str, object]:
     return {
         'analysis_id': row.analysis_id,
-        'status': 'healthy' if row.status in {EngineInstanceStatus.IDLE, EngineInstanceStatus.RUNNING, EngineInstanceStatus.STARTING} else 'terminated',
+        'status': row.status.overview_status,
         'process_id': row.process_id,
         'last_activity': row.last_activity_at.isoformat() if row.last_activity_at is not None else None,
         'current_job_id': row.current_job_id,

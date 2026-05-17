@@ -392,6 +392,10 @@ class ActiveBuildStatus(DataForgeStrEnum):
     FAILED = 'failed'
     CANCELLED = 'cancelled'
 
+    @property
+    def is_terminal(self) -> bool:
+        return self in {ActiveBuildStatus.COMPLETED, ActiveBuildStatus.FAILED, ActiveBuildStatus.CANCELLED}
+
     @classmethod
     def coerce(cls, value: object) -> 'ActiveBuildStatus':
         return cls.read(value, default=cls.QUEUED) or cls.QUEUED
@@ -581,6 +585,36 @@ class BuildEventType(DataForgeStrEnum):
     @property
     def is_terminal(self) -> bool:
         return self in {BuildEventType.COMPLETE, BuildEventType.FAILED, BuildEventType.CANCELLED}
+
+    @property
+    def step_state(self) -> BuildStepState | None:
+        match self:
+            case BuildEventType.STEP_START:
+                return BuildStepState.RUNNING
+            case BuildEventType.STEP_COMPLETE:
+                return BuildStepState.COMPLETED
+            case BuildEventType.STEP_FAILED:
+                return BuildStepState.FAILED
+            case _:
+                return None
+
+    @property
+    def terminal_build_status(self) -> ActiveBuildStatus | None:
+        match self:
+            case BuildEventType.COMPLETE:
+                return ActiveBuildStatus.COMPLETED
+            case BuildEventType.FAILED:
+                return ActiveBuildStatus.FAILED
+            case BuildEventType.CANCELLED:
+                return ActiveBuildStatus.CANCELLED
+            case _:
+                return None
+
+    @property
+    def terminal_error_message(self) -> str | None:
+        if self == BuildEventType.CANCELLED:
+            return 'Build cancelled'
+        return None
 
     @property
     def throttle_seconds(self) -> float | None:

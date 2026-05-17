@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from contracts.datasource.source_types import DataSourceType
+from contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from contracts.enums import DataForgeStrEnum
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -180,7 +180,7 @@ class CSVOptions(BaseModel):
 
 class FileDataSourceConfig(BaseModel):
     file_path: str
-    file_type: str
+    file_type: DataSourceFileType
     options: dict = Field(default_factory=dict)
     csv_options: CSVOptions | None = None
     sheet_name: str | None = None

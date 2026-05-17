@@ -11,7 +11,8 @@ from core.namespace import namespace_paths
 
 from operations.fill_null import cast_value, get_fill_strategy, get_polars_type
 from operations.filter import FilterOperatorDefinition
-from operations.groupby import get_aggregation
+from operations.groupby import GroupByAggregationDefinition
+from operations.plot import ChartAggregationDefinition
 from operations.template_placeholders import render_template_placeholders
 from operations.timeseries import TimeseriesParams
 
@@ -27,15 +28,26 @@ def test_filter_operator_definition_invalid():
         FilterOperatorDefinition.require("nope")
 
 
-def test_get_aggregation():
-    agg = get_aggregation("sum")
-    expr = agg("value")
+def test_groupby_aggregation_definition():
+    definition = GroupByAggregationDefinition.require("sum")
+    expr = definition.apply("value")
     assert isinstance(expr, pl.Expr)
 
 
-def test_get_aggregation_invalid():
+def test_groupby_aggregation_definition_invalid():
     with pytest.raises(ValueError, match="Unsupported aggregation"):
-        get_aggregation("nope")
+        GroupByAggregationDefinition.require("nope")
+
+
+def test_chart_aggregation_definition():
+    definition = ChartAggregationDefinition.require("sum")
+    expr = definition.apply("value")
+    assert isinstance(expr, pl.Expr)
+
+
+def test_chart_aggregation_definition_invalid():
+    with pytest.raises(ValueError, match="Unsupported chart aggregation"):
+        ChartAggregationDefinition.require("nope")
 
 
 def test_timeseries_extractor_and_duration():

@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from core.logging import DatabaseLogWriter, RequestLoggingMiddleware, redact_logged_body
+from core.logging import DatabaseLogKind, DatabaseLogWriter, RequestLoggingMiddleware, redact_logged_body
 
 
 class TestLoggingRedaction:
@@ -24,6 +24,12 @@ class TestLoggingRedaction:
     def test_leaves_non_sensitive_paths_unchanged(self) -> None:
         body = '{"api_key":"sk-test","value":1}'
         assert redact_logged_body('/api/v1/config', body) == body
+
+
+def test_database_log_kind_marks_control_messages() -> None:
+    assert DatabaseLogKind.FLUSH.is_control is True
+    assert DatabaseLogKind.STOP.is_control is True
+    assert DatabaseLogKind.REQUEST.is_control is False
 
 
 class _InMemoryWriter:

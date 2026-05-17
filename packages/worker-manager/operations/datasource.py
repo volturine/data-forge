@@ -8,6 +8,7 @@ from threading import Lock
 
 import polars as pl
 from contracts.compute.base import OperationHandler, OperationParams
+from contracts.datasource.source_types import DataSourceType
 from contracts.enums import DataForgeStrEnum
 from core.iceberg_metadata import resolve_iceberg_branch_metadata_path
 from pydantic import ConfigDict
@@ -16,12 +17,8 @@ from datasources.datasource_loading import load_datasource_frame
 from operations.step_converter import convert_step_format
 
 
-class DatasourceSourceType(DataForgeStrEnum):
-    FILE = "file"
-    DATABASE = "database"
+class DatasourceLoadType(DataForgeStrEnum):
     DUCKDB = "duckdb"
-    ICEBERG = "iceberg"
-    ANALYSIS = "analysis"
 
 
 class IcebergReader(DataForgeStrEnum):
@@ -32,7 +29,7 @@ class IcebergReader(DataForgeStrEnum):
 class DatasourceParams(OperationParams):
     model_config = ConfigDict(extra="allow")
 
-    source_type: DatasourceSourceType = DatasourceSourceType.FILE
+    source_type: DataSourceType | DatasourceLoadType = DataSourceType.FILE
     analysis_tab_id: str | None = None
     analysis_pipeline: dict | None = None
     file_path: str | None = None
@@ -174,15 +171,15 @@ def _resolve_pipeline_datasource(pipeline: dict, datasource: dict) -> dict:
     analysis_tab_id = datasource.get("analysis_tab_id")
     if isinstance(analysis_tab_id, str) and analysis_tab_id:
         return {
-            "source_type": "analysis",
+            "source_type": DataSourceType.ANALYSIS.value,
             "analysis_id": str(pipeline.get("analysis_id") or ""),
             "analysis_tab_id": analysis_tab_id,
             **config,
         }
-    source_type = datasource.get("source_type")
-    if not isinstance(source_type, str) or not source_type.strip():
+    source_type = DataSourceType.read(datasource.get("source_type"), default=None)
+    if source_type is None:
         raise ValueError(f"Analysis pipeline missing datasource metadata for {datasource_id}")
-    return {"source_type": source_type, **config}
+    return {"source_type": source_type.value, **config}
 
 
 def _step_source_payload(step_config: dict, source_id: str) -> dict | None:
@@ -287,7 +284,11 @@ def _build_tab_pipeline(
         merged = _resolve_pipeline_datasource(pipeline, datasource)
         analysis_id = pipeline.get("analysis_id")
         analysis_id = str(analysis_id) if analysis_id is not None else None
-        if analysis_id and merged.get("source_type") == "analysis" and str(merged.get("analysis_id")) == analysis_id:
+        if (
+            analysis_id
+            and DataSourceType.read(merged.get("source_type"), default=None) == DataSourceType.ANALYSIS
+            and str(merged.get("analysis_id")) == analysis_id
+        ):
             merged = {**merged, "analysis_pipeline": pipeline}
 
         base_frame = load_datasource(merged)
@@ -384,7 +385,7 @@ def _collect_analysis_sources(
                 continue
             if str(source_id) in output_to_tab:
                 next_config = {
-                    "source_type": "analysis",
+                    "source_type": DataSourceType.ANALYSIS.value,
                     "analysis_id": str(pipeline.get("analysis_id") or ""),
                     "analysis_tab_id": output_to_tab[str(source_id)],
                     "analysis_pipeline": pipeline,
@@ -394,7 +395,7 @@ def _collect_analysis_sources(
                 if not isinstance(raw, dict):
                     raise ValueError(f"Analysis pipeline missing datasource config for {source_id}")
                 next_config = _resolve_pipeline_datasource(pipeline, raw)
-                if next_config.get("source_type") == "analysis":
+                if DataSourceType.read(next_config.get("source_type"), default=None) == DataSourceType.ANALYSIS:
                     next_config = {**next_config, "analysis_pipeline": pipeline}
             additional[str(source_id)] = load_datasource(next_config)
 
@@ -402,11 +403,11 @@ def _collect_analysis_sources(
 
 
 DatasourceHandler.SOURCE_LOADERS = {
-    "file": DatasourceHandler._load_file,
-    "database": DatasourceHandler._load_database,
-    "duckdb": DatasourceHandler._load_duckdb,
-    "iceberg": DatasourceHandler._load_iceberg,
-    "analysis": DatasourceHandler._load_analysis,
+    DataSourceType.FILE.value: DatasourceHandler._load_file,
+    DataSourceType.DATABASE.value: DatasourceHandler._load_database,
+    DatasourceLoadType.DUCKDB.value: DatasourceHandler._load_duckdb,
+    DataSourceType.ICEBERG.value: DatasourceHandler._load_iceberg,
+    DataSourceType.ANALYSIS.value: DatasourceHandler._load_analysis,
 }
 
 

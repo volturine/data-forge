@@ -147,110 +147,6 @@ def _next_sequence(session: Session, build_id: str) -> int:
     return (int(last) if isinstance(last, int) else 0) + 1
 
 
-def _apply_context(run: BuildRun, event: compute_schemas.BuildEvent) -> None:
-    # Build-run kind is fixed at creation time; event streams must not mutate it.
-    if event.current_datasource_id is not None:
-        run.current_datasource_id = event.current_datasource_id
-    if event.tab_id is not None:
-        run.current_tab_id = event.tab_id
-    if event.tab_name is not None:
-        run.current_tab_name = event.tab_name
-    if event.current_output_id is not None:
-        run.current_output_id = event.current_output_id
-    if event.current_output_name is not None:
-        run.current_output_name = event.current_output_name
-    if event.engine_run_id is not None:
-        run.current_engine_run_id = event.engine_run_id
-
-
-def _apply_terminal_status(run: BuildRun, event: compute_schemas.BuildEvent) -> bool:
-    if run.status in _TERMINAL_STATUSES:
-        return False
-    if isinstance(event, compute_schemas.BuildCompleteEvent):
-        run.status = BuildRunStatus.COMPLETED
-        run.progress = event.progress
-        run.elapsed_ms = event.elapsed_ms
-        run.total_steps = event.total_steps
-        run.duration_ms = event.duration_ms
-        run.error_message = None
-        run.completed_at = event.emitted_at
-        return True
-    if isinstance(event, compute_schemas.BuildFailedEvent):
-        run.status = BuildRunStatus.FAILED
-        run.progress = event.progress
-        run.elapsed_ms = event.elapsed_ms
-        run.total_steps = event.total_steps
-        run.duration_ms = event.duration_ms
-        run.error_message = event.error
-        run.completed_at = event.emitted_at
-        return True
-    if isinstance(event, compute_schemas.BuildCancelledEvent):
-        run.status = BuildRunStatus.CANCELLED
-        run.progress = event.progress
-        run.elapsed_ms = event.elapsed_ms
-        run.total_steps = event.total_steps
-        run.duration_ms = event.duration_ms
-        run.error_message = 'Build cancelled'
-        run.cancelled_at = event.cancelled_at
-        run.cancelled_by = event.cancelled_by
-        run.completed_at = event.emitted_at
-        return True
-    return True
-
-
-def _terminal_status_for_event(event: compute_schemas.BuildEvent) -> BuildRunStatus | None:
-    if isinstance(event, compute_schemas.BuildCompleteEvent):
-        return BuildRunStatus.COMPLETED
-    if isinstance(event, compute_schemas.BuildFailedEvent):
-        return BuildRunStatus.FAILED
-    if isinstance(event, compute_schemas.BuildCancelledEvent):
-        return BuildRunStatus.CANCELLED
-    return None
-
-
-def _terminal_update_values(event: compute_schemas.BuildEvent) -> dict[str, object] | None:
-    if isinstance(event, compute_schemas.BuildCompleteEvent):
-        return {
-            'status': BuildRunStatus.COMPLETED,
-            'progress': event.progress,
-            'elapsed_ms': event.elapsed_ms,
-            'total_steps': event.total_steps,
-            'duration_ms': event.duration_ms,
-            'error_message': None,
-            'cancelled_at': None,
-            'cancelled_by': None,
-            'completed_at': event.emitted_at,
-            'updated_at': event.emitted_at,
-        }
-    if isinstance(event, compute_schemas.BuildFailedEvent):
-        return {
-            'status': BuildRunStatus.FAILED,
-            'progress': event.progress,
-            'elapsed_ms': event.elapsed_ms,
-            'total_steps': event.total_steps,
-            'duration_ms': event.duration_ms,
-            'error_message': event.error,
-            'cancelled_at': None,
-            'cancelled_by': None,
-            'completed_at': event.emitted_at,
-            'updated_at': event.emitted_at,
-        }
-    if isinstance(event, compute_schemas.BuildCancelledEvent):
-        return {
-            'status': BuildRunStatus.CANCELLED,
-            'progress': event.progress,
-            'elapsed_ms': event.elapsed_ms,
-            'total_steps': event.total_steps,
-            'duration_ms': event.duration_ms,
-            'error_message': 'Build cancelled',
-            'cancelled_at': event.cancelled_at,
-            'cancelled_by': event.cancelled_by,
-            'completed_at': event.emitted_at,
-            'updated_at': event.emitted_at,
-        }
-    return None
-
-
 def _cas_update_build_run(session: Session, *, run: BuildRun, values: dict[str, object], expected_status: BuildRunStatus) -> BuildRun | None:
     result = session.execute(
         update(BuildRun)
@@ -282,14 +178,14 @@ def guarded_terminal_update(session: Session, *, build_id: str, event: compute_s
     if run.status in _TERMINAL_STATUSES:
         return None
     expected_status = run.status
-    values = _terminal_update_values(event)
+    values = BuildRun.terminal_update_values(event)
     if values is None:
         return None
     values['version'] = run.version + 1
     updated = _cas_update_build_run(session, run=run, values=values, expected_status=expected_status)
     if updated is None:
         return None
-    terminal_status = _terminal_status_for_event(event)
+    terminal_status = BuildRun.terminal_status_for_event(event)
     if updated.status in _TERMINAL_STATUSES and updated.status != expected_status and updated.status != terminal_status:
         return None
     return updated
@@ -327,38 +223,20 @@ def append_build_event(
     run = session.get(BuildRun, build_id)
     if run is None:
         raise ValueError(f'Build run {build_id} not found')
-    terminal_status = _terminal_status_for_event(event)
+    terminal_status = BuildRun.terminal_status_for_event(event)
     if run.status in _TERMINAL_STATUSES and terminal_status != run.status:
         return None
     run_namespace = run.namespace
 
     should_update_run = run.status not in _TERMINAL_STATUSES
     if should_update_run:
-        _apply_context(run, event)
+        run.apply_event_context(event)
         if resource_config_json is not None:
             run.resource_config_json = _copy_json_dict(resource_config_json)
 
-        if isinstance(event, compute_schemas.BuildProgressEvent):
-            run.progress = event.progress
-            run.elapsed_ms = event.elapsed_ms
-            run.estimated_remaining_ms = event.estimated_remaining_ms
-            run.current_step = event.current_step
-            run.current_step_index = event.current_step_index
-            run.total_steps = event.total_steps
-        if isinstance(event, compute_schemas.BuildStepStartEvent):
-            run.current_step = event.step_name
-            run.current_step_index = event.build_step_index
-            run.total_steps = event.total_steps
-        if isinstance(event, compute_schemas.BuildStepCompleteEvent):
-            run.current_step = event.step_name
-            run.current_step_index = event.build_step_index
-            run.total_steps = event.total_steps
-        if isinstance(event, compute_schemas.BuildStepFailedEvent):
-            run.current_step = event.step_name
-            run.current_step_index = event.build_step_index
-            run.total_steps = event.total_steps
+        run.apply_runtime_event(event)
 
-        if terminal_status is not None and not _apply_terminal_status(run, event):
+        if terminal_status is not None and not run.apply_terminal_event(event):
             return None
 
         run.updated_at = event.emitted_at

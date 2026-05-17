@@ -1,101 +1,28 @@
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import polars as pl
 from contracts.analysis.step_types import ChartType
 from contracts.compute.base import OperationHandler, OperationParams
-from contracts.enums import DataForgeStrEnum
+from contracts.step_config_enums import (
+    AxisScale,
+    ChartAggregation,
+    DateBucket,
+    DateOrdinal,
+    DisplayUnits,
+    GroupSortBy,
+    LegendPosition,
+    OverlayChartType,
+    ReferenceAxis,
+    SortBy,
+    SortDirection,
+    StackMode,
+    YAxisPosition,
+)
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 logger = logging.getLogger(__name__)
-
-
-class AggregationType(DataForgeStrEnum):
-    SUM = "sum"
-    MEAN = "mean"
-    COUNT = "count"
-    MIN = "min"
-    MAX = "max"
-    MEDIAN = "median"
-    STD = "std"
-    VARIANCE = "variance"
-    UNIQUE_COUNT = "unique_count"
-
-
-class OverlayChartType(DataForgeStrEnum):
-    LINE = "line"
-    AREA = "area"
-    BAR = "bar"
-    SCATTER = "scatter"
-
-
-class Axis(DataForgeStrEnum):
-    X = "x"
-    Y = "y"
-
-
-class GroupSortBy(DataForgeStrEnum):
-    NAME = "name"
-    VALUE = "value"
-    CUSTOM = "custom"
-
-
-class SortBy(DataForgeStrEnum):
-    X = "x"
-    Y = "y"
-    CUSTOM = "custom"
-
-
-class SortOrder(DataForgeStrEnum):
-    ASC = "asc"
-    DESC = "desc"
-
-
-class StackMode(DataForgeStrEnum):
-    GROUPED = "grouped"
-    STACKED = "stacked"
-    FULL = "100%"
-
-
-class DateBucket(DataForgeStrEnum):
-    EXACT = "exact"
-    YEAR = "year"
-    QUARTER = "quarter"
-    MONTH = "month"
-    WEEK = "week"
-    DAY = "day"
-    HOUR = "hour"
-
-
-class DateOrdinal(DataForgeStrEnum):
-    DAY_OF_WEEK = "day_of_week"
-    MONTH_OF_YEAR = "month_of_year"
-    QUARTER_OF_YEAR = "quarter_of_year"
-
-
-class YAxisScale(DataForgeStrEnum):
-    LINEAR = "linear"
-    LOG = "log"
-
-
-class DisplayUnits(DataForgeStrEnum):
-    NONE = ""
-    THOUSANDS = "K"
-    MILLIONS = "M"
-    BILLIONS = "B"
-    PERCENT = "%"
-
-
-class LegendPosition(DataForgeStrEnum):
-    TOP = "top"
-    BOTTOM = "bottom"
-    LEFT = "left"
-    RIGHT = "right"
-    NONE = "none"
-
-
-class YAxisPosition(DataForgeStrEnum):
-    LEFT = "left"
-    RIGHT = "right"
 
 
 class OverlayConfig(BaseModel):
@@ -103,14 +30,14 @@ class OverlayConfig(BaseModel):
 
     chart_type: OverlayChartType = OverlayChartType.LINE
     y_column: str
-    aggregation: AggregationType = AggregationType.SUM
+    aggregation: ChartAggregation = ChartAggregation.SUM
     y_axis_position: YAxisPosition = YAxisPosition.LEFT
 
 
 class ReferenceLine(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    axis: Axis
+    axis: ReferenceAxis
     value: float | None = None
     label: str | None = None
     color: str | None = None
@@ -123,21 +50,21 @@ class ChartParams(OperationParams):
     x_column: str
     y_column: str | None = None
     bins: int = 10
-    aggregation: AggregationType = AggregationType.SUM
+    aggregation: ChartAggregation = ChartAggregation.SUM
     group_column: str | None = None
     group_sort_by: GroupSortBy | None = None
-    group_sort_order: SortOrder = SortOrder.ASC
+    group_sort_order: SortDirection = SortDirection.ASC
     group_sort_column: str | None = None
     stack_mode: StackMode = StackMode.GROUPED
     area_opacity: float = 0.35
     date_bucket: DateBucket | None = None
     date_ordinal: DateOrdinal | None = None
     sort_by: SortBy | None = None
-    sort_order: SortOrder = SortOrder.ASC
+    sort_order: SortDirection = SortDirection.ASC
     sort_column: str | None = None
     x_axis_label: str | None = None
     y_axis_label: str | None = None
-    y_axis_scale: YAxisScale = YAxisScale.LINEAR
+    y_axis_scale: AxisScale = AxisScale.LINEAR
     y_axis_min: float | None = None
     y_axis_max: float | None = None
     display_units: DisplayUnits = DisplayUnits.NONE
@@ -269,32 +196,47 @@ class ChartHandler(OperationHandler):
 # --- Chart computation functions (used by compute_chart_data) ---
 
 
-def _agg_expr(col: str, agg: AggregationType) -> pl.Expr:
-    if agg == AggregationType.SUM:
-        return pl.col(col).sum().alias("y")
-    if agg == AggregationType.MEAN:
-        return pl.col(col).mean().alias("y")
-    if agg == AggregationType.MEDIAN:
-        return pl.col(col).median().alias("y")
-    if agg == AggregationType.STD:
-        return pl.col(col).std().alias("y")
-    if agg == AggregationType.VARIANCE:
-        return pl.col(col).var().alias("y")
-    if agg == AggregationType.UNIQUE_COUNT:
-        return pl.col(col).n_unique().alias("y")
-    if agg == AggregationType.COUNT:
-        return pl.col(col).count().alias("y")
-    if agg == AggregationType.MIN:
-        return pl.col(col).min().alias("y")
-    if agg == AggregationType.MAX:
-        return pl.col(col).max().alias("y")
-    return pl.col(col).sum().alias("y")
+ChartAggregationExpr = Callable[[str], pl.Expr]
+
+
+@dataclass(frozen=True, slots=True)
+class ChartAggregationDefinition:
+    aggregation: ChartAggregation
+    expr_factory: ChartAggregationExpr
+
+    @classmethod
+    def require(cls, value: ChartAggregation | str) -> "ChartAggregationDefinition":
+        try:
+            aggregation = ChartAggregation.require(value)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported chart aggregation: {value}") from exc
+        return CHART_AGGREGATION_DEFINITIONS[aggregation]
+
+    def apply(self, column: str, *, alias: str = "y") -> pl.Expr:
+        return self.expr_factory(column).alias(alias)
+
+
+CHART_AGGREGATION_DEFINITIONS: dict[ChartAggregation, ChartAggregationDefinition] = {
+    ChartAggregation.SUM: ChartAggregationDefinition(ChartAggregation.SUM, lambda column: pl.col(column).sum()),
+    ChartAggregation.MEAN: ChartAggregationDefinition(ChartAggregation.MEAN, lambda column: pl.col(column).mean()),
+    ChartAggregation.COUNT: ChartAggregationDefinition(ChartAggregation.COUNT, lambda column: pl.col(column).count()),
+    ChartAggregation.MIN: ChartAggregationDefinition(ChartAggregation.MIN, lambda column: pl.col(column).min()),
+    ChartAggregation.MAX: ChartAggregationDefinition(ChartAggregation.MAX, lambda column: pl.col(column).max()),
+    ChartAggregation.MEDIAN: ChartAggregationDefinition(ChartAggregation.MEDIAN, lambda column: pl.col(column).median()),
+    ChartAggregation.STD: ChartAggregationDefinition(ChartAggregation.STD, lambda column: pl.col(column).std()),
+    ChartAggregation.VARIANCE: ChartAggregationDefinition(ChartAggregation.VARIANCE, lambda column: pl.col(column).var()),
+    ChartAggregation.UNIQUE_COUNT: ChartAggregationDefinition(ChartAggregation.UNIQUE_COUNT, lambda column: pl.col(column).n_unique()),
+}
+
+
+def _agg_expr(col: str, agg: ChartAggregation, *, alias: str = "y") -> pl.Expr:
+    return ChartAggregationDefinition.require(agg).apply(col, alias=alias)
 
 
 def _apply_sort(df: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     if p.sort_by is None:
         return df.sort("x")
-    order_desc = p.sort_order == SortOrder.DESC
+    order_desc = p.sort_order == SortDirection.DESC
     if p.sort_by == SortBy.X:
         return df.sort("x", descending=order_desc)
     if p.sort_by == SortBy.Y:
@@ -362,7 +304,7 @@ def _apply_group_sort(
     if group_key not in schema:
         return df
 
-    descending = p.group_sort_order == SortOrder.DESC
+    descending = p.group_sort_order == SortDirection.DESC
     order: pl.LazyFrame | None = None
     if p.group_sort_by == GroupSortBy.NAME:
         order = df.select(pl.col(group_key)).unique().sort(group_key, descending=descending)
@@ -440,11 +382,11 @@ def _aggregate_pie(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
         result = group_sorted.rename({"x": "label"})
 
     if p.sort_by == SortBy.X:
-        sorted_result = result.sort("label", descending=p.sort_order == SortOrder.DESC)
+        sorted_result = result.sort("label", descending=p.sort_order == SortDirection.DESC)
     elif p.sort_by == SortBy.Y:
-        sorted_result = result.sort("y", descending=p.sort_order == SortOrder.DESC)
+        sorted_result = result.sort("y", descending=p.sort_order == SortDirection.DESC)
     elif p.sort_by == SortBy.CUSTOM and p.sort_column:
-        sorted_result = result.sort(p.sort_column, descending=p.sort_order == SortOrder.DESC)
+        sorted_result = result.sort(p.sort_column, descending=p.sort_order == SortDirection.DESC)
     else:
         sorted_result = result.sort("y", descending=True)
 
@@ -509,11 +451,11 @@ def _build_histogram(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
         },
     )
     if p.sort_by == SortBy.X:
-        return result.sort("bin_start", descending=p.sort_order == SortOrder.DESC)
+        return result.sort("bin_start", descending=p.sort_order == SortDirection.DESC)
     if p.sort_by == SortBy.Y:
-        return result.sort("count", descending=p.sort_order == SortOrder.DESC)
+        return result.sort("count", descending=p.sort_order == SortDirection.DESC)
     if p.sort_by == SortBy.CUSTOM and p.sort_column:
-        return result.sort(p.sort_column, descending=p.sort_order == SortOrder.DESC)
+        return result.sort(p.sort_column, descending=p.sort_order == SortDirection.DESC)
     return result
 
 
@@ -552,7 +494,7 @@ def _build_boxplot(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
             pl.lit("all").alias("group"),
         )
     if p.sort_by == SortBy.CUSTOM and p.sort_column:
-        return result.sort(p.sort_column, descending=p.sort_order == SortOrder.DESC)
+        return result.sort(p.sort_column, descending=p.sort_order == SortDirection.DESC)
     return result
 
 
@@ -561,6 +503,6 @@ def _aggregate_heatgrid(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
         return pl.LazyFrame({"x": [], "y": [], "value": []})
 
     value_col = p.y_column
-    agg_expr = _agg_expr(value_col, p.aggregation).alias("value")
+    agg_expr = _agg_expr(value_col, p.aggregation, alias="value")
 
     return lf.group_by([p.x_column, value_col]).agg(agg_expr).rename({p.x_column: "x", value_col: "y"})

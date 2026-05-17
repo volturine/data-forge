@@ -223,6 +223,109 @@ class ActiveBuild:
         self.updated_at = _utcnow()
         self.logs.append(item)
 
+    def context(self) -> ActiveBuildContext:
+        return ActiveBuildContext(
+            current_kind=self.current_kind,
+            current_datasource_id=self.current_datasource_id,
+            current_tab_id=self.current_tab_id,
+            current_tab_name=self.current_tab_name,
+            current_output_id=self.current_output_id,
+            current_output_name=self.current_output_name,
+        )
+
+    def apply_event_payload(self, payload: dict) -> ActiveBuildContext:
+        event_type = schemas.BuildEventType.read(payload.get("type"))
+        self.current_datasource_id = _safe_str(payload.get("current_datasource_id")) or self.current_datasource_id
+        self.current_tab_id = _safe_str(payload.get("tab_id")) or self.current_tab_id
+        self.current_tab_name = _safe_str(payload.get("tab_name")) or self.current_tab_name
+        self.current_output_id = _safe_str(payload.get("current_output_id")) or self.current_output_id
+        self.current_output_name = _safe_str(payload.get("current_output_name")) or self.current_output_name
+        self.current_engine_run_id = _safe_str(payload.get("engine_run_id")) or self.current_engine_run_id
+
+        if event_type == schemas.BuildEventType.PLAN:
+            self.add_query_plan(
+                schemas.BuildQueryPlanSnapshot(
+                    tab_id=_safe_str(payload.get("tab_id")),
+                    tab_name=_safe_str(payload.get("tab_name")),
+                    optimized_plan=_safe_str(payload.get("optimized_plan")) or "",
+                    unoptimized_plan=_safe_str(payload.get("unoptimized_plan")) or "",
+                )
+            )
+
+        if (step_state := event_type.step_state if event_type is not None else None) is not None:
+            self.upsert_step(
+                schemas.BuildStepSnapshot(
+                    build_step_index=_safe_int(payload.get("build_step_index")) or 0,
+                    step_index=_safe_int(payload.get("step_index")) or 0,
+                    step_id=_safe_str(payload.get("step_id")) or "unknown",
+                    step_name=_safe_str(payload.get("step_name")) or "Unnamed step",
+                    step_type=_safe_str(payload.get("step_type")) or "unknown",
+                    tab_id=_safe_str(payload.get("tab_id")),
+                    tab_name=_safe_str(payload.get("tab_name")),
+                    state=step_state,
+                    duration_ms=_safe_int(payload.get("duration_ms")) if step_state == schemas.BuildStepState.COMPLETED else None,
+                    row_count=_safe_int(payload.get("row_count")) if step_state == schemas.BuildStepState.COMPLETED else None,
+                    error=_safe_str(payload.get("error")) if step_state == schemas.BuildStepState.FAILED else None,
+                )
+            )
+
+        if event_type == schemas.BuildEventType.PROGRESS:
+            self.update_progress(
+                progress=_safe_float(payload.get("progress")),
+                elapsed_ms=_safe_int(payload.get("elapsed_ms")) or self.elapsed_ms,
+                estimated_remaining_ms=_safe_int(payload.get("estimated_remaining_ms")),
+                current_step=_safe_str(payload.get("current_step")),
+                current_step_index=_safe_int(payload.get("current_step_index")),
+                total_steps=_safe_int(payload.get("total_steps")) or self.total_steps,
+            )
+
+        if event_type == schemas.BuildEventType.RESOURCES:
+            self.add_resource(
+                schemas.BuildResourceSnapshot(
+                    sampled_at=_utcnow(),
+                    cpu_percent=_safe_float(payload.get("cpu_percent")),
+                    memory_mb=_safe_float(payload.get("memory_mb")),
+                    memory_limit_mb=_safe_float(payload.get("memory_limit_mb")) if payload.get("memory_limit_mb") is not None else None,
+                    active_threads=_safe_int(payload.get("active_threads")) or 0,
+                    max_threads=_safe_int(payload.get("max_threads")),
+                )
+            )
+
+        if event_type == schemas.BuildEventType.LOG:
+            self.add_log(
+                schemas.BuildLogEntry(
+                    timestamp=_utcnow(),
+                    level=schemas.BuildLogLevel.coerce(payload.get("level")),
+                    message=_safe_str(payload.get("message")) or "",
+                    step_name=_safe_str(payload.get("step_name")),
+                    step_id=_safe_str(payload.get("step_id")),
+                    tab_id=_safe_str(payload.get("tab_id")),
+                    tab_name=_safe_str(payload.get("tab_name")),
+                )
+            )
+
+        terminal_status = event_type.terminal_build_status if event_type is not None else None
+        terminal_error_message = event_type.terminal_error_message if event_type is not None else None
+        if terminal_status is not None:
+            self.results = [schemas.BuildTabResult.model_validate(item) for item in payload.get("results", []) if isinstance(item, dict)]
+            self.update_progress(
+                progress=1.0 if terminal_status == schemas.ActiveBuildStatus.COMPLETED else _safe_float(payload.get("progress"), self.progress),
+                elapsed_ms=_safe_int(payload.get("elapsed_ms")) or self.elapsed_ms,
+                estimated_remaining_ms=0 if terminal_status == schemas.ActiveBuildStatus.COMPLETED else None,
+                current_step=self.current_step,
+                current_step_index=self.current_step_index,
+                total_steps=_safe_int(payload.get("total_steps")) or self.total_steps,
+            )
+            self.update_status(
+                terminal_status,
+                duration_ms=_safe_int(payload.get("duration_ms")) or self.elapsed_ms,
+                error=_safe_str(payload.get("error")) or terminal_error_message,
+                cancelled_at=_safe_datetime(payload.get("cancelled_at")),
+                cancelled_by=_safe_str(payload.get("cancelled_by")),
+            )
+
+        return self.context()
+
     @property
     def resource_config_json(self) -> dict[str, object] | None:
         if self.resource_config is None:
@@ -492,161 +595,14 @@ class ActiveBuildRegistry:
             if build is None:
                 return None
             normalized = _normalize_payload(payload)
-            event_type = schemas.BuildEventType.read(normalized.get("type"))
-            # Build kind is immutable for build runs in live state.
-            build.current_datasource_id = _safe_str(normalized.get("current_datasource_id")) or build.current_datasource_id
-            build.current_tab_id = _safe_str(normalized.get("tab_id")) or build.current_tab_id
-            build.current_tab_name = _safe_str(normalized.get("tab_name")) or build.current_tab_name
-            build.current_output_id = _safe_str(normalized.get("current_output_id")) or build.current_output_id
-            build.current_output_name = _safe_str(normalized.get("current_output_name")) or build.current_output_name
-            build.current_engine_run_id = _safe_str(normalized.get("engine_run_id")) or build.current_engine_run_id
-            if event_type == schemas.BuildEventType.PLAN:
-                optimized = _safe_str(normalized.get("optimized_plan")) or ""
-                unoptimized = _safe_str(normalized.get("unoptimized_plan")) or ""
-                build.add_query_plan(
-                    schemas.BuildQueryPlanSnapshot(
-                        tab_id=_safe_str(normalized.get("tab_id")),
-                        tab_name=_safe_str(normalized.get("tab_name")),
-                        optimized_plan=optimized,
-                        unoptimized_plan=unoptimized,
-                    )
-                )
-            if event_type == schemas.BuildEventType.STEP_START:
-                snapshot = schemas.BuildStepSnapshot(
-                    build_step_index=_safe_int(normalized.get("build_step_index")) or 0,
-                    step_index=_safe_int(normalized.get("step_index")) or 0,
-                    step_id=_safe_str(normalized.get("step_id")) or "unknown",
-                    step_name=_safe_str(normalized.get("step_name")) or "Unnamed step",
-                    step_type=_safe_str(normalized.get("step_type")) or "unknown",
-                    tab_id=_safe_str(normalized.get("tab_id")),
-                    tab_name=_safe_str(normalized.get("tab_name")),
-                    state=schemas.BuildStepState.RUNNING,
-                )
-                build.upsert_step(snapshot)
-            if event_type == schemas.BuildEventType.STEP_COMPLETE:
-                snapshot = schemas.BuildStepSnapshot(
-                    build_step_index=_safe_int(normalized.get("build_step_index")) or 0,
-                    step_index=_safe_int(normalized.get("step_index")) or 0,
-                    step_id=_safe_str(normalized.get("step_id")) or "unknown",
-                    step_name=_safe_str(normalized.get("step_name")) or "Unnamed step",
-                    step_type=_safe_str(normalized.get("step_type")) or "unknown",
-                    tab_id=_safe_str(normalized.get("tab_id")),
-                    tab_name=_safe_str(normalized.get("tab_name")),
-                    state=schemas.BuildStepState.COMPLETED,
-                    duration_ms=_safe_int(normalized.get("duration_ms")),
-                    row_count=_safe_int(normalized.get("row_count")),
-                )
-                build.upsert_step(snapshot)
-            if event_type == schemas.BuildEventType.STEP_FAILED:
-                snapshot = schemas.BuildStepSnapshot(
-                    build_step_index=_safe_int(normalized.get("build_step_index")) or 0,
-                    step_index=_safe_int(normalized.get("step_index")) or 0,
-                    step_id=_safe_str(normalized.get("step_id")) or "unknown",
-                    step_name=_safe_str(normalized.get("step_name")) or "Unnamed step",
-                    step_type=_safe_str(normalized.get("step_type")) or "unknown",
-                    tab_id=_safe_str(normalized.get("tab_id")),
-                    tab_name=_safe_str(normalized.get("tab_name")),
-                    state=schemas.BuildStepState.FAILED,
-                    error=_safe_str(normalized.get("error")),
-                )
-                build.upsert_step(snapshot)
-            if event_type == schemas.BuildEventType.PROGRESS:
-                build.update_progress(
-                    progress=_safe_float(normalized.get("progress")),
-                    elapsed_ms=_safe_int(normalized.get("elapsed_ms")) or build.elapsed_ms,
-                    estimated_remaining_ms=_safe_int(normalized.get("estimated_remaining_ms")),
-                    current_step=_safe_str(normalized.get("current_step")),
-                    current_step_index=_safe_int(normalized.get("current_step_index")),
-                    total_steps=_safe_int(normalized.get("total_steps")) or build.total_steps,
-                )
-            if event_type == schemas.BuildEventType.RESOURCES:
-                build.add_resource(
-                    schemas.BuildResourceSnapshot(
-                        sampled_at=_utcnow(),
-                        cpu_percent=_safe_float(normalized.get("cpu_percent")),
-                        memory_mb=_safe_float(normalized.get("memory_mb")),
-                        memory_limit_mb=_safe_float(normalized.get("memory_limit_mb")) if normalized.get("memory_limit_mb") is not None else None,
-                        active_threads=_safe_int(normalized.get("active_threads")) or 0,
-                        max_threads=_safe_int(normalized.get("max_threads")),
-                    )
-                )
-            if event_type == schemas.BuildEventType.LOG:
-                build.add_log(
-                    schemas.BuildLogEntry(
-                        timestamp=_utcnow(),
-                        level=schemas.BuildLogLevel.coerce(normalized.get("level")),
-                        message=_safe_str(normalized.get("message")) or "",
-                        step_name=_safe_str(normalized.get("step_name")),
-                        step_id=_safe_str(normalized.get("step_id")),
-                        tab_id=_safe_str(normalized.get("tab_id")),
-                        tab_name=_safe_str(normalized.get("tab_name")),
-                    )
-                )
-            if event_type == schemas.BuildEventType.COMPLETE:
-                build.results = [schemas.BuildTabResult.model_validate(item) for item in normalized.get("results", []) if isinstance(item, dict)]
-                build.update_progress(
-                    progress=1.0,
-                    elapsed_ms=_safe_int(normalized.get("elapsed_ms")) or build.elapsed_ms,
-                    estimated_remaining_ms=0,
-                    current_step=build.current_step,
-                    current_step_index=build.current_step_index,
-                    total_steps=_safe_int(normalized.get("total_steps")) or build.total_steps,
-                )
-                build.update_status(
-                    schemas.ActiveBuildStatus.COMPLETED,
-                    duration_ms=_safe_int(normalized.get("duration_ms")) or build.elapsed_ms,
-                )
-            if event_type == schemas.BuildEventType.FAILED:
-                build.results = [schemas.BuildTabResult.model_validate(item) for item in normalized.get("results", []) if isinstance(item, dict)]
-                build.update_progress(
-                    progress=_safe_float(normalized.get("progress"), build.progress),
-                    elapsed_ms=_safe_int(normalized.get("elapsed_ms")) or build.elapsed_ms,
-                    estimated_remaining_ms=None,
-                    current_step=build.current_step,
-                    current_step_index=build.current_step_index,
-                    total_steps=_safe_int(normalized.get("total_steps")) or build.total_steps,
-                )
-                build.update_status(
-                    schemas.ActiveBuildStatus.FAILED,
-                    duration_ms=_safe_int(normalized.get("duration_ms")) or build.elapsed_ms,
-                    error=_safe_str(normalized.get("error")),
-                )
-            if event_type == schemas.BuildEventType.CANCELLED:
-                build.results = [schemas.BuildTabResult.model_validate(item) for item in normalized.get("results", []) if isinstance(item, dict)]
-                build.update_progress(
-                    progress=_safe_float(normalized.get("progress"), build.progress),
-                    elapsed_ms=_safe_int(normalized.get("elapsed_ms")) or build.elapsed_ms,
-                    estimated_remaining_ms=None,
-                    current_step=build.current_step,
-                    current_step_index=build.current_step_index,
-                    total_steps=_safe_int(normalized.get("total_steps")) or build.total_steps,
-                )
-                build.update_status(
-                    schemas.ActiveBuildStatus.CANCELLED,
-                    duration_ms=_safe_int(normalized.get("duration_ms")) or build.elapsed_ms,
-                    error="Build cancelled",
-                    cancelled_at=_safe_datetime(normalized.get("cancelled_at")),
-                    cancelled_by=_safe_str(normalized.get("cancelled_by")),
-                )
-            return ActiveBuildContext(
-                current_kind=build.current_kind,
-                current_datasource_id=build.current_datasource_id,
-                current_tab_id=build.current_tab_id,
-                current_tab_name=build.current_tab_name,
-                current_output_id=build.current_output_id,
-                current_output_name=build.current_output_name,
-            )
+            return build.apply_event_payload(normalized)
 
     def _prune_finished_locked(self) -> None:
         now = _utcnow()
         removable: set[str] = set()
         finished: list[ActiveBuild] = []
         for build in self._builds.values():
-            if build.status not in {
-                schemas.ActiveBuildStatus.COMPLETED,
-                schemas.ActiveBuildStatus.FAILED,
-                schemas.ActiveBuildStatus.CANCELLED,
-            }:
+            if not build.status.is_terminal:
                 continue
             finished.append(build)
             finished_at = build.finished_at or build.updated_at
