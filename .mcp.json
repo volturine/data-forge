@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "panda": {
-      "command": "bunx",
-      "args": ["panda", "mcp", "--config", "/Users/kripso/Documents/scratchpad/polars-fastapi-svelte/frontend/panda.config.ts"]
-    }
-  }
-}

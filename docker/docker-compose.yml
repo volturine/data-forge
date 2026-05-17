@@ -1,0 +1,137 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${DF_POSTGRES_DB}
+      POSTGRES_USER: ${DF_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${DF_POSTGRES_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DF_POSTGRES_USER} -d ${DF_POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    image: ${DF_API_IMAGE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &api-env
+      ENV_FILE: ""
+      APP_NAME: ${DF_APP_NAME}
+      APP_VERSION: ${DF_APP_VERSION}
+      DEBUG: ${DF_DEBUG}
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: ${DF_DATA_DIR}
+      DATABASE_URL: ${DF_DATABASE_URL}
+      DISTRIBUTED_RUNTIME_ENABLED: "true"
+      DATABASE_POOL_SIZE: ${DF_DATABASE_POOL_SIZE}
+      DATABASE_MAX_OVERFLOW: ${DF_DATABASE_MAX_OVERFLOW}
+      DATABASE_POOL_TIMEOUT: ${DF_DATABASE_POOL_TIMEOUT}
+      DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
+      UPLOAD_CHUNK_SIZE: ${DF_UPLOAD_CHUNK_SIZE}
+      POLARS_MAX_THREADS: ${DF_POLARS_MAX_THREADS}
+      POLARS_MAX_MEMORY_MB: ${DF_POLARS_MAX_MEMORY_MB}
+      POLARS_STREAMING_CHUNK_SIZE: ${DF_POLARS_STREAMING_CHUNK_SIZE}
+      MAX_CONCURRENT_ENGINES: ${DF_MAX_CONCURRENT_ENGINES}
+      WORKERS: ${DF_WORKERS}
+      WORKER_CONNECTIONS: ${DF_WORKER_CONNECTIONS}
+      BUILD_WORKER_MIN_PROCESSES: ${DF_BUILD_WORKER_MIN_PROCESSES}
+      BUILD_WORKER_MAX_PROCESSES: ${DF_BUILD_WORKER_MAX_PROCESSES}
+      BUILD_WORKER_IDLE_EXIT_SECONDS: ${DF_BUILD_WORKER_IDLE_EXIT_SECONDS}
+      LOG_LEVEL: ${DF_LOG_LEVEL}
+      TRUSTED_PROXY_HOPS: ${DF_TRUSTED_PROXY_HOPS}
+      SETTINGS_ENCRYPTION_KEY: ${DF_SETTINGS_ENCRYPTION_KEY}
+      AUTH_REQUIRED: ${DF_AUTH_REQUIRED}
+      VERIFY_EMAIL_ADDRESS: ${DF_VERIFY_EMAIL_ADDRESS}
+      DEFAULT_USER_EMAIL: ${DF_DEFAULT_USER_EMAIL}
+      DEFAULT_USER_PASSWORD: ${DF_DEFAULT_USER_PASSWORD}
+      DEFAULT_USER_NAME: ${DF_DEFAULT_USER_NAME}
+      AUTH_FRONTEND_URL: ${DF_AUTH_FRONTEND_URL}
+      CORS_ORIGINS: ${DF_CORS_ORIGINS}
+      GOOGLE_CLIENT_ID: ${DF_GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${DF_GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${DF_GOOGLE_REDIRECT_URI}
+      GITHUB_CLIENT_ID: ${DF_GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${DF_GITHUB_CLIENT_SECRET}
+      GITHUB_REDIRECT_URI: ${DF_GITHUB_REDIRECT_URI}
+    ports:
+      - "${DF_API_PORT}:8000"
+    volumes:
+      - data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import sys,urllib.request; sys.exit(0 if
+            urllib.request.urlopen('http://localhost:8000/health/ready').status\
+            ==200 else 1)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  scheduler:
+    image: ${DF_SCHEDULER_IMAGE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+    environment: &scheduler-env
+      ENV_FILE: ""
+      APP_NAME: ${DF_APP_NAME}
+      APP_VERSION: ${DF_APP_VERSION}
+      DEBUG: ${DF_DEBUG}
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: ${DF_DATA_DIR}
+      DATABASE_URL: ${DF_DATABASE_URL}
+      DISTRIBUTED_RUNTIME_ENABLED: "true"
+      DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
+      WORKERS: "1"
+      SCHEDULER_CHECK_INTERVAL: ${DF_SCHEDULER_CHECK_INTERVAL}
+      LOG_LEVEL: ${DF_LOG_LEVEL}
+      SETTINGS_ENCRYPTION_KEY: ${DF_SETTINGS_ENCRYPTION_KEY}
+    volumes:
+      - data:/app/data
+    restart: unless-stopped
+
+  worker:
+    image: ${DF_WORKER_IMAGE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+    environment: &worker-env
+      ENV_FILE: ""
+      APP_NAME: ${DF_APP_NAME}
+      APP_VERSION: ${DF_APP_VERSION}
+      DEBUG: ${DF_DEBUG}
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: ${DF_DATA_DIR}
+      DATABASE_URL: ${DF_DATABASE_URL}
+      DISTRIBUTED_RUNTIME_ENABLED: "true"
+      DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
+      WORKERS: "1"
+      POLARS_MAX_THREADS: ${DF_POLARS_MAX_THREADS}
+      POLARS_MAX_MEMORY_MB: ${DF_POLARS_MAX_MEMORY_MB}
+      POLARS_STREAMING_CHUNK_SIZE: ${DF_POLARS_STREAMING_CHUNK_SIZE}
+      MAX_CONCURRENT_ENGINES: ${DF_MAX_CONCURRENT_ENGINES}
+      BUILD_WORKER_MIN_PROCESSES: ${DF_BUILD_WORKER_MIN_PROCESSES}
+      BUILD_WORKER_MAX_PROCESSES: ${DF_BUILD_WORKER_MAX_PROCESSES}
+      BUILD_WORKER_IDLE_EXIT_SECONDS: ${DF_BUILD_WORKER_IDLE_EXIT_SECONDS}
+      LOG_LEVEL: ${DF_LOG_LEVEL}
+      SETTINGS_ENCRYPTION_KEY: ${DF_SETTINGS_ENCRYPTION_KEY}
+    volumes:
+      - data:/app/data
+    restart: unless-stopped
+
+volumes:
+  data:
+    driver: local
+  pg-data:
+    driver: local

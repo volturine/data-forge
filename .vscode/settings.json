@@ -4,34 +4,47 @@
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.codeActionsOnSave": {
-      "source.fixAll.ruff": "explicit",
-      "source.organizeImports.ruff": "explicit"
+      "source.fixAll.ruff": "always",
+      "source.organizeImports.ruff": "always"
     }
   },
   "[svelte]": {
     "editor.defaultFormatter": "svelte.svelte-vscode"
   },
-  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
-  "python.envFile": "${workspaceFolder}/backend/.env",
-  "python.testing.pytestArgs": ["${workspaceFolder}/backend/tests"],
-  "python.testing.cwd": "${workspaceFolder}/backend/tests",
-  "python.testing.unittestEnabled": false,
-  "python.testing.pytestEnabled": true,
   "svelte.enable-ts-plugin": true,
-  "typescript.tsdk": "frontend/node_modules/typescript/lib",
   "files.associations": {
     "*.svelte": "svelte"
   },
-  "eslint.workingDirectories": ["./frontend"],
-  "ruff.path": ["${workspaceFolder}/backend/.venv/bin/ruff"],
+  "eslint.workingDirectories": ["./packages/frontend"],
   "files.exclude": {
     "**/__pycache__": true,
     "**/.pytest_cache": true,
     "**/.mypy_cache": true,
     "**/.ruff_cache": true,
     "**/node_modules": true,
-    "**/.svelte-kit": true
+    "**/.svelte-kit": false
   },
-  "python-envs.pythonProjects": [],
+  "python-envs.pythonProjects": [
+    {
+      "workspace": "${workspaceFolder}/packages/backend",
+      "envManager": "venv",
+      "pythonPath": "${workspaceFolder}/packages/backend/.venv/bin/python"
+    },
+    {
+      "workspace": "${workspaceFolder}/packages/scheduler",
+      "envManager": "venv",
+      "pythonPath": "${workspaceFolder}/packages/scheduler/.venv/bin/python"
+    },
+    {
+      "workspace": "${workspaceFolder}/packages/shared",
+      "envManager": "venv",
+      "pythonPath": "${workspaceFolder}/packages/shared/.venv/bin/python"
+    },
+    {
+      "workspace": "${workspaceFolder}/packages/worker-manager",
+      "envManager": "venv",
+      "pythonPath": "${workspaceFolder}/packages/worker-manager/.venv/bin/python"
+    }
+  ],
   "projectManager.hg.ignoredFolders": ["out", "typings", "test", ".haxelib"]
 }

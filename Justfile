@@ -1,83 +1,135 @@
-# Justfile for Svelte-FastAPI Template
+# Data Forge task runner
 
-# Default goal
 default: dev
 
-# Install all dependencies
+pytest := 'uv run python -m pytest -c pyproject.toml -q'
+python := 'uv run python'
+
 install:
-    @echo "Installing backend dependencies..."
-    cd backend && uv sync
-    @echo "Installing frontend dependencies..."
-    cd frontend && bun install
+    cd packages/shared && uv sync
+    cd packages/backend && uv sync
+    cd packages/scheduler && uv sync
+    cd packages/worker-manager && uv sync
+    cd packages/frontend && bun install
 
 # Update dependencies to latest available versions
 update-deps:
     @echo "Updating backend dependencies to latest..."
-    cd backend && uv lock --upgrade && uv sync
+    cd packages/backend && uv lock --upgrade && uv sync
     @echo "Updating frontend dependencies to latest..."
-    cd frontend && bun update --latest
+    cd packages/frontend && bun update --latest
+    @echo "Updating scheduler dependencies to latest..."
+    cd packages/scheduler && uv lock --upgrade && uv sync
+    @echo "Updating shared dependencies to latest..."
+    cd packages/shared && uv lock --upgrade && uv sync
+    @echo "Updating worker-manager dependencies to latest..."
+    cd packages/worker-manager && uv lock --upgrade && uv sync
 
-# Run development servers concurrently
 dev:
-    @echo "Starting servers..."
-    (cd backend && uv run --env-file .env ./main.py) & (cd frontend && bun run dev) & wait
-
-# Format code
-format:
-    @echo "Formatting backend..."
-    cd backend && uv run ruff format .
-    @echo "Formatting frontend..."
-    cd frontend && bun run format
-
-# Run all linters and type checks
-check:
-    cd backend && uv run ruff format --check . && uv run ruff check . && uv run mypy .
-    cd frontend && bun run panda:codegen && bun run check && bun run lint
-
-
-# Run e2e tests with backend + frontend lifecycle managed by Just
-test-e2e:
     #!/usr/bin/env bash
     set -euo pipefail
+    set -a; source packages/shared/dev.env; set +a
+    (cd packages/backend && uv run --env-file ../shared/dev.env main.py) & \
+    (cd packages/scheduler && uv run --env-file ../shared/dev.env main.py) & \
+    (cd packages/worker-manager && uv run --env-file ../shared/dev.env main.py) & \
+    (cd packages/frontend && bun run dev) & wait
 
-    cleanup() {
-        lsof -ti tcp:8001,3001 | xargs kill 2>/dev/null || true
-    }
+dev-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    set -a; source packages/shared/dev.env; set +a
+    cd packages/shared
+    uv run python - <<'PY'
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import OperationalError
+    from core.config import settings
 
-    trap cleanup EXIT INT TERM
+    engine = create_engine(settings.database_url, isolation_level='AUTOCOMMIT')
+    try:
+        with engine.connect() as connection:
+            schemas = list(connection.execute(text("""
+                SELECT nspname
+                FROM pg_namespace
+                WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+                  AND nspname NOT LIKE 'pg_%'
+            """)).scalars())
+            for schema in schemas:
+                connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+            connection.execute(text('CREATE SCHEMA public'))
+    except OperationalError as exc:
+        if 'does not exist' not in str(exc).lower():
+            raise
+        print('Development database does not exist; skipping database schema reset.')
+    finally:
+        engine.dispose()
+    PY
+    cd ../..
+    rm -rf .runtime/data packages/shared/data packages/shared/packages packages/backend/data packages/scheduler/data packages/worker-manager/data
+    echo "✓ Local dev database and runtime data reset. Run 'just dev' to recreate everything."
 
-    set -a; source backend/e2e.env; set +a
-    export FRONTEND_PORT=3001
-    (cd backend && uv run --no-env-file ./main.py) &
-    (cd frontend && bun run dev) &
-    FRONTEND_PID=$!
+format:
+    cd packages/shared && uv run ruff check --select I --fix .
+    cd packages/backend && uv run --project ../shared ruff check --select I --fix .
+    cd packages/scheduler && uv run --project ../shared ruff check --select I --fix .
+    cd packages/worker-manager && uv run --project ../shared ruff check --select I --fix .
+    cd packages/shared && uv run ruff format .
+    cd packages/backend && uv run --project ../shared ruff format .
+    cd packages/scheduler && uv run --project ../shared ruff format .
+    cd packages/worker-manager && uv run --project ../shared ruff format .
+    cd packages/frontend && bun run format
 
-    for _ in {1..90}; do
-        if nc -z localhost 8001 && nc -z localhost 3001; then
-            cd frontend && bun run test:e2e
-            exit 0
-        fi
-        sleep 1
-    done
+check:
+    cd packages/shared && uv run ruff format --check . ../backend ../scheduler ../worker-manager
+    cd packages/shared && uv run ruff check . ../backend ../scheduler ../worker-manager
+    cd packages/shared && uv run python -m mypy .
+    cd packages/shared && uv run python -m mypy ../backend
+    cd packages/shared && uv run python -m mypy ../scheduler
+    cd packages/shared && uv run python -m mypy ../worker-manager
+    cd packages/shared && uv run python ../../scripts/generate_ts_build_stream_types.py --check
+    cd packages/shared && uv run python ../../scripts/generate_ts_step_types.py --check
+    cd packages/shared && uv run python ../../scripts/check_package_boundaries.py
+    cd packages/shared && uv run python ../../scripts/check_env_contracts.py
+    cd packages/shared && uv run python ../../scripts/check_dependency_hygiene.py
+    cd packages/shared && uv run python ../../scripts/check_code_hygiene.py
+    cd packages/shared && uv run python ../../scripts/check_test_layout.py
+    cd packages/frontend && bun run panda:codegen && bun run check && bun run lint
 
-    echo "Timed out waiting for backend/frontend to start for e2e tests" >&2
-    exit 1
+verify:
+    cd packages/shared && uv run python ../../scripts/scan_warnings.py -- just format
+    cd packages/shared && uv run python ../../scripts/scan_warnings.py -- just check
 
-# Run backend tests
+
 test:
-    cd backend && uv run pytest --tb=short -q
-    cd frontend && bun run test:unit
+    cd packages/shared && uv run python ../../scripts/scan_warnings.py -- just test-backend-raw
+    cd packages/shared && uv run python ../../scripts/scan_warnings.py -- just test-frontend-raw
 
-# Generate TypeScript types from Pydantic step schemas
+test-backend-raw:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd packages/shared
+    {{pytest}} tests
+    {{pytest}} ../backend/tests --ignore=../backend/tests/integration
+    {{pytest}} ../backend/tests/integration
+    {{pytest}} ../worker-manager/tests --ignore=../worker-manager/tests/integration
+    {{pytest}} ../scheduler/tests
+
+test-frontend-raw:
+    cd packages/frontend && bun run test:unit
+
+test-e2e:
+    cd packages/shared && uv run python ../../scripts/scan_warnings.py --cwd . -- scripts/test_e2e.sh
+
 generate-step-types:
-    cd backend && uv run python scripts/generate_ts_step_types.py
+    cd packages/shared && uv run python ../../scripts/generate_ts_step_types.py
 
-# Full verification gate -- must pass before any task is declared done
-verify: format check
+generate-build-stream-types:
+    cd packages/shared && uv run python ../../scripts/generate_ts_build_stream_types.py
 
-# Build for production
-prod:
-    @echo "Building frontend..."
-    cd frontend && bun run build
-    @echo "Starting backend in production mode..."
-    cd backend && uv run --env-file .prod.env ./main.py
+docker-dev:
+    docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build
+
+docker-dev-down:
+    docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/docker-compose.yml -f docker/docker-compose.dev.yml down -v --remove-orphans
+
+docker-dev-logs:
+    docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/docker-compose.yml -f docker/docker-compose.dev.yml logs -f

@@ -1,10 +1,22 @@
 .DS_Store
+/session-*.md
 
 # Data directory (uploads, results, exports, logs)
 /data/
 .opencode/opencode.jsonc
 .vscode/mcp.json
 
-# Playwright artifacts (safety net for stray outputs)
-test-results/
-playwright-report/
+# Test artifacts (package-local)
+packages/*/tests/.artifacts/
+
+# Node/tool caches
+node_modules/
+.vite/
+.opencode/node_modules/
+.opencode/package-lock.json
+
+.runtime/
+.docker/
+.docker-home/
+
+*__pycache__/

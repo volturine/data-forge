@@ -1,0 +1,23 @@
+import { apiRequest } from './client';
+import type { ApiError } from './client';
+import type { ResultAsync } from 'neverthrow';
+
+export interface FrontendConfig {
+	timezone: string;
+	normalize_tz: boolean;
+	log_client_batch_size: number;
+	log_client_flush_interval_ms: number;
+	log_client_dedupe_window_ms: number;
+	log_client_flush_cooldown_ms: number;
+	log_queue_max_size: number;
+	public_idb_debug: boolean;
+	smtp_enabled: boolean;
+	telegram_enabled: boolean;
+	default_namespace: string;
+	auth_required: boolean;
+	verify_email_address: boolean;
+}
+
+export function getConfig(): ResultAsync<FrontendConfig, ApiError> {
+	return apiRequest<FrontendConfig>('/v1/config');
+}

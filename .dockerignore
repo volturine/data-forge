@@ -20,6 +20,15 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 .venv/
+backend/.env
+backend/.env.*
+backend/.prod.env
+backend/e2e.env
+backend/.mypy_cache/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.venv/
+packages/frontend/node_modules/
 venv/
 ENV/
 env/
@@ -30,9 +39,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-frontend/build/
-frontend/.svelte-kit/
-frontend/dist/
+packages/frontend/build/
+packages/frontend/.svelte-kit/
+packages/frontend/dist/
 
 # IDE
 .vscode/

@@ -1,0 +1,74 @@
+[
+  {
+    "id": "blank",
+    "name": "Blank",
+    "description": "Start with an empty pipeline and configure each tab manually.",
+    "icon": "file",
+    "required_input_columns": [],
+    "steps": []
+  },
+  {
+    "id": "data_quality_audit",
+    "name": "Data Quality Audit",
+    "description": "Profile nulls, derive quality flags, and summarize issues before exporting.",
+    "icon": "shield-check",
+    "required_input_columns": ["Primary business key", "Critical metric columns", "Quality-sensitive dimensions"],
+    "steps": [
+      { "type": "view", "config": { "rowLimit": 100 } },
+      { "type": "filter", "config": { "conditions": [], "logic": "AND" } },
+      { "type": "with_columns", "config": { "expressions": [] } },
+      { "type": "groupby", "config": { "group_by": [], "aggregations": [] } }
+    ]
+  },
+  {
+    "id": "elt_transform",
+    "name": "ELT Transform",
+    "description": "Clean an input dataset and prepare it for a managed output table.",
+    "icon": "arrow-right-left",
+    "required_input_columns": ["Source fields to keep", "Columns that need renaming", "Any branch-specific identifiers"],
+    "steps": [
+      { "type": "filter", "config": { "conditions": [], "logic": "AND" } },
+      { "type": "select", "config": { "columns": [], "cast_map": {} } },
+      { "type": "rename", "config": { "column_mapping": {} } },
+      { "type": "export", "config": { "format": "parquet", "filename": "export", "destination": "download" } }
+    ]
+  },
+  {
+    "id": "aggregation_report",
+    "name": "Aggregation Report",
+    "description": "Group, aggregate, and sort a dataset into a report-ready output.",
+    "icon": "chart-column",
+    "required_input_columns": ["Grouping dimensions", "Measure columns for aggregations", "Sort keys"],
+    "steps": [
+      { "type": "groupby", "config": { "group_by": [], "aggregations": [] } },
+      { "type": "sort", "config": { "columns": [], "descending": [] } },
+      { "type": "view", "config": { "rowLimit": 100 } },
+      { "type": "export", "config": { "format": "parquet", "filename": "report", "destination": "download" } }
+    ]
+  },
+  {
+    "id": "time_series_analysis",
+    "name": "Time-Series Analysis",
+    "description": "Prepare a time-aware dataset for exploration, gap filling, and charting.",
+    "icon": "chart-line",
+    "required_input_columns": ["A timestamp or date column", "One or more numeric series", "Optional categorical segment columns"],
+    "steps": [
+      { "type": "timeseries", "config": { "column": "", "operation_type": "extract", "component": "month", "new_column": "time_component" } },
+      { "type": "fill_null", "config": { "strategy": "forward", "columns": [] } },
+      { "type": "plot_line", "config": { "chart_type": "line", "x_column": "", "y_column": "" } }
+    ]
+  },
+  {
+    "id": "join_and_enrich",
+    "name": "Join & Enrich",
+    "description": "Combine multiple sources, enrich records, and prepare an output table.",
+    "icon": "git-merge",
+    "required_input_columns": ["Stable join keys across sources", "Columns to keep from the right source", "Derived enrichment targets"],
+    "steps": [
+      { "type": "join", "config": { "how": "inner", "right_source": "", "join_columns": [], "right_columns": [], "suffix": "_right" } },
+      { "type": "with_columns", "config": { "expressions": [] } },
+      { "type": "select", "config": { "columns": [], "cast_map": {} } },
+      { "type": "export", "config": { "format": "parquet", "filename": "enriched", "destination": "download" } }
+    ]
+  }
+]

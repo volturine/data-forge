@@ -22,32 +22,32 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.2.22
 
       - name: Install dependencies
-        working-directory: frontend
+        working-directory: packages/frontend
         run: bun install --frozen-lockfile
 
       - name: SvelteKit sync
-        working-directory: frontend
+        working-directory: packages/frontend
         run: bun x svelte-kit sync
 
       - name: Panda codegen
-        working-directory: frontend
+        working-directory: packages/frontend
         run: bun run panda:codegen
 
       - name: Build
-        working-directory: frontend
+        working-directory: packages/frontend
         run: bun run build
 
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-build
-          path: frontend/build/
+          path: packages/frontend/build/
           retention-days: 1
 
   binary:
-    name: Build binary (${{ matrix.platform }})
+    name: Build backend binary (${{ matrix.platform }})
     needs: frontend
     strategy:
       fail-fast: false
@@ -55,13 +55,13 @@ jobs:
         include:
           - os: ubuntu-22.04
             platform: linux-x86_64
-            binary: app-linux-x86_64
+            binary: backend-linux-x86_64
           - os: macos-latest
             platform: macos-arm64
-            binary: app-macos-arm64
+            binary: backend-macos-arm64
           - os: windows-latest
             platform: windows-x86_64
-            binary: app-windows-x86_64.exe
+            binary: backend-windows-x86_64.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -69,24 +69,26 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: frontend-build
-          path: frontend/build/
+          path: packages/frontend/build/
 
       - uses: astral-sh/setup-uv@v7
+        with:
+          version: 0.9.5
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Install backend dependencies
-        working-directory: backend
+        working-directory: packages/shared
         run: uv sync
 
       - name: Install Nuitka
-        working-directory: backend
+        working-directory: packages/shared
         run: uv pip install nuitka ordered-set zstandard
 
       - name: Build binary
-        working-directory: backend
+        working-directory: packages/shared
         shell: bash
         run: |
           uv run python -m nuitka \
@@ -103,12 +105,12 @@ jobs:
             --include-package-data=alembic \
             --include-data-dir=../frontend/build=frontend/build \
             --output-filename=${{ matrix.binary }} \
-            main.py
+            ../backend/main.py
 
       - uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.platform }}
-          path: backend/${{ matrix.binary }}
+          path: packages/shared/${{ matrix.binary }}
           retention-days: 7
 
   release:
@@ -130,4 +132,4 @@ jobs:
           draft: false
           prerelease: false
           make_latest: true
-          files: "app-*"
+          files: "backend-*"

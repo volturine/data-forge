@@ -1,0 +1,1652 @@
+<script lang="ts">
+	import type {
+		AnalysisTab,
+		AnalysisTabIcebergConfig,
+		AnalysisTabNotificationConfig,
+		AnalysisTabOutput
+	} from '$lib/types/analysis';
+	import type { Subscriber } from '$lib/api/settings';
+	import { getSubscribers } from '$lib/api/settings';
+	import { cancelBuild } from '$lib/api/compute';
+	import { apiRequest } from '$lib/api/client';
+	import { listDatasources, updateDatasource } from '$lib/api/datasource';
+	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import { configStore } from '$lib/stores/config.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
+	import type { ActiveBuildDetail } from '$lib/types/build-stream';
+	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
+	import { isUuid } from '$lib/utils/analysis-tab';
+	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
+	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
+	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
+	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import BaseModal from '$lib/components/ui/BaseModal.svelte';
+	import { css, chip } from '$lib/styles/panda';
+	import {
+		Bell,
+		CalendarClock,
+		ChevronDown,
+		ChevronRight,
+		EyeOff,
+		HeartPulse,
+		Loader,
+		Play,
+		Database,
+		Pencil,
+		Check,
+		X
+	} from 'lucide-svelte';
+	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
+	import { listSchedules } from '$lib/api/schedule';
+	import { SvelteMap } from 'svelte/reactivity';
+
+	interface Props {
+		buildStore: BuildStreamStore;
+		analysisId?: string;
+		datasourceId?: string;
+		activeTab?: AnalysisTab | null;
+		readOnly?: boolean;
+	}
+
+	let {
+		buildStore,
+		analysisId,
+		datasourceId,
+		activeTab = null,
+		readOnly = false
+	}: Props = $props();
+
+	const queryClient = useQueryClient();
+	const analysisPipeline = $derived.by(() => {
+		if (!analysisId) return null;
+		return buildAnalysisPipelinePayload(
+			analysisId,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+	});
+	let toggling = $state(false);
+	let buildStarting = $state(false);
+	let previewOpen = $state(false);
+	let error = $state<string | null>(null);
+	let cancelConfirmOpen = $state(false);
+	let cancelPending = $state(false);
+	let cancelToast = $state<string | null>(null);
+	let notifyOpen = $state(false);
+	let scheduleOpen = $state(false);
+	let healthOpen = $state(false);
+	let probeOutputDatasourceFor = $state<string | null>(null);
+	let editingName = $state(false);
+	let draftName = $state('');
+	let modeMenuOpen = $state(false);
+	let modeMenuRef = $state<HTMLElement>();
+	let modeTriggerRef = $state<HTMLButtonElement>();
+	let cancelToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const outputConfig = $derived.by(() => {
+		const tab = activeTab;
+		if (!tab) return null;
+		const output = tab.output;
+		const icebergRaw = output.iceberg;
+		if (!icebergRaw) return null;
+		if (
+			typeof output.filename !== 'string' ||
+			!output.filename ||
+			typeof output.build_mode !== 'string' ||
+			typeof icebergRaw.namespace !== 'string' ||
+			!icebergRaw.namespace ||
+			typeof icebergRaw.table_name !== 'string' ||
+			!icebergRaw.table_name ||
+			typeof icebergRaw.branch !== 'string' ||
+			!icebergRaw.branch
+		) {
+			return null;
+		}
+		return {
+			format: 'parquet',
+			filename: output.filename,
+			build_mode: output.build_mode,
+			iceberg: {
+				namespace: icebergRaw.namespace,
+				table_name: icebergRaw.table_name,
+				branch: icebergRaw.branch
+			},
+			notification: output.notification ?? null
+		};
+	});
+
+	const branchValue = $derived(outputConfig?.iceberg.branch ?? '');
+	function extractBranches(config: Record<string, unknown> | null | undefined): string[] {
+		const raw = config?.branches;
+		if (!Array.isArray(raw)) return [];
+		return raw.filter((branch): branch is string => typeof branch === 'string' && !!branch.trim());
+	}
+	const branchOptions = $derived.by(() => {
+		const cleaned = extractBranches(outputDatasourceQuery.data?.config);
+		const current = branchValue.trim();
+		if (!current) return cleaned;
+		if (cleaned.includes(current)) return cleaned;
+		return [current, ...cleaned];
+	});
+	const idPrefix = $derived(`output-${analysisId ?? datasourceId ?? 'node'}`);
+
+	const outputDatasourceId = $derived(activeTab?.output?.result_id ?? null);
+	const outputDefaults = $derived.by(() => {
+		return outputConfig;
+	});
+	const canQueryOutput = $derived(isUuid(outputDatasourceId));
+	const shouldQueryOutputDatasource = $derived(
+		canQueryOutput &&
+			(probeOutputDatasourceFor === outputDatasourceId || healthOpen || scheduleOpen)
+	);
+
+	const outputDatasourceQuery = createQuery(() => ({
+		queryKey: ['datasource', outputDatasourceId],
+		queryFn: async () => {
+			if (!outputDatasourceId) return null;
+			const result = await listDatasources(true);
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
+			return result.value.find((ds) => ds.id === outputDatasourceId) ?? null;
+		},
+		enabled: shouldQueryOutputDatasource
+	}));
+	const hasOutputDatasource = $derived(outputDatasourceQuery.data != null);
+	const hidden = $derived(outputDatasourceQuery.data?.is_hidden ?? true);
+
+	const healthChecksQuery = createQuery(() => ({
+		queryKey: ['healthchecks', outputDatasourceId],
+		queryFn: async () => {
+			if (!outputDatasourceId) return [];
+			const result = await listHealthChecks(outputDatasourceId);
+			if (result.isErr()) return [];
+			return result.value;
+		},
+		enabled: canQueryOutput && hasOutputDatasource
+	}));
+
+	const healthResultsQuery = createQuery(() => ({
+		queryKey: ['healthcheck-results', outputDatasourceId],
+		queryFn: async () => {
+			if (!outputDatasourceId) return [];
+			const result = await listHealthCheckResults(outputDatasourceId, 50);
+			if (result.isErr()) return [];
+			return result.value;
+		},
+		enabled: canQueryOutput && hasOutputDatasource
+	}));
+
+	const healthCount = $derived(healthChecksQuery.data?.length ?? 0);
+	const healthPassed = $derived.by(() => {
+		const checks = healthChecksQuery.data ?? [];
+		const results = healthResultsQuery.data ?? [];
+		if (checks.length === 0) return null;
+		const latest = new SvelteMap<string, boolean>();
+		for (const r of results) {
+			if (!latest.has(r.healthcheck_id)) {
+				latest.set(r.healthcheck_id, r.passed);
+			}
+		}
+		if (latest.size === 0) return null;
+		const failed = [...latest.values()].filter((v) => !v).length;
+		return failed === 0;
+	});
+
+	const schedulesQuery = createQuery(() => ({
+		queryKey: ['schedules', outputDatasourceId],
+		queryFn: async () => {
+			if (!outputDatasourceId) return [];
+			const result = await listSchedules(outputDatasourceId);
+			if (result.isErr()) return [];
+			return result.value;
+		},
+		enabled: canQueryOutput && hasOutputDatasource
+	}));
+
+	const scheduleCount = $derived(schedulesQuery.data?.length ?? 0);
+	const enabledSchedules = $derived((schedulesQuery.data ?? []).filter((s) => s.enabled).length);
+
+	const canTelegram = $derived(configStore.telegramEnabled);
+
+	const subscribersQuery = createQuery(() => ({
+		queryKey: ['telegram-subscribers'],
+		queryFn: async () => {
+			const result = await getSubscribers();
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		staleTime: 30_000,
+		enabled: canTelegram
+	}));
+
+	const notifyConfig = $derived.by(() => {
+		const n = outputConfig?.notification;
+		if (!n) {
+			return {
+				enabled: false,
+				body_template:
+					'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}'
+			};
+		}
+		return {
+			enabled: true,
+			body_template:
+				(typeof n.body_template === 'string' ? n.body_template : undefined) ||
+				'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}'
+		};
+	});
+
+	const activeSubscribers = $derived(
+		(subscribersQuery.data ?? []).filter((s: Subscriber) => s.is_active)
+	);
+
+	const selectedCount = $derived(activeSubscribers.length);
+	const buildBusy = $derived(
+		buildStarting ||
+			buildStore.status === 'connecting' ||
+			buildStore.status === 'queued' ||
+			buildStore.status === 'running'
+	);
+	const hasBuildSession = $derived(
+		buildBusy ||
+			buildStore.buildId !== null ||
+			buildStore.status === 'completed' ||
+			buildStore.status === 'failed' ||
+			buildStore.status === 'cancelled'
+	);
+	const canCancelRunningBuild = $derived(
+		(buildStore.status === 'connecting' ||
+			buildStore.status === 'queued' ||
+			buildStore.status === 'running') &&
+			!!buildStore.buildId
+	);
+	const buildSessionLabel = $derived.by(() => {
+		if (buildBusy) return 'Active Build';
+		if (buildStore.status === 'completed') return 'Last Build';
+		if (buildStore.status === 'failed') return 'Last Build';
+		if (buildStore.status === 'cancelled') return 'Last Build';
+		return 'Build';
+	});
+	const buildSessionSummary = $derived.by(() => {
+		if (buildBusy) return buildStore.currentStep ?? 'Preparing build';
+		if (buildStore.status === 'completed') {
+			if (buildStore.duration !== null) {
+				return `Completed in ${(buildStore.duration / 1000).toFixed(2)}s`;
+			}
+			return 'Completed';
+		}
+		if (buildStore.status === 'failed') {
+			return buildStore.error ?? 'Build failed';
+		}
+		if (buildStore.status === 'cancelled') {
+			return buildStore.error ?? 'Build cancelled';
+		}
+		return 'No build data';
+	});
+
+	function openBuildPreview(): void {
+		if (!hasBuildSession) return;
+		previewOpen = true;
+		if (!buildStore.buildId) return;
+		void apiRequest<ActiveBuildDetail>(`/v1/compute/builds/active/${buildStore.buildId}`).match(
+			(build: ActiveBuildDetail) => {
+				buildStore.applySnapshot(build);
+			},
+			(err) => {
+				error = err.message;
+			}
+		);
+	}
+
+	function updateOutputConfig(patch: Partial<AnalysisTabOutput>) {
+		if (readOnly) return;
+		const tab = activeTab;
+		if (!tab) return;
+		const currentOutput = tab.output;
+		const nextOutput: AnalysisTabOutput = { ...currentOutput, ...patch };
+		analysisStore.updateTab(tab.id, {
+			output: nextOutput
+		});
+	}
+
+	function updateIcebergConfig(patch: Partial<AnalysisTabIcebergConfig>) {
+		if (readOnly) return;
+		if (!outputConfig) return;
+		const current = outputConfig.iceberg;
+		updateOutputConfig({ iceberg: { ...current, ...patch } });
+	}
+
+	function ensureOutputConfig(): void {
+		if (readOnly) return;
+		const tab = activeTab;
+		if (!tab) return;
+		const defaults = outputDefaults;
+		if (!defaults) return;
+		const currentOutput = tab.output;
+		const merged: AnalysisTabOutput = { ...defaults, ...currentOutput };
+		analysisStore.updateTab(tab.id, {
+			output: merged
+		});
+	}
+
+	function startNameEdit() {
+		if (readOnly) return;
+		if (!outputConfig) return;
+		draftName = outputConfig.iceberg.table_name;
+		editingName = true;
+	}
+
+	function commitNameEdit() {
+		if (readOnly) {
+			editingName = false;
+			return;
+		}
+		if (draftName.trim()) {
+			updateIcebergConfig({ table_name: draftName.trim() });
+		}
+		editingName = false;
+	}
+
+	function cancelNameEdit() {
+		editingName = false;
+	}
+
+	function applyGlobalBranchValue(next: string) {
+		if (readOnly) return;
+		const tab = activeTab;
+		if (!tab) return;
+		const output = tab.output ?? {};
+		const iceberg = output.iceberg;
+		const branch = next.trim();
+		if (!branch) return;
+		updateOutputConfig({ iceberg: { ...iceberg, branch } });
+	}
+
+	function toggleNotification() {
+		if (readOnly) return;
+		if (notifyConfig.enabled) {
+			updateOutputConfig({ notification: null });
+			return;
+		}
+		updateOutputConfig({
+			notification: {
+				method: 'telegram',
+				body_template:
+					'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}'
+			}
+		});
+	}
+
+	function updateNotification(patch: Partial<AnalysisTabNotificationConfig>) {
+		if (readOnly) return;
+		if (!outputConfig) return;
+		const current = outputConfig.notification ?? {};
+		updateOutputConfig({ notification: { ...current, ...patch } });
+	}
+
+	async function toggleHidden() {
+		if (readOnly) return;
+		if (!outputDatasourceId || toggling) return;
+		if (!hasOutputDatasource) {
+			probeOutputDatasourceFor = outputDatasourceId;
+			return;
+		}
+		toggling = true;
+		const result = await updateDatasource(outputDatasourceId, { is_hidden: !hidden });
+		result.match(
+			() => {
+				queryClient.invalidateQueries({ queryKey: ['datasources'] });
+				queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
+				toggling = false;
+			},
+			(err) => {
+				error = err.message;
+				toggling = false;
+			}
+		);
+	}
+
+	async function handleManualBuild() {
+		if (!analysisId || buildBusy || readOnly) return;
+		analysisStore.setPreviewPaused(true);
+		previewOpen = false;
+		buildStore.reset();
+		buildStarting = true;
+		error = null;
+		ensureOutputConfig();
+
+		const saveResult = await analysisStore.save();
+		if (saveResult.isErr()) {
+			analysisStore.setPreviewPaused(false);
+			error = saveResult.error.message;
+			buildStarting = false;
+			return;
+		}
+
+		const pipeline = buildAnalysisPipelinePayload(
+			analysisId,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+		if (!pipeline) {
+			analysisStore.setPreviewPaused(false);
+			error = datasourceStore.loaded
+				? 'Unable to build analysis payload.'
+				: 'Datasources are still loading. Please try again.';
+			buildStarting = false;
+			return;
+		}
+		if (!outputConfig) {
+			analysisStore.setPreviewPaused(false);
+			error =
+				'Output configuration is incomplete. Fill in explicit output settings before building.';
+			buildStarting = false;
+			return;
+		}
+		buildStore.start({
+			analysis_pipeline: pipeline,
+			tab_id: activeTab?.id ?? null
+		});
+		buildStarting = false;
+	}
+
+	$effect(() => {
+		if (buildBusy) return;
+		analysisStore.setPreviewPaused(false);
+	});
+
+	function closeBuildPreview() {
+		previewOpen = false;
+	}
+
+	function openCancelConfirm(): void {
+		if (cancelPending || !canCancelRunningBuild) return;
+		cancelConfirmOpen = true;
+	}
+
+	function closeCancelConfirm(): void {
+		if (cancelPending) return;
+		cancelConfirmOpen = false;
+	}
+
+	function showCancelToast(message: string): void {
+		cancelToast = message;
+		if (cancelToastTimer !== null) {
+			clearTimeout(cancelToastTimer);
+		}
+		cancelToastTimer = setTimeout(() => {
+			cancelToast = null;
+			cancelToastTimer = null;
+		}, 4000);
+	}
+
+	async function confirmCancelBuild(): Promise<void> {
+		const buildId = buildStore.buildId;
+		if (!buildId || cancelPending) return;
+		cancelConfirmOpen = false;
+		cancelPending = true;
+		error = null;
+		const result = await cancelBuild(buildId);
+		result.match(
+			(cancelled) => {
+				buildStore.markCancelled(cancelled);
+				showCancelToast('Build cancelled');
+			},
+			(err) => {
+				error = err.message;
+			}
+		);
+		cancelPending = false;
+	}
+
+	const modeMenuOverlayConfig = $derived<OverlayConfig>({
+		onEscape: () => (modeMenuOpen = false),
+		onOutsideClick: (target: Node) => {
+			if (modeMenuRef?.contains(target)) return;
+			if (modeTriggerRef?.contains(target)) return;
+			modeMenuOpen = false;
+		}
+	});
+
+	$effect(() => {
+		return () => {
+			if (cancelToastTimer !== null) {
+				clearTimeout(cancelToastTimer);
+				cancelToastTimer = null;
+			}
+		};
+	});
+</script>
+
+<div
+	class={css({
+		contentVisibility: 'auto',
+		containIntrinsicSize: 'auto 200px',
+		position: 'relative',
+		width: '60%'
+	})}
+>
+	<div
+		class={css({
+			borderWidth: '1',
+			backgroundColor: 'bg.primary'
+		})}
+	>
+		<!-- Header: icon + label + badge (mirrors DatasourceNode) -->
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				paddingX: '4',
+				paddingY: '3',
+				borderBottomWidth: '1'
+			})}
+		>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+				<div
+					class={css({
+						display: 'flex',
+						height: 'iconMd',
+						width: 'iconMd',
+						alignItems: 'center',
+						justifyContent: 'center',
+						backgroundColor: 'accent.primary',
+						color: 'fg.inverse'
+					})}
+				>
+					<Database size={12} />
+				</div>
+				<span
+					class={css({
+						fontSize: 'xs',
+						fontWeight: 'semibold',
+						textTransform: 'uppercase',
+						letterSpacing: 'wide'
+					})}
+				>
+					output
+				</span>
+			</div>
+			<span
+				class={css({
+					display: 'inline-flex',
+					alignItems: 'center',
+					paddingX: '1.5',
+					paddingY: '0.5',
+					fontSize: '2xs',
+					fontWeight: 'medium',
+					textTransform: 'uppercase',
+					letterSpacing: 'widest',
+					backgroundColor: 'bg.tertiary',
+					borderWidth: '1',
+					color: 'fg.faint'
+				})}>sink</span
+			>
+		</div>
+
+		{#if outputConfig}
+			<!-- Export Name (same info-row pattern as DatasourceNode tab name) -->
+			<div
+				class={css({
+					marginX: '4',
+					marginTop: '4',
+					marginBottom: '3',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'space-between',
+					borderWidth: '1',
+					backgroundColor: 'bg.secondary',
+					paddingY: '2',
+					paddingX: '3'
+				})}
+			>
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						gap: '2',
+						fontSize: '2xs',
+						textTransform: 'uppercase',
+						letterSpacing: 'widest',
+						color: 'fg.faint'
+					})}
+				>
+					<Pencil size={11} class={css({ opacity: '0.5' })} />
+					<span>Table name</span>
+				</div>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+					{#if editingName}
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+							<input
+								class={css({
+									width: 'full',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' },
+									minWidth: 'fieldSm',
+									paddingX: '2',
+									paddingY: '0.5',
+									fontSize: 'sm'
+								})}
+								id="output-node-name"
+								bind:value={draftName}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') commitNameEdit();
+									if (e.key === 'Escape') cancelNameEdit();
+								}}
+								aria-label="Edit export name"
+							/>
+							<button
+								class={css({
+									display: 'inline-flex',
+									height: 'iconMd',
+									width: 'iconMd',
+									cursor: 'pointer',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '1',
+									color: 'fg.success',
+									backgroundColor: 'bg.primary',
+									padding: '0',
+									lineHeight: '1',
+									_hover: { backgroundColor: 'bg.success', color: 'fg.primary' }
+								})}
+								onclick={commitNameEdit}
+								type="button"
+								aria-label="Save"
+							>
+								<Check size={12} class={css({ flexShrink: '0' })} />
+							</button>
+							<button
+								class={css({
+									display: 'inline-flex',
+									height: 'iconMd',
+									width: 'iconMd',
+									cursor: 'pointer',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '1',
+									borderColor: 'border.error',
+									color: 'fg.error',
+									backgroundColor: 'bg.primary',
+									padding: '0',
+									lineHeight: '1',
+									_hover: { backgroundColor: 'bg.error', color: 'fg.primary' }
+								})}
+								onclick={cancelNameEdit}
+								type="button"
+								aria-label="Cancel"
+							>
+								<X size={12} class={css({ flexShrink: '0' })} />
+							</button>
+						</div>
+					{:else}
+						<span
+							class={css({ fontSize: 'sm', fontWeight: 'medium' })}
+							data-testid="output-table-name-inline"
+						>
+							{outputConfig.iceberg.table_name}
+						</span>
+						{#if !readOnly}
+							<button
+								class={css({
+									display: 'inline-flex',
+									height: 'iconMd',
+									width: 'iconMd',
+									cursor: 'pointer',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '1',
+									borderColor: 'border.primary',
+									backgroundColor: 'bg.primary',
+									color: 'fg.muted',
+									padding: '0',
+									lineHeight: '1',
+									_hover: {
+										backgroundColor: 'bg.tertiary',
+										opacity: '1'
+									}
+								})}
+								onclick={startNameEdit}
+								type="button"
+								aria-label="Edit export name"
+								data-testid="output-table-name-inline-edit"
+							>
+								<Pencil size={12} class={css({ flexShrink: '0' })} />
+							</button>
+						{/if}
+					{/if}
+				</div>
+			</div>
+
+			<!-- Output Details (mirrors DatasourceNode dataset card) -->
+			<div class={css({ marginX: '4', marginBottom: '3' })}>
+				<div
+					class={css({
+						marginBottom: '2',
+						display: 'flex',
+						alignItems: 'center',
+						gap: '2',
+						fontSize: 'xs',
+						textTransform: 'uppercase',
+						letterSpacing: 'wide',
+						color: 'fg.muted'
+					})}
+				>
+					<Database size={12} class={css({ opacity: '0.6' })} />
+					<span>Output</span>
+				</div>
+				<div
+					class={css({
+						display: 'flex',
+						flexDirection: 'column',
+						gap: '2',
+						borderWidth: '1',
+						backgroundColor: 'bg.tertiary',
+						padding: '3'
+					})}
+				>
+					<div
+						class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
+					>
+						<span
+							class={css({ fontSize: 'sm', fontWeight: 'semibold' })}
+							data-testid="output-table-name-card"
+						>
+							{outputConfig.iceberg.table_name}
+						</span>
+						<button
+							type="button"
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								gap: '1',
+								borderWidth: '1',
+								backgroundColor: 'bg.secondary',
+								paddingX: '2',
+								paddingY: '0.5',
+								fontSize: '2xs',
+								color: hidden ? 'fg.muted' : 'fg.success',
+								_hover: { color: 'fg.primary' }
+							})}
+							onclick={toggleHidden}
+							disabled={readOnly || toggling || !hasOutputDatasource}
+							data-testid="output-visibility-toggle"
+							title={hidden
+								? 'Hidden from other analyses — click to make visible'
+								: 'Visible to other analyses — click to hide'}
+						>
+							{#if hidden}
+								<EyeOff size={10} />
+								<span>hidden</span>
+							{:else}
+								<Database size={10} />
+								<span>visible</span>
+							{/if}
+						</button>
+					</div>
+					<div
+						class={css({
+							display: 'grid',
+							gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+							gap: '2',
+							borderTopWidth: '1',
+							paddingTop: '2'
+						})}
+					>
+						{#if readOnly}
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									borderWidth: '1',
+									backgroundColor: 'bg.secondary',
+									paddingX: '3',
+									paddingY: '2',
+									fontSize: 'sm'
+								})}
+							>
+								<span class={css({ color: 'fg.muted' })}>Build mode</span>
+								<span>{outputConfig.build_mode}</span>
+							</div>
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									borderWidth: '1',
+									backgroundColor: 'bg.secondary',
+									paddingX: '3',
+									paddingY: '2',
+									fontSize: 'sm'
+								})}
+							>
+								<span class={css({ color: 'fg.muted' })}>Branch</span>
+								<span>{branchValue}</span>
+							</div>
+						{:else}
+							<div
+								class={css({
+									display: 'flex',
+									flexDirection: 'column',
+									gap: '2',
+									minWidth: 'inputSm',
+									position: 'relative'
+								})}
+								bind:this={modeMenuRef}
+							>
+								<button
+									type="button"
+									class={css({
+										display: 'flex',
+										alignItems: 'center',
+										gap: '2',
+										paddingX: '3',
+										paddingY: '2',
+										borderWidth: '1',
+										backgroundColor: 'bg.secondary',
+										cursor: 'pointer',
+										justifyContent: 'space-between',
+										fontSize: 'sm',
+										_focusVisible: {
+											outline: '2px solid {colors.accent.secondary}',
+											outlineOffset: '2px'
+										},
+										width: '100%'
+									})}
+									onclick={() => (modeMenuOpen = !modeMenuOpen)}
+									aria-expanded={modeMenuOpen}
+									bind:this={modeTriggerRef}
+									data-testid="output-mode-trigger"
+								>
+									<span
+										class={css({
+											flex: '1',
+											textAlign: 'left',
+											minWidth: '0',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap'
+										})}>{outputConfig.build_mode}</span
+									>
+									<ChevronDown size={14} class={css({ color: 'fg.muted' })} />
+								</button>
+								{#if modeMenuOpen}
+									<div
+										class={css({
+											position: 'absolute',
+											zIndex: 'dropdown',
+											top: 'calc(100% + 6px)',
+											left: '0',
+											minWidth: '100%',
+											width: '100%',
+											maxWidth: '100%',
+											backgroundColor: 'bg.primary',
+											borderWidth: '1',
+											padding: '2',
+											display: 'flex',
+											flexDirection: 'column',
+											gap: '2'
+										})}
+										role="listbox"
+										data-testid="output-mode-listbox"
+										use:overlayStack.action={modeMenuOverlayConfig}
+									>
+										<div
+											class={css({
+												display: 'flex',
+												flexDirection: 'column',
+												gap: '2',
+												maxHeight: 'dropdown',
+												overflowY: 'auto',
+												overflowX: 'hidden',
+												padding: '2',
+												scrollbarWidth: 'thin',
+												scrollbarColor: '{colors.border.primary} transparent'
+											})}
+										>
+											{#each ['full', 'incremental', 'recreate'] as mode (mode)}
+												<button
+													type="button"
+													class={css(
+														{
+															minWidth: '0',
+															width: '100%',
+															paddingX: '3',
+															paddingY: '2',
+															borderWidth: '1',
+															borderColor: 'transparent',
+															background: 'transparent',
+															textAlign: 'left',
+															display: 'flex',
+															alignItems: 'center',
+															justifyContent: 'flex-start',
+															gap: '2',
+															cursor: 'pointer',
+															fontSize: 'sm',
+															'& span': { minWidth: '0', overflowWrap: 'anywhere' },
+															_hover: { backgroundColor: 'bg.hover' }
+														},
+														outputConfig.build_mode === mode && { backgroundColor: 'bg.hover' }
+													)}
+													onclick={() => {
+														updateOutputConfig({ build_mode: mode });
+														modeMenuOpen = false;
+													}}
+													role="option"
+													aria-selected={outputConfig.build_mode === mode}
+													data-testid={`output-mode-option-${mode}`}
+												>
+													<span>{mode}</span>
+												</button>
+											{/each}
+										</div>
+									</div>
+								{/if}
+							</div>
+							<BranchPicker
+								branches={branchOptions}
+								value={branchValue}
+								placeholder="Branch"
+								allowCreate={true}
+								onChange={applyGlobalBranchValue}
+							/>
+						{/if}
+					</div>
+				</div>
+			</div>
+		{:else}
+			<div
+				class={css({
+					marginX: '4',
+					marginTop: '4',
+					marginBottom: '3',
+					borderWidth: '1',
+					borderStyle: 'dashed',
+					padding: '3',
+					fontSize: 'xs',
+					color: 'fg.tertiary'
+				})}
+				data-testid="output-config-required"
+			>
+				Output configuration is incomplete. Set explicit output filename, build mode, namespace,
+				table name, and branch before building.
+			</div>
+		{/if}
+
+		<!-- Build Action -->
+		<div class={css({ marginX: '4', marginBottom: '3' })}>
+			<button
+				class={css({
+					display: 'flex',
+					width: '100%',
+					cursor: 'pointer',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '2',
+					borderWidth: '1',
+					borderColor: 'border.primary',
+					backgroundColor: 'bg.secondary',
+					paddingY: '2',
+					paddingX: '3',
+					fontSize: 'xs',
+					fontWeight: 'medium',
+					color: 'fg.muted',
+					_hover: {
+						backgroundColor: 'bg.tertiary',
+						color: 'fg.primary',
+						'& svg': { opacity: '1' }
+					},
+					_disabled: { cursor: 'not-allowed', opacity: '0.5' }
+				})}
+				onclick={handleManualBuild}
+				disabled={!analysisId || buildBusy || readOnly || !analysisPipeline}
+				title="Run analysis build"
+				type="button"
+				data-testid="output-build-button"
+			>
+				{#if buildBusy}
+					<Loader size={14} class={css({ opacity: '0.7' })} />
+					<span data-testid="output-building">building...</span>
+				{:else}
+					<Play size={14} class={css({ opacity: '0.7' })} />
+					<span>build</span>
+				{/if}
+			</button>
+		</div>
+
+		{#if hasBuildSession}
+			<div class={css({ marginX: '4', marginBottom: '3' })}>
+				<button
+					type="button"
+					class={css({
+						display: 'flex',
+						width: '100%',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						gap: '3',
+						cursor: 'pointer',
+						borderWidth: '1',
+						backgroundColor: buildBusy ? 'bg.accent' : 'bg.secondary',
+						paddingX: '3',
+						paddingY: '2.5',
+						textAlign: 'left',
+						_hover: { backgroundColor: 'bg.hover' }
+					})}
+					onclick={openBuildPreview}
+					data-testid="output-build-preview-trigger"
+					aria-label="Open build preview"
+				>
+					<div class={css({ display: 'flex', minWidth: '0', alignItems: 'center', gap: '2.5' })}>
+						{#if buildBusy}
+							<Loader
+								size={14}
+								class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
+							/>
+						{:else if buildStore.status === 'completed'}
+							<Check size={14} class={css({ color: 'fg.success' })} />
+						{:else if buildStore.status === 'cancelled'}
+							<X size={14} class={css({ color: 'fg.warning' })} />
+						{:else}
+							<X size={14} class={css({ color: 'fg.error' })} />
+						{/if}
+						<div
+							class={css({ display: 'flex', minWidth: '0', flexDirection: 'column', gap: '0.5' })}
+						>
+							<span
+								class={css({
+									fontSize: '2xs',
+									textTransform: 'uppercase',
+									letterSpacing: 'wide',
+									color: 'fg.muted'
+								})}
+							>
+								{buildSessionLabel}
+							</span>
+							<span
+								class={css({
+									overflow: 'hidden',
+									textOverflow: 'ellipsis',
+									whiteSpace: 'nowrap',
+									fontSize: 'sm',
+									fontWeight: 'medium'
+								})}
+								title={buildSessionSummary}
+							>
+								{buildSessionSummary}
+							</span>
+						</div>
+					</div>
+					<div
+						class={css({
+							display: 'flex',
+							flexShrink: '0',
+							alignItems: 'center',
+							gap: '2',
+							fontSize: 'xs',
+							color: 'fg.muted'
+						})}
+					>
+						{#if buildStore.buildId}
+							<span class={css({ fontFamily: 'mono' })}>{buildStore.buildId.slice(0, 8)}</span>
+						{/if}
+						<span>{buildBusy ? 'Open live view' : 'Open details'}</span>
+						<ChevronRight size={12} />
+					</div>
+				</button>
+			</div>
+		{/if}
+
+		<!-- Collapsible Sections -->
+		<div
+			class={css({
+				display: 'flex',
+				flexDirection: 'column',
+				gap: '3',
+				borderTopWidth: '1',
+				paddingTop: '3',
+				marginX: '4',
+				marginBottom: '3'
+			})}
+		>
+			<!-- Build Notification Section -->
+			<div>
+				<button
+					type="button"
+					class={css({
+						display: 'flex',
+						height: 'iconLg',
+						width: '100%',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '0',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
+					onclick={() => (notifyOpen = !notifyOpen)}
+					data-testid="output-notify-toggle"
+				>
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						{#if notifyOpen}
+							<ChevronDown size={12} />
+						{:else}
+							<ChevronRight size={12} />
+						{/if}
+						<Bell size={12} />
+						<span>Build Notification</span>
+					</span>
+					{#if notifyConfig.enabled}
+						<span class={chip({ tone: 'accent' })}>
+							{selectedCount}/{activeSubscribers.length}
+						</span>
+					{/if}
+				</button>
+
+				{#if notifyOpen}
+					<div
+						class={css({
+							marginTop: '2',
+							display: 'flex',
+							flexDirection: 'column',
+							gap: '2',
+							paddingLeft: '5'
+						})}
+						data-testid="output-notify-panel"
+					>
+						<label
+							class={css({
+								display: 'flex',
+								cursor: 'pointer',
+								alignItems: 'center',
+								gap: '2',
+								fontSize: 'xs',
+								fontWeight: 'normal',
+								color: 'fg.secondary',
+								textTransform: 'none',
+								letterSpacing: 'normal',
+								marginBottom: '0'
+							})}
+						>
+							<input
+								name="notify_enabled"
+								type="checkbox"
+								checked={notifyConfig.enabled}
+								onchange={toggleNotification}
+								disabled={readOnly}
+							/>
+							<span>Notify subscribers on build</span>
+						</label>
+
+						{#if notifyConfig.enabled}
+							<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+								{#if !canTelegram}
+									<div
+										class={css({
+											borderWidth: '1',
+											borderColor: 'border.warning',
+											backgroundColor: 'bg.warning',
+											padding: '2',
+											fontSize: '2xs',
+											color: 'fg.warning'
+										})}
+									>
+										Telegram not enabled. Enable bot in global settings.
+									</div>
+								{:else}
+									<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+										<span
+											class={css({
+												fontSize: '2xs',
+												textTransform: 'uppercase',
+												color: 'fg.muted'
+											})}
+										>
+											Recipients
+										</span>
+										<div
+											class={css({
+												maxHeight: 'colMd',
+												overflowY: 'auto',
+												borderWidth: '1',
+												backgroundColor: 'bg.secondary'
+											})}
+										>
+											{#if subscribersQuery.isPending}
+												<div
+													class={css({
+														padding: '2',
+														textAlign: 'center',
+														fontSize: '2xs',
+														color: 'fg.muted'
+													})}
+												>
+													Loading...
+												</div>
+											{:else if subscribersQuery.isError}
+												<div
+													class={css({
+														padding: '2',
+														textAlign: 'center',
+														fontSize: '2xs',
+														color: 'fg.error'
+													})}
+												>
+													Failed to load subscribers
+												</div>
+											{:else if activeSubscribers.length === 0}
+												<div
+													class={css({
+														padding: '2',
+														textAlign: 'center',
+														fontSize: '2xs',
+														color: 'fg.muted'
+													})}
+												>
+													No subscribers. Users can subscribe via /subscribe in Telegram.
+												</div>
+											{:else}
+												{#each activeSubscribers as sub (sub.id)}
+													<div
+														class={css({
+															display: 'flex',
+															alignItems: 'center',
+															gap: '2',
+															borderBottomWidth: '1',
+															paddingX: '2',
+															paddingY: '1.5',
+															'&:last-child': { borderBottomWidth: '0' }
+														})}
+													>
+														<span
+															class={css({
+																overflow: 'hidden',
+																textOverflow: 'ellipsis',
+																whiteSpace: 'nowrap',
+																fontSize: 'xs',
+																color: 'fg.primary'
+															})}
+														>
+															{sub.title}
+														</span>
+														<span
+															class={css({
+																marginLeft: 'auto',
+																flexShrink: '0',
+																fontSize: '2xs',
+																color: 'fg.muted'
+															})}
+														>
+															{sub.chat_id}
+														</span>
+													</div>
+												{/each}
+											{/if}
+										</div>
+										<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+											All active subscribers receive build notifications.
+										</span>
+									</div>
+								{/if}
+
+								<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+									<label
+										class={css({
+											display: 'block',
+											fontSize: '2xs',
+											fontWeight: 'semibold',
+											color: 'fg.muted',
+											marginBottom: '1.5',
+											textTransform: 'uppercase',
+											letterSpacing: 'wider'
+										})}
+										for={`${idPrefix}-notify-body`}
+									>
+										Message Template
+									</label>
+									<textarea
+										class={css({
+											width: 'full',
+											color: 'fg.primary',
+											borderWidth: '1',
+											borderRadius: '0',
+											transitionProperty: 'border-color',
+											transitionDuration: '160ms',
+											transitionTimingFunction: 'ease',
+											_focus: { outline: 'none' },
+											_focusVisible: { borderColor: 'border.accent' },
+											_disabled: {
+												opacity: '0.5',
+												cursor: 'not-allowed'
+											},
+											_placeholder: { color: 'fg.muted' },
+											backgroundColor: 'bg.secondary',
+											paddingY: '1',
+											paddingX: '2',
+											fontSize: 'xs'
+										})}
+										id={`${idPrefix}-notify-body`}
+										rows="3"
+										value={notifyConfig.body_template}
+										disabled={readOnly}
+										oninput={(e) =>
+											updateNotification({
+												body_template: e.currentTarget.value
+											})}
+									></textarea>
+									<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+										&#123;&#123;analysis_name&#125;&#125;, &#123;&#123;status&#125;&#125;,
+										&#123;&#123;duration_ms&#125;&#125;, &#123;&#123;row_count&#125;&#125;
+									</span>
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<!-- Health Checks Section -->
+			<div>
+				<button
+					type="button"
+					class={css({
+						display: 'flex',
+						height: 'iconLg',
+						width: '100%',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '0',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
+					onclick={() => (healthOpen = !healthOpen)}
+					data-testid="output-health-toggle"
+				>
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						{#if healthOpen}
+							<ChevronDown size={12} />
+						{:else}
+							<ChevronRight size={12} />
+						{/if}
+						<HeartPulse size={12} />
+						<span>Health Checks</span>
+					</span>
+					{#if healthCount > 0}
+						<span
+							class={css(
+								{ paddingX: '1.5', paddingY: '0.5', fontSize: '2xs' },
+								healthPassed === true && { backgroundColor: 'bg.success', color: 'fg.success' },
+								healthPassed === false && { backgroundColor: 'bg.error', color: 'fg.error' },
+								healthPassed !== true &&
+									healthPassed !== false && {
+										backgroundColor: 'bg.accent',
+										color: 'accent.primary'
+									}
+							)}
+						>
+							{healthCount}
+						</span>
+					{/if}
+				</button>
+
+				{#if healthOpen}
+					{#if readOnly}
+						<div
+							class={css({
+								marginTop: '2',
+								borderWidth: '1',
+								borderStyle: 'dashed',
+								padding: '3',
+								textAlign: 'center',
+								fontSize: 'xs',
+								color: 'fg.tertiary'
+							})}
+						>
+							Analysis is locked. Health checks are read-only from this view.
+						</div>
+					{:else if canQueryOutput && hasOutputDatasource}
+						<div
+							class={css({
+								marginTop: '2',
+								borderWidth: '1',
+								backgroundColor: 'bg.primary',
+								padding: '2'
+							})}
+						>
+							<HealthChecksManager datasourceId={outputDatasourceId ?? undefined} compact />
+						</div>
+					{:else}
+						<div
+							class={css({
+								marginTop: '2',
+								borderWidth: '1',
+								borderStyle: 'dashed',
+								padding: '3',
+								textAlign: 'center',
+								fontSize: 'xs',
+								color: 'fg.tertiary'
+							})}
+							data-testid="output-health-empty-state"
+						>
+							{#if canQueryOutput}
+								Build this output once to materialize its datasource before adding health checks.
+							{:else}
+								Save this analysis to create an output datasource before adding health checks.
+							{/if}
+						</div>
+					{/if}
+				{/if}
+			</div>
+
+			<!-- Schedule Section -->
+			<div>
+				<button
+					type="button"
+					class={css({
+						display: 'flex',
+						height: 'iconLg',
+						width: '100%',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '0',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
+					onclick={() => (scheduleOpen = !scheduleOpen)}
+					data-testid="output-schedule-toggle"
+				>
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						{#if scheduleOpen}
+							<ChevronDown size={12} />
+						{:else}
+							<ChevronRight size={12} />
+						{/if}
+						<CalendarClock size={12} />
+						<span>Schedules</span>
+					</span>
+					{#if scheduleCount > 0}
+						<span class={chip({ tone: 'accent' })}>
+							{enabledSchedules}/{scheduleCount}
+						</span>
+					{/if}
+				</button>
+
+				{#if scheduleOpen && readOnly}
+					<div
+						class={css({
+							marginTop: '2',
+							borderWidth: '1',
+							borderStyle: 'dashed',
+							padding: '3',
+							textAlign: 'center',
+							fontSize: 'xs',
+							color: 'fg.tertiary'
+						})}
+					>
+						Analysis is locked. Schedules are read-only from this view.
+					</div>
+				{:else if scheduleOpen && canQueryOutput && hasOutputDatasource}
+					<div
+						class={css({
+							marginTop: '2',
+							borderWidth: '1',
+							backgroundColor: 'bg.primary',
+							padding: '2'
+						})}
+					>
+						<ScheduleManager datasourceId={outputDatasourceId ?? undefined} compact />
+					</div>
+				{:else if scheduleOpen}
+					<div
+						class={css({
+							marginTop: '2',
+							borderWidth: '1',
+							borderStyle: 'dashed',
+							padding: '3',
+							textAlign: 'center',
+							fontSize: 'xs',
+							color: 'fg.tertiary'
+						})}
+					>
+						{#if canQueryOutput}
+							Build this output once to materialize its datasource before adding schedules.
+						{:else}
+							Save this analysis to create an output datasource before adding schedules.
+						{/if}
+					</div>
+				{/if}
+			</div>
+		</div>
+
+		{#if error}
+			<div
+				class={css({
+					marginTop: '3',
+					borderWidth: '1',
+					borderColor: 'border.error',
+					backgroundColor: 'bg.error',
+					padding: '2',
+					fontSize: 'xs',
+					color: 'fg.error'
+				})}
+				data-testid="output-build-error"
+			>
+				{error}
+			</div>
+		{/if}
+	</div>
+</div>
+
+<BaseModal
+	open={previewOpen}
+	onClose={closeBuildPreview}
+	panelClass={css({
+		width: '100%',
+		maxWidth: 'modalLg',
+		maxHeight: '90vh',
+		overflowY: 'auto',
+		borderWidth: '1',
+		backgroundColor: 'bg.primary'
+	})}
+>
+	{#snippet content()}
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				paddingX: '4',
+				paddingY: '3',
+				borderBottomWidth: '1'
+			})}
+		>
+			<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>Build Preview</span>
+			<button
+				type="button"
+				class={css({
+					display: 'inline-flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					cursor: 'pointer',
+					border: 'none',
+					backgroundColor: 'transparent',
+					color: 'fg.muted',
+					padding: '1',
+					_hover: { color: 'fg.primary' }
+				})}
+				onclick={closeBuildPreview}
+				aria-label="Close build preview"
+			>
+				<X size={14} />
+			</button>
+		</div>
+		<BuildPreview
+			store={buildStore}
+			onCancel={openCancelConfirm}
+			canCancel={canCancelRunningBuild}
+			{cancelPending}
+		/>
+	{/snippet}
+</BaseModal>
+
+<ConfirmDialog
+	show={cancelConfirmOpen}
+	heading="Cancel this build?"
+	message="Cancel this build? Any partial results will be discarded."
+	confirmText={cancelPending ? 'Cancelling...' : 'Cancel Build'}
+	cancelText="Keep running"
+	onConfirm={confirmCancelBuild}
+	onCancel={closeCancelConfirm}
+/>
+
+{#if cancelToast}
+	<div
+		class={css({
+			position: 'fixed',
+			bottom: '4',
+			left: '50%',
+			transform: 'translateX(-50%)',
+			backgroundColor: 'bg.warning',
+			borderWidth: '1',
+			borderColor: 'border.warning',
+			color: 'fg.warning',
+			paddingX: '4',
+			paddingY: '2',
+			fontSize: 'sm',
+			zIndex: 'toast'
+		})}
+		data-testid="build-cancel-toast"
+	>
+		{cancelToast}
+	</div>
+{/if}

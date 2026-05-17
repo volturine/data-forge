@@ -1,0 +1,30 @@
+[project]
+    name            = "dataforge-scheduler"
+    version         = "1.0.0"
+    description     = "Data-Forge scheduler runtime package"
+    requires-python = ">=3.11"
+    dependencies    = ["dataforge-shared"]
+
+[tool.uv.sources]
+    dataforge-shared = { path = "../shared", editable = true }
+
+[build-system]
+    requires      = ["hatchling"]
+    build-backend = "hatchling.build"
+
+[tool.ruff]
+    target-version = "py311"
+    line-length    = 160
+    indent-width   = 4
+
+[dependency-groups]
+    dev = [
+        "pytest>=9.0.3",
+        "pytest-asyncio>=1.3.0",
+        "pytest-cov>=7.1.0",
+        "pytest-timeout>=2.4.0",
+        "pytest-xdist>=3.8.0",
+    ]
+
+[tool.hatch.build.targets.wheel]
+    only-include = ["main.py", "scheduler_service.py"]

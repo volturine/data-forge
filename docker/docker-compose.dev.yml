@@ -1,0 +1,80 @@
+services:
+  api:
+    environment:
+      DEBUG: "true"
+      PROD_MODE_ENABLED: "false"
+      WORKERS: "1"
+      SCHEDULER_CHECK_INTERVAL: ${DF_SCHEDULER_CHECK_INTERVAL}
+      UVICORN_ACCESS_LOG: "true"
+      AUTH_FRONTEND_URL: ${DF_AUTH_FRONTEND_URL}
+      CORS_ORIGINS: ${DF_CORS_ORIGINS}
+    volumes:
+      - data:/app/data
+      - ../packages/:/app/packages/
+      - shared-venv:/app/packages/shared/.venv
+
+  scheduler:
+    environment:
+      DEBUG: "true"
+      PROD_MODE_ENABLED: "false"
+      WORKERS: "1"
+      SCHEDULER_CHECK_INTERVAL: ${DF_SCHEDULER_CHECK_INTERVAL}
+    volumes:
+      - data:/app/data
+      - ../packages/:/app/packages/
+      - shared-venv:/app/packages/shared/.venv
+
+  worker:
+    environment:
+      DEBUG: "true"
+      PROD_MODE_ENABLED: "false"
+      WORKERS: "1"
+      BUILD_WORKER_MAX_PROCESSES: ${DF_BUILD_WORKER_MAX_PROCESSES}
+      BUILD_WORKER_IDLE_EXIT_SECONDS: ${DF_BUILD_WORKER_IDLE_EXIT_SECONDS}
+    volumes:
+      - data:/app/data
+      - ../packages/:/app/packages/
+      - shared-venv:/app/packages/shared/.venv
+
+  frontend:
+    image: oven/bun:1
+    working_dir: /app/packages/frontend
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      FRONTEND_PORT: ${DF_FRONTEND_PORT}
+      BACKEND_HOST: api
+      BACKEND_PORT: "8000"
+      VITE_BACKEND_PORT: "8000"
+    ports:
+      - "${DF_FRONTEND_PORT}:${DF_FRONTEND_PORT}"
+    volumes:
+      - ../packages/frontend:/app/packages/frontend
+      - frontend-node-modules:/app/packages/frontend/node_modules
+      - frontend-svelte-kit:/app/packages/frontend/.svelte-kit
+    command:
+      [
+        "sh",
+        "-lc",
+        "bun install --frozen-lockfile && bun run dev --host 0.0.0.0 --port ${DF_FRONTEND_PORT}",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "const port = process.env.FRONTEND_PORT; const res = await fetch('http://127.0.0.1:' + port); if (!res.ok) process.exit(1);",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  shared-venv:
+    driver: local
+  frontend-node-modules:
+    driver: local
+  frontend-svelte-kit:
+    driver: local

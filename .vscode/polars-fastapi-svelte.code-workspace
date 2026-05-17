@@ -3,10 +3,24 @@
     {
       "path": "..",
     },
+    {
+      "path": "../packages/frontend",
+    },
+    {
+      "path": "../packages/backend",
+    },
+    {
+      "path": "../packages/scheduler",
+    },
+    {
+      "path": "../packages/shared",
+    },
+    {
+      "path": "../packages/worker-manager",
+    },
   ],
   "settings": {
     "svelte.enable-ts-plugin": true,
-    "typescript.tsdk": "frontend/node_modules/typescript/lib",
     "files.associations": {
       "*.svelte": "svelte",
     },
