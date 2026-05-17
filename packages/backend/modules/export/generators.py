@@ -447,7 +447,6 @@ def render_polars_filter(context: PolarsStepRenderContext) -> str:
 def render_polars_select(context: PolarsStepRenderContext) -> str:
     columns = context.config.get("columns")
     cast_map = context.config.get("cast_map")
-    current = context.current_var
     if isinstance(columns, list) and columns:
         quoted = "[" + ", ".join(json.dumps(col) for col in columns if isinstance(col, str)) + "]"
         current = context.assign(f"{context.current_var}.select({quoted})")
