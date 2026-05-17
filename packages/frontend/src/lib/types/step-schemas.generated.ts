@@ -12,11 +12,29 @@ export interface DropConfig {
 	columns?: string[];
 }
 
+export type FilterOperator =
+	| '='
+	| '=='
+	| '!='
+	| '>'
+	| '<'
+	| '>='
+	| '<='
+	| 'contains'
+	| 'not_contains'
+	| 'starts_with'
+	| 'ends_with'
+	| 'regex'
+	| 'is_null'
+	| 'is_not_null'
+	| 'in'
+	| 'not_in';
+
 export type FilterValueType = 'string' | 'number' | 'date' | 'datetime' | 'column' | 'boolean';
 
 export interface FilterConditionSchema {
 	column: string;
-	operator: string;
+	operator: FilterOperator;
 	value?: string | number | boolean | string[] | null;
 	value_type?: FilterValueType;
 	compare_column?: string | null;

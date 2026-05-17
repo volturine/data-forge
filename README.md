@@ -3,7 +3,7 @@
 > A local-first, no-code data analysis platform for building visual data pipelines — powered by Polars, FastAPI, and SvelteKit.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/volturine/polars-fastapi-svelte/actions/workflows/ci.yml/badge.svg)](https://github.com/volturine/polars-fastapi-svelte/actions/workflows/ci.yml)
+[![CI](https://github.com/volturine/data-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Bun](https://img.shields.io/badge/runtime-Bun-black.svg)](https://bun.sh)
 
@@ -126,7 +126,7 @@ See [`docker/README.md`](docker/README.md) for the Docker production, evaluation
 # Install all dependencies
 just install
 
-# Edit backend/dev.env for local settings
+# Review packages/shared/dev.env for local settings
 
 # Start the full local runtime with hot-reload
 just dev
@@ -170,14 +170,14 @@ just dev
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DEBUG` | `false` | Enable debug logging and SQL echo |
-| `PROD_MODE_ENABLED` | `false` | Serve static frontend from `frontend/build` |
+| `PROD_MODE_ENABLED` | `false` | Serve static frontend from `packages/frontend/build` |
 | `AUTH_REQUIRED` | `false` | Require login before accessing routes |
 | `DATA_DIR` | — | Base directory for all data storage |
 | `DATABASE_URL` | PostgreSQL connection URL | Runtime database connection |
 | `DISTRIBUTED_RUNTIME_ENABLED` | `false` | Enables supported Postgres distributed runtime mode |
 | `DEFAULT_NAMESPACE` | `default` | Default data namespace |
 
-See **[ENV_VARIABLES.md](ENV_VARIABLES.md)** for the complete reference.
+See **[docs/ENV_VARIABLES.md](docs/ENV_VARIABLES.md)** for the complete reference.
 
 ---
 
@@ -196,68 +196,50 @@ See **[ENV_VARIABLES.md](ENV_VARIABLES.md)** for the complete reference.
 just install        # Install all dependencies
 just dev            # Start supervised app runtime and frontend
 just format         # Format all code (ruff + prettier)
-just check          # Run all linters and type checks
+just check          # Run ruff + mypy + svelte-check + eslint
 just test           # Run backend pytest + frontend Vitest
 just test-e2e       # Run Playwright end-to-end tests
-just verify         # Full gate: format + check (required before every PR)
+just verify         # Format + static checks only
 just prod           # Build frontend and start production server
 ```
 
 ### Running Tests
 
 ```bash
-# Backend unit tests
-cd backend && uv run pytest
-
-# Frontend unit tests
-cd frontend && bun run test:unit
-
-# End-to-end tests (starts servers automatically)
+# Standard validation workflow
+just verify
+just test
 just test-e2e
 ```
 
+For code or config changes, run all three commands before opening a PR. For targeted local work, the tests live under `packages/shared/tests/`, `packages/backend/tests/`, `packages/scheduler/tests/`, `packages/worker-manager/tests/`, and `packages/frontend/tests/`.
+
 ### Code Style
 
-- **Python**: Ruff (format + lint) + mypy — see `backend/pyproject.toml`
+- **Python**: Ruff (format + lint) + mypy — see `packages/backend/pyproject.toml`
 - **TypeScript/Svelte**: ESLint + Prettier + svelte-check
 - **Conventions**: See [STYLE_GUIDE.md](STYLE_GUIDE.md)
 
-> **Important:** Always run `just verify` before opening a PR. It must pass with zero errors and zero unclassified warnings.
+> **Important:** For code or config changes, run `just verify`, `just test`, and `just test-e2e` before opening a PR. All must pass with zero errors and zero unclassified warnings.
 
 ---
 
 ## Project Structure
 
 ```
-polars-fastapi-svelte/
-├── backend/                  # FastAPI Python backend
-│   ├── api/                  # API route registration
-│   ├── core/                 # Settings, database, lifespan
-│   ├── modules/              # Feature modules (compute, datasources, analyses, ...)
-│   │   ├── compute/          # Polars compute engine + process manager
-│   │   ├── datasources/      # Data source CRUD and schema extraction
-│   │   ├── analyses/         # Analysis and pipeline definition management
-│   │   ├── scheduling/       # Dataset-centric scheduler
-│   │   ├── lineage/          # Dependency graph computation
-│   │   └── mcp/              # MCP tool registry and router
-│   ├── tests/                # Backend pytest tests
-│   └── main.py               # API entry point
-├── scheduler/                # Scheduler runtime package
-│   └── main.py               # Scheduler entry point
-├── worker-manager/           # Build worker runtime package
-│   └── main.py               # Worker-manager entry point
-├── frontend/                 # SvelteKit frontend
-│   ├── src/
-│   │   ├── lib/              # Shared components, utils, stores
-│   │   │   ├── components/   # Reusable UI components
-│   │   │   ├── api/          # TanStack Query hooks
-│   │   │   └── utils/        # Utility functions
-│   │   └── routes/           # SvelteKit page routes
-│   └── tests/                # Playwright e2e tests
-├── docs/                     # Product and architecture docs
+data-forge/
+├── packages/
+│   ├── shared/               # Shared Python runtime, contracts, tests, and env files
+│   ├── backend/              # FastAPI API service
+│   ├── scheduler/            # Scheduler runtime
+│   ├── worker-manager/       # Dynamic build worker runtime
+│   └── frontend/             # SvelteKit frontend + Playwright/Vitest tests
+├── docs/                     # Product docs, PRDs, and references
 ├── docker/                   # Docker image targets, compose, and env files
+├── scripts/                  # Repo maintenance and validation scripts
 ├── Justfile                  # Task runner commands
-└── ENV_VARIABLES.md          # Complete environment variable reference
+├── AGENTS.md                 # Assistant workflow and repo rules
+└── STYLE_GUIDE.md            # Code style conventions
 ```
 
 ---
@@ -316,7 +298,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes and run `just verify`
+3. Make your changes and run the required validation commands (`just verify`, `just test`, and `just test-e2e` for code/config changes)
 4. Open a pull request
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on code style, testing, and the review process.
@@ -325,17 +307,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on code style, te
 
 ## Security
 
-If you discover a security vulnerability, please report it responsibly. See [SECURITY.md](SECURITY.md) for details.
+If you discover a security vulnerability, please report it privately to the project maintainers.
 
 **Do not open public issues for security vulnerabilities.**
 
 ### Development
 
-- **[IMPROVEMENTS.md](IMPROVEMENTS.md)** — Code quality improvements summary
-- [PRD](docs/PRD.md) — Feature specs and architecture
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) — Release and project history
+- [docs/ENV_VARIABLES.md](docs/ENV_VARIABLES.md) — Environment variable reference
+- [docs/prd/data-forge.md](docs/prd/data-forge.md) — Core product spec and architecture
 - [AGENTS.md](AGENTS.md) — Developer guidelines
 - [STYLE_GUIDE.md](STYLE_GUIDE.md) — Code style
-- [MCP Tool Contract](docs/mcp-tool-contract.md) — How API routes are exposed as MCP tools
+- [docs/prd/mcp-tool-contract.md](docs/prd/mcp-tool-contract.md) — How API routes are exposed as MCP tools
 ---
 
 ## License

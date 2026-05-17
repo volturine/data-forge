@@ -10,21 +10,21 @@ from core.iceberg_metadata import (
 from core.namespace import namespace_paths
 
 from operations.fill_null import cast_value, get_fill_strategy, get_polars_type
-from operations.filter import get_operator
+from operations.filter import FilterOperatorDefinition
 from operations.groupby import get_aggregation
 from operations.template_placeholders import render_template_placeholders
 from operations.timeseries import TimeseriesParams
 
 
-def test_get_operator():
-    op = get_operator("==")
-    expr = op(pl.col("a"), 1)
+def test_filter_operator_definition():
+    definition = FilterOperatorDefinition.require("==")
+    expr = definition.apply(pl.col("a"), 1)
     assert isinstance(expr, pl.Expr)
 
 
-def test_get_operator_invalid():
+def test_filter_operator_definition_invalid():
     with pytest.raises(ValueError, match="Unsupported filter operator"):
-        get_operator("nope")
+        FilterOperatorDefinition.require("nope")
 
 
 def test_get_aggregation():

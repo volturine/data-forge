@@ -11,6 +11,9 @@ from contracts.analysis.step_types import (
 from contracts.enums import DataForgeStrEnum
 from contracts.step_config_enums import (
     DurationUnit,
+    FilterLogic,
+    FilterOperator,
+    FilterValueType,
     StringTransformMethod,
     TimeComponent,
     TimeDirection,
@@ -44,20 +47,6 @@ class CastMapType(DataForgeStrEnum):
     UTF8 = "Utf8"
     DATE = "Date"
     DATETIME = "Datetime"
-
-
-class FilterValueType(DataForgeStrEnum):
-    STRING = "string"
-    NUMBER = "number"
-    DATE = "date"
-    DATETIME = "datetime"
-    COLUMN = "column"
-    BOOLEAN = "boolean"
-
-
-class FilterLogic(DataForgeStrEnum):
-    AND = "AND"
-    OR = "OR"
 
 
 class JoinHow(DataForgeStrEnum):
@@ -170,7 +159,7 @@ class FilterConditionSchema(BaseModel):
         return {key: value for key, value in data.items() if key != "dtype"}
 
     column: str = Field(description="Column to filter on")
-    operator: str = Field(description="Comparison operator")
+    operator: FilterOperator = Field(description="Comparison operator")
     value: str | int | float | bool | list[str] | None = ""
     value_type: FilterValueType = FilterValueType.STRING
     compare_column: str | None = None

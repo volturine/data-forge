@@ -20,7 +20,7 @@ First off, thank you for considering contributing to Data-Forge! It's people lik
 Before you begin, ensure you have the following installed:
 
 - **Python 3.11+** — Backend runtime
-- **Node.js 18+** or **Bun** — Frontend runtime (we recommend Bun)
+- **Bun** — Frontend runtime and package manager
 - **uv** — Python package manager ([install](https://github.com/astral-sh/uv))
 - **just** — Command runner ([install](https://github.com/casey/just))
 - **Docker** (optional) — For containerized development/deployment
@@ -35,14 +35,14 @@ bash scripts/prerequisites.sh
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/polars-fastapi-svelte.git
-cd polars-fastapi-svelte
+git clone https://github.com/your-username/data-forge.git
+cd data-forge
 
 # Install dependencies
 just install
 
-# Edit local environment file
-# backend/dev.env covers backend and Vite dev-server settings
+# Review local environment settings
+# packages/shared/dev.env covers the shared local runtime configuration
 
 # Start development servers
 just dev
@@ -65,11 +65,13 @@ Backend API: http://localhost:8000
 ```bash
 just dev              # Start API, worker, scheduler, and frontend
 just format           # Format all code (ruff + prettier)
-just check            # Run linters and type checks
-just test             # Run all tests
-just test-e2e         # Run end-to-end tests
-just verify           # Full verification gate (required before PR)
+just check            # Run ruff + mypy + svelte-check + eslint
+just test             # Run backend pytest + frontend unit tests
+just test-e2e         # Run end-to-end tests with the managed runtime
+just verify           # Format + static checks only
 ```
+
+For code or config changes, run `just verify`, `just test`, and `just test-e2e` before asking for review or opening a PR.
 
 ### IDE Setup
 
@@ -117,17 +119,19 @@ Looking for a place to start? Check issues labeled:
 2. Fork the repository
 3. Create a feature branch: `git checkout -b feature/your-feature-name`
 4. Make your changes
-5. Run `just verify` to ensure all checks pass
+5. Run `just verify`, `just test`, and `just test-e2e` for code or config changes
 6. Submit a pull request
 
 ## Pull Request Process
 
 ### Before Submitting
 
-1. **Run `just verify`** — This is mandatory and must pass
-2. **Write tests** — Add tests for new functionality
-3. **Update documentation** — If you changed APIs or behavior
-4. **Keep changes focused** — One feature/fix per PR
+1. **Run `just verify`** — Required for code or config changes
+2. **Run `just test`** — Required for code or config changes
+3. **Run `just test-e2e`** — Required for code or config changes
+4. **Write tests** — Add tests for new functionality
+5. **Update documentation** — If you changed APIs or behavior
+6. **Keep changes focused** — One feature/fix per PR
 
 ### PR Guidelines
 
@@ -178,28 +182,21 @@ See [STYLE_GUIDE.md](STYLE_GUIDE.md) for complete details.
 
 ## Testing
 
-### Backend Tests
+### Standard Validation Commands
 
 ```bash
-cd backend
-uv run pytest                    # Run all tests
-uv run pytest tests/test_foo.py  # Run specific test file
-uv run pytest -k "test_name"     # Run tests matching name
-```
-
-### Frontend Tests
-
-```bash
-cd frontend
-bun run test:unit                # Run unit tests
-just test-e2e                    # Run e2e tests with managed local runtime
+just verify     # Format + static checks
+just test       # Backend pytest + frontend unit tests
+just test-e2e   # End-to-end tests with the managed local runtime
 ```
 
 ### Writing Tests
 
-- Backend: Write pytest tests in `backend/tests/`
-- Frontend: Write Vitest tests alongside components as `*.test.ts`
-- E2E: Write Playwright tests in `frontend/tests/`
+- Backend: Write pytest tests in `packages/backend/tests/`, `packages/scheduler/tests/`, or `packages/worker-manager/tests/` as appropriate
+- Shared Python logic: Write tests in `packages/shared/tests/`
+- Frontend: Write Vitest tests as `*.test.ts` under `packages/frontend/src/`
+- E2E: Write Playwright tests under `packages/frontend/tests/`
+- Do not run Playwright directly for repository e2e validation; use `just test-e2e`
 
 ## Documentation
 
@@ -207,8 +204,8 @@ Good documentation is crucial. When contributing:
 
 - Update READMEs if behavior changes
 - Add docstrings to new functions
-- Update `ENV_VARIABLES.md` for new config options
-- Update `docs/PRD.md` for architectural changes
+- Update `docs/ENV_VARIABLES.md` for new config options
+- Update the relevant document under `docs/prd/` for architectural changes
 
 ## Community
 

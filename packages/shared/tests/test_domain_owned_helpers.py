@@ -1,8 +1,9 @@
+from contracts.analysis.step_types import STEP_TYPES
 from contracts.datasource.models import DataSource, DataSourceCreatedBy, DataSourceTargetKind
 from contracts.datasource.source_types import DataSourceType
 from contracts.healthcheck_models import HealthCheckType
 from contracts.runtime.ipc import RuntimePayloadKind
-from contracts.step_config_enums import FillNullStrategy
+from contracts.step_config_enums import FillNullStrategy, FilterOperator
 
 
 def test_datasource_target_kind_is_model_owned() -> None:
@@ -53,3 +54,17 @@ def test_fill_null_strategy_owns_special_modes() -> None:
     assert FillNullStrategy.ZERO.uses_literal_value is False
     assert FillNullStrategy.DROP_ROWS.drops_rows is True
     assert FillNullStrategy.MEAN.drops_rows is False
+
+
+def test_step_types_own_dependency_config_keys() -> None:
+    assert STEP_TYPES.dependency_values(STEP_TYPES.join.value, {'right_source': 'tab-2'}) == ('tab-2',)
+    assert STEP_TYPES.dependency_values(STEP_TYPES.union_by_name.value, {'sources': ['tab-2', 'tab-3', None]}) == ('tab-2', 'tab-3')
+    assert STEP_TYPES.dependency_values(STEP_TYPES.filter.value, {'right_source': 'ignored'}) == ()
+
+
+def test_filter_operator_owns_error_and_list_semantics() -> None:
+    assert FilterOperator.unsupported_message('nope') == 'Unsupported filter operator: nope'
+    assert FilterOperator.NOT_IN.empty_list_result is True
+    assert FilterOperator.IN.empty_list_result is False
+    assert FilterOperator.NOT_CONTAINS.folds_list_with_all is True
+    assert FilterOperator.CONTAINS.folds_list_with_all is False

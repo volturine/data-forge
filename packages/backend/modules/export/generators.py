@@ -8,14 +8,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from contracts.analysis.pipeline_types import PipelineDefinition, PipelineTab
+from contracts.analysis.step_types import get_step_dependency_values
 from contracts.datasource.models import DataSource
+from contracts.step_config_enums import FilterLogic, FilterOperator, FilterValueType
 
 from modules.analysis.step_schemas import FilterConfig
 from modules.export.models import CodeExportFormat
 from modules.export.utils import export_slug
-
-_FILTER_BINARY_OPERATORS = {"=", "==", "!=", ">", "<", ">=", "<="}
-_FILTER_IN_OPERATORS = {"in", "not_in"}
 
 _POLARS_CAST_MAP = {
     "Int64": "Int64",
@@ -125,16 +124,7 @@ def _tab_dependencies(tab: PipelineTab) -> set[str]:
     if isinstance(source_tab_id, str) and source_tab_id:
         deps.add(source_tab_id)
     for step in tab.steps:
-        if step.type == "join":
-            right_source = step.config.get("right_source")
-            if isinstance(right_source, str) and right_source:
-                deps.add(right_source)
-        if step.type == "union_by_name":
-            raw_sources = step.config.get("sources")
-            if isinstance(raw_sources, list):
-                for source in raw_sources:
-                    if isinstance(source, str) and source:
-                        deps.add(source)
+        deps.update(get_step_dependency_values(step.type, step.config))
     return deps
 
 
@@ -248,35 +238,36 @@ def _polars_filter_expr(condition: dict[str, Any]) -> str | None:
     column = condition.get("column")
     if not isinstance(column, str) or not column:
         return None
-    operator = str(condition.get("operator", "="))
-    value_type = str(condition.get("value_type", "string"))
+    operator = FilterOperator.read(condition.get("operator"), default=FilterOperator.EQUAL)
+    if operator is None:
+        return None
+    value_type = FilterValueType.read(condition.get("value_type"), default=FilterValueType.STRING)
     compare_column = condition.get("compare_column")
     column_expr = f"pl.col({json.dumps(column)})"
 
-    if operator == "is_null":
+    if operator == FilterOperator.IS_NULL:
         return f"{column_expr}.is_null()"
-    if operator == "is_not_null":
+    if operator == FilterOperator.IS_NOT_NULL:
         return f"{column_expr}.is_not_null()"
 
-    if value_type == "column" and isinstance(compare_column, str) and compare_column:
+    if value_type == FilterValueType.COLUMN and isinstance(compare_column, str) and compare_column:
         rhs = f"pl.col({json.dumps(compare_column)})"
     else:
         rhs = _safe_py(condition.get("value"))
 
-    if operator in {"=", "==", "!=", ">", "<", ">=", "<="}:
-        actual = "==" if operator == "=" else operator
+    if actual := operator.polars_binary_token:
         return f"{column_expr} {actual} {rhs}"
-    if operator == "contains":
+    if operator == FilterOperator.CONTAINS:
         return f"{column_expr}.str.contains({rhs}, literal=True)"
-    if operator == "not_contains":
+    if operator == FilterOperator.NOT_CONTAINS:
         return f"~{column_expr}.str.contains({rhs}, literal=True)"
-    if operator == "starts_with":
+    if operator == FilterOperator.STARTS_WITH:
         return f"{column_expr}.str.starts_with({rhs})"
-    if operator == "ends_with":
+    if operator == FilterOperator.ENDS_WITH:
         return f"{column_expr}.str.ends_with({rhs})"
-    if operator == "in":
+    if operator == FilterOperator.IN:
         return f"{column_expr}.is_in({rhs})"
-    if operator == "not_in":
+    if operator == FilterOperator.NOT_IN:
         return f"~{column_expr}.is_in({rhs})"
     return None
 
@@ -285,40 +276,41 @@ def _sql_filter_expr(condition: dict[str, Any]) -> str | None:
     column = condition.get("column")
     if not isinstance(column, str) or not column:
         return None
-    operator = str(condition.get("operator", "="))
-    value_type = str(condition.get("value_type", "string"))
+    operator = FilterOperator.read(condition.get("operator"), default=FilterOperator.EQUAL)
+    if operator is None:
+        return None
+    value_type = FilterValueType.read(condition.get("value_type"), default=FilterValueType.STRING)
     compare_column = condition.get("compare_column")
     lhs = _sql_quote(column)
 
-    if operator == "is_null":
+    if operator == FilterOperator.IS_NULL:
         return f"{lhs} IS NULL"
-    if operator == "is_not_null":
+    if operator == FilterOperator.IS_NOT_NULL:
         return f"{lhs} IS NOT NULL"
 
-    if value_type == "column" and isinstance(compare_column, str) and compare_column:
+    if value_type == FilterValueType.COLUMN and isinstance(compare_column, str) and compare_column:
         rhs = _sql_quote(compare_column)
     else:
         value = condition.get("value")
-        if operator in _FILTER_IN_OPERATORS:
+        if operator.is_membership:
             items = value if isinstance(value, list) else [value]
             rhs = "(" + ", ".join(_sql_literal(item) for item in items) + ")"
         else:
             rhs = _sql_literal(value)
 
-    if operator in _FILTER_BINARY_OPERATORS:
-        actual = "=" if operator == "==" else operator
+    if actual := operator.sql_binary_token:
         return f"{lhs} {actual} {rhs}"
-    if operator == "contains":
+    if operator == FilterOperator.CONTAINS:
         return f"{lhs} LIKE ('%' || {rhs} || '%')"
-    if operator == "not_contains":
+    if operator == FilterOperator.NOT_CONTAINS:
         return f"{lhs} NOT LIKE ('%' || {rhs} || '%')"
-    if operator == "starts_with":
+    if operator == FilterOperator.STARTS_WITH:
         return f"{lhs} LIKE ({rhs} || '%')"
-    if operator == "ends_with":
+    if operator == FilterOperator.ENDS_WITH:
         return f"{lhs} LIKE ('%' || {rhs})"
-    if operator == "in":
+    if operator == FilterOperator.IN:
         return f"{lhs} IN {rhs}"
-    if operator == "not_in":
+    if operator == FilterOperator.NOT_IN:
         return f"{lhs} NOT IN {rhs}"
     return None
 
@@ -433,10 +425,10 @@ def generate_polars_code(
 
             if step.type == "filter":
                 conditions = [condition.model_dump(mode="json", exclude_none=True) for condition in FilterConfig.model_validate(config).conditions]
-                logic = str(config.get("logic", "AND")).upper()
+                logic = FilterLogic.read(str(config.get("logic", FilterLogic.AND.value)).upper(), default=FilterLogic.AND)
                 exprs = [expr for cond in conditions if isinstance(cond, dict) if (expr := _polars_filter_expr(cond))]
                 if exprs:
-                    joiner = " & " if logic == "AND" else " | "
+                    joiner = " & " if logic == FilterLogic.AND else " | "
                     lines.append(f"{next_var} = {current_var}.filter({joiner.join(exprs)})")
                 else:
                     lines.append(f"{next_var} = {current_var}")
@@ -737,10 +729,10 @@ def generate_sql_code(
 
             if step.type == "filter":
                 conditions = [condition.model_dump(mode="json", exclude_none=True) for condition in FilterConfig.model_validate(config).conditions]
-                logic = str(config.get("logic", "AND")).upper()
+                logic = FilterLogic.read(str(config.get("logic", FilterLogic.AND.value)).upper(), default=FilterLogic.AND)
                 exprs = [expr for cond in conditions if isinstance(cond, dict) if (expr := _sql_filter_expr(cond))]
                 if exprs:
-                    joiner = " AND " if logic == "AND" else " OR "
+                    joiner = " AND " if logic == FilterLogic.AND else " OR "
                     body = f"SELECT * FROM {current_cte} WHERE " + joiner.join(exprs)
                 else:
                     warn(f"Filter step in tab '{tab.name}' has no valid SQL conditions")

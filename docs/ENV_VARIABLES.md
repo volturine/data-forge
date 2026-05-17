@@ -2,11 +2,11 @@
 
 This project uses environment variables for two layers:
 
-1. **Backend runtime** — loaded by `backend/core/config.py` from process env and the env file selected by `ENV_FILE`
-2. **Frontend dev server (Vite)** — read from the process environment; `just dev` sources `backend/dev.env` so local dev variables come from the same file
+1. **Backend runtime** — loaded by `packages/shared/core/config.py` from process env and the env file selected by `ENV_FILE`
+2. **Frontend dev server (Vite)** — read from the process environment; `just dev` sources `packages/shared/dev.env` so local dev variables come from the same file
 
-There is no separate `frontend/.env` file. All local dev configuration — including Vite
-dev-server settings (`FRONTEND_PORT`, `BACKEND_HOST`) — lives in `backend/dev.env`.
+There is no separate `packages/frontend/.env` file. All local dev configuration — including Vite
+dev-server settings (`FRONTEND_PORT`, `BACKEND_HOST`) — lives in `packages/shared/dev.env`.
 
 ## Deployment topologies
 
@@ -19,11 +19,11 @@ which are irrelevant for your context.
 Browser  ──►  FastAPI (PORT 8000)
                   │
                   ├── /api/*     →  API handlers
-                  └── /*         →  Serves frontend/build static files
+                  └── /*         →  Serves packages/frontend/build static files
 ```
 
 - `PROD_MODE_ENABLED=true` tells FastAPI to serve static files from
-  `frontend/build/`. Build the frontend first: `cd frontend && bun run build`.
+  `packages/frontend/build/`. Build the frontend first: `cd packages/frontend && bun run build`.
 - Browser and API share the **same origin**, so cross-origin CORS is not needed
   for regular browser traffic. `CORS_ORIGINS` only needs a value when you have
   out-of-band clients (native apps, separate domains).
@@ -36,7 +36,7 @@ Browser  ──►  FastAPI (PORT 8000)
 
 - Customer install: copy `docker/docker-compose.yml` to `compose.yml` plus `docker/env/prod.env` to `.env`, then run `docker compose pull && docker compose up -d`
 - Maintainer local smoke test: `just docker-prod` uses the same `docker/env/prod.env` but overrides image tags to local builds at runtime
-- Bare-metal (`just prod`): edit `backend/prod.env`
+- Bare-metal (`just prod`): edit `packages/shared/prod.env`
 
 ### Development — local runtime
 
@@ -66,7 +66,7 @@ Repo-level local runtime:
 
 **Templates for this topology:**
 
-- Edit `backend/dev.env` (covers both backend and Vite dev-server settings)
+- Edit `packages/shared/dev.env` (covers both backend and Vite dev-server settings)
 
 ---
 
@@ -80,7 +80,7 @@ If you only want the high-value knobs, start with these:
 - `AUTH_REQUIRED` — turn login on/off
 - `SETTINGS_ENCRYPTION_KEY` — strongly recommended when auth is enabled
 - `POLARS_MAX_THREADS`, `POLARS_MAX_MEMORY_MB`, `MAX_CONCURRENT_ENGINES` — performance limits
-- **Dev-only:** `BACKEND_HOST`, `BACKEND_PORT`, `FRONTEND_PORT` — Vite proxy wiring (Node.js only, not exposed to browser)
+- **Dev-only:** `BACKEND_HOST`, `BACKEND_PORT`, `FRONTEND_PORT` — Vite proxy wiring (Bun/Vite only, not exposed to browser)
 
 ## How configuration is loaded
 
@@ -94,8 +94,8 @@ If you only want the high-value knobs, start with these:
 
 ### Frontend dev server
 
-- `just dev` sources `backend/dev.env` into the shell before starting Vite, so `FRONTEND_PORT` and `BACKEND_HOST` are inherited from the same file as the backend.
-- No `frontend/.env` file is needed or used.
+- `just dev` sources `packages/shared/dev.env` into the shell before starting Vite, so `FRONTEND_PORT` and `BACKEND_HOST` are inherited from the same file as the backend.
+- No `packages/frontend/.env` file is needed or used.
 - No variables are exposed to browser code — the `VITE_` prefix convention is not used.
 
 ## Setup examples
@@ -122,18 +122,18 @@ The checked-in Docker production env defaults to `DF_WORKERS=4` for the API proc
 
 ```bash
 # Build the frontend first
-cd frontend && bun run build && cd ..
+cd packages/frontend && bun run build && cd ../..
 # Configure the backend
-# Edit backend/prod.env with your host, secrets, resource limits
+# Edit packages/shared/prod.env with your host, secrets, resource limits
 just prod
 ```
 
-The checked-in `backend/prod.env` now defaults to `WORKERS=4` and dynamic build-worker scaling with zero warm workers.
+The checked-in `packages/shared/prod.env` now defaults to `WORKERS=4` and dynamic build-worker scaling with zero warm workers.
 
 ### Local development
 
 ```bash
-# Edit backend/dev.env with your settings — covers both backend and Vite dev-server
+# Edit packages/shared/dev.env with your settings — covers both backend and Vite dev-server
 just dev
 ```
 
@@ -147,7 +147,7 @@ just dev
 | `APP_NAME`                   | `Data-Forge Analysis Platform`                                                            | Application name for UI/logging metadata.                                                                                                                     |
 | `APP_VERSION`                | `1.0.0`                                                                                   | Application version string.                                                                                                                                   |
 | `DEBUG`                      | `false`                                                                                   | Enables verbose/debug behavior.                                                                                                                               |
-| `PROD_MODE_ENABLED`          | `false`                                                                                   | Must be `true` in production. Enables static-file serving from `frontend/build/`. In dev, leave `false` so FastAPI does not try to serve the frontend.        |
+| `PROD_MODE_ENABLED`          | `false`                                                                                   | Must be `true` in production. Enables static-file serving from `packages/frontend/build/`. In dev, leave `false` so FastAPI does not try to serve the frontend. |
 | `PORT`                       | `8000`                                                                                    | Backend HTTP port.                                                                                                                                            |
 | `DATA_DIR`                   | system temp dir + `/data-forge`                                                           | Base writable directory for app data.                                                                                                                         |
 | `DATABASE_URL`               | none                                                                                      | Full backend PostgreSQL database URL. Required.                                                                                                                |
@@ -254,7 +254,7 @@ just dev
 ## Frontend dev-server variables
 
 > **Development only.** These configure the Vite dev server and its proxy.
-> They live in `backend/dev.env` alongside the backend variables. `just dev`
+> They live in `packages/shared/dev.env` alongside the backend variables. `just dev`
 > sources that file so both processes share the same configuration.
 > In production the Vite dev server is not running, so none of these have any
 > effect on the deployed application.
@@ -262,7 +262,7 @@ just dev
 | Variable        | Default     | Notes                                                   |
 | --------------- | ----------- | ------------------------------------------------------- |
 | `FRONTEND_PORT` | `3000`      | Local Vite dev-server port.  Must match `AUTH_FRONTEND_URL`. |
-| `BACKEND_HOST`  | `127.0.0.1` | Backend hostname used by the Vite proxy (Node.js only, not exposed to browser code). |
+| `BACKEND_HOST`  | `127.0.0.1` | Backend hostname used by the Vite proxy (Bun/Vite only, not exposed to browser code). |
 | `BACKEND_PORT`  | `PORT`      | Backend port used by the Vite proxy. Defaults to `PORT` when unset. |
 
 ## Test and tooling variables

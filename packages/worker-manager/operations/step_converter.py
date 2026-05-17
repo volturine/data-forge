@@ -22,6 +22,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from contracts.analysis.step_types import (
+    STEP_TYPES,
     ChartType,
     chart_type_for_step,
     get_step_type_label,
@@ -95,7 +96,7 @@ class BackendStep:
 
 
 def step_display_name(step_type: str, config: Mapping[str, object]) -> str:
-    if step_type == "chart":
+    if step_type == STEP_TYPES.chart.value:
         chart_type = config.get("chart_type")
         if isinstance(chart_type, str) and chart_type:
             return get_step_type_label(f"plot_{chart_type}")
@@ -399,35 +400,52 @@ def _identity_config(config: dict) -> dict:
     return config
 
 
-_CONVERTERS: dict[str, Callable[[dict], dict]] = {
-    "datasource": _identity_config,
-    "select": _identity_config,
-    "drop": _identity_config,
-    "unpivot": _identity_config,
-    "explode": _identity_config,
-    "sample": _identity_config,
-    "limit": _identity_config,
-    "topk": _identity_config,
-    "view": _identity_config,
-    "download": _identity_config,
-    "expression": _identity_config,
-    "with_columns": _identity_config,
-    "filter": convert_filter_config,
-    "groupby": convert_groupby_config,
-    "sort": convert_sort_config,
-    "rename": convert_rename_config,
-    "join": convert_join_config,
-    "deduplicate": convert_deduplicate_config,
-    "fill_null": convert_fillnull_config,
-    "pivot": convert_pivot_config,
-    "timeseries": convert_timeseries_config,
-    "string_transform": convert_string_transform_config,
-    "export": convert_export_config,
-    "union_by_name": convert_union_by_name_config,
-    "chart": convert_plot_config,
-    "ai": convert_ai_config,
-    "notification": convert_notification_config,
-}
+_CONVERTERS: dict[str, Callable[[dict], dict]] = {}
+
+
+def config_converter(step_type: str) -> Callable[[Callable[[dict], dict]], Callable[[dict], dict]]:
+    if not is_step_type(step_type):
+        raise ValueError(f"Unknown step type '{step_type}'")
+
+    def register(converter: Callable[[dict], dict]) -> Callable[[dict], dict]:
+        _CONVERTERS[step_type] = converter
+        return converter
+
+    return register
+
+
+for _step_type in (
+    STEP_TYPES.datasource.value,
+    STEP_TYPES.select.value,
+    STEP_TYPES.drop.value,
+    STEP_TYPES.unpivot.value,
+    STEP_TYPES.explode.value,
+    STEP_TYPES.sample.value,
+    STEP_TYPES.limit.value,
+    STEP_TYPES.topk.value,
+    STEP_TYPES.view.value,
+    STEP_TYPES.download.value,
+    STEP_TYPES.expression.value,
+    STEP_TYPES.with_columns.value,
+):
+    config_converter(_step_type)(_identity_config)
+
+
+config_converter(STEP_TYPES.filter.value)(convert_filter_config)
+config_converter(STEP_TYPES.groupby.value)(convert_groupby_config)
+config_converter(STEP_TYPES.sort.value)(convert_sort_config)
+config_converter(STEP_TYPES.rename.value)(convert_rename_config)
+config_converter(STEP_TYPES.join.value)(convert_join_config)
+config_converter(STEP_TYPES.deduplicate.value)(convert_deduplicate_config)
+config_converter(STEP_TYPES.fill_null.value)(convert_fillnull_config)
+config_converter(STEP_TYPES.pivot.value)(convert_pivot_config)
+config_converter(STEP_TYPES.timeseries.value)(convert_timeseries_config)
+config_converter(STEP_TYPES.string_transform.value)(convert_string_transform_config)
+config_converter(STEP_TYPES.export.value)(convert_export_config)
+config_converter(STEP_TYPES.union_by_name.value)(convert_union_by_name_config)
+config_converter(STEP_TYPES.chart.value)(convert_plot_config)
+config_converter(STEP_TYPES.ai.value)(convert_ai_config)
+config_converter(STEP_TYPES.notification.value)(convert_notification_config)
 
 
 def convert_config_to_params(operation: str, config: dict) -> dict:

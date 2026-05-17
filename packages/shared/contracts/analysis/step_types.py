@@ -25,6 +25,7 @@ class StepType:
     label: str
     normalized: str | None = None
     chart_type: ChartType | None = None
+    dependency_config_keys: tuple[str, ...] = ()
 
     @property
     def canonical(self) -> str:
@@ -44,8 +45,8 @@ class StepTypes:
     drop: StepType = StepType(value='drop', label='Drop')
     filter: StepType = StepType(value='filter', label='Filter')
     groupby: StepType = StepType(value='groupby', label='Group By')
-    join: StepType = StepType(value='join', label='Join')
-    union_by_name: StepType = StepType(value='union_by_name', label='Union By Name')
+    join: StepType = StepType(value='join', label='Join', dependency_config_keys=('right_source',))
+    union_by_name: StepType = StepType(value='union_by_name', label='Union By Name', dependency_config_keys=('sources',))
     unpivot: StepType = StepType(value='unpivot', label='Unpivot')
     explode: StepType = StepType(value='explode', label='Explode')
     pivot: StepType = StepType(value='pivot', label='Pivot')
@@ -110,6 +111,20 @@ class StepTypes:
         definition = self._definition_for(step_type)
         return definition.chart_type if definition is not None else None
 
+    def dependency_config_keys(self, step_type: str) -> tuple[str, ...]:
+        definition = self._definition_for(step_type)
+        return definition.dependency_config_keys if definition is not None else ()
+
+    def dependency_values(self, step_type: str, config: dict[str, object]) -> tuple[str, ...]:
+        values: list[str] = []
+        for key in self.dependency_config_keys(step_type):
+            raw_value = config.get(key)
+            if isinstance(raw_value, str) and raw_value:
+                values.append(raw_value)
+            elif isinstance(raw_value, list):
+                values.extend(value for value in raw_value if isinstance(value, str) and value)
+        return tuple(values)
+
     def label(self, step_type: str) -> str:
         definition = self._definition_for(step_type)
         if definition is not None:
@@ -155,6 +170,10 @@ def chart_type_for_step(step_type: str) -> ChartType | None:
 
 def get_step_type_label(step_type: str) -> str:
     return STEP_TYPES.label(step_type)
+
+
+def get_step_dependency_values(step_type: str, config: dict[str, object]) -> tuple[str, ...]:
+    return STEP_TYPES.dependency_values(step_type, config)
 
 
 def get_step_timing_key(key: str) -> tuple[str, str]:
