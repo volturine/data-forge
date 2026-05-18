@@ -364,6 +364,21 @@
 		onPreview();
 	}
 
+	function wheelDeltaPixels(event: WheelEvent, container: HTMLDivElement): number {
+		if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+		if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * container.clientWidth;
+		return event.deltaY;
+	}
+
+	function handleScrollWheel(event: WheelEvent) {
+		if (!event.ctrlKey || !scrollRef) return;
+		if (scrollRef.scrollWidth <= scrollRef.clientWidth) return;
+		const deltaLeft = wheelDeltaPixels(event, scrollRef);
+		if (deltaLeft === 0) return;
+		event.preventDefault();
+		scrollRef.scrollLeft += deltaLeft;
+	}
+
 	const columnMenuOverlayConfig = $derived<OverlayConfig>({
 		onEscape: () => {
 			activeColumn = null;
@@ -637,6 +652,8 @@
 				fillContainer && { flex: '1' }
 			)}
 			bind:this={scrollRef}
+			onwheel={handleScrollWheel}
+			data-testid="data-table-scroll"
 		>
 			<table
 				class={css({

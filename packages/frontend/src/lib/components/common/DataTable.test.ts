@@ -138,6 +138,62 @@ describe('DataTable', () => {
 			});
 			expect(screen.getByText('[1, 2, 3]')).toBeInTheDocument();
 		});
+
+		test('maps ctrl+wheel to horizontal scrolling when table overflows', () => {
+			renderTable();
+			const scrollContainer = screen.getByTestId('data-table-scroll');
+			Object.defineProperty(scrollContainer, 'scrollWidth', {
+				value: 900,
+				configurable: true
+			});
+			Object.defineProperty(scrollContainer, 'clientWidth', {
+				value: 300,
+				configurable: true
+			});
+			Object.defineProperty(scrollContainer, 'scrollLeft', {
+				value: 0,
+				writable: true,
+				configurable: true
+			});
+
+			const event = new WheelEvent('wheel', {
+				deltaY: 48,
+				ctrlKey: true,
+				cancelable: true
+			});
+			const dispatchResult = scrollContainer.dispatchEvent(event);
+
+			expect(dispatchResult).toBe(false);
+			expect(scrollContainer.scrollLeft).toBe(48);
+		});
+
+		test('does not hijack ctrl+wheel when table does not overflow horizontally', () => {
+			renderTable();
+			const scrollContainer = screen.getByTestId('data-table-scroll');
+			Object.defineProperty(scrollContainer, 'scrollWidth', {
+				value: 300,
+				configurable: true
+			});
+			Object.defineProperty(scrollContainer, 'clientWidth', {
+				value: 300,
+				configurable: true
+			});
+			Object.defineProperty(scrollContainer, 'scrollLeft', {
+				value: 0,
+				writable: true,
+				configurable: true
+			});
+
+			const event = new WheelEvent('wheel', {
+				deltaY: 48,
+				ctrlKey: true,
+				cancelable: true
+			});
+			const dispatchResult = scrollContainer.dispatchEvent(event);
+
+			expect(dispatchResult).toBe(true);
+			expect(scrollContainer.scrollLeft).toBe(0);
+		});
 	});
 
 	describe('footer', () => {
