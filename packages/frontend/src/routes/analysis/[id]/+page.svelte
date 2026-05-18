@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { MediaQuery } from 'svelte/reactivity';
+	import { MediaQuery, SvelteSet } from 'svelte/reactivity';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
@@ -116,10 +116,10 @@
 	let isDirty = $state(false);
 	let draftTimer: number | null = null;
 	let lastLoadedVersion = $state<string | null>(null);
-	let hydratedGates = $state(new Set<string>());
+	let hydratedGates = new SvelteSet<string>();
 	const draftLoadGate = createAsyncGate();
 	const inferredSchemaGate = createAsyncGate();
-	const sourceSchemaGate = createAsyncGate();
+	let pendingSourceSchemaKeys = new SvelteSet<string>();
 
 	let lockMode = $state<EditorLockMode>('pending');
 	let lockIntent = $state<'editing' | 'released'>('editing');
@@ -212,7 +212,8 @@
 			analysisStore.reset();
 			schemaStore.reset();
 			selectedStepId = null;
-			hydratedGates = new Set();
+			hydratedGates = new SvelteSet();
+			pendingSourceSchemaKeys = new SvelteSet();
 			lastAnalysisId = analysisId;
 		}
 		draftLoaded = false;
@@ -517,7 +518,7 @@
 		const pipelineHash = hashPipeline(applySteps(pipeline));
 		const gate = `${validAnalysisId}:${tab.id}:${pipelineHash}`;
 		if (hydratedGates.has(gate)) return;
-		hydratedGates = new Set([...hydratedGates, gate]);
+		hydratedGates.add(gate);
 		const requestToken = inferredSchemaGate.issue();
 
 		const targets = pipeline.filter(
@@ -580,9 +581,10 @@
 		const schemaId = schemaKey;
 		if (!schemaId) return;
 		const activeTabId = activeTab?.id ?? null;
+		const requestKey = `${schemaId}:${activeTabId ?? ''}`;
 
 		const existingSchema = analysisStore.sourceSchemas.get(schemaId);
-		if (existingSchema) return;
+		if (existingSchema || pendingSourceSchemaKeys.has(requestKey)) return;
 
 		const analysisTabId = activeTab?.datasource?.analysis_tab_id ?? null;
 		const analysisPayload = validAnalysisId
@@ -592,11 +594,15 @@
 					datasourceStore.datasources
 				)
 			: null;
+		const releasePendingSchema = () => {
+			if (!pendingSourceSchemaKeys.has(requestKey)) return;
+			pendingSourceSchemaKeys.delete(requestKey);
+		};
 
 		if (analysisTabId) {
 			if (!analysisPayload) return;
+			pendingSourceSchemaKeys.add(requestKey);
 			isLoadingSchema = true;
-			const requestToken = sourceSchemaGate.issue();
 			const targetTabId = analysisTabId ?? activeTab?.id ?? null;
 			getStepSchema({
 				analysis_id: validAnalysisId ?? undefined,
@@ -605,7 +611,7 @@
 				target_step_id: 'source'
 			}).match(
 				(payload) => {
-					if (!sourceSchemaGate.isCurrent(requestToken)) return;
+					releasePendingSchema();
 					if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 					const columns = payload.columns.map((name) => ({
 						name,
@@ -619,7 +625,7 @@
 					isLoadingSchema = false;
 				},
 				(error) => {
-					if (!sourceSchemaGate.isCurrent(requestToken)) return;
+					releasePendingSchema();
 					if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 					track({
 						event: 'schema_error',
@@ -630,26 +636,24 @@
 					isLoadingSchema = false;
 				}
 			);
-			return () => {
-				sourceSchemaGate.invalidate();
-			};
+			return;
 		}
 
 		if (!datasourcesQuery.data || !datasourceIdValue) return;
 		if (!isUuid(datasourceIdValue)) return;
 		const ds = datasourcesQuery.data.find((d) => d.id === datasourceIdValue);
 		if (ds?.source_type === 'analysis') return;
+		pendingSourceSchemaKeys.add(requestKey);
 		isLoadingSchema = true;
-		const requestToken = sourceSchemaGate.issue();
 		getDatasourceSchema(datasourceIdValue).match(
 			(schema) => {
-				if (!sourceSchemaGate.isCurrent(requestToken)) return;
+				releasePendingSchema();
 				if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 				analysisStore.setSourceSchema(schemaId, schema);
 				isLoadingSchema = false;
 			},
 			(err) => {
-				if (!sourceSchemaGate.isCurrent(requestToken)) return;
+				releasePendingSchema();
 				if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 				track({
 					event: 'schema_error',
@@ -660,9 +664,6 @@
 				isLoadingSchema = false;
 			}
 		);
-		return () => {
-			sourceSchemaGate.invalidate();
-		};
 	});
 
 	const currentDatasource = $derived.by(() => {

@@ -9,7 +9,7 @@
 	import { getSubscribers } from '$lib/api/settings';
 	import { cancelBuild } from '$lib/api/compute';
 	import { apiRequest } from '$lib/api/client';
-	import { listDatasources, updateDatasource } from '$lib/api/datasource';
+	import { getDatasource, updateDatasource } from '$lib/api/datasource';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
@@ -71,6 +71,7 @@
 		);
 	});
 	let toggling = $state(false);
+	let hiddenOverride = $state<boolean | null>(null);
 	let buildStarting = $state(false);
 	let previewOpen = $state(false);
 	let error = $state<string | null>(null);
@@ -80,7 +81,6 @@
 	let notifyOpen = $state(false);
 	let scheduleOpen = $state(false);
 	let healthOpen = $state(false);
-	let probeOutputDatasourceFor = $state<string | null>(null);
 	let editingName = $state(false);
 	let draftName = $state('');
 	let modeMenuOpen = $state(false);
@@ -140,25 +140,22 @@
 		return outputConfig;
 	});
 	const canQueryOutput = $derived(isUuid(outputDatasourceId));
-	const shouldQueryOutputDatasource = $derived(
-		canQueryOutput &&
-			(probeOutputDatasourceFor === outputDatasourceId || healthOpen || scheduleOpen)
-	);
 
 	const outputDatasourceQuery = createQuery(() => ({
 		queryKey: ['datasource', outputDatasourceId],
 		queryFn: async () => {
 			if (!outputDatasourceId) return null;
-			const result = await listDatasources(true);
+			const result = await getDatasource(outputDatasourceId);
 			if (result.isErr()) {
+				if (result.error.status === 404) return null;
 				throw new Error(result.error.message);
 			}
-			return result.value.find((ds) => ds.id === outputDatasourceId) ?? null;
+			return result.value;
 		},
-		enabled: shouldQueryOutputDatasource
+		enabled: canQueryOutput
 	}));
 	const hasOutputDatasource = $derived(outputDatasourceQuery.data != null);
-	const hidden = $derived(outputDatasourceQuery.data?.is_hidden ?? true);
+	const hidden = $derived(hiddenOverride ?? outputDatasourceQuery.data?.is_hidden ?? true);
 
 	const healthChecksQuery = createQuery(() => ({
 		queryKey: ['healthchecks', outputDatasourceId],
@@ -393,19 +390,25 @@
 	async function toggleHidden() {
 		if (readOnly) return;
 		if (!outputDatasourceId || toggling) return;
-		if (!hasOutputDatasource) {
-			probeOutputDatasourceFor = outputDatasourceId;
+		const current =
+			outputDatasourceQuery.data ?? (await outputDatasourceQuery.refetch()).data ?? null;
+		if (!current) {
+			error = 'Build this output before changing visibility.';
 			return;
 		}
+		const nextHidden = !current.is_hidden;
+		hiddenOverride = nextHidden;
 		toggling = true;
-		const result = await updateDatasource(outputDatasourceId, { is_hidden: !hidden });
+		const result = await updateDatasource(outputDatasourceId, { is_hidden: nextHidden });
 		result.match(
-			() => {
-				queryClient.invalidateQueries({ queryKey: ['datasources'] });
-				queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
+			(datasource) => {
+				hiddenOverride = datasource.is_hidden;
+				queryClient.setQueryData(['datasource', outputDatasourceId], datasource);
+				void queryClient.invalidateQueries({ queryKey: ['datasources'] });
 				toggling = false;
 			},
 			(err) => {
+				hiddenOverride = outputDatasourceQuery.data?.is_hidden ?? true;
 				error = err.message;
 				toggling = false;
 			}
@@ -459,6 +462,29 @@
 	$effect(() => {
 		if (buildBusy) return;
 		analysisStore.setPreviewPaused(false);
+	});
+
+	$effect(() => {
+		const outputId = outputDatasourceId;
+		const datasource = outputDatasourceQuery.data;
+		if (!outputId) {
+			hiddenOverride = null;
+			return;
+		}
+		hiddenOverride = datasource?.is_hidden ?? null;
+	});
+
+	let lastCompletedBuildId = $state<string | null>(null);
+	$effect(() => {
+		if (!outputDatasourceId) {
+			lastCompletedBuildId = null;
+			return;
+		}
+		if (buildStore.status !== 'completed' || !buildStore.buildId) return;
+		if (lastCompletedBuildId === buildStore.buildId) return;
+		lastCompletedBuildId = buildStore.buildId;
+		void queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
+		void queryClient.invalidateQueries({ queryKey: ['datasources'] });
 	});
 
 	function closeBuildPreview() {
@@ -765,10 +791,24 @@
 					})}
 				>
 					<div
-						class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'space-between',
+							gap: '2',
+							width: '100%',
+							minWidth: '0'
+						})}
 					>
 						<span
-							class={css({ fontSize: 'sm', fontWeight: 'semibold' })}
+							class={css({
+								fontSize: 'sm',
+								fontWeight: 'semibold',
+								minWidth: '0',
+								overflow: 'hidden',
+								textOverflow: 'ellipsis',
+								whiteSpace: 'nowrap'
+							})}
 							data-testid="output-table-name-card"
 						>
 							{outputConfig.iceberg.table_name}
@@ -785,11 +825,13 @@
 								paddingY: '0.5',
 								fontSize: '2xs',
 								color: hidden ? 'fg.muted' : 'fg.success',
+								flexShrink: '0',
 								_hover: { color: 'fg.primary' }
 							})}
 							onclick={toggleHidden}
-							disabled={readOnly || toggling || !hasOutputDatasource}
+							disabled={readOnly || toggling || !outputDatasourceId}
 							data-testid="output-visibility-toggle"
+							data-output-datasource-id={outputDatasourceId}
 							title={hidden
 								? 'Hidden from other analyses — click to make visible'
 								: 'Visible to other analyses — click to hide'}

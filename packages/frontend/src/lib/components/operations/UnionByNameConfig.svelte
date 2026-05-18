@@ -7,6 +7,7 @@
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, stepConfig, label } from '$lib/styles/panda';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	interface UnionByNameConfigData {
 		sources: string[];
@@ -32,8 +33,7 @@
 	const datasourceOptions = $derived(datasourceStore.datasources);
 	const ready = $derived(datasourceStore.loaded);
 
-	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- bookkeeping only, never read by template
-	const loaded = new Set<string>();
+	const loaded = new SvelteSet<string>();
 	let pending = $state(0);
 	const loading = $derived(pending > 0);
 

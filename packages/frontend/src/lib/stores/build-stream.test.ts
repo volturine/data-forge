@@ -3,6 +3,7 @@ import type { ActiveBuildDetail } from '$lib/types/build-stream';
 import type { BuildRequest } from '$lib/api/compute';
 
 const mockStartActiveBuild = vi.fn();
+const mockGetActiveBuild = vi.fn();
 const mockRetainActivity = vi.fn();
 const mockReleaseActivity = vi.fn();
 
@@ -11,7 +12,8 @@ vi.mock('$lib/api/build-stream', async () => {
 		await vi.importActual<typeof import('$lib/api/build-stream')>('$lib/api/build-stream');
 	return {
 		...actual,
-		startActiveBuild: (...args: unknown[]) => mockStartActiveBuild(...args)
+		startActiveBuild: (...args: unknown[]) => mockStartActiveBuild(...args),
+		getActiveBuild: (...args: unknown[]) => mockGetActiveBuild(...args)
 	};
 });
 
@@ -126,6 +128,14 @@ function makeDetail(overrides: Partial<ActiveBuildDetail> = {}): ActiveBuildDeta
 	return { ...DETAIL_BASE, ...overrides };
 }
 
+async function flushAsyncWork() {
+	await Promise.resolve();
+	await Promise.resolve();
+	await Promise.resolve();
+	await Promise.resolve();
+	await Promise.resolve();
+}
+
 function mockStartSuccess(detail: ActiveBuildDetail = makeDetail()) {
 	mockStartActiveBuild.mockReturnValue({
 		match: (onOk: (build: ActiveBuildDetail) => void) => {
@@ -144,6 +154,21 @@ function mockStartError(message: string) {
 	});
 }
 
+function mockGetActiveBuildError(message = 'missing build') {
+	mockGetActiveBuild.mockReturnValue({
+		match: (_onOk: unknown, onErr: (err: { message: string }) => void) => {
+			onErr({ message });
+			return Promise.resolve(false);
+		}
+	});
+}
+
+function mockGetActiveBuildSuccess(detail: ActiveBuildDetail) {
+	mockGetActiveBuild.mockReturnValue({
+		match: (onOk: (build: ActiveBuildDetail) => boolean) => Promise.resolve(onOk(detail))
+	});
+}
+
 const { BuildStreamStore } = await import('./build-stream.svelte');
 
 describe('BuildStreamStore', () => {
@@ -151,6 +176,7 @@ describe('BuildStreamStore', () => {
 		MockWebSocket.instances = [];
 		vi.clearAllMocks();
 		mockStartSuccess();
+		mockGetActiveBuildError();
 		vi.stubGlobal('WebSocket', MockWebSocket);
 		vi.useFakeTimers();
 	});
@@ -243,7 +269,7 @@ describe('BuildStreamStore', () => {
 		expect(store.progress).toBe(0.5);
 	});
 
-	test('watch applies snapshot, event, error, and close callbacks', () => {
+	test('watch applies snapshot, event, error, and close callbacks', async () => {
 		const store = new BuildStreamStore();
 		store.watch('build-3');
 
@@ -277,11 +303,12 @@ describe('BuildStreamStore', () => {
 		store.watch('build-4');
 		const next = MockWebSocket.instances[1];
 		next.emit('close', { code: 1006, reason: 'Connection lost' });
+		await flushAsyncWork();
 		expect(store.status).toBe('connecting');
 		expect(store.error).toBeNull();
 		expect(mockRetainActivity).toHaveBeenCalledTimes(2);
 		expect(mockReleaseActivity).toHaveBeenCalledTimes(1);
-		vi.advanceTimersByTime(1000);
+		await vi.advanceTimersByTimeAsync(1000);
 		expect(MockWebSocket.instances).toHaveLength(3);
 		expect(MockWebSocket.instances[2].url).toContain('/v1/compute/ws/builds/build-4');
 	});
@@ -897,19 +924,45 @@ describe('BuildStreamStore', () => {
 		expect(store.steps[0].duration).toBe(200);
 	});
 
-	test('reconnects after unexpected close during live build', () => {
+	test('reconnects after unexpected close during live build', async () => {
 		const store = new BuildStreamStore();
 		store.start(MINIMAL_BUILD_REQUEST);
 
 		const socket = MockWebSocket.instances[0];
 		socket.emit('open');
 		socket.emit('close', { code: 1006, reason: 'Connection lost' });
+		await flushAsyncWork();
 
 		expect(store.status).toBe('running');
 		expect(store.error).toBeNull();
-		vi.advanceTimersByTime(1000);
+		await vi.advanceTimersByTimeAsync(1000);
 		expect(MockWebSocket.instances).toHaveLength(2);
 		expect(MockWebSocket.instances[1].url).toContain('/v1/compute/ws/builds/build-1');
+	});
+
+	test('hydrates terminal build detail after socket close before final event arrives', async () => {
+		const store = new BuildStreamStore();
+		store.start(MINIMAL_BUILD_REQUEST);
+		mockGetActiveBuildSuccess(
+			makeDetail({
+				status: 'completed',
+				duration_ms: 1750,
+				progress: 1,
+				current_step: null
+			})
+		);
+
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+		socket.emit('close', { code: 1006, reason: 'Connection lost' });
+		await Promise.resolve();
+
+		expect(mockGetActiveBuild).toHaveBeenCalledWith('build-1');
+		expect(store.status).toBe('completed');
+		expect(store.duration).toBe(1750);
+		expect(store.done).toBe(true);
+		vi.advanceTimersByTime(1000);
+		expect(MockWebSocket.instances).toHaveLength(1);
 	});
 
 	test('surfaces HTTP build-start failures', () => {
@@ -959,7 +1012,7 @@ describe('BuildStreamStore', () => {
 		expect(mockReleaseActivity).toHaveBeenCalledTimes(1);
 	});
 
-	test('delays connection errors until reconnect attempts are exhausted', () => {
+	test('delays connection errors until reconnect attempts are exhausted', async () => {
 		const store = new BuildStreamStore();
 		store.watch('build-9');
 
@@ -971,13 +1024,16 @@ describe('BuildStreamStore', () => {
 			const current = MockWebSocket.instances.at(-1);
 			if (!current) throw new Error('Expected websocket instance');
 			current.emit('close', { code: 1006, reason: 'Connection lost' });
+			await flushAsyncWork();
 			expect(store.status).toBe('connecting');
-			vi.advanceTimersByTime(1000);
+			await vi.advanceTimersByTimeAsync(1000);
 		}
 
 		const last = MockWebSocket.instances.at(-1);
 		last?.emit('error');
 		last?.emit('close', { code: 1006, reason: 'Connection lost' });
+		await flushAsyncWork();
+		await flushAsyncWork();
 
 		expect(store.status).toBe('disconnected');
 		expect(store.error).toBe('Connection lost');

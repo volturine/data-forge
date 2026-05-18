@@ -31,6 +31,96 @@ test.describe('Analyses – output visibility toggle', () => {
 			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
+
+	test('OutputNode: visibility toggle updates after the output datasource exists', async ({
+		page,
+		request
+	}) => {
+		test.setTimeout(180_000);
+		const dsName = `e2e-vis-build-ds-${uid()}`;
+		const aName = `E2E Vis Build ${uid()}`;
+		const dsId = await createDatasource(request, dsName);
+		const aId = await createAnalysis(request, aName, dsId);
+		try {
+			await gotoAnalysisEditor(page, aId);
+
+			const buildBtn = page.locator('[data-testid="output-build-button"]');
+			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await buildBtn.click();
+			const buildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(buildTrigger).toBeVisible({ timeout: 30_000 });
+			await expect(buildTrigger).toContainText(/Completed/i, { timeout: 180_000 });
+
+			const toggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
+			await expect(toggleBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(toggleBtn).toContainText('hidden');
+
+			await toggleBtn.click();
+			await expect(toggleBtn).toContainText('visible', { timeout: 10_000 });
+
+			await toggleBtn.click();
+			await expect(toggleBtn).toContainText('hidden', { timeout: 10_000 });
+		} finally {
+			await shutdownEngine(request, aId);
+			await deleteAnalysisViaUI(page, aName);
+			await deleteDatasourceViaUI(page, dsName);
+		}
+	});
+
+	test('OutputNode: rebuilding recreates a deleted output datasource', async ({
+		page,
+		request
+	}) => {
+		test.setTimeout(240_000);
+		const dsName = `e2e-output-rebuild-ds-${uid()}`;
+		const aName = `E2E Output Rebuild ${uid()}`;
+		const dsId = await createDatasource(request, dsName);
+		const aId = await createAnalysis(request, aName, dsId);
+		try {
+			await gotoAnalysisEditor(page, aId);
+			const outputName = (
+				await page.locator('[data-testid="output-table-name-card"]').textContent()
+			)?.trim();
+			expect(outputName).toBeTruthy();
+			const outputId = await page
+				.locator('[data-testid="output-visibility-toggle"]')
+				.getAttribute('data-output-datasource-id');
+			expect(outputId).toBeTruthy();
+
+			const buildBtn = page.locator('[data-testid="output-build-button"]');
+			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await buildBtn.click();
+			const initialBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(initialBuildTrigger).toBeVisible({ timeout: 30_000 });
+			await expect(initialBuildTrigger).toContainText(/Completed/i, { timeout: 180_000 });
+
+			await deleteDatasourceViaUI(page, outputName!);
+			await gotoAnalysisEditor(page, aId);
+
+			const rebuiltBuildBtn = page.locator('[data-testid="output-build-button"]');
+			await expect(rebuiltBuildBtn).toBeVisible({ timeout: 10_000 });
+			await rebuiltBuildBtn.click();
+			const rebuiltBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(rebuiltBuildTrigger).toBeVisible({ timeout: 30_000 });
+			await expect(rebuiltBuildTrigger).toContainText(/Completed/i, { timeout: 180_000 });
+
+			await page.goto('/datasources');
+			const showHiddenBtn = page.locator('button[title="Show auto-generated datasources"]');
+			await expect(showHiddenBtn).toBeVisible({ timeout: 10_000 });
+			await showHiddenBtn.click();
+			await expect(page.locator('button[title="Hide auto-generated datasources"]')).toBeVisible({
+				timeout: 10_000
+			});
+			const rebuiltRow = page.locator(`[data-ds-id="${outputId}"]`);
+			await expect(rebuiltRow).toBeVisible({ timeout: 15_000 });
+			await rebuiltRow.click();
+			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 60_000 });
+		} finally {
+			await shutdownEngine(request, aId);
+			await deleteAnalysisViaUI(page, aName);
+			await deleteDatasourceViaUI(page, dsName);
+		}
+	});
 });
 
 // ── Output node interactions ────────────────────────────────────────────────

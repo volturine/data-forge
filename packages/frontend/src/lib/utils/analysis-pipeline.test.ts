@@ -5,6 +5,7 @@ import {
 	buildAnalysisPipelinePayload,
 	buildDatasourceConfig,
 	buildDatasourcePipelinePayload,
+	buildDatasourcePreviewPipelinePayload,
 	normalizeSnapshotConfig
 } from './analysis-pipeline';
 
@@ -476,6 +477,7 @@ describe('buildDatasourcePipelinePayload', () => {
 		expect(result.tabs[0].id).toBe('datasource-ds-1');
 		expect(result.tabs[0].name).toBe('Test DS');
 		expect(result.tabs[0].steps).toEqual([]);
+		expect(result.tabs[0].output.result_id).toBe('datasource-preview-ds-1');
 	});
 
 	test('requires datasourceConfig', () => {
@@ -592,19 +594,36 @@ describe('buildDatasourcePipelinePayload', () => {
 		expect(config.time_travel_ui).toBeUndefined();
 	});
 
-	test('analysis-created datasource payload still uses owning analysis context', () => {
-		const result = buildDatasourcePipelinePayload({
+	test('analysis-created output datasource payload keeps persisted datasource ownership', () => {
+		const result = buildDatasourcePreviewPipelinePayload({
 			datasource: datasource({
 				id: 'out-1',
-				source_type: 'analysis',
+				source_type: 'iceberg',
 				created_by_analysis_id: 'a-1',
 				output_of_tab_id: 'tab-1',
-				config: { analysis_id: 'a-1', analysis_tab_id: 'tab-1' }
+				config: {
+					branch: 'main',
+					metadata_path: '/warehouse/out-1/metadata/v1.metadata.json',
+					table: 'out_1',
+					namespace: 'outputs'
+				}
 			}),
-			datasourceConfig: { branch: 'main' }
+			datasourceConfig: { branch: 'main', snapshot_id: 'snap-1' }
 		});
 		expect(result.analysis_id).toBe('out-1');
-		expect(result.tabs[0].datasource.source_type).toBe('analysis');
+		expect(result.tabs[0].datasource).toEqual({
+			id: 'out-1',
+			analysis_tab_id: null,
+			source_type: 'iceberg',
+			config: {
+				branch: 'main',
+				metadata_path: '/warehouse/out-1/metadata/v1.metadata.json',
+				table: 'out_1',
+				namespace: 'outputs',
+				snapshot_id: 'snap-1'
+			}
+		});
+		expect(result.tabs[0].output.result_id).toBe('datasource-preview-out-1');
 	});
 });
 

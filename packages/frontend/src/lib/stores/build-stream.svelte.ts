@@ -15,7 +15,7 @@ import {
 	coerceBuildStepState,
 	isTerminalBuildStatus
 } from '$lib/types/build-stream';
-import { connectBuildDetailStream, startActiveBuild } from '$lib/api/build-stream';
+import { connectBuildDetailStream, getActiveBuild, startActiveBuild } from '$lib/api/build-stream';
 import type { BuildRequest, CancelBuildResponse } from '$lib/api/compute';
 import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
 
@@ -187,11 +187,7 @@ export class BuildStreamStore {
 			onClose: () => {
 				if (generation !== this.generation) return;
 				this.connection = null;
-				if (!this.shouldReconnect || this.done) {
-					if (!this.done) this.status = 'disconnected';
-					return;
-				}
-				this.scheduleReconnect(buildId, generation);
+				void this.handleConnectionClose(buildId, generation);
 			}
 		});
 	}
@@ -201,10 +197,7 @@ export class BuildStreamStore {
 		this.reconnectAttempts++;
 		if (this.reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
 			this.shouldReconnect = false;
-			this.status = 'disconnected';
-			this.error = this.pendingError;
-			this.pendingError = null;
-			this.releaseActivityLease();
+			void this.finalizeDisconnectedBuild(buildId, generation);
 			return;
 		}
 		this.reconnectTimer = setTimeout(() => {
@@ -222,6 +215,42 @@ export class BuildStreamStore {
 		if (this.reconnectTimer === null) return;
 		clearTimeout(this.reconnectTimer);
 		this.reconnectTimer = null;
+	}
+
+	private async refreshBuildDetail(buildId: string, generation: number): Promise<boolean> {
+		return getActiveBuild(buildId).match(
+			(build) => {
+				if (generation !== this.generation) return false;
+				if (this.buildId !== buildId) return false;
+				this.pendingError = null;
+				this.applySnapshot(build);
+				return true;
+			},
+			() => false
+		);
+	}
+
+	private async handleConnectionClose(buildId: string, generation: number): Promise<void> {
+		if (!this.done) {
+			await this.refreshBuildDetail(buildId, generation);
+		}
+		if (generation !== this.generation) return;
+		if (!this.shouldReconnect || this.done) {
+			if (!this.done) this.status = 'disconnected';
+			return;
+		}
+		this.scheduleReconnect(buildId, generation);
+	}
+
+	private async finalizeDisconnectedBuild(buildId: string, generation: number): Promise<void> {
+		await this.refreshBuildDetail(buildId, generation);
+		if (generation !== this.generation) return;
+		if (!this.done) {
+			this.status = 'disconnected';
+			this.error = this.pendingError;
+			this.pendingError = null;
+			this.releaseActivityLease();
+		}
 	}
 
 	applySnapshot(build: ActiveBuildDetail, lastSequence = 0): void {

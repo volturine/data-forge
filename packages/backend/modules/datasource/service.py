@@ -17,6 +17,7 @@ from core.exceptions import (
 from core.namespace import namespace_paths
 from openpyxl import load_workbook
 from openpyxl.utils.cell import get_column_letter, range_boundaries
+from pyiceberg.catalog import load_catalog
 from sqlalchemy import select
 from sqlalchemy.orm import defer
 from sqlmodel import Session, col
@@ -46,6 +47,9 @@ def create_placeholder_output_datasource(
     result_id: str,
     analysis_id: str,
     analysis_tab_id: str,
+    name: str | None = None,
+    source_type: DataSourceType = DataSourceType.ANALYSIS,
+    config: dict[str, Any] | None = None,
 ) -> None:
     try:
         uuid.UUID(result_id)
@@ -63,8 +67,11 @@ def create_placeholder_output_datasource(
                 f"Output result_id '{result_id}' conflicts with an existing datasource not managed by analysis outputs",
             )
         next_config = dict(existing.config) if isinstance(existing.config, dict) else {}
+        if config is not None:
+            next_config = {**config, **next_config}
         next_config["analysis_tab_id"] = analysis_tab_id
         existing.config = next_config
+        existing.source_type = DataSourceType.require(source_type).value
         existing.created_by_analysis_id = analysis_id
         existing.created_by = DataSourceCreatedBy.ANALYSIS.value
         session.add(existing)
@@ -72,9 +79,9 @@ def create_placeholder_output_datasource(
         return
     datasource = DataSource(
         id=result_id,
-        name=result_id,
-        source_type=DataSourceType.ANALYSIS,
-        config={"analysis_tab_id": analysis_tab_id},
+        name=name or result_id,
+        source_type=DataSourceType.require(source_type).value,
+        config={**(config or {}), "analysis_tab_id": analysis_tab_id},
         created_by_analysis_id=analysis_id,
         created_by=DataSourceCreatedBy.ANALYSIS.value,
         is_hidden=True,
@@ -773,12 +780,33 @@ def _is_within(path: Path, root: Path) -> bool:
     return resolved_root in resolved_path.parents or resolved_root == resolved_path
 
 
+def _drop_iceberg_catalog_table(config: dict[str, Any]) -> None:
+    catalog_type = config.get("catalog_type")
+    catalog_uri = config.get("catalog_uri")
+    warehouse = config.get("warehouse")
+    namespace = config.get("namespace")
+    table = config.get("table")
+    if not all(isinstance(value, str) and value for value in [catalog_type, catalog_uri, warehouse, namespace, table]):
+        return
+    catalog = load_catalog(
+        "local",
+        type=catalog_type,
+        uri=catalog_uri,
+        warehouse=warehouse,
+    )
+    identifier = f"{namespace}.{table}"
+    if catalog.table_exists(identifier):
+        catalog.drop_table(identifier)
+        logger.info(f"Deleted Iceberg catalog table: {identifier}")
+
+
 def _delete_datasource_files(datasource: DataSource) -> None:
     if datasource.source_type == DataSourceType.FILE and "file_path" in datasource.config:
         _delete_file_path(str(datasource.config["file_path"]))
 
     if datasource.source_type == DataSourceType.ICEBERG and isinstance(datasource.config, dict):
         config = datasource.config
+        _drop_iceberg_catalog_table(config)
         metadata_path = config.get("metadata_path")
         if isinstance(metadata_path, str):
             root = _iceberg_cleanup_root(metadata_path)

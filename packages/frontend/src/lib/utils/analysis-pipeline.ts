@@ -225,6 +225,7 @@ export function buildDatasourcePipelinePayload(args: {
 		throw new Error('datasource.name is required');
 	}
 	const filename = datasource.name.trim().replace(/\s+/g, '_').toLowerCase();
+	const previewOutputId = `datasource-preview-${datasource.id}`;
 	const tabs: PipelineTab[] = [
 		{
 			id: `datasource-${datasource.id}`,
@@ -236,7 +237,7 @@ export function buildDatasourcePipelinePayload(args: {
 				config: normalizedConfig
 			},
 			output: {
-				result_id: datasource.id,
+				result_id: previewOutputId,
 				format: 'parquet',
 				filename: datasource.name,
 				build_mode: 'full',
@@ -249,4 +250,15 @@ export function buildDatasourcePipelinePayload(args: {
 		analysis_id: datasource.id,
 		tabs
 	};
+}
+
+export function buildDatasourcePreviewPipelinePayload(args: {
+	datasource: DataSource;
+	datasourceConfig: Record<string, unknown>;
+}): AnalysisPipelinePayload {
+	const persistedConfig = isRecord(args.datasource.config) ? args.datasource.config : {};
+	return buildDatasourcePipelinePayload({
+		datasource: args.datasource,
+		datasourceConfig: { ...persistedConfig, ...args.datasourceConfig }
+	});
 }

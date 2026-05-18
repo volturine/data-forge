@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -28,7 +29,7 @@ from core import (
 from core.config import settings
 from core.database import get_db, get_settings_db
 from core.exceptions import EngineNotFoundError
-from core.namespace import get_namespace, reset_namespace, set_namespace_context
+from core.namespace import get_namespace, namespace_paths, reset_namespace, set_namespace_context
 from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
@@ -65,6 +66,7 @@ from modules.compute.iceberg_service import (
 from modules.compute.iceberg_service import (
     list_iceberg_snapshots as list_iceberg_snapshots_info,
 )
+from modules.datasource import service as datasource_service
 from modules.mcp.router import MCPRouter
 
 logger = logging.getLogger(__name__)
@@ -510,6 +512,49 @@ async def start_active_build(
             current_tab_id = active_tab.get("id")
         if isinstance(active_tab.get("name"), str):
             current_tab_name = active_tab.get("name")
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        tab_id = tab.get("id")
+        output = tab.get("output")
+        if not isinstance(tab_id, str) or not isinstance(output, dict):
+            continue
+        result_id = output.get("result_id")
+        if not isinstance(result_id, str):
+            continue
+        iceberg = output.get("iceberg")
+        table_name = iceberg.get("table_name") if isinstance(iceberg, dict) else None
+        filename = output.get("filename")
+        output_name = table_name if isinstance(table_name, str) and table_name.strip() else filename
+        branch_name = iceberg.get("branch") if isinstance(iceberg, dict) else None
+        namespace_name = iceberg.get("namespace") if isinstance(iceberg, dict) else None
+        placeholder_config: dict[str, Any] | None = None
+        placeholder_source_type = datasource_service.DataSourceType.ANALYSIS
+        if isinstance(branch_name, str) and branch_name.strip():
+            safe_branch = re.sub(r"[^a-zA-Z0-9_]+", "_", branch_name).strip("_")
+            table_name = f"{result_id}_{safe_branch}"
+            warehouse_path = namespace_paths().exports_dir
+            placeholder_source_type = datasource_service.DataSourceType.ICEBERG
+            placeholder_config = {
+                "catalog_type": "sql",
+                "catalog_uri": settings.database_url,
+                "warehouse": f"file://{warehouse_path}",
+                "namespace": namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else "outputs",
+                "table": table_name,
+                "table_name": output_name if isinstance(output_name, str) and output_name.strip() else table_name,
+                "metadata_path": str(warehouse_path / str(result_id)),
+                "branch": branch_name,
+                "namespace_name": get_namespace(),
+            }
+        datasource_service.create_placeholder_output_datasource(
+            session,
+            result_id=result_id,
+            analysis_id=analysis_id,
+            analysis_tab_id=tab_id,
+            name=output_name if isinstance(output_name, str) else None,
+            source_type=placeholder_source_type,
+            config=placeholder_config,
+        )
     starter = schemas.BuildStarter.for_user(user)
     build_run_service.create_build_run(
         session,
@@ -745,13 +790,13 @@ async def configure_engine(
 @router.delete("/engine/{analysis_id}", status_code=204, mcp=True)
 @handle_errors(operation="shutdown engine")
 async def shutdown_engine(
-    analysis_id: AnalysisId,
+    analysis_id: str,
     http_request: Request,
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    """Shutdown an analysis engine."""
-    analysis_id_value = parse_analysis_id(analysis_id)
+    """Shutdown an engine by runtime engine key."""
+    analysis_id_value = analysis_id
     manager = _override_manager(http_request)
     if manager is not None:
         engine = manager.get_engine(analysis_id_value)
