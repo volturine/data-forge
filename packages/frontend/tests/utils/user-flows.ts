@@ -1,5 +1,10 @@
 import { expect, type Page } from '@playwright/test';
-import { gotoNewAnalysis, waitForLayoutReady, waitForUdfList } from './readiness.js';
+import {
+	gotoNewAnalysis,
+	waitForDatasourceList,
+	waitForLayoutReady,
+	waitForUdfList
+} from './readiness.js';
 
 export const E2E_PASSWORD = 'E2eTestPw12345';
 
@@ -62,9 +67,10 @@ export async function uploadDatasourceViaUi(
 		csv?: string;
 	}
 ): Promise<{ id: string }> {
-	await page.goto('/datasources/new');
+	await page.goto('/datasources/new', { waitUntil: 'domcontentloaded' });
 	await waitForLayoutReady(page);
 	const fileInput = page.locator('#file-input');
+	await expect(fileInput).toBeVisible({ timeout: 15_000 });
 	await fileInput.setInputFiles({
 		name: `${name}.csv`,
 		mimeType: 'text/csv',
@@ -77,16 +83,28 @@ export async function uploadDatasourceViaUi(
 	}
 	const uploadBtn = page.getByRole('button', { name: 'Upload', exact: true });
 	await expect(uploadBtn).toBeEnabled({ timeout: 10_000 });
-	await uploadBtn.click();
+	const [uploadResponse] = await Promise.all([
+		page.waitForResponse(
+			(resp) =>
+				resp.url().includes('/api/v1/datasource/upload') && resp.request().method() === 'POST',
+			{ timeout: 60_000 }
+		),
+		uploadBtn.click()
+	]);
+	if (!uploadResponse.ok()) {
+		throw new Error(
+			`Upload failed for ${name}: ${uploadResponse.status()} ${uploadResponse.statusText()}`
+		);
+	}
+	const uploaded = (await uploadResponse.json()) as { id?: string };
+	const datasourceId = typeof uploaded.id === 'string' ? uploaded.id : null;
+	if (!datasourceId) {
+		throw new Error(`Could not extract datasource id from upload response for ${name}`);
+	}
 	await expect(page).toHaveURL((url) => url.pathname === '/datasources', { timeout: 30_000 });
+	await waitForDatasourceList(page, 30_000);
 	const row = page.locator(`[data-ds-row="${name}"]`);
 	await expect(row).toBeVisible({ timeout: 30_000 });
-	await row.click();
-	await expect(page).toHaveURL(/id=/, { timeout: 15_000 });
-	const datasourceId = new URL(page.url()).searchParams.get('id');
-	if (!datasourceId) {
-		throw new Error(`Could not extract datasource id after uploading ${name}`);
-	}
 	return { id: datasourceId };
 }
 

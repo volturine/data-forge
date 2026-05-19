@@ -77,8 +77,39 @@ def test_datasource_target_kind_is_model_owned() -> None:
     assert analysis_output.target_kind() == DataSourceTargetKind.ANALYSIS
     assert raw_import.external_source_type() == DataSourceType.FILE
     assert raw_import.is_refreshable_external is True
+    assert raw_import.query_and_connection() == (None, None)
     assert raw_import.target_kind() == DataSourceTargetKind.RAW
     assert derived.target_kind() == DataSourceTargetKind.DATASOURCE
+
+
+def test_datasource_model_owns_query_and_connection_normalization() -> None:
+    direct = DataSource(
+        id='ds-direct',
+        name='Direct DB',
+        source_type=DataSourceType.DATABASE.value,
+        config={
+            'query': 'select * from public.users',
+            'connection_string': 'postgresql+psycopg://example/db',
+        },
+        created_by=DataSourceCreatedBy.IMPORT.value,
+        created_at='2024-01-01T00:00:00Z',
+    )
+    nested = DataSource(
+        id='ds-nested',
+        name='Nested DB',
+        source_type=DataSourceType.ICEBERG.value,
+        config={
+            'source': {
+                'query': 'select * from public.orders',
+                'connection_string': 'postgresql+asyncpg://example/db',
+            }
+        },
+        created_by=DataSourceCreatedBy.IMPORT.value,
+        created_at='2024-01-01T00:00:00Z',
+    )
+
+    assert direct.query_and_connection() == ('select * from public.users', 'postgresql://example/db')
+    assert nested.query_and_connection() == ('select * from public.orders', 'postgresql://example/db')
 
 
 def test_healthcheck_type_owns_uniqueness_rule() -> None:

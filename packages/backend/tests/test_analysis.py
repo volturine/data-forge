@@ -563,6 +563,56 @@ class TestAnalysisImport:
         assert body["name"] == "Imported Analysis"
         assert body["pipeline_definition"]["tabs"][0]["datasource"]["id"] == sample_datasource.id
 
+    def test_import_analysis_remaps_join_right_source(self, client, sample_datasource: DataSource):
+        legacy_source_id = "legacy-source-id"
+        payload = {
+            "name": "Imported Join Analysis",
+            "description": "Imported with self-join datasource remap",
+            "datasource_remap": {legacy_source_id: sample_datasource.id},
+            "pipeline": {
+                "tabs": [
+                    {
+                        "id": "tab-legacy",
+                        "name": "Legacy Source",
+                        "parent_id": None,
+                        "datasource": {
+                            "id": legacy_source_id,
+                            "analysis_tab_id": None,
+                            "config": {"branch": "master"},
+                        },
+                        "output": {
+                            "result_id": str(uuid.uuid4()),
+                            "datasource_type": "iceberg",
+                            "format": "parquet",
+                            "filename": "legacy_join_source",
+                        },
+                        "steps": [
+                            {
+                                "id": "join-1",
+                                "type": "join",
+                                "config": {
+                                    "how": "inner",
+                                    "right_source": legacy_source_id,
+                                    "join_columns": [{"id": "jc1", "left_column": "a", "right_column": "a"}],
+                                    "suffix": "_right",
+                                },
+                                "depends_on": [],
+                                "is_applied": True,
+                            }
+                        ],
+                    },
+                ],
+            },
+        }
+
+        response = client.post("/api/v1/analysis/import", json=payload)
+
+        assert response.status_code == 200
+        body = response.json()
+        tab = body["pipeline_definition"]["tabs"][0]
+        assert tab["datasource"]["id"] == sample_datasource.id
+        assert tab["steps"][0]["config"]["right_source"] == sample_datasource.id
+
 
 class TestAnalysisUpdate:
     def test_update_analysis_sets_version_headers(self, client, sample_analysis: Analysis):

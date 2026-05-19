@@ -23,6 +23,7 @@
 		Search
 	} from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { css, spinner, emptyText, label } from '$lib/styles/panda';
 
@@ -35,6 +36,7 @@
 	let { datasourceId, compact = false, searchQuery: externalSearch }: Props = $props();
 
 	const queryClient = useQueryClient();
+	const ns = useNamespace();
 	const defaultCron = '0 * * * *';
 
 	let creating = $state(false);
@@ -52,33 +54,36 @@
 	const effectiveSearch = $derived(externalSearch ?? searchQuery);
 
 	const schedulesQuery = createQuery(() => ({
-		queryKey: ['schedules', datasourceId ?? 'all'],
+		queryKey: ['schedules', ns.value, datasourceId ?? 'all'],
 		queryFn: async () => {
 			const result = await listSchedules(datasourceId);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
-		}
+		},
+		enabled: !ns.switching
 	}));
 
 	const allSchedulesQuery = createQuery(() => ({
-		queryKey: ['schedules', 'all'],
+		queryKey: ['schedules', ns.value, 'all'],
 		queryFn: async () => {
 			const result = await listSchedules();
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		staleTime: 30_000
+		staleTime: 30_000,
+		enabled: !ns.switching
 	}));
 
 	const datasourcesQuery = createQuery(() => ({
-		queryKey: ['datasources-lookup', 'include-hidden'],
+		queryKey: ['datasources-lookup', ns.value, 'include-hidden'],
 		queryFn: async () => {
 			const result = await listDatasources(true, { cache: 'no-store' });
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		staleTime: 0,
-		refetchOnMount: 'always'
+		refetchOnMount: 'always',
+		enabled: !ns.switching
 	}));
 
 	const datasourceMap = $derived(
@@ -353,7 +358,7 @@
 	function openCreate() {
 		void listDatasources(true, { cache: 'no-store' }).match(
 			(datasources) => {
-				queryClient.setQueryData(['datasources-lookup', 'include-hidden'], datasources);
+				queryClient.setQueryData(['datasources-lookup', ns.value, 'include-hidden'], datasources);
 				createDatasources = datasources;
 				creating = true;
 			},

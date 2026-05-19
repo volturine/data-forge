@@ -230,6 +230,18 @@ class DataSourceCreate(DataSourceDescriptionModel):
         return cls.normalize_description(value)
 
 
+class InternalPostgresTable(BaseModel):
+    schema_name: str
+    table_name: str
+    is_onboarded: bool = False
+
+
+class InternalPostgresToggleRequest(BaseModel):
+    schema_name: str
+    table_name: str
+    enabled: bool
+
+
 class DataSourceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -5,7 +5,7 @@ import { workerAuthFile } from './api.js';
 import { gotoAnalysesGallery, waitForDatasourceList, waitForUdfList } from './readiness.js';
 
 const ELEMENT_VISIBLE_TIMEOUT = 10_000;
-const DIALOG_HIDDEN_TIMEOUT = 10_000;
+const DIALOG_HIDDEN_TIMEOUT = 30_000;
 const ANALYSIS_DELETE_TIMEOUT = 45_000;
 
 function confirmDialog(page: Page, heading: string | RegExp): Locator {
@@ -58,7 +58,7 @@ export async function deleteDatasourceViaUI(page: Page, name: string): Promise<v
 	try {
 		await page.goto('/datasources', { waitUntil: 'domcontentloaded' });
 		await waitForDatasourceList(page, ELEMENT_VISIBLE_TIMEOUT);
-		const row = page.locator(`[data-ds-row="${name}"]`);
+		const row = page.locator(`[data-ds-row="${name}"]`).first();
 		if (!(await row.isVisible().catch(() => false))) {
 			const toggle = page.locator('button[title="Show auto-generated datasources"]');
 			if (await toggle.isVisible().catch(() => false)) {
@@ -67,10 +67,19 @@ export async function deleteDatasourceViaUI(page: Page, name: string): Promise<v
 			}
 		}
 		if (!(await row.isVisible().catch(() => false))) return;
-		await row.locator('button[title="Delete"]').click();
+		const rowId = await row.getAttribute('data-ds-id');
+		if (!rowId) {
+			throw new Error(`Datasource row missing data-ds-id: ${name}`);
+		}
+		const deleteButton = row.locator('button[title="Delete"]');
+		await expect(deleteButton).toBeEnabled({ timeout: ELEMENT_VISIBLE_TIMEOUT });
+		await deleteButton.click();
 		const dialog = confirmDialog(page, 'Delete Datasource');
 		await dialog.getByRole('button', { name: /^Delete$/ }).click();
-		await expect(row).toBeHidden({ timeout: DIALOG_HIDDEN_TIMEOUT });
+		await expect(dialog).toBeHidden({ timeout: DIALOG_HIDDEN_TIMEOUT });
+		await expect(page.locator(`[data-ds-id="${rowId}"]`)).toBeHidden({
+			timeout: DIALOG_HIDDEN_TIMEOUT
+		});
 	} catch (error) {
 		console.warn(`[ui-cleanup] deleteDatasourceViaUI failed for "${name}":`, error);
 	}

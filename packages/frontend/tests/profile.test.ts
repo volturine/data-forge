@@ -1,6 +1,18 @@
 import { test, expect } from './fixtures.js';
-import { screenshot } from './utils/visual.js';
+import { switchNamespace } from './utils/namespace.js';
 import { waitForAppShell, waitForProfileTabs, waitForProfileTab } from './utils/readiness.js';
+import { uid } from './utils/uid.js';
+import { screenshot } from './utils/visual.js';
+
+async function expandSystemExportGroup(page: import('@playwright/test').Page, schemaName: string) {
+	const toggle = page.locator(
+		`[data-testid="system-export-group-toggle"][data-schema-name="${schemaName}"]`
+	);
+	await expect(toggle).toBeVisible();
+	if ((await toggle.getAttribute('aria-expanded')) === 'true') return;
+	await toggle.click();
+	await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+}
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Profile page – tabbed interface
@@ -347,6 +359,115 @@ test.describe('Profile – System tab', () => {
 		await expect(page.getByRole('switch', { name: 'Toggle IndexedDB inspector' })).toBeVisible();
 
 		await screenshot(page, 'profile', 'system-tab');
+	});
+
+	test('system tab shows collapsible schema groups for export options', async ({ page }) => {
+		await page.goto('/profile#system');
+		await waitForProfileTab(page, 'System');
+
+		await expect(page.getByText('What you can export')).toBeVisible();
+		const defaultToggle = page.locator(
+			'[data-testid="system-export-group-toggle"][data-schema-name="default"]'
+		);
+		await expect(defaultToggle).toBeVisible();
+		await expect(defaultToggle).toHaveAttribute('aria-expanded', 'false');
+		await expect(
+			page.locator('[data-testid="internal-table-onboard-switch"]').first()
+		).not.toBeVisible();
+
+		await defaultToggle.click();
+		await expect(defaultToggle).toHaveAttribute('aria-expanded', 'true');
+		await expect(
+			page.locator('[data-testid="internal-table-onboard-switch"]').first()
+		).toBeVisible();
+
+		await defaultToggle.click();
+		await expect(defaultToggle).toHaveAttribute('aria-expanded', 'false');
+	});
+
+	test('system internal postgres switch persists on refresh and can toggle off again', async ({
+		page
+	}) => {
+		test.setTimeout(120_000);
+		await page.goto('/profile#system');
+		await waitForProfileTab(page, 'System');
+
+		await expandSystemExportGroup(page, 'default');
+
+		const switchControl = page.locator(
+			'[data-testid="internal-table-onboard-switch"][data-internal-table-key="default.analyses"]'
+		);
+		await expect(switchControl).toBeVisible();
+
+		if ((await switchControl.getAttribute('aria-checked')) !== 'true') {
+			await switchControl.click();
+			await expect(switchControl).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
+			await expect(switchControl).toBeEnabled({ timeout: 30_000 });
+		}
+
+		await page.reload();
+		await waitForProfileTab(page, 'System');
+		await expandSystemExportGroup(page, 'default');
+		await expect(switchControl).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
+		await expect(switchControl).toBeEnabled({ timeout: 30_000 });
+
+		await switchControl.click();
+		await expect(switchControl).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });
+		await expect(switchControl).toBeEnabled({ timeout: 30_000 });
+	});
+
+	test('system tab preserves hash and reloads onboard state when namespace changes', async ({
+		page
+	}) => {
+		test.setTimeout(120_000);
+		const id = uid();
+		const nsA = `e2e-profile-a-${id}`;
+		const nsB = `e2e-profile-b-${id}`;
+		const switchControl = page.locator(
+			'[data-testid="internal-table-onboard-switch"][data-internal-table-key="default.analyses"]'
+		);
+
+		try {
+			await page.goto('/profile#system');
+			await waitForProfileTab(page, 'System');
+
+			await switchNamespace(page, nsA);
+			await expect(page).toHaveURL((url) => url.pathname === '/profile' && url.hash === '#system', {
+				timeout: 10_000
+			});
+			await waitForProfileTab(page, 'System');
+			await expandSystemExportGroup(page, 'default');
+			await expect(switchControl).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });
+
+			await switchControl.click();
+			await expect(switchControl).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
+
+			await switchNamespace(page, nsB);
+			await expect(page).toHaveURL((url) => url.pathname === '/profile' && url.hash === '#system', {
+				timeout: 10_000
+			});
+			await waitForProfileTab(page, 'System');
+			await expandSystemExportGroup(page, 'default');
+			await expect(switchControl).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });
+
+			await switchNamespace(page, nsA);
+			await expect(page).toHaveURL((url) => url.pathname === '/profile' && url.hash === '#system', {
+				timeout: 10_000
+			});
+			await waitForProfileTab(page, 'System');
+			await expandSystemExportGroup(page, 'default');
+			await expect(switchControl).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
+		} finally {
+			await switchNamespace(page, nsA);
+			await waitForProfileTab(page, 'System');
+			await expandSystemExportGroup(page, 'default');
+			if ((await switchControl.getAttribute('aria-checked')) === 'true') {
+				await switchControl.click();
+				await expect(switchControl).toHaveAttribute('aria-checked', 'false', {
+					timeout: 30_000
+				});
+			}
+		}
 	});
 
 	test('system save shows success feedback on 200', async ({ page }) => {

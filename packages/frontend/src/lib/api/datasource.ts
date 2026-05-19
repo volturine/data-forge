@@ -143,6 +143,27 @@ export function connectAnalysisDatasource(
 	});
 }
 
+export interface InternalPostgresTable {
+	schema_name: string;
+	table_name: string;
+	is_onboarded: boolean;
+}
+
+export function listInternalPostgresTables(): ResultAsync<InternalPostgresTable[], ApiError> {
+	return apiRequest<InternalPostgresTable[]>('/v1/datasource/internal-postgres/tables');
+}
+
+export function toggleInternalPostgresTable(
+	schemaName: string,
+	tableName: string,
+	enabled: boolean
+): ResultAsync<InternalPostgresTable, ApiError> {
+	return apiRequest<InternalPostgresTable>('/v1/datasource/internal-postgres/toggle', {
+		method: 'POST',
+		body: JSON.stringify({ schema_name: schemaName, table_name: tableName, enabled })
+	});
+}
+
 export function refreshDatasource(datasourceId: string): ResultAsync<DataSource, ApiError> {
 	return apiRequest<DataSource>(`/v1/datasource/${datasourceId}/refresh`, {
 		method: 'POST'

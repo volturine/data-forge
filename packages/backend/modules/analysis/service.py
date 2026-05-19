@@ -1065,7 +1065,7 @@ def delete_analysis(
     session: Session,  # type: ignore[type-arg]
     analysis_id: str,
 ) -> None:
-    from modules.datasource.service import _delete_datasource_files
+    from modules.datasource.service import cleanup_datasource_storage
 
     analysis = session.get(Analysis, analysis_id)
 
@@ -1082,7 +1082,7 @@ def delete_analysis(
 
     for ds in created_datasources:
         if ds.is_hidden:
-            _delete_datasource_files(ds)
+            cleanup_datasource_storage(ds)
             session.delete(ds)
 
     session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))  # type: ignore[arg-type]

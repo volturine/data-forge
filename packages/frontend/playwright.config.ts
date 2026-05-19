@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
-const DEFAULT_E2E_WORKERS = 1;
+const DEFAULT_E2E_WORKERS = 2;
 
 function shardSuffixFromArgs(): string {
 	const shardFlagIndex = process.argv.findIndex((arg) => arg === '--shard');

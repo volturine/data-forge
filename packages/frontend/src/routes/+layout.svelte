@@ -226,6 +226,7 @@
 	const namespaceDraft = $derived(namespaceState.value);
 
 	async function handleNamespaceSelect(value: string) {
+		namespaceOpen = false;
 		await switchNamespace(value, {
 			async beforeCommit() {
 				await queryClient.cancelQueries();
@@ -238,14 +239,13 @@
 				schemaStore.reset();
 			},
 			async afterCommit() {
-				await goto(resolve(currentPath as '/'), {
+				await goto(resolve(`${currentPath}${page.url.search}${page.url.hash}` as '/'), {
 					invalidateAll: true,
 					replaceState: true
 				});
 				await queryClient.resetQueries();
 			}
 		});
-		namespaceOpen = false;
 	}
 
 	function openNamespace() {

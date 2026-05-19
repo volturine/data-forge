@@ -53,10 +53,14 @@ async function createPipelineAnalysis(
 	let prevId: string | null = null;
 	for (const s of steps) {
 		const stepId = crypto.randomUUID();
+		const config = structuredClone(s.config);
+		if (config.right_source === dsId) {
+			config.right_source = datasourceRef;
+		}
 		pipelineSteps.push({
 			id: stepId,
 			type: s.type,
-			config: s.config,
+			config,
 			depends_on: prevId ? [prevId] : [],
 			is_applied: true
 		});

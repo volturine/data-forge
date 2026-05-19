@@ -1,9 +1,12 @@
+from pathlib import Path
+
 import polars as pl
 import pytest
 from contracts.step_config_enums import TimeComponent
 from core.config import settings
 from core.export_formats import get_export_format
 from core.iceberg_metadata import (
+    IcebergMetadataPathNotFoundError,
     resolve_iceberg_branch_metadata_path,
     resolve_iceberg_metadata_path,
 )
@@ -137,6 +140,27 @@ def test_resolve_iceberg_branch_metadata_path_accepts_explicit_data_root(tmp_pat
     metadata_file.write_text("{}", encoding="utf-8")
 
     assert resolve_iceberg_branch_metadata_path(str(metadata_dir.parent), None, data_root=data_root) == str(metadata_file)
+
+
+def test_resolve_iceberg_metadata_path_reports_missing_metadata_dir_race(tmp_path, monkeypatch):
+    data_root = tmp_path / "custom-root"
+    table_dir = data_root / "table"
+    metadata_dir = table_dir / "metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    metadata_file = metadata_dir / "v1.metadata.json"
+    metadata_file.write_text("{}", encoding="utf-8")
+
+    original_glob = Path.glob
+
+    def raising_glob(self: Path, pattern: str):
+        if self == metadata_dir and pattern == "*.metadata.json":
+            raise FileNotFoundError(metadata_dir)
+        return original_glob(self, pattern)
+
+    monkeypatch.setattr(Path, "glob", raising_glob)
+
+    with pytest.raises(IcebergMetadataPathNotFoundError, match="Iceberg metadata_path not found"):
+        resolve_iceberg_metadata_path(str(table_dir), data_root=data_root)
 
 
 def test_render_template_placeholders_replaces_known_keys_and_leaves_unknown() -> None:

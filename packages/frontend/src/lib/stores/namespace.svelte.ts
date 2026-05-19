@@ -1,3 +1,4 @@
+import { registerNamespace } from '$lib/api/namespaces';
 import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 import { configStore } from '$lib/stores/config.svelte';
 
@@ -78,6 +79,12 @@ export async function switchNamespace(
 ): Promise<void> {
 	switching = true;
 	try {
+		if (isValid(value)) {
+			const result = await registerNamespace(value);
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
+		}
 		await hooks?.beforeCommit?.();
 		await setNamespace(value);
 		await hooks?.afterCommit?.();

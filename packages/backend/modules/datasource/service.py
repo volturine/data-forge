@@ -18,7 +18,7 @@ from core.namespace import namespace_paths
 from openpyxl import load_workbook
 from openpyxl.utils.cell import get_column_letter, range_boundaries
 from pyiceberg.catalog import load_catalog
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import defer
 from sqlmodel import Session, col
 
@@ -31,15 +31,129 @@ from modules.datasource.schemas import (
     DataSourceUpdate,
     FileListItem,
     FileListResponse,
+    InternalPostgresTable,
     SchemaInfo,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _open_excel_workbook(file_path: Path, *, table_name: str | None) -> Any:
-    # Table metadata is unavailable in openpyxl read_only mode.
-    return load_workbook(file_path, read_only=table_name is None, data_only=True)
+_INTERNAL_POSTGRES_EXCLUDED_TABLES = {"alembic_version"}
+
+
+class InternalPostgresOnboarding:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+        self.inspector = inspect(session.get_bind())
+
+    @staticmethod
+    def _quote_identifier(value: str) -> str:
+        return '"' + value.replace('"', '""') + '"'
+
+    @classmethod
+    def query_for(cls, schema_name: str, table_name: str) -> str:
+        return f"SELECT * FROM {cls._quote_identifier(schema_name)}.{cls._quote_identifier(table_name)}"
+
+    @staticmethod
+    def datasource_name_for(schema_name: str, table_name: str) -> str:
+        return f"internal.{schema_name}.{table_name}"
+
+    @staticmethod
+    def connection_string() -> str:
+        from core.config import settings
+
+        return DataSource.normalize_connection_string(settings.database_url)
+
+    def matching_datasources(self, schema_name: str, table_name: str) -> list[DataSource]:
+        query = self.query_for(schema_name, table_name)
+        connection_string = self.connection_string()
+        datasource_name = self.datasource_name_for(schema_name, table_name)
+        matches: list[DataSource] = []
+        for datasource in self.session.execute(select(DataSource)).scalars().all():
+            if datasource.name == datasource_name:
+                matches.append(datasource)
+                continue
+            datasource_query, datasource_connection = datasource.query_and_connection()
+            if datasource_query != query:
+                continue
+            if datasource_connection != connection_string:
+                continue
+            matches.append(datasource)
+        return matches
+
+    def list_tables(self) -> list[InternalPostgresTable]:
+        rows: list[InternalPostgresTable] = []
+        existing_names = {datasource.name for datasource in self.session.execute(select(DataSource)).scalars().all()}
+        for schema_name in sorted(self.inspector.get_schema_names()):
+            if schema_name.startswith("pg_") or schema_name == "information_schema":
+                continue
+            for table_name in sorted(self.inspector.get_table_names(schema=schema_name)):
+                if table_name in _INTERNAL_POSTGRES_EXCLUDED_TABLES:
+                    continue
+                rows.append(
+                    InternalPostgresTable(
+                        schema_name=schema_name,
+                        table_name=table_name,
+                        is_onboarded=self.datasource_name_for(schema_name, table_name) in existing_names,
+                    ),
+                )
+        return rows
+
+    def table_query(self, schema_name: str, table_name: str) -> str:
+        if schema_name.startswith("pg_") or schema_name == "information_schema":
+            raise ValueError("System schemas cannot be onboarded")
+        if table_name in _INTERNAL_POSTGRES_EXCLUDED_TABLES:
+            raise ValueError(f"Table {schema_name}.{table_name} cannot be onboarded")
+        if not self.inspector.has_table(table_name, schema=schema_name):
+            raise ValueError(f"Internal Postgres table {schema_name}.{table_name} does not exist")
+        return self.query_for(schema_name, table_name)
+
+    def is_onboarded(self, schema_name: str, table_name: str) -> bool:
+        self.table_query(schema_name, table_name)
+        return bool(self.matching_datasources(schema_name, table_name))
+
+    def set_onboarded(self, schema_name: str, table_name: str, *, enabled: bool) -> InternalPostgresTable:
+        self.table_query(schema_name, table_name)
+        matches = self.matching_datasources(schema_name, table_name)
+        if enabled:
+            return InternalPostgresTable(
+                schema_name=schema_name,
+                table_name=table_name,
+                is_onboarded=bool(matches),
+            )
+        for datasource in matches:
+            delete_datasource(self.session, datasource.id)
+        return InternalPostgresTable(schema_name=schema_name, table_name=table_name, is_onboarded=False)
+
+
+def internal_postgres_connection_string() -> str:
+    return InternalPostgresOnboarding.connection_string()
+
+
+def list_internal_postgres_tables(session: Session) -> list[InternalPostgresTable]:
+    return InternalPostgresOnboarding(session).list_tables()
+
+
+def internal_postgres_table_query(session: Session, schema_name: str, table_name: str) -> str:
+    return InternalPostgresOnboarding(session).table_query(schema_name, table_name)
+
+
+def internal_postgres_table_is_onboarded(
+    session: Session,
+    schema_name: str,
+    table_name: str,
+) -> bool:
+    return InternalPostgresOnboarding(session).is_onboarded(schema_name, table_name)
+
+
+def set_internal_postgres_table_onboarded(
+    session: Session,
+    schema_name: str,
+    table_name: str,
+    *,
+    enabled: bool,
+) -> InternalPostgresTable:
+    return InternalPostgresOnboarding(session).set_onboarded(schema_name, table_name, enabled=enabled)
 
 
 def create_placeholder_output_datasource(
@@ -140,6 +254,297 @@ class ExcelPreviewResult:
     end_row: int
 
 
+@dataclass
+class _ExcelBounds:
+    sheet_name: str
+    start_row: int
+    start_col: int
+    end_col: int
+    end_row: int | None
+
+
+class ExcelPreviewBuilder:
+    def __init__(self, file_path: Path) -> None:
+        self.file_path = file_path
+
+    def build_preview(
+        self,
+        sheet_name: str,
+        start_row: int,
+        start_col: int,
+        end_col: int,
+        end_row: int | None,
+        *,
+        table_name: str | None = None,
+        named_range: str | None = None,
+        cell_range: str | None = None,
+        preview_rows: int = 100,
+    ) -> ExcelPreviewResult:
+        workbook = self._open_workbook(table_name=table_name)
+        try:
+            resolved = self._resolve_bounds(
+                workbook,
+                sheet_name,
+                start_row,
+                start_col,
+                end_col,
+                end_row,
+                table_name,
+                named_range,
+                cell_range,
+            )
+            sheet = workbook[resolved.sheet_name]
+            end_row_value = resolved.end_row
+            if end_row_value is None:
+                end_row_value = self._detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
+            self._validate_bounds(
+                sheet,
+                resolved.start_row,
+                resolved.start_col,
+                resolved.end_col,
+                end_row_value,
+            )
+            preview_end_row = min(resolved.start_row + preview_rows - 1, end_row_value)
+            rows = self._collect_preview_rows(
+                sheet,
+                resolved.start_row,
+                resolved.start_col,
+                resolved.end_col,
+                preview_end_row,
+            )
+            return ExcelPreviewResult(
+                preview=rows,
+                detected_end_row=end_row_value,
+                sheet_name=resolved.sheet_name,
+                start_row=resolved.start_row,
+                start_col=resolved.start_col,
+                end_col=resolved.end_col,
+                end_row=end_row_value,
+            )
+        finally:
+            workbook.close()
+
+    def resolve_selection(
+        self,
+        sheet_name: str | None,
+        start_row: int,
+        start_col: int,
+        end_col: int,
+        end_row: int | None,
+        *,
+        table_name: str | None = None,
+        named_range: str | None = None,
+        cell_range: str | None = None,
+    ) -> tuple[str, int, int, int, int]:
+        try:
+            workbook = self._open_workbook(table_name=table_name)
+            try:
+                target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
+                if not target_sheet:
+                    raise ValueError("No sheets found in file")
+                resolved = self._resolve_bounds(
+                    workbook,
+                    target_sheet,
+                    start_row,
+                    start_col,
+                    end_col,
+                    end_row,
+                    table_name,
+                    named_range,
+                    cell_range,
+                )
+                sheet = workbook[resolved.sheet_name]
+                end_row_value = resolved.end_row
+                if end_row_value is None:
+                    end_row_value = self._detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
+                self._validate_bounds(
+                    sheet,
+                    resolved.start_row,
+                    resolved.start_col,
+                    resolved.end_col,
+                    end_row_value,
+                )
+                return (
+                    resolved.sheet_name,
+                    resolved.start_row,
+                    resolved.start_col,
+                    resolved.end_col,
+                    end_row_value,
+                )
+            finally:
+                workbook.close()
+        except ValueError as exc:
+            raise DataSourceValidationError(str(exc), details={"file_path": str(self.file_path)}) from exc
+
+    def _open_workbook(self, *, table_name: str | None) -> Any:
+        # Table metadata is unavailable in openpyxl read_only mode.
+        return load_workbook(self.file_path, read_only=table_name is None, data_only=True)
+
+    def _resolve_bounds(
+        self,
+        workbook: Any,
+        sheet_name: str,
+        start_row: int,
+        start_col: int,
+        end_col: int,
+        end_row: int | None,
+        table_name: str | None,
+        named_range: str | None,
+        cell_range: str | None,
+    ) -> _ExcelBounds:
+        if table_name:
+            sheet = workbook[sheet_name]
+            tables = getattr(sheet, "tables", None)
+            if not tables:
+                raise ValueError(f"No tables available in sheet: {sheet_name}")
+            table = tables.get(table_name)
+            if not table:
+                raise ValueError(f"Table not found: {table_name}")
+            min_col, min_row, max_col, max_row = range_boundaries(table.ref)
+            if min_col is None or min_row is None or max_col is None or max_row is None:
+                raise ValueError(f"Invalid table range: {table_name}")
+            return _ExcelBounds(sheet_name, int(min_row) - 1, int(min_col) - 1, int(max_col) - 1, int(max_row) - 1)
+        if named_range:
+            defined = workbook.defined_names.get(named_range)
+            if not defined:
+                raise ValueError(f"Named range not found: {named_range}")
+            destinations = list(defined.destinations)
+            if not destinations:
+                raise ValueError(f"Named range has no destinations: {named_range}")
+            dest_sheet, coord = destinations[0]
+            min_col, min_row, max_col, max_row = range_boundaries(coord)
+            if min_col is None or min_row is None or max_col is None or max_row is None:
+                raise ValueError(f"Invalid named range: {named_range}")
+            return _ExcelBounds(dest_sheet, int(min_row) - 1, int(min_col) - 1, int(max_col) - 1, int(max_row) - 1)
+        if cell_range:
+            return self._parse_cell_range(workbook, cell_range, sheet_name)
+        resolved_start_row = max(start_row, 0)
+        resolved_start_col = max(start_col, 0)
+        resolved_end_col = end_col
+        if resolved_end_col <= resolved_start_col:
+            sheet = workbook[sheet_name]
+            resolved_end_col = self._detect_end_col(sheet, resolved_start_row, resolved_start_col)
+        resolved_end_col = max(resolved_end_col, resolved_start_col)
+        end_row_value = end_row
+        if end_row_value is not None:
+            end_row_value = max(end_row_value, resolved_start_row)
+        return _ExcelBounds(
+            sheet_name,
+            resolved_start_row,
+            resolved_start_col,
+            resolved_end_col,
+            end_row_value,
+        )
+
+    def _parse_cell_range(self, workbook: Any, cell_range: str, default_sheet: str | None) -> _ExcelBounds:
+        raw = cell_range.strip()
+        if not raw:
+            raise ValueError("Cell range cannot be empty")
+        target_sheet = default_sheet
+        coord = raw
+        if "!" in raw:
+            sheet_part, coord_part = raw.split("!", maxsplit=1)
+            sheet_part = sheet_part.strip()
+            if sheet_part.startswith("'") and sheet_part.endswith("'"):
+                sheet_part = sheet_part[1:-1]
+            if not sheet_part:
+                raise ValueError(f"Invalid cell range sheet: {cell_range}")
+            target_sheet = sheet_part
+            coord = coord_part.strip()
+        if not target_sheet:
+            target_sheet = workbook.sheetnames[0] if workbook.sheetnames else None
+        if not target_sheet or target_sheet not in workbook.sheetnames:
+            raise ValueError(f"Sheet not found for cell range: {target_sheet}")
+        min_col, min_row, max_col, max_row = range_boundaries(coord)
+        if min_col is None or min_row is None or max_col is None or max_row is None:
+            raise ValueError(f"Invalid cell range: {cell_range}")
+        return _ExcelBounds(
+            target_sheet,
+            int(min_row) - 1,
+            int(min_col) - 1,
+            int(max_col) - 1,
+            int(max_row) - 1,
+        )
+
+    @staticmethod
+    def format_cell_range(sheet_name: str, start_row: int, start_col: int, end_row: int, end_col: int) -> str:
+        start_cell = f"{get_column_letter(start_col + 1)}{start_row + 1}"
+        end_cell = f"{get_column_letter(end_col + 1)}{end_row + 1}"
+        return f"{sheet_name}!{start_cell}:{end_cell}"
+
+    @staticmethod
+    def _validate_bounds(sheet: Any, start_row: int, start_col: int, end_col: int, end_row: int) -> None:
+        if start_row < 0 or start_col < 0:
+            raise ValueError("Excel bounds must be non-negative")
+        if end_row < start_row or end_col < start_col:
+            raise ValueError("Excel bounds are invalid")
+        max_row = sheet.max_row or 0
+        max_col = sheet.max_column or 0
+        if max_row <= 0 or max_col <= 0:
+            raise ValueError("Excel sheet has no data")
+        if start_row >= max_row or end_row >= max_row:
+            raise ValueError("Excel row bounds exceed sheet size")
+        if start_col >= max_col or end_col >= max_col:
+            raise ValueError("Excel column bounds exceed sheet size")
+
+    @staticmethod
+    def _detect_end_col(sheet: Any, start_row: int, start_col: int) -> int:
+        max_col = sheet.max_column or 0
+        if max_col <= start_col:
+            return start_col
+        last_col = start_col
+        for cell in sheet.iter_rows(
+            min_row=start_row + 1,
+            max_row=start_row + 1,
+            min_col=start_col + 1,
+            max_col=max_col,
+        ):
+            for item in cell:
+                if item.value is None:
+                    continue
+                if str(item.value).strip() == "":
+                    continue
+                last_col = item.column - 1
+        return last_col
+
+    @staticmethod
+    def _detect_end_row(sheet: Any, start_row: int, start_col: int, end_col: int) -> int:
+        max_row = sheet.max_row or 0
+        if max_row <= start_row:
+            return start_row
+        for row_index in range(start_row + 1, max_row + 1):
+            values: list[object | None] = []
+            for cell in sheet.iter_rows(
+                min_row=row_index,
+                max_row=row_index,
+                min_col=start_col + 1,
+                max_col=end_col + 1,
+            ):
+                values = [item.value for item in cell]
+            if all(value is None or str(value).strip() == "" for value in values):
+                return max(start_row, row_index - 2)
+        return max_row - 1
+
+    @staticmethod
+    def _collect_preview_rows(
+        sheet: Any,
+        start_row: int,
+        start_col: int,
+        end_col: int,
+        preview_end_row: int,
+    ) -> list[list[str | None]]:
+        rows: list[list[str | None]] = []
+        for row in sheet.iter_rows(
+            min_row=start_row + 1,
+            max_row=preview_end_row + 1,
+            min_col=start_col + 1,
+            max_col=end_col + 1,
+        ):
+            values = [cell.value for cell in row]
+            rows.append([str(value) if value is not None else None for value in values])
+        return rows
+
+
 def build_excel_preview(
     file_path: Path,
     sheet_name: str,
@@ -153,51 +558,18 @@ def build_excel_preview(
     cell_range: str | None = None,
     preview_rows: int = 100,
 ) -> ExcelPreviewResult:
-    workbook = _open_excel_workbook(file_path, table_name=table_name)
-    try:
-        resolved = _resolve_excel_bounds(
-            workbook,
-            sheet_name,
-            start_row,
-            start_col,
-            end_col,
-            end_row,
-            table_name,
-            named_range,
-            cell_range,
-        )
-        sheet = workbook[resolved.sheet_name]
-
-        end_row_value = resolved.end_row
-        if end_row_value is None:
-            end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
-        _validate_excel_bounds(
-            sheet,
-            resolved.start_row,
-            resolved.start_col,
-            resolved.end_col,
-            end_row_value,
-        )
-
-        preview_end_row = min(resolved.start_row + preview_rows - 1, end_row_value)
-        rows = _collect_preview_rows(
-            sheet,
-            resolved.start_row,
-            resolved.start_col,
-            resolved.end_col,
-            preview_end_row,
-        )
-        return ExcelPreviewResult(
-            preview=rows,
-            detected_end_row=end_row_value,
-            sheet_name=resolved.sheet_name,
-            start_row=resolved.start_row,
-            start_col=resolved.start_col,
-            end_col=resolved.end_col,
-            end_row=end_row_value,
-        )
-    finally:
-        workbook.close()
+    del has_header
+    return ExcelPreviewBuilder(file_path).build_preview(
+        sheet_name,
+        start_row,
+        start_col,
+        end_col,
+        end_row,
+        table_name=table_name,
+        named_range=named_range,
+        cell_range=cell_range,
+        preview_rows=preview_rows,
+    )
 
 
 def resolve_excel_selection(
@@ -211,151 +583,15 @@ def resolve_excel_selection(
     named_range: str | None = None,
     cell_range: str | None = None,
 ) -> tuple[str, int, int, int, int]:
-    try:
-        workbook = _open_excel_workbook(file_path, table_name=table_name)
-        try:
-            target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
-            if not target_sheet:
-                raise ValueError("No sheets found in file")
-            resolved = _resolve_excel_bounds(
-                workbook,
-                target_sheet,
-                start_row,
-                start_col,
-                end_col,
-                end_row,
-                table_name,
-                named_range,
-                cell_range,
-            )
-            sheet = workbook[resolved.sheet_name]
-            end_row_value = resolved.end_row
-            if end_row_value is None:
-                end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
-            _validate_excel_bounds(
-                sheet,
-                resolved.start_row,
-                resolved.start_col,
-                resolved.end_col,
-                end_row_value,
-            )
-            return (
-                resolved.sheet_name,
-                resolved.start_row,
-                resolved.start_col,
-                resolved.end_col,
-                end_row_value,
-            )
-        finally:
-            workbook.close()
-    except ValueError as exc:
-        raise DataSourceValidationError(str(exc), details={"file_path": str(file_path)}) from exc
-
-
-@dataclass
-class _ExcelBounds:
-    sheet_name: str
-    start_row: int
-    start_col: int
-    end_col: int
-    end_row: int | None
-
-
-def _resolve_excel_bounds(
-    workbook,
-    sheet_name: str,
-    start_row: int,
-    start_col: int,
-    end_col: int,
-    end_row: int | None,
-    table_name: str | None,
-    named_range: str | None,
-    cell_range: str | None,
-) -> _ExcelBounds:
-    if table_name:
-        sheet = workbook[sheet_name]
-        tables = getattr(sheet, "tables", None)
-        if not tables:
-            raise ValueError(f"No tables available in sheet: {sheet_name}")
-        table = tables.get(table_name)
-        if not table:
-            raise ValueError(f"Table not found: {table_name}")
-        min_col, min_row, max_col, max_row = range_boundaries(table.ref)
-        if min_col is None or min_row is None or max_col is None or max_row is None:
-            raise ValueError(f"Invalid table range: {table_name}")
-        min_col = int(min_col)
-        min_row = int(min_row)
-        max_col = int(max_col)
-        max_row = int(max_row)
-        return _ExcelBounds(sheet_name, min_row - 1, min_col - 1, max_col - 1, max_row - 1)
-
-    if named_range:
-        defined = workbook.defined_names.get(named_range)
-        if not defined:
-            raise ValueError(f"Named range not found: {named_range}")
-        destinations = list(defined.destinations)
-        if not destinations:
-            raise ValueError(f"Named range has no destinations: {named_range}")
-        dest_sheet, coord = destinations[0]
-        min_col, min_row, max_col, max_row = range_boundaries(coord)
-        if min_col is None or min_row is None or max_col is None or max_row is None:
-            raise ValueError(f"Invalid named range: {named_range}")
-        min_col = int(min_col)
-        min_row = int(min_row)
-        max_col = int(max_col)
-        max_row = int(max_row)
-        return _ExcelBounds(dest_sheet, min_row - 1, min_col - 1, max_col - 1, max_row - 1)
-
-    if cell_range:
-        return _parse_cell_range(workbook, cell_range, sheet_name)
-
-    resolved_start_row = max(start_row, 0)
-    resolved_start_col = max(start_col, 0)
-    resolved_end_col = end_col
-    if resolved_end_col <= resolved_start_col:
-        sheet = workbook[sheet_name]
-        resolved_end_col = _detect_end_col(sheet, resolved_start_row, resolved_start_col)
-    resolved_end_col = max(resolved_end_col, resolved_start_col)
-    end_row_value = end_row
-    if end_row_value is not None:
-        end_row_value = max(end_row_value, resolved_start_row)
-    return _ExcelBounds(
+    return ExcelPreviewBuilder(file_path).resolve_selection(
         sheet_name,
-        resolved_start_row,
-        resolved_start_col,
-        resolved_end_col,
-        end_row_value,
-    )
-
-
-def _parse_cell_range(workbook, cell_range: str, default_sheet: str | None) -> _ExcelBounds:
-    raw = cell_range.strip()
-    if not raw:
-        raise ValueError("Cell range cannot be empty")
-    target_sheet = default_sheet
-    coord = raw
-    if "!" in raw:
-        sheet_part, coord_part = raw.split("!", maxsplit=1)
-        sheet_part = sheet_part.strip()
-        if sheet_part.startswith("'") and sheet_part.endswith("'"):
-            sheet_part = sheet_part[1:-1]
-        if not sheet_part:
-            raise ValueError(f"Invalid cell range sheet: {cell_range}")
-        target_sheet = sheet_part
-        coord = coord_part.strip()
-    if not target_sheet:
-        target_sheet = workbook.sheetnames[0] if workbook.sheetnames else None
-    if not target_sheet or target_sheet not in workbook.sheetnames:
-        raise ValueError(f"Sheet not found for cell range: {target_sheet}")
-    min_col, min_row, max_col, max_row = range_boundaries(coord)
-    if min_col is None or min_row is None or max_col is None or max_row is None:
-        raise ValueError(f"Invalid cell range: {cell_range}")
-    return _ExcelBounds(
-        target_sheet,
-        int(min_row) - 1,
-        int(min_col) - 1,
-        int(max_col) - 1,
-        int(max_row) - 1,
+        start_row,
+        start_col,
+        end_col,
+        end_row,
+        table_name=table_name,
+        named_range=named_range,
+        cell_range=cell_range,
     )
 
 
@@ -366,79 +602,7 @@ def format_excel_cell_range(
     end_row: int,
     end_col: int,
 ) -> str:
-    start_cell = f"{get_column_letter(start_col + 1)}{start_row + 1}"
-    end_cell = f"{get_column_letter(end_col + 1)}{end_row + 1}"
-    return f"{sheet_name}!{start_cell}:{end_cell}"
-
-
-def _validate_excel_bounds(sheet, start_row: int, start_col: int, end_col: int, end_row: int) -> None:
-    if start_row < 0 or start_col < 0:
-        raise ValueError("Excel bounds must be non-negative")
-    if end_row < start_row or end_col < start_col:
-        raise ValueError("Excel bounds are invalid")
-    max_row = sheet.max_row or 0
-    max_col = sheet.max_column or 0
-    if max_row <= 0 or max_col <= 0:
-        raise ValueError("Excel sheet has no data")
-    if start_row >= max_row or end_row >= max_row:
-        raise ValueError("Excel row bounds exceed sheet size")
-    if start_col >= max_col or end_col >= max_col:
-        raise ValueError("Excel column bounds exceed sheet size")
-
-
-def _detect_end_col(sheet, start_row: int, start_col: int) -> int:
-    """Scan the header row (start_row) rightward to find the last non-empty column."""
-    max_col = sheet.max_column or 0
-    if max_col <= start_col:
-        return start_col
-    last_col = start_col
-    for cell in sheet.iter_rows(
-        min_row=start_row + 1,
-        max_row=start_row + 1,
-        min_col=start_col + 1,
-        max_col=max_col,
-    ):
-        for c in cell:
-            if c.value is not None and str(c.value).strip() != "":
-                last_col = c.column - 1  # 0-indexed
-    return last_col
-
-
-def _detect_end_row(sheet, start_row: int, start_col: int, end_col: int) -> int:
-    max_row = sheet.max_row or 0
-    if max_row <= start_row:
-        return start_row
-    for row_index in range(start_row + 1, max_row + 1):
-        values: list[object | None] = []
-        for cell in sheet.iter_rows(
-            min_row=row_index,
-            max_row=row_index,
-            min_col=start_col + 1,
-            max_col=end_col + 1,
-        ):
-            values = [c.value for c in cell]
-        if all(value is None or str(value).strip() == "" for value in values):
-            return max(start_row, row_index - 2)
-    return max_row - 1
-
-
-def _collect_preview_rows(
-    sheet,
-    start_row: int,
-    start_col: int,
-    end_col: int,
-    preview_end_row: int,
-) -> list[list[str | None]]:
-    rows: list[list[str | None]] = []
-    for row in sheet.iter_rows(
-        min_row=start_row + 1,
-        max_row=preview_end_row + 1,
-        min_col=start_col + 1,
-        max_col=end_col + 1,
-    ):
-        values = [cell.value for cell in row]
-        rows.append([str(value) if value is not None else None for value in values])
-    return rows
+    return ExcelPreviewBuilder.format_cell_range(sheet_name, start_row, start_col, end_row, end_col)
 
 
 def _get_column_metadata_map(session: Session, datasource_id: str) -> dict[str, str | None]:
@@ -720,96 +884,19 @@ def update_datasource(
     return response
 
 
-def delete_datasource(session: Session, datasource_id: str) -> None:
-    datasource = session.get(DataSource, datasource_id)
-
-    if not datasource:
-        raise DataSourceNotFoundError(datasource_id)
-
-    _delete_datasource_files(datasource)
-
-    session.delete(datasource)
-    session.commit()
-    logger.info(f"Deleted datasource {datasource_id}")
-
-
-def _delete_file_path(file_path: str) -> None:
-    path = Path(file_path)
-    if not path.exists():
-        return
-    try:
-        if not path.is_file():
-            logger.warning(f"Path exists but is not a file: {path}")
+class DatasourceStorageCleanup:
+    def delete(self, datasource: DataSource) -> None:
+        if datasource.source_type_kind() == DataSourceType.FILE and isinstance(datasource.config, dict):
+            file_path = datasource.config.get("file_path")
+            if isinstance(file_path, str):
+                self._delete_file_path(file_path)
+        if not datasource.is_iceberg or not isinstance(datasource.config, dict):
             return
-        path.unlink()
-        logger.info(f"Deleted file: {path}")
-    except PermissionError as exc:
-        logger.error(f"Permission denied when deleting file {path}: {exc}")
-        raise FileError(
-            f"Permission denied when deleting file: {path}",
-            error_code="FILE_PERMISSION_DENIED",
-            details={"file_path": str(path)},
-        ) from exc
-    except OSError as exc:
-        logger.error(f"OS error when deleting file {path}: {exc}")
-        raise FileError(
-            f"Failed to delete file: {path}",
-            error_code="FILE_DELETE_ERROR",
-            details={"file_path": str(path), "error": str(exc)},
-        ) from exc
-
-
-def _iceberg_cleanup_root(metadata_path: str) -> Path | None:
-    path = Path(os.path.realpath(metadata_path))
-    start = path if path.is_dir() else path.parent
-    paths = namespace_paths()
-    clean_dir = Path(os.path.realpath(paths.clean_dir))
-    exports_dir = Path(os.path.realpath(paths.exports_dir))
-
-    for candidate in [start, *start.parents]:
-        if candidate.parent == clean_dir or candidate.parent == exports_dir:
-            return candidate
-        if candidate in (clean_dir, exports_dir):
-            return None
-    return None
-
-
-def _is_within(path: Path, root: Path) -> bool:
-    resolved_path = Path(os.path.realpath(path))
-    resolved_root = Path(os.path.realpath(root))
-    return resolved_root in resolved_path.parents or resolved_root == resolved_path
-
-
-def _drop_iceberg_catalog_table(config: dict[str, Any]) -> None:
-    catalog_type = config.get("catalog_type")
-    catalog_uri = config.get("catalog_uri")
-    warehouse = config.get("warehouse")
-    namespace = config.get("namespace")
-    table = config.get("table")
-    if not all(isinstance(value, str) and value for value in [catalog_type, catalog_uri, warehouse, namespace, table]):
-        return
-    catalog = load_catalog(
-        "local",
-        type=catalog_type,
-        uri=catalog_uri,
-        warehouse=warehouse,
-    )
-    identifier = f"{namespace}.{table}"
-    if catalog.table_exists(identifier):
-        catalog.drop_table(identifier)
-        logger.info(f"Deleted Iceberg catalog table: {identifier}")
-
-
-def _delete_datasource_files(datasource: DataSource) -> None:
-    if datasource.source_type == DataSourceType.FILE and "file_path" in datasource.config:
-        _delete_file_path(str(datasource.config["file_path"]))
-
-    if datasource.source_type == DataSourceType.ICEBERG and isinstance(datasource.config, dict):
         config = datasource.config
-        _drop_iceberg_catalog_table(config)
+        self._drop_iceberg_catalog_table(config)
         metadata_path = config.get("metadata_path")
         if isinstance(metadata_path, str):
-            root = _iceberg_cleanup_root(metadata_path)
+            root = self._iceberg_cleanup_root(metadata_path)
             if root:
                 try:
                     if root.exists() and root.is_dir():
@@ -822,7 +909,6 @@ def _delete_datasource_files(datasource: DataSource) -> None:
                         error_code="FILE_DELETE_ERROR",
                         details={"path": str(root), "error": str(exc)},
                     ) from exc
-
         source = config.get("source")
         if not isinstance(source, dict):
             return
@@ -831,6 +917,87 @@ def _delete_datasource_files(datasource: DataSource) -> None:
         file_path = source.get("file_path")
         if not isinstance(file_path, str):
             return
-        if not _is_within(Path(file_path), namespace_paths().upload_dir):
+        if not self._is_within(Path(file_path), namespace_paths().upload_dir):
             return
-        _delete_file_path(file_path)
+        self._delete_file_path(file_path)
+
+    def _delete_file_path(self, file_path: str) -> None:
+        path = Path(file_path)
+        if not path.exists():
+            return
+        try:
+            if not path.is_file():
+                logger.warning(f"Path exists but is not a file: {path}")
+                return
+            path.unlink()
+            logger.info(f"Deleted file: {path}")
+        except PermissionError as exc:
+            logger.error(f"Permission denied when deleting file {path}: {exc}")
+            raise FileError(
+                f"Permission denied when deleting file: {path}",
+                error_code="FILE_PERMISSION_DENIED",
+                details={"file_path": str(path)},
+            ) from exc
+        except OSError as exc:
+            logger.error(f"OS error when deleting file {path}: {exc}")
+            raise FileError(
+                f"Failed to delete file: {path}",
+                error_code="FILE_DELETE_ERROR",
+                details={"file_path": str(path), "error": str(exc)},
+            ) from exc
+
+    def _iceberg_cleanup_root(self, metadata_path: str) -> Path | None:
+        path = Path(os.path.realpath(metadata_path))
+        start = path if path.is_dir() else path.parent
+        paths = namespace_paths()
+        clean_dir = Path(os.path.realpath(paths.clean_dir))
+        exports_dir = Path(os.path.realpath(paths.exports_dir))
+        for candidate in [start, *start.parents]:
+            if candidate.parent == clean_dir or candidate.parent == exports_dir:
+                return candidate
+            if candidate in (clean_dir, exports_dir):
+                return None
+        return None
+
+    @staticmethod
+    def _is_within(path: Path, root: Path) -> bool:
+        resolved_path = Path(os.path.realpath(path))
+        resolved_root = Path(os.path.realpath(root))
+        return resolved_root in resolved_path.parents or resolved_root == resolved_path
+
+    @staticmethod
+    def _drop_iceberg_catalog_table(config: dict[str, Any]) -> None:
+        catalog_type = config.get("catalog_type")
+        catalog_uri = config.get("catalog_uri")
+        warehouse = config.get("warehouse")
+        namespace = config.get("namespace")
+        table = config.get("table")
+        if not all(isinstance(value, str) and value for value in [catalog_type, catalog_uri, warehouse, namespace, table]):
+            return
+        catalog = load_catalog(
+            "local",
+            type=catalog_type,
+            uri=catalog_uri,
+            warehouse=warehouse,
+        )
+        identifier = f"{namespace}.{table}"
+        if catalog.table_exists(identifier):
+            catalog.drop_table(identifier)
+            logger.info(f"Deleted Iceberg catalog table: {identifier}")
+
+
+_STORAGE_CLEANUP = DatasourceStorageCleanup()
+
+
+def cleanup_datasource_storage(datasource: DataSource) -> None:
+    _STORAGE_CLEANUP.delete(datasource)
+
+
+def delete_datasource(session: Session, datasource_id: str) -> None:
+    datasource = session.get(DataSource, datasource_id)
+    if not datasource:
+        raise DataSourceNotFoundError(datasource_id)
+    cleanup_datasource_storage(datasource)
+    session.delete(datasource)
+    session.commit()
+    logger.info(f"Deleted datasource {datasource_id}")

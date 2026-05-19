@@ -32,6 +32,7 @@
 	} from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import { css, emptyText, input, label } from '$lib/styles/panda';
 
 	interface Props {
@@ -44,16 +45,18 @@
 
 	let { datasourceId, compact = false, searchQuery }: Props = $props();
 	const queryClient = useQueryClient();
+	const ns = useNamespace();
 
 	const datasourcesQuery = createQuery(() => ({
-		queryKey: ['datasources-lookup', 'include-hidden'],
+		queryKey: ['datasources-lookup', ns.value, 'include-hidden'],
 		queryFn: async () => {
 			const result = await listDatasources(true, { cache: 'no-store' });
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		staleTime: 0,
-		refetchOnMount: 'always'
+		refetchOnMount: 'always',
+		enabled: !ns.switching
 	}));
 
 	const datasourceMap = $derived.by(() => {
@@ -71,7 +74,7 @@
 	}
 
 	const listQuery = createQuery(() => ({
-		queryKey: ['healthchecks', datasourceId ?? 'all'],
+		queryKey: ['healthchecks', ns.value, datasourceId ?? 'all'],
 		queryFn: async (): Promise<HealthCheckItem[]> => {
 			const result = datasourceId
 				? await listHealthChecks(datasourceId)
@@ -82,13 +85,13 @@
 				critical: !!(check as { critical?: boolean }).critical
 			}));
 		},
-		enabled: true
+		enabled: !ns.switching
 	}));
 
 	const showInitialLoading = $derived(listQuery.isLoading && listQuery.data === undefined);
 
 	const resultsQuery = createQuery(() => ({
-		queryKey: ['healthcheck-results', datasourceId ?? 'all'],
+		queryKey: ['healthcheck-results', ns.value, datasourceId ?? 'all'],
 		queryFn: async () => {
 			const result = datasourceId
 				? await listHealthCheckResults(datasourceId, 50)
@@ -96,7 +99,7 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: true
+		enabled: !ns.switching
 	}));
 
 	const latestResults = $derived.by(() => {
@@ -117,7 +120,7 @@
 			return result.value;
 		},
 		onSuccess: (created) => {
-			const listKey = ['healthchecks', datasourceId ?? 'all'];
+			const listKey = ['healthchecks', ns.value, datasourceId ?? 'all'];
 			queryClient.setQueryData<HealthCheckItem[]>(listKey, (current) => {
 				const next = current ?? [];
 				return [...next, { ...created, critical: !!(created as { critical?: boolean }).critical }];
@@ -138,7 +141,7 @@
 		},
 		onMutate: async (payload) => {
 			await queryClient.cancelQueries({ queryKey: ['healthchecks'] });
-			const listKey = ['healthchecks', datasourceId ?? 'all'];
+			const listKey = ['healthchecks', ns.value, datasourceId ?? 'all'];
 			const previous = queryClient.getQueryData<HealthCheckItem[]>(listKey);
 			if (previous) {
 				queryClient.setQueryData<HealthCheckItem[]>(
@@ -250,7 +253,7 @@
 	async function openCreateForm(): Promise<void> {
 		const result = await listDatasources(true, { cache: 'no-store' });
 		if (result.isErr()) throw new Error(result.error.message);
-		queryClient.setQueryData(['datasources-lookup', 'include-hidden'], result.value);
+		queryClient.setQueryData(['datasources-lookup', ns.value, 'include-hidden'], result.value);
 		createDatasources = result.value;
 		if (
 			!datasourceId &&

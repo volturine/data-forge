@@ -11,6 +11,8 @@ from core.namespace import (
 )
 from fastapi.testclient import TestClient
 
+from modules.namespaces import routes as namespace_routes
+
 
 def test_normalize_namespace_default():
     assert normalize_namespace(None) == settings.default_namespace
@@ -61,15 +63,9 @@ def test_list_namespaces(tmp_path: Path, monkeypatch):
     assert list_namespaces() == ["alpha", "beta"]
 
 
-def test_list_namespaces_endpoint(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("ENV_FILE", "")
-    from core.config import Settings
-
-    Settings()
-    base = tmp_path / "data" / "namespaces"
-    (base / "alpha").mkdir(parents=True)
-    (base / "beta").mkdir(parents=True)
+def test_list_namespaces_endpoint_merges_filesystem_and_runtime_namespaces(monkeypatch):
+    monkeypatch.setattr(namespace_routes, "list_namespaces", lambda: ["alpha", "default"])
+    monkeypatch.setattr(namespace_routes, "list_runtime_namespaces", lambda session: ["beta", "default"])
 
     from main import app
 
@@ -77,4 +73,22 @@ def test_list_namespaces_endpoint(tmp_path: Path, monkeypatch):
     response = client.get("/api/v1/namespaces")
 
     assert response.status_code == 200
-    assert response.json() == {"namespaces": ["alpha", "beta"]}
+    assert response.json() == {"namespaces": ["alpha", "beta", "default"]}
+
+
+def test_create_namespace_endpoint_registers_namespace(monkeypatch):
+    created: list[str] = []
+    registered: list[str] = []
+
+    monkeypatch.setattr(namespace_routes, "namespace_paths", lambda name: created.append(name))
+    monkeypatch.setattr(namespace_routes, "register_namespace", lambda session, name: registered.append(name))
+
+    from main import app
+
+    client = TestClient(app)
+    response = client.post("/api/v1/namespaces", json={"name": "test"})
+
+    assert response.status_code == 200
+    assert response.json() == {"name": "test"}
+    assert created == ["test"]
+    assert registered == ["test"]

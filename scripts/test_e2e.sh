@@ -122,51 +122,58 @@ mkdir -p packages/frontend/tests/.artifacts/playwright
 for shard_index in 1 2 3 4; do
     mkdir -p "packages/frontend/tests/.artifacts/playwright/shard-${shard_index}-of-4/test-results"
 done
+
+run_playwright_shard() {
+    local shard_label="$1"
+    shift
+    local shard_index="${shard_label%%/*}"
+    local shard_total="${shard_label##*/}"
+    echo "Starting Playwright shard ${shard_label}"
+    cd packages/frontend
+    local output_dir="$PWD/tests/.artifacts/playwright/shard-${shard_index}-of-${shard_total}/test-results"
+    rm -rf "$output_dir"
+    mkdir -p "$output_dir"
+    PLAYWRIGHT_DISABLE_WEB_SERVER=true \
+    PLAYWRIGHT_OUTPUT_DIR="$output_dir" \
+    exec python3 ../../scripts/run_with_timeout.py \
+        --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
+        --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
+        --heartbeat-seconds "${E2E_HEARTBEAT_SECONDS:-0}" \
+        -- npx playwright test --config=playwright.config.ts "$@"
+}
+
 set +e
 pids=()
 (
-    echo "Starting Playwright shard 1/4"
-    cd packages/frontend
-    PLAYWRIGHT_DISABLE_WEB_SERVER=true \
-    PLAYWRIGHT_OUTPUT_DIR="$PWD/tests/.artifacts/playwright/shard-1-of-4/test-results" \
-    exec python3 ../../scripts/run_with_timeout.py \
-        --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
-        --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        --heartbeat-seconds "${E2E_HEARTBEAT_SECONDS:-0}" \
-        -- npx playwright test --config=playwright.config.ts --shard 1/4
+    run_playwright_shard "1/4" \
+        tests/analysis-editor.test.ts \
+        tests/analysis-crud.test.ts \
+        tests/analysis-locking.test.ts \
+        tests/lineage.test.ts
 ) & pids+=("$!")
 (
-    echo "Starting Playwright shard 2/4"
-    cd packages/frontend
-    PLAYWRIGHT_DISABLE_WEB_SERVER=true \
-    PLAYWRIGHT_OUTPUT_DIR="$PWD/tests/.artifacts/playwright/shard-2-of-4/test-results" \
-    exec python3 ../../scripts/run_with_timeout.py \
-        --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
-        --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        --heartbeat-seconds "${E2E_HEARTBEAT_SECONDS:-0}" \
-        -- npx playwright test --config=playwright.config.ts --shard 2/4
+    run_playwright_shard "2/4" \
+        --grep "Monitoring –|Navigation –|Profile –|Analyses – SQL/Polars snippet export|Datasources – detail view|Datasources – preview pagination|Datasources – column stats panel|Datasources – config tab interactions" \
+        tests/monitoring.test.ts \
+        tests/navigation.test.ts \
+        tests/profile.test.ts \
+        tests/sql-polars-snippet-export.test.ts \
+        tests/datasources.test.ts
 ) & pids+=("$!")
 (
-    echo "Starting Playwright shard 3/4"
-    cd packages/frontend
-    PLAYWRIGHT_DISABLE_WEB_SERVER=true \
-    PLAYWRIGHT_OUTPUT_DIR="$PWD/tests/.artifacts/playwright/shard-3-of-4/test-results" \
-    exec python3 ../../scripts/run_with_timeout.py \
-        --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
-        --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        --heartbeat-seconds "${E2E_HEARTBEAT_SECONDS:-0}" \
-        -- npx playwright test --config=playwright.config.ts --shard 3/4
+    run_playwright_shard "3/4" \
+        --grep "Analyses –|Datasources – list & management|Datasources – upload page|Namespace –|Build Preview –|Cancel Build –" \
+        tests/analysis-operations.test.ts \
+        tests/datasources.test.ts \
+        tests/namespace-isolation.test.ts \
+        tests/build-preview.test.ts \
+        tests/cancel-build.test.ts
 ) & pids+=("$!")
 (
-    echo "Starting Playwright shard 4/4"
-    cd packages/frontend
-    PLAYWRIGHT_DISABLE_WEB_SERVER=true \
-    PLAYWRIGHT_OUTPUT_DIR="$PWD/tests/.artifacts/playwright/shard-4-of-4/test-results" \
-    exec python3 ../../scripts/run_with_timeout.py \
-        --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
-        --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        --heartbeat-seconds "${E2E_HEARTBEAT_SECONDS:-0}" \
-        -- npx playwright test --config=playwright.config.ts --shard 4/4
+    run_playwright_shard "4/4" \
+        tests/analysis-pipeline.test.ts \
+        tests/analysis-output.test.ts \
+        tests/udfs.test.ts
 ) & pids+=("$!")
 status=0
 for pid in "${pids[@]}"; do

@@ -52,10 +52,10 @@ def resolve_iceberg_metadata_path(metadata_path: str, *, namespace_name: str | N
     if not path.is_dir():
         raise ValueError(f'Iceberg metadata_path must be a file or directory: {metadata_path}')
     if path.name == 'metadata':
-        return _latest_metadata_file(path)
+        return _latest_metadata_file(path, metadata_path)
     metadata_dir = path / 'metadata'
     if metadata_dir.is_dir():
-        return _latest_metadata_file(metadata_dir)
+        return _latest_metadata_file(metadata_dir, metadata_path)
     raise ValueError('Iceberg metadata_path must be a table directory containing metadata/')
 
 
@@ -74,7 +74,10 @@ def resolve_iceberg_branch_metadata_path(
     if metadata_dir.is_dir():
         return resolve_iceberg_metadata_path(str(metadata_dir), namespace_name=namespace_name, data_root=data_root)
     if path.is_dir():
-        children = [entry for entry in path.iterdir() if entry.is_dir()]
+        try:
+            children = [entry for entry in path.iterdir() if entry.is_dir()]
+        except FileNotFoundError as exc:
+            raise IcebergMetadataPathNotFoundError(metadata_path) from exc
         if len(children) == 1:
             return resolve_iceberg_metadata_path(str(children[0]), namespace_name=namespace_name, data_root=data_root)
     return resolve_iceberg_metadata_path(metadata_path, namespace_name=namespace_name, data_root=data_root)
@@ -86,9 +89,14 @@ def _resolve_iceberg_data_root(*, namespace_name: str | None = None, data_root: 
     return Path(os.path.realpath(namespace_paths(namespace_name).base_dir.resolve()))
 
 
-def _latest_metadata_file(metadata_dir: Path) -> str:
-    files = sorted(metadata_dir.glob('*.metadata.json'))
+def _latest_metadata_file(metadata_dir: Path, metadata_path: str) -> str:
+    try:
+        files = sorted(metadata_dir.glob('*.metadata.json'))
+    except FileNotFoundError as exc:
+        raise IcebergMetadataPathNotFoundError(metadata_path) from exc
     if not files:
+        if not metadata_dir.exists():
+            raise IcebergMetadataPathNotFoundError(metadata_path)
         raise ValueError(f'No metadata.json files found in {metadata_dir}')
     return str(files[-1])
 

@@ -291,6 +291,15 @@ test.describe('Navigation – namespace persistence', () => {
 		const sidebar = page.locator('aside[aria-label="Main navigation"]');
 		await expect(sidebar.getByText(ns)).toBeVisible({ timeout: 5_000 });
 
+		await page.getByRole('button', { name: 'Select namespace' }).click();
+		const reopenedDialog = dialogByTextbox(page, 'Search namespaces');
+		await expect(reopenedDialog).toBeVisible({ timeout: 5_000 });
+		await expect(reopenedDialog.locator(`[data-namespace-option="${ns}"]`)).toBeVisible({
+			timeout: 10_000
+		});
+		await page.keyboard.press('Escape');
+		await expect(reopenedDialog).not.toBeVisible({ timeout: 5_000 });
+
 		await page.reload({ waitUntil: 'networkidle' });
 		await waitForAppShell(page);
 

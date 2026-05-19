@@ -511,7 +511,9 @@ test.describe('Analyses – save + reload config persistence', () => {
 			await limitNode.locator('[data-action="edit"]').click();
 			const reloadedPanel = page.locator('[data-step-config="limit"]');
 			await expect(reloadedPanel).toBeVisible({ timeout: 8_000 });
+			await expect(reloadedPanel.getByText('Loading schema...')).toBeHidden({ timeout: 30_000 });
 			const reloadedInput = reloadedPanel.locator('[data-testid="limit-rows-input"]');
+			await expect(reloadedInput).toBeVisible({ timeout: 15_000 });
 			await expect(reloadedInput).toHaveValue('77', { timeout: 5_000 });
 
 			// Buttons should be disabled (no changes from persisted state)

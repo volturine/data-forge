@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import uuid
@@ -18,6 +19,7 @@ from core.exceptions import (
 )
 from core.iceberg_metadata import sync_iceberg_schema
 from core.namespace import get_namespace, namespace_paths
+from polars.datatypes import Array, List, Struct
 from pyiceberg.catalog import load_catalog
 from pyiceberg.table import Table
 from sqlmodel import Session, select
@@ -46,6 +48,50 @@ def _prepare_clean_target(clean_dir: Path, datasource_id: str, branch: str) -> P
     return target
 
 
+def _coerce_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.LazyFrame:
+    null_columns = [name for name, dtype in lazy.collect_schema().items() if dtype == pl.Null]
+    if not null_columns:
+        return lazy
+    return lazy.with_columns([pl.col(name).cast(pl.String).alias(name) for name in null_columns])
+
+
+def _normalize_iceberg_incompatible_value(value: Any) -> Any:
+    if isinstance(value, pl.Series):
+        return [_normalize_iceberg_incompatible_value(item) for item in value.to_list()]
+    if isinstance(value, dict):
+        return {key: _normalize_iceberg_incompatible_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_iceberg_incompatible_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_normalize_iceberg_incompatible_value(item) for item in value]
+    return value
+
+
+def _stringify_iceberg_incompatible_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return str(value)
+    normalized = _normalize_iceberg_incompatible_value(value)
+    try:
+        return json.dumps(normalized, default=str, sort_keys=True)
+    except TypeError:
+        return str(normalized)
+
+
+def _coerce_database_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.LazyFrame:
+    schema = lazy.collect_schema()
+    null_columns = [name for name, dtype in schema.items() if dtype == pl.Null]
+    stringify_columns = [name for name, dtype in schema.items() if dtype == pl.Object or isinstance(dtype, (Struct, List, Array))]
+    timezone_columns = [name for name, dtype in schema.items() if isinstance(dtype, pl.Datetime) and dtype.time_zone is not None and dtype.time_zone != "UTC"]
+    if not null_columns and not stringify_columns and not timezone_columns:
+        return lazy
+    expressions: list[pl.Expr] = [pl.col(name).cast(pl.String).alias(name) for name in null_columns]
+    expressions.extend(pl.col(name).map_elements(_stringify_iceberg_incompatible_value, return_dtype=pl.String).alias(name) for name in stringify_columns)
+    expressions.extend(pl.col(name).dt.convert_time_zone("UTC").alias(name) for name in timezone_columns)
+    return lazy.with_columns(expressions)
+
+
 def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) -> Table:
     catalog = load_catalog(
         "local",
@@ -56,7 +102,7 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) 
     namespace = "clean"
     catalog.create_namespace_if_not_exists(namespace)
     identifier = f"{namespace}.{table_path.parent.name}"
-    arrow_table = lazy.collect().to_arrow()
+    arrow_table = _coerce_iceberg_compatible_lazyframe(lazy).collect().to_arrow()
     if build_mode == "recreate" and catalog.table_exists(identifier):
         catalog.drop_table(identifier)
     if catalog.table_exists(identifier):
@@ -350,6 +396,7 @@ def create_database_datasource(
             DataSourceType.DATABASE.ingestion_error_message,
             details={"connection_string": connection_string},
         ) from exc
+    lazy = _coerce_database_iceberg_compatible_lazyframe(lazy)
     paths = namespace_paths()
     target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch)
     snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")

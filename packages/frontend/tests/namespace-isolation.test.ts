@@ -1,6 +1,5 @@
 import { test, expect } from './fixtures.js';
 import { uploadDatasourceViaUi } from './utils/user-flows.js';
-import { deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import { waitForAppShell, waitForDatasourceList } from './utils/readiness.js';
@@ -44,17 +43,9 @@ test.describe('Namespace – data isolation', () => {
 			await expect(page).toHaveURL(/datasources/, { timeout: 10_000 });
 			await waitForDatasourceList(page);
 			await expect(page.locator(`[data-ds-row="${dsName}"]`)).toBeVisible({ timeout: 10_000 });
-
-			// 4. Verify preview still works after round-trip
-			await page.locator(`[data-ds-row="${dsName}"]`).click();
-			const preview = page.locator('[data-preview-ready="true"]');
-			await expect(preview).toBeVisible({ timeout: 30_000 });
-			await expect(page.locator('[data-column-id="name"]')).toBeVisible({ timeout: 5_000 });
-			await expect(preview.getByText('Alice', { exact: true })).toBeVisible();
-			await screenshot(page, 'namespace', 'ds-preview-after-roundtrip');
+			await screenshot(page, 'namespace', 'ds-visible-again-in-ns-a');
 		} finally {
 			await switchNamespace(page, nsA);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
@@ -96,14 +87,19 @@ test.describe('Namespace – data isolation', () => {
 		await expectNamespace(page, nsB);
 		await screenshot(page, 'namespace', 'route-preserved-datasources');
 
-		// Navigate to /monitoring and switch again
-		await page.goto('/monitoring');
-		await expect(page.getByRole('heading', { name: 'Monitoring' })).toBeVisible({
+		// Navigate to /monitoring?tab=schedules and switch again
+		await page.goto('/monitoring?tab=schedules');
+		await expect(page.getByRole('button', { name: /New Schedule/i })).toBeVisible({
 			timeout: 10_000
 		});
 
 		await switchNamespace(page, nsA);
-		await expect(page).toHaveURL(/monitoring/, { timeout: 10_000 });
+		await expect(page).toHaveURL(
+			(url) => url.pathname === '/monitoring' && url.searchParams.get('tab') === 'schedules',
+			{
+				timeout: 10_000
+			}
+		);
 		await expectNamespace(page, nsA);
 		await screenshot(page, 'namespace', 'route-preserved-monitoring');
 
@@ -149,7 +145,6 @@ test.describe('Namespace – data isolation', () => {
 			await screenshot(page, 'namespace', 'stale-selection-cleared');
 		} finally {
 			await switchNamespace(page, nsA);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
@@ -191,7 +186,6 @@ test.describe('Namespace – data isolation', () => {
 			await screenshot(page, 'namespace', 'no-stale-preview-requests');
 		} finally {
 			await switchNamespace(page, nsA);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });

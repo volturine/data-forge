@@ -57,6 +57,30 @@ class DataSource(SQLModel, table=True):  # type: ignore[call-arg]
             return None
         return DataSourceType.read(source.get('source_type'), default=None)
 
+    @staticmethod
+    def normalize_connection_string(value: str) -> str:
+        if not value.startswith('postgresql+'):
+            return value
+        driver_suffix = value.split('://', 1)[0]
+        return value.replace(driver_suffix, 'postgresql', 1)
+
+    def query_and_connection(self) -> tuple[str | None, str | None]:
+        if not isinstance(self.config, dict):
+            return None, None
+        config = self.config
+        query = config.get('query')
+        connection_string = config.get('connection_string')
+        if isinstance(query, str) and isinstance(connection_string, str):
+            return query, self.normalize_connection_string(connection_string)
+        source = config.get('source')
+        if not isinstance(source, dict):
+            return None, None
+        source_query = source.get('query')
+        source_connection_string = source.get('connection_string')
+        if not isinstance(source_query, str) or not isinstance(source_connection_string, str):
+            return None, None
+        return source_query, self.normalize_connection_string(source_connection_string)
+
     @property
     def is_refreshable_external(self) -> bool:
         source_type = self.external_source_type()

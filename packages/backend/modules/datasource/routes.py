@@ -617,6 +617,51 @@ async def connect_datasource(
     )
 
 
+@router.get("/internal-postgres/tables", response_model=list[schemas.InternalPostgresTable])
+@handle_errors(operation="list internal Postgres tables")
+def list_internal_postgres_tables(session: Session = Depends(get_db)):
+    return service.list_internal_postgres_tables(session)
+
+
+@router.post("/internal-postgres/toggle", response_model=schemas.InternalPostgresTable)
+@handle_errors(operation="toggle internal Postgres table", value_error_status=400)
+async def toggle_internal_postgres_table(
+    request: schemas.InternalPostgresToggleRequest,
+    session: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
+):
+    if request.enabled:
+        if service.internal_postgres_table_is_onboarded(session, request.schema_name, request.table_name):
+            return schemas.InternalPostgresTable(
+                schema_name=request.schema_name,
+                table_name=request.table_name,
+                is_onboarded=True,
+            )
+        query = service.internal_postgres_table_query(session, request.schema_name, request.table_name)
+        await create_remote_database_datasource(
+            session,
+            runtime_probe=runtime_probe,
+            name=f"internal.{request.schema_name}.{request.table_name}",
+            description=f"Internal PostgreSQL table {request.schema_name}.{request.table_name}",
+            connection_string=service.internal_postgres_connection_string(),
+            query=query,
+            branch="master",
+            owner_id=user.id if user else None,
+        )
+        return schemas.InternalPostgresTable(
+            schema_name=request.schema_name,
+            table_name=request.table_name,
+            is_onboarded=True,
+        )
+    return service.set_internal_postgres_table_onboarded(
+        session,
+        request.schema_name,
+        request.table_name,
+        enabled=False,
+    )
+
+
 @router.get("", response_model=list[schemas.DataSourceListItem], mcp=True)
 @handle_errors(operation="list datasources")
 def list_datasources(include_hidden: bool = False, session: Session = Depends(get_db)):
