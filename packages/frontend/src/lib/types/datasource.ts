@@ -62,7 +62,7 @@ export interface IcebergDataSourceConfig {
 	namespace?: string | null;
 	table?: string | null;
 	source?: Record<string, unknown> | null;
-	refresh?: Record<string, unknown> | null;
+	ingest?: Record<string, unknown> | null;
 }
 
 export interface AnalysisDataSourceConfig {
@@ -198,13 +198,13 @@ export function datasourceIsExcel(datasource: DataSource): boolean {
 	return datasourceFileType(datasource) === 'excel';
 }
 
-export function datasourceIsRefreshableExternal(datasource: DataSource): boolean {
+export function datasourceIsIngestableExternal(datasource: DataSource): boolean {
 	const sourceType = datasourceExternalSourceType(datasource);
 	return sourceType === 'file' || sourceType === 'database';
 }
 
-export function datasourceNeedsExternalRefresh(datasource: DataSource): boolean {
-	return datasourceIsIceberg(datasource) && datasourceIsRefreshableExternal(datasource);
+export function datasourceNeedsExternalIngest(datasource: DataSource): boolean {
+	return datasourceIsIceberg(datasource) && datasourceIsIngestableExternal(datasource);
 }
 
 export function datasourceSupportsSchemaRefresh(datasource: DataSource): boolean {
@@ -215,6 +215,6 @@ export function datasourceIsSchedulableRaw(datasource: DataSource): boolean {
 	return (
 		datasourceIsIceberg(datasource) &&
 		!datasourceIsAnalysisOutput(datasource) &&
-		datasourceIsRefreshableExternal(datasource)
+		datasourceIsIngestableExternal(datasource)
 	);
 }

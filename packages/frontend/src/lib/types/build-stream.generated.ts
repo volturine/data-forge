@@ -1,7 +1,7 @@
 // This file is auto-generated. Do not edit manually. Run 'just generate-build-stream-types' to regenerate.
 // Generated from backend/modules/compute/schemas.py
 
-export type EngineRunKind = 'build' | 'preview' | 'row_count' | 'download';
+export type EngineRunKind = 'build' | 'preview' | 'row_count' | 'download' | 'ingest';
 
 export interface BuildPlanEvent {
 	type: 'plan';

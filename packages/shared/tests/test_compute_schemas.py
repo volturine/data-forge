@@ -11,6 +11,8 @@ from contracts.compute.schemas import (
     BuildEventAdapter,
     BuildEventType,
     BuildFailedEvent,
+    BuildRequest,
+    BuildStarter,
     BuildStepState,
     BuildTabResult,
     BuildTabStatus,
@@ -123,6 +125,37 @@ def test_step_preview_request_bounds_pagination() -> None:
 
     assert request.row_limit == 1000
     assert request.page == 1
+
+
+def test_build_request_owns_schedule_ingest_detection() -> None:
+    ingest_request = BuildRequest.model_validate(
+        {
+            'analysis_pipeline': {
+                'analysis_id': 'schedule-1',
+                'tabs': [
+                    {
+                        'id': 'tab-1',
+                        'name': 'Scheduled ingest',
+                        'datasource': {'id': 'datasource-1', 'analysis_tab_id': None, 'source_type': 'schedule', 'config': {'branch': 'master'}},
+                        'output': {'result_id': 'datasource-1', 'filename': 'scheduled_ingest', 'format': 'parquet'},
+                        'steps': [],
+                    }
+                ],
+            },
+            'tab_id': 'tab-1',
+        }
+    )
+    analysis_request = BuildRequest.model_validate({'analysis_pipeline': _pipeline_payload(), 'tab_id': 'tab-1'})
+
+    assert ingest_request.is_schedule_ingest_request() is True
+    assert analysis_request.is_schedule_ingest_request() is False
+
+
+def test_build_starter_owns_schedule_trigger_detection() -> None:
+    assert BuildStarter.for_schedule('schedule-1').is_schedule_trigger() is True
+    assert BuildStarter(triggered_by='schedule').is_schedule_trigger() is True
+    assert BuildStarter(triggered_by='user').is_schedule_trigger() is False
+    assert BuildStarter().is_schedule_trigger() is False
 
 
 @pytest.mark.parametrize(('field', 'value'), [('row_limit', 0), ('row_limit', 5001), ('page', 0)])

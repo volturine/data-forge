@@ -19,7 +19,7 @@ export async function switchNamespace(page: Page, name: string): Promise<void> {
 
 	const exact = dialog.locator(`[data-namespace-option="${name}"]`);
 	const create = dialog.locator(`[data-namespace-create="${name}"]`);
-	await expect(exact.or(create)).toBeVisible({ timeout: 8_000 });
+	await expect(exact.or(create)).toBeVisible({ timeout: 5_000 });
 
 	if (await exact.isVisible()) {
 		await exact.click();

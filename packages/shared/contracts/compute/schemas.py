@@ -384,6 +384,11 @@ class BuildRequest(BaseModel):
             raise ValueError('analysis_pipeline is required')
         return {**pipeline, 'tab_id': self.tab_id}
 
+    def is_schedule_ingest_request(self) -> bool:
+        if len(self.analysis_pipeline.tabs) != 1:
+            return False
+        return self.analysis_pipeline.tabs[0].datasource.source_type == 'schedule'
+
 
 class ActiveBuildStatus(DataForgeStrEnum):
     QUEUED = 'queued'
@@ -436,6 +441,9 @@ class BuildStarter(BaseModel):
     @classmethod
     def for_schedule(cls, schedule_id: str) -> 'BuildStarter':
         return cls(triggered_by=f'schedule:{schedule_id}')
+
+    def is_schedule_trigger(self) -> bool:
+        return isinstance(self.triggered_by, str) and (self.triggered_by == 'schedule' or self.triggered_by.startswith('schedule:'))
 
 
 class BuildResourceConfigSummary(BaseModel):

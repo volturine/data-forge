@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { css, tabButton } from '$lib/styles/panda';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import AccountTab from './AccountTab.svelte';
 	import NotificationsTab from './NotificationsTab.svelte';
 	import AiProvidersTab from './AiProvidersTab.svelte';
@@ -27,6 +28,8 @@
 	}
 
 	const activeTab = $derived(resolveTab(page.url.hash));
+	const ns = useNamespace();
+	const systemTabKey = $derived(ns.ready ? ns.value : '');
 
 	function selectTab(key: TabKey) {
 		goto(resolve(`/profile#${key}` as '/'), {
@@ -138,7 +141,9 @@
 			aria-labelledby="tab-system"
 			hidden={activeTab !== 'system'}
 		>
-			<SystemTab />
+			{#key systemTabKey}
+				<SystemTab />
+			{/key}
 		</div>
 	{/if}
 </div>

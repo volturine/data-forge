@@ -172,11 +172,10 @@ class TestBuildModeWiring:
 
         with (
             patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pl.read_parquet") as mock_read,
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service._sync_iceberg_schema", return_value=False) as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
         ):
-            mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
                 manager=self._make_manager_mock(),
@@ -207,11 +206,10 @@ class TestBuildModeWiring:
 
         with (
             patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pl.read_parquet") as mock_read,
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service._sync_iceberg_schema") as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
         ):
-            mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
                 manager=self._make_manager_mock(),
@@ -242,10 +240,9 @@ class TestBuildModeWiring:
 
         with (
             patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pl.read_parquet") as mock_read,
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service.os.path.getsize", return_value=100),
         ):
-            mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
                 manager=self._make_manager_mock(),
@@ -272,14 +269,11 @@ class TestBuildModeWiring:
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="recreate")
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
-        mock_catalog.table_exists.side_effect = [True, False]
-
         with (
             patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pl.read_parquet") as mock_read,
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service.os.path.getsize", return_value=100),
         ):
-            mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
                 manager=self._make_manager_mock(),
@@ -311,10 +305,9 @@ class TestBuildModeWiring:
 
         with (
             patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pl.read_parquet") as mock_read,
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service.os.path.getsize", return_value=100),
         ):
-            mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
                 manager=self._make_manager_mock(),
@@ -346,7 +339,7 @@ class TestBuildModeWiring:
 
         with (
             patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pl.read_parquet") as mock_read,
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch(
                 "runtime.compute_service.resolve_iceberg_metadata_path",
                 return_value="/tmp/iceberg/warehouse/ns/tbl/metadata/v1.metadata.json",
@@ -354,7 +347,6 @@ class TestBuildModeWiring:
             patch("runtime.compute_service._sync_iceberg_schema", return_value=False) as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
         ):
-            mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
                 manager=self._make_manager_mock(),

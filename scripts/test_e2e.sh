@@ -7,6 +7,8 @@ DATA_DIR="${DATA_DIR}-run-$$"
 export DATA_DIR
 LOG_DIR="${E2E_LOG_DIR:-}"
 PG_CONTAINER="dataforge-e2e-pg-$$"
+PG_LABEL="data-forge.test-postgres=1"
+PG_VOLUME="${PG_CONTAINER}-data"
 PG_PORT=""
 kill_tree() {
     local pid="$1"
@@ -53,6 +55,7 @@ cleanup() {
         kill_tree_force "$pid"
     done
     docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
+    docker volume rm -f "${PG_VOLUME}" >/dev/null 2>&1 || true
     lsof -ti "tcp:${PORT}" | xargs -r kill >/dev/null 2>&1 || true
     lsof -ti "tcp:${FRONTEND_PORT}" | xargs -r kill >/dev/null 2>&1 || true
     exit "$status"
@@ -64,9 +67,15 @@ if [ -n "$LOG_DIR" ]; then
     mkdir -p "$LOG_DIR"
 fi
 echo "Starting e2e Postgres"
+docker ps -aq --filter "label=${PG_LABEL}" | xargs -r docker rm -f >/dev/null 2>&1 || true
+docker volume ls -q --filter "label=${PG_LABEL}" | xargs -r docker volume rm -f >/dev/null 2>&1 || true
 docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
+docker volume rm -f "${PG_VOLUME}" >/dev/null 2>&1 || true
+docker volume create --label "${PG_LABEL}" "${PG_VOLUME}" >/dev/null
 docker run -d --rm \
+    --label "${PG_LABEL}" \
     --name "${PG_CONTAINER}" \
+    -v "${PG_VOLUME}:/var/lib/postgresql" \
     -e POSTGRES_DB=dataforge \
     -e POSTGRES_USER=dataforge \
     -e POSTGRES_PASSWORD=dataforge \

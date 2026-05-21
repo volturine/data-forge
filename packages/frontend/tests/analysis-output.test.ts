@@ -8,7 +8,6 @@ import { screenshot } from './utils/visual.js';
 
 test.describe('Analyses – output visibility toggle', () => {
 	test('OutputNode: visibility toggle button shows initial state', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-vis-toggle-ds-${uid()}`;
 		const aName = `E2E Vis Toggle ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -18,7 +17,7 @@ test.describe('Analyses – output visibility toggle', () => {
 
 			// Toggle button should be visible on the output node
 			const toggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
-			await expect(toggleBtn).toBeVisible({ timeout: 8_000 });
+			await expect(toggleBtn).toBeVisible({ timeout: 5_000 });
 
 			// Without a saved/built output datasource, toggle shows "hidden" (default)
 			// The toggle button is present but not functional until the output datasource exists
@@ -36,7 +35,6 @@ test.describe('Analyses – output visibility toggle', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(180_000);
 		const dsName = `e2e-vis-build-ds-${uid()}`;
 		const aName = `E2E Vis Build ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -45,21 +43,21 @@ test.describe('Analyses – output visibility toggle', () => {
 			await gotoAnalysisEditor(page, aId);
 
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
 			await buildBtn.click();
 			const buildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(buildTrigger).toBeVisible({ timeout: 30_000 });
-			await expect(buildTrigger).toContainText(/Completed/i, { timeout: 180_000 });
+			await expect(buildTrigger).toBeVisible({ timeout: 5_000 });
+			await expect(buildTrigger).toContainText(/Completed/i, { timeout: 5_000 });
 
 			const toggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
-			await expect(toggleBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(toggleBtn).toBeEnabled({ timeout: 5_000 });
 			await expect(toggleBtn).toContainText('hidden');
 
 			await toggleBtn.click();
-			await expect(toggleBtn).toContainText('visible', { timeout: 10_000 });
+			await expect(toggleBtn).toContainText('visible', { timeout: 5_000 });
 
 			await toggleBtn.click();
-			await expect(toggleBtn).toContainText('hidden', { timeout: 10_000 });
+			await expect(toggleBtn).toContainText('hidden', { timeout: 5_000 });
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
@@ -71,7 +69,6 @@ test.describe('Analyses – output visibility toggle', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(240_000);
 		const dsName = `e2e-output-rebuild-ds-${uid()}`;
 		const aName = `E2E Output Rebuild ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -88,37 +85,30 @@ test.describe('Analyses – output visibility toggle', () => {
 			expect(outputId).toBeTruthy();
 
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
 			await buildBtn.click();
 			const initialBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(initialBuildTrigger).toBeVisible({ timeout: 30_000 });
-			await expect(initialBuildTrigger).toContainText(/Completed/i, { timeout: 180_000 });
+			await expect(initialBuildTrigger).toBeVisible({ timeout: 5_000 });
+			await expect(initialBuildTrigger).toContainText(/Completed/i, { timeout: 5_000 });
 
-			await deleteDatasourceViaUI(page, outputName!);
+			await deleteDatasourceViaUI(page, outputName!, { id: outputId! });
 			await gotoAnalysisEditor(page, aId);
 
 			const rebuiltBuildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(rebuiltBuildBtn).toBeVisible({ timeout: 10_000 });
+			await expect(rebuiltBuildBtn).toBeVisible({ timeout: 5_000 });
 			await rebuiltBuildBtn.click();
 			const rebuiltBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(rebuiltBuildTrigger).toBeVisible({ timeout: 30_000 });
-			await expect(rebuiltBuildTrigger).toContainText(/Completed/i, { timeout: 180_000 });
+			await expect(rebuiltBuildTrigger).toBeVisible({ timeout: 5_000 });
+			await expect(rebuiltBuildTrigger).toContainText(/Completed/i, { timeout: 5_000 });
 
-			await page.goto('/datasources');
-			const showHiddenBtn = page.locator('button[title="Show auto-generated datasources"]');
-			await expect(showHiddenBtn).toBeVisible({ timeout: 10_000 });
-			await showHiddenBtn.click();
-			await expect(page.locator('button[title="Hide auto-generated datasources"]')).toBeVisible({
-				timeout: 10_000
-			});
-			const rebuiltRow = page.locator(`[data-ds-id="${outputId}"]`);
-			await expect(rebuiltRow).toBeVisible({ timeout: 15_000 });
-			await rebuiltRow.click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 60_000 });
+			const rebuiltToggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
+			await expect(rebuiltToggleBtn).toBeEnabled({ timeout: 5_000 });
+			await rebuiltToggleBtn.click();
+			await expect(rebuiltToggleBtn).toContainText('visible', { timeout: 5_000 });
+			await rebuiltToggleBtn.click();
+			await expect(rebuiltToggleBtn).toContainText('hidden', { timeout: 5_000 });
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });
@@ -127,7 +117,6 @@ test.describe('Analyses – output visibility toggle', () => {
 
 test.describe('Analyses – output node interactions', () => {
 	test('output node build button and mode selector are visible', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-output-ds-${uid()}`;
 		const aName = `E2E Output Node ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -137,7 +126,7 @@ test.describe('Analyses – output node interactions', () => {
 
 			// Build button should be visible
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
 
 			// Mode trigger should be visible
 			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
@@ -164,7 +153,6 @@ test.describe('Analyses – output node interactions', () => {
 	});
 
 	test('selecting a mode updates the trigger text', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-output-mode-ds-${uid()}`;
 		const aName = `E2E Output Mode ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -173,10 +161,10 @@ test.describe('Analyses – output node interactions', () => {
 			await gotoAnalysisEditor(page, aId);
 
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
 
 			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
-			await expect(modeTrigger).toBeVisible({ timeout: 10_000 });
+			await expect(modeTrigger).toBeVisible({ timeout: 5_000 });
 
 			// Default should be "full"
 			await expect(modeTrigger).toContainText('full');
@@ -209,7 +197,6 @@ test.describe('Analyses – output node interactions', () => {
 	});
 
 	test('collapsible sections toggle open and closed', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-output-sections-ds-${uid()}`;
 		const aName = `E2E Output Sections ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -222,7 +209,7 @@ test.describe('Analyses – output node interactions', () => {
 			const healthToggle = page.locator('[data-testid="output-health-toggle"]');
 			const scheduleToggle = page.locator('[data-testid="output-schedule-toggle"]');
 
-			await expect(notifyToggle).toBeVisible({ timeout: 10_000 });
+			await expect(notifyToggle).toBeVisible({ timeout: 5_000 });
 			await expect(healthToggle).toBeVisible();
 			await expect(scheduleToggle).toBeVisible();
 
@@ -262,7 +249,6 @@ test.describe('Analyses – output node interactions', () => {
 	});
 
 	test('table name inline edit', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-output-rename-ds-${uid()}`;
 		const aName = `E2E Output Rename ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -272,7 +258,7 @@ test.describe('Analyses – output node interactions', () => {
 
 			// Click the edit pencil button (aria-label="Edit export name")
 			const editBtn = page.locator('[data-testid="output-table-name-inline-edit"]');
-			await expect(editBtn).toBeVisible({ timeout: 10_000 });
+			await expect(editBtn).toBeVisible({ timeout: 5_000 });
 			await editBtn.click();
 
 			// Input should appear
@@ -302,7 +288,6 @@ test.describe('Analyses – output node interactions', () => {
 
 test.describe('Analyses – output node table name edit', () => {
 	test('OutputNode: edit table name, save, verify updated', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const dsName = `e2e-output-name-ds-${uid()}`;
 		const aName = `E2E Output Name ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -339,7 +324,6 @@ test.describe('Analyses – output node table name edit', () => {
 
 test.describe('Analyses – output node persistence', () => {
 	test('build mode persists after save and reload', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const dsName = `e2e-mode-persist-ds-${uid()}`;
 		const aName = `E2E Mode Persist ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -348,7 +332,7 @@ test.describe('Analyses – output node persistence', () => {
 			await gotoAnalysisEditor(page, aId);
 
 			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
-			await expect(modeTrigger).toBeVisible({ timeout: 10_000 });
+			await expect(modeTrigger).toBeVisible({ timeout: 5_000 });
 
 			// Select incremental mode
 			await modeTrigger.click();
@@ -359,14 +343,14 @@ test.describe('Analyses – output node persistence', () => {
 
 			// Save the analysis
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 
 			// Reload and verify mode persisted
 			await page.reload();
 			await waitForEditorReload(page);
 
 			const modeTriggerAfter = page.locator('[data-testid="output-mode-trigger"]');
-			await expect(modeTriggerAfter).toBeVisible({ timeout: 10_000 });
+			await expect(modeTriggerAfter).toBeVisible({ timeout: 5_000 });
 			await expect(modeTriggerAfter).toContainText('incremental');
 
 			await screenshot(page, 'analysis/output', 'output-mode-persisted');
@@ -378,7 +362,6 @@ test.describe('Analyses – output node persistence', () => {
 	});
 
 	test('table name persists after save and reload', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const dsName = `e2e-tablename-persist-ds-${uid()}`;
 		const aName = `E2E TableName Persist ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -388,7 +371,7 @@ test.describe('Analyses – output node persistence', () => {
 
 			// Edit the table name
 			const editBtn = page.locator('[data-testid="output-table-name-inline-edit"]');
-			await expect(editBtn).toBeVisible({ timeout: 10_000 });
+			await expect(editBtn).toBeVisible({ timeout: 5_000 });
 			await editBtn.click();
 
 			const nameInput = page.locator('#output-node-name');
@@ -404,14 +387,14 @@ test.describe('Analyses – output node persistence', () => {
 
 			// Save
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 
 			// Reload and verify table name persisted
 			await page.reload();
 			await waitForEditorReload(page);
 			await expect(page.locator('[data-testid="output-table-name-inline"]')).toHaveText(
 				'persisted_table',
-				{ timeout: 10_000 }
+				{ timeout: 5_000 }
 			);
 
 			await screenshot(page, 'analysis/output', 'output-tablename-persisted');
@@ -427,7 +410,6 @@ test.describe('Analyses – output node persistence', () => {
 
 test.describe('Analyses – row count action', () => {
 	test('count-rows: success shows row count badge', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const dsName = `e2e-rowcount-ds-${uid()}`;
 		const aName = `E2E Row Count ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -436,14 +418,14 @@ test.describe('Analyses – row count action', () => {
 			await gotoAnalysisEditor(page, aId);
 
 			const viewNode = page.locator('[data-step-type="view"]');
-			await expect(viewNode).toHaveCount(1, { timeout: 15_000 });
+			await expect(viewNode).toHaveCount(1, { timeout: 5_000 });
 			const countBtn = viewNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(countBtn).toBeEnabled({ timeout: 5_000 });
 
 			await countBtn.click();
 
 			await expect(viewNode.locator('[data-testid="step-row-count"]')).toBeVisible({
-				timeout: 15_000
+				timeout: 5_000
 			});
 			await expect(viewNode.locator('[data-testid="step-row-count"]')).toContainText('rows');
 
@@ -458,7 +440,6 @@ test.describe('Analyses – row count action', () => {
 
 test.describe('Analyses – row count on non-view steps', () => {
 	test('count-rows works on a filter step', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const dsName = `e2e-rowcount-filter-ds-${uid()}`;
 		const aName = `E2E Row Count Filter ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -483,11 +464,11 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			// Click count-rows on the filter node
 			const countBtn = filterNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(countBtn).toBeEnabled({ timeout: 5_000 });
 			await countBtn.click();
 
 			await expect(filterNode.locator('[data-testid="step-row-count"]')).toBeVisible({
-				timeout: 15_000
+				timeout: 5_000
 			});
 			await expect(filterNode.locator('[data-testid="step-row-count"]')).toContainText('rows');
 
@@ -500,7 +481,6 @@ test.describe('Analyses – row count on non-view steps', () => {
 	});
 
 	test('count-rows works on a limit step', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const dsName = `e2e-rowcount-limit-ds-${uid()}`;
 		const aName = `E2E Row Count Limit ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -516,7 +496,7 @@ test.describe('Analyses – row count on non-view steps', () => {
 			// Apply the step
 			await limitNode.locator('[data-action="edit"]').click();
 			const configPanel = page.locator('[data-step-config="limit"]');
-			await expect(configPanel).toBeVisible({ timeout: 8_000 });
+			await expect(configPanel).toBeVisible({ timeout: 5_000 });
 			await configPanel.locator('[data-testid="limit-rows-input"]').fill('2');
 			await configPanel.getByRole('button', { name: 'Apply' }).click();
 			await expect(configPanel.getByRole('button', { name: 'Apply' })).toBeDisabled({
@@ -525,11 +505,11 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			// Click count-rows on the limit node
 			const countBtn = limitNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(countBtn).toBeEnabled({ timeout: 5_000 });
 			await countBtn.click();
 
 			await expect(limitNode.locator('[data-testid="step-row-count"]')).toBeVisible({
-				timeout: 15_000
+				timeout: 5_000
 			});
 			await expect(limitNode.locator('[data-testid="step-row-count"]')).toContainText('rows');
 

@@ -5,6 +5,7 @@ from core.config import settings
 from core.namespace import (
     get_namespace,
     list_namespaces,
+    namespace_database_schema,
     namespace_paths,
     normalize_namespace,
     set_namespace_context,
@@ -47,6 +48,14 @@ def test_set_namespace_context():
         from core.namespace import reset_namespace
 
         reset_namespace(token)
+
+
+def test_namespace_database_schema_keeps_regular_namespaces() -> None:
+    assert namespace_database_schema("alpha") == "alpha"
+
+
+def test_namespace_database_schema_maps_public_namespace_away_from_public_schema() -> None:
+    assert namespace_database_schema("public") == "df$tenant$public"
 
 
 def test_list_namespaces(tmp_path: Path, monkeypatch):

@@ -1,9 +1,10 @@
 import { test, expect } from './fixtures.js';
-import type { Page, APIRequestContext } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import {
 	createDatasource,
 	createDatasourceWithDates,
-	createImportedAnalysis
+	createImportedAnalysis,
+	type E2ERequest
 } from './utils/api.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import {
@@ -40,7 +41,7 @@ interface PipelineAnalysisResult {
  * A view step is always appended so the inline preview auto-triggers.
  */
 async function createPipelineAnalysis(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string,
 	dsId: string,
 	steps: Array<{ type: string; config: Record<string, unknown> }>
@@ -128,8 +129,8 @@ async function leaveAnalysisPage(page: Page): Promise<void> {
  */
 async function navigateAndWaitForTable(page: Page, analysisId: string): Promise<void> {
 	await gotoAnalysisEditor(page, analysisId);
-	const table = page.locator('[data-testid="inline-data-table"]');
-	await expect(table).toBeVisible({ timeout: 30_000 });
+	await expect(page.locator('[data-testid="inline-data-table"]')).toBeVisible({ timeout: 5_000 });
+	await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 5_000 });
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -147,8 +148,6 @@ async function navigateAndWaitForTable(page: Page, analysisId: string): Promise<
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Pipeline data verification', () => {
-	test.setTimeout(60_000);
-
 	let dsId: string;
 	let dsName: string;
 
@@ -686,8 +685,6 @@ test.describe('Pipeline data verification', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Pipeline data – pass-through operations', () => {
-	test.setTimeout(60_000);
-
 	let dsId: string;
 	let dsName: string;
 
@@ -758,8 +755,8 @@ test.describe('Pipeline data – pass-through operations', () => {
 		try {
 			await gotoAnalysisEditor(page, aId);
 			const chart = page.locator('[data-testid="chart-preview"]');
-			await expect(chart).toBeVisible({ timeout: 30_000 });
-			await expect(chart.locator('svg')).toBeVisible({ timeout: 10_000 });
+			await expect(chart).toBeVisible({ timeout: 5_000 });
+			await expect(chart.locator('svg')).toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/pipeline', 'chart-plot-bar');
 		} finally {
@@ -873,8 +870,6 @@ test.describe('Pipeline data – pass-through operations', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Pipeline data – timeseries', () => {
-	test.setTimeout(60_000);
-
 	let dateDsId: string;
 	let dateDsName: string;
 
@@ -934,8 +929,6 @@ test.describe('Pipeline data – timeseries', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Pipeline data – union by name', () => {
-	test.setTimeout(60_000);
-
 	let dsId1: string;
 	let dsId2: string;
 	let dsName1: string;

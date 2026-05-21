@@ -1,16 +1,21 @@
+import contextlib
 import json
 import logging
 import os
+import threading
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Any, cast
 
 import polars as pl
 import psycopg
 from contracts.datasource.models import DataSource, DataSourceColumnMetadata
 from contracts.datasource.source_types import DataSourceFileType, DataSourceType
+from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from core import engine_runs_service
 from core.config import settings
 from core.exceptions import (
     DataSourceConnectionError,
@@ -22,6 +27,7 @@ from core.namespace import get_namespace, namespace_paths
 from polars.datatypes import Array, List, Struct
 from pyiceberg.catalog import load_catalog
 from pyiceberg.table import Table
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from datasources.datasource_schemas import (
@@ -40,6 +46,16 @@ from datasources.datasource_schemas import (
 from operations.datasource import load_datasource
 
 logger = logging.getLogger(__name__)
+
+_DATASOURCE_INGEST_LOCKS: dict[str, threading.Lock] = {}
+_DATASOURCE_INGEST_LOCKS_GUARD = threading.Lock()
+
+
+def _ensure_catalog_namespace(catalog, namespace: str) -> None:
+    try:
+        catalog.create_namespace_if_not_exists(namespace)
+    except IntegrityError:
+        logger.info("Namespace %s was created concurrently; continuing", namespace)
 
 
 def _prepare_clean_target(clean_dir: Path, datasource_id: str, branch: str) -> Path:
@@ -100,7 +116,7 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) 
         warehouse=f"file://{table_path.parent}",
     )
     namespace = "clean"
-    catalog.create_namespace_if_not_exists(namespace)
+    _ensure_catalog_namespace(catalog, namespace)
     identifier = f"{namespace}.{table_path.parent.name}"
     arrow_table = _coerce_iceberg_compatible_lazyframe(lazy).collect().to_arrow()
     if build_mode == "recreate" and catalog.table_exists(identifier):
@@ -134,7 +150,7 @@ def _build_iceberg_config(
         "branch": branch,
         "source": dict(source_config) if source_config is not None else None,
         "namespace_name": get_namespace(),
-        "refresh": None,
+        "ingest": None,
     }
 
 
@@ -273,6 +289,80 @@ def _persist_schema_cache(session: Session, datasource: DataSource) -> None:
     session.refresh(datasource)
 
 
+def _create_ingest_run(
+    session: Session,
+    *,
+    datasource_id: str,
+    source_type: DataSourceType,
+    branch: str,
+    mode: str,
+    triggered_by: str,
+    request_json: Mapping[str, object] | None = None,
+):
+    payload: dict[str, object] = {
+        "kind": EngineRunKind.INGEST.value,
+        "mode": mode,
+        "source_type": source_type.value,
+        "branch": branch,
+    }
+    if request_json is not None:
+        payload.update(request_json)
+    return engine_runs_service.create_engine_run(
+        session,
+        engine_runs_service.create_engine_run_payload(
+            analysis_id=None,
+            datasource_id=datasource_id,
+            kind=EngineRunKind.INGEST,
+            status=EngineRunStatus.RUNNING,
+            request_json=payload,
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+            current_step="Reading source",
+            triggered_by=triggered_by,
+        ),
+    )
+
+
+def _complete_ingest_run(
+    session: Session,
+    *,
+    run_id: str,
+    started: float,
+    datasource: DataSource,
+    original_source_type: DataSourceType,
+    metadata_path: object | None = None,
+) -> None:
+    result_json: dict[str, object] = {
+        "datasource_name": datasource.name,
+        "storage_type": datasource.source_type,
+        "original_source_type": original_source_type.value,
+    }
+    if metadata_path is not None:
+        result_json["metadata_path"] = metadata_path
+    engine_runs_service.update_engine_run(
+        session,
+        run_id,
+        status=EngineRunStatus.SUCCESS,
+        completed_at=datetime.now(UTC).replace(tzinfo=None),
+        duration_ms=int((monotonic() - started) * 1000),
+        progress=1.0,
+        current_step=None,
+        result_json=result_json,
+    )
+
+
+def _fail_ingest_run(session: Session, *, run_id: str, started: float, exc: Exception) -> None:
+    engine_runs_service.update_engine_run(
+        session,
+        run_id,
+        status=EngineRunStatus.FAILED,
+        completed_at=datetime.now(UTC).replace(tzinfo=None),
+        duration_ms=int((monotonic() - started) * 1000),
+        progress=1.0,
+        current_step=None,
+        error_message=str(exc),
+    )
+
+
 def create_file_datasource(
     session: Session,
     name: str,
@@ -320,38 +410,54 @@ def create_file_datasource(
         "named_range": named_range,
         "cell_range": cell_range,
     }
-    try:
-        lazy = load_datasource(source_config)
-    except Exception as exc:
-        raise DataSourceValidationError(
-            f"Failed to load file datasource for ingestion: {exc}",
-            details={"file_path": str(resolved_path), "file_type": resolved_file_type.value},
-        ) from exc
-    target_path = _prepare_clean_target(paths.clean_dir, datasource_id, "master")
-    snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
-    config = _build_iceberg_config(paths, target_path, branch="master", source_config=source_config)
-    _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
-    datasource = DataSource(
-        id=datasource_id,
-        name=name,
-        description=DataSourceDescriptionModel.normalize_description(description),
-        source_type=DataSourceType.ICEBERG,
-        config=config,
-        owner_id=owner_id,
-        created_at=datetime.now(UTC).replace(tzinfo=None),
+    run = _create_ingest_run(
+        session,
+        datasource_id=datasource_id,
+        source_type=DataSourceType.FILE,
+        branch="master",
+        mode="initial_ingest",
+        triggered_by="manual",
+        request_json={"file_type": resolved_file_type.value},
     )
-    session.add(datasource)
-    session.commit()
-    session.refresh(datasource)
+    started = monotonic()
     try:
-        _persist_schema_cache(session, datasource)
+        try:
+            lazy = load_datasource(source_config)
+        except Exception as exc:
+            raise DataSourceValidationError(
+                f"Failed to load file datasource for ingestion: {exc}",
+                details={"file_path": str(resolved_path), "file_type": resolved_file_type.value},
+            ) from exc
+        engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
+        target_path = _prepare_clean_target(paths.clean_dir, datasource_id, "master")
+        snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
+        config = _build_iceberg_config(paths, target_path, branch="master", source_config=source_config)
+        _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
+        datasource = DataSource(
+            id=datasource_id,
+            name=name,
+            description=DataSourceDescriptionModel.normalize_description(description),
+            source_type=DataSourceType.ICEBERG,
+            config=config,
+            owner_id=owner_id,
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+        session.add(datasource)
+        _complete_ingest_run(
+            session,
+            run_id=run.id,
+            started=started,
+            datasource=datasource,
+            original_source_type=DataSourceType.FILE,
+            metadata_path=config.get("metadata_path"),
+        )
+        session.refresh(datasource)
+        return DataSourceResponse.model_validate(datasource)
     except Exception as exc:
-        session.rollback()
-        raise DataSourceValidationError(
-            f"Failed to extract schema for datasource {datasource_id}: {exc}",
-            details={"datasource_id": datasource_id},
-        ) from exc
-    return DataSourceResponse.model_validate(datasource)
+        with contextlib.suppress(Exception):
+            session.rollback()
+            _fail_ingest_run(session, run_id=run.id, started=started, exc=exc)
+        raise
 
 
 def create_database_datasource(
@@ -365,64 +471,88 @@ def create_database_datasource(
 ) -> DataSourceResponse:
     datasource_id = str(uuid.uuid4())
     source_config = {
+        "source_type": DataSourceType.DATABASE,
         "connection_string": connection_string,
         "query": query,
         "branch": branch,
     }
-    try:
-        lazy = load_datasource(
-            {
-                "source_type": DataSourceType.DATABASE,
-                "connection_string": connection_string,
-                "query": query,
-            },
-        )
-    except Exception as exc:
-        if connection_string.startswith("postgresql://"):
-            datasource = DataSource(
-                id=datasource_id,
-                name=name,
-                description=DataSourceDescriptionModel.normalize_description(description),
-                source_type=DataSourceType.DATABASE,
-                config=source_config,
-                owner_id=owner_id,
-                created_at=datetime.now(UTC).replace(tzinfo=None),
-            )
-            session.add(datasource)
-            session.commit()
-            session.refresh(datasource)
-            return DataSourceResponse.model_validate(datasource)
-        raise DataSourceConnectionError(
-            DataSourceType.DATABASE.ingestion_error_message,
-            details={"connection_string": connection_string},
-        ) from exc
-    lazy = _coerce_database_iceberg_compatible_lazyframe(lazy)
-    paths = namespace_paths()
-    target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch)
-    snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
-    config = _build_iceberg_config(paths, target_path, branch=branch, source_config=source_config)
-    _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
-    datasource = DataSource(
-        id=datasource_id,
-        name=name,
-        description=DataSourceDescriptionModel.normalize_description(description),
-        source_type=DataSourceType.ICEBERG,
-        config=config,
-        owner_id=owner_id,
-        created_at=datetime.now(UTC).replace(tzinfo=None),
+    run = _create_ingest_run(
+        session,
+        datasource_id=datasource_id,
+        source_type=DataSourceType.DATABASE,
+        branch=branch,
+        mode="initial_ingest",
+        triggered_by="manual",
+        request_json={"query": query},
     )
-    session.add(datasource)
-    session.commit()
-    session.refresh(datasource)
+    started = monotonic()
     try:
-        _persist_schema_cache(session, datasource)
+        try:
+            lazy = load_datasource(
+                {
+                    "source_type": DataSourceType.DATABASE,
+                    "connection_string": connection_string,
+                    "query": query,
+                },
+            )
+        except Exception as exc:
+            if connection_string.startswith("postgresql://"):
+                datasource = DataSource(
+                    id=datasource_id,
+                    name=name,
+                    description=DataSourceDescriptionModel.normalize_description(description),
+                    source_type=DataSourceType.DATABASE,
+                    config=source_config,
+                    owner_id=owner_id,
+                    created_at=datetime.now(UTC).replace(tzinfo=None),
+                )
+                session.add(datasource)
+                session.commit()
+                session.refresh(datasource)
+                _complete_ingest_run(
+                    session,
+                    run_id=run.id,
+                    started=started,
+                    datasource=datasource,
+                    original_source_type=DataSourceType.DATABASE,
+                )
+                return DataSourceResponse.model_validate(datasource)
+            raise DataSourceConnectionError(
+                DataSourceType.DATABASE.ingestion_error_message,
+                details={"connection_string": connection_string},
+            ) from exc
+        engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
+        lazy = _coerce_database_iceberg_compatible_lazyframe(lazy)
+        paths = namespace_paths()
+        target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch)
+        snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
+        config = _build_iceberg_config(paths, target_path, branch=branch, source_config=source_config)
+        _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
+        datasource = DataSource(
+            id=datasource_id,
+            name=name,
+            description=DataSourceDescriptionModel.normalize_description(description),
+            source_type=DataSourceType.ICEBERG,
+            config=config,
+            owner_id=owner_id,
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+        session.add(datasource)
+        _complete_ingest_run(
+            session,
+            run_id=run.id,
+            started=started,
+            datasource=datasource,
+            original_source_type=DataSourceType.DATABASE,
+            metadata_path=config.get("metadata_path"),
+        )
+        session.refresh(datasource)
+        return DataSourceResponse.model_validate(datasource)
     except Exception as exc:
-        session.rollback()
-        raise DataSourceValidationError(
-            f"Failed to extract schema for datasource {datasource_id}: {exc}",
-            details={"datasource_id": datasource_id},
-        ) from exc
-    return DataSourceResponse.model_validate(datasource)
+        with contextlib.suppress(Exception):
+            session.rollback()
+            _fail_ingest_run(session, run_id=run.id, started=started, exc=exc)
+        raise
 
 
 def create_iceberg_datasource(
@@ -442,64 +572,87 @@ def create_iceberg_datasource(
     if not isinstance(branch, str) or not branch.strip():
         raise DataSourceValidationError("Branch is required", details={"source_type": source_type})
     branch_name = branch.strip()
-    try:
-        if source_type == DataSourceType.DATABASE:
-            connection_string = source.get("connection_string")
-            query = source.get("query")
-            if not connection_string or not query:
-                raise DataSourceValidationError(
-                    "Datasource source is missing connection details",
-                    details={"source_type": source_type},
-                )
-            lazy = load_datasource(
-                {
-                    "source_type": DataSourceType.DATABASE,
-                    "connection_string": connection_string,
-                    "query": query,
-                },
-            )
-        else:
-            lazy = load_datasource(source)
-    except DataSourceValidationError:
-        raise
-    except Exception as exc:
-        raise DataSourceConnectionError(source_type.ingestion_error_message, details={"source_type": source_type}) from exc
     datasource_id = str(uuid.uuid4())
-    paths = namespace_paths()
-    target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch_name)
-    snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
-    config = _build_iceberg_config(paths, target_path, branch=branch_name, source_config=source)
-    _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
-    datasource = DataSource(
-        id=datasource_id,
-        name=name,
-        description=DataSourceDescriptionModel.normalize_description(description),
-        source_type=DataSourceType.ICEBERG,
-        config=config,
-        owner_id=owner_id,
-        created_at=datetime.now(UTC).replace(tzinfo=None),
+    run = _create_ingest_run(
+        session,
+        datasource_id=datasource_id,
+        source_type=source_type,
+        branch=branch_name,
+        mode="initial_ingest",
+        triggered_by="manual",
+        request_json={"query": source.get("query")} if source_type == DataSourceType.DATABASE else None,
     )
-    session.add(datasource)
-    session.commit()
-    session.refresh(datasource)
+    started = monotonic()
     try:
-        _persist_schema_cache(session, datasource)
+        try:
+            if source_type == DataSourceType.DATABASE:
+                connection_string = source.get("connection_string")
+                query = source.get("query")
+                if not connection_string or not query:
+                    raise DataSourceValidationError(
+                        "Datasource source is missing connection details",
+                        details={"source_type": source_type},
+                    )
+                lazy = load_datasource(
+                    {
+                        "source_type": DataSourceType.DATABASE,
+                        "connection_string": connection_string,
+                        "query": query,
+                    },
+                )
+                lazy = _coerce_database_iceberg_compatible_lazyframe(lazy)
+            else:
+                lazy = load_datasource(source)
+        except DataSourceValidationError:
+            raise
+        except Exception as exc:
+            raise DataSourceConnectionError(source_type.ingestion_error_message, details={"source_type": source_type}) from exc
+        engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
+        paths = namespace_paths()
+        target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch_name)
+        snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
+        config = _build_iceberg_config(paths, target_path, branch=branch_name, source_config=source)
+        _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
+        datasource = DataSource(
+            id=datasource_id,
+            name=name,
+            description=DataSourceDescriptionModel.normalize_description(description),
+            source_type=DataSourceType.ICEBERG,
+            config=config,
+            owner_id=owner_id,
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+        session.add(datasource)
+        _complete_ingest_run(
+            session,
+            run_id=run.id,
+            started=started,
+            datasource=datasource,
+            original_source_type=source_type,
+            metadata_path=config.get("metadata_path"),
+        )
+        session.refresh(datasource)
+        return DataSourceResponse.model_validate(datasource)
     except Exception as exc:
-        session.rollback()
-        raise DataSourceValidationError(
-            f"Failed to extract schema for datasource {datasource_id}: {exc}",
-            details={"datasource_id": datasource_id},
-        ) from exc
-    return DataSourceResponse.model_validate(datasource)
+        with contextlib.suppress(Exception):
+            session.rollback()
+            _fail_ingest_run(session, run_id=run.id, started=started, exc=exc)
+        raise
 
 
-def refresh_external_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
+def ingest_external_datasource(
+    session: Session,
+    datasource_id: str,
+    *,
+    triggered_by: str = "manual",
+    mode: str = "manual_ingest",
+) -> DataSourceResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
         raise DataSourceNotFoundError(datasource_id)
     if not datasource.is_iceberg:
         raise DataSourceValidationError(
-            "Refresh is only available for Iceberg datasources",
+            "Ingest is only available for Iceberg datasources",
             details={"datasource_id": datasource_id},
         )
     source = datasource.external_source_config()
@@ -509,9 +662,9 @@ def refresh_external_datasource(session: Session, datasource_id: str) -> DataSou
             details={"datasource_id": datasource_id},
         )
     source_type = datasource.external_source_type()
-    if source_type is None or not datasource.is_refreshable_external:
+    if source_type is None or not datasource.is_ingestable_external:
         raise DataSourceValidationError(
-            "Datasource source is not refreshable",
+            "Datasource source is not ingestable",
             details={"datasource_id": datasource_id, "source_type": source_type},
         )
     branch_raw = datasource.config.get("branch", source.get("branch"))
@@ -520,68 +673,110 @@ def refresh_external_datasource(session: Session, datasource_id: str) -> DataSou
             "Datasource branch is required",
             details={"datasource_id": datasource_id},
         )
+    lock = _datasource_ingest_mutex(datasource_id)
+    run = _create_ingest_run(
+        session,
+        datasource_id=datasource_id,
+        source_type=source_type,
+        branch=branch_raw.strip(),
+        mode=mode,
+        triggered_by=triggered_by,
+        request_json={"query": source.get("query")} if source_type == DataSourceType.DATABASE else None,
+    )
+    lock.acquire()
+    started = monotonic()
     try:
-        if source_type == DataSourceType.DATABASE:
-            connection_string = source.get("connection_string")
-            query = source.get("query")
-            if not connection_string or not query:
-                raise DataSourceValidationError(
-                    "Datasource source is missing connection details",
-                    details={"datasource_id": datasource_id},
+        try:
+            if source_type == DataSourceType.DATABASE:
+                connection_string = source.get("connection_string")
+                query = source.get("query")
+                if not connection_string or not query:
+                    raise DataSourceValidationError(
+                        "Datasource source is missing connection details",
+                        details={"datasource_id": datasource_id},
+                    )
+                lazy = load_datasource(
+                    {
+                        "source_type": DataSourceType.DATABASE,
+                        "connection_string": connection_string,
+                        "query": query,
+                    },
                 )
-            lazy = load_datasource(
-                {
-                    "source_type": DataSourceType.DATABASE,
-                    "connection_string": connection_string,
-                    "query": query,
-                },
+            else:
+                lazy = load_datasource(source)
+        except DataSourceValidationError:
+            raise
+        except Exception as exc:
+            raise DataSourceConnectionError(source_type.ingestion_error_message, details={"datasource_id": datasource_id}) from exc
+        metadata_path = datasource.config.get("metadata_path")
+        if not isinstance(metadata_path, str) or not metadata_path:
+            raise DataSourceValidationError(
+                "Datasource missing metadata_path",
+                details={"datasource_id": datasource_id},
             )
-        else:
-            lazy = load_datasource(source)
-    except DataSourceValidationError:
-        raise
-    except Exception as exc:
-        raise DataSourceConnectionError(source_type.ingestion_error_message, details={"datasource_id": datasource_id}) from exc
-    metadata_path = datasource.config.get("metadata_path")
-    if not isinstance(metadata_path, str) or not metadata_path:
-        raise DataSourceValidationError(
-            "Datasource missing metadata_path",
-            details={"datasource_id": datasource_id},
+        if source_type == DataSourceType.DATABASE:
+            lazy = _coerce_database_iceberg_compatible_lazyframe(lazy)
+        branch = branch_raw.strip()
+        engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
+        target_path = Path(metadata_path)
+        if target_path.name != branch:
+            target_path = _prepare_clean_target(namespace_paths().clean_dir, datasource_id, branch)
+        snapshot = _write_iceberg_table(lazy, target_path, build_mode="full")
+        next_config = dict(datasource.config)
+        _set_snapshot_metadata(next_config, snapshot.current_snapshot() if snapshot else None)
+        next_config["branch"] = branch
+        next_config["metadata_path"] = str(target_path)
+        next_config["source"] = source
+        next_config["ingest"] = {"ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat()}
+        datasource.config = next_config
+        datasource.schema_cache = None
+        session.add(datasource)
+        session.commit()
+        session.refresh(datasource)
+        _complete_ingest_run(
+            session,
+            run_id=run.id,
+            started=started,
+            datasource=datasource,
+            original_source_type=source_type,
+            metadata_path=next_config.get("metadata_path"),
         )
-    branch = branch_raw.strip()
-    target_path = Path(metadata_path)
-    if target_path.name != branch:
-        target_path = _prepare_clean_target(namespace_paths().clean_dir, datasource_id, branch)
-    snapshot = _write_iceberg_table(lazy, target_path, build_mode="full")
-    next_config = dict(datasource.config)
-    _set_snapshot_metadata(next_config, snapshot.current_snapshot() if snapshot else None)
-    next_config["branch"] = branch
-    next_config["metadata_path"] = str(target_path)
-    next_config["source"] = source
-    next_config["refresh"] = {"refreshed_at": datetime.now(UTC).replace(tzinfo=None).isoformat()}
-    datasource.config = next_config
-    datasource.schema_cache = None
-    session.add(datasource)
-    session.commit()
-    session.refresh(datasource)
-    return DataSourceResponse.model_validate(datasource)
+        lock.release()
+        return DataSourceResponse.model_validate(datasource)
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            session.rollback()
+            _fail_ingest_run(session, run_id=run.id, started=started, exc=exc)
+        if lock.locked():
+            lock.release()
+        raise
+
+
+def _datasource_ingest_mutex(datasource_id: str) -> threading.Lock:
+    with _DATASOURCE_INGEST_LOCKS_GUARD:
+        return _DATASOURCE_INGEST_LOCKS.setdefault(datasource_id, threading.Lock())
 
 
 def is_reingestable_raw_datasource(datasource: DataSource) -> bool:
     return datasource.is_reingestable_raw()
 
 
-def refresh_datasource_for_schedule(session: Session, datasource_id: str) -> DataSourceResponse:
+def ingest_datasource_for_schedule(session: Session, datasource_id: str) -> DataSourceResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
         raise DataSourceNotFoundError(datasource_id)
     if is_reingestable_raw_datasource(datasource):
-        return refresh_external_datasource(session, datasource_id)
+        return ingest_external_datasource(
+            session,
+            datasource_id,
+            triggered_by="schedule",
+            mode="schedule_ingest",
+        )
     schema = _extract_schema(datasource)
     next_config = dict(datasource.config) if isinstance(datasource.config, dict) else {}
-    next_config["refresh"] = {
-        "refreshed_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
-        "mode": "schedule_schema_refresh",
+    next_config["ingest"] = {
+        "ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
+        "mode": "schedule_schema_ingest",
     }
     datasource.config = next_config
     datasource.schema_cache = _schema_cache_payload(schema)

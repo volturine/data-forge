@@ -7,8 +7,6 @@ test.describe('Analyses – multi-user locking', () => {
 	test('second account stays read-only until the active editor leaves, then takes over', async ({
 		browser
 	}) => {
-		test.setTimeout(180_000);
-
 		const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
 		const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
 		const id = Date.now().toString(36);
@@ -30,16 +28,16 @@ test.describe('Analyses – multi-user locking', () => {
 
 			await gotoAnalysisEditor(ownerPage, analysisId);
 			const ownerFilter = ownerPage.locator('button[data-step="filter"]');
-			await expect(ownerFilter).toBeEnabled({ timeout: 10_000 });
+			await expect(ownerFilter).toBeEnabled({ timeout: 5_000 });
 			await ownerFilter.click();
 			await expect(ownerPage.locator('[data-step-type="filter"]')).toHaveCount(1, {
-				timeout: 10_000
+				timeout: 5_000
 			});
 
 			await gotoReadOnlyAnalysisEditor(viewerPage, analysisId);
 			const viewerEditor = viewerPage.locator('[role="application"]');
 			await expect(viewerEditor).toHaveAttribute('data-editor-access-state', 'locked', {
-				timeout: 10_000
+				timeout: 5_000
 			});
 			await expect(viewerPage.getByTestId('lock-toggle-button')).toHaveAttribute(
 				'aria-label',
@@ -53,23 +51,23 @@ test.describe('Analyses – multi-user locking', () => {
 			await expect(ownerPage.locator('[role="application"]')).toHaveAttribute(
 				'data-editor-access-state',
 				'released',
-				{ timeout: 10_000 }
+				{ timeout: 5_000 }
 			);
 			await expect(ownerPage.getByTestId('lock-toggle-button')).toHaveAttribute(
 				'aria-label',
 				'Lock',
-				{ timeout: 10_000 }
+				{ timeout: 5_000 }
 			);
 
 			await expect(viewerEditor).toHaveAttribute('data-editor-access-state', 'editable', {
-				timeout: 30_000
+				timeout: 5_000
 			});
 
 			const viewerFilter = viewerPage.locator('button[data-step="filter"]');
-			await expect(viewerFilter).toBeEnabled({ timeout: 10_000 });
+			await expect(viewerFilter).toBeEnabled({ timeout: 5_000 });
 			await viewerFilter.click();
 			await expect(viewerPage.locator('[data-step-type="filter"]')).toHaveCount(1, {
-				timeout: 10_000
+				timeout: 5_000
 			});
 		} finally {
 			await viewerPage.close().catch(() => {});

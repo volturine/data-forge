@@ -13,6 +13,7 @@ from multiprocessing.connection import wait as wait_handles
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue as MPQueue
 from queue import Empty
+from typing import Any
 
 import polars as pl
 from contracts.analysis.step_types import is_chart_step_type
@@ -48,6 +49,17 @@ from runtime.compute_utils import apply_steps, normalize_timezones
 logger = logging.getLogger(__name__)
 
 
+def _compute_mp_context() -> Any:
+    if sys.platform == "win32":
+        return mp.get_context("spawn")
+    available = set(mp.get_all_start_methods())
+    if "forkserver" in available:
+        return mp.get_context("forkserver")
+    if "fork" in available:
+        return mp.get_context("fork")
+    return mp.get_context("spawn")
+
+
 class PolarsComputeEngine:
     @staticmethod
     def _classify_engine_error(exc: Exception) -> tuple[str, dict[str, object]]:
@@ -72,7 +84,7 @@ class PolarsComputeEngine:
         self.analysis_id = analysis_id
         self.resource_config = resource_config or {}
         self.effective_resources: dict = {}  # Populated when engine starts
-        self._mp_context = mp.get_context("spawn")
+        self._mp_context = _compute_mp_context()
         self.process: BaseProcess | None = None
         self.command_queue: mp.Queue | None = None
         self.result_queue: mp.Queue | None = None

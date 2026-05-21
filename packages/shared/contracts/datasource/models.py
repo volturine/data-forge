@@ -82,7 +82,7 @@ class DataSource(SQLModel, table=True):  # type: ignore[call-arg]
         return source_query, self.normalize_connection_string(source_connection_string)
 
     @property
-    def is_refreshable_external(self) -> bool:
+    def is_ingestable_external(self) -> bool:
         source_type = self.external_source_type()
         return source_type.supports_external_ingestion if source_type is not None else False
 
@@ -91,7 +91,7 @@ class DataSource(SQLModel, table=True):  # type: ignore[call-arg]
             return False
         if self.is_analysis_output:
             return False
-        return self.is_refreshable_external
+        return self.is_ingestable_external
 
     def target_kind(self) -> DataSourceTargetKind:
         if self.is_analysis_output and self.created_by_analysis_id:

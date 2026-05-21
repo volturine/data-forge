@@ -76,7 +76,7 @@ def test_datasource_target_kind_is_model_owned() -> None:
 
     assert analysis_output.target_kind() == DataSourceTargetKind.ANALYSIS
     assert raw_import.external_source_type() == DataSourceType.FILE
-    assert raw_import.is_refreshable_external is True
+    assert raw_import.is_ingestable_external is True
     assert raw_import.query_and_connection() == (None, None)
     assert raw_import.target_kind() == DataSourceTargetKind.RAW
     assert derived.target_kind() == DataSourceTargetKind.DATASOURCE

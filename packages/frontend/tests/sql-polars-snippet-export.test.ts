@@ -1,12 +1,11 @@
 import { test, expect } from './fixtures.js';
-import type { APIRequestContext } from '@playwright/test';
-import { createDatasource, createImportedAnalysis } from './utils/api.js';
+import { createDatasource, createImportedAnalysis, type E2ERequest } from './utils/api.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 
 async function createSnippetAnalysis(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string,
 	leftDatasourceId: string,
 	rightDatasourceId: string
@@ -114,7 +113,7 @@ async function createSnippetAnalysis(
 }
 
 async function createUnsupportedAnalysis(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string,
 	datasourceId: string
 ): Promise<string> {
@@ -163,7 +162,6 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(90_000);
 		const id = uid();
 		const leftDsName = `e2e-snippet-left-${id}`;
 		const rightDsName = `e2e-snippet-right-${id}`;
@@ -176,9 +174,9 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 			await page.getByTestId('analysis-export-toolbar-button').click();
 
 			const code = page.getByTestId('analysis-export-code');
-			await expect(code).toBeVisible({ timeout: 10_000 });
+			await expect(code).toBeVisible({ timeout: 5_000 });
 			await expect
-				.poll(async () => (await code.textContent())?.trim() ?? '', { timeout: 10_000 })
+				.poll(async () => (await code.textContent())?.trim() ?? '', { timeout: 5_000 })
 				.not.toBe('');
 			await expect(code).toContainText('import polars as pl');
 			await expect(code).toContainText('.join(');
@@ -201,7 +199,6 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(90_000);
 		await page.addInitScript(() => {
 			Object.defineProperty(navigator, 'clipboard', {
 				configurable: true,
@@ -225,13 +222,13 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 			await gotoAnalysisEditor(page, analysisId);
 
 			const leftTabButton = page.locator('button[data-tab-name="Left Source"]');
-			await expect(leftTabButton).toBeVisible({ timeout: 8_000 });
+			await expect(leftTabButton).toBeVisible({ timeout: 5_000 });
 			await leftTabButton.click({ button: 'right' });
 			await page.getByTestId('analysis-tab-context-export').click();
 
 			const code = page.getByTestId('analysis-export-code');
 			await expect
-				.poll(async () => (await code.textContent())?.trim() ?? '', { timeout: 10_000 })
+				.poll(async () => (await code.textContent())?.trim() ?? '', { timeout: 5_000 })
 				.not.toBe('');
 			await expect(code).toContainText('SOURCE_RIGHT_SOURCE_PATH');
 			await expect(code).toContainText('SOURCE_LEFT_SOURCE_PATH');
@@ -264,7 +261,6 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 	});
 
 	test('untranslatable steps surface warnings in export modal', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
 		const dsName = `e2e-snippet-warn-${id}`;
 		const analysisName = `E2E Snippet Warnings ${id}`;
@@ -275,7 +271,7 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 			await page.getByTestId('analysis-export-toolbar-button').click();
 			await page.getByTestId('analysis-export-format-sql').click();
 			const warnings = page.getByTestId('analysis-export-warnings');
-			await expect(warnings).toBeVisible({ timeout: 10_000 });
+			await expect(warnings).toBeVisible({ timeout: 5_000 });
 			await expect(warnings).toContainText(/ai/i);
 			await expect(page.getByTestId('analysis-export-code')).toContainText('-- WARNING:');
 			await expect(page.getByTestId('analysis-export-code')).toContainText('Original config');

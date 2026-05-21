@@ -11,6 +11,7 @@ class EngineRunKind(DataForgeStrEnum):
     PREVIEW = 'preview'
     ROW_COUNT = 'row_count'
     DOWNLOAD = 'download'
+    INGEST = 'ingest'
 
 
 class EngineRunStatus(DataForgeStrEnum):

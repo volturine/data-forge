@@ -6,7 +6,7 @@ import {
 	datasourceIsAnalysisOutput,
 	datasourceIsCsv,
 	datasourceIsSchedulableRaw,
-	datasourceNeedsExternalRefresh,
+	datasourceNeedsExternalIngest,
 	datasourceSupportsSchemaRefresh
 } from './datasource';
 
@@ -54,7 +54,25 @@ describe('datasource ownership helpers', () => {
 		});
 
 		expect(datasourceFileConfig(datasource)?.file_path).toBe('/tmp/data.csv');
-		expect(datasourceNeedsExternalRefresh(datasource)).toBe(true);
+		expect(datasourceNeedsExternalIngest(datasource)).toBe(true);
+		expect(datasourceIsSchedulableRaw(datasource)).toBe(true);
+	});
+
+	it('owns external database-backed iceberg ingestion classification', () => {
+		const datasource = makeDatasource({
+			source_type: 'iceberg',
+			config: {
+				metadata_path: '/tmp/table/metadata/v1.metadata.json',
+				branch: 'master',
+				source: {
+					source_type: 'database',
+					connection_string: 'postgresql://example/db',
+					query: 'select * from public.users'
+				}
+			}
+		});
+
+		expect(datasourceNeedsExternalIngest(datasource)).toBe(true);
 		expect(datasourceIsSchedulableRaw(datasource)).toBe(true);
 	});
 

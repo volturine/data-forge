@@ -1,11 +1,12 @@
 import path from 'node:path';
-import type { APIRequestContext, Browser, Page } from '@playwright/test';
+import type { APIRequestContext, Browser, BrowserContext, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 import {
 	createHealthCheckViaUi,
 	createScheduleViaUi,
 	createUdfViaUi,
 	importAnalysisViaUi,
+	shutdownEngineViaUi,
 	uploadDatasourceViaUi,
 	uploadDatasourceWithDatesViaUi,
 	E2E_PASSWORD
@@ -14,9 +15,6 @@ import { deleteDatasourceViaUI } from './ui-cleanup.js';
 import { waitForLayoutReady } from './readiness.js';
 import { switchNamespace } from './namespace.js';
 
-const apiOrigin =
-	process.env.PLAYWRIGHT_API_ORIGIN || `http://localhost:${process.env.PORT || '8000'}`;
-export const API_BASE = `${apiOrigin}/api/v1`;
 export const AUTH_DIR = path.resolve('tests/.artifacts/auth');
 export const META_FILE = path.join(AUTH_DIR, 'meta.json');
 export const E2E_RUN_STAMP =
@@ -24,7 +22,7 @@ export const E2E_RUN_STAMP =
 
 export { E2E_PASSWORD };
 
-export interface E2ERequest {
+export interface E2ERequest extends APIRequestContext {
 	browser: Browser;
 	authFile: string;
 	workerIndex: number;
@@ -34,29 +32,40 @@ export interface E2ERequest {
 const datasourceRegistry = new Map<string, { name: string; namespace?: string }>();
 const analysisRegistry = new Map<string, { name: string }>();
 const udfRegistry = new Map<string, { name: string }>();
+const authedSetupContexts = new Map<string, BrowserContext>();
 
 export function workerAuthFile(workerIndex: number): string {
 	return path.join(AUTH_DIR, `state-${E2E_RUN_STAMP}-w${workerIndex}.json`);
 }
 
-function asE2ERequest(request: APIRequestContext): E2ERequest {
-	return request as unknown as E2ERequest;
+async function getAuthedSetupContext(request: E2ERequest): Promise<BrowserContext> {
+	const existingContext = authedSetupContexts.get(request.authFile);
+	if (existingContext) {
+		return existingContext;
+	}
+	const context = await request.browser.newContext({
+		baseURL: request.baseURL,
+		storageState: request.authFile
+	});
+	authedSetupContexts.set(request.authFile, context);
+	return context;
 }
 
-async function withAuthedPage<T>(
-	request: APIRequestContext,
-	fn: (page: Page) => Promise<T>
-): Promise<T> {
-	const setup = asE2ERequest(request);
-	const context = await setup.browser.newContext({
-		baseURL: setup.baseURL,
-		storageState: setup.authFile
-	});
+async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promise<T>): Promise<T> {
+	const context = await getAuthedSetupContext(request);
 	const page = await context.newPage();
 	try {
 		return await fn(page);
 	} finally {
-		await context.close();
+		await page.close().catch(() => undefined);
+	}
+}
+
+export async function disposeWorkerSetupContexts(authFile: string): Promise<void> {
+	const context = authedSetupContexts.get(authFile);
+	authedSetupContexts.delete(authFile);
+	if (context) {
+		await context.close().catch(() => undefined);
 	}
 }
 
@@ -76,7 +85,7 @@ function buildOutput(filename: string) {
 }
 
 export async function createDatasource(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string,
 	namespace?: string,
 	description?: string
@@ -94,7 +103,7 @@ export async function createDatasource(
 }
 
 export async function createLargeDatasource(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string,
 	rows: number
 ): Promise<string> {
@@ -106,7 +115,7 @@ export async function createLargeDatasource(
 }
 
 export async function createDatasourceWithDates(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
@@ -117,7 +126,7 @@ export async function createDatasourceWithDates(
 }
 
 export async function deleteDatasource(
-	request: APIRequestContext,
+	request: E2ERequest,
 	id: string,
 	namespace?: string
 ): Promise<void> {
@@ -134,7 +143,7 @@ export async function deleteDatasource(
 }
 
 export async function createAnalysis(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string,
 	datasourceId: string
 ): Promise<string> {
@@ -164,7 +173,7 @@ export async function createAnalysis(
 }
 
 export async function createImportedAnalysis(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string,
 	pipeline: Record<string, unknown>,
 	datasourceRemap?: Record<string, string>,
@@ -173,12 +182,13 @@ export async function createImportedAnalysis(
 	return withAuthedPage(request, async (page) => {
 		const id = await importAnalysisViaUi(page, { name, description, pipeline, datasourceRemap });
 		analysisRegistry.set(id, { name });
+		await page.goto('/', { waitUntil: 'domcontentloaded' }).catch(() => undefined);
 		return id;
 	});
 }
 
 export async function createMultiStepAnalysis(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string,
 	datasourceId: string
 ): Promise<string> {
@@ -231,7 +241,7 @@ export async function createMultiStepAnalysis(
 }
 
 export async function createLongRunningAnalysis(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string,
 	datasourceId: string
 ): Promise<string> {
@@ -300,7 +310,7 @@ export async function createLongRunningAnalysis(
 	);
 }
 
-export async function createUdf(request: APIRequestContext, name: string): Promise<string> {
+export async function createUdf(request: E2ERequest, name: string): Promise<string> {
 	return withAuthedPage(request, async (page) => {
 		const id = await createUdfViaUi(page, name);
 		udfRegistry.set(id, { name });
@@ -309,7 +319,7 @@ export async function createUdf(request: APIRequestContext, name: string): Promi
 }
 
 export async function createSchedule(
-	request: APIRequestContext,
+	request: E2ERequest,
 	datasourceId: string,
 	cron = '0 9 * * *'
 ): Promise<string> {
@@ -317,7 +327,7 @@ export async function createSchedule(
 }
 
 export async function createHealthCheck(
-	request: APIRequestContext,
+	request: E2ERequest,
 	datasourceId: string,
 	name: string
 ): Promise<string> {
@@ -325,16 +335,16 @@ export async function createHealthCheck(
 }
 
 export async function waitForNoActiveBuild(
-	request: APIRequestContext,
+	request: E2ERequest,
 	analysisId: string,
-	timeoutMs = 60_000
+	timeoutMs = 5_000
 ): Promise<void> {
 	await withAuthedPage(request, async (page) => {
 		const started = Date.now();
 		await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
 		await waitForLayoutReady(page);
 		const panel = page.locator('#panel-builds');
-		await expect(panel).toBeVisible({ timeout: 15_000 });
+		await expect(panel).toBeVisible({ timeout: 5_000 });
 		while (Date.now() - started < timeoutMs) {
 			const running = panel.locator(
 				`[data-build-analysis-id="${analysisId}"][data-build-status="running"]`
@@ -363,24 +373,34 @@ export async function waitForNoActiveBuild(
 	});
 }
 
-export async function spawnEngine(_request: APIRequestContext, _analysisId: string): Promise<void> {
+export async function spawnEngine(_request: E2ERequest, _analysisId: string): Promise<void> {
 	// No-op in pure UI e2e: engines are started through visible user actions.
 }
 
 export async function waitForNoEngineJob(
-	_request: APIRequestContext,
+	_request: E2ERequest,
 	_analysisId: string,
-	_timeoutMs = 30_000
+	_timeoutMs = 5_000
 ): Promise<void> {
 	// No-op in pure UI e2e: engine lifecycle is observed via visible build status.
 }
 
+export function findAnalysisIdByName(name: string): string | null {
+	for (const [id, entry] of analysisRegistry.entries()) {
+		if (entry.name === name) return id;
+	}
+	return null;
+}
+
 export async function shutdownEngine(
-	request: APIRequestContext,
+	request: E2ERequest,
 	analysisId: string,
 	options?: { waitForIdleMs?: number }
 ): Promise<void> {
 	await waitForNoActiveBuild(request, analysisId, options?.waitForIdleMs ?? 5_000).catch(() => {});
+	await withAuthedPage(request, async (page) => {
+		await shutdownEngineViaUi(page, analysisId, { timeoutMs: options?.waitForIdleMs ?? 5_000 });
+	});
 }
 
 export async function registerUser(_email: string, _displayName: string): Promise<string> {

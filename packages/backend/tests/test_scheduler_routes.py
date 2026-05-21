@@ -161,6 +161,30 @@ class TestScheduleRoutes:
         response = client.post("/api/v1/schedules", json=payload)
         assert response.status_code == 200
 
+    def test_create_allows_reingestable_raw_database_iceberg(self, client, test_db_session: Session):
+        raw = DataSource(
+            id=str(uuid.uuid4()),
+            name="Raw Database Iceberg",
+            source_type="iceberg",
+            config={
+                "metadata_path": "/tmp/path",
+                "branch": "master",
+                "source": {
+                    "source_type": "database",
+                    "connection_string": "postgresql://example/db",
+                    "query": "select * from public.users",
+                },
+            },
+            created_by="import",
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(raw)
+        test_db_session.commit()
+
+        payload = {"datasource_id": raw.id, "cron_expression": "0 * * * *"}
+        response = client.post("/api/v1/schedules", json=payload)
+        assert response.status_code == 200
+
     def test_create_rejected_for_nonexistent_datasource(self, client):
         payload = {
             "datasource_id": str(uuid.uuid4()),

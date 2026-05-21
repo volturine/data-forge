@@ -29,6 +29,10 @@ export type AnalysisPipelinePayload = {
 	tabs: PipelineTab[];
 };
 
+export function datasourcePreviewAnalysisId(datasourceId: string): string {
+	return `__preview__${datasourceId}`;
+}
+
 function toDatasourceConfig(config: Record<string, unknown>): AnalysisTabDatasourceConfig {
 	const branchRaw = config.branch;
 	if (typeof branchRaw !== 'string' || !branchRaw.trim()) {
@@ -71,35 +75,12 @@ export function normalizeSnapshotConfig(
 	return normalized;
 }
 
-function collectTabSourceIds(tab: AnalysisTab): Set<string> {
-	const ids = new Set<string>([tab.datasource.id]);
-	for (const step of applySteps(tab.steps ?? [])) {
-		const config = step.config ?? {};
-		if (!isRecord(config)) continue;
-		const cfg = config;
-		const rightSource = cfg.right_source;
-		if (typeof rightSource === 'string' && rightSource) ids.add(rightSource);
-		const sources = cfg.sources;
-		if (typeof sources === 'string' && sources) ids.add(sources);
-		if (Array.isArray(sources)) {
-			for (const source of sources) {
-				if (typeof source === 'string' && source) ids.add(source);
-			}
-		}
-	}
-	return ids;
-}
-
-function collectSourceIds(tabs: AnalysisTab[]): Set<string> {
-	return new Set(tabs.flatMap((tab) => [...collectTabSourceIds(tab)]));
-}
-
 function toPipelineDatasource(args: {
 	analysisId: string;
 	datasource: AnalysisTab['datasource'];
 	datasourceMap: Map<string, DataSource>;
 	outputById: Map<string, string>;
-}): PipelineDatasource | null {
+}): PipelineDatasource {
 	const config = normalizeSnapshotConfig(args.datasource.config);
 	if (args.datasource.analysis_tab_id) {
 		return {
@@ -119,7 +100,13 @@ function toPipelineDatasource(args: {
 		};
 	}
 	const ds = args.datasourceMap.get(args.datasource.id);
-	if (!ds) return null;
+	if (!ds) {
+		return {
+			id: args.datasource.id,
+			analysis_tab_id: null,
+			config
+		};
+	}
 	if (!isRecord(ds.config)) {
 		throw new Error(`datasource ${ds.id} config is invalid`);
 	}
@@ -139,7 +126,6 @@ export function buildAnalysisPipelinePayload(
 	if (!analysisId) return null;
 	if (!tabs.length) return null;
 
-	const sourceIds = collectSourceIds(tabs);
 	const datasourceMap = new Map(datasources.map((ds) => [ds.id, ds]));
 	const missing: string[] = [];
 	const outputByTabId = new Map<string, string>();
@@ -154,13 +140,6 @@ export function buildAnalysisPipelinePayload(
 		outputByTabId.set(tab.id, outputId);
 		outputById.set(outputId, tab.id);
 	}
-	for (const id of sourceIds) {
-		if (outputById.has(id)) continue;
-		const ds = datasourceMap.get(id);
-		if (!ds) {
-			missing.push(id);
-		}
-	}
 	if (missing.length) {
 		return null;
 	}
@@ -173,7 +152,7 @@ export function buildAnalysisPipelinePayload(
 			datasourceMap,
 			outputById
 		});
-		if (!datasource || !outputId) return null;
+		if (!outputId) return null;
 		return {
 			id: tab.id,
 			name: tab.name,
@@ -247,7 +226,7 @@ export function buildDatasourcePipelinePayload(args: {
 		}
 	];
 	return {
-		analysis_id: datasource.id,
+		analysis_id: datasourcePreviewAnalysisId(datasource.id),
 		tabs
 	};
 }

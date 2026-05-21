@@ -85,11 +85,31 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(buildAnalysisPipelinePayload('a-1', [t], [datasource()])).toBeNull();
 	});
 
-	test('returns null when datasource is missing from list', () => {
+	test('keeps minimal datasource payload when datasource is missing from list', () => {
 		const t = tab({
 			datasource: { id: 'ds-missing', analysis_tab_id: null, config: { branch: 'main' } }
 		});
-		expect(buildAnalysisPipelinePayload('a-1', [t], [datasource()])).toBeNull();
+		expect(buildAnalysisPipelinePayload('a-1', [t], [datasource()])).toEqual({
+			analysis_id: 'a-1',
+			tabs: [
+				{
+					id: 'tab-1',
+					name: 'Tab 1',
+					datasource: {
+						id: 'ds-missing',
+						analysis_tab_id: null,
+						config: { branch: 'main' }
+					},
+					output: {
+						result_id: 'out-1',
+						format: 'parquet',
+						filename: 'output',
+						build_mode: 'full'
+					},
+					steps: []
+				}
+			]
+		});
 	});
 
 	test('handles multiple tabs', () => {
@@ -235,7 +255,7 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(result!.tabs[0].steps[0].config).toEqual({ right_source: 'ds-join' });
 	});
 
-	test('returns null when a referenced source from step is missing', () => {
+	test('preserves a referenced source from step even when datasource metadata is missing', () => {
 		const t = tab({
 			steps: [
 				{
@@ -245,7 +265,9 @@ describe('buildAnalysisPipelinePayload', () => {
 				}
 			]
 		});
-		expect(buildAnalysisPipelinePayload('a-1', [t], [datasource()])).toBeNull();
+		const result = buildAnalysisPipelinePayload('a-1', [t], [datasource()]);
+		expect(result).not.toBeNull();
+		expect(result!.tabs[0].steps[0].config).toEqual({ right_source: 'ds-missing' });
 	});
 
 	test('filters out unapplied steps', () => {
@@ -472,7 +494,7 @@ describe('buildDatasourcePipelinePayload', () => {
 			datasource: ds,
 			datasourceConfig: { branch: 'main' }
 		});
-		expect(result.analysis_id).toBe('ds-1');
+		expect(result.analysis_id).toBe('__preview__ds-1');
 		expect(result.tabs).toHaveLength(1);
 		expect(result.tabs[0].id).toBe('datasource-ds-1');
 		expect(result.tabs[0].name).toBe('Test DS');
@@ -610,7 +632,7 @@ describe('buildDatasourcePipelinePayload', () => {
 			}),
 			datasourceConfig: { branch: 'main', snapshot_id: 'snap-1' }
 		});
-		expect(result.analysis_id).toBe('out-1');
+		expect(result.analysis_id).toBe('__preview__out-1');
 		expect(result.tabs[0].datasource).toEqual({
 			id: 'out-1',
 			analysis_tab_id: null,

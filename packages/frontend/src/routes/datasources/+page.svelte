@@ -18,11 +18,13 @@
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
 	import BuildComparisonPanel from '$lib/components/datasources/BuildComparisonPanel.svelte';
+	import { shutdownEngineBestEffort, spawnEngine } from '$lib/api/compute';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, spinner } from '$lib/styles/panda';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { datasourcePreviewAnalysisId } from '$lib/utils/analysis-pipeline';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
@@ -37,6 +39,7 @@
 	let showComparison = $state(false);
 	let snapshotConfig = $state<Record<string, unknown> | null>(null);
 	let selectedBranch = $state<string | null>(null);
+	let warmedPreviewKey = $state<string | null>(null);
 
 	const urlId = $derived(page.url.searchParams.get('id'));
 	let lastNs = ns.value;
@@ -61,6 +64,41 @@
 		}
 	});
 
+	// Network: warm the datasource preview engine as soon as selection is known so
+	// the first visible preview does not pay the full cold-start cost.
+	$effect(() => {
+		if (!selectedId) {
+			warmedPreviewKey = null;
+			return;
+		}
+		const previewAnalysisId = datasourcePreviewAnalysisId(selectedId);
+		if (warmedPreviewKey === previewAnalysisId) return;
+		warmedPreviewKey = previewAnalysisId;
+		let alive = true;
+		spawnEngine(previewAnalysisId).match(
+			() => {
+				if (!alive) return;
+			},
+			() => {
+				if (!alive) return;
+			}
+		);
+		return () => {
+			alive = false;
+		};
+	});
+
+	// Cleanup: datasource previews use dedicated compute engines; release the previous
+	// preview engine when the selection changes or the page unmounts so preview work
+	// stays fast instead of accumulating idle datasource engines.
+	$effect(() => {
+		const previewAnalysisId = selectedId ? datasourcePreviewAnalysisId(selectedId) : null;
+		return () => {
+			if (!previewAnalysisId) return;
+			shutdownEngineBestEffort(previewAnalysisId);
+		};
+	});
+
 	const query = createQuery(() => ({
 		queryKey: ['datasources', ns.value, showHidden],
 		queryFn: async () => {
@@ -82,7 +120,7 @@
 	});
 
 	const selectedDatasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', ns.value, selectedId, selectedBranch ?? ''],
+		queryKey: ['datasource', ns.value, selectedId],
 		queryFn: async () => {
 			if (!selectedId) return null;
 			const result = await getDatasource(selectedId);
@@ -121,6 +159,7 @@
 	const selectedDatasource = $derived(
 		selectedDatasourceQuery.data ?? datasources.find((d) => d.id === selectedId) ?? null
 	);
+	const previewDatasource = $derived(selectedDatasourceQuery.data ?? null);
 
 	function selectDatasource(id: string | null) {
 		selectedId = id;
@@ -606,12 +645,23 @@
 				<div class={css({ flex: '1', minHeight: '0', overflow: 'auto' })}>
 					{#if showComparison}
 						<BuildComparisonPanel datasource={selectedDatasource} />
-					{:else}
+					{:else if previewDatasource}
 						<DatasourcePreview
-							datasourceId={selectedDatasource.id}
-							datasource={selectedDatasource}
-							datasourceConfig={snapshotConfig ?? selectedDatasource.config}
+							datasourceId={previewDatasource.id}
+							datasource={previewDatasource}
+							datasourceConfig={snapshotConfig ?? previewDatasource.config}
 						/>
+					{:else}
+						<div
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								height: '100%'
+							})}
+						>
+							<div class={spinner()}></div>
+						</div>
 					{/if}
 				</div>
 			</div>

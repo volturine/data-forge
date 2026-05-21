@@ -143,6 +143,52 @@ class TestLockRoutes:
         lock = test_db_session.get(ResourceLock, ("analysis", "analysis-5"))
         assert lock is not None
 
+    def test_acquire_lock_recovers_when_existing_row_disappears_during_commit(
+        self,
+        test_db_session,
+        test_engine,
+        monkeypatch,
+    ) -> None:
+        from sqlmodel import Session as SQLModelSession
+
+        from modules.locks import service as locks_service
+
+        now = datetime.now(UTC).replace(tzinfo=None)
+        existing = ResourceLock(
+            resource_type="analysis",
+            resource_id="analysis-race",
+            owner_id="owner-a",
+            lock_token="lock-a",
+            acquired_at=now - timedelta(minutes=2),
+            expires_at=now - timedelta(seconds=1),
+            last_heartbeat=now - timedelta(minutes=1),
+        )
+        test_db_session.add(existing)
+        test_db_session.commit()
+
+        original_commit = test_db_session.commit
+        injected = False
+
+        def race_commit() -> None:
+            nonlocal injected
+            if not injected:
+                injected = True
+                with SQLModelSession(test_engine) as other:
+                    victim = other.get(ResourceLock, ("analysis", "analysis-race"))
+                    if victim is not None:
+                        other.delete(victim)
+                        other.commit()
+            original_commit()
+
+        monkeypatch.setattr(test_db_session, "commit", race_commit)
+
+        lock = locks_service.acquire_lock(test_db_session, "analysis", "analysis-race", "owner-b")
+
+        assert lock.owner_id == "owner-b"
+        stored = test_db_session.get(ResourceLock, ("analysis", "analysis-race"))
+        assert stored is not None
+        assert stored.owner_id == "owner-b"
+
 
 class TestLockWebsocket:
     def test_watch_can_acquire_and_release_over_websocket(self, client, monkeypatch) -> None:

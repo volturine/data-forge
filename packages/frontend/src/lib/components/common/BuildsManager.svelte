@@ -10,6 +10,7 @@
 	import {
 		activeBuildStatusLabel,
 		canCancelActiveBuildStatus,
+		engineRunDisplayKind,
 		engineRunKindLabel,
 		engineRunStatusFilterValue,
 		engineRunStatusToActiveBuildStatus,
@@ -142,7 +143,7 @@
 	const engineRunParams = $derived<ListEngineRunsParams>({
 		analysis_id: queryParams.analysis_id,
 		datasource_id: queryParams.datasource_id,
-		kind: kindFilter && kindFilter !== 'build' ? kindFilter : undefined,
+		kind: kindFilter === 'build' ? 'ingest' : kindFilter || undefined,
 		status: engineRunStatusFilterValue(statusFilter),
 		limit,
 		offset: (page - 1) * limit
@@ -156,7 +157,7 @@
 			return result.value;
 		},
 		staleTime: 10_000,
-		enabled: !ns.switching && kindFilter !== 'build'
+		enabled: !ns.switching
 	}));
 
 	const monitoringEngineRuns = $derived(
@@ -279,8 +280,8 @@
 		const kind = readEngineRunKind(run.kind);
 		return {
 			build_id: run.id,
-			analysis_id: run.analysis_id ?? run.id,
-			analysis_name: run.analysis_id ?? run.id,
+			analysis_id: run.analysis_id ?? '',
+			analysis_name: run.analysis_id ?? '',
 			namespace: '',
 			status: engineRunStatusToActiveBuildStatus(run.status),
 			started_at: run.created_at,
@@ -343,7 +344,7 @@
 	}
 
 	function effectiveKind(run: ActiveBuildSummary): string {
-		return run.current_kind ?? '';
+		return engineRunDisplayKind(run.current_kind ?? '');
 	}
 
 	function buildDatasourceId(run: ActiveBuildSummary): string {
@@ -668,7 +669,7 @@
 		>
 			<h1 class={css({ margin: '0', marginBottom: '2', fontSize: '2xl' })}>Builds</h1>
 			<p class={css({ margin: '0', color: 'fg.tertiary' })}>
-				Build history for previews and exports
+				Build history for previews, exports, and datasource ingestions
 			</p>
 		</header>
 	{/if}
@@ -901,8 +902,8 @@
 		>
 			<p class={emptyText({ size: 'panel' })}>No builds yet.</p>
 			<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
-				Runs will appear here when you preview or export data in analyses. Compare builds from the
-				Datasources tab.
+				Runs will appear here when you preview, export, or ingest data from external sources.
+				Compare snapshots from the Datasources tab.
 			</p>
 		</div>
 	{:else}
@@ -1297,7 +1298,7 @@
 										<div class={css({ width: '100%', overflowX: 'hidden' })}>
 											<BuildPreview
 												store={expandedStore}
-												title={engineRunKindLabel(run.current_kind ?? '')}
+												title={engineRunKindLabel(effectiveKind(run))}
 												requestJson={expandedPayload?.requestJson ?? null}
 												resultJson={expandedPayload?.resultJson ?? null}
 											/>

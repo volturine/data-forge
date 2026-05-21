@@ -46,7 +46,7 @@ from modules.compute.executor_client import (
     get_datasource_schema as get_remote_datasource_schema,
 )
 from modules.compute.executor_client import (
-    refresh_datasource as refresh_remote_datasource,
+    ingest_datasource as ingest_remote_datasource,
 )
 from modules.compute.executor_client import (
     shutdown_engine as shutdown_remote_engine,
@@ -62,6 +62,10 @@ from modules.mcp.router import MCPRouter
 logger = logging.getLogger(__name__)
 
 router = MCPRouter(prefix="/datasource", tags=["datasource"])
+
+
+def _datasource_preview_analysis_id(datasource_id: str) -> str:
+    return f"__preview__{datasource_id}"
 
 
 def _write_chunk(path: Path, chunk: bytes) -> None:
@@ -629,7 +633,6 @@ async def toggle_internal_postgres_table(
     request: schemas.InternalPostgresToggleRequest,
     session: Session = Depends(get_db),
     user: User | None = Depends(get_optional_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if request.enabled:
         if service.internal_postgres_table_is_onboarded(session, request.schema_name, request.table_name):
@@ -639,11 +642,16 @@ async def toggle_internal_postgres_table(
                 is_onboarded=True,
             )
         query = service.internal_postgres_table_query(session, request.schema_name, request.table_name)
-        await create_remote_database_datasource(
+        service.create_database_datasource_record(
             session,
-            runtime_probe=runtime_probe,
-            name=f"internal.{request.schema_name}.{request.table_name}",
-            description=f"Internal PostgreSQL table {request.schema_name}.{request.table_name}",
+            name=service.InternalPostgresOnboarding.datasource_name_for(
+                request.schema_name,
+                request.table_name,
+            ),
+            description=service.InternalPostgresOnboarding.datasource_description_for(
+                request.schema_name,
+                request.table_name,
+            ),
             connection_string=service.internal_postgres_connection_string(),
             query=query,
             branch="master",
@@ -743,7 +751,7 @@ async def get_datasource_schema(
         source = datasource.config.get("source") if isinstance(datasource.config, dict) else None
         source_type = DataSourceType.read(source.get("source_type") if isinstance(source, dict) else None, default=None)
         if datasource.source_type == DataSourceType.ICEBERG and source_type is not None and source_type.supports_external_ingestion:
-            await refresh_remote_datasource(
+            await ingest_remote_datasource(
                 session,
                 datasource_id=datasource_id_value,
                 runtime_probe=runtime_probe,
@@ -884,15 +892,15 @@ def update_datasource(
     return service.update_datasource(session, parse_datasource_id(datasource_id), update)
 
 
-@router.post("/{datasource_id}/refresh", response_model=schemas.DataSourceResponse, mcp=True)
-@handle_errors(operation="refresh datasource")
-async def refresh_datasource(
+@router.post("/{datasource_id}/ingest", response_model=schemas.DataSourceResponse, mcp=True)
+@handle_errors(operation="ingest datasource")
+async def ingest_datasource(
     datasource_id: DataSourceId,
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    """Refresh an external datasource (re-read schema from source). Useful after upstream data changes."""
-    return await refresh_remote_datasource(
+    """Ingest an external datasource again from source. Useful after upstream data changes."""
+    return await ingest_remote_datasource(
         session,
         datasource_id=parse_datasource_id(datasource_id),
         runtime_probe=runtime_probe,
@@ -909,6 +917,9 @@ async def delete_datasource(
     """Delete a datasource and its associated files. Use GET /datasource to find IDs."""
     datasource_id_value = parse_datasource_id(datasource_id)
     service.delete_datasource(session, datasource_id_value)
-    preview_key = f"__preview__{datasource_id_value}"
     with contextlib.suppress(HTTPException):
-        await shutdown_remote_engine(session, analysis_id=preview_key, runtime_probe=runtime_probe)
+        await shutdown_remote_engine(
+            session,
+            analysis_id=_datasource_preview_analysis_id(datasource_id_value),
+            runtime_probe=runtime_probe,
+        )

@@ -24,11 +24,11 @@ const reporter = [['line'] as const];
 export default defineConfig({
 	testDir: './tests',
 	timeout: 30_000,
-	expect: { timeout: 10_000 },
+	expect: { timeout: 5_000 },
 	fullyParallel: false,
 	globalSetup: './tests/global-setup.ts',
 	workers: DEFAULT_E2E_WORKERS,
-	retries: 1,
+	retries: 0,
 	outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR
 		? path.resolve(process.env.PLAYWRIGHT_OUTPUT_DIR)
 		: path.join(artifactsRoot, 'playwright', `test-results${shardSuffix}`),

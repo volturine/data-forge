@@ -69,7 +69,13 @@ export type {
 	BuildTabResult
 };
 
-const ENGINE_RUN_KINDS = new Set<EngineRunKind>(['build', 'preview', 'row_count', 'download']);
+const ENGINE_RUN_KINDS = new Set<EngineRunKind>([
+	'build',
+	'preview',
+	'row_count',
+	'download',
+	'ingest'
+]);
 const BUILD_STEP_STATES = new Set<BuildStepState>([
 	'pending',
 	'running',
@@ -112,7 +118,8 @@ const ENGINE_RUN_KIND_LABELS: Record<EngineRunKind, string> = {
 	build: 'Build',
 	preview: 'Preview',
 	row_count: 'Row Count',
-	download: 'Download'
+	download: 'Download',
+	ingest: 'Ingest'
 };
 const BUILD_TAB_STATUS_LABELS: Record<BuildTabResult['status'], string> = {
 	success: 'Success',
@@ -205,8 +212,15 @@ export function engineRunStatusFilterValue(
 	return status === 'completed' ? 'success' : status;
 }
 
-export function engineRunKindLabel(kind: EngineRunKind | string): string {
+export function engineRunDisplayKind(kind: EngineRunKind | string): EngineRunKind | string {
+	if (kind === 'raw') return 'build';
 	const parsed = readEngineRunKind(kind);
+	if (parsed === 'ingest') return 'build';
+	return parsed ?? kind;
+}
+
+export function engineRunKindLabel(kind: EngineRunKind | string): string {
+	const parsed = readEngineRunKind(engineRunDisplayKind(kind));
 	return parsed === null ? kind : ENGINE_RUN_KIND_LABELS[parsed];
 }
 

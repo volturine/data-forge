@@ -203,7 +203,7 @@ class DatabaseDataSourceConfig(BaseModel):
 class IcebergDataSourceConfig(BaseModel):
     branch: str = "master"
     source: dict
-    refresh: dict | None = None
+    ingest: dict | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

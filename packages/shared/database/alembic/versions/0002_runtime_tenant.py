@@ -27,7 +27,7 @@ COMPUTE_REQUEST_KIND = sa.Enum(
     'create_file_datasource',
     'create_database_datasource',
     'create_iceberg_datasource',
-    'refresh_datasource',
+    'ingest_datasource',
     'spawn_engine',
     'keepalive_engine',
     'configure_engine',

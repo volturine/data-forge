@@ -2,18 +2,117 @@
 
 import os
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import polars as pl
 import pytest
+from contracts.compute import schemas as compute_schemas
 from contracts.engine_runs.schemas import EngineRunResponseSchema
 from pydantic import ValidationError
 
+from builds.build_live import ActiveBuild
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
+from runtime import compute_service
 from runtime.compute_engine import PolarsComputeEngine
+from runtime.compute_service import ExportDatasourceResult
+
+# ---------------------------------------------------------------------------
+# Build runtime regressions
+# ---------------------------------------------------------------------------
+
+
+def test_analysis_build_engine_id_reuses_a_stable_engine_per_analysis() -> None:
+    assert compute_service._analysis_build_engine_id("analysis-1") == "analysis-1:build"
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_build_stream_keeps_completed_build_engine_warm(
+    test_db_session,
+    monkeypatch,
+) -> None:
+    pipeline = {
+        "analysis_id": "analysis-1",
+        "tabs": [
+            {
+                "id": "tab-1",
+                "name": "Output",
+                "datasource": {
+                    "id": "source-1",
+                    "analysis_tab_id": None,
+                    "source_type": "iceberg",
+                    "config": {"branch": "main"},
+                },
+                "output": {
+                    "result_id": "out-1",
+                    "format": "parquet",
+                    "filename": "output_table",
+                    "build_mode": "full",
+                    "iceberg": {
+                        "table_name": "output_table",
+                        "namespace": "outputs",
+                        "branch": "main",
+                    },
+                },
+                "steps": [],
+            }
+        ],
+    }
+    build = ActiveBuild(
+        build_id="build-1",
+        analysis_id="analysis-1",
+        analysis_name="Analysis 1",
+        namespace="default",
+        starter=compute_schemas.BuildStarter(triggered_by="user"),
+        started_at=datetime.now(UTC),
+    )
+    events: list[compute_schemas.BuildEvent] = []
+    shutdown_calls: list[str] = []
+    spawn_calls: list[str] = []
+    seen_engine_keys: list[str] = []
+
+    def fake_export_data(*, engine_key: str, **_kwargs) -> ExportDatasourceResult:
+        seen_engine_keys.append(engine_key)
+        return ExportDatasourceResult(
+            datasource_id="out-1",
+            datasource_name="output_table",
+            result_meta={},
+            source_datasource_id="source-1",
+            engine_run_id="run-1",
+        )
+
+    monkeypatch.setattr(compute_service, "export_data", fake_export_data)
+
+    manager = cast(
+        Any,
+        SimpleNamespace(
+            spawn_engine=lambda engine_id: spawn_calls.append(engine_id),
+            shutdown_engine=lambda engine_id: shutdown_calls.append(engine_id),
+        ),
+    )
+
+    async def emitter(event: compute_schemas.BuildEvent) -> None:
+        events.append(event)
+
+    result = await compute_service.run_analysis_build_stream(
+        session=test_db_session,
+        manager=manager,
+        pipeline=pipeline,
+        build=build,
+        emitter=emitter,
+        triggered_by="user",
+    )
+
+    assert result["analysis_id"] == "analysis-1"
+    assert spawn_calls == ["analysis-1:build"]
+    assert seen_engine_keys == ["analysis-1:build"]
+    assert shutdown_calls == []
+    assert events[-1].type == compute_schemas.BuildEventType.COMPLETE
+
 
 # ---------------------------------------------------------------------------
 # EngineRunResponseSchema.progress default

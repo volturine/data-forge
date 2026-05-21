@@ -227,8 +227,8 @@ export function engineRunBuildDetail(run: EngineRun): ActiveBuildDetail {
 	const results = readBuildResults(run, result);
 	return {
 		build_id: run.id,
-		analysis_id: run.analysis_id ?? run.id,
-		analysis_name: run.analysis_id ?? run.id,
+		analysis_id: run.analysis_id ?? '',
+		analysis_name: run.analysis_id ?? '',
 		namespace: '',
 		status: engineRunStatus(run),
 		started_at: run.created_at,

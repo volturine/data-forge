@@ -52,7 +52,7 @@ async def _submit_and_wait(
             break
         session.rollback()
         with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(wait_task), timeout=0.25)
+            await asyncio.wait_for(asyncio.shield(wait_task), timeout=0.05)
         if wait_task.done():
             wait_task = asyncio.create_task(response_hub.wait(request.id))
     if completed.status == ComputeRequestStatus.COMPLETED:
@@ -244,7 +244,7 @@ async def create_iceberg_datasource(
     return datasource_schemas.DataSourceResponse.model_validate(completed.response_json)
 
 
-async def refresh_datasource(
+async def ingest_datasource(
     session: Session,
     *,
     datasource_id: str,
@@ -252,7 +252,7 @@ async def refresh_datasource(
 ) -> datasource_schemas.DataSourceResponse:
     completed = await _submit_and_wait(
         session,
-        kind=ComputeRequestKind.REFRESH_DATASOURCE,
+        kind=ComputeRequestKind.INGEST_DATASOURCE,
         request_json={"datasource_id": datasource_id},
         runtime_probe=runtime_probe,
     )

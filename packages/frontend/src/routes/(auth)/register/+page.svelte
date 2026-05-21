@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { css, button, input, label, spinner } from '$lib/styles/panda';
 	import { configStore } from '$lib/stores/config.svelte';
@@ -39,6 +40,7 @@
 
 	const displayed = $derived(validation ?? authStore.error);
 	const verifyEmailAddress = $derived(configStore.verifyEmailAddress);
+	const hydrated = $derived(browser);
 </script>
 
 <div
@@ -103,7 +105,11 @@
 			<a href={resolve('/')} class={button({ variant: 'primary' })}> Continue </a>
 		{/if}
 	{:else}
-		<form onsubmit={submit} class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
+		<form
+			onsubmit={submit}
+			data-auth-form-ready={hydrated ? 'true' : 'false'}
+			class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}
+		>
 			<div>
 				<label for="name" class={label({ variant: 'field' })}>Display name</label>
 				<input

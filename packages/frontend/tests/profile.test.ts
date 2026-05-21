@@ -366,6 +366,10 @@ test.describe('Profile – System tab', () => {
 		await waitForProfileTab(page, 'System');
 
 		await expect(page.getByText('What you can export')).toBeVisible();
+		await expect(page.getByText('Namespace tables: default')).toBeVisible();
+		await expect(
+			page.locator('[data-testid="system-export-group-toggle"][data-schema-name="public"]')
+		).toContainText('App tables');
 		const defaultToggle = page.locator(
 			'[data-testid="system-export-group-toggle"][data-schema-name="default"]'
 		);
@@ -388,7 +392,6 @@ test.describe('Profile – System tab', () => {
 	test('system internal postgres switch persists on refresh and can toggle off again', async ({
 		page
 	}) => {
-		test.setTimeout(120_000);
 		await page.goto('/profile#system');
 		await waitForProfileTab(page, 'System');
 
@@ -401,25 +404,30 @@ test.describe('Profile – System tab', () => {
 
 		if ((await switchControl.getAttribute('aria-checked')) !== 'true') {
 			await switchControl.click();
-			await expect(switchControl).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
-			await expect(switchControl).toBeEnabled({ timeout: 30_000 });
+			await expect(switchControl).toHaveAttribute('aria-checked', 'true', {
+				timeout: 5_000
+			});
+			await expect(switchControl).toBeEnabled({ timeout: 5_000 });
 		}
 
 		await page.reload();
 		await waitForProfileTab(page, 'System');
 		await expandSystemExportGroup(page, 'default');
-		await expect(switchControl).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
-		await expect(switchControl).toBeEnabled({ timeout: 30_000 });
+		await expect(switchControl).toHaveAttribute('aria-checked', 'true', {
+			timeout: 5_000
+		});
+		await expect(switchControl).toBeEnabled({ timeout: 5_000 });
 
 		await switchControl.click();
-		await expect(switchControl).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });
-		await expect(switchControl).toBeEnabled({ timeout: 30_000 });
+		await expect(switchControl).toHaveAttribute('aria-checked', 'false', {
+			timeout: 5_000
+		});
+		await expect(switchControl).toBeEnabled({ timeout: 5_000 });
 	});
 
 	test('system tab preserves hash and reloads onboard state when namespace changes', async ({
 		page
 	}) => {
-		test.setTimeout(120_000);
 		const id = uid();
 		const nsA = `e2e-profile-a-${id}`;
 		const nsB = `e2e-profile-b-${id}`;
@@ -433,30 +441,38 @@ test.describe('Profile – System tab', () => {
 
 			await switchNamespace(page, nsA);
 			await expect(page).toHaveURL((url) => url.pathname === '/profile' && url.hash === '#system', {
-				timeout: 10_000
+				timeout: 5_000
 			});
 			await waitForProfileTab(page, 'System');
 			await expandSystemExportGroup(page, 'default');
-			await expect(switchControl).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });
+			await expect(switchControl).toHaveAttribute('aria-checked', 'false', {
+				timeout: 5_000
+			});
 
 			await switchControl.click();
-			await expect(switchControl).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
+			await expect(switchControl).toHaveAttribute('aria-checked', 'true', {
+				timeout: 5_000
+			});
 
 			await switchNamespace(page, nsB);
 			await expect(page).toHaveURL((url) => url.pathname === '/profile' && url.hash === '#system', {
-				timeout: 10_000
+				timeout: 5_000
 			});
 			await waitForProfileTab(page, 'System');
 			await expandSystemExportGroup(page, 'default');
-			await expect(switchControl).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });
+			await expect(switchControl).toHaveAttribute('aria-checked', 'false', {
+				timeout: 5_000
+			});
 
 			await switchNamespace(page, nsA);
 			await expect(page).toHaveURL((url) => url.pathname === '/profile' && url.hash === '#system', {
-				timeout: 10_000
+				timeout: 5_000
 			});
 			await waitForProfileTab(page, 'System');
 			await expandSystemExportGroup(page, 'default');
-			await expect(switchControl).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
+			await expect(switchControl).toHaveAttribute('aria-checked', 'true', {
+				timeout: 5_000
+			});
 		} finally {
 			await switchNamespace(page, nsA);
 			await waitForProfileTab(page, 'System');
@@ -464,10 +480,27 @@ test.describe('Profile – System tab', () => {
 			if ((await switchControl.getAttribute('aria-checked')) === 'true') {
 				await switchControl.click();
 				await expect(switchControl).toHaveAttribute('aria-checked', 'false', {
-					timeout: 30_000
+					timeout: 5_000
 				});
 			}
 		}
+	});
+
+	test('system tab keeps public namespace distinct from app schema public', async ({ page }) => {
+		await page.goto('/profile#system');
+		await waitForProfileTab(page, 'System');
+		await switchNamespace(page, 'public');
+		await expect(page).toHaveURL((url) => url.pathname === '/profile' && url.hash === '#system', {
+			timeout: 5_000
+		});
+		await waitForProfileTab(page, 'System');
+		await expect(page.getByText('App tables')).toBeVisible();
+		await expect(page.getByText('Shared internal app data')).toBeVisible();
+		await expect(page.getByText('Namespace tables: public')).toBeVisible();
+		await expect(page.getByText('Data Forge namespace: public (current)')).toBeVisible();
+		await expect(page.getByText('Namespace tables: default')).toBeVisible();
+		await expect(page.getByText('Data Forge namespace: default')).toBeVisible();
+		await expect(page.getByText('df$tenant$public')).toHaveCount(0);
 	});
 
 	test('system save shows success feedback on 200', async ({ page }) => {
@@ -488,7 +521,7 @@ test.describe('Profile – System tab', () => {
 test.describe('Profile – settings redirect', () => {
 	test('/settings redirects to /profile with system tab', async ({ page }) => {
 		await page.goto('/settings');
-		await page.waitForURL(/\/profile/, { timeout: 10_000 });
+		await page.waitForURL(/\/profile/, { timeout: 5_000 });
 		await expect(page).toHaveURL(/profile/);
 	});
 });
@@ -503,7 +536,7 @@ test.describe('Profile – sidebar navigation', () => {
 		await waitForAppShell(page);
 
 		await page.getByRole('link', { name: 'Profile' }).click();
-		await page.waitForURL(/\/profile/, { timeout: 10_000 });
+		await page.waitForURL(/\/profile/, { timeout: 5_000 });
 
 		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
 			'aria-selected',

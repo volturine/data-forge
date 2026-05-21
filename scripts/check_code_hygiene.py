@@ -46,6 +46,23 @@ class _PrintCallVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+def _private_all_exports(tree: ast.AST) -> list[tuple[int, str]]:
+    exports: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == '__all__' for target in node.targets):
+            continue
+        if not isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
+            continue
+        for element in node.value.elts:
+            if not isinstance(element, ast.Constant) or not isinstance(element.value, str):
+                continue
+            if element.value.startswith('_'):
+                exports.append((element.lineno, element.value))
+    return exports
+
+
 def _iter_files(root: Path, suffixes: set[str]):
     for path in root.rglob('*'):
         if not path.is_file() or path.suffix not in suffixes:
@@ -80,6 +97,8 @@ def _check_python_sources(errors: list[str]) -> None:
             visitor.visit(tree)
             for line_number in visitor.lines:
                 errors.append(f'{path.relative_to(ROOT)}:{line_number}: print(...) is not allowed in source files')
+            for line_number, name in _private_all_exports(tree):
+                errors.append(f'{path.relative_to(ROOT)}:{line_number}: __all__ must not export private name {name}')
 
 
 def main() -> int:

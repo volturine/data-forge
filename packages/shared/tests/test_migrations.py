@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 
 from core.migrations import _PUBLIC_REVISION, _TENANT_REVISION, _alembic_config, ensure_database_exists, migrate_runtime
+from core.namespace import namespace_database_schema
 
 
 def test_alembic_config_includes_runtime_scope(monkeypatch, tmp_path: Path) -> None:
@@ -94,3 +95,23 @@ def test_migrate_runtime_rejects_existing_tenant_revision(monkeypatch, tmp_path:
 
     with pytest.raises(RuntimeError, match='Unsupported existing tenant schema revision'):
         migrate_runtime(['default'])
+
+
+def test_migrate_runtime_maps_public_namespace_to_tenant_schema(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_current_revision(schema: str) -> str | None:
+        revisions = {'public': _PUBLIC_REVISION, namespace_database_schema('public'): None}
+        return revisions.get(schema)
+
+    monkeypatch.setattr('core.migrations._current_revision', fake_current_revision)
+    monkeypatch.setattr('core.migrations._schema_has_table', lambda *, schema, table_name: False)
+    monkeypatch.setattr('core.migrations.ensure_database_exists', lambda _database_url=None: calls.append(('ensure_database', 'db')))
+    monkeypatch.setattr('core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
+
+    migrate_runtime(['public'])
+
+    assert calls == [
+        ('ensure_database', 'db'),
+        ('tenant', f'{namespace_database_schema("public")}:{_TENANT_REVISION}'),
+    ]

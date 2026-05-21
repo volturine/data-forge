@@ -160,6 +160,7 @@
 <div
 	class={css({ contain: 'content', width: 'full', height: 'panel', overflow: 'hidden' })}
 	data-testid="inline-data-table"
+	data-preview-ready={data && !isLoading && !error && data.columns.length > 0 ? 'true' : undefined}
 >
 	<DataTable
 		columns={data?.columns ?? []}

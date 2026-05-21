@@ -8,7 +8,13 @@ from sqlalchemy.engine import Connection, Engine
 from sqlmodel import Session, create_engine
 
 from core.config import settings
-from core.namespace import get_namespace, list_namespaces, namespace_paths, normalize_namespace
+from core.namespace import (
+    get_namespace,
+    list_namespaces,
+    namespace_database_schema,
+    namespace_paths,
+    normalize_namespace,
+)
 
 P = ParamSpec('P')
 T = TypeVar('T')
@@ -87,9 +93,10 @@ def _set_postgres_search_path(raw_connection: object, namespace: str) -> None:
     cursor = getattr(raw_connection, 'cursor', None)
     if not callable(cursor):
         return
+    schema = namespace_database_schema(namespace)
     db_cursor = cursor()
     try:
-        db_cursor.execute(f'SET search_path TO "{namespace}", {_PUBLIC_SCHEMA}')
+        db_cursor.execute(f'SET search_path TO "{schema}", {_PUBLIC_SCHEMA}')
     finally:
         db_cursor.close()
 
@@ -97,7 +104,8 @@ def _set_postgres_search_path(raw_connection: object, namespace: str) -> None:
 def _apply_postgres_search_path(connection: Connection, namespace: str) -> None:
     if connection.dialect.name != 'postgresql':
         return
-    connection.execute(text(f'SET search_path TO "{namespace}", {_PUBLIC_SCHEMA}'))
+    schema = namespace_database_schema(namespace)
+    connection.execute(text(f'SET search_path TO "{schema}", {_PUBLIC_SCHEMA}'))
 
 
 def _create_public_engine() -> Engine:

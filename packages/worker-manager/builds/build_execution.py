@@ -103,7 +103,7 @@ async def _run_active_build_task(
         reset_namespace(token)
 
 
-async def _run_queued_build_job(*, manager: ProcessManager, build_id: str) -> None:
+async def run_queued_build_job(*, manager: ProcessManager, build_id: str) -> None:
     session_gen = get_db()
     session = next(session_gen)
     build: ActiveBuild | None = None
@@ -144,8 +144,8 @@ async def _run_queued_build_job(*, manager: ProcessManager, build_id: str) -> No
     await build_event_service.publish_build_notification(build.namespace, build_id, latest_sequence=0)
     current_kind = build.current_kind or ""
     engine_run_kind = EngineRunKind.parse(build.current_kind)
-    is_schedule_build = engine_run_kind == EngineRunKind.BUILD and starter.triggered_by == "schedule"
-    if current_kind == DataSourceTargetKind.RAW.value or is_schedule_build:
+    is_schedule_ingest = engine_run_kind == EngineRunKind.BUILD and starter.is_schedule_trigger() and request_payload.is_schedule_ingest_request()
+    if current_kind == DataSourceTargetKind.RAW.value or is_schedule_ingest:
         datasource_id = build.current_datasource_id
         if datasource_id is None:
             raise ValueError(f"Queued schedule build {build.build_id} missing datasource id")
@@ -155,18 +155,11 @@ async def _run_queued_build_job(*, manager: ProcessManager, build_id: str) -> No
             try:
                 from datasources import datasource_service
 
-                if current_kind == DataSourceTargetKind.RAW.value:
-                    refreshed = await asyncio.to_thread(
-                        datasource_service.refresh_external_datasource,
-                        session,
-                        datasource_id,
-                    )
-                else:
-                    refreshed = await asyncio.to_thread(
-                        datasource_service.refresh_datasource_for_schedule,
-                        session,
-                        datasource_id,
-                    )
+                refreshed = await asyncio.to_thread(
+                    datasource_service.ingest_datasource_for_schedule,
+                    session,
+                    datasource_id,
+                )
                 await _emit_active_build_event(
                     build.namespace,
                     build.build_id,
@@ -235,4 +228,4 @@ async def _run_queued_build_job(*, manager: ProcessManager, build_id: str) -> No
     )
 
 
-__all__ = ["_run_queued_build_job"]
+__all__ = ["run_queued_build_job"]

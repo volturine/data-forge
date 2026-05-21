@@ -406,6 +406,32 @@ def test_namespace_connection_sets_search_path(monkeypatch, tmp_path: Path) -> N
 
 
 @pytest.mark.timeout(300)
+def test_namespace_connection_maps_public_namespace_away_from_public_schema(monkeypatch, tmp_path: Path) -> None:
+    require_docker()
+
+    from core import database
+    from core.config import settings
+    from core.namespace import namespace_database_schema
+
+    with PostgresContainer() as container:
+        _clear_database_state()
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, "database_url", container.url, raising=False)
+        monkeypatch.setattr(settings, "data_dir", data_dir, raising=False)
+        monkeypatch.setattr(settings, "distributed_runtime_enabled", True, raising=False)
+        database.set_settings_engine_override(database._create_public_engine())
+
+        asyncio.run(database.init_db())
+        database._init_namespace_db("public")
+
+        with database.namespace_connection("public") as connection:
+            assert connection.execute(text("SELECT current_schema()")).scalar_one() == namespace_database_schema("public")
+
+        _clear_database_state()
+
+
+@pytest.mark.timeout(300)
 def test_tenant_engine_checkout_tracks_current_namespace(monkeypatch, tmp_path: Path) -> None:
     require_docker()
 

@@ -7,6 +7,7 @@ import {
 	buildStepStateFromEngineRunStatus,
 	buildStepTypeFromExecutionEntry,
 	countEngineRunSteps,
+	engineRunDisplayKind,
 	engineRunKindLabel,
 	engineRunStatusFilterValue,
 	engineRunStatusToActiveBuildStatus
@@ -21,8 +22,11 @@ describe('build-stream ownership helpers', () => {
 	});
 
 	it('owns engine-run kind labels', () => {
+		expect(engineRunDisplayKind('raw')).toBe('build');
+		expect(engineRunDisplayKind('ingest')).toBe('build');
 		expect(engineRunKindLabel('row_count')).toBe('Row Count');
 		expect(engineRunKindLabel('download')).toBe('Download');
+		expect(engineRunKindLabel('ingest')).toBe('Build');
 	});
 
 	it('owns execution-entry step typing and counting', () => {

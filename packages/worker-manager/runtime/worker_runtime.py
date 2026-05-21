@@ -218,9 +218,11 @@ def _reconcile_schedule_run(session, *, build_id: str) -> None:
         schedule.last_run = stamp
         schedule.last_success_at = stamp
         schedule.last_successful_build_id = run.id
+        schedule.next_run = Schedule.compute_next_run(schedule.cron_expression)
     else:
         schedule.last_failure_at = stamp
     session.add(schedule)
+    session.commit()
 
 
 def _register_worker(*, worker_id: str, capacity: int) -> None:

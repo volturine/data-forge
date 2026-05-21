@@ -8,6 +8,7 @@ from psycopg import sql
 from sqlalchemy import create_engine, text
 
 from core.config import settings
+from core.namespace import namespace_database_schema
 
 _PUBLIC_REVISION = '0001_runtime_public'
 _TENANT_REVISION = '0002_runtime_tenant'
@@ -134,12 +135,13 @@ def migrate_runtime(namespaces: list[str]) -> None:
         else:
             _upgrade_schema(scope='public', schema='public', revision=_PUBLIC_REVISION)
     for namespace in namespaces:
-        revision = _current_revision(namespace)
+        tenant_schema = namespace_database_schema(namespace)
+        revision = _current_revision(tenant_schema)
         if revision is not None and revision != _TENANT_REVISION:
             raise RuntimeError(f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected {_TENANT_REVISION}.')
         if revision == _TENANT_REVISION:
             continue
-        if revision is None and _schema_has_table(schema=namespace, table_name='datasources'):
-            _stamp_schema(scope='tenant', schema=namespace, revision=_TENANT_REVISION)
+        if revision is None and _schema_has_table(schema=tenant_schema, table_name='datasources'):
+            _stamp_schema(scope='tenant', schema=tenant_schema, revision=_TENANT_REVISION)
             continue
-        _upgrade_schema(scope='tenant', schema=namespace, revision=_TENANT_REVISION)
+        _upgrade_schema(scope='tenant', schema=tenant_schema, revision=_TENANT_REVISION)

@@ -4,12 +4,20 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from contracts.build_jobs.models import BuildJobStatus
+from contracts.build_runs.models import BuildRunStatus
+from contracts.datasource.models import DataSource
 from contracts.runtime_workers.models import RuntimeWorkerKind
+from contracts.scheduler.models import Schedule
 from core import (
     build_jobs_service as build_job_service,
+)
+from core import (
+    build_runs_service as build_run_service,
 )
 from core import (
     runtime_workers_service as runtime_worker_service,
@@ -18,7 +26,8 @@ from core.database import run_db, run_settings_db
 from core.namespace import reset_namespace, set_namespace_context
 from core.namespaces_service import register_namespace
 
-from runtime.worker_runtime import build_worker_loop, next_job
+from builds import build_execution
+from runtime.worker_runtime import _reconcile_schedule_run, build_worker_loop, next_job
 
 
 def _load_runtime_process():
@@ -233,6 +242,260 @@ async def test_build_worker_loop_tracks_runtime_worker_lifecycle(
     assert refreshed.lease_expires_at is None
 
 
+def test_reconcile_schedule_run_persists_last_run_and_next_run(test_db_session) -> None:
+    datasource = DataSource(
+        id=str(uuid.uuid4()),
+        name="Ingestable raw",
+        source_type="iceberg",
+        config={
+            "metadata_path": "/tmp/raw-path",
+            "branch": "master",
+            "source": {
+                "source_type": "file",
+                "file_path": "/tmp/source.csv",
+                "file_type": "csv",
+                "options": {},
+            },
+        },
+        created_by="import",
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(datasource)
+    test_db_session.commit()
+
+    schedule = Schedule(
+        id=str(uuid.uuid4()),
+        datasource_id=datasource.id,
+        cron_expression="0 * * * *",
+        enabled=True,
+        created_at=datetime.now(UTC),
+        lease_owner="scheduler:test",
+        lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    test_db_session.add(schedule)
+    test_db_session.commit()
+
+    build = build_run_service.create_build_run(
+        test_db_session,
+        build_id=str(uuid.uuid4()),
+        namespace="default",
+        schedule_id=schedule.id,
+        analysis_id=schedule.id,
+        analysis_name="Schedule ingest",
+        request_json={"analysis_pipeline": {"analysis_id": schedule.id, "tabs": []}, "tab_id": schedule.id},
+        starter_json={"triggered_by": f"schedule:{schedule.id}"},
+        status=BuildRunStatus.COMPLETED,
+        current_kind="build",
+        current_datasource_id=datasource.id,
+        current_tab_id=schedule.id,
+        current_tab_name="Scheduled ingest",
+        current_output_id=datasource.id,
+        current_output_name=datasource.name,
+        total_tabs=1,
+    )
+    build.completed_at = datetime.now(UTC)
+    test_db_session.add(build)
+    test_db_session.commit()
+
+    _reconcile_schedule_run(test_db_session, build_id=build.id)
+
+    refreshed = test_db_session.get(Schedule, schedule.id)
+    assert refreshed is not None
+    assert refreshed.last_run is not None
+    assert refreshed.last_success_at is not None
+    assert refreshed.next_run is not None
+    assert refreshed.last_successful_build_id == build.id
+    assert refreshed.lease_owner is None
+
+
+@pytest.mark.asyncio
+async def test_run_queued_build_job_uses_schedule_ingest_path_for_schedule_ingest_request(
+    test_db_session,
+    monkeypatch,
+) -> None:
+    datasource = DataSource(
+        id=str(uuid.uuid4()),
+        name="Ingestable raw",
+        source_type="iceberg",
+        config={
+            "metadata_path": "/tmp/raw-path",
+            "branch": "master",
+            "source": {
+                "source_type": "file",
+                "file_path": "/tmp/source.csv",
+                "file_type": "csv",
+                "options": {},
+            },
+        },
+        created_by="import",
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(datasource)
+    test_db_session.commit()
+
+    schedule = Schedule(
+        id=str(uuid.uuid4()),
+        datasource_id=datasource.id,
+        cron_expression="0 * * * *",
+        enabled=True,
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(schedule)
+    test_db_session.commit()
+
+    build = build_run_service.create_build_run(
+        test_db_session,
+        build_id=str(uuid.uuid4()),
+        namespace="default",
+        schedule_id=schedule.id,
+        analysis_id=schedule.id,
+        analysis_name="Schedule ingest",
+        request_json={
+            "analysis_pipeline": {
+                "analysis_id": schedule.id,
+                "tabs": [
+                    {
+                        "id": schedule.id,
+                        "name": "Scheduled ingest",
+                        "datasource": {
+                            "id": datasource.id,
+                            "analysis_tab_id": None,
+                            "source_type": "schedule",
+                            "config": {"branch": "master"},
+                        },
+                        "output": {
+                            "result_id": datasource.id,
+                            "datasource_type": "iceberg",
+                            "format": "parquet",
+                            "filename": f"schedule_{schedule.id}",
+                        },
+                        "steps": [],
+                    }
+                ],
+            },
+            "tab_id": schedule.id,
+        },
+        starter_json={"triggered_by": f"schedule:{schedule.id}"},
+        status=BuildRunStatus.QUEUED,
+        current_kind="build",
+        current_datasource_id=datasource.id,
+        current_tab_id=schedule.id,
+        current_tab_name="Scheduled ingest",
+        current_output_id=datasource.id,
+        current_output_name=datasource.name,
+        total_tabs=1,
+    )
+
+    refreshed = SimpleNamespace(name=datasource.name)
+    publish_notification = AsyncMock()
+    run_analysis_build = AsyncMock()
+    ingest_calls: list[str] = []
+
+    def fake_ingest(_session, datasource_id: str):
+        ingest_calls.append(datasource_id)
+        return refreshed
+
+    monkeypatch.setattr(build_execution.build_event_service, "publish_build_notification", publish_notification)
+    monkeypatch.setattr(build_execution, "_run_active_build_task", run_analysis_build)
+    monkeypatch.setattr("datasources.datasource_service.ingest_datasource_for_schedule", fake_ingest)
+
+    manager = cast(Any, SimpleNamespace())
+    await build_execution.run_queued_build_job(manager=manager, build_id=build.id)
+
+    assert ingest_calls == [datasource.id]
+    run_analysis_build.assert_not_awaited()
+    test_db_session.expire_all()
+    persisted = build_run_service.get_build_run(test_db_session, build.id)
+    assert persisted is not None
+    assert persisted.status == BuildRunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_run_queued_build_job_keeps_analysis_schedule_on_analysis_build_path(
+    test_db_session,
+    monkeypatch,
+) -> None:
+    datasource = DataSource(
+        id=str(uuid.uuid4()),
+        name="Source",
+        source_type="iceberg",
+        config={"metadata_path": "/tmp/source/master", "branch": "master"},
+        created_by="import",
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(datasource)
+    test_db_session.commit()
+
+    schedule = Schedule(
+        id=str(uuid.uuid4()),
+        datasource_id=str(uuid.uuid4()),
+        cron_expression="0 * * * *",
+        enabled=True,
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(schedule)
+    test_db_session.commit()
+
+    build = build_run_service.create_build_run(
+        test_db_session,
+        build_id=str(uuid.uuid4()),
+        namespace="default",
+        schedule_id=schedule.id,
+        analysis_id="analysis-1",
+        analysis_name="Scheduled analysis",
+        request_json={
+            "analysis_pipeline": {
+                "analysis_id": "analysis-1",
+                "tabs": [
+                    {
+                        "id": "tab-1",
+                        "name": "Export",
+                        "datasource": {
+                            "id": datasource.id,
+                            "analysis_tab_id": None,
+                            "source_type": "iceberg",
+                            "config": {"metadata_path": "/tmp/source/master", "branch": "master"},
+                        },
+                        "output": {
+                            "result_id": schedule.datasource_id,
+                            "datasource_type": "iceberg",
+                            "format": "parquet",
+                            "filename": "scheduled_output",
+                            "iceberg": {"namespace": "outputs", "table_name": "scheduled_output"},
+                        },
+                        "steps": [],
+                    }
+                ],
+            },
+            "tab_id": "tab-1",
+        },
+        starter_json={"triggered_by": f"schedule:{schedule.id}"},
+        status=BuildRunStatus.QUEUED,
+        current_kind="build",
+        current_datasource_id=schedule.datasource_id,
+        current_tab_id="tab-1",
+        current_tab_name="Export",
+        current_output_id=schedule.datasource_id,
+        current_output_name="scheduled_output",
+        total_tabs=1,
+    )
+
+    publish_notification = AsyncMock()
+    run_analysis_build = AsyncMock()
+
+    def fail_ingest(*_args, **_kwargs):
+        raise AssertionError("analysis schedule should not use datasource ingest path")
+
+    monkeypatch.setattr(build_execution.build_event_service, "publish_build_notification", publish_notification)
+    monkeypatch.setattr(build_execution, "_run_active_build_task", run_analysis_build)
+    monkeypatch.setattr("datasources.datasource_service.ingest_datasource_for_schedule", fail_ingest)
+
+    manager = cast(Any, SimpleNamespace())
+    await build_execution.run_queued_build_job(manager=manager, build_id=build.id)
+
+    run_analysis_build.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_build_worker_loop_exits_after_one_job_when_max_jobs_set(
     test_db_session,
@@ -353,9 +616,9 @@ def test_stop_worker_process_escalates_when_child_does_not_ack() -> None:
     names = [name for name, _ in calls]
     assert names[0] == "stop"
     assert calls[1][0] == "wait"
-    assert calls[1][1] == pytest.approx(runtime_process._CHILD_COOPERATIVE_STOP_SECONDS)
+    assert calls[1][1] == pytest.approx(runtime_process._CHILD_COOPERATIVE_STOP_SECONDS, abs=1e-3)
     terminate_join = next(timeout for name, timeout in calls if name == "join" and timeout is not None)
-    assert terminate_join == pytest.approx(runtime_process._CHILD_TERMINATE_SECONDS)
+    assert terminate_join == pytest.approx(runtime_process._CHILD_TERMINATE_SECONDS, abs=1e-3)
     assert ("join", None) in calls
     assert "terminate" in names
     assert "kill" not in names

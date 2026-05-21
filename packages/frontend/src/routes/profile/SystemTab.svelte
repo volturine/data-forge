@@ -78,8 +78,34 @@
 		return table.table_name;
 	}
 
+	function isAppDatabaseSchema(schemaName: string) {
+		return schemaName === 'public';
+	}
+
+	function displayNamespaceSchemaName(schemaName: string) {
+		if (schemaName.startsWith('df$tenant$')) {
+			return schemaName.slice('df$tenant$'.length);
+		}
+		return schemaName;
+	}
+
 	function schemaGroupLabel(schemaName: string) {
-		return `Database schema: ${schemaName}`;
+		const displayName = displayNamespaceSchemaName(schemaName);
+		if (isAppDatabaseSchema(schemaName)) {
+			return 'App tables';
+		}
+		return `Namespace tables: ${displayName}`;
+	}
+
+	function schemaGroupHint(schemaName: string) {
+		if (isAppDatabaseSchema(schemaName)) {
+			return 'Shared internal app data';
+		}
+		const displayName = displayNamespaceSchemaName(schemaName);
+		if (displayName === ns.value) {
+			return `Data Forge namespace: ${displayName} (current)`;
+		}
+		return `Data Forge namespace: ${displayName}`;
 	}
 
 	const groupedInternalTables = $derived.by(() => {
@@ -300,7 +326,6 @@
 			<p class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
 				Choose which internal PostgreSQL tables should be onboarded as datasources.
 			</p>
-
 			{#if internalTablesLoading}
 				<div class={css({ display: 'flex', alignItems: 'center', gap: '2', color: 'fg.muted' })}>
 					<Loader2 size={14} class={css({ animation: 'spin 1s linear infinite' })} />
@@ -340,11 +365,23 @@
 								data-schema-name={group.schemaName}
 								onclick={() => toggleSchemaGroup(group.schemaName)}
 							>
-								<span
-									class={css({ fontSize: 'sm', fontWeight: 'semibold', textTransform: 'none' })}
+								<div
+									class={css({
+										display: 'flex',
+										flexDirection: 'column',
+										gap: '0.5',
+										minWidth: '0'
+									})}
 								>
-									{schemaGroupLabel(group.schemaName)}
-								</span>
+									<span
+										class={css({ fontSize: 'sm', fontWeight: 'semibold', textTransform: 'none' })}
+									>
+										{schemaGroupLabel(group.schemaName)}
+									</span>
+									<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
+										{schemaGroupHint(group.schemaName)}
+									</span>
+								</div>
 								<ChevronDown
 									size={16}
 									class={css(
@@ -404,15 +441,12 @@
 													cursor: togglingKey !== null ? 'default' : 'pointer',
 													border: 'none',
 													transition: 'background-color 150ms',
-													backgroundColor:
-														table.is_onboarded || togglingKey === key
-															? 'accent.primary'
-															: 'bg.tertiary',
+													backgroundColor: table.is_onboarded ? 'accent.primary' : 'bg.tertiary',
 													_disabled: { opacity: 0.7 }
 												})}
 												type="button"
 												role="switch"
-												aria-checked={table.is_onboarded || togglingKey === key}
+												aria-checked={table.is_onboarded}
 												aria-label={`Onboard table ${key}`}
 												data-testid="internal-table-onboard-switch"
 												data-internal-table-key={key}
@@ -428,9 +462,7 @@
 														width: 'iconSm',
 														backgroundColor: 'accent.primary',
 														transition: 'transform 150ms',
-														...(table.is_onboarded || togglingKey === key
-															? { transform: 'translateX(1rem)' }
-															: {})
+														...(table.is_onboarded ? { transform: 'translateX(1rem)' } : {})
 													})}
 												>
 													{#if togglingKey === key}

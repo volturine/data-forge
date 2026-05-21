@@ -9,6 +9,7 @@ from core.config import settings
 
 _NAMESPACE = ContextVar('namespace', default='')
 _NAMESPACE_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+_PUBLIC_NAMESPACE_DATABASE_SCHEMA = 'df$tenant$public'
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,13 @@ def normalize_namespace(value: str | None) -> str:
     if not _NAMESPACE_RE.match(raw):
         raise ValueError('Namespace must be alphanumeric with dashes/underscores')
     return raw
+
+
+def namespace_database_schema(value: str | None) -> str:
+    name = normalize_namespace(value)
+    if name == 'public':
+        return _PUBLIC_NAMESPACE_DATABASE_SCHEMA
+    return name
 
 
 def set_namespace_context(value: str | None) -> Token:

@@ -146,10 +146,10 @@ async def run_build_worker_process(
         )
     )
 
-    from builds.build_execution import _run_queued_build_job
+    from builds.build_execution import run_queued_build_job
 
     async def run_job(build_id: str) -> None:
-        await _run_queued_build_job(manager=manager, build_id=build_id)
+        await run_queued_build_job(manager=manager, build_id=build_id)
 
     task = asyncio.create_task(
         build_worker_loop(

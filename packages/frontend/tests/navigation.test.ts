@@ -34,9 +34,9 @@ test.describe('Navigation – page load smoke tests', () => {
 	test('monitoring page renders Monitoring heading', async ({ page }) => {
 		await page.goto('/monitoring');
 		await expect(page.getByRole('heading', { name: 'Monitoring' })).toBeVisible({
-			timeout: 10_000
+			timeout: 5_000
 		});
-		await expect(page.getByRole('tab', { name: 'Builds' })).toBeVisible({ timeout: 10_000 });
+		await expect(page.getByRole('tab', { name: 'Builds' })).toBeVisible({ timeout: 5_000 });
 		await screenshot(page, 'navigation', 'monitoring-page');
 	});
 
@@ -69,14 +69,14 @@ test.describe('Navigation – page load smoke tests', () => {
 		const link = page.getByRole('link', { name: /New Analysis/i });
 		await expect(link).toBeVisible();
 		await link.click();
-		await expect(page).toHaveURL(/analysis\/new/, { timeout: 15_000 });
+		await expect(page).toHaveURL(/analysis\/new/, { timeout: 5_000 });
 	});
 
 	test('datasources "Add" link navigates to /datasources/new', async ({ page }) => {
 		await page.goto('/datasources');
 		// The "Add" link is the primary CTA in the datasource left panel header
 		await page.getByRole('link', { name: /^Add$/ }).click();
-		await expect(page).toHaveURL(/datasources\/new/, { timeout: 10_000 });
+		await expect(page).toHaveURL(/datasources\/new/, { timeout: 5_000 });
 	});
 
 	test('UDFs "New UDF" button navigates to /udfs/new', async ({ page }) => {
@@ -84,7 +84,7 @@ test.describe('Navigation – page load smoke tests', () => {
 		const newUdfBtn = page.getByRole('button', { name: 'New UDF' });
 		await expect(newUdfBtn).toBeVisible();
 		await newUdfBtn.click();
-		await expect(page).toHaveURL(/udfs\/new/, { timeout: 15_000 });
+		await expect(page).toHaveURL(/udfs\/new/, { timeout: 5_000 });
 	});
 });
 
@@ -94,7 +94,7 @@ test.describe('Navigation – profile access', () => {
 		await waitForAppShell(page);
 		await page.getByRole('link', { name: 'Profile' }).click();
 
-		await page.waitForURL(/\/profile/, { timeout: 10_000 });
+		await page.waitForURL(/\/profile/, { timeout: 5_000 });
 		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
 			'aria-selected',
@@ -111,13 +111,13 @@ async function gotoMonitoringBuilds(page: Page, analysisId?: string) {
 	await page.goto(`/monitoring?${params.toString()}`);
 	await waitForAppShell(page);
 	await expect(page.getByRole('tab', { name: 'Builds', selected: true })).toBeVisible({
-		timeout: 15_000
+		timeout: 5_000
 	});
-	await expect(page.locator('#panel-builds')).toBeVisible({ timeout: 15_000 });
+	await expect(page.locator('#panel-builds')).toBeVisible({ timeout: 5_000 });
 }
 
 async function refreshBuildHistory(page: Page) {
-	await page.getByRole('button', { name: /Refresh History/i }).click({ timeout: 15_000 });
+	await page.getByRole('button', { name: /Refresh History/i }).click({ timeout: 5_000 });
 }
 
 function cancelBuildDialog(page: Page) {
@@ -128,18 +128,18 @@ function cancelBuildDialog(page: Page) {
 async function confirmCancelBuild(page: Page) {
 	const dialog = cancelBuildDialog(page);
 	const confirmButton = dialog.getByRole('button', { name: 'Cancel Build', exact: true });
-	await expect(dialog).toBeVisible({ timeout: 10_000 });
-	await expect(confirmButton).toBeVisible({ timeout: 10_000 });
-	await expect(confirmButton).toBeEnabled({ timeout: 10_000 });
-	await confirmButton.click({ force: true, timeout: 10_000 });
-	await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+	await expect(dialog).toBeVisible({ timeout: 5_000 });
+	await expect(confirmButton).toBeVisible({ timeout: 5_000 });
+	await expect(confirmButton).toBeEnabled({ timeout: 5_000 });
+	await confirmButton.click({ force: true, timeout: 5_000 });
+	await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 }
 
 async function previewBuildId(page: Page) {
 	const preview = page.locator('[data-testid="build-preview"]');
-	await expect(preview).toBeVisible({ timeout: 10_000 });
+	await expect(preview).toBeVisible({ timeout: 5_000 });
 	const id = preview.locator('[data-testid="build-preview-id"]');
-	await expect(id).toHaveText(/\S+/, { timeout: 30_000 });
+	await expect(id).toHaveText(/\S+/, { timeout: 5_000 });
 	return (await id.textContent())?.trim() ?? '';
 }
 
@@ -148,21 +148,20 @@ async function waitForBuildRowById(
 	panel: ReturnType<Page['locator']>,
 	runId: string,
 	status: 'running' | 'completed' | 'failed' | 'cancelled',
-	timeout = 30_000
+	timeout = 5_000
 ) {
 	const row = panel.locator(`[data-build-row="${runId}"][data-build-status="${status}"]`);
 	const started = Date.now();
 	while (Date.now() - started < timeout) {
 		if (await row.isVisible().catch(() => false)) return row;
 		await refreshBuildHistory(page);
-		await page.waitForTimeout(1_000);
+		await page.waitForTimeout(250);
 	}
 	throw new Error(`Timed out waiting for build row ${runId} to reach ${status}`);
 }
 
 test.describe('Navigation – engines live monitor', () => {
 	test('engines popup lists running engines on demand', async ({ page, request }) => {
-		test.setTimeout(120_000);
 		const dsName = `e2e-engines-ds-${uid()}`;
 		const analysisName = `E2E Engines ${uid()}`;
 		const datasourceId = await createLargeDatasource(request, dsName, 200);
@@ -172,21 +171,21 @@ test.describe('Navigation – engines live monitor', () => {
 			await gotoAnalysisEditor(page, analysisId);
 			await waitForAppShell(page);
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
 			await buildBtn.click();
 			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(openPreviewBtn).toBeVisible({ timeout: 30_000 });
+			await expect(openPreviewBtn).toBeVisible({ timeout: 5_000 });
 			await openPreviewBtn.click();
 			const runId = await previewBuildId(page);
 			await page.keyboard.press('Escape');
 			await expect(page.locator('[data-testid="build-preview"]')).not.toBeVisible({
-				timeout: 10_000
+				timeout: 5_000
 			});
 
 			await gotoMonitoringBuilds(page, analysisId);
 
 			const engineButton = page.getByRole('button', { name: 'Engine Monitor' });
-			await expect(engineButton).toBeVisible({ timeout: 10_000 });
+			await expect(engineButton).toBeVisible({ timeout: 5_000 });
 			const enginePopup = page.locator('[data-engines-popup="true"]');
 			let open = false;
 			for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -198,21 +197,21 @@ test.describe('Navigation – engines live monitor', () => {
 				await page.waitForTimeout(250);
 			}
 			expect(open).toBe(true);
-			await expect(page.getByTestId('engine-monitor-count')).toBeVisible({ timeout: 15_000 });
+			await expect(page.getByTestId('engine-monitor-count')).toBeVisible({ timeout: 5_000 });
 			await expect(enginePopup.locator('[data-engine-row]').first()).toBeVisible({
-				timeout: 10_000
+				timeout: 5_000
 			});
 
 			const panel = page.locator('#panel-builds');
-			const runningRow = await waitForBuildRowById(page, panel, runId, 'running', 90_000);
+			const runningRow = await waitForBuildRowById(page, panel, runId, 'running', 5_000);
 			const cancelButton = runningRow.getByLabel('Cancel build');
-			await expect(cancelButton).toBeVisible({ timeout: 10_000 });
-			await expect(cancelButton).toBeEnabled({ timeout: 10_000 });
-			await cancelButton.click({ force: true, timeout: 10_000 });
+			await expect(cancelButton).toBeVisible({ timeout: 5_000 });
+			await expect(cancelButton).toBeEnabled({ timeout: 5_000 });
+			await cancelButton.click({ force: true, timeout: 5_000 });
 			await confirmCancelBuild(page);
 
-			const cancelledRow = await waitForBuildRowById(page, panel, runId, 'cancelled', 30_000);
-			await expect(cancelledRow.getByText('Cancelled')).toBeVisible({ timeout: 15_000 });
+			const cancelledRow = await waitForBuildRowById(page, panel, runId, 'cancelled', 5_000);
+			await expect(cancelledRow.getByText('Cancelled')).toBeVisible({ timeout: 5_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, dsName);
@@ -272,7 +271,6 @@ test.describe('Navigation – chat panel smoke', () => {
 
 test.describe('Navigation – namespace persistence', () => {
 	test('selected namespace persists across page refresh', async ({ page }) => {
-		test.setTimeout(30_000);
 		const ns = `e2e-ns-${uid()}`;
 
 		await page.goto('/');
@@ -289,13 +287,15 @@ test.describe('Navigation – namespace persistence', () => {
 		await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 
 		const sidebar = page.locator('aside[aria-label="Main navigation"]');
-		await expect(sidebar.getByText(ns)).toBeVisible({ timeout: 5_000 });
+		await expect(sidebar.getByRole('button', { name: 'Select namespace' })).toContainText(ns, {
+			timeout: 5_000
+		});
 
 		await page.getByRole('button', { name: 'Select namespace' }).click();
 		const reopenedDialog = dialogByTextbox(page, 'Search namespaces');
 		await expect(reopenedDialog).toBeVisible({ timeout: 5_000 });
 		await expect(reopenedDialog.locator(`[data-namespace-option="${ns}"]`)).toBeVisible({
-			timeout: 10_000
+			timeout: 5_000
 		});
 		await page.keyboard.press('Escape');
 		await expect(reopenedDialog).not.toBeVisible({ timeout: 5_000 });
@@ -303,7 +303,7 @@ test.describe('Navigation – namespace persistence', () => {
 		await page.reload({ waitUntil: 'networkidle' });
 		await waitForAppShell(page);
 
-		await expect(sidebar.getByText(ns)).toBeVisible({ timeout: 10_000 });
+		await expect(sidebar.getByText(ns)).toBeVisible({ timeout: 5_000 });
 		await screenshot(page, 'navigation', 'namespace-persisted');
 	});
 });

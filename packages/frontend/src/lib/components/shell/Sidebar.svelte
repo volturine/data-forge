@@ -238,24 +238,21 @@
 				aria-label="Select namespace"
 				bind:this={namespaceTrigger}
 			>
-				<span class={css({ display: 'flex', alignItems: 'center', gap: '0', overflow: 'hidden' })}>
+				<span
+					class={css({ display: 'flex', alignItems: 'center', gap: '1.5', overflow: 'hidden' })}
+				>
 					<span
-						class={css({ display: 'flex', alignItems: 'center', gap: '0', overflow: 'hidden' })}
+						class={css({
+							color: 'fg.primary',
+							overflow: 'hidden',
+							textOverflow: 'ellipsis',
+							whiteSpace: 'nowrap',
+							textDecoration: 'underline',
+							textDecorationColor: 'fg.muted',
+							textUnderlineOffset: '3px'
+						})}
 					>
-						<span class={css({ color: 'fg.muted' })}>/</span>
-						<span
-							class={css({
-								color: 'fg.primary',
-								overflow: 'hidden',
-								textOverflow: 'ellipsis',
-								whiteSpace: 'nowrap',
-								textDecoration: 'underline',
-								textDecorationColor: 'fg.muted',
-								textUnderlineOffset: '3px'
-							})}
-						>
-							{namespace}
-						</span>
+						{namespace}
 					</span>
 				</span></button
 			>

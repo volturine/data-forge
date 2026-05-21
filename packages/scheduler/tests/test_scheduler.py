@@ -944,10 +944,50 @@ class TestEnqueueScheduleRun:
         job = build_job_service.get_job_by_build_id(test_db_session, run_id)
         assert job is not None
 
-    def test_enqueue_schedule_for_plain_datasource_creates_refresh_build(self, test_db_session: Session, sample_datasource: DataSource):
+    def test_enqueue_schedule_for_plain_datasource_creates_ingest_build(self, test_db_session: Session, sample_datasource: DataSource):
         schedule = create_schedule(
             test_db_session,
             ScheduleCreate(datasource_id=sample_datasource.id, cron_expression="0 * * * *"),
+        )
+        row = test_db_session.get(Schedule, schedule.id)
+        assert row is not None
+        row.lease_owner = "scheduler:test"
+        row.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+        test_db_session.add(row)
+        test_db_session.commit()
+
+        run_id = enqueue_schedule_run(test_db_session, schedule.id, worker_id="scheduler:test")
+        run = build_run_service.get_build_run(test_db_session, run_id)
+
+        assert run is not None
+        assert run.schedule_id == schedule.id
+        assert run.current_kind == EngineRunKind.BUILD.value
+        assert run.status == BuildRunStatus.QUEUED
+
+    def test_enqueue_schedule_for_raw_datasource_uses_build_kind(self, test_db_session: Session, sample_csv_file):
+        raw = DataSource(
+            id=str(uuid.uuid4()),
+            name="Raw Iceberg",
+            source_type="iceberg",
+            config={
+                "metadata_path": "/tmp/raw-path",
+                "branch": "master",
+                "source": {
+                    "source_type": "file",
+                    "file_path": str(sample_csv_file),
+                    "file_type": "csv",
+                    "options": {},
+                },
+            },
+            created_by="import",
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(raw)
+        test_db_session.commit()
+
+        schedule = create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=raw.id, cron_expression="0 * * * *"),
         )
         row = test_db_session.get(Schedule, schedule.id)
         assert row is not None

@@ -334,14 +334,14 @@ class TestDataSourceConnect:
         assert body["config"]["source"]["source_type"] == "file"
 
 
-class TestDatasourceRefreshRoute:
-    @patch("modules.datasource.routes.refresh_remote_datasource", new_callable=AsyncMock)
-    def test_refresh_route_delegates_to_worker_manager(self, mock_refresh, client):
+class TestDatasourceIngestRoute:
+    @patch("modules.datasource.routes.ingest_remote_datasource", new_callable=AsyncMock)
+    def test_ingest_route_delegates_to_worker_manager(self, mock_ingest, client):
         datasource_id = str(uuid.uuid4())
         created_at = datetime.now(UTC).isoformat()
-        mock_refresh.return_value = {
+        mock_ingest.return_value = {
             "id": datasource_id,
-            "name": "Refreshed datasource",
+            "name": "Ingested datasource",
             "description": None,
             "source_type": "iceberg",
             "config": {"branch": "master", "metadata_path": "/tmp/master"},
@@ -353,13 +353,13 @@ class TestDatasourceRefreshRoute:
             "output_of_tab_id": None,
         }
 
-        response = client.post(f"/api/v1/datasource/{datasource_id}/refresh")
+        response = client.post(f"/api/v1/datasource/{datasource_id}/ingest")
 
         assert response.status_code == 200
-        mock_refresh.assert_awaited_once()
-        assert mock_refresh.await_args.kwargs["datasource_id"] == datasource_id
+        mock_ingest.assert_awaited_once()
+        assert mock_ingest.await_args.kwargs["datasource_id"] == datasource_id
         assert response.json()["id"] == datasource_id
-        assert response.json()["name"] == "Refreshed datasource"
+        assert response.json()["name"] == "Ingested datasource"
 
 
 class TestDataSourceList:
@@ -637,6 +637,23 @@ class TestDataSourceDelete:
 
         get_response = client.get(f"/api/v1/datasource/{datasource_id}")
         assert get_response.status_code == 404
+
+    @patch("modules.datasource.routes.shutdown_remote_engine", new_callable=AsyncMock)
+    def test_delete_datasource_shuts_down_matching_preview_engine(
+        self,
+        mock_shutdown_remote_engine: AsyncMock,
+        client,
+        sample_datasource: DataSource,
+    ):
+        datasource_id = sample_datasource.id
+
+        response = client.delete(f"/api/v1/datasource/{datasource_id}")
+
+        assert response.status_code == 204
+        assert mock_shutdown_remote_engine.await_count == 1
+        await_args = mock_shutdown_remote_engine.await_args
+        assert await_args is not None
+        assert await_args.kwargs["analysis_id"] == f"__preview__{datasource_id}"
 
     def test_delete_datasource_not_found(self, client):
         missing_id = str(uuid.uuid4())

@@ -47,6 +47,28 @@ def require_docker() -> None:
     pytest.skip('Docker daemon is required for Postgres integration tests')
 
 
+def cleanup_stale_test_postgres(*, label: str = 'data-forge.test-postgres=1') -> None:
+    stale_containers = run_command(
+        ['docker', 'ps', '-aq', '--filter', f'label={label}'],
+        env=docker_env(),
+        check=False,
+        timeout=120,
+    )
+    container_ids = [line.strip() for line in stale_containers.stdout.splitlines() if line.strip()]
+    if container_ids:
+        run_command(['docker', 'rm', '-f', *container_ids], env=docker_env(), check=False, timeout=300)
+
+    stale_volumes = run_command(
+        ['docker', 'volume', 'ls', '-q', '--filter', f'label={label}'],
+        env=docker_env(),
+        check=False,
+        timeout=120,
+    )
+    volume_ids = [line.strip() for line in stale_volumes.stdout.splitlines() if line.strip()]
+    if volume_ids:
+        run_command(['docker', 'volume', 'rm', '-f', *volume_ids], env=docker_env(), check=False, timeout=300)
+
+
 def run_command(
     command: list[str], *, cwd: Path = REPO_ROOT, env: dict[str, str] | None = None, timeout: float = 120, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
@@ -152,6 +174,8 @@ class PostgresContainer:
     database: str = 'dataforge'
     image: str = 'postgres:18-alpine'
     name: str = field(default_factory=lambda: f'df-pg-{uuid.uuid4().hex[:10]}')
+    label: str = 'data-forge.test-postgres=1'
+    volume_name: str = field(default_factory=lambda: f'df-pg-data-{uuid.uuid4().hex[:10]}')
     container_id: str | None = None
     port: int | None = None
 
@@ -161,30 +185,43 @@ class PostgresContainer:
         return f'postgresql+psycopg://{self.user}:{self.password}@127.0.0.1:{self.port}/{self.database}'
 
     def start(self) -> None:
-        result = run_command(
-            [
-                'docker',
-                'run',
-                '-d',
-                '--rm',
-                '--name',
-                self.name,
-                '-e',
-                f'POSTGRES_DB={self.database}',
-                '-e',
-                f'POSTGRES_USER={self.user}',
-                '-e',
-                f'POSTGRES_PASSWORD={self.password}',
-                '-p',
-                '127.0.0.1::5432',
-                self.image,
-            ],
-            env=docker_env(),
-            timeout=300,
-        )
-        self.container_id = result.stdout.strip()
-        self.port = self._wait_for_port_mapping()
-        self.wait_ready()
+        try:
+            run_command(
+                ['docker', 'volume', 'create', '--label', self.label, self.volume_name],
+                env=docker_env(),
+                timeout=120,
+            )
+            result = run_command(
+                [
+                    'docker',
+                    'run',
+                    '-d',
+                    '--rm',
+                    '--label',
+                    self.label,
+                    '--name',
+                    self.name,
+                    '-v',
+                    f'{self.volume_name}:/var/lib/postgresql',
+                    '-e',
+                    f'POSTGRES_DB={self.database}',
+                    '-e',
+                    f'POSTGRES_USER={self.user}',
+                    '-e',
+                    f'POSTGRES_PASSWORD={self.password}',
+                    '-p',
+                    '127.0.0.1::5432',
+                    self.image,
+                ],
+                env=docker_env(),
+                timeout=300,
+            )
+            self.container_id = result.stdout.strip()
+            self.port = self._wait_for_port_mapping()
+            self.wait_ready()
+        except Exception:
+            self.stop()
+            raise
 
     def _wait_for_port_mapping(self, *, timeout: float = 30) -> int:
         deadline = time.time() + timeout
@@ -215,9 +252,8 @@ class PostgresContainer:
         return psycopg.connect(self.url.replace('+psycopg', ''), autocommit=True)
 
     def stop(self) -> None:
-        if self.container_id is None:
-            return
         run_command(['docker', 'rm', '-f', self.name], env=docker_env(), check=False, timeout=120)
+        run_command(['docker', 'volume', 'rm', '-f', self.volume_name], env=docker_env(), check=False, timeout=120)
         self.container_id = None
         self.port = None
 

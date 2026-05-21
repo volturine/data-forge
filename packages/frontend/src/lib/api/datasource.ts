@@ -164,8 +164,8 @@ export function toggleInternalPostgresTable(
 	});
 }
 
-export function refreshDatasource(datasourceId: string): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>(`/v1/datasource/${datasourceId}/refresh`, {
+export function ingestDatasource(datasourceId: string): ResultAsync<DataSource, ApiError> {
+	return apiRequest<DataSource>(`/v1/datasource/${datasourceId}/ingest`, {
 		method: 'POST'
 	});
 }

@@ -1,11 +1,12 @@
 import logging
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from contracts.datasource.models import DataSource, DataSourceColumnMetadata, DataSourceCreatedBy
 from contracts.datasource.source_types import DataSourceFileType, DataSourceType
@@ -39,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 
 _INTERNAL_POSTGRES_EXCLUDED_TABLES = {"alembic_version"}
+_INTERNAL_POSTGRES_NAMESPACE_SCHEMA_PREFIX = "df$tenant$"
+_INTERNAL_POSTGRES_QUERY_RE = re.compile(r'^SELECT \* FROM "([^"]+)"\."([^"]+)"$')
 
 
 class InternalPostgresOnboarding:
@@ -55,8 +58,27 @@ class InternalPostgresOnboarding:
         return f"SELECT * FROM {cls._quote_identifier(schema_name)}.{cls._quote_identifier(table_name)}"
 
     @staticmethod
-    def datasource_name_for(schema_name: str, table_name: str) -> str:
-        return f"internal.{schema_name}.{table_name}"
+    def display_schema_name(schema_name: str) -> str:
+        if schema_name.startswith(_INTERNAL_POSTGRES_NAMESPACE_SCHEMA_PREFIX):
+            return schema_name[len(_INTERNAL_POSTGRES_NAMESPACE_SCHEMA_PREFIX) :]
+        return schema_name
+
+    @classmethod
+    def datasource_name_for(cls, schema_name: str, table_name: str) -> str:
+        return f"internal.{cls.display_schema_name(schema_name)}.{table_name}"
+
+    @classmethod
+    def datasource_description_for(cls, schema_name: str, table_name: str) -> str:
+        return f"Internal PostgreSQL table {cls.display_schema_name(schema_name)}.{table_name}"
+
+    @staticmethod
+    def query_schema_and_table(query: str | None) -> tuple[str, str] | None:
+        if not isinstance(query, str):
+            return None
+        match = _INTERNAL_POSTGRES_QUERY_RE.fullmatch(query)
+        if match is None:
+            return None
+        return match.group(1), match.group(2)
 
     @staticmethod
     def connection_string() -> str:
@@ -83,7 +105,6 @@ class InternalPostgresOnboarding:
 
     def list_tables(self) -> list[InternalPostgresTable]:
         rows: list[InternalPostgresTable] = []
-        existing_names = {datasource.name for datasource in self.session.execute(select(DataSource)).scalars().all()}
         for schema_name in sorted(self.inspector.get_schema_names()):
             if schema_name.startswith("pg_") or schema_name == "information_schema":
                 continue
@@ -94,7 +115,7 @@ class InternalPostgresOnboarding:
                     InternalPostgresTable(
                         schema_name=schema_name,
                         table_name=table_name,
-                        is_onboarded=self.datasource_name_for(schema_name, table_name) in existing_names,
+                        is_onboarded=bool(self.matching_datasources(schema_name, table_name)),
                     ),
                 )
         return rows
@@ -128,6 +149,31 @@ class InternalPostgresOnboarding:
 
 def internal_postgres_connection_string() -> str:
     return InternalPostgresOnboarding.connection_string()
+
+
+_DatasourceResponseT = TypeVar("_DatasourceResponseT", DataSourceResponse, DataSourceListItem)
+
+
+def _canonical_internal_postgres_name(datasource: DataSource) -> str | None:
+    query, connection_string = datasource.query_and_connection()
+    if connection_string != internal_postgres_connection_string():
+        return None
+    source = InternalPostgresOnboarding.query_schema_and_table(query)
+    if source is None:
+        return None
+    schema_name, table_name = source
+    canonical = InternalPostgresOnboarding.datasource_name_for(schema_name, table_name)
+    legacy = f"internal.{schema_name}.{table_name}"
+    if datasource.name not in {legacy, canonical}:
+        return None
+    return canonical
+
+
+def _apply_display_name(response: _DatasourceResponseT, datasource: DataSource) -> _DatasourceResponseT:
+    canonical = _canonical_internal_postgres_name(datasource)
+    if canonical is not None:
+        response.name = canonical
+    return response
 
 
 def list_internal_postgres_tables(session: Session) -> list[InternalPostgresTable]:
@@ -203,6 +249,37 @@ def create_placeholder_output_datasource(
     )
     session.add(datasource)
     session.flush()
+
+
+def create_database_datasource_record(
+    session: Session,
+    *,
+    name: str,
+    description: str | None,
+    connection_string: str,
+    query: str,
+    branch: str,
+    owner_id: str | None = None,
+) -> DataSourceResponse:
+    datasource = DataSource(
+        id=str(uuid.uuid4()),
+        name=name,
+        description=DataSourceDescriptionModel.normalize_description(description),
+        source_type=DataSourceType.DATABASE.value,
+        config={
+            "connection_string": connection_string,
+            "query": query,
+            "branch": branch,
+        },
+        owner_id=owner_id,
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+
+    session.add(datasource)
+    session.commit()
+    session.refresh(datasource)
+
+    return DataSourceResponse.model_validate(datasource)
 
 
 def create_analysis_datasource(
@@ -708,7 +785,7 @@ def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
-    response = DataSourceResponse.model_validate(datasource)
+    response = _apply_display_name(DataSourceResponse.model_validate(datasource), datasource)
     response.output_of_tab_id = datasource.config.get("analysis_tab_id") if isinstance(datasource.config, dict) else None
     return response
 
@@ -723,7 +800,7 @@ def list_datasources(session: Session, include_hidden: bool = False) -> list[Dat
     datasources = session.execute(query).scalars().all()
     results: list[DataSourceListItem] = []
     for ds in datasources:
-        item = DataSourceListItem.model_validate(ds)
+        item = _apply_display_name(DataSourceListItem.model_validate(ds), ds)
         item.output_of_tab_id = ds.config.get("analysis_tab_id") if isinstance(ds.config, dict) else None
         results.append(item)
     return results
@@ -879,7 +956,7 @@ def update_datasource(
     session.refresh(datasource)
 
     logger.info(f"Updated datasource {datasource_id}")
-    response = DataSourceResponse.model_validate(datasource)
+    response = _apply_display_name(DataSourceResponse.model_validate(datasource), datasource)
     response.output_of_tab_id = datasource.config.get("analysis_tab_id") if isinstance(datasource.config, dict) else None
     return response
 

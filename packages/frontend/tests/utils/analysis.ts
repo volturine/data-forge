@@ -87,7 +87,7 @@ async function waitForAnalysisEditor(
 export async function gotoAnalysisEditor(
 	page: Page,
 	analysisId: string,
-	timeout = 60_000
+	timeout = 5_000
 ): Promise<void> {
 	const deadline = Date.now() + timeout;
 	const remaining = () => Math.max(deadline - Date.now(), 1_000);
@@ -95,7 +95,7 @@ export async function gotoAnalysisEditor(
 
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		try {
-			await page.goto(`/analysis/${analysisId}`);
+			await page.goto(`/analysis/${analysisId}`, { waitUntil: 'domcontentloaded' });
 			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: remaining() });
 			await waitForLayoutReady(page, remaining());
 			await waitForAnalysisEditor(page, deadline, 'editable');
@@ -113,7 +113,7 @@ export async function gotoAnalysisEditor(
 export async function gotoReadOnlyAnalysisEditor(
 	page: Page,
 	analysisId: string,
-	timeout = 60_000
+	timeout = 5_000
 ): Promise<void> {
 	const deadline = Date.now() + timeout;
 	const remaining = () => Math.max(deadline - Date.now(), 1_000);
@@ -121,7 +121,7 @@ export async function gotoReadOnlyAnalysisEditor(
 
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		try {
-			await page.goto(`/analysis/${analysisId}`);
+			await page.goto(`/analysis/${analysisId}`, { waitUntil: 'domcontentloaded' });
 			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: remaining() });
 			await waitForLayoutReady(page, remaining());
 			await waitForAnalysisEditor(page, deadline, 'locked');
@@ -140,7 +140,7 @@ export async function gotoReadOnlyAnalysisEditor(
  * After a `page.reload()` inside the analysis editor, re-confirm readiness.
  * Same gates as `gotoAnalysisEditor` but without the navigation step.
  */
-export async function waitForEditorReload(page: Page, timeout = 60_000): Promise<void> {
+export async function waitForEditorReload(page: Page, timeout = 5_000): Promise<void> {
 	const deadline = Date.now() + timeout;
 	await waitForLayoutReady(page, Math.max(deadline - Date.now(), 1_000));
 	await waitForAnalysisEditor(page, deadline, 'editable');
@@ -172,9 +172,8 @@ export async function addStepAndOpenConfig(
 	await editBtn.click();
 
 	const configPanel = page.locator(`[data-step-config="${stepType}"]`);
-	await expect(configPanel).toBeVisible({ timeout: 8_000 });
-	await expect(configPanel.getByText('Loading schema...')).toBeHidden({ timeout: 30_000 });
+	await expect(configPanel).toBeVisible({ timeout: 5_000 });
 	const configBody = configPanel.locator(':scope > *');
-	await expect.poll(async () => await configBody.count(), { timeout: 8_000 }).toBeGreaterThan(0);
+	await expect.poll(async () => await configBody.count(), { timeout: 5_000 }).toBeGreaterThan(0);
 	return configPanel;
 }

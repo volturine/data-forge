@@ -89,14 +89,13 @@ test.describe('Lineage – graph interaction', () => {
 		await page.goto('/lineage');
 		await waitForLineageToolbar(page);
 		// Wait for the loading state to clear first, then verify no error
-		await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 15_000 });
+		await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 5_000 });
 		await expect(page.getByText('Failed to load lineage.')).not.toBeVisible();
 	});
 });
 
 test.describe('Lineage – with datasource data', () => {
 	test('lineage graph renders nodes when datasources exist', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-lineage-ds-${uid()}`;
 		const aName = `E2E Lineage ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -106,7 +105,7 @@ test.describe('Lineage – with datasource data', () => {
 			// The lineage graph area should not show the error state
 			await expect(page.getByText('Failed to load lineage.')).not.toBeVisible();
 			// The graph container should be present and not loading
-			await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 15_000 });
+			await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 5_000 });
 			await screenshot(page, 'lineage', 'with-data');
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
@@ -115,7 +114,6 @@ test.describe('Lineage – with datasource data', () => {
 	});
 
 	test('dragging the canvas pans visible lineage nodes', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-lineage-pan-ds-${uid()}`;
 		const aName = `E2E Lineage Pan ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -125,10 +123,10 @@ test.describe('Lineage – with datasource data', () => {
 			await page.goto('/lineage');
 			await waitForLineageToolbar(page);
 			const graph = page.getByTestId('lineage-canvas');
-			await expect(graph).toBeVisible({ timeout: 15_000 });
+			await expect(graph).toBeVisible({ timeout: 5_000 });
 
 			const node = page.getByRole('button', { name: `source ${dsName}` });
-			await expect(node).toBeVisible({ timeout: 15_000 });
+			await expect(node).toBeVisible({ timeout: 5_000 });
 
 			const before = await node.boundingBox();
 			const graphBox = await graph.boundingBox();

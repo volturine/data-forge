@@ -211,13 +211,13 @@ def _build_analysis_request(session: Session, schedule: Schedule, analysis_id: s
     return request, str(analysis.id), analysis.name, target_tab.id, target_tab.name
 
 
-def _build_refresh_request(schedule: Schedule) -> compute_schemas.BuildRequest:
+def _build_ingest_request(schedule: Schedule) -> compute_schemas.BuildRequest:
     pipeline = {
         "analysis_id": schedule.id,
         "tabs": [
             {
                 "id": schedule.id,
-                "name": "Scheduled refresh",
+                "name": "Scheduled ingest",
                 "datasource": {
                     "id": schedule.datasource_id,
                     "analysis_tab_id": None,
@@ -228,7 +228,7 @@ def _build_refresh_request(schedule: Schedule) -> compute_schemas.BuildRequest:
                     "result_id": schedule.datasource_id,
                     "datasource_type": "iceberg",
                     "format": "parquet",
-                    "filename": f"schedule_{schedule.id}",
+                    "filename": f"schedule_ingest_{schedule.id}",
                 },
                 "steps": [],
             }
@@ -237,7 +237,7 @@ def _build_refresh_request(schedule: Schedule) -> compute_schemas.BuildRequest:
     return compute_schemas.BuildRequest.model_validate({"analysis_pipeline": pipeline, "tab_id": schedule.id})
 
 
-def _enqueue_schedule_refresh_build(
+def _enqueue_schedule_ingest_build(
     session: Session,
     *,
     schedule: Schedule,
@@ -246,7 +246,7 @@ def _enqueue_schedule_refresh_build(
     now: datetime,
 ) -> build_run_service.BuildRun:
     build_id = str(uuid.uuid4())
-    analysis_name = f"Schedule refresh {schedule.datasource_id}"
+    analysis_name = f"Schedule ingest {schedule.datasource_id}"
     run = build_run_service.create_build_run(
         session,
         build_id=build_id,
@@ -254,13 +254,13 @@ def _enqueue_schedule_refresh_build(
         schedule_id=schedule.id,
         analysis_id=schedule.id,
         analysis_name=analysis_name,
-        request_json=_build_refresh_request(schedule).model_dump(mode="json"),
+        request_json=_build_ingest_request(schedule).model_dump(mode="json"),
         starter_json=compute_schemas.BuildStarter.for_schedule(schedule.id).model_dump(mode="json"),
         status=BuildRunStatus.QUEUED,
         current_kind=target_kind,
         current_datasource_id=schedule.datasource_id,
         current_tab_id=schedule.id,
-        current_tab_name="Scheduled refresh",
+        current_tab_name="Scheduled ingest",
         current_output_id=schedule.datasource_id,
         current_output_name=analysis_name,
         total_tabs=1,
@@ -745,10 +745,10 @@ def enqueue_schedule_run(session: Session, schedule_id: str, *, worker_id: str) 
     schedule.last_failure_at = None
 
     if target_kind == DataSourceTargetKind.RAW:
-        run = _enqueue_schedule_refresh_build(
+        run = _enqueue_schedule_ingest_build(
             session,
             schedule=schedule,
-            target_kind=DataSourceTargetKind.RAW.value,
+            target_kind=EngineRunKind.BUILD.value,
             namespace=namespace,
             now=stamp,
         )
@@ -757,7 +757,7 @@ def enqueue_schedule_run(session: Session, schedule_id: str, *, worker_id: str) 
         return run.id
 
     if target_kind == DataSourceTargetKind.DATASOURCE:
-        run = _enqueue_schedule_refresh_build(
+        run = _enqueue_schedule_ingest_build(
             session,
             schedule=schedule,
             target_kind=EngineRunKind.BUILD.value,

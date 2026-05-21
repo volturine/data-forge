@@ -188,6 +188,12 @@
 		}
 	}
 
+	async function gotoCreatedDatasource(datasourceId: string) {
+		queryClient.invalidateQueries({ queryKey: ['datasources'] });
+		queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
+		await goto(resolve(`/datasources?created_id=${datasourceId}` as '/'), { invalidateAll: true });
+	}
+
 	async function handleFileUpload() {
 		if (!file || !fileName) {
 			error = 'Please select a file and provide a name';
@@ -221,21 +227,21 @@
 					loading = false;
 					return;
 				}
-				queryClient.invalidateQueries({ queryKey: ['datasources'] });
-				queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
-				goto(resolve('/datasources'), { invalidateAll: true });
+				await gotoCreatedDatasource(result.value.id);
 				return;
 			}
-			await uploadFile(file, fileName, fileDescription, {
+			const result = await uploadFile(file, fileName, fileDescription, {
 				delimiter: csvDelimiter,
 				quote_char: csvQuoteChar,
 				has_header: csvHasHeader,
 				skip_rows: csvSkipRows,
 				encoding: csvEncoding
 			});
-			queryClient.invalidateQueries({ queryKey: ['datasources'] });
-			queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
-			goto(resolve('/datasources'), { invalidateAll: true });
+			if (result.isErr()) {
+				error = result.error.message || 'Upload failed';
+				return;
+			}
+			await gotoCreatedDatasource(result.value.id);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Upload failed';
 		} finally {
@@ -253,10 +259,12 @@
 		error = null;
 
 		try {
-			await connectDatabase(dbName, dbDescription, connectionString, query);
-			queryClient.invalidateQueries({ queryKey: ['datasources'] });
-			queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
-			goto(resolve('/datasources'), { invalidateAll: true });
+			const result = await connectDatabase(dbName, dbDescription, connectionString, query);
+			if (result.isErr()) {
+				error = result.error.message || 'Connection failed';
+				return;
+			}
+			await gotoCreatedDatasource(result.value.id);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Connection failed';
 		} finally {

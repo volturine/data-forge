@@ -20,7 +20,7 @@ class FauxDatasourceRuntime:
         monkeypatch.setattr(routes, "create_remote_database_datasource", self.create_database_datasource)
         monkeypatch.setattr(routes, "create_remote_iceberg_datasource", self.create_iceberg_datasource)
         monkeypatch.setattr(routes, "get_remote_datasource_schema", self.get_datasource_schema)
-        monkeypatch.setattr(routes, "refresh_remote_datasource", self.refresh_datasource)
+        monkeypatch.setattr(routes, "ingest_remote_datasource", self.ingest_datasource)
         monkeypatch.setattr(routes, "get_remote_column_stats", self.get_column_stats)
 
     async def create_file_datasource(
@@ -127,7 +127,7 @@ class FauxDatasourceRuntime:
         session.commit()
         return schema
 
-    async def refresh_datasource(self, session: Session, *, datasource_id: str, **kwargs: Any):
+    async def ingest_datasource(self, session: Session, *, datasource_id: str, **kwargs: Any):
         del kwargs
         datasource = self._get_datasource(session, datasource_id)
         datasource.schema_cache = self._schema_for(datasource).model_dump(exclude_none=True)

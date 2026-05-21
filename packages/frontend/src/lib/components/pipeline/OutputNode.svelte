@@ -424,12 +424,14 @@
 		error = null;
 		ensureOutputConfig();
 
-		const saveResult = await analysisStore.save();
-		if (saveResult.isErr()) {
-			analysisStore.setPreviewPaused(false);
-			error = saveResult.error.message;
-			buildStarting = false;
-			return;
+		if (analysisStore.isDirty()) {
+			const saveResult = await analysisStore.save();
+			if (saveResult.isErr()) {
+				analysisStore.setPreviewPaused(false);
+				error = saveResult.error.message;
+				buildStarting = false;
+				return;
+			}
 		}
 
 		const pipeline = buildAnalysisPipelinePayload(

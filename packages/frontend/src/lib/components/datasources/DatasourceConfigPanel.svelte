@@ -4,7 +4,7 @@
 	import {
 		getDatasource,
 		getDatasourceSchema,
-		refreshDatasource,
+		ingestDatasource,
 		updateDatasource,
 		updateDatasourceColumnDescriptions
 	} from '$lib/api/datasource';
@@ -15,6 +15,8 @@
 	import {
 		activeBuildStatusLabel,
 		activeBuildStatusTone,
+		engineRunDisplayKind,
+		engineRunKindLabel,
 		engineRunStatusToActiveBuildStatus,
 		readActiveBuildStatus
 	} from '$lib/types/build-stream';
@@ -42,6 +44,8 @@
 		ColumnSchema
 	} from '$lib/types/datasource';
 	import {
+		datasourceExternalSourceConfig,
+		datasourceExternalSourceType,
 		datasourceFileConfig,
 		datasourceIsAnalysisOutput,
 		datasourceIsCsv,
@@ -50,7 +54,7 @@
 		datasourceIsFile,
 		datasourceIsIceberg,
 		datasourceIsSchedulableRaw,
-		datasourceNeedsExternalRefresh,
+		datasourceNeedsExternalIngest,
 		datasourceSupportsSchemaRefresh
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
@@ -363,6 +367,14 @@
 		return datasourceFileConfig(ds);
 	}
 
+	function getExternalSource(ds: DataSource) {
+		return datasourceExternalSourceConfig(ds);
+	}
+
+	function getExternalSourceType(ds: DataSource) {
+		return datasourceExternalSourceType(ds);
+	}
+
 	function isCsv(ds: DataSource): boolean {
 		return datasourceIsCsv(ds);
 	}
@@ -505,10 +517,10 @@
 		hasChanges = false;
 		configDirty = false;
 
-		if (update.config && datasourceNeedsExternalRefresh(ds)) {
-			const refreshResult = await refreshDatasource(ds.id);
-			if (refreshResult.isErr()) {
-				refreshError = refreshResult.error.message || 'Failed to re-ingest datasource';
+		if (update.config && datasourceNeedsExternalIngest(ds)) {
+			const ingestResult = await ingestDatasource(ds.id);
+			if (ingestResult.isErr()) {
+				refreshError = ingestResult.error.message || 'Failed to re-ingest datasource';
 				return;
 			}
 			queryClient.invalidateQueries({ queryKey: ['datasource', ds.id] });
@@ -518,7 +530,7 @@
 		}
 	}
 
-	async function handleRefresh() {
+	async function handleIngest() {
 		refreshError = null;
 		isRefreshing = true;
 		const previousColumns = new Map(columns.map((col) => [col.name, col.dtype]));
@@ -529,11 +541,11 @@
 			return;
 		}
 		try {
-			const reingested = datasourceNeedsExternalRefresh(datasource);
+			const reingested = datasourceNeedsExternalIngest(datasource);
 			if (reingested) {
-				const refreshResult = await refreshDatasource(datasource.id);
-				if (refreshResult.isErr()) {
-					throw new Error(refreshResult.error.message);
+				const ingestResult = await ingestDatasource(datasource.id);
+				if (ingestResult.isErr()) {
+					throw new Error(ingestResult.error.message);
 				}
 			}
 			const result = await getDatasourceSchema(datasource.id, { refresh: !reingested });
@@ -561,7 +573,7 @@
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-preview', datasource.id] });
 		} catch (error) {
-			refreshError = error instanceof Error ? error.message : 'Failed to refresh schema';
+			refreshError = error instanceof Error ? error.message : 'Failed to ingest datasource schema';
 		} finally {
 			isRefreshing = false;
 		}
@@ -628,6 +640,12 @@
 			: null
 	);
 	const rawSchedulable = $derived(datasourceIsSchedulableRaw(ds));
+	const refreshActionLabel = $derived(
+		datasourceNeedsExternalIngest(ds) ? 'Re-ingest from source' : 'Refresh schema'
+	);
+	const refreshBusyLabel = $derived(
+		datasourceNeedsExternalIngest(ds) ? 'Re-ingesting...' : 'Refreshing schema...'
+	);
 
 	function formatDuration(ms: number | null): string {
 		if (ms === null) return '-';
@@ -1039,8 +1057,9 @@
 									})}>{config.metadata_path}</span
 								>
 							</div>
-							{#if config.source}
-								{@const fileSource = config.source as Record<string, unknown>}
+							{#if getExternalSource(ds)}
+								{@const externalSource = getExternalSource(ds)}
+								{@const externalSourceType = getExternalSourceType(ds)}
 								<div
 									class={css({
 										paddingTop: '2',
@@ -1068,11 +1087,14 @@
 											})}>Type</span
 										>
 										<FileTypeBadge
-											path={typeof fileSource.file_path === 'string' ? fileSource.file_path : ''}
+											sourceType={externalSourceType ?? undefined}
+											path={typeof externalSource?.file_path === 'string'
+												? externalSource.file_path
+												: undefined}
 											size="sm"
 										/>
 									</div>
-									{#if typeof fileSource.file_path === 'string'}
+									{#if typeof externalSource?.file_path === 'string'}
 										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 											<span
 												class={css({
@@ -1086,7 +1108,43 @@
 													wordBreak: 'break-all',
 													color: 'fg.secondary',
 													fontFamily: 'mono'
-												})}>{fileSource.file_path}</span
+												})}>{externalSource.file_path}</span
+											>
+										</div>
+									{/if}
+									{#if typeof externalSource?.connection_string === 'string'}
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+											<span
+												class={css({
+													textTransform: 'uppercase',
+													letterSpacing: 'wide',
+													color: 'fg.muted'
+												})}>Connection</span
+											>
+											<span
+												class={css({
+													wordBreak: 'break-all',
+													color: 'fg.secondary',
+													fontFamily: 'mono'
+												})}>{externalSource.connection_string}</span
+											>
+										</div>
+									{/if}
+									{#if typeof externalSource?.query === 'string'}
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+											<span
+												class={css({
+													textTransform: 'uppercase',
+													letterSpacing: 'wide',
+													color: 'fg.muted'
+												})}>Query</span
+											>
+											<span
+												class={css({
+													wordBreak: 'break-all',
+													color: 'fg.secondary',
+													fontFamily: 'mono'
+												})}>{externalSource.query}</span
 											>
 										</div>
 									{/if}
@@ -1155,15 +1213,15 @@
 							alignItems: 'center',
 							gap: '2'
 						})}
-						onclick={handleRefresh}
+						onclick={handleIngest}
 						disabled={isRefreshing || updateMutation.isPending}
 					>
 						{#if isRefreshing}
 							<Loader size={16} class={css({ animation: 'spin 1s linear infinite' })} />
-							Refreshing...
+							{refreshBusyLabel}
 						{:else}
 							<RefreshCw size={16} />
-							Refresh
+							{refreshActionLabel}
 						{/if}
 					</button>
 					{#if hasChanges}
@@ -1198,7 +1256,7 @@
 						<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
 							<CircleAlert size={20} />
 							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-								<p class={css({ margin: '0', fontWeight: 'semibold' })}>Refresh failed</p>
+								<p class={css({ margin: '0', fontWeight: 'semibold' })}>Ingest failed</p>
 								<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>{refreshError}</p>
 							</div>
 						</div>
@@ -1704,7 +1762,8 @@
 					<div class={emptyText({ size: 'panel' })}>
 						<p class={css({ margin: '0' })}>No runs associated with this datasource.</p>
 						<p class={css({ margin: '0', marginTop: '1', color: 'fg.tertiary' })}>
-							Runs will appear here when this datasource is used in analyses.
+							Runs will appear here when this datasource is onboarded, rebuilt from source, or used
+							in analyses.
 						</p>
 					</div>
 				{:else}
@@ -1736,6 +1795,7 @@
 							<span>Created</span>
 						</div>
 						{#each filteredRuns as run, index (run.id)}
+							{@const displayKind = engineRunDisplayKind(run.kind)}
 							<div
 								class={css(
 									{
@@ -1752,19 +1812,16 @@
 								<div
 									class={css({ display: 'flex', alignItems: 'center', gap: '2', fontSize: 'xs' })}
 								>
-									{#if run.kind === 'preview'}
+									{#if displayKind === 'preview'}
 										<Eye size={14} class={css({ flexShrink: '0', color: 'accent.primary' })} />
-										<span>Preview</span>
-									{:else if run.kind === 'build'}
+									{:else if displayKind === 'build'}
 										<Save size={14} class={css({ flexShrink: '0', color: 'accent.primary' })} />
-										<span>Build</span>
-									{:else if run.kind === 'row_count'}
+									{:else if displayKind === 'row_count'}
 										<RefreshCw size={14} class={css({ flexShrink: '0', color: 'fg.secondary' })} />
-										<span>Row Count</span>
 									{:else}
 										<Download size={14} class={css({ flexShrink: '0', color: 'fg.success' })} />
-										<span>Export</span>
 									{/if}
+									<span>{engineRunKindLabel(run.kind)}</span>
 									{#if run.builtTag}
 										<span
 											class={chip({ tone: 'accent' })}

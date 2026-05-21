@@ -150,11 +150,20 @@ def test_list_engine_runs_excludes_build_kind(test_db_session):
             datasource_id="ds-preview",
         ),
     )
+    engine_run_service.create_engine_run(
+        test_db_session,
+        _create_payload(
+            EngineRunKind.INGEST,
+            EngineRunStatus.SUCCESS,
+            analysis_id=None,
+            datasource_id="ds-ingest",
+        ),
+    )
 
     rows = engine_run_service.list_engine_runs(test_db_session)
 
-    assert len(rows) == 1
-    assert rows[0].kind == EngineRunKind.PREVIEW
+    assert len(rows) == 2
+    assert {row.kind for row in rows} == {EngineRunKind.PREVIEW, EngineRunKind.INGEST}
     assert engine_run_service.list_engine_runs(test_db_session, kind=EngineRunKind.BUILD) == []
 
 

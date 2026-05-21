@@ -27,7 +27,6 @@ test.describe('Analyses – list & gallery', () => {
 	});
 
 	test('lists existing analysis after API create', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-list-ds-${uid()}`;
 		const aName = `E2E List ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -42,7 +41,6 @@ test.describe('Analyses – list & gallery', () => {
 	});
 
 	test('search filters out non-matching analyses', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const suffix = uid();
 		const dsName = `e2e-search-ds-${suffix}`;
 		const analysisName = `E2E Search Alpha ${suffix}`;
@@ -65,7 +63,6 @@ test.describe('Analyses – list & gallery', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(60_000);
 		const suffix = uid();
 		const dsName = `e2e-favorite-ds-${suffix}`;
 		const analysisName = `E2E Favorite ${suffix}`;
@@ -81,7 +78,7 @@ test.describe('Analyses – list & gallery', () => {
 
 			const favorites = page.getByRole('group', { name: 'Favorite analyses' });
 			const link = favorites.getByRole('link', { name: analysisName });
-			await expect(link).toBeVisible({ timeout: 10_000 });
+			await expect(link).toBeVisible({ timeout: 5_000 });
 
 			await page.reload({ waitUntil: 'networkidle' });
 			await gotoAnalysesGallery(page);
@@ -89,7 +86,7 @@ test.describe('Analyses – list & gallery', () => {
 			const persistedLink = page
 				.getByRole('group', { name: 'Favorite analyses' })
 				.getByRole('link', { name: analysisName });
-			await expect(persistedLink).toBeVisible({ timeout: 10_000 });
+			await expect(persistedLink).toBeVisible({ timeout: 5_000 });
 			await persistedLink.click();
 			await expect(page).toHaveURL(`/analysis/${aId}`);
 		} finally {
@@ -116,7 +113,7 @@ test.describe('Analyses – list & gallery', () => {
 			await expect(dialog).toBeVisible();
 			await dialog.getByRole('button', { name: /^Delete$/ }).click();
 
-			await expect(card).toHaveCount(countBefore - 1, { timeout: 8_000 });
+			await expect(card).toHaveCount(countBefore - 1, { timeout: 5_000 });
 		} finally {
 			await deleteDatasourceViaUI(page, dsName);
 		}
@@ -154,11 +151,10 @@ test.describe('Analyses – create wizard', () => {
 	test('Cancel on step 1 returns to home', async ({ page }) => {
 		await gotoNewAnalysis(page);
 		await page.getByRole('link', { name: /Cancel/i }).click();
-		await expect(page).toHaveURL('/', { timeout: 8_000 });
+		await expect(page).toHaveURL('/', { timeout: 5_000 });
 	});
 
 	test('full create flow: wizard → analysis detail page', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-create-ds-${uid()}`;
 		const aName = `E2E Created ${uid()}`;
 		await createDatasource(request, dsName);
@@ -194,7 +190,7 @@ test.describe('Analyses – create wizard', () => {
 			// Redirects to an actual analysis editor, not back to /analysis/new
 			await expect(page).toHaveURL(
 				(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-				{ timeout: 20_000 }
+				{ timeout: 5_000 }
 			);
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
@@ -203,7 +199,6 @@ test.describe('Analyses – create wizard', () => {
 	});
 
 	test('template create flow reaches editor for Data Quality Audit', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const dsName = `e2e-template-ds-${uid()}`;
 		const aName = `E2E Template ${uid()}`;
 		await createDatasource(request, dsName);
@@ -231,7 +226,7 @@ test.describe('Analyses – create wizard', () => {
 
 			await expect(page).toHaveURL(
 				(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-				{ timeout: 20_000 }
+				{ timeout: 5_000 }
 			);
 			const match = page.url().match(/\/analysis\/([^/?#]+)/);
 			if (!match || match[1] === 'new') {
@@ -292,7 +287,7 @@ test.describe('Analyses – detail page', () => {
 
 	test('step library shows search box', async ({ page }) => {
 		await gotoAnalysisEditor(page, aId);
-		await expect(page.getByPlaceholder(/Search operations/i)).toBeVisible({ timeout: 10_000 });
+		await expect(page.getByPlaceholder(/Search operations/i)).toBeVisible({ timeout: 5_000 });
 	});
 
 	test('step library search filters operations', async ({ page }) => {
@@ -306,7 +301,7 @@ test.describe('Analyses – detail page', () => {
 	test('Save button is present', async ({ page }) => {
 		await gotoAnalysisEditor(page, aId);
 		await expect(page.getByRole('button', { name: /^(Save|Saved|Saving\.\.\.)$/ })).toBeVisible({
-			timeout: 10_000
+			timeout: 5_000
 		});
 	});
 
@@ -314,7 +309,7 @@ test.describe('Analyses – detail page', () => {
 		await page.goto(`/analysis/${aId}`);
 		await waitForLayoutReady(page);
 		await expect(page.getByRole('heading', { name: aName, level: 1 })).toBeVisible({
-			timeout: 15_000
+			timeout: 5_000
 		});
 	});
 });
@@ -326,7 +321,7 @@ test.describe('Analyses – detail error state', () => {
 		await page.goto(`/analysis/${BAD_ID}`);
 
 		await expect(page.locator('[data-testid="analysis-load-error"]')).toBeVisible({
-			timeout: 15_000
+			timeout: 5_000
 		});
 		await expect(page.getByText('Error loading analysis')).toBeVisible();
 
@@ -338,7 +333,7 @@ test.describe('Analyses – detail error state', () => {
 	test('analysis error page does not crash navigation', async ({ page }) => {
 		await page.goto(`/analysis/${BAD_ID}`);
 		await expect(page.locator('[data-testid="analysis-load-error"]')).toBeVisible({
-			timeout: 15_000
+			timeout: 5_000
 		});
 
 		await page.getByRole('link', { name: 'Analyses' }).click();

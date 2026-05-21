@@ -29,7 +29,13 @@
 		unfavoriteAnalysis
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
-	import { downloadBlob, getEngineDefaults, getStepSchema } from '$lib/api/compute';
+	import {
+		downloadBlob,
+		getEngineDefaults,
+		getStepSchema,
+		shutdownEngineBestEffort,
+		spawnEngine
+	} from '$lib/api/compute';
 	import { openLockSession, type LockSessionError } from '$lib/api/locks';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
@@ -120,6 +126,7 @@
 	const draftLoadGate = createAsyncGate();
 	const inferredSchemaGate = createAsyncGate();
 	let pendingSourceSchemaKeys = new SvelteSet<string>();
+	let warmedEngineKey = $state<string | null>(null);
 
 	let lockMode = $state<EditorLockMode>('pending');
 	let lockIntent = $state<'editing' | 'released'>('editing');
@@ -161,6 +168,17 @@
 		if (editorAccessState === 'pending' || editorAccessState === 'locked') return;
 		lockIntent = lockIntent === 'released' ? 'editing' : 'released';
 	}
+
+	// Cleanup: analysis engines should not accumulate after the user leaves the editor.
+	// Keep the current analysis warm only while this route is mounted; opening the page
+	// again will prewarm it immediately.
+	$effect(() => {
+		if (!validAnalysisId) return;
+		const analysisIdForCleanup = validAnalysisId;
+		return () => {
+			shutdownEngineBestEffort(analysisIdForCleanup);
+		};
+	});
 
 	// Websocket: $derived can't manage lock acquire + websocket watcher lifecycle.
 	$effect(() => {
@@ -500,6 +518,49 @@
 				});
 			}
 		);
+	});
+
+	// Network: warm the compute engine shortly after the route knows the analysis id.
+	// A small delay still overlaps engine startup with analysis fetch/layout work,
+	// but avoids spawning engines for transient hidden setup pages that redirect
+	// away immediately after creation/import.
+	$effect(() => {
+		if (!validAnalysisId) {
+			analysisStore.setPreviewPaused(false);
+			warmedEngineKey = null;
+			return;
+		}
+		const nextKey = `${validAnalysisId}:${JSON.stringify(analysisStore.resourceConfig ?? {})}`;
+		if (warmedEngineKey === nextKey) {
+			analysisStore.setPreviewPaused(false);
+			return;
+		}
+		warmedEngineKey = nextKey;
+		analysisStore.setPreviewPaused(true);
+		let alive = true;
+		const timer = window.setTimeout(() => {
+			if (!alive) return;
+			spawnEngine(validAnalysisId, analysisStore.resourceConfig ?? undefined).match(
+				() => {
+					if (!alive) return;
+					analysisStore.setPreviewPaused(false);
+				},
+				(err) => {
+					if (!alive) return;
+					track({
+						event: 'engine_error',
+						action: 'prewarm',
+						target: validAnalysisId,
+						meta: { message: err.message }
+					});
+					analysisStore.setPreviewPaused(false);
+				}
+			);
+		}, 300);
+		return () => {
+			alive = false;
+			window.clearTimeout(timer);
+		};
 	});
 
 	// Network: $derived can't hydrate inferred schemas for expression/with_columns steps.

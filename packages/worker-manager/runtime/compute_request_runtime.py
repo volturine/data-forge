@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,15 @@ from runtime.compute_manager import ProcessManager
 from runtime.worker_runtime import runtime_namespaces
 
 logger = logging.getLogger(__name__)
+
+_COMPUTE_REQUEST_MAX_WORKERS = max(
+    1,
+    min(settings.compute_request_concurrency, max(settings.build_worker_max_processes, 6)),
+)
+_COMPUTE_REQUEST_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_COMPUTE_REQUEST_MAX_WORKERS,
+    thread_name_prefix="compute-request",
+)
 
 
 @dataclass(frozen=True)
@@ -97,7 +107,6 @@ async def compute_request_loop(
             stop_task = asyncio.create_task(stop_event.wait())
             done, pending = await asyncio.wait(
                 {wait_task, stop_task},
-                timeout=0.25,
                 return_when=asyncio.FIRST_COMPLETED,
             )
             for task in pending:
@@ -133,6 +142,11 @@ def release_worker_requests(worker_id: str) -> None:
 
 
 async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManager) -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
+
+
+def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManager) -> None:
     token = set_namespace_context(claimed.namespace)
     session_gen = get_db()
     session = next(session_gen)
@@ -298,9 +312,9 @@ async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManag
                 claimed.id,
                 response_json=datasource_response.model_dump(mode="json"),
             )
-        elif claimed.kind == ComputeRequestKind.REFRESH_DATASOURCE:
+        elif claimed.kind == ComputeRequestKind.INGEST_DATASOURCE:
             datasource_id = str(claimed.request_json["datasource_id"])
-            datasource_response = datasource_service.refresh_external_datasource(session, datasource_id)
+            datasource_response = datasource_service.ingest_external_datasource(session, datasource_id)
             compute_requests_service.mark_request_completed(
                 session,
                 claimed.id,
@@ -392,7 +406,7 @@ async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManag
         session.close()
         session_gen.close()
         reset_namespace(token)
-        await asyncio.to_thread(runtime_ipc.notify_compute_response, claimed.id)
+        runtime_ipc.notify_compute_response(claimed.id)
 
 
 def _write_artifact(request_id: str, filename: str, content: bytes) -> Path:

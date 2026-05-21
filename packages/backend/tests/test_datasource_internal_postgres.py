@@ -4,7 +4,7 @@ from typing import Any
 from contracts.datasource.models import DataSource
 from contracts.datasource.source_types import DataSourceType
 
-from modules.datasource import routes
+from modules.datasource import service
 
 
 class _AvailableRuntimeProbe:
@@ -14,7 +14,7 @@ class _AvailableRuntimeProbe:
         return True
 
 
-async def _create_database_datasource_stub(
+def _create_database_datasource_stub(
     session,
     *,
     name: str,
@@ -55,6 +55,49 @@ def test_list_internal_postgres_tables_reports_application_tables(client, test_d
     assert row["is_onboarded"] is False
 
 
+def test_internal_postgres_display_names_strip_internal_namespace_storage_prefix(test_db_session) -> None:
+    namespace_public = DataSource(
+        id="namespace-public-ds",
+        name="internal.df$tenant$public.users",
+        source_type="iceberg",
+        config={
+            "metadata_path": "/tmp/namespace-public",
+            "source": {
+                "source_type": "database",
+                "connection_string": service.internal_postgres_connection_string(),
+                "query": 'SELECT * FROM "df$tenant$public"."users"',
+            },
+        },
+        created_by="import",
+        created_at=datetime.now(UTC),
+    )
+    default_namespace = DataSource(
+        id="default-namespace-ds",
+        name="internal.default.users",
+        source_type="iceberg",
+        config={
+            "metadata_path": "/tmp/default-namespace",
+            "source": {
+                "source_type": "database",
+                "connection_string": service.internal_postgres_connection_string(),
+                "query": 'SELECT * FROM "default"."users"',
+            },
+        },
+        created_by="import",
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(namespace_public)
+    test_db_session.add(default_namespace)
+    test_db_session.commit()
+
+    listed = {item.id: item.name for item in service.list_datasources(test_db_session, include_hidden=True)}
+
+    assert listed[namespace_public.id] == "internal.public.users"
+    assert listed[default_namespace.id] == "internal.default.users"
+    assert service.get_datasource(test_db_session, namespace_public.id).name == "internal.public.users"
+    assert service.get_datasource(test_db_session, default_namespace.id).name == "internal.default.users"
+
+
 def test_toggle_internal_postgres_table_creates_database_datasource_once_and_deletes_on_disable(
     client,
     monkeypatch,
@@ -62,12 +105,12 @@ def test_toggle_internal_postgres_table_creates_database_datasource_once_and_del
 ) -> None:
     calls = 0
 
-    async def _stub(*args, **kwargs):
+    def _stub(*args, **kwargs):
         nonlocal calls
         calls += 1
-        return await _create_database_datasource_stub(*args, **kwargs)
+        return _create_database_datasource_stub(*args, **kwargs)
 
-    monkeypatch.setattr(routes, "create_remote_database_datasource", _stub)
+    monkeypatch.setattr(service, "create_database_datasource_record", _stub)
 
     enabled = client.post(
         "/api/v1/datasource/internal-postgres/toggle",

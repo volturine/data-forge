@@ -2,11 +2,43 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
 
 from contracts.compute_requests.models import ComputeRequest, ComputeRequestKind, ComputeRequestStatus
+
+_HIGH_PRIORITY_REQUEST_KINDS = frozenset(
+    {
+        ComputeRequestKind.SPAWN_ENGINE,
+        ComputeRequestKind.CONFIGURE_ENGINE,
+        ComputeRequestKind.SHUTDOWN_ENGINE,
+        ComputeRequestKind.PREVIEW,
+        ComputeRequestKind.SCHEMA,
+        ComputeRequestKind.ROW_COUNT,
+        ComputeRequestKind.DATASOURCE_SCHEMA,
+        ComputeRequestKind.DATASOURCE_COLUMN_STATS,
+        ComputeRequestKind.COMPARE_ICEBERG_SNAPSHOTS,
+        ComputeRequestKind.DOWNLOAD,
+        ComputeRequestKind.EXPORT,
+    }
+)
+
+_USER_CREATE_REQUEST_KINDS = frozenset(
+    {
+        ComputeRequestKind.CREATE_FILE_DATASOURCE,
+        ComputeRequestKind.CREATE_DATABASE_DATASOURCE,
+        ComputeRequestKind.CREATE_ICEBERG_DATASOURCE,
+    }
+)
+
+
+def _request_priority_clause(table):
+    return case(
+        *[(table.c.kind == kind, 0) for kind in _HIGH_PRIORITY_REQUEST_KINDS],
+        *[(table.c.kind == kind, 1) for kind in _USER_CREATE_REQUEST_KINDS],
+        else_=2,
+    )
 
 
 def _utcnow() -> datetime:
@@ -40,7 +72,7 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
     reclaimable = set(reclaimable_owner_ids or ())
     queued_clause = table.c.status == ComputeRequestStatus.QUEUED
     reclaimable_clause = and_(table.c.status == ComputeRequestStatus.RUNNING, or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable)))
-    base = select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).order_by(table.c.created_at).limit(1)
+    base = select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).order_by(_request_priority_clause(table), table.c.created_at).limit(1)
     dialect = session.get_bind().dialect.name
     stmt = base.with_for_update(skip_locked=True) if dialect == 'postgresql' else base
     row = session.execute(stmt).scalars().first()

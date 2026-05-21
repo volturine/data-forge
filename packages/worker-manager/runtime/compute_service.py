@@ -16,6 +16,7 @@ from typing import Final, TypedDict, cast
 
 import polars as pl
 import pyarrow as pa  # type: ignore[import-untyped]
+import pyarrow.parquet as pq  # type: ignore[import-untyped]
 from contracts.analysis.models import Analysis
 from contracts.compute import schemas as compute_schemas
 from contracts.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
@@ -49,6 +50,7 @@ from core.namespace import get_namespace, namespace_paths
 from pyiceberg.catalog import load_catalog
 from pyiceberg.table import Table as IcebergTable
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col
 
 from builds.build_live import ActiveBuild
@@ -63,6 +65,14 @@ from runtime.compute_utils import (
 from runtime.notification_delivery import notification_service, render_template
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_catalog_namespace(catalog, namespace: str) -> None:
+    try:
+        catalog.create_namespace_if_not_exists(namespace)
+    except IntegrityError:
+        logger.info("Namespace %s was created concurrently; continuing", namespace)
+
 
 MAX_DOWNLOAD_BYTES: Final = 10 * 1024 * 1024
 
@@ -587,7 +597,9 @@ def _upsert_output_datasource(
     """Create or update the output datasource for an export.
 
     If ``result_id`` points to an existing row, update it in-place.
-    Otherwise create a brand-new ``DataSource``.  Returns the DB object.
+    Otherwise create a brand-new ``DataSource``. Returns the DB object and leaves
+    commit ownership to the caller so build completion can batch this write with
+    the accompanying build-run update.
     """
     try:
         uuid.UUID(result_id)
@@ -605,12 +617,11 @@ def _upsert_output_datasource(
         if is_hidden is not None:
             existing.is_hidden = is_hidden
         session.add(existing)
-        session.commit()
+        session.flush()
         return existing
 
-    new_id = result_id
     ds = DataSource(
-        id=new_id,
+        id=result_id,
         name=name,
         source_type=source_type,
         config=config,
@@ -621,7 +632,7 @@ def _upsert_output_datasource(
         created_at=datetime.now(UTC),
     )
     session.add(ds)
-    session.commit()
+    session.flush()
     return ds
 
 
@@ -2015,7 +2026,7 @@ def export_data(
         }
 
         catalog = load_catalog("local", **catalog_config)
-        catalog.create_namespace_if_not_exists(namespace)
+        _ensure_catalog_namespace(catalog, namespace)
 
         identifier = f"{namespace}.{table_name}"
 
@@ -2029,11 +2040,13 @@ def export_data(
             )
 
         write_started = time.perf_counter()
-        arrow_table = pl.read_parquet(tmp_output).to_arrow()
-        if build_mode == "recreate" and catalog.table_exists(identifier):
+        arrow_table = pq.read_table(tmp_output)
+        table_exists = catalog.table_exists(identifier)
+        if build_mode == "recreate" and table_exists:
             catalog.drop_table(identifier)
+            table_exists = False
 
-        if catalog.table_exists(identifier):
+        if table_exists:
             iceberg_table = catalog.load_table(identifier)
             if build_mode == "incremental":
                 iceberg_table.append(arrow_table)
@@ -2876,6 +2889,17 @@ async def _stop_stream_task(task: asyncio.Task | None) -> None:
         _ = await task
 
 
+def _analysis_build_engine_id(analysis_id: str) -> str:
+    return f"{analysis_id}:build"
+
+
+async def _prewarm_build_engine(manager: ProcessManager, engine_id: str) -> None:
+    try:
+        await asyncio.to_thread(manager.spawn_engine, engine_id)
+    except Exception:
+        logger.debug("Build engine prewarm failed for %s", engine_id, exc_info=True)
+
+
 async def run_analysis_build_stream(
     session: Session,
     manager: ProcessManager,
@@ -2925,7 +2949,8 @@ async def run_analysis_build_stream(
         engine_run_id=build.current_engine_run_id,
     )
 
-    build_engine_id = f"{analysis_id_value}:build:{build.build_id}"
+    build_engine_id = _analysis_build_engine_id(analysis_id_value)
+    build_engine_prewarm_task = asyncio.create_task(_prewarm_build_engine(manager, build_engine_id))
     results: list[dict] = []
     tabs_built = 0
     build_step_base = 0
@@ -3523,7 +3548,6 @@ async def run_analysis_build_stream(
             ),
         )
     else:
-        manager.shutdown_engine(build_engine_id)
         await _emit_build_event(
             emitter,
             event=compute_schemas.BuildCompleteEvent(
@@ -3544,6 +3568,12 @@ async def run_analysis_build_stream(
                 duration_ms=elapsed_ms,
             ),
         )
+    if not build_engine_prewarm_task.done():
+        build_engine_prewarm_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await build_engine_prewarm_task
+    else:
+        await build_engine_prewarm_task
     return {
         "analysis_id": analysis_id_value,
         "tabs_built": tabs_built,

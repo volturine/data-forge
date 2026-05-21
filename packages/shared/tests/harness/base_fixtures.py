@@ -12,7 +12,13 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, create_engine
 
-from harness.postgres_harness import ExternalPostgres, PostgresContainer, require_docker
+from harness.postgres_harness import (
+    ExternalPostgres,
+    PostgresContainer,
+    cleanup_stale_test_postgres,
+    docker_available,
+    require_docker,
+)
 
 if TYPE_CHECKING:
     from contracts.analysis.models import Analysis
@@ -25,6 +31,10 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     os.environ.setdefault('ENV_FILE', '')
     os.environ.setdefault('SETTINGS_ENCRYPTION_KEY', 'test-key')
     os.environ.setdefault('DATABASE_URL', 'postgresql+psycopg://dataforge:dataforge@127.0.0.1:5432/dataforge')
+    if os.environ.get('TEST_POSTGRES_URL'):
+        return
+    if docker_available():
+        cleanup_stale_test_postgres()
 
 
 def _settings():

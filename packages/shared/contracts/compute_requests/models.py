@@ -15,7 +15,7 @@ class ComputeRequestKind(DataForgeStrEnum):
     CREATE_FILE_DATASOURCE = 'create_file_datasource'
     CREATE_DATABASE_DATASOURCE = 'create_database_datasource'
     CREATE_ICEBERG_DATASOURCE = 'create_iceberg_datasource'
-    REFRESH_DATASOURCE = 'refresh_datasource'
+    INGEST_DATASOURCE = 'ingest_datasource'
     DATASOURCE_SCHEMA = 'datasource_schema'
     DATASOURCE_COLUMN_STATS = 'datasource_column_stats'
     COMPARE_ICEBERG_SNAPSHOTS = 'compare_iceberg_snapshots'

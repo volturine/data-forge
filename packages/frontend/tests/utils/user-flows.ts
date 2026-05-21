@@ -11,7 +11,6 @@ export const E2E_PASSWORD = 'E2eTestPw12345';
 const SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n';
 const DATE_CSV =
 	'id,name,event_date,amount\n1,Alice,2024-01-15,100\n2,Bob,2024-03-22,250\n3,Charlie,2024-06-10,75\n';
-
 function generateLargeCsv(rows: number): string {
 	const names = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank', 'Grace', 'Hank'];
 	const cities = ['London', 'Paris', 'Berlin', 'Tokyo', 'Sydney', 'Oslo', 'Rome', 'Madrid'];
@@ -27,7 +26,7 @@ function generateLargeCsv(rows: number): string {
 export async function registerViaUi(page: Page, email: string, name: string): Promise<void> {
 	await page.goto('/register');
 	await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({
-		timeout: 15_000
+		timeout: 5_000
 	});
 	const nameInput = page.locator('#name');
 	const emailInput = page.locator('#email');
@@ -42,20 +41,20 @@ export async function registerViaUi(page: Page, email: string, name: string): Pr
 	await expect(passwordInput).toHaveValue(E2E_PASSWORD);
 	await expect(confirmInput).toHaveValue(E2E_PASSWORD);
 	const createButton = page.getByRole('button', { name: 'Create account', exact: true });
-	await expect(createButton).toBeEnabled({ timeout: 15_000 });
+	await expect(createButton).toBeEnabled({ timeout: 5_000 });
 	await createButton.click();
 	const continueLink = page.getByRole('link', { name: /Continue/i });
 	await Promise.race([
-		continueLink.waitFor({ state: 'visible', timeout: 15_000 }),
-		page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 15_000 }),
-		page.getByText(/Account created\./i).waitFor({ state: 'visible', timeout: 15_000 })
+		continueLink.waitFor({ state: 'visible', timeout: 5_000 }),
+		page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 5_000 }),
+		page.getByText(/Account created\./i).waitFor({ state: 'visible', timeout: 5_000 })
 	]).catch(() => undefined);
 	if (await continueLink.isVisible().catch(() => false)) {
 		await continueLink.click();
 	} else {
 		await page.goto('/', { waitUntil: 'domcontentloaded' });
 	}
-	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 15_000 });
+	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 5_000 });
 }
 
 export async function uploadDatasourceViaUi(
@@ -70,7 +69,7 @@ export async function uploadDatasourceViaUi(
 	await page.goto('/datasources/new', { waitUntil: 'domcontentloaded' });
 	await waitForLayoutReady(page);
 	const fileInput = page.locator('#file-input');
-	await expect(fileInput).toBeVisible({ timeout: 15_000 });
+	await expect(fileInput).toBeVisible({ timeout: 5_000 });
 	await fileInput.setInputFiles({
 		name: `${name}.csv`,
 		mimeType: 'text/csv',
@@ -82,29 +81,26 @@ export async function uploadDatasourceViaUi(
 		await page.locator('#file-description').fill(options.description);
 	}
 	const uploadBtn = page.getByRole('button', { name: 'Upload', exact: true });
-	await expect(uploadBtn).toBeEnabled({ timeout: 10_000 });
-	const [uploadResponse] = await Promise.all([
-		page.waitForResponse(
-			(resp) =>
-				resp.url().includes('/api/v1/datasource/upload') && resp.request().method() === 'POST',
-			{ timeout: 60_000 }
-		),
-		uploadBtn.click()
-	]);
-	if (!uploadResponse.ok()) {
-		throw new Error(
-			`Upload failed for ${name}: ${uploadResponse.status()} ${uploadResponse.statusText()}`
-		);
-	}
-	const uploaded = (await uploadResponse.json()) as { id?: string };
-	const datasourceId = typeof uploaded.id === 'string' ? uploaded.id : null;
+	await expect(uploadBtn).toBeEnabled({ timeout: 5_000 });
+	await uploadBtn.click();
+	await expect(
+		page,
+		`Upload did not redirect to the created datasource list for ${name}`
+	).toHaveURL(
+		(url) =>
+			url.pathname === '/datasources' &&
+			(url.searchParams.has('created_id') || url.searchParams.has('id')),
+		{ timeout: 5_000 }
+	);
+	const currentUrl = new URL(page.url());
+	const datasourceId =
+		currentUrl.searchParams.get('created_id') ?? currentUrl.searchParams.get('id');
 	if (!datasourceId) {
-		throw new Error(`Could not extract datasource id from upload response for ${name}`);
+		throw new Error(`Could not extract browser-visible datasource id after upload for ${name}`);
 	}
-	await expect(page).toHaveURL((url) => url.pathname === '/datasources', { timeout: 30_000 });
-	await waitForDatasourceList(page, 30_000);
+	await waitForDatasourceList(page, 5_000);
 	const row = page.locator(`[data-ds-row="${name}"]`);
-	await expect(row).toBeVisible({ timeout: 30_000 });
+	await expect(row).toBeVisible({ timeout: 5_000 });
 	return { id: datasourceId };
 }
 
@@ -136,7 +132,7 @@ export async function createAnalysisViaUi(
 	await page.getByRole('button', { name: /Create Analysis/i }).click();
 	await expect(page).toHaveURL(
 		(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-		{ timeout: 20_000 }
+		{ timeout: 5_000 }
 	);
 	const match = page.url().match(/\/analysis\/([^/?#]+)/);
 	if (!match || match[1] === 'new') {
@@ -181,7 +177,7 @@ export async function importAnalysisViaUi(
 	await page.getByRole('button', { name: /Create Analysis/i }).click();
 	await expect(page).toHaveURL(
 		(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-		{ timeout: 30_000 }
+		{ timeout: 5_000 }
 	);
 	const match = page.url().match(/\/analysis\/([^/?#]+)/);
 	if (!match || match[1] === 'new') {
@@ -203,7 +199,7 @@ export async function createUdfViaUi(page: Page, name: string): Promise<string> 
 		page.getByTestId('udf-save-button').click()
 	]);
 	const payload = (await response.json()) as { id: string };
-	await expect(page).toHaveURL(new RegExp(`/udfs/${payload.id}$`), { timeout: 15_000 });
+	await expect(page).toHaveURL(new RegExp(`/udfs/${payload.id}$`), { timeout: 5_000 });
 	return payload.id;
 }
 
@@ -260,5 +256,40 @@ export async function createHealthCheckViaUi(
 export async function waitForUdfVisible(page: Page, name: string): Promise<void> {
 	await page.goto('/udfs');
 	await waitForUdfList(page);
-	await expect(page.locator(`[data-udf-card="${name}"]`)).toBeVisible({ timeout: 10_000 });
+	await expect(page.locator(`[data-udf-card="${name}"]`)).toBeVisible({ timeout: 5_000 });
+}
+
+export async function shutdownEngineViaUi(
+	page: Page,
+	analysisId: string,
+	options?: { timeoutMs?: number }
+): Promise<void> {
+	const timeoutMs = options?.timeoutMs ?? 5_000;
+	await page.goto('/', { waitUntil: 'domcontentloaded' });
+	await waitForLayoutReady(page, timeoutMs);
+
+	const engineButton = page.getByRole('button', { name: 'Engine Monitor' });
+	await expect(engineButton).toBeVisible({ timeout: timeoutMs });
+	await engineButton.click();
+
+	const popup = page.locator('[data-engines-popup="true"]');
+	await expect(popup).toBeVisible({ timeout: timeoutMs });
+
+	const row = popup.locator(`[data-engine-row="${analysisId}"]`);
+	const shutdownButton = popup.locator(`[data-engine-shutdown="${analysisId}"]`);
+	const started = Date.now();
+	while (Date.now() - started < timeoutMs) {
+		if (await row.isVisible().catch(() => false)) {
+			await expect(shutdownButton).toBeEnabled({ timeout: 1_000 });
+			await shutdownButton.click();
+			await expect(row).toBeHidden({
+				timeout: Math.max(timeoutMs - (Date.now() - started), 1_000)
+			});
+			await page.keyboard.press('Escape').catch(() => undefined);
+			return;
+		}
+		await page.waitForTimeout(250);
+	}
+
+	await page.keyboard.press('Escape').catch(() => undefined);
 }
