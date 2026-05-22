@@ -147,7 +147,6 @@ run_playwright_shard() {
     exec python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        --heartbeat-seconds "${E2E_HEARTBEAT_SECONDS:-0}" \
         -- npx playwright test --config=playwright.config.ts "$@"
 }
 
