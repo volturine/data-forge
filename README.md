@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/volturine/data-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/ci.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue.svg)](https://www.python.org/)
 [![Bun](https://img.shields.io/badge/runtime-Bun-black.svg)](https://bun.sh)
 
 Data-Forge is a **local-first**, **no-code** data transformation tool. Build multi-step data pipelines visually, preview results instantly, schedule automated builds, and keep everything on your own machine — no cloud, no subscriptions, no data leaving your computer.
@@ -65,7 +65,7 @@ Data-Forge is a **local-first**, **no-code** data transformation tool. Build mul
 
 | Layer | Technology |
 |-------|-----------|
-| **Backend Runtime** | Python 3.11+ with [uv](https://github.com/astral-sh/uv) |
+| **Backend Runtime** | Python 3.14+ with [uv](https://github.com/astral-sh/uv) |
 | **API Framework** | FastAPI (async) |
 | **Data Engine** | [Polars](https://pola.rs) + DuckDB |
 | **Storage** | Apache Iceberg via [PyIceberg](https://py.iceberg.apache.org) |
@@ -120,7 +120,7 @@ See [`docker/README.md`](docker/README.md) for the Docker production, evaluation
 
 ### Option 2: Local Development
 
-**Prerequisites:** Python 3.11+, [uv](https://github.com/astral-sh/uv), [Bun](https://bun.sh), [just](https://github.com/casey/just)
+**Prerequisites:** Python 3.14+, [uv](https://github.com/astral-sh/uv), [Bun](https://bun.sh), [just](https://github.com/casey/just)
 
 ```bash
 # Install all dependencies
@@ -185,7 +185,7 @@ See **[docs/ENV_VARIABLES.md](docs/ENV_VARIABLES.md)** for the complete referenc
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.14+
 - [uv](https://github.com/astral-sh/uv) — Python package manager
 - [Bun](https://bun.sh) — JavaScript runtime and package manager
 - [just](https://github.com/casey/just) — Command runner

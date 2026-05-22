@@ -97,7 +97,7 @@ class FilterOperator(DataForgeStrEnum):
         return f'Unsupported filter operator: {value}'
 
     @classmethod
-    def require_supported(cls, value: object) -> 'FilterOperator':
+    def require_supported(cls, value: object) -> FilterOperator:
         try:
             return cls.require(value)  # type: ignore[arg-type]
         except ValueError as exc:

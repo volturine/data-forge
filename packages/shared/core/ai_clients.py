@@ -255,7 +255,7 @@ class AIClientProviderDefinition:
     build: AIClientBuilder
 
     @classmethod
-    def require(cls, provider: str | AIProvider) -> 'AIClientProviderDefinition':
+    def require(cls, provider: str | AIProvider) -> AIClientProviderDefinition:
         normalized = str(provider).strip().lower()
         for definition in AI_CLIENT_PROVIDER_DEFINITIONS.values():
             if normalized == definition.provider.value or normalized in definition.aliases:

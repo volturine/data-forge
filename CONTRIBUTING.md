@@ -19,7 +19,7 @@ First off, thank you for considering contributing to Data-Forge! It's people lik
 
 Before you begin, ensure you have the following installed:
 
-- **Python 3.11+** — Backend runtime
+- **Python 3.14+** — Backend runtime
 - **Bun** — Frontend runtime and package manager
 - **uv** — Python package manager ([install](https://github.com/astral-sh/uv))
 - **just** — Command runner ([install](https://github.com/casey/just))

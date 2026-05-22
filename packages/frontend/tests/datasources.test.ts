@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures.js';
 import { createDatasource, createLargeDatasource } from './utils/api.js';
-import { deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import {
@@ -15,35 +15,46 @@ import { dialogByHeading } from './utils/locators.js';
  * E2E tests for datasources – mirrors test_datasource.py / test_datasource_extended.py.
  */
 test.describe('Datasources – list & management', () => {
-	test('list shows datasource description preview', async ({ page, request }) => {
-		const ds = `e2e-description-list-${uid()}`;
-		const description = 'Primary customer dataset for retention analysis and reporting.';
-		await createDatasource(request, ds, undefined, description);
+	let sharedListDatasource = '';
+	const sharedDescription = 'Primary customer dataset for retention analysis and reporting.';
+
+	test.beforeAll(async ({ request }) => {
+		sharedListDatasource = `e2e-description-list-${uid()}`;
+		await createDatasource(request, sharedListDatasource, undefined, sharedDescription);
+	});
+
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+		await deleteDatasourceViaUI(page, sharedListDatasource);
+		await page.close();
+		await context.close();
+	});
+	test('list shows datasource description preview', async ({ page }) => {
+		const ds = sharedListDatasource;
+		const description = sharedDescription;
 		try {
 			await page.goto('/datasources');
 			const row = page.locator(`[data-ds-row="${ds}"]`);
 			await expect(row).toBeVisible();
 			await expect(row.getByText(description)).toBeVisible();
 		} finally {
-			await deleteDatasourceViaUI(page, ds);
+			// shared datasource cleaned in afterAll
 		}
 	});
 
-	test('lists datasource after API create', async ({ page, request }) => {
-		const ds = `e2e-visible-${uid()}`;
-		await createDatasource(request, ds);
+	test('lists datasource after API create', async ({ page }) => {
+		const ds = sharedListDatasource;
 		try {
 			await page.goto('/datasources');
 			await expect(page.locator(`[data-ds-row="${ds}"]`)).toBeVisible();
 			await screenshot(page, 'datasources', 'list-with-datasource');
 		} finally {
-			await deleteDatasourceViaUI(page, ds);
+			// shared datasource cleaned in afterAll
 		}
 	});
 
-	test('shows Import and Analysis badges', async ({ page, request }) => {
-		const ds = `e2e-badge-${uid()}`;
-		await createDatasource(request, ds);
+	test('shows Import and Analysis badges', async ({ page }) => {
+		const ds = sharedListDatasource;
 		try {
 			await page.goto('/datasources');
 			const row = page.locator(`[data-ds-row="${ds}"]`);
@@ -51,13 +62,12 @@ test.describe('Datasources – list & management', () => {
 			// uploaded files have "Import" badge
 			await expect(row.getByText('Import', { exact: true })).toBeVisible();
 		} finally {
-			await deleteDatasourceViaUI(page, ds);
+			// shared datasource cleaned in afterAll
 		}
 	});
 
-	test('search input filters datasource list', async ({ page, request }) => {
-		const ds = `e2e-search-${uid()}`;
-		await createDatasource(request, ds);
+	test('search input filters datasource list', async ({ page }) => {
+		const ds = sharedListDatasource;
 		try {
 			await page.goto('/datasources');
 			const row = page.locator(`[data-ds-row="${ds}"]`);
@@ -67,16 +77,14 @@ test.describe('Datasources – list & management', () => {
 			await expect(row).not.toBeVisible();
 			await expect(page.getByText(/No datasources match/i)).toBeVisible();
 		} finally {
-			await deleteDatasourceViaUI(page, ds);
+			// shared datasource cleaned in afterAll
 		}
 	});
 
 	test('clicking a datasource clears the "No datasource selected" placeholder', async ({
-		page,
-		request
+		page
 	}) => {
-		const ds = `e2e-select-${uid()}`;
-		await createDatasource(request, ds);
+		const ds = sharedListDatasource;
 		try {
 			await page.goto('/datasources');
 			await expect(page.getByText(/No datasource selected/i)).toBeVisible();
@@ -84,7 +92,7 @@ test.describe('Datasources – list & management', () => {
 			await page.locator(`[data-ds-row="${ds}"]`).click();
 			await expect(page.getByText(/No datasource selected/i)).not.toBeVisible();
 		} finally {
-			await deleteDatasourceViaUI(page, ds);
+			// shared datasource cleaned in afterAll
 		}
 	});
 
@@ -190,13 +198,16 @@ test.describe('Datasources – upload page', () => {
 test.describe('Datasources – detail view', () => {
 	let ds: string;
 
-	test.beforeEach(async ({ request }) => {
+	test.beforeAll(async ({ request }) => {
 		ds = `e2e-detail-view-${uid()}`;
 		await createDatasource(request, ds);
 	});
 
-	test.afterEach(async ({ page }) => {
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteDatasourceViaUI(page, ds);
+		await page.close();
+		await context.close();
 	});
 
 	test('selecting datasource shows General tab with source information', async ({ page }) => {

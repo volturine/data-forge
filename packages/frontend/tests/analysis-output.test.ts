@@ -1,17 +1,35 @@
 import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis, shutdownEngine } from './utils/api.js';
-import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import {
+	createCleanupPage,
+	deleteAnalysisViaUI,
+	deleteDatasourceViaUI
+} from './utils/ui-cleanup.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
+
+let sharedDatasourceId = '';
+let sharedDatasourceName = '';
+
+test.beforeAll(async ({ request }) => {
+	sharedDatasourceName = `e2e-output-shared-ds-${uid()}`;
+	sharedDatasourceId = await createDatasource(request, sharedDatasourceName);
+});
+
+test.afterAll(async ({ browser, workerAuth }) => {
+	const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+	await deleteDatasourceViaUI(page, sharedDatasourceName);
+	await page.close();
+	await context.close();
+});
+
 // ── Output visibility toggle ────────────────────────────────────────────────
 
 test.describe('Analyses – output visibility toggle', () => {
 	test('OutputNode: visibility toggle button shows initial state', async ({ page, request }) => {
-		const dsName = `e2e-vis-toggle-ds-${uid()}`;
 		const aName = `E2E Vis Toggle ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -27,7 +45,6 @@ test.describe('Analyses – output visibility toggle', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
@@ -35,10 +52,8 @@ test.describe('Analyses – output visibility toggle', () => {
 		page,
 		request
 	}) => {
-		const dsName = `e2e-vis-build-ds-${uid()}`;
 		const aName = `E2E Vis Build ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -61,7 +76,6 @@ test.describe('Analyses – output visibility toggle', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
@@ -69,10 +83,8 @@ test.describe('Analyses – output visibility toggle', () => {
 		page,
 		request
 	}) => {
-		const dsName = `e2e-output-rebuild-ds-${uid()}`;
 		const aName = `E2E Output Rebuild ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			const outputName = (
@@ -109,6 +121,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			await expect(rebuiltToggleBtn).toContainText('hidden', { timeout: 5_000 });
 		} finally {
 			await shutdownEngine(request, aId);
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 });
@@ -117,10 +130,8 @@ test.describe('Analyses – output visibility toggle', () => {
 
 test.describe('Analyses – output node interactions', () => {
 	test('output node build button and mode selector are visible', async ({ page, request }) => {
-		const dsName = `e2e-output-ds-${uid()}`;
 		const aName = `E2E Output Node ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -148,15 +159,12 @@ test.describe('Analyses – output node interactions', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
 	test('selecting a mode updates the trigger text', async ({ page, request }) => {
-		const dsName = `e2e-output-mode-ds-${uid()}`;
 		const aName = `E2E Output Mode ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -192,15 +200,12 @@ test.describe('Analyses – output node interactions', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
 	test('collapsible sections toggle open and closed', async ({ page, request }) => {
-		const dsName = `e2e-output-sections-ds-${uid()}`;
 		const aName = `E2E Output Sections ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -244,15 +249,12 @@ test.describe('Analyses – output node interactions', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
 	test('table name inline edit', async ({ page, request }) => {
-		const dsName = `e2e-output-rename-ds-${uid()}`;
 		const aName = `E2E Output Rename ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -279,7 +281,6 @@ test.describe('Analyses – output node interactions', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });
@@ -288,10 +289,8 @@ test.describe('Analyses – output node interactions', () => {
 
 test.describe('Analyses – output node table name edit', () => {
 	test('OutputNode: edit table name, save, verify updated', async ({ page, request }) => {
-		const dsName = `e2e-output-name-ds-${uid()}`;
 		const aName = `E2E Output Name ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -315,7 +314,6 @@ test.describe('Analyses – output node table name edit', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });
@@ -324,10 +322,8 @@ test.describe('Analyses – output node table name edit', () => {
 
 test.describe('Analyses – output node persistence', () => {
 	test('build mode persists after save and reload', async ({ page, request }) => {
-		const dsName = `e2e-mode-persist-ds-${uid()}`;
 		const aName = `E2E Mode Persist ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -357,15 +353,12 @@ test.describe('Analyses – output node persistence', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
 	test('table name persists after save and reload', async ({ page, request }) => {
-		const dsName = `e2e-tablename-persist-ds-${uid()}`;
 		const aName = `E2E TableName Persist ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -401,7 +394,6 @@ test.describe('Analyses – output node persistence', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });
@@ -410,10 +402,8 @@ test.describe('Analyses – output node persistence', () => {
 
 test.describe('Analyses – row count action', () => {
 	test('count-rows: success shows row count badge', async ({ page, request }) => {
-		const dsName = `e2e-rowcount-ds-${uid()}`;
 		const aName = `E2E Row Count ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -433,17 +423,14 @@ test.describe('Analyses – row count action', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });
 
 test.describe('Analyses – row count on non-view steps', () => {
 	test('count-rows works on a filter step', async ({ page, request }) => {
-		const dsName = `e2e-rowcount-filter-ds-${uid()}`;
 		const aName = `E2E Row Count Filter ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'filter');
 			const filterNode = page.locator('[data-step-type="filter"]');
@@ -476,15 +463,12 @@ test.describe('Analyses – row count on non-view steps', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
 	test('count-rows works on a limit step', async ({ page, request }) => {
-		const dsName = `e2e-rowcount-limit-ds-${uid()}`;
 		const aName = `E2E Row Count Limit ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -517,7 +501,6 @@ test.describe('Analyses – row count on non-view steps', () => {
 		} finally {
 			await shutdownEngine(request, aId);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });

@@ -89,20 +89,18 @@ export async function gotoAnalysisEditor(
 	analysisId: string,
 	timeout = 5_000
 ): Promise<void> {
-	const deadline = Date.now() + timeout;
-	const remaining = () => Math.max(deadline - Date.now(), 1_000);
 	let lastError: unknown;
 
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		try {
-			await page.goto(`/analysis/${analysisId}`, { waitUntil: 'domcontentloaded' });
-			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: remaining() });
-			await waitForLayoutReady(page, remaining());
-			await waitForAnalysisEditor(page, deadline, 'editable');
+			await page.goto(`/analysis/${analysisId}`, { waitUntil: 'commit' });
+			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout });
+			await waitForLayoutReady(page, timeout);
+			await waitForAnalysisEditor(page, Date.now() + timeout, 'editable');
 			return;
 		} catch (error) {
 			lastError = error;
-			if (attempt === 1 || remaining() <= 1_500) throw error;
+			if (attempt === 1) throw error;
 			await page.waitForTimeout(500);
 		}
 	}
@@ -115,20 +113,18 @@ export async function gotoReadOnlyAnalysisEditor(
 	analysisId: string,
 	timeout = 5_000
 ): Promise<void> {
-	const deadline = Date.now() + timeout;
-	const remaining = () => Math.max(deadline - Date.now(), 1_000);
 	let lastError: unknown;
 
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		try {
-			await page.goto(`/analysis/${analysisId}`, { waitUntil: 'domcontentloaded' });
-			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: remaining() });
-			await waitForLayoutReady(page, remaining());
-			await waitForAnalysisEditor(page, deadline, 'locked');
+			await page.goto(`/analysis/${analysisId}`, { waitUntil: 'commit' });
+			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout });
+			await waitForLayoutReady(page, timeout);
+			await waitForAnalysisEditor(page, Date.now() + timeout, 'locked');
 			return;
 		} catch (error) {
 			lastError = error;
-			if (attempt === 1 || remaining() <= 1_500) throw error;
+			if (attempt === 1) throw error;
 			await page.waitForTimeout(500);
 		}
 	}
@@ -141,9 +137,8 @@ export async function gotoReadOnlyAnalysisEditor(
  * Same gates as `gotoAnalysisEditor` but without the navigation step.
  */
 export async function waitForEditorReload(page: Page, timeout = 5_000): Promise<void> {
-	const deadline = Date.now() + timeout;
-	await waitForLayoutReady(page, Math.max(deadline - Date.now(), 1_000));
-	await waitForAnalysisEditor(page, deadline, 'editable');
+	await waitForLayoutReady(page, timeout);
+	await waitForAnalysisEditor(page, Date.now() + timeout, 'editable');
 }
 
 /**

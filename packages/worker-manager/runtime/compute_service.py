@@ -41,13 +41,13 @@ from core.exceptions import (
     PipelineValidationError,
 )
 from core.healthcheck_runner import run_healthchecks
+from core.iceberg_catalog import load_runtime_catalog
 from core.iceberg_metadata import (
     resolve_iceberg_branch_metadata_path,
     resolve_iceberg_metadata_path,
     sync_iceberg_schema,
 )
 from core.namespace import get_namespace, namespace_paths
-from pyiceberg.catalog import load_catalog
 from pyiceberg.table import Table as IcebergTable
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -603,7 +603,7 @@ def _upsert_output_datasource(
     """
     try:
         uuid.UUID(result_id)
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         raise ValueError(f"result_id must be a valid UUID, got: {result_id!r}") from None
     existing = session.get(DataSource, result_id)
     if existing:
@@ -2025,7 +2025,7 @@ def export_data(
             "warehouse": f"file://{warehouse_path}",
         }
 
-        catalog = load_catalog("local", **catalog_config)
+        catalog = load_runtime_catalog("local", **catalog_config)
         _ensure_catalog_namespace(catalog, namespace)
 
         identifier = f"{namespace}.{table_name}"
@@ -3609,7 +3609,7 @@ def list_iceberg_snapshots(session: Session, datasource_id: str, branch: str | N
         }
         if warehouse:
             catalog_config["warehouse"] = warehouse
-        catalog = load_catalog("local", **catalog_config)
+        catalog = load_runtime_catalog("local", **catalog_config)
         identifier = f"{namespace}.{table_name}"
         table = catalog.load_table(identifier)
         resolved = resolve_iceberg_metadata_path(str(table.metadata_location))
@@ -3670,7 +3670,7 @@ def delete_iceberg_snapshot(session: Session, datasource_id: str, snapshot_id: s
         }
         if warehouse:
             catalog_config["warehouse"] = warehouse
-        catalog = load_catalog("local", **catalog_config)
+        catalog = load_runtime_catalog("local", **catalog_config)
         identifier = f"{namespace}.{table_name}"
         table = catalog.load_table(identifier)
     else:

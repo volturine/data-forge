@@ -36,11 +36,11 @@ class DataSourceFileType(DataForgeStrEnum):
         raise AssertionError(f'Unhandled datasource file type: {self}')
 
     @classmethod
-    def from_upload_filename(cls, filename: str) -> 'DataSourceFileType | None':
+    def from_upload_filename(cls, filename: str) -> DataSourceFileType | None:
         return cls.from_upload_suffix(Path(filename).suffix.lower())
 
     @classmethod
-    def from_upload_suffix(cls, suffix: str) -> 'DataSourceFileType | None':
+    def from_upload_suffix(cls, suffix: str) -> DataSourceFileType | None:
         normalized = suffix.lower()
         for item in cls:
             if normalized in item.upload_suffixes:

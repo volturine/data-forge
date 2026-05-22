@@ -22,10 +22,10 @@ from core.exceptions import (
     DataSourceNotFoundError,
     DataSourceValidationError,
 )
+from core.iceberg_catalog import load_runtime_catalog
 from core.iceberg_metadata import sync_iceberg_schema
 from core.namespace import get_namespace, namespace_paths
 from polars.datatypes import Array, List, Struct
-from pyiceberg.catalog import load_catalog
 from pyiceberg.table import Table
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -109,7 +109,7 @@ def _coerce_database_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.Lazy
 
 
 def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) -> Table:
-    catalog = load_catalog(
+    catalog = load_runtime_catalog(
         "local",
         type="sql",
         uri=settings.database_url,

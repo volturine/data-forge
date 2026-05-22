@@ -26,7 +26,7 @@ class EngineInstanceStatus(DataForgeStrEnum):
         return 'terminated'
 
     @classmethod
-    def from_engine_status(cls, value: str, current_job_id: str | None) -> 'EngineInstanceStatus':
+    def from_engine_status(cls, value: str, current_job_id: str | None) -> EngineInstanceStatus:
         engine_status = EngineStatus.require(value)
         if engine_status == EngineStatus.HEALTHY and current_job_id:
             return cls.RUNNING

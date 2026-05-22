@@ -40,7 +40,7 @@ def test_ensure_database_exists_creates_missing_database(monkeypatch: pytest.Mon
     calls: list[tuple[str, Any]] = []
 
     class FakeCursor:
-        def __enter__(self) -> 'FakeCursor':
+        def __enter__(self) -> FakeCursor:
             return self
 
         def __exit__(self, *_args: object) -> None:
@@ -54,7 +54,7 @@ def test_ensure_database_exists_creates_missing_database(monkeypatch: pytest.Mon
             return None
 
     class FakeConnection:
-        def __enter__(self) -> 'FakeConnection':
+        def __enter__(self) -> FakeConnection:
             return self
 
         def __exit__(self, *_args: object) -> None:

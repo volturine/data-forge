@@ -152,7 +152,7 @@ def _get_tenant_engine() -> Engine:
 
 
 @contextmanager
-def namespace_connection(namespace: str) -> Generator[Connection, None, None]:
+def namespace_connection(namespace: str) -> Generator[Connection]:
     engine = _get_tenant_engine()
     with engine.begin() as connection:
         _apply_postgres_search_path(connection, namespace)
@@ -173,7 +173,7 @@ def get_settings_db():
         yield session
 
 
-def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
+def run_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
     namespace = get_namespace()
     _init_namespace_db(namespace)
     engine_to_use = _get_tenant_engine()
@@ -181,7 +181,7 @@ def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: 
         return func(session, *args, **kwargs)
 
 
-def run_settings_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
+def run_settings_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
     engine_to_use = get_settings_engine()
     with Session(engine_to_use) as session:
         return func(session, *args, **kwargs)

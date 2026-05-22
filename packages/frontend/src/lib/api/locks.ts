@@ -76,6 +76,7 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 	let opened = false;
 	let awaitingAcquire = false;
 	let wantsAcquire = false;
+	let attemptedAcquireOnExistingLock = false;
 	let ownedToken: string | null = null;
 
 	function clearTimer(): void {
@@ -117,6 +118,7 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 	function resetOwnership(): void {
 		opened = false;
 		awaitingAcquire = false;
+		attemptedAcquireOnExistingLock = false;
 		ownedToken = null;
 		options.onStatus(null, false);
 	}
@@ -142,6 +144,7 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 	function handleStatus(lock: LockStatus | null): void {
 		if (lock === null) {
 			awaitingAcquire = false;
+			attemptedAcquireOnExistingLock = false;
 			ownedToken = null;
 			options.onStatus(null, false);
 			if (wantsAcquire) sendAcquire();
@@ -150,13 +153,21 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 
 		if (awaitingAcquire) {
 			awaitingAcquire = false;
+			attemptedAcquireOnExistingLock = false;
 			ownedToken = lock.lock_token;
 			options.onStatus(lock, true);
 			return;
 		}
 
 		if (ownedToken !== null && lock.lock_token === ownedToken) {
+			attemptedAcquireOnExistingLock = false;
 			options.onStatus(lock, true);
+			return;
+		}
+
+		if (wantsAcquire && !attemptedAcquireOnExistingLock) {
+			attemptedAcquireOnExistingLock = true;
+			sendAcquire();
 			return;
 		}
 
@@ -223,10 +234,12 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 	return {
 		acquire(ttlSeconds?: number) {
 			wantsAcquire = true;
+			attemptedAcquireOnExistingLock = false;
 			sendAcquire(ttlSeconds);
 		},
 		release() {
 			wantsAcquire = false;
+			attemptedAcquireOnExistingLock = false;
 			if (!opened) return;
 			awaitingAcquire = false;
 			const message: Record<string, unknown> = { action: 'release' };

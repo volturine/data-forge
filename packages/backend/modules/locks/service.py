@@ -85,7 +85,7 @@ def acquire_lock(
             session.add(lock)
             try:
                 session.commit()
-            except (IntegrityError, StaleDataError):
+            except IntegrityError, StaleDataError:
                 _reset_session_after_conflict(session)
                 continue
             session.refresh(lock)

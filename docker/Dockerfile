@@ -8,7 +8,7 @@ RUN bun install --frozen-lockfile
 COPY packages/frontend/ ./
 RUN bun run panda:codegen && bun run build
 
-FROM python:3.13.7-slim AS backend-base
+FROM python:3.14.3-slim AS backend-base
 WORKDIR /app/packages/shared
 
 ARG UV_VERSION=0.9.5

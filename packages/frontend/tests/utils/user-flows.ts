@@ -11,6 +11,13 @@ export const E2E_PASSWORD = 'E2eTestPw12345';
 const SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n';
 const DATE_CSV =
 	'id,name,event_date,amount\n1,Alice,2024-01-15,100\n2,Bob,2024-03-22,250\n3,Charlie,2024-06-10,75\n';
+
+async function waitForAnalysisEditorSurface(page: Page): Promise<void> {
+	const editor = page.locator('[role="application"]');
+	await expect(editor).toBeVisible({ timeout: 5_000 });
+	await expect(editor).toHaveAttribute('data-editor-access-state', /^(editable|locked)$/);
+}
+
 function generateLargeCsv(rows: number): string {
 	const names = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank', 'Grace', 'Hank'];
 	const cities = ['London', 'Paris', 'Berlin', 'Tokyo', 'Sydney', 'Oslo', 'Rome', 'Madrid'];
@@ -134,6 +141,7 @@ export async function createAnalysisViaUi(
 		(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
 		{ timeout: 5_000 }
 	);
+	await waitForAnalysisEditorSurface(page);
 	const match = page.url().match(/\/analysis\/([^/?#]+)/);
 	if (!match || match[1] === 'new') {
 		throw new Error(`Could not extract analysis id from URL: ${page.url()}`);
@@ -179,6 +187,7 @@ export async function importAnalysisViaUi(
 		(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
 		{ timeout: 5_000 }
 	);
+	await waitForAnalysisEditorSurface(page);
 	const match = page.url().match(/\/analysis\/([^/?#]+)/);
 	if (!match || match[1] === 'new') {
 		throw new Error(`Could not extract imported analysis id from URL: ${page.url()}`);

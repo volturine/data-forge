@@ -19,7 +19,7 @@ class ScheduleCreate(BaseModel):
     trigger_on_datasource_id: str | None = Field(default=None, description='Trigger when this datasource updates')
 
     @model_validator(mode='after')
-    def validate_trigger(self) -> 'ScheduleCreate':
+    def validate_trigger(self) -> ScheduleCreate:
         if self.depends_on and self.trigger_on_datasource_id:
             raise ValueError('Schedule trigger must use either depends_on or trigger_on_datasource_id, not both')
         return self
@@ -37,7 +37,7 @@ class ScheduleUpdate(BaseModel):
     trigger_on_datasource_id: str | None = None
 
     @model_validator(mode='after')
-    def validate_trigger(self) -> 'ScheduleUpdate':
+    def validate_trigger(self) -> ScheduleUpdate:
         if self.depends_on and self.trigger_on_datasource_id:
             raise ValueError('Schedule trigger must use either depends_on or trigger_on_datasource_id, not both')
         return self

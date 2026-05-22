@@ -2,7 +2,7 @@
     name            = "dataforge-backend"
     version         = "1.0.0"
     description     = "Data-Forge FastAPI application package"
-    requires-python = ">=3.11"
+    requires-python = ">=3.14"
     dependencies    = ["dataforge-shared"]
 
 [tool.uv.sources]
@@ -13,7 +13,7 @@
     build-backend = "hatchling.build"
 
 [tool.ruff]
-    target-version = "py311"
+    target-version = "py314"
     line-length    = 160
     indent-width   = 4
 

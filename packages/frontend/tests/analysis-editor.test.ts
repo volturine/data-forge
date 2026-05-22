@@ -16,6 +16,21 @@ async function latestNode(page: Parameters<typeof gotoAnalysisEditor>[0], stepTy
 	return nodes.nth((await nodes.count()) - 1);
 }
 
+let sharedDatasourceId = '';
+let sharedDatasourceName = '';
+
+test.beforeAll(async ({ request }) => {
+	sharedDatasourceName = `e2e-editor-shared-ds-${uid()}`;
+	sharedDatasourceId = await createDatasource(request, sharedDatasourceName);
+});
+
+test.afterAll(async ({ browser, workerAuth }) => {
+	const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+	await deleteDatasourceViaUI(page, sharedDatasourceName);
+	await page.close();
+	await context.close();
+});
+
 // ── Save/discard dirty tracking ─────────────────────────────────────────────
 
 test.describe('Analyses – save/discard dirty tracking', () => {
@@ -24,10 +39,8 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 		request
 	}) => {
 		const id = uid();
-		const ds = `e2e-dirty-clean-${id}`;
 		const analysis = `E2E Dirty Clean ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -38,16 +51,13 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await expect(discardBtn).toBeDisabled();
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('adding a step makes Save show "Save" and enables Discard', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-dirty-add-${id}`;
 		const analysis = `E2E Dirty Add ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="select"]').click();
@@ -61,16 +71,13 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await expect(discardBtn).toBeEnabled({ timeout: 5_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('Discard reverts dirty state back to "Saved"', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-dirty-discard-${id}`;
 		const analysis = `E2E Dirty Discard ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="sort"]').click();
@@ -84,7 +91,6 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await expect(page.getByRole('button', { name: 'Discard' })).toBeDisabled();
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -93,10 +99,8 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 		request
 	}) => {
 		const id = uid();
-		const ds = `e2e-dirty-config-${id}`;
 		const analysis = `E2E Dirty Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="filter"]').click();
@@ -118,17 +122,14 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await expect(cancelBtn).toBeEnabled();
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('analysis description can be edited and saved after creation', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-description-ds-${id}`;
 		const analysis = `E2E Description ${id}`;
 		const nextDescription = `Updated description ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.getByTestId('analysis-description-trigger').click();
@@ -149,7 +150,6 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -157,22 +157,17 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 // ── Step library labels ─────────────────────────────────────────────────────
 
 test.describe('Analyses – step library labels', () => {
-	let dsId = '';
 	let aId = '';
-	let dsName: string;
 	let aName: string;
 
 	test.beforeAll(async ({ request }) => {
-		dsName = `e2e-labels-ds-${uid()}`;
 		aName = `E2E Labels ${uid()}`;
-		dsId = await createDatasource(request, dsName);
-		aId = await createAnalysis(request, aName, dsId);
+		aId = await createAnalysis(request, aName, sharedDatasourceId);
 	});
 
 	test.afterAll(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteAnalysisViaUI(page, aName);
-		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
 		await context.close();
 	});
@@ -224,10 +219,8 @@ test.describe('Analyses – step library labels', () => {
 test.describe('Analyses – step interaction', () => {
 	test('clicking Filter step adds it to the canvas', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-click-filter-${id}`;
 		const analysis = `E2E Click Filter ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -241,7 +234,6 @@ test.describe('Analyses – step interaction', () => {
 			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -250,10 +242,8 @@ test.describe('Analyses – step interaction', () => {
 		request
 	}) => {
 		const id = uid();
-		const ds = `e2e-config-panel-${id}`;
 		const analysis = `E2E Config Panel ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="filter"]').click();
@@ -268,7 +258,6 @@ test.describe('Analyses – step interaction', () => {
 			await expect(configPanel.getByRole('button', { name: 'Cancel' })).toBeVisible();
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -277,10 +266,8 @@ test.describe('Analyses – step interaction', () => {
 		request
 	}) => {
 		const id = uid();
-		const ds = `e2e-click-select-${id}`;
 		const analysis = `E2E Click Select ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -294,7 +281,6 @@ test.describe('Analyses – step interaction', () => {
 			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -304,10 +290,8 @@ test.describe('Analyses – step interaction', () => {
 test.describe('Analyses – save persistence', () => {
 	test('saving a step persists across page reload', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-persist-${id}`;
 		const analysis = `E2E Persist Test ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -340,7 +324,6 @@ test.describe('Analyses – save persistence', () => {
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -349,10 +332,8 @@ test.describe('Analyses – save persistence', () => {
 		request
 	}) => {
 		const id = uid();
-		const ds = `e2e-apply-cancel-${id}`;
 		const analysis = `E2E Apply Cancel ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -378,7 +359,6 @@ test.describe('Analyses – save persistence', () => {
 			await expect(cancelBtn).toBeDisabled({ timeout: 5_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -388,10 +368,8 @@ test.describe('Analyses – save persistence', () => {
 test.describe('Analyses – node delete via action button', () => {
 	test('delete button removes step from canvas', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-node-del-${id}`;
 		const analysis = `E2E Node Delete ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -409,7 +387,6 @@ test.describe('Analyses – node delete via action button', () => {
 			await screenshot(page, 'analysis/editor', 'node-deleted');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -417,10 +394,8 @@ test.describe('Analyses – node delete via action button', () => {
 test.describe('Analyses – node toggle (enable/disable)', () => {
 	test('toggle disables and re-enables a step', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-node-toggle-${id}`;
 		const analysis = `E2E Node Toggle ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -457,7 +432,6 @@ test.describe('Analyses – node toggle (enable/disable)', () => {
 			await screenshot(page, 'analysis/editor', 'node-toggle-enabled');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -469,10 +443,8 @@ test.describe('Analyses – node toggle (enable/disable)', () => {
 test.describe('Analyses – step reorder persistence', () => {
 	test('Step order persists after save and reload', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-reorder-${id}`;
 		const analysis = `E2E Reorder Persist ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -519,7 +491,6 @@ test.describe('Analyses – step reorder persistence', () => {
 			await screenshot(page, 'analysis/editor', 'step-reorder-persisted');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -527,10 +498,8 @@ test.describe('Analyses – step reorder persistence', () => {
 test.describe('Analyses – save + reload config persistence', () => {
 	test('configured Limit step persists value after save and reload', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-cfg-persist-${id}`;
 		const analysis = `E2E Cfg Persist ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'limit');
 			const limitInput = configPanel.locator('[data-testid="limit-rows-input"]');
@@ -556,7 +525,6 @@ test.describe('Analyses – save + reload config persistence', () => {
 			await expect(reloadedInput).toHaveValue('77');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -566,10 +534,8 @@ test.describe('Analyses – save + reload config persistence', () => {
 test.describe('Analyses – derived tab flow', () => {
 	test('add derived tab from existing tab output, switch back', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-derived-tab-${id}`;
 		const analysis = `E2E Derived Tab ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
@@ -590,8 +556,10 @@ test.describe('Analyses – derived tab flow', () => {
 				await expect(modal).toBeVisible({ timeout: 5_000 });
 
 				// Search for our datasource (use the same one)
-				await modal.locator('#dsm-search').fill(ds);
-				await modal.locator(`[data-datasource-option="${ds}"]`).click({ timeout: 5_000 });
+				await modal.locator('#dsm-search').fill(sharedDatasourceName);
+				await modal
+					.locator(`[data-datasource-option="${sharedDatasourceName}"]`)
+					.click({ timeout: 5_000 });
 				await expect(modal).toBeHidden({ timeout: 5_000 });
 			}
 
@@ -609,7 +577,6 @@ test.describe('Analyses – derived tab flow', () => {
 			await screenshot(page, 'analysis/editor', 'derived-tab-flow');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -617,14 +584,10 @@ test.describe('Analyses – derived tab flow', () => {
 test.describe('Analyses – multi-tab flow', () => {
 	test('add second tab from another datasource, switch between tabs', async ({ page, request }) => {
 		const id = uid();
-		const ds1 = `e2e-multitab-ds1-${id}`;
 		const ds2 = `e2e-multitab-ds2-${id}`;
 		const analysis = `E2E Multi Tab ${id}`;
-		const [ds1Id, ds2Id] = await Promise.all([
-			createDatasource(request, ds1),
-			createDatasource(request, ds2)
-		]);
-		const aId = await createAnalysis(request, analysis, ds1Id);
+		const ds2Id = await createDatasource(request, ds2);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		void ds2Id;
 		try {
 			await gotoAnalysisEditor(page, aId);
@@ -657,7 +620,6 @@ test.describe('Analyses – multi-tab flow', () => {
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 			await deleteDatasourceViaUI(page, ds2);
-			await deleteDatasourceViaUI(page, ds1);
 		}
 	});
 });
@@ -667,10 +629,8 @@ test.describe('Analyses – multi-tab flow', () => {
 test.describe('Analyses – version history modal', () => {
 	test('opens version modal and shows empty state on fresh analysis', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-ver-empty-${id}`;
 		const analysis = `E2E Ver Empty ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -693,16 +653,13 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('version modal shows versions after save creates a version', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-ver-list-${id}`;
 		const analysis = `E2E Ver List ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -726,16 +683,13 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('rename version inline edit', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-ver-rename-${id}`;
 		const analysis = `E2E Ver Rename ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -770,16 +724,13 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('Escape key closes version modal', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-ver-esc-${id}`;
 		const analysis = `E2E Ver Escape ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -791,16 +742,13 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('delete version removes it from the list', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-ver-del-${id}`;
 		const analysis = `E2E Ver Delete ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -828,16 +776,13 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('restore version closes modal and updates analysis state', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-ver-restore-${id}`;
 		const analysis = `E2E Ver Restore ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -867,7 +812,6 @@ test.describe('Analyses – version history modal', () => {
 			await screenshot(page, 'analysis/editor', 'version-history-after-restore');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -877,10 +821,8 @@ test.describe('Analyses – version history modal', () => {
 test.describe('Analyses – insert view via insert zone', () => {
 	test('Insert View button adds a view step between existing steps', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-insert-view-${id}`;
 		const analysis = `E2E Insert View ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -913,7 +855,6 @@ test.describe('Analyses – insert view via insert zone', () => {
 			await screenshot(page, 'analysis/editor', 'insert-view-between-steps');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -921,10 +862,8 @@ test.describe('Analyses – insert view via insert zone', () => {
 test.describe('Analyses – pointer drag reorder', () => {
 	test('drag handle moves step to new position', async ({ page, request }) => {
 		const id = uid();
-		const ds = `e2e-drag-reorder-${id}`;
 		const analysis = `E2E Drag Reorder ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -1012,7 +951,6 @@ test.describe('Analyses – pointer drag reorder', () => {
 			await screenshot(page, 'analysis/editor', 'drag-reorder-done');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });

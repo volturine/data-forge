@@ -24,7 +24,7 @@ class EngineRunStatus(DataForgeStrEnum):
     def is_terminal(self) -> bool:
         return self in {EngineRunStatus.SUCCESS, EngineRunStatus.FAILED, EngineRunStatus.CANCELLED}
 
-    def blocks_transition_to(self, next_status: 'EngineRunStatus') -> bool:
+    def blocks_transition_to(self, next_status: EngineRunStatus) -> bool:
         return self.is_terminal and next_status != self
 
 

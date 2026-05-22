@@ -70,7 +70,7 @@ class HealthCheck(SQLModel, table=True):  # type: ignore[call-arg]
         value = self.config.get(key)
         return float(cast(int | float | str, value)) if value is not None else None
 
-    def missing_column_result(self, *, now: dt.datetime) -> 'HealthCheckResult':
+    def missing_column_result(self, *, now: dt.datetime) -> HealthCheckResult:
         column_name = self.column_name() or ''
         return HealthCheckResult(
             id=str(uuid.uuid4()),

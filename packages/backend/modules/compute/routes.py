@@ -826,7 +826,7 @@ async def engine_list_stream(websocket: WebSocket) -> None:
             last_seen = updated
     except WebSocketDisconnect:
         return
-    except (asyncio.CancelledError, concurrent.futures.CancelledError):
+    except asyncio.CancelledError, concurrent.futures.CancelledError:
         return
     except HTTPException as exc:
         await safe_send_json(
@@ -879,7 +879,7 @@ async def build_list_stream(websocket: WebSocket) -> None:
             last_seen = updated
     except WebSocketDisconnect:
         return
-    except (asyncio.CancelledError, concurrent.futures.CancelledError):
+    except asyncio.CancelledError, concurrent.futures.CancelledError:
         return
     except HTTPException as exc:
         await safe_send_json(
@@ -946,7 +946,7 @@ async def active_build_stream(websocket: WebSocket, build_id: str) -> None:
             last_sequence = max(replayed_sequence, notification.latest_sequence)
     except WebSocketDisconnect:
         return
-    except (asyncio.CancelledError, concurrent.futures.CancelledError):
+    except asyncio.CancelledError, concurrent.futures.CancelledError:
         return
     except HTTPException as exc:
         await safe_send_json(

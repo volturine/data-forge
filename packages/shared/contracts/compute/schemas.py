@@ -347,7 +347,7 @@ class BuildStatus(DataForgeStrEnum):
     WARNING = 'warning'
 
     @classmethod
-    def coerce(cls, value: object) -> 'BuildStatus':
+    def coerce(cls, value: object) -> BuildStatus:
         return cls.read(value, default=cls.SUCCESS) or cls.SUCCESS
 
 
@@ -402,7 +402,7 @@ class ActiveBuildStatus(DataForgeStrEnum):
         return self in {ActiveBuildStatus.COMPLETED, ActiveBuildStatus.FAILED, ActiveBuildStatus.CANCELLED}
 
     @classmethod
-    def coerce(cls, value: object) -> 'ActiveBuildStatus':
+    def coerce(cls, value: object) -> ActiveBuildStatus:
         return cls.read(value, default=cls.QUEUED) or cls.QUEUED
 
 
@@ -420,7 +420,7 @@ class BuildLogLevel(DataForgeStrEnum):
     ERROR = 'error'
 
     @classmethod
-    def coerce(cls, value: object) -> 'BuildLogLevel':
+    def coerce(cls, value: object) -> BuildLogLevel:
         return cls.read(value, default=cls.INFO) or cls.INFO
 
 
@@ -433,13 +433,13 @@ class BuildStarter(BaseModel):
     triggered_by: str | None = None
 
     @classmethod
-    def for_user(cls, user: object | None) -> 'BuildStarter':
+    def for_user(cls, user: object | None) -> BuildStarter:
         if user is None:
             return cls(triggered_by='user')
         return cls(user_id=getattr(user, 'id', None), display_name=getattr(user, 'display_name', None), email=getattr(user, 'email', None), triggered_by='user')
 
     @classmethod
-    def for_schedule(cls, schedule_id: str) -> 'BuildStarter':
+    def for_schedule(cls, schedule_id: str) -> BuildStarter:
         return cls(triggered_by=f'schedule:{schedule_id}')
 
     def is_schedule_trigger(self) -> bool:
@@ -548,7 +548,7 @@ class ActiveBuildDetail(ActiveBuildSummary):
         elapsed_from_start = max(int((cancelled_at - started_at).total_seconds() * 1000), 0)
         return max(self.elapsed_ms, elapsed_from_start)
 
-    def cancelled_event(self, *, cancelled_at: datetime, cancelled_by: str | None, duration_ms: int, emitted_at: datetime) -> 'BuildCancelledEvent':
+    def cancelled_event(self, *, cancelled_at: datetime, cancelled_by: str | None, duration_ms: int, emitted_at: datetime) -> BuildCancelledEvent:
         return BuildCancelledEvent(
             build_id=self.build_id,
             analysis_id=self.analysis_id,

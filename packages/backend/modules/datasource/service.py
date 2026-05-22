@@ -15,10 +15,10 @@ from core.exceptions import (
     DataSourceValidationError,
     FileError,
 )
+from core.iceberg_catalog import load_runtime_catalog
 from core.namespace import namespace_paths
 from openpyxl import load_workbook
 from openpyxl.utils.cell import get_column_letter, range_boundaries
-from pyiceberg.catalog import load_catalog
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import defer
 from sqlmodel import Session, col
@@ -1051,7 +1051,7 @@ class DatasourceStorageCleanup:
         table = config.get("table")
         if not all(isinstance(value, str) and value for value in [catalog_type, catalog_uri, warehouse, namespace, table]):
             return
-        catalog = load_catalog(
+        catalog = load_runtime_catalog(
             "local",
             type=catalog_type,
             uri=catalog_uri,

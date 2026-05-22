@@ -213,6 +213,7 @@
 				lockMode = 'error';
 			}
 		});
+		session.acquire();
 
 		return () => {
 			alive = false;

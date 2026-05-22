@@ -101,7 +101,7 @@ async def _serve_postgres_notifications(connection: psycopg.Connection, stop_eve
             if not await _wait_for_postgres_socket(connection, stop_event):
                 return
             notifications = list(connection.notifies(timeout=0, stop_after=100))
-        except (asyncio.CancelledError, psycopg.Error):
+        except asyncio.CancelledError, psycopg.Error:
             return
         if not notifications:
             continue

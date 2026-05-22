@@ -104,7 +104,7 @@ def _reset_settings_state(engine: Engine) -> None:
 
 
 @pytest.fixture(scope='session')
-def postgres_container() -> Generator[ExternalPostgres | PostgresContainer, None, None]:
+def postgres_container() -> Generator[ExternalPostgres | PostgresContainer]:
     external_url = os.environ.get('TEST_POSTGRES_URL')
     if external_url:
         yield ExternalPostgres(external_url)
@@ -177,7 +177,7 @@ def isolate_data_dir(tmp_path: Path, monkeypatch, postgres_container: PostgresCo
 @pytest.fixture(autouse=True, scope='function')
 def isolate_settings_engine(
     request: pytest.FixtureRequest, tmp_path: Path, isolate_data_dir, postgres_container: PostgresContainer
-) -> Generator[Engine | None, None, None]:
+) -> Generator[Engine | None]:
     if '/backend/tests/' in request.node.path.as_posix():
         yield None
         return

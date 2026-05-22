@@ -1,7 +1,11 @@
 import { test, expect } from './fixtures.js';
+import { gotoAnalysisEditor } from './utils/analysis.js';
 import { createDatasource, createAnalysis, shutdownEngine } from './utils/api.js';
-import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
-import { waitForLayoutReady } from './utils/readiness.js';
+import {
+	createCleanupPage,
+	deleteAnalysisViaUI,
+	deleteDatasourceViaUI
+} from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -10,16 +14,16 @@ import { screenshot } from './utils/visual.js';
 test.describe('Build Preview – real build lifecycle', () => {
 	test('clicking Build queues the run and the preview opens only from the engine status control', async ({
 		page,
-		request
+		request,
+		browser,
+		workerAuth
 	}) => {
 		const dsName = `e2e-bprev-real-ds-${uid()}`;
 		const aName = `E2E BPrev Real ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
-			await page.goto(`/analysis/${aId}`);
-			await waitForLayoutReady(page);
-			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 5_000 });
+			await gotoAnalysisEditor(page, aId);
 
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
 			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
@@ -42,21 +46,33 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-terminal');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			const { page: cleanupPage, context } = await createCleanupPage(
+				browser,
+				workerAuth.workerIndex
+			);
+			try {
+				await shutdownEngine(request, aId);
+				await deleteAnalysisViaUI(cleanupPage, aName);
+				await deleteDatasourceViaUI(cleanupPage, dsName);
+			} finally {
+				await cleanupPage.close();
+				await context.close();
+			}
 		}
 	});
 
-	test('close button dismisses the Build Preview modal', async ({ page, request }) => {
+	test('close button dismisses the Build Preview modal', async ({
+		page,
+		request,
+		browser,
+		workerAuth
+	}) => {
 		const dsName = `e2e-bprev-close-ds-${uid()}`;
 		const aName = `E2E BPrev Close ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
-			await page.goto(`/analysis/${aId}`);
-			await waitForLayoutReady(page);
-			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 5_000 });
+			await gotoAnalysisEditor(page, aId);
 
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
 			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
@@ -77,9 +93,18 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-modal-closed');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			const { page: cleanupPage, context } = await createCleanupPage(
+				browser,
+				workerAuth.workerIndex
+			);
+			try {
+				await shutdownEngine(request, aId);
+				await deleteAnalysisViaUI(cleanupPage, aName);
+				await deleteDatasourceViaUI(cleanupPage, dsName);
+			} finally {
+				await cleanupPage.close();
+				await context.close();
+			}
 		}
 	});
 });

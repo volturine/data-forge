@@ -263,7 +263,6 @@ test.describe('Monitoring – Schedules tab', () => {
 			await expect(schedRow).toContainText('Cron: 0 6 * * *', { timeout: 5_000 });
 		} finally {
 			await deleteScheduleViaUI(page, ds);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -312,7 +311,6 @@ test.describe('Monitoring – Schedules tab', () => {
 			});
 		} finally {
 			await deleteScheduleViaUI(page, ds);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -345,7 +343,6 @@ test.describe('Monitoring – Schedule create flow', () => {
 			await expect(schedRow).toContainText('Every hour', { timeout: 5_000 });
 		} finally {
 			await deleteScheduleViaUI(page, ds);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -413,7 +410,6 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 			await screenshot(page, 'monitoring', 'schedule-cron-edited');
 		} finally {
 			await deleteScheduleViaUI(page, ds);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -445,7 +441,6 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 			await expect(detailRow.locator('code')).toContainText('0 6 * * *', { timeout: 5_000 });
 		} finally {
 			await deleteScheduleViaUI(page, ds);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -479,7 +474,6 @@ test.describe('Monitoring – Health Checks tab', () => {
 			await waitForHealthCheckRow(page, hc);
 		} finally {
 			await deleteHealthCheckViaUI(page, hc);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -526,7 +520,6 @@ test.describe('Monitoring – Health Checks tab', () => {
 			await screenshot(page, 'monitoring', 'health-check-toggled-off');
 		} finally {
 			await deleteHealthCheckViaUI(page, hc);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -563,7 +556,6 @@ test.describe('Monitoring – Health Check create flow', () => {
 			await waitForHealthCheckRow(page, hc);
 		} finally {
 			await deleteHealthCheckViaUI(page, hc);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });

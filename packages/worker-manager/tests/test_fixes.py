@@ -1095,7 +1095,6 @@ class TestSafeBuiltinsUdf:
         # exec() here is intentional: we are verifying that the _SAFE_BUILTINS
         # sandbox correctly blocks dangerous builtins. The code strings are
         # hard-coded in each test — no user input reaches this helper.
-        from typing import Any
 
         import polars as pl
 

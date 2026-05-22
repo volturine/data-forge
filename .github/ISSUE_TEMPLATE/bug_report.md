@@ -29,7 +29,7 @@ A clear and concise description of what actually happened.
 
 - **OS**: [e.g., Ubuntu 22.04, macOS 14, Windows 11]
 - **Browser**: [e.g., Chrome 120, Firefox 121] (for frontend issues)
-- **Python version**: [e.g., 3.11.5]
+- **Python version**: [e.g., 3.14.2]
 - **Node/Bun version**: [e.g., Bun 1.0.0]
 - **Deployment**: [Local dev / Docker / Production]
 

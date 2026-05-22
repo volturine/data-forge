@@ -262,7 +262,7 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode='after')
-    def _validate_numeric_constraints(self) -> 'Settings':
+    def _validate_numeric_constraints(self) -> Settings:
         for field_name, min_val, max_val in _NUMERIC_CONSTRAINTS:
             value = getattr(self, field_name)
             if min_val is not None and value < min_val:
@@ -272,7 +272,7 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode='after')
-    def _validate_directories_writable(self) -> 'Settings':
+    def _validate_directories_writable(self) -> Settings:
         """Ensure all directories are writable."""
         for dir_name in ['data_dir']:
             dir_path = getattr(self, dir_name)
@@ -281,13 +281,13 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode='after')
-    def _validate_lock_intervals(self) -> 'Settings':
+    def _validate_lock_intervals(self) -> Settings:
         if self.lock_heartbeat_interval_seconds >= self.lock_ttl_seconds:
             raise ValueError('lock_heartbeat_interval_seconds must be < lock_ttl_seconds')
         return self
 
     @model_validator(mode='after')
-    def _validate_runtime_mode(self) -> 'Settings':
+    def _validate_runtime_mode(self) -> Settings:
         if self.distributed_runtime_enabled and self.embedded_build_worker_enabled:
             raise ValueError('EMBEDDED_BUILD_WORKER_ENABLED cannot be enabled with DISTRIBUTED_RUNTIME_ENABLED')
         if self.build_worker_min_processes > self.build_worker_max_processes:

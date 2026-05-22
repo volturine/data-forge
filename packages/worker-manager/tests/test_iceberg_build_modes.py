@@ -171,7 +171,7 @@ class TestBuildModeWiring:
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
 
         with (
-            patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service._sync_iceberg_schema", return_value=False) as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
@@ -205,7 +205,7 @@ class TestBuildModeWiring:
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
 
         with (
-            patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service._sync_iceberg_schema") as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
@@ -239,7 +239,7 @@ class TestBuildModeWiring:
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=False)
 
         with (
-            patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service.os.path.getsize", return_value=100),
         ):
@@ -270,7 +270,7 @@ class TestBuildModeWiring:
         pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="recreate")
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
         with (
-            patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service.os.path.getsize", return_value=100),
         ):
@@ -304,7 +304,7 @@ class TestBuildModeWiring:
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=False)
 
         with (
-            patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service.os.path.getsize", return_value=100),
         ):
@@ -338,7 +338,7 @@ class TestBuildModeWiring:
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
 
         with (
-            patch("runtime.compute_service.load_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch(
                 "runtime.compute_service.resolve_iceberg_metadata_path",

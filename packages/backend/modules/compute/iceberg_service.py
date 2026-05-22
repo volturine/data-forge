@@ -3,11 +3,11 @@ from pathlib import Path
 from contracts.compute import schemas
 from contracts.datasource.models import DataSource
 from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError
+from core.iceberg_catalog import load_runtime_catalog
 from core.iceberg_metadata import (
     resolve_iceberg_branch_metadata_path,
     resolve_iceberg_metadata_path,
 )
-from pyiceberg.catalog import load_catalog
 from sqlmodel import Session
 
 
@@ -33,7 +33,7 @@ def list_iceberg_snapshots(session: Session, datasource_id: str, branch: str | N
         catalog_config = {"type": catalog_type, "uri": catalog_uri}
         if warehouse:
             catalog_config["warehouse"] = warehouse
-        catalog = load_catalog("local", **catalog_config)
+        catalog = load_runtime_catalog("local", **catalog_config)
         identifier = f"{namespace}.{table_name}"
         table = catalog.load_table(identifier)
         resolved = resolve_iceberg_metadata_path(str(table.metadata_location))
@@ -89,7 +89,7 @@ def delete_iceberg_snapshot(session: Session, datasource_id: str, snapshot_id: s
     catalog_config = {"type": catalog_type, "uri": catalog_uri}
     if warehouse:
         catalog_config["warehouse"] = warehouse
-    catalog = load_catalog("local", **catalog_config)
+    catalog = load_runtime_catalog("local", **catalog_config)
     table = catalog.load_table(f"{namespace}.{table_name}")
 
     if not hasattr(table, "maintenance"):

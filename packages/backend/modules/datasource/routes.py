@@ -175,7 +175,7 @@ async def upload_file(
             csv_options=csv_options.model_dump() if csv_options else None,
             owner_id=owner_id,
         )
-    except (AppError, HTTPException, ValueError):
+    except AppError, HTTPException, ValueError:
         if file_path.exists():
             file_path.unlink()
         raise
@@ -556,7 +556,7 @@ async def confirm_excel(
             cell_range=resolved_cell_range,
             owner_id=user.id if user else None,
         )
-    except (AppError, HTTPException):
+    except AppError, HTTPException:
         if target_path.exists():
             target_path.unlink()
         await clear_preflight(parse_preflight_id(preflight_id))

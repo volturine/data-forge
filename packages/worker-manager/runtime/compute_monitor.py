@@ -23,7 +23,7 @@ async def monitor_engine_resources(engine: ComputeEngine, interval: float = 1.0)
                 memory_mb = process.memory_info().rss / (1024 * 1024)
                 active_threads = process.num_threads()
                 raw_cpu_percent = process.cpu_percent(interval=None)
-        except (psutil.Error, OSError):
+        except psutil.Error, OSError:
             return
 
         yield {

@@ -462,7 +462,7 @@ def _safe_int(val: object) -> int | None:
         return None
     try:
         return int(val)  # type: ignore[call-overload]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
