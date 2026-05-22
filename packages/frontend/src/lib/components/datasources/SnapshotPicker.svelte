@@ -1,8 +1,6 @@
 <script lang="ts">
+	import { listIcebergSnapshots } from '$lib/api/datasource';
 	import { apiRequest } from '$lib/api/client';
-	import { BuildsStore } from '$lib/stores/builds.svelte';
-	import type { ActiveBuildSummary } from '$lib/types/build-stream';
-	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { Trash2, ChevronDown, Clock } from '@lucide/svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { css, spinner } from '$lib/styles/panda';
@@ -56,7 +54,6 @@
 	let deleteConfirmId = $state<string | null>(null);
 	let deleteLoading = $state(false);
 	let deleteError = $state<string | null>(null);
-	const buildRunsStore = new BuildsStore();
 	let lastDatasourceId = $state<string | null>(null);
 	// Subscription: $derived can't reset snapshot state on datasource switch.
 	$effect(() => {
@@ -74,38 +71,8 @@
 		deleteConfirmId = null;
 		deleteLoading = false;
 		deleteError = null;
-		buildRunsStore.reset();
 	});
-	// Network: fetch build history on demand when snapshot build previews are enabled.
-	$effect(() => {
-		if (!showBuildPreviews || !datasourceId) return;
-		buildRunsStore.load({ datasource_id: datasourceId, limit: 50 });
-		return () => buildRunsStore.close();
-	});
-	const buildRuns = $derived.by(() => {
-		const branchValue = branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
-		return buildRunsStore.builds.filter((run: ActiveBuildSummary) => {
-			if (run.current_kind !== 'build') return false;
-			if (run.status !== 'completed') return false;
-			if (!branchValue) return true;
-			const runBranch = run.result_json?.branch;
-			return typeof runBranch === 'string' && runBranch === branchValue;
-		});
-	});
-	const runSnapshotMap = $derived(buildSnapshotMap(buildRuns, toSnapshotRefs(snapshotList)));
-	const filteredSnapshotList = $derived.by(() => {
-		if (!showBuildPreviews) return snapshotList;
-		if (buildRuns.length === 0) return snapshotList;
-		if (runSnapshotMap.size === 0) return snapshotList;
-		const mapped = new SvelteMap<string, boolean>();
-		for (const snap of runSnapshotMap.values()) {
-			if (!snap) continue;
-			mapped.set(snap, true);
-		}
-		const result = snapshotList.filter((snap) => mapped.has(snap.id));
-		if (result.length === 0) return snapshotList;
-		return result;
-	});
+	const filteredSnapshotList = $derived(snapshotList);
 	const filteredSnapshots = $derived(
 		selectedDay
 			? filteredSnapshotList.filter((snap) => formatSnapshotKey(snap.timestamp) === selectedDay)
@@ -300,15 +267,10 @@
 
 	function getIcebergSnapshots(nextId: string) {
 		const branchValue = branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
-		const suffix = branchValue ? `?branch=${encodeURIComponent(branchValue)}` : '';
-		return apiRequest<{
-			snapshots: Array<{
-				snapshot_id: string;
-				timestamp_ms: number;
-				operation?: string | null;
-				is_current?: boolean | null;
-			}>;
-		}>(`/v1/compute/iceberg/${nextId}/snapshots${suffix}`);
+		return listIcebergSnapshots(nextId, {
+			branch: branchValue,
+			buildResultsOnly: showBuildPreviews
+		});
 	}
 
 	function setSnapshot(snapshotId: string | null, timestampMs?: number) {
@@ -329,10 +291,6 @@
 		}
 		onConfigChange?.(nextConfig);
 		onSelect?.(snapshotId, timestampMs);
-	}
-
-	function toSnapshotRefs(list: Array<{ id: string; timestamp: number }>) {
-		return list.map((snap) => ({ snapshot_id: snap.id, timestamp_ms: snap.timestamp }));
 	}
 
 	function updatePopoverPosition() {
@@ -627,7 +585,7 @@
 				</div>
 			{:else if snapshotsError}
 				<div class={css({ fontSize: 'xs', color: 'fg.error' })}>{snapshotsError}</div>
-			{:else if snapshotList.length === 0}
+			{:else if filteredSnapshotList.length === 0}
 				<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>No snapshots found.</div>
 			{:else}
 				<div class={css({ display: 'flex', gap: '2' })}>

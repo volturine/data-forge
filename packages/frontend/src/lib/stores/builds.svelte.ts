@@ -9,10 +9,10 @@ export class BuildsStore {
 	status = $state<BuildsStatus>('disconnected');
 	error = $state<string | null>(null);
 
-	private abortController: AbortController | null = null;
 	private params: ListBuildsParams | undefined;
 	private inFlight = false;
 	private pendingRefresh = false;
+	private token = 0;
 
 	load(params?: ListBuildsParams): void {
 		if (
@@ -21,7 +21,6 @@ export class BuildsStore {
 		) {
 			return;
 		}
-		this.abortController?.abort();
 		this.params = params;
 		this.pendingRefresh = false;
 		this.status = 'connecting';
@@ -41,18 +40,17 @@ export class BuildsStore {
 	}
 
 	close(): void {
-		this.abortController?.abort();
-		this.abortController = null;
+		this.token += 1;
 		this.inFlight = false;
 		this.pendingRefresh = false;
+		this.status = 'disconnected';
+		this.error = null;
 	}
 
 	reset(): void {
 		this.close();
 		this.builds = [];
 		this.total = 0;
-		this.status = 'disconnected';
-		this.error = null;
 	}
 
 	replaceBuild(next: ActiveBuildSummary): void {
@@ -60,15 +58,12 @@ export class BuildsStore {
 	}
 
 	private fetch(): void {
-		this.abortController?.abort();
-		const controller = new AbortController();
-		this.abortController = controller;
+		const token = ++this.token;
 		this.inFlight = true;
 
-		listBuilds(this.params, controller.signal).match(
+		listBuilds(this.params).match(
 			(response) => {
-				this.finishFetch(controller);
-				if (controller.signal.aborted) return;
+				if (!this.finishFetch(token)) return;
 				this.builds = response.builds;
 				this.total = response.total;
 				this.status = 'connected';
@@ -79,8 +74,7 @@ export class BuildsStore {
 				}
 			},
 			(err) => {
-				this.finishFetch(controller);
-				if (controller.signal.aborted) return;
+				if (!this.finishFetch(token)) return;
 				this.error = err.message;
 				this.status = 'error';
 				if (this.pendingRefresh) {
@@ -91,9 +85,10 @@ export class BuildsStore {
 		);
 	}
 
-	private finishFetch(controller: AbortController): void {
-		if (this.abortController === controller) this.abortController = null;
+	private finishFetch(token: number): boolean {
+		if (this.token !== token) return false;
 		this.inFlight = false;
+		return true;
 	}
 }
 

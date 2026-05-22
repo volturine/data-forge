@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { resolve } from '$app/paths';
 	import {
@@ -20,7 +21,6 @@
 		engineRunStatusToActiveBuildStatus,
 		readActiveBuildStatus
 	} from '$lib/types/build-stream';
-	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
 	import {
 		Save,
 		Loader,
@@ -67,6 +67,7 @@
 	import { formatDateDisplay } from '$lib/utils/datetime';
 	import { resolveColumnType } from '$lib/utils/column-types';
 	import { css, input, tabButton, chip, emptyText } from '$lib/styles/panda';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
 
 	interface Props {
 		datasource: DataSource;
@@ -76,15 +77,17 @@
 	let { datasource, onSave }: Props = $props();
 
 	const queryClient = useQueryClient();
+	const ns = useNamespace();
 
 	const datasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', datasource.id],
+		queryKey: ['datasource', ns.value, datasource.id],
 		queryFn: async () => {
 			const result = await getDatasource(datasource.id);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		initialData: datasource
+		initialData: datasource,
+		refetchOnMount: false
 	}));
 
 	const schemaQuery = createQuery(() => ({
@@ -100,46 +103,28 @@
 
 	const buildRunsStore = new BuildsStore();
 	const engineRunsStore = new EngineRunsStore();
-	// Network: fetch datasource build history when the datasource changes.
-	$effect(() => {
-		if (!datasource.id) return;
-		buildRunsStore.load({ datasource_id: datasource.id, limit: 50 });
-		return () => buildRunsStore.close();
-	});
-	// Network: fetch non-build engine runs when the datasource changes.
-	$effect(() => {
-		if (!datasource.id) return;
-		engineRunsStore.load({ datasource_id: datasource.id, limit: 50 });
-		return () => engineRunsStore.close();
-	});
+	let runsRequested = false;
 
-	// Network: switching to the Runs tab is an explicit user refresh point, so reload once
-	// to pick up runs that may have been persisted just after the datasource was selected.
+	// Network: keep run history dormant until the user opens the Runs tab.
 	$effect(() => {
 		if (activeTab !== 'runs' || !datasource.id) return;
+		if (!untrack(() => runsRequested)) {
+			buildRunsStore.load({ datasource_id: datasource.id, limit: 50 });
+			engineRunsStore.load({ datasource_id: datasource.id, limit: 50 });
+			runsRequested = true;
+			return;
+		}
 		buildRunsStore.refresh();
 		engineRunsStore.refresh();
 	});
 
-	const healthChecksQuery = createQuery(() => ({
-		queryKey: ['datasource-healthchecks-count', datasource.id],
-		queryFn: async () => {
-			const result = await listHealthChecks(datasource.id);
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		enabled: !!datasource.id
-	}));
-
-	const healthResultsQuery = createQuery(() => ({
-		queryKey: ['healthcheck-results', datasource.id],
-		queryFn: async () => {
-			const result = await listHealthCheckResults(datasource.id, 50);
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		enabled: !!datasource.id
-	}));
+	// Subscription: keep any in-flight runs requests alive during normal tab switches.
+	$effect(() => {
+		return () => {
+			buildRunsStore.close();
+			engineRunsStore.close();
+		};
+	});
 
 	const updateMutation = createMutation(() => ({
 		mutationFn: async (update: {
@@ -152,7 +137,7 @@
 			return result.value;
 		},
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ['datasource', datasource.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, datasource.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasources'] });
 			onSave?.();
@@ -205,6 +190,9 @@
 		if (!ds) return;
 		if (currentDatasourceId === ds.id) return;
 		currentDatasourceId = ds.id;
+		buildRunsStore.reset();
+		engineRunsStore.reset();
+		runsRequested = false;
 
 		// Reset all state for new datasource
 		name = ds.name;
@@ -523,7 +511,7 @@
 				refreshError = ingestResult.error.message || 'Failed to re-ingest datasource';
 				return;
 			}
-			queryClient.invalidateQueries({ queryKey: ['datasource', ds.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, ds.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ds.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasources'] });
@@ -579,23 +567,6 @@
 		}
 	}
 
-	const healthChecks = $derived(healthChecksQuery.data ?? []);
-	const activeHealthChecks = $derived(healthChecks.filter((hc) => hc.enabled));
-	const healthStatus = $derived.by(() => {
-		const results = healthResultsQuery.data ?? [];
-		if (activeHealthChecks.length === 0 || results.length === 0) return 'none';
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local Map for computation, not reactive state
-		const latestPerCheck = new Map<string, boolean>();
-		for (const r of results) {
-			if (!latestPerCheck.has(r.healthcheck_id)) {
-				latestPerCheck.set(r.healthcheck_id, r.passed);
-			}
-		}
-		for (const passed of latestPerCheck.values()) {
-			if (!passed) return 'failing';
-		}
-		return 'passing';
-	});
 	type DatasourceRunRow = {
 		id: string;
 		kind: string;
@@ -763,9 +734,6 @@
 			aria-selected={activeTab === 'runs'}
 		>
 			Runs
-			{#if filteredRuns.length > 0}
-				<span class={css({ marginLeft: '1', color: 'fg.tertiary' })}>({filteredRuns.length})</span>
-			{/if}
 		</button>
 		<button
 			class={tabButton({ active: activeTab === 'health' })}
@@ -774,45 +742,6 @@
 			aria-selected={activeTab === 'health'}
 		>
 			Health Checks
-			{#if activeHealthChecks.length > 0}
-				<span class={css({ marginLeft: '1', color: 'fg.tertiary' })}
-					>({activeHealthChecks.length})</span
-				>
-				{#if healthStatus === 'passing'}
-					<span
-						class={css({
-							marginLeft: '1',
-							display: 'inline-block',
-							height: 'dot',
-							width: 'dot',
-							backgroundColor: 'fg.success'
-						})}
-						title="All checks passing"
-					></span>
-				{:else if healthStatus === 'failing'}
-					<span
-						class={css({
-							marginLeft: '1',
-							display: 'inline-block',
-							height: 'dot',
-							width: 'dot',
-							backgroundColor: 'fg.error'
-						})}
-						title="Some checks failing"
-					></span>
-				{:else}
-					<span
-						class={css({
-							marginLeft: '1',
-							display: 'inline-block',
-							height: 'dot',
-							width: 'dot',
-							backgroundColor: 'bg.indicator'
-						})}
-						title="No results yet"
-					></span>
-				{/if}
-			{/if}
 		</button>
 		{#if scheduleAnalysisId || rawSchedulable}
 			<button

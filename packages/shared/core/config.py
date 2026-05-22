@@ -167,6 +167,7 @@ class Settings(BaseSettings):
 
     # Frontend debug panels
     public_idb_debug: bool = Field(default=False, alias='PUBLIC_IDB_DEBUG')
+    persist_preview_runs: bool = Field(default=True, alias='PERSIST_PREVIEW_RUNS')
 
     settings_encryption_key: str = Field(default='', alias='SETTINGS_ENCRYPTION_KEY')
 

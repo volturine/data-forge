@@ -4,6 +4,8 @@ from typing import Annotated
 from core.exceptions import InvalidIdError
 from fastapi import Path
 
+_PREVIEW_PREFIX = "__preview__"
+
 
 def _parse_uuid(value: str) -> str:
     try:
@@ -17,6 +19,14 @@ AnalysisId = Annotated[
     Path(
         description="Analysis ID",
         examples=["b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a"],
+        min_length=1,
+    ),
+]
+ComputeAnalysisId = Annotated[
+    str,
+    Path(
+        description="Compute analysis or datasource preview ID",
+        examples=["b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a", "__preview__datasource-1"],
         min_length=1,
     ),
 ]
@@ -76,6 +86,15 @@ parse_analysis_id = _parse_uuid
 def parse_datasource_id(value: str) -> str:
     """Datasource IDs may be UUIDs or slug strings — accept both."""
     return value.strip()
+
+
+def parse_compute_analysis_id(value: str) -> str:
+    if value.startswith(_PREVIEW_PREFIX):
+        datasource_id = parse_datasource_id(value[len(_PREVIEW_PREFIX) :])
+        if datasource_id:
+            return f"{_PREVIEW_PREFIX}{datasource_id}"
+        raise InvalidIdError(message=f"Invalid preview analysis ID: {value}", details={"value": value})
+    return parse_analysis_id(value)
 
 
 parse_schedule_id = _parse_uuid

@@ -1,9 +1,14 @@
 <script lang="ts">
-	import type { DataSource } from '$lib/types/datasource';
+	import {
+		datasourceIsAnalysisOutput,
+		datasourceNeedsExternalIngest,
+		type DataSource
+	} from '$lib/types/datasource';
 	import type { AnalysisTab, AnalysisTabDatasource } from '$lib/types/analysis';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { getDatasource } from '$lib/api/datasource';
+	import { getEngineDefaults } from '$lib/api/compute';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { track } from '$lib/utils/audit-log';
 	import {
@@ -60,8 +65,20 @@
 	// Engine config - simple state bound to store
 	let engineExpanded = $state(false);
 
-	// Use defaults from store (fetched by analysis page on load)
-	const defaults = $derived(analysisStore.engineDefaults);
+	const engineDefaultsQuery = createQuery(() => ({
+		queryKey: ['engine-defaults'],
+		queryFn: async () => {
+			const result = await getEngineDefaults();
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		initialData: analysisStore.engineDefaults ?? undefined,
+		staleTime: Infinity,
+		refetchOnMount: false
+	}));
+
+	// Use defaults from store or query cache for both existing and new analyses.
+	const defaults = $derived(engineDefaultsQuery.data ?? analysisStore.engineDefaults);
 
 	// Threads: show effective value (default when not overridden)
 	const threadsOverride = $derived(analysisStore.resourceConfig?.max_threads ?? 0);
@@ -115,8 +132,13 @@
 		enabled: !!datasource?.id
 	}));
 	const resolvedDatasource = $derived(datasourceQuery.data ?? datasource);
-	const outputId = $derived(activeTab?.output.result_id ?? null);
-	const isOutputSource = $derived(activeTab?.datasource?.id === outputId && !!outputId);
+	const showSnapshotBuildPreviews = $derived.by(() => {
+		if (!resolvedDatasource) return false;
+		return (
+			datasourceIsAnalysisOutput(resolvedDatasource) ||
+			datasourceNeedsExternalIngest(resolvedDatasource)
+		);
+	});
 	function ensureBranch(
 		config: AnalysisTabDatasource['config'] | null | undefined,
 		fallback: string
@@ -579,7 +601,7 @@
 									persistOpen
 									disabled={readOnly}
 									branch={snapshotBranch}
-									showBuildPreviews={!isOutputSource}
+									showBuildPreviews={showSnapshotBuildPreviews}
 									onConfigChange={updateSnapshotConfig}
 									onUiChange={updateTimeTravelUi}
 									onSelect={handleSnapshotSelect}

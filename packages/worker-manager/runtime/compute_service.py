@@ -1438,26 +1438,29 @@ def preview_step(
         preview_steps = _hydrate_udfs(session, preview_steps)
 
     engine = manager.get_or_create_engine(analysis_id_value, resource_config=resource_config)
-    run_response = engine_run_service.create_engine_run(
-        session,
-        engine_run_service.create_engine_run_payload(
-            analysis_id=run_analysis_id,
-            datasource_id=datasource_id,
-            kind="preview",
-            status="running",
-            request_json=request_payload,
-            result_json=_initial_live_run_result(
-                current_tab_id=tab_id,
-                current_tab_name=tab_name,
-                total_steps=len(preview_steps),
-                total_tabs=1,
-                resource_config=resource_config if isinstance(resource_config, dict) else None,
+    persist_preview_runs = settings.persist_preview_runs
+    run_response = None
+    if persist_preview_runs:
+        run_response = engine_run_service.create_engine_run(
+            session,
+            engine_run_service.create_engine_run_payload(
+                analysis_id=run_analysis_id,
+                datasource_id=datasource_id,
+                kind="preview",
+                status="running",
+                request_json=request_payload,
+                result_json=_initial_live_run_result(
+                    current_tab_id=tab_id,
+                    current_tab_name=tab_name,
+                    total_steps=len(preview_steps),
+                    total_tabs=1,
+                    resource_config=resource_config if isinstance(resource_config, dict) else None,
+                ),
+                created_at=started_at,
+                progress=0.0,
+                triggered_by=triggered_by,
             ),
-            created_at=started_at,
-            progress=0.0,
-            triggered_by=triggered_by,
-        ),
-    )
+        )
 
     additional_datasources = _get_additional_datasources(session, preview_steps, analysis_pipeline)
 
@@ -1499,38 +1502,39 @@ def preview_step(
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
-        result_json = _build_canonical_engine_run_result(
-            existing_result=_load_engine_run_result_json(session, run_response.id),
-            summary_meta=result_meta,
-            execution_entries=execution_entries,
-            current_tab_id=tab_id,
-            current_tab_name=tab_name,
-            total_steps=len(preview_steps),
-            total_tabs=1,
-            resource_config=_resource_summary(engine),
-            results=[
-                _result_entry(
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                    status=BuildTabStatus.SUCCESS,
-                )
-            ],
-            append_logs=[_log_entry(message="Preview completed", tab_id=tab_id, tab_name=tab_name)],
-        )
-        engine_run_service.update_engine_run(
-            session,
-            run_response.id,
-            status=ComputeRunStatus.SUCCESS,
-            result_json=result_json,
-            merge_result_json=False,
-            completed_at=completed_at,
-            duration_ms=duration_ms,
-            step_timings=step_timings,
-            query_plan=query_plan,
-            execution_entries=execution_entries,
-            progress=1.0,
-            current_step=current_step_id,
-        )
+        if run_response is not None:
+            result_json = _build_canonical_engine_run_result(
+                existing_result=_load_engine_run_result_json(session, run_response.id),
+                summary_meta=result_meta,
+                execution_entries=execution_entries,
+                current_tab_id=tab_id,
+                current_tab_name=tab_name,
+                total_steps=len(preview_steps),
+                total_tabs=1,
+                resource_config=_resource_summary(engine),
+                results=[
+                    _result_entry(
+                        tab_id=tab_id,
+                        tab_name=tab_name,
+                        status=BuildTabStatus.SUCCESS,
+                    )
+                ],
+                append_logs=[_log_entry(message="Preview completed", tab_id=tab_id, tab_name=tab_name)],
+            )
+            engine_run_service.update_engine_run(
+                session,
+                run_response.id,
+                status=ComputeRunStatus.SUCCESS,
+                result_json=result_json,
+                merge_result_json=False,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+                step_timings=step_timings,
+                query_plan=query_plan,
+                execution_entries=execution_entries,
+                progress=1.0,
+                current_step=current_step_id,
+            )
 
         return StepPreviewResponse(
             step_id=target_step_id,
@@ -1549,29 +1553,30 @@ def preview_step(
             result_data if isinstance(result_data, dict) else None,
             duration_ms=duration_ms,
         )
-        _finalize_failed_engine_run(
-            session,
-            run_id=run_response.id,
-            existing_result=_load_engine_run_result_json(session, run_response.id),
-            execution_entries=execution_entries,
-            error=exc,
-            completed_at=completed_at,
-            duration_ms=duration_ms,
-            step_timings=step_timings,
-            current_tab_id=tab_id,
-            current_tab_name=tab_name,
-            total_steps=len(preview_steps),
-            total_tabs=1,
-            resource_config=_resource_summary(engine),
-            result_entry=_result_entry(
-                tab_id=tab_id,
-                tab_name=tab_name,
-                status=BuildTabStatus.FAILED,
-                error=str(exc),
-            ),
-            log_entry=_log_entry(message=str(exc), level="error", tab_id=tab_id, tab_name=tab_name),
-            current_step=current_step_id,
-        )
+        if run_response is not None:
+            _finalize_failed_engine_run(
+                session,
+                run_id=run_response.id,
+                existing_result=_load_engine_run_result_json(session, run_response.id),
+                execution_entries=execution_entries,
+                error=exc,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+                step_timings=step_timings,
+                current_tab_id=tab_id,
+                current_tab_name=tab_name,
+                total_steps=len(preview_steps),
+                total_tabs=1,
+                resource_config=_resource_summary(engine),
+                result_entry=_result_entry(
+                    tab_id=tab_id,
+                    tab_name=tab_name,
+                    status=BuildTabStatus.FAILED,
+                    error=str(exc),
+                ),
+                log_entry=_log_entry(message=str(exc), level="error", tab_id=tab_id, tab_name=tab_name),
+                current_step=current_step_id,
+            )
         raise
 
 

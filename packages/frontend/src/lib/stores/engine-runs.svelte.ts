@@ -7,10 +7,10 @@ export class EngineRunsStore {
 	status = $state<EngineRunsStatus>('disconnected');
 	error = $state<string | null>(null);
 
-	private abortController: AbortController | null = null;
 	private params: ListEngineRunsParams | undefined;
 	private inFlight = false;
 	private pendingRefresh = false;
+	private token = 0;
 
 	load(params?: ListEngineRunsParams): void {
 		if (
@@ -19,7 +19,6 @@ export class EngineRunsStore {
 		) {
 			return;
 		}
-		this.abortController?.abort();
 		this.params = params;
 		this.pendingRefresh = false;
 		this.status = 'connecting';
@@ -39,17 +38,16 @@ export class EngineRunsStore {
 	}
 
 	close(): void {
-		this.abortController?.abort();
-		this.abortController = null;
+		this.token += 1;
 		this.inFlight = false;
 		this.pendingRefresh = false;
+		this.status = 'disconnected';
+		this.error = null;
 	}
 
 	reset(): void {
 		this.close();
 		this.runs = [];
-		this.status = 'disconnected';
-		this.error = null;
 	}
 
 	replaceRun(next: EngineRun): void {
@@ -57,15 +55,12 @@ export class EngineRunsStore {
 	}
 
 	private fetch(): void {
-		this.abortController?.abort();
-		const controller = new AbortController();
-		this.abortController = controller;
+		const token = ++this.token;
 		this.inFlight = true;
 
-		listEngineRuns(this.params, controller.signal).match(
+		listEngineRuns(this.params).match(
 			(runs) => {
-				this.finishFetch(controller);
-				if (controller.signal.aborted) return;
+				if (!this.finishFetch(token)) return;
 				this.runs = runs;
 				this.status = 'connected';
 				this.error = null;
@@ -75,8 +70,7 @@ export class EngineRunsStore {
 				}
 			},
 			(err) => {
-				this.finishFetch(controller);
-				if (controller.signal.aborted) return;
+				if (!this.finishFetch(token)) return;
 				this.error = err.message;
 				this.status = 'error';
 				if (this.pendingRefresh) {
@@ -87,9 +81,10 @@ export class EngineRunsStore {
 		);
 	}
 
-	private finishFetch(controller: AbortController): void {
-		if (this.abortController === controller) this.abortController = null;
+	private finishFetch(token: number): boolean {
+		if (this.token !== token) return false;
 		this.inFlight = false;
+		return true;
 	}
 }
 

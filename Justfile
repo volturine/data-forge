@@ -31,6 +31,7 @@ dev:
     #!/usr/bin/env bash
     set -euo pipefail
     set -a; source packages/shared/dev.env; set +a
+    uv run --project packages/shared python scripts/ensure_dev_postgres.py
     (cd packages/backend && uv run --env-file ../shared/dev.env main.py) & \
     (cd packages/scheduler && uv run --env-file ../shared/dev.env main.py) & \
     (cd packages/worker-manager && uv run --env-file ../shared/dev.env main.py) & \

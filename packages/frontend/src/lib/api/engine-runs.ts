@@ -1,6 +1,8 @@
 import { apiRequest } from './client';
 import type { ApiError } from './client';
 import type { ResultAsync } from 'neverthrow';
+import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
+import { shareInFlight } from './in-flight';
 
 export interface EngineRunExecutionEntry {
 	key: string;
@@ -56,11 +58,22 @@ function buildQueryString(params?: ListEngineRunsParams): string {
 	return str ? `?${str}` : '';
 }
 
+const inFlight = new Map<string, ResultAsync<EngineRun[], ApiError>>();
+
+function namespaceKey(): string {
+	if (!isNamespaceReady()) return '';
+	return requireNamespace();
+}
+
 export function listEngineRuns(
 	params?: ListEngineRunsParams,
 	signal?: AbortSignal
 ): ResultAsync<EngineRun[], ApiError> {
-	return apiRequest<EngineRun[]>(`/v1/engine-runs${buildQueryString(params)}`, { signal });
+	const endpoint = `/v1/engine-runs${buildQueryString(params)}`;
+	if (signal) return apiRequest<EngineRun[]>(endpoint, { signal });
+	return shareInFlight(inFlight, `${namespaceKey()}:${endpoint}`, () =>
+		apiRequest<EngineRun[]>(endpoint)
+	);
 }
 
 export function getEngineRun(id: string): ResultAsync<EngineRun, ApiError> {

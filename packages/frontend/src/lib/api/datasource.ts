@@ -183,10 +183,26 @@ export interface IcebergSnapshotsResponse {
 	snapshots: IcebergSnapshotInfo[];
 }
 
+export interface ListIcebergSnapshotsOptions {
+	branch?: string | null;
+	buildResultsOnly?: boolean;
+}
+
 export function listIcebergSnapshots(
-	datasourceId: string
+	datasourceId: string,
+	options?: ListIcebergSnapshotsOptions
 ): ResultAsync<IcebergSnapshotsResponse, ApiError> {
-	return apiRequest<IcebergSnapshotsResponse>(`/v1/compute/iceberg/${datasourceId}/snapshots`);
+	const params = new URLSearchParams();
+	if (options?.branch) {
+		params.set('branch', options.branch);
+	}
+	if (options?.buildResultsOnly) {
+		params.set('build_results_only', 'true');
+	}
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	return apiRequest<IcebergSnapshotsResponse>(
+		`/v1/compute/iceberg/${datasourceId}/snapshots${suffix}`
+	);
 }
 
 export interface SnapshotPreview {

@@ -1,7 +1,9 @@
 import { apiRequest } from './client';
 import type { ApiError } from './client';
 import type { ResultAsync } from 'neverthrow';
+import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
 import type { ActiveBuildDetail, ActiveBuildSummary } from '$lib/types/build-stream';
+import { shareInFlight } from './in-flight';
 
 export interface ListBuildsParams {
 	analysis_id?: string;
@@ -30,13 +32,22 @@ function buildQueryString(params?: ListBuildsParams): string {
 	return str ? `?${str}` : '';
 }
 
+const inFlight = new Map<string, ResultAsync<ActiveBuildListResponse, ApiError>>();
+
+function namespaceKey(): string {
+	if (!isNamespaceReady()) return '';
+	return requireNamespace();
+}
+
 export function listBuilds(
 	params?: ListBuildsParams,
 	signal?: AbortSignal
 ): ResultAsync<ActiveBuildListResponse, ApiError> {
-	return apiRequest<ActiveBuildListResponse>(`/v1/compute/builds${buildQueryString(params)}`, {
-		signal
-	});
+	const endpoint = `/v1/compute/builds${buildQueryString(params)}`;
+	if (signal) return apiRequest<ActiveBuildListResponse>(endpoint, { signal });
+	return shareInFlight(inFlight, `${namespaceKey()}:${endpoint}`, () =>
+		apiRequest<ActiveBuildListResponse>(endpoint)
+	);
 }
 
 export function getBuild(buildId: string): ResultAsync<ActiveBuildDetail, ApiError> {

@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import logging
+import os
 import re
 import uuid
 from datetime import UTC, datetime
@@ -45,9 +46,9 @@ from backend_core.engine_live import load_engine_snapshot
 from backend_core.engine_live import registry as engine_registry
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import (
-    AnalysisId,
+    ComputeAnalysisId,
     DataSourceId,
-    parse_analysis_id,
+    parse_compute_analysis_id,
     parse_datasource_id,
 )
 from backend_core.websocket import (
@@ -309,6 +310,32 @@ def _get_latest_build_namespace_update(namespace: str) -> str | None:
     return str(latest)
 
 
+def _resolved_default_max_threads() -> int:
+    if settings.polars_max_threads > 0:
+        return settings.polars_max_threads
+    return os.cpu_count() or 1
+
+
+def _resolved_system_memory_mb() -> int:
+    try:
+        pages = os.sysconf("SC_PHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+    except AttributeError, OSError, ValueError:
+        return 0
+    if not isinstance(pages, int) or not isinstance(page_size, int):
+        return 0
+    total_bytes = pages * page_size
+    if total_bytes <= 0:
+        return 0
+    return total_bytes // (1024 * 1024)
+
+
+def _resolved_default_max_memory_mb() -> int:
+    if settings.polars_max_memory_mb > 0:
+        return settings.polars_max_memory_mb
+    return _resolved_system_memory_mb()
+
+
 async def _send_engine_snapshot(websocket: WebSocket) -> None:
     session_gen = get_settings_db()
     session = next(session_gen)
@@ -445,14 +472,21 @@ async def get_step_row_count(
 def list_iceberg_snapshots(
     datasource_id: DataSourceId,
     branch: str | None = None,
+    build_results_only: bool = False,
     session: Session = Depends(get_db),
 ):
     """List Iceberg table snapshots for time-travel selection.
 
     Each snapshot has a snapshot_id, timestamp, and operation type.
-    Optionally filter by branch. Use snapshot_id with compare-snapshots.
+    Optionally filter by branch. Set build_results_only=true to return only
+    snapshots produced by completed builds for this datasource.
     """
-    return list_iceberg_snapshots_info(session, parse_datasource_id(datasource_id), branch=branch)
+    return list_iceberg_snapshots_info(
+        session,
+        parse_datasource_id(datasource_id),
+        branch=branch,
+        build_results_only=build_results_only,
+    )
 
 
 @router.delete(
@@ -731,7 +765,7 @@ async def get_active_build(
 @router.post("/engine/spawn/{analysis_id}", response_model=schemas.EngineStatusSchema, mcp=True)
 @handle_errors(operation="spawn engine")
 async def spawn_engine(
-    analysis_id: AnalysisId,
+    analysis_id: ComputeAnalysisId,
     http_request: Request,
     request: schemas.SpawnEngineRequest | None = None,
     session: Session = Depends(get_db),
@@ -742,7 +776,7 @@ async def spawn_engine(
     Optionally accepts resource configuration overrides.
     """
     resource_config = request.resource_config.model_dump() if request and request.resource_config else None
-    analysis_id_value = parse_analysis_id(analysis_id)
+    analysis_id_value = parse_compute_analysis_id(analysis_id)
     manager = _override_manager(http_request)
     if manager is not None:
         manager.spawn_engine(analysis_id_value, resource_config=resource_config)
@@ -762,7 +796,7 @@ async def spawn_engine(
 )
 @handle_errors(operation="configure engine")
 async def configure_engine(
-    analysis_id: AnalysisId,
+    analysis_id: ComputeAnalysisId,
     request: schemas.EngineResourceConfig,
     http_request: Request,
     session: Session = Depends(get_db),
@@ -774,7 +808,7 @@ async def configure_engine(
     resource configuration. Values set to null will use the default from settings.
     """
     resource_config = request.model_dump()
-    analysis_id_value = parse_analysis_id(analysis_id)
+    analysis_id_value = parse_compute_analysis_id(analysis_id)
     manager = _override_manager(http_request)
     if manager is not None:
         manager.restart_engine_with_config(analysis_id_value, resource_config)
@@ -975,12 +1009,10 @@ async def active_build_stream(websocket: WebSocket, build_id: str) -> None:
 @router.get("/defaults", response_model=schemas.EngineDefaults, mcp=True)
 @handle_errors(operation="get engine defaults")
 def get_engine_defaults():
-    """Get default engine resource settings from environment configuration."""
-    from core.config import settings
-
+    """Get resolved default engine resource settings for the UI."""
     return schemas.EngineDefaults(
-        max_threads=settings.polars_max_threads,
-        max_memory_mb=settings.polars_max_memory_mb,
+        max_threads=_resolved_default_max_threads(),
+        max_memory_mb=_resolved_default_max_memory_mb(),
         streaming_chunk_size=settings.polars_streaming_chunk_size,
     )
 

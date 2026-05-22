@@ -88,6 +88,14 @@ class TestSettings:
         assert settings.polars_max_threads == 8
         assert settings.polars_streaming_chunk_size == 100000
 
+    def test_preview_run_persistence_setting(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('PERSIST_PREVIEW_RUNS', 'false')
+
+        settings = Settings()
+
+        assert settings.persist_preview_runs is False
+
     def test_cors_settings(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('CORS_ORIGINS', 'http://localhost:3000,http://localhost:5173')

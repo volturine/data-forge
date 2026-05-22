@@ -3,7 +3,6 @@ import { render, screen, fireEvent } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { okAsync } from 'neverthrow';
 import SnapshotPicker from './SnapshotPicker.svelte';
-import type { ActiveBuildSummary } from '$lib/types/build-stream';
 
 vi.mock('$lib/stores/clientIdentity.svelte', () => ({
 	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' })
@@ -18,18 +17,6 @@ const mockApiRequest = vi.fn();
 vi.mock('$lib/api/client', () => ({
 	apiRequest: (...args: unknown[]) => mockApiRequest(...args),
 	BASE_URL: '/api'
-}));
-
-let mockBuilds: ActiveBuildSummary[] = [];
-vi.mock('$lib/stores/builds.svelte', () => ({
-	BuildsStore: class {
-		get builds() {
-			return mockBuilds;
-		}
-		load() {}
-		close() {}
-		reset() {}
-	}
 }));
 
 function renderPicker(props: Record<string, unknown> = {}) {
@@ -64,41 +51,9 @@ function makeSnapshots(
 	};
 }
 
-function makeRun(overrides: Partial<ActiveBuildSummary> = {}): ActiveBuildSummary {
-	return {
-		build_id: 'run-1',
-		analysis_id: 'analysis-1',
-		analysis_name: 'Analysis 1',
-		namespace: 'default',
-		status: 'completed',
-		started_at: '2024-06-15T12:00:00Z',
-		starter: { user_id: null, display_name: null, email: null, triggered_by: null },
-		resource_config: null,
-		progress: 1,
-		elapsed_ms: 60000,
-		estimated_remaining_ms: null,
-		current_step: null,
-		current_step_index: null,
-		total_steps: 0,
-		current_kind: 'build',
-		current_datasource_id: 'ds-1',
-		current_tab_id: null,
-		current_tab_name: null,
-		current_output_id: 'ds-1',
-		current_output_name: 'Output',
-		current_engine_run_id: null,
-		total_tabs: 1,
-		cancelled_at: null,
-		cancelled_by: null,
-		result_json: null,
-		...overrides
-	};
-}
-
 beforeEach(() => {
 	vi.useFakeTimers();
 	mockApiRequest.mockReset();
-	mockBuilds = [];
 });
 
 afterEach(() => {
@@ -643,118 +598,27 @@ describe('SnapshotPicker', () => {
 		});
 	});
 
-	describe('showBuildPreviews fallback', () => {
-		test('shows all snapshots when build runs exist but map is empty', async () => {
-			mockApiRequest.mockReturnValue(
-				okAsync(
-					makeSnapshots([
-						{ id: 'snap-a', ts: JUN15, current: true },
-						{ id: 'snap-b', ts: JUN15_LATE, current: false }
-					])
-				)
-			);
-			mockBuilds = [makeRun({ build_id: 'run-1', result_json: null })];
+	describe('showBuildPreviews request mode', () => {
+		test('requests build-results-only snapshots when enabled', async () => {
+			mockApiRequest.mockImplementation((endpoint: string) => {
+				expect(endpoint).toBe('/v1/compute/iceberg/ds-1/snapshots?build_results_only=true');
+				return okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN15, current: true }]));
+			});
 			renderPicker({ showBuildPreviews: true });
-			await tick();
 			await fireEvent.click(screen.getByRole('button'));
-			await tick();
-
 			expect(screen.getByText('2024-06')).toBeInTheDocument();
-			const dayButton = screen.getByText('15').closest('button');
-			expect(dayButton).toBeTruthy();
-			await fireEvent.click(dayButton!);
-
-			const buttons = screen.getAllByRole('button');
-			const timeButtons = buttons.filter((btn) => btn.textContent?.match(/\d{2}:\d{2}:\d{2}/));
-			expect(timeButtons.length).toBe(2);
 		});
 
-		test('shows all snapshots when no build runs loaded', async () => {
-			mockApiRequest.mockReturnValue(
-				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN15, current: true }]))
-			);
-			mockBuilds = [];
-			renderPicker({ showBuildPreviews: true });
-			await tick();
+		test('includes branch alongside build-results-only filter', async () => {
+			mockApiRequest.mockImplementation((endpoint: string) => {
+				expect(endpoint).toBe(
+					'/v1/compute/iceberg/ds-1/snapshots?branch=dev&build_results_only=true'
+				);
+				return okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN15, current: true }]));
+			});
+			renderPicker({ showBuildPreviews: true, branch: 'dev' });
 			await fireEvent.click(screen.getByRole('button'));
-			await tick();
-
 			expect(screen.getByText('2024-06')).toBeInTheDocument();
-			const dayButton = screen.getByText('15').closest('button');
-			expect(dayButton).toBeTruthy();
-		});
-
-		test('filters to matched snapshots when map has entries', async () => {
-			const runs = [makeRun({ build_id: 'run-1', result_json: { snapshot_id: 'snap-a' } })];
-			mockBuilds = runs;
-			mockApiRequest.mockReturnValue(
-				okAsync(
-					makeSnapshots([
-						{ id: 'snap-a', ts: JUN15, current: true },
-						{ id: 'snap-b', ts: JUN15_LATE, current: false },
-						{ id: 'snap-c', ts: JUN20, current: false }
-					])
-				)
-			);
-			vi.useRealTimers();
-			renderPicker({ showBuildPreviews: true });
-			await tick();
-			await tick();
-			await fireEvent.click(screen.getByRole('button'));
-			await tick();
-			await tick();
-
-			const dayButton = screen.getByText('15').closest('button');
-			expect(dayButton).toBeTruthy();
-			await fireEvent.click(dayButton!);
-			await tick();
-			await tick();
-
-			const buttons = screen.getAllByRole('button');
-			const timeButtons = buttons.filter((btn) => btn.textContent?.match(/\d{2}:\d{2}:\d{2}/));
-			expect(timeButtons.length).toBe(1);
-		});
-
-		test('day selection works when map is empty', async () => {
-			mockApiRequest.mockReturnValue(
-				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN20, current: true }]))
-			);
-			mockBuilds = [makeRun({ build_id: 'run-1', result_json: {} })];
-			const onUiChange = vi.fn();
-			renderPicker({ showBuildPreviews: true, onUiChange });
-			await tick();
-			await fireEvent.click(screen.getByRole('button'));
-			await tick();
-
-			const dayButton = screen.getByText('20').closest('button');
-			expect(dayButton).toBeTruthy();
-			await fireEvent.click(dayButton!);
-
-			const dayCalls = onUiChange.mock.calls.filter(
-				(c: Array<Record<string, unknown>>) => c[0].day === '2024-06-20'
-			);
-			expect(dayCalls.length).toBeGreaterThanOrEqual(1);
-		});
-
-		test('month navigation works when map is empty', async () => {
-			mockApiRequest.mockReturnValue(
-				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN15, current: true }]))
-			);
-			mockBuilds = [makeRun({ build_id: 'run-1', result_json: null })];
-			const onUiChange = vi.fn();
-			renderPicker({ showBuildPreviews: true, onUiChange });
-			await tick();
-			await fireEvent.click(screen.getByRole('button'));
-			await tick();
-
-			expect(screen.getByText('2024-06')).toBeInTheDocument();
-			await fireEvent.click(screen.getByText('→'));
-			await tick();
-
-			const monthCall = onUiChange.mock.calls.find(
-				(c: Array<Record<string, unknown>>) => c[0].month === '2024-07'
-			);
-			expect(monthCall).toBeDefined();
 		});
 	});
 });

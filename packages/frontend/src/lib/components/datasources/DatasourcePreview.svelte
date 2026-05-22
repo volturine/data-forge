@@ -2,6 +2,7 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import {
 		previewStepData,
+		spawnEngine,
 		type StepPreviewRequest,
 		type StepPreviewResponse
 	} from '$lib/api/compute';
@@ -9,7 +10,10 @@
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
 	import type { DataSource } from '$lib/types/datasource';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { buildDatasourcePreviewPipelinePayload } from '$lib/utils/analysis-pipeline';
+	import {
+		buildDatasourcePreviewPipelinePayload,
+		datasourcePreviewAnalysisId
+	} from '$lib/utils/analysis-pipeline';
 	import { css } from '$lib/styles/panda';
 
 	interface Props {
@@ -49,16 +53,20 @@
 
 	const configKey = $derived(JSON.stringify(datasourceConfig));
 	const pipelineKey = $derived(JSON.stringify(analysisPipeline));
-	const resetKey = $derived(`${datasourceId}:${configKey}:${pipelineKey}`);
+	const previewAnalysisId = $derived(datasourcePreviewAnalysisId(datasourceId));
 
-	// Subscription: $derived can't reset pagination/state.
-	$effect(() => {
-		if (!datasourceId) return;
-		void resetKey;
-		page = 1;
-		statsOpen = false;
-		statsColumn = null;
-	});
+	const warmQuery = createQuery(() => ({
+		queryKey: ['datasource-preview-engine', ns.value, previewAnalysisId],
+		queryFn: async () => {
+			const result = await spawnEngine(previewAnalysisId);
+			if (result.isErr()) return null;
+			return result.value;
+		},
+		staleTime: 30000,
+		refetchOnMount: false,
+		retry: false,
+		enabled: !!datasourceId && !!analysisPipeline && !ns.switching
+	}));
 
 	const query = createQuery(() => ({
 		queryKey: [
@@ -85,7 +93,13 @@
 			return result.value;
 		},
 		staleTime: 30000,
-		enabled: !!datasourceId && !!analysisPipeline && !ns.switching
+		refetchOnMount: false,
+		retry: false,
+		enabled:
+			!!datasourceId &&
+			!!analysisPipeline &&
+			!ns.switching &&
+			(!warmQuery.isFetching || !!warmQuery.data || !!warmQuery.error)
 	}));
 
 	const data = $derived(query.data);

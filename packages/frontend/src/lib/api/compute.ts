@@ -10,6 +10,8 @@ import type { ApiError } from './client';
 import { createStream, type StreamHandle } from './websocket';
 import { track } from '$lib/utils/audit-log';
 import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
+import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
+import { shareInFlight } from './in-flight';
 
 export interface StepPreviewRequest {
 	analysis_id?: string;
@@ -34,14 +36,33 @@ export interface StepPreviewResponse {
 	metadata?: Record<string, unknown>;
 }
 
+const previewInFlight = new Map<string, ResultAsync<StepPreviewResponse, ApiError>>();
+const schemaInFlight = new Map<string, ResultAsync<StepSchemaResponse, ApiError>>();
+const rowCountInFlight = new Map<string, ResultAsync<StepRowCountResponse, ApiError>>();
+const spawnInFlight = new Map<string, ResultAsync<EngineStatusResponse, ApiError>>();
+const configureInFlight = new Map<string, ResultAsync<EngineStatusResponse, ApiError>>();
+const shutdownInFlight = new Map<string, ResultAsync<void, ApiError>>();
+
+function namespaceKey(): string {
+	if (!isNamespaceReady()) return '';
+	return requireNamespace();
+}
+
+function requestKey(endpoint: string, body?: string): string {
+	return `${namespaceKey()}:${endpoint}:${body ?? ''}`;
+}
+
 export function previewStepData(
 	request: StepPreviewRequest
 ): ResultAsync<StepPreviewResponse, ApiError> {
-	return computeActivityStore.track(
-		apiRequest<StepPreviewResponse>('/v1/compute/preview', {
-			method: 'POST',
-			body: JSON.stringify(request)
-		})
+	const body = JSON.stringify(request);
+	return shareInFlight(previewInFlight, requestKey('/v1/compute/preview', body), () =>
+		computeActivityStore.track(
+			apiRequest<StepPreviewResponse>('/v1/compute/preview', {
+				method: 'POST',
+				body
+			})
+		)
 	);
 }
 
@@ -52,11 +73,14 @@ export function spawnEngine(
 	resourceConfig?: EngineResourceConfig
 ): ResultAsync<EngineStatusResponse, ApiError> {
 	const body = resourceConfig ? JSON.stringify({ resource_config: resourceConfig }) : undefined;
-	return computeActivityStore.track(
-		apiRequest<EngineStatusResponse>(`/v1/compute/engine/spawn/${analysisId}`, {
-			method: 'POST',
-			body
-		})
+	const endpoint = `/v1/compute/engine/spawn/${analysisId}`;
+	return shareInFlight(spawnInFlight, requestKey(endpoint, body), () =>
+		computeActivityStore.track(
+			apiRequest<EngineStatusResponse>(endpoint, {
+				method: 'POST',
+				body
+			})
+		)
 	);
 }
 
@@ -64,19 +88,26 @@ export function configureEngine(
 	analysisId: string,
 	resourceConfig: EngineResourceConfig
 ): ResultAsync<EngineStatusResponse, ApiError> {
-	return computeActivityStore.track(
-		apiRequest<EngineStatusResponse>(`/v1/compute/engine/configure/${analysisId}`, {
-			method: 'POST',
-			body: JSON.stringify(resourceConfig)
-		})
+	const body = JSON.stringify(resourceConfig);
+	const endpoint = `/v1/compute/engine/configure/${analysisId}`;
+	return shareInFlight(configureInFlight, requestKey(endpoint, body), () =>
+		computeActivityStore.track(
+			apiRequest<EngineStatusResponse>(endpoint, {
+				method: 'POST',
+				body
+			})
+		)
 	);
 }
 
 export function shutdownEngine(analysisId: string): ResultAsync<void, ApiError> {
-	return computeActivityStore.track(
-		apiRequest<void>(`/v1/compute/engine/${analysisId}`, {
-			method: 'DELETE'
-		})
+	const endpoint = `/v1/compute/engine/${analysisId}`;
+	return shareInFlight(shutdownInFlight, requestKey(endpoint), () =>
+		computeActivityStore.track(
+			apiRequest<void>(endpoint, {
+				method: 'DELETE'
+			})
+		)
 	);
 }
 
@@ -206,11 +237,14 @@ export interface StepSchemaResponse {
 export function getStepSchema(
 	request: StepSchemaRequest
 ): ResultAsync<StepSchemaResponse, ApiError> {
-	return computeActivityStore.track(
-		apiRequest<StepSchemaResponse>('/v1/compute/schema', {
-			method: 'POST',
-			body: JSON.stringify(request)
-		})
+	const body = JSON.stringify(request);
+	return shareInFlight(schemaInFlight, requestKey('/v1/compute/schema', body), () =>
+		computeActivityStore.track(
+			apiRequest<StepSchemaResponse>('/v1/compute/schema', {
+				method: 'POST',
+				body
+			})
+		)
 	);
 }
 
@@ -224,11 +258,14 @@ export interface StepRowCountResponse {
 export function getStepRowCount(
 	request: StepRowCountRequest
 ): ResultAsync<StepRowCountResponse, ApiError> {
-	return computeActivityStore.track(
-		apiRequest<StepRowCountResponse>('/v1/compute/row-count', {
-			method: 'POST',
-			body: JSON.stringify(request)
-		})
+	const body = JSON.stringify(request);
+	return shareInFlight(rowCountInFlight, requestKey('/v1/compute/row-count', body), () =>
+		computeActivityStore.track(
+			apiRequest<StepRowCountResponse>('/v1/compute/row-count', {
+				method: 'POST',
+				body
+			})
+		)
 	);
 }
 

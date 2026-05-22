@@ -27,7 +27,11 @@
 		AnalysisTemplateDetail,
 		PipelineStep
 	} from '$lib/types/analysis';
-	import type { DataSource } from '$lib/types/datasource';
+	import {
+		datasourceIsAnalysisOutput,
+		datasourceNeedsExternalIngest,
+		type DataSource
+	} from '$lib/types/datasource';
 	import {
 		validatePipelineTabs,
 		formatPipelineErrors,
@@ -892,6 +896,8 @@
 												datasourceConfig={currentConfig}
 												branch={currentConfig.branch}
 												label="Snapshot"
+												showBuildPreviews={datasourceIsAnalysisOutput(datasource) ||
+													datasourceNeedsExternalIngest(datasource)}
 												onConfigChange={(config) => {
 													datasourceConfigs[datasource.id] = {
 														...currentConfig,

@@ -39,6 +39,20 @@ vi.mock('$lib/stores/compute-activity.svelte', () => ({
 
 const compute = await import('./compute');
 
+function makeResult(tag: string) {
+	return {
+		tag,
+		match: vi.fn((onOk: (value: undefined) => unknown) => onOk(undefined))
+	};
+}
+
+function makePendingResult(tag: string) {
+	return {
+		tag,
+		match: vi.fn()
+	};
+}
+
 describe('compute api activity tracking', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -49,7 +63,7 @@ describe('compute api activity tracking', () => {
 	});
 
 	test('previewStepData tracks compute activity', () => {
-		const result = { tag: 'preview' };
+		const result = makeResult('preview');
 		mockApiRequest.mockReturnValue(result);
 
 		const value = compute.previewStepData({
@@ -68,8 +82,27 @@ describe('compute api activity tracking', () => {
 		expect(value).toBe(result);
 	});
 
+	test('previewStepData coalesces identical in-flight requests', () => {
+		const result = makePendingResult('preview');
+		mockApiRequest.mockReturnValue(result);
+
+		const first = compute.previewStepData({
+			target_step_id: 'step-1',
+			analysis_pipeline: { analysis_id: 'analysis-1', tabs: [] }
+		});
+		const second = compute.previewStepData({
+			target_step_id: 'step-1',
+			analysis_pipeline: { analysis_id: 'analysis-1', tabs: [] }
+		});
+
+		expect(first).toBe(result);
+		expect(second).toBe(result);
+		expect(mockApiRequest).toHaveBeenCalledTimes(1);
+		expect(mockRetain).toHaveBeenCalledTimes(1);
+	});
+
 	test('getStepSchema tracks compute activity', () => {
-		const result = { tag: 'schema' };
+		const result = makeResult('schema');
 		mockApiRequest.mockReturnValue(result);
 
 		const value = compute.getStepSchema({
@@ -92,8 +125,21 @@ describe('compute api activity tracking', () => {
 		expect(value).toBe(result);
 	});
 
+	test('spawnEngine coalesces identical in-flight requests', () => {
+		const result = makePendingResult('spawn');
+		mockApiRequest.mockReturnValue(result);
+
+		const first = compute.spawnEngine('analysis-1');
+		const second = compute.spawnEngine('analysis-1');
+
+		expect(first).toBe(result);
+		expect(second).toBe(result);
+		expect(mockApiRequest).toHaveBeenCalledTimes(1);
+		expect(mockRetain).toHaveBeenCalledTimes(1);
+	});
+
 	test('getStepRowCount tracks compute activity', () => {
-		const result = { tag: 'row-count' };
+		const result = makeResult('row-count');
 		mockApiRequest.mockReturnValue(result);
 
 		const value = compute.getStepRowCount({

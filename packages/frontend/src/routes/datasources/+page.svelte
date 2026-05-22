@@ -18,86 +18,27 @@
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
 	import BuildComparisonPanel from '$lib/components/datasources/BuildComparisonPanel.svelte';
-	import { shutdownEngineBestEffort, spawnEngine } from '$lib/api/compute';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, spinner } from '$lib/styles/panda';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { datasourcePreviewAnalysisId } from '$lib/utils/analysis-pipeline';
+	import { datasourceIsAnalysisOutput, datasourceNeedsExternalIngest } from '$lib/types/datasource';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
 
 	let showHidden = $state(false);
 
-	let selectedId = $state<string | null>(page.url.searchParams.get('id'));
-	let showConfig = $state<string | null>(page.url.searchParams.get('id'));
 	let deletingId = $state<string | null>(null);
 	let mutatingId = $state<string | null>(null);
 	let searchQuery = $state('');
 	let showComparison = $state(false);
 	let snapshotConfig = $state<Record<string, unknown> | null>(null);
-	let selectedBranch = $state<string | null>(null);
-	let warmedPreviewKey = $state<string | null>(null);
 
-	const urlId = $derived(page.url.searchParams.get('id'));
-	let lastNs = ns.value;
-
-	// Namespace switch: clear stale selection immediately when namespace changes.
-	$effect(() => {
-		const current = ns.value;
-		if (current === lastNs) return;
-		lastNs = current;
-		selectDatasource(null);
-	});
-
-	// Navigation: layout may strip ?id= on namespace switch; sync state from URL.
-	$effect(() => {
-		if (urlId === selectedId) return;
-		selectedId = urlId;
-		showConfig = urlId;
-		showComparison = false;
-		if (!urlId) {
-			snapshotConfig = null;
-			selectedBranch = null;
-		}
-	});
-
-	// Network: warm the datasource preview engine as soon as selection is known so
-	// the first visible preview does not pay the full cold-start cost.
-	$effect(() => {
-		if (!selectedId) {
-			warmedPreviewKey = null;
-			return;
-		}
-		const previewAnalysisId = datasourcePreviewAnalysisId(selectedId);
-		if (warmedPreviewKey === previewAnalysisId) return;
-		warmedPreviewKey = previewAnalysisId;
-		let alive = true;
-		spawnEngine(previewAnalysisId).match(
-			() => {
-				if (!alive) return;
-			},
-			() => {
-				if (!alive) return;
-			}
-		);
-		return () => {
-			alive = false;
-		};
-	});
-
-	// Cleanup: datasource previews use dedicated compute engines; release the previous
-	// preview engine when the selection changes or the page unmounts so preview work
-	// stays fast instead of accumulating idle datasource engines.
-	$effect(() => {
-		const previewAnalysisId = selectedId ? datasourcePreviewAnalysisId(selectedId) : null;
-		return () => {
-			if (!previewAnalysisId) return;
-			shutdownEngineBestEffort(previewAnalysisId);
-		};
-	});
+	const selectedId = $derived(page.url.searchParams.get('id'));
+	const activeSelectedId = $derived(!ns.switching ? selectedId : null);
+	let lastSelectionKey = '';
 
 	const query = createQuery(() => ({
 		queryKey: ['datasources', ns.value, showHidden],
@@ -109,25 +50,17 @@
 		enabled: !ns.switching
 	}));
 
-	const selectionValid = $derived(
-		!selectedId || !query.data || query.data.some((d) => d.id === selectedId)
-	);
-
-	// Navigation: clear stale selection when datasource list loads without the selected ID.
-	$effect(() => {
-		if (selectionValid) return;
-		selectDatasource(null);
-	});
-
 	const selectedDatasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', ns.value, selectedId],
+		queryKey: ['datasource', ns.value, activeSelectedId],
 		queryFn: async () => {
-			if (!selectedId) return null;
-			const result = await getDatasource(selectedId);
+			if (!activeSelectedId) return null;
+			const result = await getDatasource(activeSelectedId);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: !!selectedId && selectionValid && !ns.switching
+		enabled: !!activeSelectedId,
+		refetchOnMount: false,
+		retry: false
 	}));
 
 	const deleteMutation = createMutation(() => ({
@@ -137,7 +70,7 @@
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['datasources'] });
-			if (selectedId === mutatingId) {
+			if (activeSelectedId === mutatingId) {
 				selectDatasource(null);
 			}
 			mutatingId = null;
@@ -157,38 +90,45 @@
 			: datasources
 	);
 	const selectedDatasource = $derived(
-		selectedDatasourceQuery.data ?? datasources.find((d) => d.id === selectedId) ?? null
+		selectedDatasourceQuery.data ?? datasources.find((d) => d.id === activeSelectedId) ?? null
 	);
-	const previewDatasource = $derived(selectedDatasourceQuery.data ?? null);
+	const staleSelection = $derived(
+		!!activeSelectedId &&
+			!!query.data &&
+			!selectedDatasourceQuery.isFetching &&
+			!selectedDatasourceQuery.data &&
+			!datasources.some((d) => d.id === activeSelectedId)
+	);
+	const previewDatasource = $derived(selectedDatasource);
+	const effectiveConfig = $derived.by(() => snapshotConfig ?? previewDatasource?.config ?? null);
+	const previewKey = $derived.by(() => {
+		const ds = previewDatasource;
+		const config = effectiveConfig;
+		if (!ds || !config) return '';
+		return `${ds.id}:${JSON.stringify(config)}`;
+	});
+
+	// Navigation: URL-driven selection still needs local transient state reset.
+	$effect(() => {
+		const key = `${ns.value}:${selectedId ?? ''}`;
+		if (key === lastSelectionKey) return;
+		lastSelectionKey = key;
+		showComparison = false;
+		snapshotConfig = null;
+	});
+
+	// Navigation: clear stale selection only after both the list and direct lookup miss.
+	$effect(() => {
+		if (!staleSelection) return;
+		selectDatasource(null);
+	});
 
 	function selectDatasource(id: string | null) {
-		selectedId = id;
-		showConfig = id;
-		selectedBranch = null;
 		showComparison = false;
-		if (id) {
-			const ds = datasources.find((d) => d.id === id);
-			const config = (ds?.config ?? {}) as Record<string, unknown>;
-			snapshotConfig = Object.keys(config).length > 0 ? { ...config } : null;
-		} else {
-			snapshotConfig = null;
-		}
+		snapshotConfig = null;
 		const url = id ? `/datasources?id=${id}` : '/datasources';
 		goto(resolve(url as '/'), { replaceState: true });
 	}
-
-	// $derived cannot write to $state — must imperatively merge server config while preserving active time-travel selection
-	$effect(() => {
-		const selected = selectedDatasource;
-		if (!selectedId) return;
-		if (!selected) return;
-		if (snapshotConfig) return;
-		const nextConfig = (selected.config ?? {}) as Record<string, unknown>;
-		if (Object.keys(nextConfig).length === 0) return;
-		const merged = { ...nextConfig } as Record<string, unknown>;
-		snapshotConfig = merged;
-		selectedBranch = typeof merged.branch === 'string' ? merged.branch : null;
-	});
 
 	function handleDelete(id: string) {
 		deletingId = id;
@@ -230,7 +170,8 @@
 		return [active, ...next];
 	});
 	const activeBranch = $derived.by(() => {
-		if (snapshotConfig && snapshotConfig.branch) return String(snapshotConfig.branch);
+		const branch = effectiveConfig?.branch;
+		if (typeof branch === 'string' && branch.trim().length > 0) return branch;
 		return 'master';
 	});
 </script>
@@ -406,7 +347,7 @@
 						data-ds-id={datasource.id}
 						class={css({
 							borderBottomWidth: '1',
-							...(selectedId === datasource.id
+							...(activeSelectedId === datasource.id
 								? {
 										backgroundColor: 'bg.accent',
 										borderLeftWidth: '2'
@@ -457,7 +398,7 @@
 												overflow: 'hidden',
 												whiteSpace: 'nowrap',
 												fontSize: 'sm',
-												color: selectedId === datasource.id ? 'accent.primary' : undefined
+												color: activeSelectedId === datasource.id ? 'accent.primary' : undefined
 											})}
 										>
 											{datasource.name}
@@ -561,7 +502,7 @@
 						</div>
 
 						<!-- Inline Config Panel -->
-						{#if showConfig === datasource.id}
+						{#if activeSelectedId === datasource.id}
 							<DatasourceConfigPanel {datasource} onSave={handleConfigSaved} />
 						{/if}
 					</div>
@@ -591,11 +532,12 @@
 								<div class={css({ flex: '1', minWidth: '0' })}>
 									<SnapshotPicker
 										datasourceId={selectedDatasource.id}
-										datasourceConfig={snapshotConfig ?? selectedDatasource.config}
+										datasourceConfig={effectiveConfig ?? selectedDatasource.config}
 										label="Time Travel"
-										branch={selectedBranch}
+										branch={activeBranch}
 										showDelete
-										showBuildPreviews={selectedDatasource.created_by === 'analysis'}
+										showBuildPreviews={datasourceIsAnalysisOutput(selectedDatasource) ||
+											datasourceNeedsExternalIngest(selectedDatasource)}
 										onConfigChange={handleSnapshotConfigChange}
 									/>
 								</div>
@@ -606,9 +548,8 @@
 										value={activeBranch}
 										placeholder="Select branch"
 										onChange={(value: string) => {
-											selectedBranch = value;
 											snapshotConfig = {
-												...(snapshotConfig ?? selectedDatasource?.config ?? {}),
+												...(effectiveConfig ?? selectedDatasource?.config ?? {}),
 												branch: value
 											} as Record<string, unknown>;
 										}}
@@ -644,13 +585,15 @@
 				</div>
 				<div class={css({ flex: '1', minHeight: '0', overflow: 'auto' })}>
 					{#if showComparison}
-						<BuildComparisonPanel datasource={selectedDatasource} />
+						<BuildComparisonPanel datasource={selectedDatasource} branch={activeBranch} />
 					{:else if previewDatasource}
-						<DatasourcePreview
-							datasourceId={previewDatasource.id}
-							datasource={previewDatasource}
-							datasourceConfig={snapshotConfig ?? previewDatasource.config}
-						/>
+						{#key previewKey}
+							<DatasourcePreview
+								datasourceId={previewDatasource.id}
+								datasource={previewDatasource}
+								datasourceConfig={effectiveConfig ?? previewDatasource.config}
+							/>
+						{/key}
 					{:else}
 						<div
 							class={css({

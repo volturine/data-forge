@@ -336,6 +336,16 @@ def _complete_ingest_run(
         "storage_type": datasource.source_type,
         "original_source_type": original_source_type.value,
     }
+    config = datasource.config if isinstance(datasource.config, dict) else {}
+    snapshot_id = config.get("snapshot_id")
+    if isinstance(snapshot_id, (str, int)) and str(snapshot_id):
+        result_json["snapshot_id"] = str(snapshot_id)
+    snapshot_timestamp_ms = config.get("snapshot_timestamp_ms")
+    if isinstance(snapshot_timestamp_ms, int):
+        result_json["snapshot_timestamp_ms"] = snapshot_timestamp_ms
+    branch = config.get("branch")
+    if isinstance(branch, str) and branch:
+        result_json["branch"] = branch
     if metadata_path is not None:
         result_json["metadata_path"] = metadata_path
     engine_runs_service.update_engine_run(
