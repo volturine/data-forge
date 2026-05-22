@@ -1,7 +1,8 @@
 # Multi-stage Dockerfile for Data-Forge Analysis Platform
 # Builds fixed-role release images from one codebase.
 
-FROM oven/bun:1.2.22 AS frontend-builder
+ARG BUN_VERSION=1.3.11
+FROM oven/bun:${BUN_VERSION} AS frontend-builder
 WORKDIR /app/packages/frontend
 COPY packages/frontend/package.json packages/frontend/bun.lock* ./
 RUN bun install --frozen-lockfile
@@ -35,7 +36,11 @@ COPY packages/worker-manager/ /app/packages/worker-manager/
 COPY Justfile /app/Justfile
 COPY scripts/ /app/scripts/
 
-RUN if [ "$INSTALL_DEV" = "true" ]; then uv sync --frozen --group dev; else uv sync --frozen; fi
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    if [ "$INSTALL_DEV" = "true" ]; then uv sync --frozen --group dev; else uv sync --frozen; fi && \
+    apt-get purge -y --auto-remove build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=frontend-builder /app/packages/frontend/build /app/packages/frontend/build
 
