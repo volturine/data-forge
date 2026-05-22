@@ -16,7 +16,7 @@
 		SquareDashed,
 		Plus,
 		X
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import { css, label, stepConfig, input } from '$lib/styles/panda';

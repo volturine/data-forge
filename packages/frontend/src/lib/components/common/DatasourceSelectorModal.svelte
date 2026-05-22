@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Debounced } from 'runed';
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import type { DataSource } from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { SourceType } from '$lib/utils/file-types';

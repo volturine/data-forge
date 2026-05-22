@@ -20,7 +20,7 @@
 		LoaderCircle,
 		Bug,
 		Play
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import { css, menuItem } from '$lib/styles/panda';

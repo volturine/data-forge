@@ -16,7 +16,7 @@
 		LogOut,
 		User,
 		Star
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { listFavoriteAnalyses } from '$lib/api/analysis';
 	import { css } from '$lib/styles/panda';
 	import { enginesStore } from '$lib/stores/engines.svelte';

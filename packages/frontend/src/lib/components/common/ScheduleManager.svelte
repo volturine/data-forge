@@ -21,7 +21,7 @@
 		CircleQuestionMark,
 		ChartColumn,
 		Search
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import { SvelteMap } from 'svelte/reactivity';

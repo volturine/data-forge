@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import { X, Plus } from 'lucide-svelte';
+	import { X, Plus } from '@lucide/svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import DateTimeInput from '$lib/components/common/DateTimeInput.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';

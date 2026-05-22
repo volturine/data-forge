@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Udf } from '$lib/types/udf';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';

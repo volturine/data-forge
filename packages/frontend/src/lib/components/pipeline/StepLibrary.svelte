@@ -140,7 +140,7 @@
 		Bell,
 		Sparkles,
 		Download
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 
 	const stepTypes: StepType[] = [
 		{ type: 'filter', label: 'Filter', icon: Funnel, description: 'Filter rows by conditions' },

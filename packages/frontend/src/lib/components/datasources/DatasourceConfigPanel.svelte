@@ -34,7 +34,7 @@
 		CircleX,
 		Upload,
 		GitBranch
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import type {
 		DataSource,
 		DatabaseDataSource,

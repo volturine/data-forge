@@ -8,7 +8,7 @@
 	import ConnectionLine from './ConnectionLine.svelte';
 	import DatasourceNode from './DatasourceNode.svelte';
 	import { css } from '$lib/styles/panda';
-	import { ClipboardPaste, Plus, Eye, ArrowDown } from 'lucide-svelte';
+	import { ClipboardPaste, Plus, Eye, ArrowDown } from '@lucide/svelte';
 	import { stepTypes, isChartStep } from './utils';
 
 	export interface ClipboardStep {

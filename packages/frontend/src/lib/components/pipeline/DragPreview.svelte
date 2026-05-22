@@ -25,7 +25,7 @@
 		ListChecks,
 		Trash2,
 		Bell
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 
 	// Step type metadata with icons and labels
 	const stepTypeInfo: Record<string, { label: string; icon: typeof Funnel }> = {

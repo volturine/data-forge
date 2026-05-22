@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { LineageNode, LineageResponse, NodeKind, EdgeType } from '$lib/api/lineage';
-	import { ArrowRight, ArrowDown, LayoutGrid, RotateCcw, ZoomIn, ZoomOut } from 'lucide-svelte';
+	import { ArrowRight, ArrowDown, LayoutGrid, RotateCcw, ZoomIn, ZoomOut } from '@lucide/svelte';
 	import { css, button } from '$lib/styles/panda';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';

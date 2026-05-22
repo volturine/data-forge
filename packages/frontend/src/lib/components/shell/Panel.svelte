@@ -1,5 +1,11 @@
 <script lang="ts">
-	import { X, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-svelte';
+	import {
+		X,
+		PanelLeftClose,
+		PanelLeftOpen,
+		PanelRightClose,
+		PanelRightOpen
+	} from '@lucide/svelte';
 	import { css, spinner as spinnerRecipe } from '$lib/styles/panda';
 	import type { Snippet } from 'svelte';
 

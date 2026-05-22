@@ -9,7 +9,7 @@
 	import type { BulkUploadResult } from '$lib/api/datasource';
 
 	import { SvelteSet } from 'svelte/reactivity';
-	import { Check, X } from 'lucide-svelte';
+	import { Check, X } from '@lucide/svelte';
 	import { css, button, input, tabButton, label } from '$lib/styles/panda';
 
 	type Tab = 'file' | 'database';

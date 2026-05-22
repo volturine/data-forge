@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { LayoutGrid, Plus } from 'lucide-svelte';
+	import { LayoutGrid, Plus } from '@lucide/svelte';
 	import { css } from '$lib/styles/panda';
 
 	function createNew() {

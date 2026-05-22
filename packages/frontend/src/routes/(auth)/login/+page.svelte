@@ -3,7 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { css, button, input, label, spinner } from '$lib/styles/panda';
 	import { authStore } from '$lib/stores/auth.svelte';
-	import { GitBranch } from 'lucide-svelte';
+	import { GitBranch } from '@lucide/svelte';
 
 	let email = $state('');
 	let password = $state('');

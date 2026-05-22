@@ -20,7 +20,7 @@
 		X,
 		Cpu,
 		ChevronDown
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { drag } from '$lib/stores/drag.svelte';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';

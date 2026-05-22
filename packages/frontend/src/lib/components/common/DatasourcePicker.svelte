@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { DataSource } from '$lib/types/datasource';
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';

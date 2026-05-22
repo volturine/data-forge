@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import { ArrowRight, X } from 'lucide-svelte';
+	import { ArrowRight, X } from '@lucide/svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import { css, emptyText, label, stepConfig } from '$lib/styles/panda';
 

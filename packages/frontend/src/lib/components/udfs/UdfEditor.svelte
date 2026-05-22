@@ -8,7 +8,7 @@
 	import UdfSignatureBuilder from '$lib/components/udfs/UdfSignatureBuilder.svelte';
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
 	import type { Udf, UdfInput, UdfSignature } from '$lib/types/udf';
-	import { ArrowLeft, Save } from 'lucide-svelte';
+	import { ArrowLeft, Save } from '@lucide/svelte';
 	import { css, button, input, label } from '$lib/styles/panda';
 
 	interface Props {

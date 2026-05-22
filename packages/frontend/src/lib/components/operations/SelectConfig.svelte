@@ -6,7 +6,7 @@
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, stepConfig } from '$lib/styles/panda';
-	import { ArrowRight } from 'lucide-svelte';
+	import { ArrowRight } from '@lucide/svelte';
 
 	interface SelectConfigData {
 		columns: string[];

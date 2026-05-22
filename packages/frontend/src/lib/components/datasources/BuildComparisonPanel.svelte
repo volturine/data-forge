@@ -5,7 +5,7 @@
 	import type { DataSource } from '$lib/types/datasource';
 	import type { ActiveBuildSummary } from '$lib/types/build-stream';
 	import DataTable from '$lib/components/common/DataTable.svelte';
-	import { GitCompareArrows, RefreshCw, X, Plus, Minus, Search } from 'lucide-svelte';
+	import { GitCompareArrows, RefreshCw, X, Plus, Minus, Search } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { BuildsStore } from '$lib/stores/builds.svelte';

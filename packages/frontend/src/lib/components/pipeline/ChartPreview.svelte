@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as d3 from 'd3';
-	import { ChevronLeft, ChevronRight } from 'lucide-svelte';
+	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
 	import { css } from '$lib/styles/panda';
 	import { downloadBlob } from '$lib/api/compute';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';

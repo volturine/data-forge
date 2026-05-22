@@ -40,7 +40,7 @@
 		Pencil,
 		Check,
 		X
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
 	import { listSchedules } from '$lib/api/schedule';
 	import { SvelteMap } from 'svelte/reactivity';

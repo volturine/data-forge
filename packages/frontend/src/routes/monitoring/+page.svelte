@@ -2,7 +2,7 @@
 	import BuildsManager from '$lib/components/common/BuildsManager.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
-	import { Search } from 'lucide-svelte';
+	import { Search } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';

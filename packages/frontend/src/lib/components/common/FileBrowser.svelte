@@ -4,7 +4,7 @@
 	import type { FileListItem, FileListResponse } from '$lib/api/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import { ArrowUp } from 'lucide-svelte';
+	import { ArrowUp } from '@lucide/svelte';
 	import { css, emptyText } from '$lib/styles/panda';
 
 	let {

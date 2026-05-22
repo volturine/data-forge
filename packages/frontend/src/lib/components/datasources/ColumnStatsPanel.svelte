@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { ChartColumn, X } from 'lucide-svelte';
+	import { ChartColumn, X } from '@lucide/svelte';
 	import { getColumnStats } from '$lib/api/datasource';
 	import type { HistogramBin } from '$lib/api/datasource';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';

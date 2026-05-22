@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CheckCircle, XCircle, Save, Loader2 } from 'lucide-svelte';
+	import { CheckCircle, XCircle, Save, Loader2 } from '@lucide/svelte';
 	import { getSettings, updateSettings, isMasked, MASKED_PLACEHOLDER } from '$lib/api/settings';
 	import type { AppSettings } from '$lib/api/settings';
 	import { listAIModels, testAIConnection } from '$lib/api/ai';

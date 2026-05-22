@@ -8,7 +8,7 @@
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import ToggleButton from '$lib/components/ui/ToggleButton.svelte';
-	import { Search } from 'lucide-svelte';
+	import { Search } from '@lucide/svelte';
 	import { css, input, label, stepConfig } from '$lib/styles/panda';
 
 	interface Props {

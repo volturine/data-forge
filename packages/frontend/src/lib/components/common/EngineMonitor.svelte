@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Cpu, X, ChevronDown, LoaderCircle } from 'lucide-svelte';
+	import { Cpu, X, ChevronDown, LoaderCircle } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import { toEpochDisplay } from '$lib/utils/datetime';

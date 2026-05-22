@@ -83,7 +83,7 @@
 		Star,
 		Trash2,
 		X
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 
 	const queryClient = useQueryClient();
 	const analysisId = $derived($page.params.id ?? null);

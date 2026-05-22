@@ -35,7 +35,7 @@ vi.mock('$lib/stores/namespace.svelte', () => ({
 	})
 }));
 
-vi.mock('lucide-svelte', () => {
+vi.mock('@lucide/svelte', () => {
 	const Icon = () => '';
 	return {
 		Loader2: Icon,

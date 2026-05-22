@@ -66,7 +66,7 @@
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { Settings2, X } from 'lucide-svelte';
+	import { Settings2, X } from '@lucide/svelte';
 	import { css, spinner, button } from '$lib/styles/panda';
 
 	type WithColumnsConfigShape = {

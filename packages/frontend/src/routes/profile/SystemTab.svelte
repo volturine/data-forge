@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
-	import { CheckCircle, XCircle, Save, Loader2, Database, ChevronDown } from 'lucide-svelte';
+	import { CheckCircle, XCircle, Save, Loader2, Database, ChevronDown } from '@lucide/svelte';
 	import { getSettings, updateSettings } from '$lib/api/settings';
 	import type { AppSettings } from '$lib/api/settings';
 	import {

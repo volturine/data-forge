@@ -4,7 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { listUdfs, deleteUdf, exportUdfs, importUdfs, cloneUdf } from '$lib/api/udf';
 	import type { UdfExport } from '$lib/types/udf';
-	import { Plus, Upload, Download, Copy, Trash2, Pencil, X } from 'lucide-svelte';
+	import { Plus, Upload, Download, Copy, Trash2, Pencil, X } from '@lucide/svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';

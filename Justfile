@@ -12,18 +12,20 @@ install:
     cd packages/worker-manager && uv sync
     cd packages/frontend && bun install
 
-# Update dependencies to latest available versions
+# Update dependencies to the newest available releases.
+# - frontend: bun update --latest updates package.json ranges to latest majors
+# - python: uv lock --upgrade refreshes to the latest versions allowed by pyproject constraints
 update-deps:
-    @echo "Updating backend dependencies to latest..."
-    cd packages/backend && uv lock --upgrade && uv sync
-    @echo "Updating frontend dependencies to latest..."
+    @echo "Updating backend dependencies to latest allowed releases..."
+    cd packages/backend && uv lock --upgrade --resolution highest && uv sync
+    @echo "Updating frontend dependencies to latest releases (including majors)..."
     cd packages/frontend && bun update --latest
-    @echo "Updating scheduler dependencies to latest..."
-    cd packages/scheduler && uv lock --upgrade && uv sync
-    @echo "Updating shared dependencies to latest..."
-    cd packages/shared && uv lock --upgrade && uv sync
-    @echo "Updating worker-manager dependencies to latest..."
-    cd packages/worker-manager && uv lock --upgrade && uv sync
+    @echo "Updating scheduler dependencies to latest allowed releases..."
+    cd packages/scheduler && uv lock --upgrade --resolution highest && uv sync
+    @echo "Updating shared dependencies to latest allowed releases..."
+    cd packages/shared && uv lock --upgrade --resolution highest && uv sync
+    @echo "Updating worker-manager dependencies to latest allowed releases..."
+    cd packages/worker-manager && uv lock --upgrade --resolution highest && uv sync
 
 dev:
     #!/usr/bin/env bash

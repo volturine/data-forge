@@ -25,7 +25,7 @@ import {
 	ListChecks,
 	Trash2,
 	Bell
-} from 'lucide-svelte';
+} from '@lucide/svelte';
 import {
 	isChartStepType,
 	normalizePipelineStepType,

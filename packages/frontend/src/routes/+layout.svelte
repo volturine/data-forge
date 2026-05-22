@@ -6,7 +6,7 @@
 	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import favicon from '$lib/assets/favicon.svg';
 	import { css, spinner } from '$lib/styles/panda';
-	import { PanelLeftClose } from 'lucide-svelte';
+	import { PanelLeftClose } from '@lucide/svelte';
 	// SettingsPopup removed — settings now live under /profile tabs
 	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
 	import ChatPanel from '$lib/components/common/ChatPanel.svelte';

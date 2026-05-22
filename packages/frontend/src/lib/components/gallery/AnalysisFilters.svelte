@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Search, X, Trash2 } from 'lucide-svelte';
+	import { Search, X, Trash2 } from '@lucide/svelte';
 	import { css, input } from '$lib/styles/panda';
 
 	export type SortOption = 'newest' | 'oldest' | 'name-asc' | 'name-desc';

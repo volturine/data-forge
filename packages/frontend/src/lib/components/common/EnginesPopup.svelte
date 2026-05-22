@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { X, Power, LoaderCircle } from 'lucide-svelte';
+	import { X, Power, LoaderCircle } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import type { EngineStatus } from '$lib/types/compute';

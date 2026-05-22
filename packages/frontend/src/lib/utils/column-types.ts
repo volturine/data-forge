@@ -28,7 +28,7 @@
  * ```
  */
 
-import type { ComponentType } from 'svelte';
+import type { LucideIcon } from '@lucide/svelte';
 import {
 	Type,
 	Hash,
@@ -38,7 +38,7 @@ import {
 	Layers,
 	CircleQuestionMark,
 	File
-} from 'lucide-svelte';
+} from '@lucide/svelte';
 
 /**
  * Supported column types (Polars data types)
@@ -103,7 +103,7 @@ export interface ColumnTypeConfig {
 	/** Type category */
 	category: ColumnTypeCategory;
 	/** Lucide icon component */
-	icon: ComponentType;
+	icon: LucideIcon;
 	/** Human-readable description */
 	description: string;
 	/** Alternative names/aliases */
@@ -116,7 +116,7 @@ export interface ColumnTypeConfig {
 export interface CategoryConfig {
 	category: ColumnTypeCategory;
 	label: string;
-	icon: ComponentType;
+	icon: LucideIcon;
 }
 
 // Aliases for Python/Polars shorthand names not present in COLUMN_TYPE_REGISTRY

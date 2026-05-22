@@ -2,7 +2,7 @@
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { ChartBar, Copy, Star, Trash2 } from 'lucide-svelte';
+	import { ChartBar, Copy, Star, Trash2 } from '@lucide/svelte';
 	import { formatDateDisplay, getYearDisplay } from '$lib/utils/datetime';
 	import { css } from '$lib/styles/panda';
 

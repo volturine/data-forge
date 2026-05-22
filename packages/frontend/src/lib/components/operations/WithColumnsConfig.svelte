@@ -12,7 +12,7 @@
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
-	import { Pencil, X } from 'lucide-svelte';
+	import { Pencil, X } from '@lucide/svelte';
 	import { css, button, emptyText, input, label, stepConfig } from '$lib/styles/panda';
 
 	interface WithColumnsExpr {

@@ -29,7 +29,7 @@
 		Ban,
 		Timer,
 		WifiOff
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { css, iconButton, button, input, label } from '$lib/styles/panda';
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { chatStore } from '$lib/stores/chat.svelte';

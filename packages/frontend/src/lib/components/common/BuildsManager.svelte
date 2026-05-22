@@ -34,7 +34,7 @@
 		Database,
 		RefreshCw,
 		Hash
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';

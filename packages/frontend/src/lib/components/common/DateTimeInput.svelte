@@ -7,7 +7,7 @@
 		Calendar,
 		X,
 		Clock
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { css } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';

@@ -3,7 +3,7 @@
 	import { BuildsStore } from '$lib/stores/builds.svelte';
 	import type { ActiveBuildSummary } from '$lib/types/build-stream';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
-	import { Trash2, ChevronDown, Clock } from 'lucide-svelte';
+	import { Trash2, ChevronDown, Clock } from '@lucide/svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { css, spinner } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';

@@ -29,7 +29,7 @@
 		Search,
 		Power,
 		PowerOff
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';

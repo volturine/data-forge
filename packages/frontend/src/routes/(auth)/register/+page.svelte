@@ -4,7 +4,7 @@
 	import { css, button, input, label, spinner } from '$lib/styles/panda';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
-	import { GitBranch } from 'lucide-svelte';
+	import { GitBranch } from '@lucide/svelte';
 
 	let name = $state('');
 	let email = $state('');
