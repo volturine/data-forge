@@ -3,6 +3,7 @@
 	import { untrack } from 'svelte';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import { toEpochDisplay } from '$lib/utils/datetime';
+	import { nowEpochMs } from '$lib/utils/temporal';
 	import { css, emptyText } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
@@ -28,7 +29,7 @@
 	function formatTime(isoString: string | null): string {
 		if (!isoString) return 'N/A';
 		const dateMs = toEpochDisplay(isoString);
-		const nowMs = Date.now();
+		const nowMs = nowEpochMs();
 		const diff = Math.floor((nowMs - dateMs) / 1000);
 
 		if (diff < 60) return `${diff}s ago`;

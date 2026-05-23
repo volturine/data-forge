@@ -17,6 +17,7 @@ import type { MCPTool } from '$lib/api/mcp';
 import { analysisStore } from '$lib/stores/analysis.svelte';
 import { schemaStore } from '$lib/stores/schema.svelte';
 import type { Schema } from '$lib/types/schema';
+import { nowEpochMs } from '$lib/utils/temporal';
 import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 
 const SESSION_KEY = 'chat_session_id';
@@ -547,7 +548,7 @@ export class ChatStore {
 					id: this._id(),
 					role: event.role,
 					content: displayContent,
-					ts: event.ts ?? Date.now()
+					ts: event.ts ?? nowEpochMs()
 				};
 				this.messages.push(msg);
 				this.timeline.push({ kind: 'message', item: msg });
@@ -580,7 +581,7 @@ export class ChatStore {
 					id: this._id(),
 					role: 'tool',
 					content: summary,
-					ts: event.ts ?? Date.now()
+					ts: event.ts ?? nowEpochMs()
 				};
 				this.messages.push(errMsg);
 				this.timeline.push({ kind: 'message', item: errMsg });
@@ -597,7 +598,7 @@ export class ChatStore {
 					(t) => t.tool_id === event.tool_id && t.status === 'running'
 				);
 				if (startTc) {
-					startTc.startedAt = Date.now();
+					startTc.startedAt = nowEpochMs();
 				}
 				for (let i = this.timeline.length - 1; i >= 0; i--) {
 					const entry = this.timeline[i];
@@ -606,7 +607,7 @@ export class ChatStore {
 						entry.item.tool_id === event.tool_id &&
 						entry.item.status === 'running'
 					) {
-						entry.item.startedAt = Date.now();
+						entry.item.startedAt = nowEpochMs();
 						break;
 					}
 				}

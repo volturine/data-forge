@@ -3,6 +3,7 @@
 	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
 	import { css } from '$lib/styles/panda';
 	import { downloadBlob } from '$lib/api/compute';
+	import { formatEpoch, parsePlainDateTime } from '$lib/utils/temporal';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	type ChartType =
@@ -239,26 +240,27 @@
 	function fmtAxisTime(value: unknown): string {
 		const raw = str(value);
 		if (!raw) return '';
-		const parsed = new Date(raw);
-		if (Number.isNaN(parsed.getTime())) return raw;
+		const parsed = parsePlainDateTime(raw);
+		if (!parsed) return raw;
 		const bucket = str(config.date_bucket);
 		const ordinal = str(config.date_ordinal);
-		if (ordinal === 'day_of_week') return d3.timeFormat('%a')(parsed);
-		if (ordinal === 'month_of_year') return d3.timeFormat('%b')(parsed);
-		if (ordinal === 'quarter_of_year') {
-			const quarter = Math.floor(parsed.getMonth() / 3) + 1;
-			return `Q${quarter}`;
+		const quarter = Math.floor((parsed.month - 1) / 3) + 1;
+		const epochMs = parsed
+			.toPlainDate()
+			.toZonedDateTime({ timeZone: 'UTC', plainTime: { hour: parsed.hour, minute: parsed.minute } })
+			.toInstant().epochMilliseconds;
+		if (ordinal === 'day_of_week') return formatEpoch(epochMs, { weekday: 'short' }, 'UTC');
+		if (ordinal === 'month_of_year') return formatEpoch(epochMs, { month: 'short' }, 'UTC');
+		if (ordinal === 'quarter_of_year') return `Q${quarter}`;
+		if (bucket === 'year') return String(parsed.year);
+		if (bucket === 'quarter') return `Q${quarter} ${parsed.year}`;
+		if (bucket === 'month') return formatEpoch(epochMs, { month: 'short', year: 'numeric' }, 'UTC');
+		if (bucket === 'week') return formatEpoch(epochMs, { month: 'short', day: '2-digit' }, 'UTC');
+		if (bucket === 'day') return formatEpoch(epochMs, { month: 'short', day: '2-digit' }, 'UTC');
+		if (bucket === 'hour') {
+			return `${formatEpoch(epochMs, { month: 'short', day: '2-digit' }, 'UTC')} ${String(parsed.hour).padStart(2, '0')}:00`;
 		}
-		if (bucket === 'year') return d3.timeFormat('%Y')(parsed);
-		if (bucket === 'quarter') {
-			const quarter = Math.floor(parsed.getMonth() / 3) + 1;
-			return `Q${quarter} ${parsed.getFullYear()}`;
-		}
-		if (bucket === 'month') return d3.timeFormat('%b %Y')(parsed);
-		if (bucket === 'week') return d3.timeFormat('%b %d')(parsed);
-		if (bucket === 'day') return d3.timeFormat('%b %d')(parsed);
-		if (bucket === 'hour') return d3.timeFormat('%b %d %H:00')(parsed);
-		return d3.timeFormat('%Y-%m-%d')(parsed);
+		return parsed.toPlainDate().toString();
 	}
 
 	/* Full format for tooltips and value labels */

@@ -39,6 +39,7 @@
 	import type { ChatUiPatchEvent } from '$lib/api/chat';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { renderMarkdown, timeAgo } from '$lib/utils/markdown';
+	import { formatEpoch, isSameLocalDay, isYesterday, nowEpochMs } from '$lib/utils/temporal';
 
 	const queryClient = useQueryClient();
 
@@ -96,22 +97,17 @@
 			const prev = chatStore.timeline[i];
 			const prevTs = prev.kind === 'message' ? prev.item.ts : 0;
 			if (prevTs) {
-				return new Date(ts).toDateString() !== new Date(prevTs).toDateString()
-					? formatDateLabel(ts)
-					: null;
+				return isSameLocalDay(ts, prevTs) ? null : formatDateLabel(ts);
 			}
 		}
 		return idx === 0 ? formatDateLabel(ts) : null;
 	}
 
 	function formatDateLabel(ts: number): string {
-		const d = new Date(ts);
-		const now = Date.now();
-		const todayStr = new Date(now).toDateString();
-		if (d.toDateString() === todayStr) return 'Today';
-		const yesterdayMs = now - 86_400_000;
-		if (d.toDateString() === new Date(yesterdayMs).toDateString()) return 'Yesterday';
-		return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+		const now = nowEpochMs();
+		if (isSameLocalDay(ts, now)) return 'Today';
+		if (isYesterday(ts, now)) return 'Yesterday';
+		return formatEpoch(ts, { weekday: 'short', month: 'short', day: 'numeric' });
 	}
 
 	/** Extract a human-readable name from a tool_id like "post_analysis" → "Create Analysis" */
@@ -306,12 +302,12 @@
 	}
 
 	/** Reactive elapsed timer — ticks every second while a tool is running. */
-	let elapsedTick = $state(Date.now());
+	let elapsedTick = $state(nowEpochMs());
 	$effect(() => {
 		const hasRunning = chatStore.toolCalls.some((tc) => tc.status === 'running' && tc.startedAt);
 		if (!hasRunning) return;
 		const iv = setInterval(() => {
-			elapsedTick = Date.now();
+			elapsedTick = nowEpochMs();
 		}, 1000);
 		return () => clearInterval(iv);
 	});

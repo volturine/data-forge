@@ -20,7 +20,7 @@ function makeEngine(overrides: Partial<EngineStatusResponse> = {}): EngineStatus
 		analysis_id: 'analysis-1',
 		status: 'healthy',
 		process_id: 1234,
-		last_activity: new Date().toISOString(),
+		last_activity: Temporal.Now.instant().toString(),
 		current_job_id: null,
 		resource_config: null,
 		effective_resources: null,

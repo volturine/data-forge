@@ -40,6 +40,8 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
+	import { endOfDayEpoch, startOfDayEpoch } from '$lib/utils/temporal';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { css, spinner, button, emptyText, input } from '$lib/styles/panda';
 
@@ -221,14 +223,12 @@
 		}
 
 		if (dateFrom) {
-			const from = new Date(dateFrom);
-			result = result.filter((run) => new Date(run.started_at) >= from);
+			const from = startOfDayEpoch(dateFrom);
+			result = result.filter((run) => toEpochDisplay(run.started_at) >= from);
 		}
 		if (dateTo) {
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local Date for comparison, not reactive state
-			const to = new Date(dateTo);
-			to.setHours(23, 59, 59, 999);
-			result = result.filter((run) => new Date(run.started_at) <= to);
+			const to = endOfDayEpoch(dateTo);
+			result = result.filter((run) => toEpochDisplay(run.started_at) <= to);
 		}
 
 		if (branchFilter) {
@@ -244,7 +244,7 @@
 		const dir = sortDir === 'asc' ? 1 : -1;
 		return [...list].sort((a, b) => {
 			if (sortColumn === 'created_at') {
-				return dir * (new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
+				return dir * (toEpochDisplay(a.started_at) - toEpochDisplay(b.started_at));
 			}
 			if (sortColumn === 'duration_ms') {
 				return dir * (summaryDurationMs(a) - summaryDurationMs(b));
@@ -323,7 +323,7 @@
 	}
 
 	function formatDate(isoDate: string): string {
-		return new Date(isoDate).toLocaleString();
+		return formatDateTimeDisplay(isoDate);
 	}
 
 	function prevPage() {

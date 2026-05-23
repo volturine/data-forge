@@ -16,6 +16,8 @@
 		isUuid,
 		validatePipelineTabs
 	} from '$lib/utils/analysis-tab';
+	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
+	import { nowEpochMs } from '$lib/utils/temporal';
 	import {
 		exportAnalysisCode,
 		favoriteAnalysis,
@@ -929,7 +931,7 @@
 
 	function handleAddTab(datasourceId: string, name: string) {
 		if (editorReadOnly) return;
-		const tabId = `tab-${datasourceId}-${Date.now()}`;
+		const tabId = `tab-${datasourceId}-${nowEpochMs()}`;
 		const output = buildOutputConfig({
 			outputId: uuid(),
 			name: generateOutputName(),
@@ -968,7 +970,7 @@
 			flashTabError('Select a different tab to avoid using the current tab as its own source.');
 			return;
 		}
-		const tabId = `tab-analysis-${datasourceId}-${Date.now()}`;
+		const tabId = `tab-analysis-${datasourceId}-${nowEpochMs()}`;
 		const output = buildOutputConfig({
 			outputId: uuid(),
 			name: generateOutputName(),
@@ -1146,9 +1148,8 @@
 
 	function formatVersionDate(value: string | null | undefined): string {
 		if (!value) return 'Unknown';
-		const parsed = new Date(value);
-		if (Number.isNaN(parsed.getTime())) return 'Unknown';
-		return parsed.toLocaleString();
+		if (Number.isNaN(toEpochDisplay(value))) return 'Unknown';
+		return formatDateTimeDisplay(value);
 	}
 
 	async function handleRestoreVersion(version: number) {

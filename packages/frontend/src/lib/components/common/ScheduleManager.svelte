@@ -24,6 +24,7 @@
 	} from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { formatDateTimeDisplay } from '$lib/utils/datetime';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { css, spinner, emptyText, label } from '$lib/styles/panda';
 
@@ -375,7 +376,7 @@
 
 	function formatDate(iso: string | null): string {
 		if (!iso) return '-';
-		return new Date(iso).toLocaleString();
+		return formatDateTimeDisplay(iso);
 	}
 
 	function getProvenanceDisplay(schedule: Schedule): string {

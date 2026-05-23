@@ -33,6 +33,7 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { formatDateTimeDisplay } from '$lib/utils/datetime';
 	import { css, emptyText, input, label } from '$lib/styles/panda';
 
 	interface Props {
@@ -1646,7 +1647,7 @@
 											<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Created</span>
 												<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
-													{new Date(check.created_at).toLocaleString()}
+													{formatDateTimeDisplay(check.created_at)}
 												</span>
 											</div>
 											<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>

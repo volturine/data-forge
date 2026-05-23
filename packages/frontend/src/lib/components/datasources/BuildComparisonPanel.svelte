@@ -13,6 +13,7 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { BuildsStore } from '$lib/stores/builds.svelte';
+	import { formatDateTimeDisplay } from '$lib/utils/datetime';
 	import { css, button } from '$lib/styles/panda';
 
 	interface Props {
@@ -154,12 +155,11 @@
 	}
 
 	function formatDate(isoDate: string): string {
-		const date = new Date(isoDate);
-		return date.toLocaleString();
+		return formatDateTimeDisplay(isoDate);
 	}
 
 	function formatSnapshotDate(timestampMs: number): string {
-		return new Date(timestampMs).toLocaleString();
+		return formatDateTimeDisplay(timestampMs);
 	}
 
 	function formatDelta(val: number): string {

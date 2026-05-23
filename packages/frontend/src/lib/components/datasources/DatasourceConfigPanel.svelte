@@ -64,7 +64,7 @@
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { formatDateDisplay } from '$lib/utils/datetime';
+	import { formatDateDisplay, toEpochDisplay } from '$lib/utils/datetime';
 	import { resolveColumnType } from '$lib/utils/column-types';
 	import { css, input, tabButton, chip, emptyText } from '$lib/styles/panda';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
@@ -602,7 +602,9 @@
 		const rows = [...buildRows, ...engineRows].filter(
 			(run) => showPreviews || run.kind !== 'preview'
 		);
-		return rows.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+		return rows.sort(
+			(left, right) => toEpochDisplay(right.createdAt) - toEpochDisplay(left.createdAt)
+		);
 	});
 	const isOutputDatasource = $derived(datasourceIsAnalysisOutput(ds));
 	const scheduleAnalysisId = $derived(

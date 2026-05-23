@@ -5,6 +5,7 @@ import type {
 	AnalysisTabOutput
 } from '$lib/types/analysis';
 import { isRecord } from '$lib/utils/json';
+import { nowEpochMs } from '$lib/utils/temporal';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -13,7 +14,7 @@ export function isUuid(value: string | null | undefined): boolean {
 }
 
 export function generateOutputName(): string {
-	return `output-${Date.now()}`;
+	return `output-${nowEpochMs()}`;
 }
 
 function requireString(value: unknown, field: string): string {

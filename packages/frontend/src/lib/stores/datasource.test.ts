@@ -24,7 +24,7 @@ function makeDatasource(overrides: Partial<DataSource> = {}): DataSource {
 		schema_cache: null,
 		created_by: 'test',
 		is_hidden: false,
-		created_at: new Date().toISOString(),
+		created_at: Temporal.Now.instant().toString(),
 		...overrides
 	} as DataSource;
 }

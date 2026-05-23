@@ -1,6 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
 import { overlayStack } from '$lib/stores/overlay.svelte';
+import { patchTemporalForBun } from '$lib/test-utils/temporal-patch';
+
+patchTemporalForBun();
 
 /**
  * Install the same capture-phase Escape / outside-click arbiter that

@@ -93,10 +93,10 @@ describe('renderMarkdown', () => {
 });
 
 describe('timeAgo', () => {
-	let now: Date;
+	let now: number;
 
 	beforeEach(() => {
-		now = new Date('2025-06-15T14:30:00.000Z');
+		now = Temporal.Instant.from('2025-06-15T14:30:00.000Z').epochMilliseconds;
 		vi.useFakeTimers();
 		vi.setSystemTime(now);
 	});
@@ -106,30 +106,30 @@ describe('timeAgo', () => {
 	});
 
 	test('returns time only for today', () => {
-		const today = new Date('2025-06-15T10:05:00.000Z');
-		const result = timeAgo(today.getTime());
+		const today = Temporal.Instant.from('2025-06-15T10:05:00.000Z').epochMilliseconds;
+		const result = timeAgo(today);
 		expect(result).toMatch(/\d{1,2}:\d{2}/);
 		expect(result).not.toContain('Yesterday');
 	});
 
 	test('returns "Yesterday" prefix for yesterday', () => {
-		const yesterday = new Date('2025-06-14T09:00:00.000Z');
-		const result = timeAgo(yesterday.getTime());
+		const yesterday = Temporal.Instant.from('2025-06-14T09:00:00.000Z').epochMilliseconds;
+		const result = timeAgo(yesterday);
 		expect(result).toContain('Yesterday');
 		expect(result).toMatch(/\d{1,2}:\d{2}/);
 	});
 
 	test('returns date + time for older dates', () => {
-		const older = new Date('2025-06-10T12:00:00.000Z');
-		const result = timeAgo(older.getTime());
+		const older = Temporal.Instant.from('2025-06-10T12:00:00.000Z').epochMilliseconds;
+		const result = timeAgo(older);
 		expect(result).not.toContain('Yesterday');
 		expect(result).toMatch(/\d{1,2}:\d{2}/);
 		expect(result).toMatch(/Jun|10/);
 	});
 
 	test('handles timestamps at midnight boundary', () => {
-		const midnight = new Date('2025-06-15T00:00:00.000Z');
-		const result = timeAgo(midnight.getTime());
+		const midnight = Temporal.Instant.from('2025-06-15T00:00:00.000Z').epochMilliseconds;
+		const result = timeAgo(midnight);
 		expect(result).toMatch(/\d{1,2}:\d{2}/);
 	});
 });

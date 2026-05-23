@@ -3,6 +3,8 @@
 	import { apiRequest } from '$lib/api/client';
 	import { Trash2, ChevronDown, Clock } from '@lucide/svelte';
 	import { SvelteMap } from 'svelte/reactivity';
+	import { formatDateInput, formatDateTimeDisplay, formatTimeDisplay } from '$lib/utils/datetime';
+	import { monthMeta, shiftMonthKey } from '$lib/utils/temporal';
 	import { css, spinner } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
@@ -119,16 +121,15 @@
 	});
 
 	function formatSnapshotKey(timestampMs: number) {
-		const date = new Date(timestampMs);
-		return date.toISOString().slice(0, 10);
+		return formatDateInput(timestampMs);
 	}
 
 	function formatSnapshotLabel(timestampMs: number) {
-		return new Date(timestampMs).toLocaleString();
+		return formatDateTimeDisplay(timestampMs);
 	}
 
 	function formatSnapshotTime(timestampMs: number) {
-		return new Date(timestampMs).toLocaleTimeString([], {
+		return formatTimeDisplay(timestampMs, {
 			hour: '2-digit',
 			minute: '2-digit',
 			second: '2-digit'
@@ -179,16 +180,11 @@
 		monthKey: string,
 		snapshots: Array<{ timestamp: number }>
 	): Array<{ key: string; day: number; count: number; inMonth: boolean }> {
-		if (!monthKey) return [];
-		const [yearStr, monthStr] = monthKey.split('-');
-		const year = Number(yearStr);
-		const month = Number(monthStr) - 1;
-		const first = new Date(year, month, 1);
-		const startDay = (first.getDay() + 6) % 7;
-		const daysInMonth = new Date(year, month + 1, 0).getDate();
+		const meta = monthMeta(monthKey);
+		if (!meta) return [];
 		const days: Array<{ key: string; day: number; count: number; inMonth: boolean }> = [];
 
-		for (let i = 0; i < startDay; i += 1) {
+		for (let i = 0; i < meta.offset; i += 1) {
 			days.push({ key: `blank-${monthKey}-${i}`, day: 0, count: 0, inMonth: false });
 		}
 
@@ -197,7 +193,7 @@
 			const key = formatSnapshotKey(snap.timestamp);
 			counts.set(key, (counts.get(key) ?? 0) + 1);
 		}
-		for (let day = 1; day <= daysInMonth; day += 1) {
+		for (let day = 1; day <= meta.daysInMonth; day += 1) {
 			const key = `${monthKey}-${String(day).padStart(2, '0')}`;
 			const count = counts.get(key) ?? 0;
 			days.push({ key, day, count, inMonth: true });
@@ -355,12 +351,8 @@
 	}
 
 	function shiftMonth(delta: number) {
-		const [yearStr, monthStr] = snapshotMonth.split('-');
-		const year = Number(yearStr);
-		const month = Number(monthStr) - 1 + delta;
-		const next = new Date(year, month, 1);
-		const nextKey = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
-		selectMonth(nextKey);
+		if (!snapshotMonth) return;
+		selectMonth(shiftMonthKey(snapshotMonth, delta));
 	}
 
 	function deleteSnapshot(snapshotId: string) {

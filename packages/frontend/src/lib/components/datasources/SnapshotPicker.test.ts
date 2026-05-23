@@ -29,9 +29,9 @@ function renderPicker(props: Record<string, unknown> = {}) {
 	});
 }
 
-const JUN15 = new Date('2024-06-15T12:00:00Z').getTime();
-const JUN15_LATE = new Date('2024-06-15T18:30:00Z').getTime();
-const JUN20 = new Date('2024-06-20T10:00:00Z').getTime();
+const JUN15 = Temporal.Instant.from('2024-06-15T12:00:00Z').epochMilliseconds;
+const JUN15_LATE = Temporal.Instant.from('2024-06-15T18:30:00Z').epochMilliseconds;
+const JUN20 = Temporal.Instant.from('2024-06-20T10:00:00Z').epochMilliseconds;
 
 function makeSnapshots(
 	items: Array<{
