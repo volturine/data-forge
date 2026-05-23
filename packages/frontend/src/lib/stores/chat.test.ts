@@ -1,6 +1,8 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
+import { okAsync } from 'neverthrow';
 import type { ChatEvent, ChatModel } from '$lib/api/chat';
 import type { MCPTool } from '$lib/api/mcp';
+import type { AppSettings } from '$lib/api/settings';
 
 vi.mock('$lib/api/chat', () => ({
 	createSession: vi.fn(),
@@ -15,6 +17,8 @@ vi.mock('$lib/api/chat', () => ({
 }));
 
 vi.mock('$lib/api/settings', () => ({
+	MASKED_PLACEHOLDER: '••••••••',
+	isMasked: (value: string) => value === '••••••••' || /^\*+$/.test(value),
 	getSettings: vi.fn(),
 	updateSettings: vi.fn()
 }));
@@ -56,7 +60,33 @@ vi.stubGlobal('window', {
 	localStorage: mockLocalStorage
 });
 
+const chatApi = await import('$lib/api/chat');
+const settingsApi = await import('$lib/api/settings');
+const mcpApi = await import('$lib/api/mcp');
 const { ChatStore } = await import('./chat.svelte');
+
+function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
+	return {
+		smtp_host: '',
+		smtp_port: 25,
+		smtp_user: '',
+		smtp_password: '',
+		telegram_bot_token: '',
+		telegram_bot_enabled: false,
+		openrouter_api_key: '',
+		openrouter_default_model: 'openai/gpt-4o-mini',
+		openai_api_key: '',
+		openai_endpoint_url: 'https://api.openai.com',
+		openai_default_model: 'gpt-4o-mini',
+		openai_organization_id: '',
+		ollama_endpoint_url: 'http://localhost:11434',
+		ollama_default_model: 'llama3.2',
+		huggingface_api_token: '',
+		huggingface_default_model: 'google/flan-t5-base',
+		public_idb_debug: false,
+		...overrides
+	};
+}
 
 function makeTool(overrides: Partial<MCPTool> = {}): MCPTool {
 	return {
@@ -117,6 +147,73 @@ describe('ChatStore — pure local logic', () => {
 				completion_tokens: 0,
 				total_tokens: 0
 			});
+		});
+	});
+
+	describe('configuration state', () => {
+		test('masked openrouter settings still count as configured', () => {
+			store.provider = 'openrouter';
+			store.settings = makeSettings({ openrouter_api_key: '••••••••' });
+			const applyDefaults = Reflect.get(store, '_applyProviderDefaults') as
+				| (() => void)
+				| undefined;
+			expect(applyDefaults).toBeTypeOf('function');
+			applyDefaults?.call(store);
+			expect(store.apiKey).toBe('');
+			expect(store.configured).toBe(true);
+		});
+
+		test('active openrouter session counts as configured without a local api key', () => {
+			store.provider = 'openrouter';
+			store.apiKey = '';
+			store.sessionId = 'session-1';
+			const refreshConfigured = Reflect.get(store, '_refreshConfigured') as
+				| (() => void)
+				| undefined;
+			expect(refreshConfigured).toBeTypeOf('function');
+			refreshConfigured?.call(store);
+			expect(store.configured).toBe(true);
+		});
+
+		test('open_panel resumes stored session before the config gate', async () => {
+			storage.set('chat_session_id', 'session-1');
+			vi.mocked(settingsApi.getSettings).mockReturnValue(okAsync(makeSettings()));
+			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.getHistory).mockReturnValue(
+				okAsync({
+					session_id: 'session-1',
+					history: []
+				})
+			);
+			vi.mocked(chatApi.openEventStream).mockReturnValue({
+				close: vi.fn(),
+				onopen: null,
+				onmessage: null,
+				onerror: null
+			} as unknown as EventSource);
+
+			await store.open_panel();
+
+			expect(store.sessionId).toBe('session-1');
+			expect(store.configured).toBe(true);
+			expect(chatApi.getHistory).toHaveBeenCalledWith('session-1');
+		});
+
+		test('reset clears session-backed configured state when no provider key is stored', () => {
+			store.provider = 'openrouter';
+			store.settings = makeSettings();
+			store.sessionId = 'session-1';
+			const refreshConfigured = Reflect.get(store, '_refreshConfigured') as
+				| (() => void)
+				| undefined;
+			expect(refreshConfigured).toBeTypeOf('function');
+			refreshConfigured?.call(store);
+			expect(store.configured).toBe(true);
+
+			store.reset();
+			expect(store.sessionId).toBeNull();
+			expect(store.configured).toBe(false);
 		});
 	});
 

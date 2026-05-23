@@ -132,4 +132,19 @@ describe('timeAgo', () => {
 		const result = timeAgo(midnight);
 		expect(result).toMatch(/\d{1,2}:\d{2}/);
 	});
+
+	test('accepts floating-point millisecond timestamps', () => {
+		const timestamp = Temporal.Instant.from('2025-06-15T10:05:00.000Z').epochMilliseconds + 0.342;
+		const result = timeAgo(timestamp);
+		expect(result).toMatch(/\d{1,2}:\d{2}/);
+		expect(result).not.toContain('Yesterday');
+	});
+
+	test('accepts floating-point second timestamps from chat sessions', () => {
+		const timestamp =
+			Temporal.Instant.from('2025-06-15T10:05:00.000Z').epochMilliseconds / 1000 + 0.161473;
+		const result = timeAgo(timestamp);
+		expect(result).toMatch(/\d{1,2}:\d{2}/);
+		expect(result).not.toContain('1970');
+	});
 });

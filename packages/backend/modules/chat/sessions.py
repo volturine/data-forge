@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import secrets
 import time
 from collections.abc import AsyncIterator
@@ -20,6 +21,22 @@ logger = logging.getLogger(__name__)
 
 MAX_EVENTS = 500
 MAX_MESSAGES = 100
+SECOND_EPOCH_THRESHOLD = 10_000_000_000
+
+
+def _normalize_epoch_milliseconds(value: Any) -> int | None:
+    if not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    epoch_ms = value * 1000 if abs(value) < SECOND_EPOCH_THRESHOLD else value
+    return int(round(epoch_ms))
+
+
+def _normalize_event(event: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(event)
+    ts = _normalize_epoch_milliseconds(normalized.get("ts"))
+    if ts is not None:
+        normalized["ts"] = ts
+    return normalized
 
 
 class LiveSession:
@@ -100,8 +117,8 @@ class LiveSession:
 
     def push_event(self, event: dict) -> None:
         self.last_activity = time.time()
-        if "ts" not in event:
-            event = {**event, "ts": time.time() * 1000}
+        ts = _normalize_epoch_milliseconds(event.get("ts"))
+        event = {**event, "ts": ts if ts is not None else int(round(time.time() * 1000))}
         self._history.append(event)
         if len(self._history) > MAX_EVENTS:
             self._history = self._history[-MAX_EVENTS:]
@@ -126,7 +143,7 @@ class LiveSession:
             self._queue.put_nowait(item)
 
     def get_history(self) -> list[dict[str, Any]]:
-        return list(self._history)
+        return [_normalize_event(event) for event in self._history]
 
     async def events(self) -> AsyncIterator[dict]:
         while True:
@@ -230,7 +247,7 @@ class SessionStore:
                         "id": row.id,
                         "model": row.model,
                         "provider": row.provider,
-                        "created_at": row.created_at,
+                        "created_at": _normalize_epoch_milliseconds(row.created_at) or 0,
                         "preview": preview,
                     },
                 )

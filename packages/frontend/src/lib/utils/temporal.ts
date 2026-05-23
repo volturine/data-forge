@@ -3,6 +3,7 @@ export type TemporalInput = string | number | Temporal.Instant;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DATETIME_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?$/;
 const TIMEZONE_RE = /(?:[zZ]|[+-]\d{2}:?\d{2})$/;
+const SECOND_EPOCH_THRESHOLD = 10_000_000_000;
 
 function normalizeIsoText(value: string): string {
 	return value.replace(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}.*)$/, '$1T$2');
@@ -30,13 +31,22 @@ export function hasTimezone(value: string): boolean {
 	return TIMEZONE_RE.test(value);
 }
 
+export function normalizeEpochMilliseconds(value: number): number | null {
+	if (!Number.isFinite(value)) return null;
+	const epochMs = Math.abs(value) < SECOND_EPOCH_THRESHOLD ? value * 1000 : value;
+	return Math.round(epochMs);
+}
+
 export function parseInstantWithZone(
 	value: TemporalInput,
 	timeZone: string,
 	normalize: boolean
 ): Temporal.Instant | null {
 	if (value instanceof Temporal.Instant) return value;
-	if (typeof value === 'number') return Temporal.Instant.fromEpochMilliseconds(value);
+	if (typeof value === 'number') {
+		const epochMs = normalizeEpochMilliseconds(value);
+		return epochMs === null ? null : Temporal.Instant.fromEpochMilliseconds(epochMs);
+	}
 	const raw = String(value).trim();
 	if (!raw) return null;
 	try {
@@ -124,8 +134,10 @@ export function formatEpoch(
 	options: Intl.DateTimeFormatOptions,
 	timeZone?: string
 ): string {
+	const normalized = normalizeEpochMilliseconds(epochMs);
+	if (normalized === null) return String(epochMs);
 	const next = timeZone ? { ...options, timeZone } : options;
-	return new Intl.DateTimeFormat(undefined, next).format(epochMs);
+	return new Intl.DateTimeFormat(undefined, next).format(normalized);
 }
 
 export function formatValue(

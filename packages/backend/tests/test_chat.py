@@ -77,6 +77,19 @@ class TestLiveSession:
         assert len(s.get_history()) == 1
         assert s.get_history()[0]["type"] == "message"
 
+    def test_push_event_normalizes_float_timestamp_to_integer_milliseconds(self) -> None:
+        row = ChatSession(
+            id="sid",
+            provider="openrouter",
+            model="gpt-4o-mini",
+            api_key=encrypt_secret("key"),
+        )
+        s = LiveSession(row)
+        s.push_event({"type": "message", "role": "assistant", "content": "hi", "ts": 1779554733866.484})
+        history = s.get_history()
+        assert history[0]["ts"] == 1779554733866
+        assert isinstance(history[0]["ts"], int)
+
     def test_get_history_returns_copy(self) -> None:
         row = ChatSession(
             id="sid",
@@ -455,6 +468,44 @@ class TestChatRoutes:
         data = hist.json()
         assert data["session_id"] == sid
         assert data["history"] == []
+
+    def test_list_sessions_returns_epoch_milliseconds(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/v1/ai/chat/sessions",
+            json={
+                "provider": "openrouter",
+                "model": "gpt-4o-mini",
+                "api_key": "test-key",
+            },
+        )
+        sid = resp.json()["session_id"]
+
+        sessions_resp = client.get("/api/v1/ai/chat/sessions")
+        assert sessions_resp.status_code == 200
+        session = next(item for item in sessions_resp.json() if item["id"] == sid)
+        assert isinstance(session["created_at"], int)
+        assert session["created_at"] > 10_000_000_000
+
+    def test_history_normalizes_legacy_float_timestamps(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/v1/ai/chat/sessions",
+            json={
+                "provider": "openrouter",
+                "model": "gpt-4o-mini",
+                "api_key": "test-key",
+            },
+        )
+        sid = resp.json()["session_id"]
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        live._history = [{"type": "message", "role": "assistant", "content": "OK", "ts": 1779554733866.484}]
+
+        hist = client.get(f"/api/v1/ai/chat/history/{sid}")
+        assert hist.status_code == 200
+        assert hist.json()["history"][0]["ts"] == 1779554733866
 
     def test_history_unknown_session_returns_404(self, client: TestClient) -> None:
         resp = client.get("/api/v1/ai/chat/history/nonexistent")
@@ -1857,7 +1908,7 @@ class TestMalformedToolArgs:
         assert len(history) > 0
         for event in history:
             assert "ts" in event, f"Event missing ts: {event}"
-            assert isinstance(event["ts"], float)
+            assert isinstance(event["ts"], int)
             assert event["ts"] > 0
 
 
