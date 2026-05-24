@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 
 from contracts.compute.base import EngineStatusInfo
 from contracts.engine_instances.models import EngineInstance, EngineInstanceStatus
+from core.engine_identity import parse_engine_identity
 
 
 def _utcnow() -> datetime:
@@ -20,6 +21,8 @@ def _apply_engine_status(row: EngineInstance, *, status: EngineStatusInfo, stamp
     row.process_id = status.process_id
     row.status = EngineInstanceStatus.from_engine_status(status.status, status.current_job_id)
     row.current_job_id = status.current_job_id
+    row.current_build_id = status.current_build_id
+    row.current_engine_run_id = status.current_engine_run_id
     row.resource_config_json = _copy_json(status.resource_config)
     row.effective_resources_json = _copy_json(status.effective_resources)
     row.last_activity_at = _read_dt(status.last_activity) or row.last_activity_at or stamp
@@ -40,8 +43,8 @@ def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, st
             process_id=status.process_id,
             status=EngineInstanceStatus.from_engine_status(status.status, status.current_job_id),
             current_job_id=status.current_job_id,
-            current_build_id=None,
-            current_engine_run_id=None,
+            current_build_id=status.current_build_id,
+            current_engine_run_id=status.current_engine_run_id,
             resource_config_json=_copy_json(status.resource_config),
             effective_resources_json=_copy_json(status.effective_resources),
             last_activity_at=_read_dt(status.last_activity) or stamp,
@@ -140,6 +143,7 @@ def latest_namespace_update(session: Session, *, namespace: str) -> datetime | N
 
 
 def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object]) -> dict[str, object]:
+    identity = parse_engine_identity(row.analysis_id)
     return {
         'analysis_id': row.analysis_id,
         'status': row.status.overview_status,
@@ -149,6 +153,12 @@ def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object
         'resource_config': _copy_json(row.resource_config_json),
         'effective_resources': _copy_json(row.effective_resources_json),
         'defaults': defaults,
+        'scope': identity.scope.value,
+        'reuse_policy': identity.reuse_policy.value,
+        'datasource_id': identity.datasource_id,
+        'build_id': identity.build_id,
+        'current_build_id': row.current_build_id or identity.build_id,
+        'current_engine_run_id': row.current_engine_run_id,
     }
 
 

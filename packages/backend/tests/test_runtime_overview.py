@@ -53,7 +53,7 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
         worker_id="build-worker-1",
         namespace="default",
         status=EngineStatusInfo(
-            analysis_id="analysis-live",
+            analysis_id="__preview__preview-ds",
             status="healthy",
             process_id=4321,
             last_activity=datetime.now(UTC).isoformat(),
@@ -61,6 +61,29 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
             resource_config={"max_threads": 2},
             effective_resources={"max_threads": 2},
             defaults={"max_threads": 2},
+            scope="datasource_preview",
+            reuse_policy="shared",
+            datasource_id="preview-ds",
+        ),
+    )
+    run_settings_db(
+        engine_instance_service.upsert_engine_status,
+        worker_id="build-worker-1",
+        namespace="default",
+        status=EngineStatusInfo(
+            analysis_id="build:build-live",
+            status="healthy",
+            process_id=5432,
+            last_activity=datetime.now(UTC).isoformat(),
+            current_job_id="job-build",
+            resource_config=None,
+            effective_resources=None,
+            defaults={"max_threads": 2},
+            scope="build",
+            reuse_policy="exclusive",
+            build_id="build-live",
+            current_build_id="build-live",
+            current_engine_run_id="run-live",
         ),
     )
 
@@ -92,7 +115,18 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
     assert body["api"]["version"] == settings.app_version
     assert any(item["id"] == "build-manager-1" and item["kind"] == "build_manager" for item in body["workers"])
     assert any(item["id"] == "build-worker-1" for item in body["workers"])
-    assert any(item["analysis_id"] == "analysis-live" for item in body["engines"])
+    assert any(
+        item["analysis_id"] == "__preview__preview-ds" and item["scope"] == "datasource_preview" and item["datasource_id"] == "preview-ds"
+        for item in body["engines"]
+    )
+    assert any(
+        item["analysis_id"] == "build:build-live"
+        and item["scope"] == "build"
+        and item["build_id"] == "build-live"
+        and item["current_build_id"] == "build-live"
+        and item["current_engine_run_id"] == "run-live"
+        for item in body["engines"]
+    )
     assert body["queue"]["totals"]["queued"] == 1
     assert body["queue"]["totals"]["running"] == 1
     assert body["queue"]["totals"]["orphaned"] == 1

@@ -9,6 +9,7 @@ from contracts.runtime_workers.models import RuntimeWorker, RuntimeWorkerKind
 from core import runtime_workers_service
 from core.config import settings
 from core.database import run_db, run_settings_db, supports_distributed_runtime
+from core.engine_identity import parse_engine_identity
 from core.namespace import list_namespaces, reset_namespace, set_namespace_context
 from sqlmodel import Session, select
 
@@ -71,22 +72,29 @@ def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary
 def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummary]:
     stmt = select(EngineInstance).order_by(EngineInstance.namespace, EngineInstance.analysis_id)  # type: ignore[arg-type]
     rows = list(session.execute(stmt).scalars().all())
-    return [
-        schemas.EngineInstanceSummary(
-            id=row.id,
-            worker_id=row.worker_id,
-            namespace=row.namespace,
-            analysis_id=row.analysis_id,
-            process_id=row.process_id,
-            status=row.status,
-            current_job_id=row.current_job_id,
-            current_build_id=row.current_build_id,
-            current_engine_run_id=row.current_engine_run_id,
-            last_activity_at=row.last_activity_at,
-            last_seen_at=row.last_seen_at,
+    items: list[schemas.EngineInstanceSummary] = []
+    for row in rows:
+        identity = parse_engine_identity(row.analysis_id)
+        items.append(
+            schemas.EngineInstanceSummary(
+                id=row.id,
+                worker_id=row.worker_id,
+                namespace=row.namespace,
+                analysis_id=row.analysis_id,
+                process_id=row.process_id,
+                status=row.status,
+                current_job_id=row.current_job_id,
+                current_build_id=row.current_build_id,
+                current_engine_run_id=row.current_engine_run_id,
+                last_activity_at=row.last_activity_at,
+                last_seen_at=row.last_seen_at,
+                scope=schemas.EngineScope(identity.scope.value),
+                reuse_policy=schemas.EngineReusePolicy(identity.reuse_policy.value),
+                datasource_id=identity.datasource_id,
+                build_id=identity.build_id,
+            )
         )
-        for row in rows
-    ]
+    return items
 
 
 def queue_summary() -> schemas.QueueSummary:

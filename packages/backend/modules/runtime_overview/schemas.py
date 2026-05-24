@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
+from contracts.compute.schemas import EngineReusePolicy, EngineScope
 from contracts.engine_instances.models import EngineInstanceStatus
 from contracts.runtime_workers.models import RuntimeWorkerKind
 from pydantic import BaseModel
@@ -42,6 +43,10 @@ class EngineInstanceSummary(BaseModel):
     current_engine_run_id: str | None
     last_activity_at: datetime | None
     last_seen_at: datetime
+    scope: EngineScope | None = None
+    reuse_policy: EngineReusePolicy | None = None
+    datasource_id: str | None = None
+    build_id: str | None = None
 
 
 class QueueNamespaceSummary(BaseModel):

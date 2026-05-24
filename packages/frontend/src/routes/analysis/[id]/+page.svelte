@@ -31,13 +31,7 @@
 		unfavoriteAnalysis
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
-	import {
-		downloadBlob,
-		getEngineDefaults,
-		getStepSchema,
-		shutdownEngineBestEffort,
-		spawnEngine
-	} from '$lib/api/compute';
+	import { downloadBlob, getEngineDefaults, getStepSchema, spawnEngine } from '$lib/api/compute';
 	import { openLockSession, type LockSessionError } from '$lib/api/locks';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
@@ -170,17 +164,6 @@
 		if (editorAccessState === 'pending' || editorAccessState === 'locked') return;
 		lockIntent = lockIntent === 'released' ? 'editing' : 'released';
 	}
-
-	// Cleanup: analysis engines should not accumulate after the user leaves the editor.
-	// Keep the current analysis warm only while this route is mounted; opening the page
-	// again will prewarm it immediately.
-	$effect(() => {
-		if (!validAnalysisId) return;
-		const analysisIdForCleanup = validAnalysisId;
-		return () => {
-			shutdownEngineBestEffort(analysisIdForCleanup);
-		};
-	});
 
 	// Websocket: $derived can't manage lock acquire + websocket watcher lifecycle.
 	$effect(() => {

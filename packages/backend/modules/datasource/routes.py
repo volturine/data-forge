@@ -9,6 +9,7 @@ from shutil import copy2
 from contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from core.config import settings
 from core.database import get_db
+from core.engine_identity import datasource_preview_engine_key
 from core.exceptions import AppError
 from core.namespace import namespace_paths
 from fastapi import Depends, Form, HTTPException, UploadFile
@@ -65,7 +66,7 @@ router = MCPRouter(prefix="/datasource", tags=["datasource"])
 
 
 def _datasource_preview_analysis_id(datasource_id: str) -> str:
-    return f"__preview__{datasource_id}"
+    return datasource_preview_engine_key(datasource_id)
 
 
 def _write_chunk(path: Path, chunk: bytes) -> None:

@@ -22,6 +22,8 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('build_worker_min_processes', 0, 100),
     ('build_worker_max_processes', 0, 100),
     ('build_worker_idle_exit_seconds', 1, None),
+    ('engine_idle_ttl_seconds', 1, None),
+    ('engine_idle_reap_interval_seconds', 1, None),
     ('log_queue_max_size', 1, None),
     ('log_max_body_size', 0, None),
     ('log_client_batch_size', 1, None),
@@ -128,6 +130,9 @@ class Settings(BaseSettings):
     build_worker_min_processes: int = Field(default=0, alias='BUILD_WORKER_MIN_PROCESSES')
     build_worker_max_processes: int = Field(default=10, alias='BUILD_WORKER_MAX_PROCESSES')
     build_worker_idle_exit_seconds: int = Field(default=30, alias='BUILD_WORKER_IDLE_EXIT_SECONDS')
+
+    engine_idle_ttl_seconds: int = Field(default=300, alias='ENGINE_IDLE_TTL_SECONDS')
+    engine_idle_reap_interval_seconds: int = Field(default=30, alias='ENGINE_IDLE_REAP_INTERVAL_SECONDS')
 
     # Logging level (debug, info, warning, error)
     log_level: str = Field(default='info', alias='LOG_LEVEL')
@@ -295,6 +300,8 @@ class Settings(BaseSettings):
             raise ValueError('BUILD_WORKER_MIN_PROCESSES must be <= BUILD_WORKER_MAX_PROCESSES')
         if self.build_worker_max_processes > self.max_concurrent_engines:
             raise ValueError('BUILD_WORKER_MAX_PROCESSES must be <= MAX_CONCURRENT_ENGINES')
+        if self.engine_idle_reap_interval_seconds >= self.engine_idle_ttl_seconds:
+            raise ValueError('ENGINE_IDLE_REAP_INTERVAL_SECONDS must be < ENGINE_IDLE_TTL_SECONDS')
         return self
 
 

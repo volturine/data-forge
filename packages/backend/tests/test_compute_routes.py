@@ -22,7 +22,7 @@ class _StubManager:
 
     @staticmethod
     def get_engine(engine_id: str):
-        return _StubEngine() if engine_id == "analysis-1:build:build-1" else None
+        return _StubEngine() if engine_id == "build:build-1" else None
 
     @staticmethod
     def get_engine_status(engine_id: str) -> dict[str, object]:
@@ -74,23 +74,23 @@ def test_configure_engine_accepts_datasource_preview_analysis_id(client) -> None
     assert manager.restart_calls == [("__preview__datasource-1", {"max_threads": 4, "max_memory_mb": None, "streaming_chunk_size": None})]
 
 
-def test_shutdown_engine_accepts_composite_build_engine_key(client) -> None:
+def test_shutdown_engine_accepts_build_engine_key(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
-        response = client.delete("/api/v1/compute/engine/analysis-1:build:build-1")
+        response = client.delete("/api/v1/compute/engine/build:build-1")
     finally:
         app.dependency_overrides.pop(get_manager, None)
 
     assert response.status_code == 204
-    assert manager.shutdown_calls == ["analysis-1:build:build-1"]
+    assert manager.shutdown_calls == ["build:build-1"]
 
 
 def test_shutdown_engine_returns_not_found_for_unknown_engine_key(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
-        response = client.delete("/api/v1/compute/engine/analysis-1:build:missing")
+        response = client.delete("/api/v1/compute/engine/build:missing")
     finally:
         app.dependency_overrides.pop(get_manager, None)
 

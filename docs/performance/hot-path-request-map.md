@@ -27,7 +27,7 @@ These owners control who gets CPU time first.
 | --- | --- | --- |
 | Compute request ordering | `packages/shared/core/compute_requests_service.py` | interactive preview/editor/runtime work first, user-triggered datasource creation second, background ingest last |
 | Compute request execution model | `packages/worker-manager/runtime/compute_request_runtime.py` | blocking work runs off the event loop in a bounded executor |
-| Engine warmup / build reuse | `packages/worker-manager/runtime/compute_service.py` | stable per-analysis build engine ids, prewarm where it shortens user-visible latency |
+| Engine warmup / build reuse | `packages/worker-manager/runtime/compute_service.py` | shared datasource/analysis engines stay warm until idle cleanup; each build trigger gets its own build engine key |
 | Same-datasource write safety | `packages/worker-manager/datasources/datasource_service.py` | same datasource ingests are serialized |
 
 ## Known cross-cutting latency amplifiers

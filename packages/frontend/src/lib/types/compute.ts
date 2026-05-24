@@ -1,4 +1,6 @@
 export type EngineStatus = 'healthy' | 'terminated';
+export type EngineScope = 'datasource_preview' | 'analysis_interactive' | 'build';
+export type EngineReusePolicy = 'shared' | 'exclusive';
 
 /**
  * Resource configuration for compute engine.
@@ -20,6 +22,12 @@ export interface EngineStatusResponse {
 	resource_config: EngineResourceConfig | null; // User-provided overrides
 	effective_resources: EngineResourceConfig | null; // Actual values being used
 	defaults: EngineDefaults | null; // Default values from env vars
+	scope: EngineScope | null;
+	reuse_policy: EngineReusePolicy | null;
+	datasource_id: string | null;
+	build_id: string | null;
+	current_build_id: string | null;
+	current_engine_run_id: string | null;
 }
 
 export interface SpawnEngineRequest {

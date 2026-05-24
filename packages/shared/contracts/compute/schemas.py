@@ -13,6 +13,17 @@ class EngineStatus(DataForgeStrEnum):
     TERMINATED = 'terminated'
 
 
+class EngineScope(DataForgeStrEnum):
+    DATASOURCE_PREVIEW = 'datasource_preview'
+    ANALYSIS_INTERACTIVE = 'analysis_interactive'
+    BUILD = 'build'
+
+
+class EngineReusePolicy(DataForgeStrEnum):
+    SHARED = 'shared'
+    EXCLUSIVE = 'exclusive'
+
+
 class EngineResourceConfig(BaseModel):
     """Optional resource overrides for compute engine.
 
@@ -159,6 +170,12 @@ class EngineStatusSchema(BaseModel):
     resource_config: EngineResourceConfig | None = None  # Overrides provided by user
     effective_resources: EngineResourceConfig | None = None  # Actual values being used
     defaults: EngineDefaults | None = None  # Default values from env vars
+    scope: EngineScope | None = None
+    reuse_policy: EngineReusePolicy | None = None
+    datasource_id: str | None = None
+    build_id: str | None = None
+    current_build_id: str | None = None
+    current_engine_run_id: str | None = None
 
 
 class EngineListSnapshotMessage(BaseModel):

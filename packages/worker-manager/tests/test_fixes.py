@@ -26,12 +26,13 @@ from runtime.compute_service import ExportDatasourceResult
 # ---------------------------------------------------------------------------
 
 
-def test_analysis_build_engine_id_reuses_a_stable_engine_per_analysis() -> None:
-    assert compute_service._analysis_build_engine_id("analysis-1") == "analysis-1:build"
+def test_build_engine_id_uses_build_scope_and_is_unique_per_build() -> None:
+    assert compute_service._build_engine_id("build-1") == "build:build-1"
+    assert compute_service._build_engine_id("build-1") != compute_service._build_engine_id("build-2")
 
 
 @pytest.mark.asyncio
-async def test_run_analysis_build_stream_keeps_completed_build_engine_warm(
+async def test_run_analysis_build_stream_shuts_down_build_engine_after_completion(
     test_db_session,
     monkeypatch,
 ) -> None:
@@ -92,6 +93,7 @@ async def test_run_analysis_build_stream_keeps_completed_build_engine_warm(
         SimpleNamespace(
             spawn_engine=lambda engine_id: spawn_calls.append(engine_id),
             shutdown_engine=lambda engine_id: shutdown_calls.append(engine_id),
+            set_engine_runtime_context=lambda engine_id, current_build_id, current_engine_run_id: None,
         ),
     )
 
@@ -108,9 +110,9 @@ async def test_run_analysis_build_stream_keeps_completed_build_engine_warm(
     )
 
     assert result["analysis_id"] == "analysis-1"
-    assert spawn_calls == ["analysis-1:build"]
-    assert seen_engine_keys == ["analysis-1:build"]
-    assert shutdown_calls == []
+    assert spawn_calls == ["build:build-1"]
+    assert seen_engine_keys == ["build:build-1"]
+    assert shutdown_calls == ["build:build-1"]
     assert events[-1].type == compute_schemas.BuildEventType.COMPLETE
 
 

@@ -1,10 +1,9 @@
 import uuid
 from typing import Annotated
 
+from core.engine_identity import PREVIEW_PREFIX, datasource_preview_engine_key, is_datasource_preview_engine_key
 from core.exceptions import InvalidIdError
 from fastapi import Path
-
-_PREVIEW_PREFIX = "__preview__"
 
 
 def _parse_uuid(value: str) -> str:
@@ -89,10 +88,10 @@ def parse_datasource_id(value: str) -> str:
 
 
 def parse_compute_analysis_id(value: str) -> str:
-    if value.startswith(_PREVIEW_PREFIX):
-        datasource_id = parse_datasource_id(value[len(_PREVIEW_PREFIX) :])
-        if datasource_id:
-            return f"{_PREVIEW_PREFIX}{datasource_id}"
+    if value.startswith(PREVIEW_PREFIX):
+        datasource_id = parse_datasource_id(value[len(PREVIEW_PREFIX) :])
+        if is_datasource_preview_engine_key(value) and datasource_id:
+            return datasource_preview_engine_key(datasource_id)
         raise InvalidIdError(message=f"Invalid preview analysis ID: {value}", details={"value": value})
     return parse_analysis_id(value)
 

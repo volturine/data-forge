@@ -25,6 +25,12 @@ function makeEngine(overrides: Partial<EngineStatusResponse> = {}): EngineStatus
 		resource_config: null,
 		effective_resources: null,
 		defaults: null,
+		scope: null,
+		reuse_policy: null,
+		datasource_id: null,
+		build_id: null,
+		current_build_id: null,
+		current_engine_run_id: null,
 		...overrides
 	};
 }

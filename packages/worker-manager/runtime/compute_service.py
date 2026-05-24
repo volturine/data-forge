@@ -34,6 +34,7 @@ from core import (
 )
 from core.config import settings
 from core.database import get_db
+from core.engine_identity import build_engine_key
 from core.exceptions import (
     DataSourceNotFoundError,
     DataSourceSnapshotError,
@@ -1382,6 +1383,18 @@ def _resolve_pipeline_request(
     }
 
 
+def _acquire_engine(manager: ProcessManager, engine_key: str, resource_config: dict | None = None):
+    return manager.get_or_create_engine(engine_key, resource_config=resource_config)
+
+
+def _resolve_export_engine_key(*, engine_key: str | None, analysis_id: str | None) -> str:
+    if engine_key is not None:
+        return engine_key
+    if analysis_id:
+        return analysis_id
+    raise ValueError("Export requires analysis_id or engine_key")
+
+
 def preview_step(
     session: Session,
     manager: ProcessManager,
@@ -1437,7 +1450,7 @@ def preview_step(
         preview_steps = steps[: step_index + 1]
         preview_steps = _hydrate_udfs(session, preview_steps)
 
-    engine = manager.get_or_create_engine(analysis_id_value, resource_config=resource_config)
+    engine = _acquire_engine(manager, analysis_id_value, resource_config=resource_config)
     persist_preview_runs = settings.persist_preview_runs
     run_response = None
     if persist_preview_runs:
@@ -1619,7 +1632,7 @@ def get_step_schema(
         schema_steps = steps[: step_index + 1]
         schema_steps = _hydrate_udfs(session, schema_steps)
 
-    engine = manager.get_engine(analysis_id_value) or manager.get_or_create_engine(analysis_id_value)
+    engine = _acquire_engine(manager, analysis_id_value)
 
     additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
 
@@ -1697,7 +1710,7 @@ def get_step_row_count(
         count_steps = steps[: step_index + 1]
         count_steps = _hydrate_udfs(session, count_steps)
 
-    engine = manager.get_engine(analysis_id_value) or manager.get_or_create_engine(analysis_id_value)
+    engine = _acquire_engine(manager, analysis_id_value)
 
     additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
 
@@ -1879,15 +1892,8 @@ def export_data(
         export_steps = steps[: step_index + 1]
     export_steps = _hydrate_udfs(session, export_steps)
 
-    temp_engine = False
-    temp_engine_id = engine_key or f"{datasource_id}_export"
-    if engine_key is not None:
-        engine = manager.get_or_create_engine(engine_key)
-    elif analysis_id_value:
-        engine = manager.get_engine(analysis_id_value) or manager.get_or_create_engine(analysis_id_value)
-    else:
-        engine = manager.get_or_create_engine(temp_engine_id)
-        temp_engine = True
+    resolved_engine_key = _resolve_export_engine_key(engine_key=engine_key, analysis_id=analysis_id_value)
+    engine = _acquire_engine(manager, resolved_engine_key)
 
     additional_datasources = _get_additional_datasources(session, export_steps, analysis_pipeline)
     source_datasource_name = _datasource_name(session, datasource_id)
@@ -2266,8 +2272,6 @@ def export_data(
             )
         raise
     finally:
-        if temp_engine:
-            manager.shutdown_engine(temp_engine_id)
         if os.path.exists(tmp_output):
             os.unlink(tmp_output)
 
@@ -2327,7 +2331,7 @@ def download_step(
         download_steps = steps[: step_index + 1]
         download_steps = _hydrate_udfs(session, download_steps)
 
-    engine = manager.get_or_create_engine(analysis_id_value)
+    engine = _acquire_engine(manager, analysis_id_value)
     branch = _resolve_branch_value(datasource_config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
     request_payload = _ensure_request_branch(
@@ -2894,13 +2898,14 @@ async def _stop_stream_task(task: asyncio.Task | None) -> None:
         _ = await task
 
 
-def _analysis_build_engine_id(analysis_id: str) -> str:
-    return f"{analysis_id}:build"
+def _build_engine_id(build_id: str) -> str:
+    return build_engine_key(build_id)
 
 
-async def _prewarm_build_engine(manager: ProcessManager, engine_id: str) -> None:
+async def _prewarm_build_engine(manager: ProcessManager, engine_id: str, *, build_id: str) -> None:
     try:
         await asyncio.to_thread(manager.spawn_engine, engine_id)
+        await asyncio.to_thread(manager.set_engine_runtime_context, engine_id, current_build_id=build_id, current_engine_run_id=None)
     except Exception:
         logger.debug("Build engine prewarm failed for %s", engine_id, exc_info=True)
 
@@ -2954,8 +2959,8 @@ async def run_analysis_build_stream(
         engine_run_id=build.current_engine_run_id,
     )
 
-    build_engine_id = _analysis_build_engine_id(analysis_id_value)
-    build_engine_prewarm_task = asyncio.create_task(_prewarm_build_engine(manager, build_engine_id))
+    build_engine_id = _build_engine_id(build.build_id)
+    build_engine_prewarm_task = asyncio.create_task(_prewarm_build_engine(manager, build_engine_id, build_id=build.build_id))
     results: list[dict] = []
     tabs_built = 0
     build_step_base = 0
@@ -3133,6 +3138,11 @@ async def run_analysis_build_stream(
                     return
                 if isinstance(run_id, str):
                     build.current_engine_run_id = run_id
+                    manager.set_engine_runtime_context(
+                        build_engine_id,
+                        current_build_id=build.build_id,
+                        current_engine_run_id=run_id,
+                    )
                     _cancel_started_engine_run_if_build_cancelled(build, run_id=run_id)
                     if build.status == compute_schemas.ActiveBuildStatus.CANCELLED:
                         return
@@ -3579,6 +3589,8 @@ async def run_analysis_build_stream(
             await build_engine_prewarm_task
     else:
         await build_engine_prewarm_task
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(manager.shutdown_engine, build_engine_id)
     return {
         "analysis_id": analysis_id_value,
         "tabs_built": tabs_built,

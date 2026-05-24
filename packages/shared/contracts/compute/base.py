@@ -116,6 +116,12 @@ class EngineStatusInfo:
     resource_config: dict[str, Any] | None
     effective_resources: dict[str, Any] | None
     defaults: dict[str, Any]
+    scope: str | None = None
+    reuse_policy: str | None = None
+    datasource_id: str | None = None
+    build_id: str | None = None
+    current_build_id: str | None = None
+    current_engine_run_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
