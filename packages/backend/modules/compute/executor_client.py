@@ -12,6 +12,7 @@ from contracts.runtime_workers.models import RuntimeWorkerKind
 from core import compute_requests_service
 from core.exceptions import PipelineExecutionError
 from core.namespace import get_namespace
+from core.object_store import delete_object, download_bytes, is_object_store_url
 from fastapi import HTTPException
 from sqlmodel import Session
 
@@ -124,6 +125,10 @@ async def download_step(
     )
     if not completed.artifact_path or not completed.artifact_name or not completed.artifact_content_type:
         raise PipelineExecutionError("Download artifact missing from compute response")
+    if is_object_store_url(completed.artifact_path):
+        data = download_bytes(completed.artifact_path)
+        delete_object(completed.artifact_path)
+        return data, completed.artifact_name, completed.artifact_content_type
     path = Path(completed.artifact_path)
     data = path.read_bytes()
     path.unlink(missing_ok=True)

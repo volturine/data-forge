@@ -109,8 +109,10 @@ class DataSource(SQLModel, table=True):  # type: ignore[call-arg]
     created_by_analysis_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     created_by: str = Field(default=DataSourceCreatedBy.IMPORT.value, sa_column=Column(String, nullable=False, server_default=DataSourceCreatedBy.IMPORT.value))
     is_hidden: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0'))
+    is_pending_delete: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0', index=True))
     owner_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    delete_requested_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True, index=True))
 
 
 class DataSourceColumnMetadata(SQLModel, table=True):  # type: ignore[call-arg]

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import contextlib
+import os
+import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,13 +39,19 @@ class FauxDatasourceRuntime:
         owner_id: str | None = None,
         **kwargs: Any,
     ):
+        from core.namespace import get_namespace
+        from core.object_store import join_object_store_url, object_store_url, upload_bytes
+
+        metadata_root = object_store_url("namespaces", get_namespace(), "clean", uuid.uuid4().hex, "master")
+        upload_bytes(b'{"metadata":"placeholder"}', join_object_store_url(metadata_root, "metadata", "00000-placeholder.metadata.json"))
+
         datasource = DataSource(
             id=str(uuid.uuid4()),
             name=name,
             description=description,
             source_type=DataSourceType.ICEBERG,
             config={
-                "metadata_path": str(self._clean_dir() / uuid.uuid4().hex / "master"),
+                "metadata_path": metadata_root,
                 "branch": "master",
                 "source": {
                     "source_type": "file",
@@ -57,7 +66,6 @@ class FauxDatasourceRuntime:
             created_at=datetime.now(UTC),
         )
         datasource.schema_cache = self._schema_for(datasource).model_dump(exclude_none=True)
-        Path(datasource.config["metadata_path"]).mkdir(parents=True, exist_ok=True)
         session.add(datasource)
         session.commit()
         session.refresh(datasource)
@@ -198,6 +206,24 @@ class FauxDatasourceRuntime:
         response.output_of_tab_id = datasource.config.get("analysis_tab_id") if isinstance(datasource.config, dict) else None
         return response
 
+    @contextlib.contextmanager
+    def _materialized_source_path(self, file_path: str):
+        from core.object_store import download_file, is_object_store_url
+
+        if not is_object_store_url(file_path):
+            yield file_path
+            return
+        suffix = Path(file_path).suffix or ".dat"
+        fd, temp_name = tempfile.mkstemp(suffix=suffix)
+        os.close(fd)
+        temp_path = Path(temp_name)
+        try:
+            download_file(file_path, temp_path)
+            yield str(temp_path)
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                temp_path.unlink()
+
     def _read_dataframe(self, datasource: DataSource) -> pl.DataFrame:
         config = datasource.config if isinstance(datasource.config, dict) else {}
         source = config.get("source") if datasource.source_type == DataSourceType.ICEBERG else config
@@ -207,17 +233,13 @@ class FauxDatasourceRuntime:
         file_type = source.get("file_type")
         if not isinstance(file_path, str):
             return pl.DataFrame()
-        if file_type == "parquet":
-            return pl.read_parquet(file_path)
-        if file_type == "json":
-            return pl.read_json(file_path)
-        if file_type == "ndjson":
-            return pl.read_ndjson(file_path)
-        if file_type == "excel":
-            return pl.read_excel(file_path)
-        return pl.read_csv(file_path)
-
-    def _clean_dir(self) -> Path:
-        from core.namespace import namespace_paths
-
-        return namespace_paths().clean_dir
+        with self._materialized_source_path(file_path) as local_file_path:
+            if file_type == "parquet":
+                return pl.read_parquet(local_file_path)
+            if file_type == "json":
+                return pl.read_json(local_file_path)
+            if file_type == "ndjson":
+                return pl.read_ndjson(local_file_path)
+            if file_type == "excel":
+                return pl.read_excel(local_file_path)
+            return pl.read_csv(local_file_path)

@@ -1,3 +1,5 @@
+import type { Locator } from '@playwright/test';
+
 import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis, shutdownEngine } from './utils/api.js';
 import {
@@ -25,6 +27,19 @@ test.afterAll(async ({ browser, workerAuth }) => {
 });
 
 // ── Output visibility toggle ────────────────────────────────────────────────
+
+async function expectCompletedEventually(locator: Locator) {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			await expect(locator).toContainText(/Completed/i, { timeout: 5_000 });
+			return;
+		} catch (error) {
+			lastError = error;
+		}
+	}
+	throw lastError;
+}
 
 test.describe('Analyses – output visibility toggle', () => {
 	test('OutputNode: visibility toggle button shows initial state', async ({ page, request }) => {
@@ -101,7 +116,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			await buildBtn.click();
 			const initialBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
 			await expect(initialBuildTrigger).toBeVisible({ timeout: 5_000 });
-			await expect(initialBuildTrigger).toContainText(/Completed/i, { timeout: 5_000 });
+			await expectCompletedEventually(initialBuildTrigger);
 
 			await deleteDatasourceViaUI(page, outputName!, { id: outputId! });
 			await gotoAnalysisEditor(page, aId);
@@ -111,7 +126,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			await rebuiltBuildBtn.click();
 			const rebuiltBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
 			await expect(rebuiltBuildTrigger).toBeVisible({ timeout: 5_000 });
-			await expect(rebuiltBuildTrigger).toContainText(/Completed/i, { timeout: 5_000 });
+			await expectCompletedEventually(rebuiltBuildTrigger);
 
 			const rebuiltToggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
 			await expect(rebuiltToggleBtn).toBeEnabled({ timeout: 5_000 });

@@ -136,7 +136,7 @@ class TestScheduleRoutes:
         response = client.post("/api/v1/schedules", json=payload)
         assert response.status_code == 200
 
-    def test_create_allows_reingestable_raw_iceberg(self, client, test_db_session: Session, sample_csv_file):
+    def test_create_allows_reingestable_raw_iceberg(self, client, test_db_session: Session, sample_csv_object_url: str):
         raw = DataSource(
             id=str(uuid.uuid4()),
             name="Raw Iceberg",
@@ -146,7 +146,7 @@ class TestScheduleRoutes:
                 "branch": "master",
                 "source": {
                     "source_type": "file",
-                    "file_path": str(sample_csv_file),
+                    "file_path": sample_csv_object_url,
                     "file_type": "csv",
                     "options": {},
                 },

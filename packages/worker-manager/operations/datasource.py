@@ -11,6 +11,7 @@ from contracts.compute.base import OperationHandler, OperationParams
 from contracts.datasource.source_types import DataSourceType
 from contracts.enums import DataForgeStrEnum
 from core.iceberg_metadata import resolve_iceberg_branch_metadata_path
+from core.object_store import object_store_storage_options
 from pydantic import ConfigDict
 
 from datasources.datasource_loading import load_datasource_frame
@@ -100,7 +101,7 @@ class DatasourceHandler(OperationHandler):
             )
             from pyiceberg.table import StaticTable
 
-            table = StaticTable.from_metadata(metadata_path)
+            table = StaticTable.from_metadata(metadata_path, properties=object_store_storage_options())
             snapshot = table.snapshot_as_of_timestamp(config.snapshot_timestamp_ms)
             if snapshot is None:
                 raise ValueError("Iceberg snapshot not found for the selected timestamp")

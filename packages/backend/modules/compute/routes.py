@@ -30,7 +30,8 @@ from core import (
 from core.config import settings
 from core.database import get_db, get_settings_db
 from core.exceptions import EngineNotFoundError
-from core.namespace import get_namespace, namespace_paths, reset_namespace, set_namespace_context
+from core.namespace import get_namespace, reset_namespace, set_namespace_context
+from core.object_store import object_store_url
 from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
@@ -567,18 +568,19 @@ async def start_active_build(
         if isinstance(branch_name, str) and branch_name.strip():
             safe_branch = re.sub(r"[^a-zA-Z0-9_]+", "_", branch_name).strip("_")
             table_name = f"{result_id}_{safe_branch}"
-            warehouse_path = namespace_paths().exports_dir
+            warehouse_path = object_store_url("namespaces", get_namespace(), "exports")
             placeholder_source_type = datasource_service.DataSourceType.ICEBERG
             placeholder_config = {
                 "catalog_type": "sql",
                 "catalog_uri": settings.database_url,
-                "warehouse": f"file://{warehouse_path}",
+                "warehouse": warehouse_path,
                 "namespace": namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else "outputs",
                 "table": table_name,
                 "table_name": output_name if isinstance(output_name, str) and output_name.strip() else table_name,
-                "metadata_path": str(warehouse_path / str(result_id)),
+                "metadata_path": object_store_url("namespaces", get_namespace(), "exports", str(result_id)),
                 "branch": branch_name,
                 "namespace_name": get_namespace(),
+                "reader": "native",
             }
         datasource_service.create_placeholder_output_datasource(
             session,

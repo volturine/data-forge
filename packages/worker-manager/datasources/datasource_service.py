@@ -2,6 +2,7 @@ import contextlib
 import json
 import logging
 import os
+import tempfile
 import threading
 import uuid
 from collections.abc import Callable, Mapping
@@ -9,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import polars as pl
 import psycopg
@@ -25,6 +27,14 @@ from core.exceptions import (
 from core.iceberg_catalog import load_runtime_catalog
 from core.iceberg_metadata import sync_iceberg_schema
 from core.namespace import get_namespace, namespace_paths
+from core.object_store import (
+    download_file,
+    ensure_bucket_exists,
+    is_object_store_url,
+    object_exists,
+    object_store_storage_options,
+    object_store_url,
+)
 from polars.datatypes import Array, List, Struct
 from pyiceberg.table import Table
 from sqlalchemy.exc import IntegrityError
@@ -58,10 +68,8 @@ def _ensure_catalog_namespace(catalog, namespace: str) -> None:
         logger.info("Namespace %s was created concurrently; continuing", namespace)
 
 
-def _prepare_clean_target(clean_dir: Path, datasource_id: str, branch: str) -> Path:
-    target = clean_dir / datasource_id / branch
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+def _prepare_clean_target(_clean_dir: Path, datasource_id: str, branch: str) -> str:
+    return object_store_url("namespaces", get_namespace(), "clean", datasource_id, branch)
 
 
 def _coerce_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.LazyFrame:
@@ -108,16 +116,64 @@ def _coerce_database_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.Lazy
     return lazy.with_columns(expressions)
 
 
-def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) -> Table:
+@contextlib.contextmanager
+def _materialized_file_source(source_config: dict[str, Any]):
+    file_path = source_config.get("file_path")
+    if not isinstance(file_path, str) or not is_object_store_url(file_path):
+        yield source_config
+        return
+    suffix = Path(urlparse(file_path).path).suffix or f".{source_config.get('file_type') or 'dat'}"
+    fd, temp_name = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    temp_path = Path(temp_name)
+    try:
+        download_file(file_path, temp_path)
+        yield {**source_config, "file_path": str(temp_path)}
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            temp_path.unlink()
+
+
+def _validate_source_file_path(file_path: str, file_type: DataSourceFileType) -> str:
+    normalized = file_path.strip()
+    if not is_object_store_url(normalized):
+        raise ValueError("file_path must be an s3:// URL")
+    if not object_exists(normalized):
+        raise ValueError(f"Object not found: {normalized}")
+    return normalized
+
+
+def _validated_file_source_config(source: Mapping[str, object]) -> dict[str, object]:
+    file_path = source.get("file_path")
+    if not isinstance(file_path, str) or not file_path.strip():
+        raise DataSourceValidationError("Datasource source is missing file_path")
+    file_type = DataSourceFileType.read(source.get("file_type"), default=None)
+    if file_type is None:
+        raise DataSourceValidationError("Datasource source is missing file_type")
+    return {
+        **source,
+        "file_path": _validate_source_file_path(file_path, file_type),
+        "file_type": file_type.value,
+    }
+
+
+def _write_iceberg_table(lazy: pl.LazyFrame, table_path: str, build_mode: str) -> Table:
+    ensure_bucket_exists()
+    table_location = table_path.rstrip("/")
+    location_parts = table_location.split("/")
+    if len(location_parts) < 2:
+        raise ValueError(f"Invalid Iceberg table location: {table_path}")
+    table_name = location_parts[-2]
     catalog = load_runtime_catalog(
         "local",
         type="sql",
         uri=settings.database_url,
-        warehouse=f"file://{table_path.parent}",
+        warehouse=object_store_url("namespaces", get_namespace(), "clean"),
+        **object_store_storage_options(),
     )
     namespace = "clean"
     _ensure_catalog_namespace(catalog, namespace)
-    identifier = f"{namespace}.{table_path.parent.name}"
+    identifier = f"{namespace}.{table_name}"
     arrow_table = _coerce_iceberg_compatible_lazyframe(lazy).collect().to_arrow()
     if build_mode == "recreate" and catalog.table_exists(identifier):
         catalog.drop_table(identifier)
@@ -129,27 +185,33 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) 
             _sync_iceberg_schema(table, arrow_table.schema)
             table.overwrite(arrow_table)
         return table
-    table = catalog.create_table(identifier, schema=arrow_table.schema, location=str(table_path))
+    table = catalog.create_table(identifier, schema=arrow_table.schema, location=table_location)
     table.append(arrow_table)
     return table
 
 
 def _build_iceberg_config(
     paths,
-    target_path: Path,
+    target_path: str,
     branch: str,
     source_config: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    del paths
+    cleaned = target_path.rstrip("/")
+    parts = cleaned.split("/")
+    if len(parts) < 2:
+        raise ValueError(f"Invalid Iceberg table location: {target_path}")
     return {
         "catalog_type": "sql",
         "catalog_uri": settings.database_url,
-        "warehouse": f"file://{paths.clean_dir}",
+        "warehouse": object_store_url("namespaces", get_namespace(), "clean"),
         "namespace": "clean",
-        "table": target_path.parent.name,
-        "metadata_path": str(target_path.parent),
+        "table": parts[-2],
+        "metadata_path": cleaned,
         "branch": branch,
         "source": dict(source_config) if source_config is not None else None,
         "namespace_name": get_namespace(),
+        "reader": "native",
         "ingest": None,
     }
 
@@ -393,33 +455,28 @@ def create_file_datasource(
     owner_id: str | None = None,
 ) -> DataSourceResponse:
     datasource_id = str(uuid.uuid4())
-    resolved_path = Path(os.path.realpath(Path(file_path).resolve()))
     paths = namespace_paths()
-    data_root = Path(os.path.realpath(paths.base_dir.resolve()))
-    upload_root = Path(os.path.realpath(paths.upload_dir.resolve()))
-    within_data_root = data_root in resolved_path.parents or data_root == resolved_path
-    within_upload_root = upload_root in resolved_path.parents or upload_root == resolved_path
-    if not (within_data_root or within_upload_root):
-        raise ValueError(f"Path must be inside data directory: {data_root}")
     resolved_file_type = DataSourceFileType.require(file_type)
-    resolved_file_type.validate_local_path(resolved_path)
+    resolved_file_path = _validate_source_file_path(file_path, resolved_file_type)
 
-    source_config = {
-        "source_type": DataSourceType.FILE,
-        "file_path": str(resolved_path),
-        "file_type": resolved_file_type.value,
-        "options": options or {},
-        "csv_options": csv_options.model_dump() if csv_options else None,
-        "sheet_name": sheet_name,
-        "start_row": start_row,
-        "start_col": start_col,
-        "end_col": end_col,
-        "end_row": end_row,
-        "has_header": has_header,
-        "table_name": table_name,
-        "named_range": named_range,
-        "cell_range": cell_range,
-    }
+    source_config = _validated_file_source_config(
+        {
+            "source_type": DataSourceType.FILE,
+            "file_path": resolved_file_path,
+            "file_type": resolved_file_type.value,
+            "options": options or {},
+            "csv_options": csv_options.model_dump() if csv_options else None,
+            "sheet_name": sheet_name,
+            "start_row": start_row,
+            "start_col": start_col,
+            "end_col": end_col,
+            "end_row": end_row,
+            "has_header": has_header,
+            "table_name": table_name,
+            "named_range": named_range,
+            "cell_range": cell_range,
+        }
+    )
     run = _create_ingest_run(
         session,
         datasource_id=datasource_id,
@@ -432,15 +489,16 @@ def create_file_datasource(
     started = monotonic()
     try:
         try:
-            lazy = load_datasource(source_config)
+            with _materialized_file_source(source_config) as load_config:
+                lazy = load_datasource(load_config)
+                engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
+                target_path = _prepare_clean_target(paths.clean_dir, datasource_id, "master")
+                snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
         except Exception as exc:
             raise DataSourceValidationError(
                 f"Failed to load file datasource for ingestion: {exc}",
-                details={"file_path": str(resolved_path), "file_type": resolved_file_type.value},
+                details={"file_path": resolved_file_path, "file_type": resolved_file_type.value},
             ) from exc
-        engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
-        target_path = _prepare_clean_target(paths.clean_dir, datasource_id, "master")
-        snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
         config = _build_iceberg_config(paths, target_path, branch="master", source_config=source_config)
         _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
         datasource = DataSource(
@@ -595,6 +653,8 @@ def create_iceberg_datasource(
     started = monotonic()
     try:
         try:
+            paths = namespace_paths()
+            target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch_name)
             if source_type == DataSourceType.DATABASE:
                 connection_string = source.get("connection_string")
                 query = source.get("query")
@@ -611,17 +671,20 @@ def create_iceberg_datasource(
                     },
                 )
                 lazy = _coerce_database_iceberg_compatible_lazyframe(lazy)
+                engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
+                snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
             else:
-                lazy = load_datasource(source)
+                file_source = _validated_file_source_config(source)
+                with _materialized_file_source(file_source) as load_source:
+                    lazy = load_datasource(load_source)
+                    engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
+                    snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
         except DataSourceValidationError:
             raise
         except Exception as exc:
             raise DataSourceConnectionError(source_type.ingestion_error_message, details={"source_type": source_type}) from exc
-        engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
-        paths = namespace_paths()
-        target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch_name)
-        snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate")
-        config = _build_iceberg_config(paths, target_path, branch=branch_name, source_config=source)
+        persisted_source = _validated_file_source_config(source) if source_type == DataSourceType.FILE else source
+        config = _build_iceberg_config(paths, target_path, branch=branch_name, source_config=persisted_source)
         _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
         datasource = DataSource(
             id=datasource_id,
@@ -696,6 +759,16 @@ def ingest_external_datasource(
     lock.acquire()
     started = monotonic()
     try:
+        metadata_path = datasource.config.get("metadata_path")
+        if not isinstance(metadata_path, str) or not metadata_path:
+            raise DataSourceValidationError(
+                "Datasource missing metadata_path",
+                details={"datasource_id": datasource_id},
+            )
+        branch = branch_raw.strip()
+        target_path = metadata_path.rstrip("/")
+        if target_path.split("/")[-1] != branch:
+            target_path = _prepare_clean_target(namespace_paths().clean_dir, datasource_id, branch)
         try:
             if source_type == DataSourceType.DATABASE:
                 connection_string = source.get("connection_string")
@@ -712,31 +785,24 @@ def ingest_external_datasource(
                         "query": query,
                     },
                 )
+                lazy = _coerce_database_iceberg_compatible_lazyframe(lazy)
+                engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
+                snapshot = _write_iceberg_table(lazy, target_path, build_mode="full")
             else:
-                lazy = load_datasource(source)
+                file_source = _validated_file_source_config(source)
+                with _materialized_file_source(file_source) as load_source:
+                    lazy = load_datasource(load_source)
+                    engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
+                    snapshot = _write_iceberg_table(lazy, target_path, build_mode="full")
         except DataSourceValidationError:
             raise
         except Exception as exc:
             raise DataSourceConnectionError(source_type.ingestion_error_message, details={"datasource_id": datasource_id}) from exc
-        metadata_path = datasource.config.get("metadata_path")
-        if not isinstance(metadata_path, str) or not metadata_path:
-            raise DataSourceValidationError(
-                "Datasource missing metadata_path",
-                details={"datasource_id": datasource_id},
-            )
-        if source_type == DataSourceType.DATABASE:
-            lazy = _coerce_database_iceberg_compatible_lazyframe(lazy)
-        branch = branch_raw.strip()
-        engine_runs_service.update_engine_run(session, run.id, current_step="Writing Iceberg", progress=0.6)
-        target_path = Path(metadata_path)
-        if target_path.name != branch:
-            target_path = _prepare_clean_target(namespace_paths().clean_dir, datasource_id, branch)
-        snapshot = _write_iceberg_table(lazy, target_path, build_mode="full")
         next_config = dict(datasource.config)
         _set_snapshot_metadata(next_config, snapshot.current_snapshot() if snapshot else None)
         next_config["branch"] = branch
-        next_config["metadata_path"] = str(target_path)
-        next_config["source"] = source
+        next_config["metadata_path"] = target_path
+        next_config["source"] = _validated_file_source_config(source) if source_type == DataSourceType.FILE else source
         next_config["ingest"] = {"ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat()}
         datasource.config = next_config
         datasource.schema_cache = None

@@ -224,15 +224,21 @@ class TestDataSourceValidation:
         assert response.status_code == 400
 
     def test_preflight_excel_path_rejects_non_xlsx(self, client, temp_upload_dir: Path):
+        from core.object_store import object_store_url, upload_file
+
         csv_path = temp_upload_dir / "invalid.csv"
         csv_path.write_text("a,b\n1,2")
-        payload = {"file_path": str(csv_path)}
+        object_url = object_store_url("tests", uuid.uuid4().hex, csv_path.name)
+        upload_file(csv_path, object_url)
+        payload = {"file_path": object_url}
 
         response = client.post("/api/v1/datasource/preflight-path", json=payload)
 
         assert response.status_code == 400
 
-    def test_preflight_excel_path_returns_preview(self, client, temp_upload_dir: Path, monkeypatch):
+    def test_preflight_excel_path_returns_preview(self, client, temp_upload_dir: Path):
+        from core.object_store import object_store_url, upload_file
+
         excel_path = temp_upload_dir / "path.xlsx"
         workbook = Workbook()
         sheet = workbook.active
@@ -243,22 +249,10 @@ class TestDataSourceValidation:
         sheet.append([1, "A"])
         sheet.append([2, "B"])
         workbook.save(excel_path)
-        from core import namespace
 
-        from modules.datasource import routes as datasource_routes
-
-        def fake_paths():
-            return namespace.NamespacePaths(
-                base_dir=temp_upload_dir.parent,
-                upload_dir=temp_upload_dir,
-                clean_dir=temp_upload_dir.parent / "clean",
-                exports_dir=temp_upload_dir.parent / "exports",
-                db_path=temp_upload_dir.parent / "namespace.db",
-            )
-
-        monkeypatch.setattr(namespace, "namespace_paths", fake_paths)
-        monkeypatch.setattr(datasource_routes, "namespace_paths", fake_paths)
-        payload = {"file_path": str(excel_path)}
+        object_url = object_store_url("tests", uuid.uuid4().hex, excel_path.name)
+        upload_file(excel_path, object_url)
+        payload = {"file_path": object_url}
 
         response = client.post("/api/v1/datasource/preflight-path", json=payload)
 
@@ -286,28 +280,28 @@ class TestDataSourceValidation:
         monkeypatch.setattr(preflight, "clear_preflight", fail)
         preflight._PREFLIGHTS.clear()
         preflight._PREFLIGHTS["keep"] = preflight.ExcelPreflight(
-            temp_path=keep_path,
+            source_path=str(keep_path),
             sheets=[],
             tables={},
             named_ranges=[],
             created_at=now - preflight._PREFLIGHT_TTL - timedelta(seconds=1),
-            delete_file=False,
+            delete_source=False,
         )
         preflight._PREFLIGHTS["drop"] = preflight.ExcelPreflight(
-            temp_path=drop_path,
+            source_path=str(drop_path),
             sheets=[],
             tables={},
             named_ranges=[],
             created_at=now - preflight._PREFLIGHT_TTL - timedelta(seconds=1),
-            delete_file=True,
+            delete_source=True,
         )
         preflight._PREFLIGHTS["stay"] = preflight.ExcelPreflight(
-            temp_path=stay_path,
+            source_path=str(stay_path),
             sheets=[],
             tables={},
             named_ranges=[],
             created_at=now,
-            delete_file=True,
+            delete_source=True,
         )
 
         try:
@@ -602,8 +596,8 @@ class TestDataSourceDeletion:
         # Delete the datasource
         response = client.delete(f"/api/v1/datasource/{datasource_id}")
 
-        # Should succeed or return appropriate error
-        assert response.status_code in [204, 400, 409]
+        # Delete is now asynchronous: accepted immediately, finalized once preview work drains.
+        assert response.status_code in [202, 400, 409]
 
     def test_delete_uploaded_datasource_removes_iceberg_and_upload(self, client):
         payload = b"id,value\n1,10\n2,20\n"
@@ -613,21 +607,24 @@ class TestDataSourceDeletion:
         create = client.post("/api/v1/datasource/upload", files=files, data=data)
 
         assert create.status_code == 200
+        from core.object_store import is_object_store_url, list_metadata_files, object_exists
+
         body = create.json()
         datasource_id = body["id"]
-        metadata_path = Path(body["config"]["metadata_path"])
+        metadata_path = body["config"]["metadata_path"]
         source = body["config"]["source"]
-        upload_path = Path(source["file_path"])
+        upload_path = source["file_path"]
 
-        assert metadata_path.exists()
-        assert upload_path.exists()
+        assert is_object_store_url(metadata_path)
+        assert bool(list_metadata_files(metadata_path))
+        assert object_exists(upload_path)
         assert source["source_type"] == "file"
 
         response = client.delete(f"/api/v1/datasource/{datasource_id}")
 
-        assert response.status_code == 204
-        assert not metadata_path.exists()
-        assert not upload_path.exists()
+        assert response.status_code == 202
+        assert bool(list_metadata_files(metadata_path))
+        assert object_exists(upload_path)
 
         get_response = client.get(f"/api/v1/datasource/{datasource_id}")
         assert get_response.status_code == 404
@@ -737,7 +734,7 @@ class TestIsHidden:
 
 
 class TestDatasourceUpdateRunLogging:
-    def test_update_raw_iceberg_does_not_create_build_engine_run(self, client, test_db_session, sample_csv_file: Path):
+    def test_update_raw_iceberg_does_not_create_build_engine_run(self, client, test_db_session, sample_csv_object_url: str):
         ds = DataSource(
             id=str(uuid.uuid4()),
             name="Raw Iceberg",
@@ -748,7 +745,7 @@ class TestDatasourceUpdateRunLogging:
                 "snapshot_id": "500",
                 "source": {
                     "source_type": "file",
-                    "file_path": str(sample_csv_file),
+                    "file_path": sample_csv_object_url,
                     "file_type": "csv",
                     "options": {},
                 },
@@ -769,7 +766,7 @@ class TestDatasourceUpdateRunLogging:
         )
         assert runs == []
 
-    def test_update_rejects_system_snapshot_fields(self, client, test_db_session, sample_csv_file: Path):
+    def test_update_rejects_system_snapshot_fields(self, client, test_db_session, sample_csv_object_url: str):
         ds = DataSource(
             id=str(uuid.uuid4()),
             name="Snapshot Locked",
@@ -783,7 +780,7 @@ class TestDatasourceUpdateRunLogging:
                 "current_snapshot_timestamp_ms": 1000,
                 "source": {
                     "source_type": "file",
-                    "file_path": str(sample_csv_file),
+                    "file_path": sample_csv_object_url,
                     "file_type": "csv",
                     "options": {},
                 },

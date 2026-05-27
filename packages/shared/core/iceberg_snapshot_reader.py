@@ -6,11 +6,12 @@ import polars as pl
 from pyiceberg.table import StaticTable
 
 from core.exceptions import DataSourceSnapshotError
+from core.object_store import object_store_storage_options
 
 
 def scan_iceberg_snapshot(metadata_path: str, snapshot_id: int, storage_options: dict[str, Any] | None) -> pl.LazyFrame:
-    del storage_options
-    table = StaticTable.from_metadata(metadata_path)
+    properties = storage_options if isinstance(storage_options, dict) and storage_options else object_store_storage_options()
+    table = StaticTable.from_metadata(metadata_path, properties=properties)
     snapshot = table.snapshot_by_id(snapshot_id)
     if snapshot is None:
         raise DataSourceSnapshotError(f'Iceberg snapshot ID not found: {snapshot_id}', details={'snapshot_id': str(snapshot_id)})

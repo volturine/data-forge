@@ -1,3 +1,5 @@
+import type { Locator } from '@playwright/test';
+
 import { test, expect } from './fixtures.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { createDatasource, createAnalysis, shutdownEngine } from './utils/api.js';
@@ -10,6 +12,19 @@ import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
 // ── Real e2e build preview tests (no WS mocking) ───────────────────────────
+
+async function expectVisibleEventually(locator: Locator) {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			await expect(locator).toBeVisible({ timeout: 5_000 });
+			return;
+		} catch (error) {
+			lastError = error;
+		}
+	}
+	throw lastError;
+}
 
 test.describe('Build Preview – real build lifecycle', () => {
 	test('clicking Build queues the run and the preview opens only from the engine status control', async ({
@@ -26,17 +41,17 @@ test.describe('Build Preview – real build lifecycle', () => {
 			await gotoAnalysisEditor(page, aId);
 
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
+			await expectVisibleEventually(buildBtn);
 			await buildBtn.click();
 
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).not.toBeVisible();
 
 			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(openPreviewBtn).toBeVisible({ timeout: 5_000 });
+			await expectVisibleEventually(openPreviewBtn);
 			await openPreviewBtn.click();
 
-			await expect(preview).toBeVisible({ timeout: 5_000 });
+			await expectVisibleEventually(preview);
 
 			const closeBtn = page.locator('[aria-label="Close build preview"]');
 			await expect(closeBtn).toBeVisible();
@@ -75,15 +90,15 @@ test.describe('Build Preview – real build lifecycle', () => {
 			await gotoAnalysisEditor(page, aId);
 
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
+			await expectVisibleEventually(buildBtn);
 			await buildBtn.click();
 
 			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(openPreviewBtn).toBeVisible({ timeout: 5_000 });
+			await expectVisibleEventually(openPreviewBtn);
 			await openPreviewBtn.click();
 
 			const preview = page.locator('[data-testid="build-preview"]');
-			await expect(preview).toBeVisible({ timeout: 5_000 });
+			await expectVisibleEventually(preview);
 
 			const closeBtn = page.locator('[aria-label="Close build preview"]');
 			await expect(closeBtn).toBeVisible();

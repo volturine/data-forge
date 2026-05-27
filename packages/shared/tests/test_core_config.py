@@ -211,6 +211,7 @@ class TestSettings:
 
     def test_empty_env_file_uses_stable_default_data_dir(self, monkeypatch, tmp_path):
         monkeypatch.delenv('DATA_DIR', raising=False)
+        monkeypatch.setenv('DATABASE_URL', 'postgresql+psycopg://dataforge:dataforge@127.0.0.1:5432/dataforge')
         empty_env = tmp_path / '.env'
         empty_env.write_text('', encoding='utf-8')
         monkeypatch.setenv('ENV_FILE', str(empty_env))

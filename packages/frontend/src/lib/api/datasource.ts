@@ -76,28 +76,6 @@ export function uploadBulkFiles(
 	});
 }
 
-export interface FileListItem {
-	name: string;
-	path: string;
-	is_dir: boolean;
-}
-
-export interface FileListResponse {
-	base_path: string;
-	entries: FileListItem[];
-}
-
-export function listDataFiles(path?: string): ResultAsync<FileListResponse, ApiError> {
-	const params = new URLSearchParams();
-	if (path) {
-		params.set('path', path);
-	}
-	const suffix = params.toString() ? `?${params.toString()}` : '';
-	return apiRequest<FileListResponse>(`/v1/datasource/file/list${suffix}`, {
-		method: 'GET'
-	});
-}
-
 export function connectDatabase(
 	name: string,
 	description: string,

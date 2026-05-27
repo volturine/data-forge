@@ -61,10 +61,14 @@ def upgrade() -> None:
         sa.Column('created_by_analysis_id', sa.String(), nullable=True),
         sa.Column('created_by', sa.String(), nullable=False, server_default='import'),
         sa.Column('is_hidden', sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column('is_pending_delete', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('owner_id', sa.String(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('delete_requested_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('id'),
     )
+    op.create_index('ix_datasources_is_pending_delete', 'datasources', ['is_pending_delete'])
+    op.create_index('ix_datasources_delete_requested_at', 'datasources', ['delete_requested_at'])
     op.create_table(
         'datasource_column_metadata',
         sa.Column('id', sa.String(), nullable=False),
@@ -384,5 +388,7 @@ def downgrade() -> None:
     op.drop_table('analysis_datasources')
     op.drop_table('analyses')
     op.drop_index('ix_datasource_column_metadata_datasource_id', table_name='datasource_column_metadata')
+    op.drop_index('ix_datasources_delete_requested_at', table_name='datasources')
+    op.drop_index('ix_datasources_is_pending_delete', table_name='datasources')
     op.drop_table('datasource_column_metadata')
     op.drop_table('datasources')

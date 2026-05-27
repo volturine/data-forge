@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import polars as pl
+import pytest
 from contracts.datasource.models import DataSource
 from contracts.engine_runs.models import EngineRun
 from sqlmodel import Session, select
@@ -18,10 +19,8 @@ class TestDatasourceIngest:
         mock_write,
         mock_load,
         test_db_session,
-        sample_csv_file: Path,
+        sample_csv_object_url: str,
     ):
-        from core.namespace import namespace_paths
-
         from datasources.datasource_service import create_file_datasource
 
         class _Snap:
@@ -35,14 +34,11 @@ class TestDatasourceIngest:
         mock_load.return_value = pl.DataFrame({"x": [1]}).lazy()
         mock_write.return_value = _Table()
 
-        allowed_file = namespace_paths().upload_dir / sample_csv_file.name
-        allowed_file.write_bytes(sample_csv_file.read_bytes())
-
         out = create_file_datasource(
             test_db_session,
             name="Uploaded CSV",
             description=None,
-            file_path=str(allowed_file),
+            file_path=sample_csv_object_url,
             file_type="csv",
         )
 
@@ -60,6 +56,18 @@ class TestDatasourceIngest:
         assert runs[0].status == "success"
         assert runs[0].result_json is not None
         assert runs[0].result_json["original_source_type"] == "file"
+
+    def test_create_file_datasource_rejects_local_path(self, test_db_session, sample_csv_file: Path):
+        from datasources.datasource_service import create_file_datasource
+
+        with pytest.raises(Exception, match="file_path must be an s3:// URL"):
+            create_file_datasource(
+                test_db_session,
+                name="Local CSV",
+                description=None,
+                file_path=str(sample_csv_file),
+                file_type="csv",
+            )
 
     @patch("datasources.datasource_service.load_datasource")
     @patch("datasources.datasource_service._write_iceberg_table")
@@ -113,7 +121,7 @@ class TestDatasourceIngest:
         mock_write,
         mock_load,
         test_db_session,
-        sample_csv_file: Path,
+        sample_csv_object_url: str,
     ):
         from datasources.datasource_service import create_iceberg_datasource
 
@@ -134,7 +142,7 @@ class TestDatasourceIngest:
             description=None,
             source={
                 "source_type": "file",
-                "file_path": str(sample_csv_file),
+                "file_path": sample_csv_object_url,
                 "file_type": "csv",
                 "options": {},
             },
@@ -161,7 +169,7 @@ class TestDatasourceIngest:
         mock_write,
         mock_load,
         test_db_session,
-        sample_csv_file: Path,
+        sample_csv_object_url: str,
     ):
         from datasources.datasource_service import ingest_external_datasource
 
@@ -185,7 +193,7 @@ class TestDatasourceIngest:
                 "branch": "master",
                 "source": {
                     "source_type": "file",
-                    "file_path": str(sample_csv_file),
+                    "file_path": sample_csv_object_url,
                     "file_type": "csv",
                     "options": {},
                 },
@@ -202,7 +210,7 @@ class TestDatasourceIngest:
         assert out.config["current_snapshot_id"] == "222"
         assert out.config["current_snapshot_timestamp_ms"] == 654321
         assert out.config["ingest"] is not None
-        mock_write.assert_called_once_with(mock_load.return_value, Path(out.config["metadata_path"]), build_mode="full")
+        mock_write.assert_called_once_with(mock_load.return_value, out.config["metadata_path"], build_mode="full")
 
         runs = (
             test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == ds.id))  # type: ignore[arg-type]
@@ -223,7 +231,7 @@ class TestDatasourceIngest:
         mock_load,
         test_engine,
         test_db_session,
-        sample_csv_file: Path,
+        sample_csv_object_url: str,
     ):
         from datasources.datasource_service import ingest_external_datasource
 
@@ -266,7 +274,7 @@ class TestDatasourceIngest:
                 "branch": "master",
                 "source": {
                     "source_type": "file",
-                    "file_path": str(sample_csv_file),
+                    "file_path": sample_csv_object_url,
                     "file_type": "csv",
                     "options": {},
                 },

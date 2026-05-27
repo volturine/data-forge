@@ -32,6 +32,7 @@ dev:
     set -euo pipefail
     set -a; source packages/shared/dev.env; set +a
     uv run --project packages/shared python scripts/ensure_dev_postgres.py
+    uv run --project packages/shared python scripts/ensure_dev_rustfs.py
     (cd packages/backend && uv run --env-file ../shared/dev.env main.py) & \
     (cd packages/scheduler && uv run --env-file ../shared/dev.env main.py) & \
     (cd packages/worker-manager && uv run --env-file ../shared/dev.env main.py) & \
@@ -68,6 +69,7 @@ dev-clean:
     PY
     cd ../..
     rm -rf .runtime/data packages/shared/data packages/shared/packages packages/backend/data packages/scheduler/data packages/worker-manager/data
+    uv run --project packages/shared python scripts/ensure_dev_rustfs.py --remove
     echo "✓ Local dev database and runtime data reset. Run 'just dev' to recreate everything."
 
 format:

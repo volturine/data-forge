@@ -134,6 +134,13 @@ class Settings(BaseSettings):
     engine_idle_ttl_seconds: int = Field(default=300, alias='ENGINE_IDLE_TTL_SECONDS')
     engine_idle_reap_interval_seconds: int = Field(default=30, alias='ENGINE_IDLE_REAP_INTERVAL_SECONDS')
 
+    object_store_endpoint: str = Field(default='http://127.0.0.1:9000', alias='OBJECT_STORE_ENDPOINT')
+    object_store_region: str = Field(default='us-east-1', alias='OBJECT_STORE_REGION')
+    object_store_access_key: str = Field(default='rustfsadmin', alias='OBJECT_STORE_ACCESS_KEY')
+    object_store_secret_key: str = Field(default='rustfsadmin', alias='OBJECT_STORE_SECRET_KEY')
+    object_store_bucket: str = Field(default='dataforge', alias='OBJECT_STORE_BUCKET')
+    object_store_prefix: str = Field(default='dataforge', alias='OBJECT_STORE_PREFIX')
+
     # Logging level (debug, info, warning, error)
     log_level: str = Field(default='info', alias='LOG_LEVEL')
     sql_echo: bool = Field(default=False, alias='SQL_ECHO')
@@ -302,6 +309,18 @@ class Settings(BaseSettings):
             raise ValueError('BUILD_WORKER_MAX_PROCESSES must be <= MAX_CONCURRENT_ENGINES')
         if self.engine_idle_reap_interval_seconds >= self.engine_idle_ttl_seconds:
             raise ValueError('ENGINE_IDLE_REAP_INTERVAL_SECONDS must be < ENGINE_IDLE_TTL_SECONDS')
+        if not self.object_store_endpoint.strip():
+            raise ValueError('OBJECT_STORE_ENDPOINT must not be empty')
+        if not self.object_store_region.strip():
+            raise ValueError('OBJECT_STORE_REGION must not be empty')
+        if not self.object_store_access_key.strip():
+            raise ValueError('OBJECT_STORE_ACCESS_KEY must not be empty')
+        if not self.object_store_secret_key.strip():
+            raise ValueError('OBJECT_STORE_SECRET_KEY must not be empty')
+        if not self.object_store_bucket.strip():
+            raise ValueError('OBJECT_STORE_BUCKET must not be empty')
+        if not self.object_store_prefix.strip():
+            raise ValueError('OBJECT_STORE_PREFIX must not be empty')
         return self
 
 

@@ -69,6 +69,18 @@ def cleanup_stale_test_postgres(*, label: str = 'data-forge.test-postgres=1') ->
         run_command(['docker', 'volume', 'rm', '-f', *volume_ids], env=docker_env(), check=False, timeout=300)
 
 
+def cleanup_stale_test_rustfs(*, label: str = 'data-forge.test-rustfs=1') -> None:
+    stale_containers = run_command(
+        ['docker', 'ps', '-aq', '--filter', f'label={label}'],
+        env=docker_env(),
+        check=False,
+        timeout=120,
+    )
+    container_ids = [line.strip() for line in stale_containers.stdout.splitlines() if line.strip()]
+    if container_ids:
+        run_command(['docker', 'rm', '-f', *container_ids], env=docker_env(), check=False, timeout=300)
+
+
 def run_command(
     command: list[str], *, cwd: Path = REPO_ROOT, env: dict[str, str] | None = None, timeout: float = 120, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
@@ -157,6 +169,92 @@ class ManagedProcess:
     def _join_threads(self) -> None:
         for thread in self.threads:
             thread.join(timeout=1)
+
+
+@dataclass
+class RustfsContainer:
+    image: str = 'rustfs/rustfs:latest'
+    access_key: str = 'dataforge-test-access'
+    secret_key: str = 'dataforge-test-secret'
+    bucket: str = 'dataforge'
+    name: str = field(default_factory=lambda: f'df-rustfs-{uuid.uuid4().hex[:10]}')
+    label: str = 'data-forge.test-rustfs=1'
+    container_id: str | None = None
+    port: int | None = None
+
+    @property
+    def endpoint(self) -> str:
+        assert self.port is not None
+        return f'http://127.0.0.1:{self.port}'
+
+    def start(self) -> None:
+        try:
+            result = run_command(
+                [
+                    'docker',
+                    'run',
+                    '-d',
+                    '--rm',
+                    '--label',
+                    self.label,
+                    '--name',
+                    self.name,
+                    '-e',
+                    f'RUSTFS_ACCESS_KEY={self.access_key}',
+                    '-e',
+                    f'RUSTFS_SECRET_KEY={self.secret_key}',
+                    '-p',
+                    '127.0.0.1::9000',
+                    self.image,
+                    '/data',
+                ],
+                env=docker_env(),
+                timeout=300,
+            )
+            self.container_id = result.stdout.strip()
+            self.port = self._wait_for_port_mapping()
+            self.wait_ready()
+        except Exception:
+            self.stop()
+            raise
+
+    def _wait_for_port_mapping(self, *, timeout: float = 30) -> int:
+        deadline = time.time() + timeout
+        last_error = ''
+        while time.time() < deadline:
+            result = run_command(['docker', 'port', self.name, '9000/tcp'], env=docker_env(), check=False)
+            output = result.stdout.strip()
+            if result.returncode == 0 and output:
+                return int(output.rsplit(':', 1)[-1])
+            last_error = result.stderr.strip() or output or f'exit code {result.returncode}'
+            time.sleep(0.2)
+        raise AssertionError(f'Timed out waiting for RustFS port mapping for {self.name}: {last_error}')
+
+    def wait_ready(self, *, timeout: float = 90) -> None:
+        deadline = time.time() + timeout
+        last_error = ''
+        while time.time() < deadline:
+            try:
+                response = httpx.get(self.endpoint, timeout=5)
+                if response.status_code < 500:
+                    return
+                last_error = f'HTTP {response.status_code}: {response.text}'
+            except httpx.HTTPError as exc:
+                last_error = str(exc)
+            time.sleep(1)
+        raise AssertionError(f'Timed out waiting for RustFS container {self.name}: {last_error}')
+
+    def stop(self) -> None:
+        run_command(['docker', 'rm', '-f', self.name], env=docker_env(), check=False, timeout=120)
+        self.container_id = None
+        self.port = None
+
+    def __enter__(self) -> RustfsContainer:
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.stop()
 
 
 @dataclass

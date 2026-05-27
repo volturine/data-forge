@@ -99,8 +99,6 @@ class DataSourceType(DataForgeStrEnum):
 
     @property
     def connect_api_error_message(self) -> str | None:
-        if self == DataSourceType.FILE:
-            return 'File datasource creation must use upload'
         if self == DataSourceType.ANALYSIS:
             return 'Direct creation of analysis datasources is no longer supported. Use analysis tabs with analysis_tab_id.'
         return None

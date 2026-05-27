@@ -2,6 +2,7 @@ from datetime import datetime
 
 from contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from contracts.enums import DataForgeStrEnum
+from core.object_store import is_object_store_url
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -141,6 +142,14 @@ class ExcelPreflightPathRequest(BaseModel):
     named_range: str | None = None
     cell_range: str | None = None
 
+    @field_validator("file_path")
+    @classmethod
+    def _validate_file_path(cls, value: str) -> str:
+        normalized = value.strip()
+        if not is_object_store_url(normalized):
+            raise ValueError("file_path must be an s3:// URL")
+        return normalized
+
 
 class ExcelPreflightResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -192,6 +201,14 @@ class FileDataSourceConfig(BaseModel):
     table_name: str | None = None
     named_range: str | None = None
     cell_range: str | None = None
+
+    @field_validator("file_path")
+    @classmethod
+    def _validate_file_path(cls, value: str) -> str:
+        normalized = value.strip()
+        if not is_object_store_url(normalized):
+            raise ValueError("file_path must be an s3:// URL")
+        return normalized
 
 
 class DatabaseDataSourceConfig(BaseModel):
@@ -287,17 +304,6 @@ class DataSourceUpdate(DataSourceDescriptionModel):
     @classmethod
     def _normalize_description(cls, value: str | None) -> str | None:
         return cls.normalize_description(value)
-
-
-class FileListItem(BaseModel):
-    name: str
-    path: str
-    is_dir: bool
-
-
-class FileListResponse(BaseModel):
-    base_path: str
-    entries: list[FileListItem]
 
 
 class BulkUploadResult(BaseModel):

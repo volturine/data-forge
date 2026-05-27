@@ -11,13 +11,15 @@ from zoneinfo import ZoneInfo
 import polars as pl
 import pytest
 from contracts.compute import schemas as compute_schemas
+from contracts.datasource.models import DataSource
 from contracts.engine_runs.schemas import EngineRunResponseSchema
+from core.engine_identity import datasource_preview_engine_key
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
-from runtime import compute_service
+from runtime import compute_request_runtime, compute_service, datasource_delete_runtime
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_service import ExportDatasourceResult
 
@@ -29,6 +31,123 @@ from runtime.compute_service import ExportDatasourceResult
 def test_build_engine_id_uses_build_scope_and_is_unique_per_build() -> None:
     assert compute_service._build_engine_id("build-1") == "build:build-1"
     assert compute_service._build_engine_id("build-1") != compute_service._build_engine_id("build-2")
+
+
+def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) -> None:
+    completed: list[dict[str, object]] = []
+    closed: list[bool] = []
+
+    class _Session:
+        def close(self) -> None:
+            closed.append(True)
+
+    def fake_get_db():
+        session = _Session()
+        yield session
+
+    engine = SimpleNamespace(current_job_id="job-1", is_process_alive=lambda: True)
+    shutdown_calls: list[str] = []
+
+    def fake_sleep(_seconds: float) -> None:
+        engine.current_job_id = None
+
+    monkeypatch.setattr(compute_request_runtime, "get_db", fake_get_db)
+    monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
+    monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
+    monkeypatch.setattr(
+        compute_request_runtime.compute_requests_service, "mark_request_completed", lambda session, request_id, response_json: completed.append(response_json)
+    )
+    monkeypatch.setattr(compute_request_runtime.runtime_ipc, "notify_compute_response", lambda request_id: None)
+    monkeypatch.setattr(compute_request_runtime.time, "sleep", fake_sleep)
+
+    manager = SimpleNamespace(
+        get_engine=lambda analysis_id: engine,
+        shutdown_engine=lambda analysis_id: shutdown_calls.append(analysis_id),
+    )
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-1",
+        namespace="default",
+        kind=compute_request_runtime.ComputeRequestKind.SHUTDOWN_ENGINE,
+        request_json={"analysis_id": "analysis-1"},
+    )
+
+    compute_request_runtime._execute_request_sync(claimed, cast(Any, manager))
+
+    assert shutdown_calls == ["analysis-1"]
+    assert completed == [{"success": True}]
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_pending_datasource_delete_waits_for_busy_preview_engine(test_db_session, monkeypatch) -> None:
+    datasource_id = "datasource-1"
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name="Pending datasource",
+            source_type="file",
+            config={"file_path": "s3://dataforge-tests/pending.csv", "file_type": "csv", "options": {}},
+            is_hidden=True,
+            is_pending_delete=True,
+            created_at=datetime.now(UTC),
+            delete_requested_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    cleanup_calls: list[str] = []
+    shutdown_calls: list[str] = []
+    busy_engine = SimpleNamespace(current_job_id="job-1", is_process_alive=lambda: True)
+    manager = SimpleNamespace(
+        get_engine=lambda engine_key: busy_engine if engine_key == datasource_preview_engine_key(datasource_id) else None,
+        shutdown_engine=lambda engine_key: shutdown_calls.append(engine_key),
+    )
+
+    monkeypatch.setattr(datasource_delete_runtime, "runtime_namespaces", lambda: ["default"])
+    monkeypatch.setattr(datasource_delete_runtime, "cleanup_datasource_storage", lambda datasource: cleanup_calls.append(datasource.id))
+
+    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager))
+
+    assert handled is False
+    assert cleanup_calls == []
+    assert shutdown_calls == []
+    assert test_db_session.get(DataSource, datasource_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(test_db_session, monkeypatch) -> None:
+    datasource_id = "datasource-2"
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name="Pending datasource",
+            source_type="file",
+            config={"file_path": "s3://dataforge-tests/pending.csv", "file_type": "csv", "options": {}},
+            is_hidden=True,
+            is_pending_delete=True,
+            created_at=datetime.now(UTC),
+            delete_requested_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    cleanup_calls: list[str] = []
+    shutdown_calls: list[str] = []
+    idle_engine = SimpleNamespace(current_job_id=None, is_process_alive=lambda: True)
+    manager = SimpleNamespace(
+        get_engine=lambda engine_key: idle_engine if engine_key == datasource_preview_engine_key(datasource_id) else None,
+        shutdown_engine=lambda engine_key: shutdown_calls.append(engine_key),
+    )
+
+    monkeypatch.setattr(datasource_delete_runtime, "runtime_namespaces", lambda: ["default"])
+    monkeypatch.setattr(datasource_delete_runtime, "cleanup_datasource_storage", lambda datasource: cleanup_calls.append(datasource.id))
+
+    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager))
+
+    assert handled is True
+    assert cleanup_calls == [datasource_id]
+    assert shutdown_calls == [datasource_preview_engine_key(datasource_id)]
+    assert test_db_session.get(DataSource, datasource_id) is None
 
 
 @pytest.mark.asyncio

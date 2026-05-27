@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from pathlib import Path
 
 from contracts.compute import schemas as compute_schemas
 from contracts.compute_requests.live import request_hub
@@ -18,6 +18,7 @@ from core.config import settings
 from core.database import get_db, run_db, run_settings_db
 from core.exceptions import AppError, EngineBusyError, EngineNotFoundError
 from core.namespace import reset_namespace, set_namespace_context
+from core.object_store import object_store_url, upload_bytes
 from sqlmodel import Session
 
 from datasources import datasource_service
@@ -27,6 +28,9 @@ from runtime.compute_manager import ProcessManager
 from runtime.worker_runtime import runtime_namespaces
 
 logger = logging.getLogger(__name__)
+
+_ENGINE_SHUTDOWN_WAIT_SECONDS = 15.0
+_ENGINE_SHUTDOWN_POLL_SECONDS = 0.1
 
 _COMPUTE_REQUEST_MAX_WORKERS = max(
     1,
@@ -221,7 +225,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             compute_requests_service.mark_request_completed(
                 session,
                 claimed.id,
-                artifact_path=str(artifact_path),
+                artifact_path=artifact_path,
                 artifact_name=filename,
                 artifact_content_type=content_type,
             )
@@ -381,6 +385,9 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             engine = manager.get_engine(analysis_id)
             if engine is None:
                 raise EngineNotFoundError(analysis_id)
+            deadline = time.monotonic() + _ENGINE_SHUTDOWN_WAIT_SECONDS
+            while engine.current_job_id and engine.is_process_alive() and time.monotonic() < deadline:
+                time.sleep(_ENGINE_SHUTDOWN_POLL_SECONDS)
             if engine.current_job_id and engine.is_process_alive():
                 raise EngineBusyError(analysis_id)
             manager.shutdown_engine(analysis_id)
@@ -409,12 +416,10 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
         runtime_ipc.notify_compute_response(claimed.id)
 
 
-def _write_artifact(request_id: str, filename: str, content: bytes) -> Path:
-    directory = Path(settings.data_dir) / "runtime-compute-downloads"
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{request_id}-{filename}"
-    path.write_bytes(content)
-    return path
+def _write_artifact(request_id: str, filename: str, content: bytes) -> str:
+    artifact_url = object_store_url("runtime-artifacts", request_id, filename)
+    upload_bytes(content, artifact_url)
+    return artifact_url
 
 
 def _error_message(exc: Exception) -> str:

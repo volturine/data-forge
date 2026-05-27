@@ -48,7 +48,8 @@ from core.iceberg_metadata import (
     resolve_iceberg_metadata_path,
     sync_iceberg_schema,
 )
-from core.namespace import get_namespace, namespace_paths
+from core.namespace import get_namespace
+from core.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
 from pyiceberg.table import Table as IcebergTable
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -2023,17 +2024,16 @@ def export_data(
         branch_name = iceberg_options["branch"]
         safe_branch = re.sub(r"[^a-zA-Z0-9_]+", "_", branch_name).strip("_")
         table_name = f"{result_id}_{safe_branch}"
-        export_base = namespace_paths().exports_dir / str(result_id)
-        table_path = export_base / branch_name
-        warehouse_path = namespace_paths().exports_dir
-        export_base.mkdir(parents=True, exist_ok=True)
-        table_path.mkdir(parents=True, exist_ok=True)
-        warehouse_path.mkdir(parents=True, exist_ok=True)
+        export_base = object_store_url("namespaces", get_namespace(), "exports", str(result_id))
+        table_path = join_object_store_url(export_base, branch_name)
+        warehouse_path = object_store_url("namespaces", get_namespace(), "exports")
+        ensure_bucket_exists()
 
         catalog_config = {
             "type": "sql",
             "uri": settings.database_url,
-            "warehouse": f"file://{warehouse_path}",
+            "warehouse": warehouse_path,
+            **object_store_storage_options(),
         }
 
         catalog = load_runtime_catalog("local", **catalog_config)
@@ -2065,7 +2065,7 @@ def export_data(
                 _sync_iceberg_schema(iceberg_table, arrow_table.schema)
                 iceberg_table.overwrite(arrow_table)
         else:
-            iceberg_table = catalog.create_table(identifier, schema=arrow_table.schema, location=str(table_path))
+            iceberg_table = catalog.create_table(identifier, schema=arrow_table.schema, location=table_path)
             iceberg_table.append(arrow_table)
 
         snapshot_id = None
@@ -2079,13 +2079,14 @@ def export_data(
         iceberg_ds_config = {
             "catalog_type": "sql",
             "catalog_uri": settings.database_url,
-            "warehouse": f"file://{warehouse_path}",
+            "warehouse": warehouse_path,
             "namespace": namespace,
             "table": table_name,
             "table_name": datasource_name,
-            "metadata_path": str(export_base),
+            "metadata_path": export_base,
             "branch": branch_name,
             "namespace_name": get_namespace(),
+            "reader": "native",
         }
         if tab_id:
             iceberg_ds_config["analysis_tab_id"] = str(tab_id)
@@ -3623,6 +3624,7 @@ def list_iceberg_snapshots(session: Session, datasource_id: str, branch: str | N
         catalog_config = {
             "type": catalog_type,
             "uri": catalog_uri,
+            **object_store_storage_options(),
         }
         if warehouse:
             catalog_config["warehouse"] = warehouse
@@ -3634,7 +3636,7 @@ def list_iceberg_snapshots(session: Session, datasource_id: str, branch: str | N
         from pyiceberg.table import StaticTable
 
         resolved = resolve_iceberg_branch_metadata_path(metadata_path, branch_name)
-        table = StaticTable.from_metadata(resolved)
+        table = StaticTable.from_metadata(resolved, properties=object_store_storage_options())
 
     current_snapshot = table.current_snapshot()
     current_snapshot_id = str(current_snapshot.snapshot_id) if current_snapshot else None
@@ -3653,9 +3655,10 @@ def list_iceberg_snapshots(session: Session, datasource_id: str, branch: str | N
 
     snapshots.sort(key=lambda s: s.timestamp_ms, reverse=True)
 
+    table_path = resolved if resolved.startswith("s3://") else str(Path(resolved).parents[1])
     return IcebergSnapshotsResponse(
         datasource_id=datasource_id,
-        table_path=str(Path(resolved).parents[1]),
+        table_path=table_path,
         snapshots=snapshots,
     )
 
@@ -3684,6 +3687,7 @@ def delete_iceberg_snapshot(session: Session, datasource_id: str, snapshot_id: s
         catalog_config = {
             "type": catalog_type,
             "uri": catalog_uri,
+            **object_store_storage_options(),
         }
         if warehouse:
             catalog_config["warehouse"] = warehouse

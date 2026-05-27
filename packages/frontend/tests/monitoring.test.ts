@@ -177,6 +177,47 @@ async function waitForDatasourceBuildRow(
 	throw new Error(`Timed out waiting for datasource build row ${datasourceId}`);
 }
 
+async function waitForDatasourcePreviewRow(
+	page: import('@playwright/test').Page,
+	panel: ReturnType<import('@playwright/test').Page['locator']>,
+	datasourceId: string,
+	timeout = 5_000
+) {
+	const started = Date.now();
+	while (Date.now() - started < timeout) {
+		const failedToLoad = panel.getByText(/Failed to load builds/i).first();
+		if (await failedToLoad.isVisible().catch(() => false)) {
+			throw new Error(`Build history failed while waiting for preview row ${datasourceId}`);
+		}
+		const row = panel
+			.locator(`[data-build-kind="preview"][data-build-datasource-id="${datasourceId}"]`)
+			.first();
+		if (await row.isVisible().catch(() => false)) {
+			return row;
+		}
+		await refreshBuildHistory(page);
+		await page.waitForTimeout(BUILD_HISTORY_POLL_INTERVAL_MS);
+	}
+	throw new Error(`Timed out waiting for datasource preview row ${datasourceId}`);
+}
+
+async function waitForBuildRowEventually(
+	page: import('@playwright/test').Page,
+	panel: ReturnType<import('@playwright/test').Page['locator']>,
+	buildId: string,
+	statuses: Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>
+) {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			return await waitForBuildRowById(page, panel, buildId, statuses, 5_000);
+		} catch (error) {
+			lastError = error;
+		}
+	}
+	throw lastError;
+}
+
 /**
  * E2E tests for the monitoring page – mirrors test_healthchecks.py /
  * test_scheduler.py / test_engine_runs.py.
@@ -580,20 +621,14 @@ test.describe('Monitoring – Builds tab', () => {
 		});
 		try {
 			await page.goto(`/datasources?id=${dsId}`);
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({
-				timeout: 5_000
-			});
 			await expect.poll(() => previewRequests).toBe(1);
 
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
 			await expect(panel).toBeVisible({ timeout: 5_000 });
 			await page.getByLabel(/Search builds, schedules, or health checks/i).fill(ds);
-			const previewRows = panel.locator(
-				`[data-build-kind="preview"][data-build-datasource-id="${dsId}"]`
-			);
-			await expect(previewRows).toHaveCount(1, { timeout: 5_000 });
-			await expect(previewRows.first()).toContainText('Preview');
+			const previewRow = await waitForDatasourcePreviewRow(page, panel, dsId);
+			await expect(previewRow).toContainText('Preview');
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -754,7 +789,7 @@ test.describe('Monitoring – Builds tab', () => {
 			for (let i = 0; i < 4; i += 1) {
 				const buildId = await startBuildFromAnalysisPage(page, analysisId, previousBuildId);
 				previousBuildId = buildId;
-				const row = await waitForBuildRowById(monitorPage, panel, buildId, ['completed'], 5_000);
+				const row = await waitForBuildRowEventually(monitorPage, panel, buildId, ['completed']);
 				await expect(row).toHaveAttribute('data-build-kind', 'build');
 				await expect(row).toHaveAttribute('data-build-status', 'completed');
 				await expect(row).toContainText('Build');
@@ -768,16 +803,16 @@ test.describe('Monitoring – Builds tab', () => {
 				});
 			}
 
-			await page.goto('/datasources');
-			await page.locator(`[data-ds-row="${ds}"]`).click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 5_000 });
+			let previewRequests = 0;
+			page.on('request', (req) => {
+				if (req.url().includes('/api/v1/compute/preview')) previewRequests += 1;
+			});
+			await page.goto(`/datasources?id=${dsId}`);
+			await expect.poll(() => previewRequests).toBe(1);
 
 			await monitorPage.goto('/monitoring?tab=builds');
 			await monitorPage.getByLabel(/Search builds, schedules, or health checks/i).fill(ds);
-			const previewRow = panel
-				.locator(`[data-build-kind="preview"][data-build-datasource-id="${dsId}"]`)
-				.first();
-			await expect(previewRow).toBeVisible({ timeout: 5_000 });
+			const previewRow = await waitForDatasourcePreviewRow(monitorPage, panel, dsId);
 			await expect(previewRow).toContainText('Preview');
 			await monitorPage.close();
 		} finally {

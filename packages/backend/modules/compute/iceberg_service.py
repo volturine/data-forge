@@ -12,6 +12,7 @@ from core.iceberg_metadata import (
     resolve_iceberg_branch_metadata_path,
     resolve_iceberg_metadata_path,
 )
+from core.object_store import object_store_storage_options
 from sqlalchemy import or_, select
 from sqlmodel import Session
 
@@ -172,7 +173,7 @@ def list_iceberg_snapshots(
     warehouse = datasource.config.get("warehouse")
 
     if catalog_type and catalog_uri and namespace and table_name:
-        catalog_config = {"type": catalog_type, "uri": catalog_uri}
+        catalog_config = {"type": catalog_type, "uri": catalog_uri, **object_store_storage_options()}
         if warehouse:
             catalog_config["warehouse"] = warehouse
         catalog = load_runtime_catalog("local", **catalog_config)
@@ -183,7 +184,7 @@ def list_iceberg_snapshots(
         from pyiceberg.table import StaticTable
 
         resolved = resolve_iceberg_branch_metadata_path(metadata_path, branch_name)
-        table = StaticTable.from_metadata(resolved)
+        table = StaticTable.from_metadata(resolved, properties=object_store_storage_options())
 
     current_snapshot = table.current_snapshot()
     current_snapshot_id = str(current_snapshot.snapshot_id) if current_snapshot else None
@@ -206,9 +207,10 @@ def list_iceberg_snapshots(
         )
         snapshots = [snapshot for snapshot in snapshots if snapshot.snapshot_id in allowed_snapshot_ids]
     snapshots.sort(key=lambda snapshot: snapshot.timestamp_ms, reverse=True)
+    table_path = resolved if resolved.startswith("s3://") else str(Path(resolved).parents[1])
     return schemas.IcebergSnapshotsResponse(
         datasource_id=datasource_id,
-        table_path=str(Path(resolved).parents[1]),
+        table_path=table_path,
         snapshots=snapshots,
     )
 
@@ -236,7 +238,7 @@ def delete_iceberg_snapshot(session: Session, datasource_id: str, snapshot_id: s
             details={"snapshot_id": snapshot_id},
         )
 
-    catalog_config = {"type": catalog_type, "uri": catalog_uri}
+    catalog_config = {"type": catalog_type, "uri": catalog_uri, **object_store_storage_options()}
     if warehouse:
         catalog_config["warehouse"] = warehouse
     catalog = load_runtime_catalog("local", **catalog_config)

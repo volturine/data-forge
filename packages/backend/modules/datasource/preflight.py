@@ -1,20 +1,22 @@
 import asyncio
+import contextlib
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from core.object_store import delete_object, is_object_store_url
 from openpyxl import load_workbook
 
 
 @dataclass
 class ExcelPreflight:
-    temp_path: Path
+    source_path: str
     sheets: list[str]
     tables: dict[str, list[str]]
     named_ranges: list[str]
     created_at: datetime
-    delete_file: bool
+    delete_source: bool
 
 
 _PREFLIGHTS: dict[str, ExcelPreflight] = {}
@@ -22,7 +24,7 @@ _PREFLIGHTS_LOCK = asyncio.Lock()
 _PREFLIGHT_TTL = timedelta(minutes=30)
 
 
-async def create_preflight(file_path: Path, *, delete_file: bool = True) -> tuple[str, ExcelPreflight]:
+async def create_preflight(file_path: Path, *, source_path: str | None = None, delete_source: bool = True) -> tuple[str, ExcelPreflight]:
     workbook = await asyncio.to_thread(load_workbook, file_path, read_only=False, data_only=True)
     sheets = workbook.sheetnames
     tables: dict[str, list[str]] = {}
@@ -34,12 +36,12 @@ async def create_preflight(file_path: Path, *, delete_file: bool = True) -> tupl
     named_ranges = [name for name in workbook.defined_names]
     preflight_id = str(uuid.uuid4())
     preflight = ExcelPreflight(
-        temp_path=file_path,
+        source_path=source_path or str(file_path),
         sheets=sheets,
         tables=tables,
         named_ranges=named_ranges,
         created_at=datetime.now(UTC).replace(tzinfo=None),
-        delete_file=delete_file,
+        delete_source=delete_source,
     )
     async with _PREFLIGHTS_LOCK:
         _PREFLIGHTS[preflight_id] = preflight
@@ -52,12 +54,12 @@ async def get_preflight(preflight_id: str) -> ExcelPreflight | None:
         return _PREFLIGHTS.get(preflight_id)
 
 
-async def clear_preflight(preflight_id: str, *, delete_file: bool = True) -> None:
+async def clear_preflight(preflight_id: str, *, delete_source: bool = True) -> None:
     async with _PREFLIGHTS_LOCK:
         preflight = _PREFLIGHTS.pop(preflight_id, None)
         if not preflight:
             return
-    await _delete_temp_file(preflight.temp_path, delete_file=delete_file)
+    await _delete_source(preflight.source_path, delete_source=delete_source and preflight.delete_source)
 
 
 async def _cleanup_expired() -> None:
@@ -69,10 +71,17 @@ async def _cleanup_expired() -> None:
                 continue
             expired.append(_PREFLIGHTS.pop(preflight_id))
     for preflight in expired:
-        await _delete_temp_file(preflight.temp_path, delete_file=preflight.delete_file)
+        await _delete_source(preflight.source_path, delete_source=preflight.delete_source)
 
 
-async def _delete_temp_file(path: Path, *, delete_file: bool) -> None:
-    if not delete_file or not path.exists():
+async def _delete_source(path: str, *, delete_source: bool) -> None:
+    if not delete_source:
         return
-    await asyncio.to_thread(path.unlink)
+    if is_object_store_url(path):
+        await asyncio.to_thread(delete_object, path)
+        return
+    local_path = Path(path)
+    if not local_path.exists():
+        return
+    with contextlib.suppress(FileNotFoundError):
+        await asyncio.to_thread(local_path.unlink)

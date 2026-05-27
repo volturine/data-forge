@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import polars as pl
 from contracts.datasource.models import DataSource, DataSourceColumnMetadata
 from core.exceptions import DataSourceValidationError
-from core.namespace import namespace_paths
+from core.object_store import is_object_store_url
 from sqlmodel import select
 
 from main import app
@@ -34,7 +34,7 @@ class TestDataSourceUpload:
         assert "id" in result
         assert "created_at" in result
         assert result["config"]["branch"] == "master"
-        assert result["config"]["metadata_path"].startswith(str(namespace_paths().clean_dir))
+        assert is_object_store_url(result["config"]["metadata_path"])
 
     def test_upload_csv_file_with_description_success(self, client, temp_upload_dir: Path, mock_file_upload: dict):
         files = {
@@ -257,7 +257,7 @@ class TestDataSourceConnect:
 
         assert response.status_code == 422
 
-    def test_connect_file_datasource_rejects_upload_only_creation(self, client):
+    def test_connect_file_datasource_rejects_local_path(self, client):
         payload = {
             "name": "File Connect",
             "source_type": "file",
@@ -267,7 +267,7 @@ class TestDataSourceConnect:
         response = client.post("/api/v1/datasource/connect", json=payload)
 
         assert response.status_code == 400
-        assert response.json()["detail"] == "File datasource creation must use upload"
+        assert "file_path must be an s3:// URL" in response.json()["detail"]
 
     def test_connect_analysis_datasource_rejects_direct_creation(self, client):
         payload = {
@@ -292,6 +292,21 @@ class TestDataSourceConnect:
 
         assert response.status_code == 400
 
+    def test_connect_file_datasource_accepts_s3_url(self, client, sample_csv_object_url: str):
+        payload = {
+            "name": "File Connect",
+            "source_type": "file",
+            "config": {"file_path": sample_csv_object_url, "file_type": "csv"},
+        }
+
+        response = client.post("/api/v1/datasource/connect", json=payload)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["source_type"] == "iceberg"
+        assert body["config"]["source"]["file_path"] == sample_csv_object_url
+        assert body["config"]["source"]["file_type"] == "csv"
+
     @patch("datasources.datasource_service.load_datasource")
     @patch("datasources.datasource_service._write_iceberg_table")
     def test_connect_iceberg_with_source_config_creates_iceberg(
@@ -299,7 +314,7 @@ class TestDataSourceConnect:
         mock_write,
         mock_load,
         client,
-        sample_csv_file: Path,
+        sample_csv_object_url: str,
     ):
         class _Snap:
             snapshot_id = 100
@@ -319,7 +334,7 @@ class TestDataSourceConnect:
                 "branch": "master",
                 "source": {
                     "source_type": "file",
-                    "file_path": str(sample_csv_file),
+                    "file_path": sample_csv_object_url,
                     "file_type": "csv",
                     "options": {},
                 },
@@ -336,8 +351,8 @@ class TestDataSourceConnect:
 
 class TestDatasourceIngestRoute:
     @patch("modules.datasource.routes.ingest_remote_datasource", new_callable=AsyncMock)
-    def test_ingest_route_delegates_to_worker_manager(self, mock_ingest, client):
-        datasource_id = str(uuid.uuid4())
+    def test_ingest_route_delegates_to_worker_manager(self, mock_ingest, client, sample_datasource: DataSource):
+        datasource_id = sample_datasource.id
         created_at = datetime.now(UTC).isoformat()
         mock_ingest.return_value = {
             "id": datasource_id,
@@ -597,11 +612,11 @@ class TestDataSourceSchema:
 
 
 class TestColumnStats:
-    def test_column_stats_with_config_override(self, client, sample_datasource: DataSource, sample_csv_file: Path):
+    def test_column_stats_with_config_override(self, client, sample_datasource: DataSource, sample_csv_object_url: str):
         payload = {
             "datasource": {
                 "config": {
-                    "file_path": str(sample_csv_file),
+                    "file_path": sample_csv_object_url,
                     "file_type": "csv",
                     "options": {},
                 },
@@ -623,37 +638,36 @@ class TestColumnStats:
 
 
 class TestDataSourceDelete:
-    def test_delete_datasource_success(self, client, sample_datasource: DataSource, test_db_session):
-        datasource_id = sample_datasource.id
-        file_path = Path(sample_datasource.config["file_path"])
+    def test_delete_datasource_marks_datasource_pending_delete(self, client, sample_datasource: DataSource, test_db_session):
+        from core.object_store import object_exists
 
-        assert file_path.exists()
+        datasource_id = sample_datasource.id
+        file_path = sample_datasource.config["file_path"]
+
+        assert object_exists(file_path)
 
         response = client.delete(f"/api/v1/datasource/{datasource_id}")
 
-        assert response.status_code == 204
+        assert response.status_code == 202
+        assert object_exists(file_path)
 
-        assert not file_path.exists()
+        stored = test_db_session.get(DataSource, datasource_id)
+        assert stored is not None
+        assert stored.is_pending_delete is True
+        assert stored.is_hidden is True
+        assert stored.delete_requested_at is not None
 
+    def test_delete_datasource_hides_pending_datasource_from_normal_reads(self, client, sample_datasource: DataSource):
+        datasource_id = sample_datasource.id
+
+        response = client.delete(f"/api/v1/datasource/{datasource_id}")
+
+        assert response.status_code == 202
         get_response = client.get(f"/api/v1/datasource/{datasource_id}")
         assert get_response.status_code == 404
-
-    @patch("modules.datasource.routes.shutdown_remote_engine", new_callable=AsyncMock)
-    def test_delete_datasource_shuts_down_matching_preview_engine(
-        self,
-        mock_shutdown_remote_engine: AsyncMock,
-        client,
-        sample_datasource: DataSource,
-    ):
-        datasource_id = sample_datasource.id
-
-        response = client.delete(f"/api/v1/datasource/{datasource_id}")
-
-        assert response.status_code == 204
-        assert mock_shutdown_remote_engine.await_count == 1
-        await_args = mock_shutdown_remote_engine.await_args
-        assert await_args is not None
-        assert await_args.kwargs["analysis_id"] == f"__preview__{datasource_id}"
+        list_response = client.get("/api/v1/datasource")
+        assert list_response.status_code == 200
+        assert all(item["id"] != datasource_id for item in list_response.json())
 
     def test_delete_datasource_not_found(self, client):
         missing_id = str(uuid.uuid4())
@@ -685,4 +699,4 @@ class TestDataSourceDelete:
 
         response = client.delete(f"/api/v1/datasource/{datasource_id}")
 
-        assert response.status_code == 204
+        assert response.status_code == 202

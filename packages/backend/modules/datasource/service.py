@@ -1,7 +1,5 @@
 import logging
-import os
 import re
-import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -10,13 +8,9 @@ from typing import Any, TypeVar
 
 from contracts.datasource.models import DataSource, DataSourceColumnMetadata, DataSourceCreatedBy
 from contracts.datasource.source_types import DataSourceFileType, DataSourceType
-from core.exceptions import (
-    DataSourceNotFoundError,
-    DataSourceValidationError,
-    FileError,
-)
-from core.iceberg_catalog import load_runtime_catalog
-from core.namespace import namespace_paths
+from core import datasource_delete_service
+from core.datasource_storage import cleanup_datasource_storage
+from core.exceptions import DataSourceNotFoundError, DataSourceValidationError
 from openpyxl import load_workbook
 from openpyxl.utils.cell import get_column_letter, range_boundaries
 from sqlalchemy import inspect, select
@@ -30,8 +24,6 @@ from modules.datasource.schemas import (
     DataSourceListItem,
     DataSourceResponse,
     DataSourceUpdate,
-    FileListItem,
-    FileListResponse,
     InternalPostgresTable,
     SchemaInfo,
 )
@@ -754,45 +746,18 @@ def update_column_descriptions(
     return attach_column_descriptions(session, datasource_id, schema_info)
 
 
-def list_data_files(path: str | None) -> FileListResponse:
-    base_dir = Path(os.path.realpath(namespace_paths().base_dir))
-    target = Path(path) if path else base_dir
-    resolved = Path(os.path.realpath(target))
-    if base_dir not in resolved.parents and base_dir != resolved:
-        raise ValueError(f"Path must be inside data directory: {base_dir}")
-    if not resolved.exists():
-        raise ValueError(f"Path does not exist: {resolved}")
-    if not resolved.is_dir():
-        raise ValueError(f"Path must be a directory: {resolved}")
-
-    entries = [
-        FileListItem(
-            name=item.name,
-            path=str(item),
-            is_dir=item.is_dir(),
-        )
-        for item in sorted(
-            resolved.iterdir(),
-            key=lambda entry: (not entry.is_dir(), entry.name.lower()),
-        )
-    ]
-    return FileListResponse(base_path=str(resolved), entries=entries)
-
-
 def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
-    datasource = session.get(DataSource, datasource_id)
-
-    if not datasource:
-        raise DataSourceNotFoundError(datasource_id)
-
+    datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
     response = _apply_display_name(DataSourceResponse.model_validate(datasource), datasource)
     response.output_of_tab_id = datasource.config.get("analysis_tab_id") if isinstance(datasource.config, dict) else None
     return response
 
 
 def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceListItem]:
-    query = select(DataSource).options(
-        defer(DataSource.schema_cache),  # type: ignore[arg-type]
+    query = (
+        select(DataSource)
+        .options(defer(DataSource.schema_cache))  # type: ignore[arg-type]
+        .where(col(DataSource.is_pending_delete) == False)  # type: ignore[arg-type]  # noqa: E712
     )
     if not include_hidden:
         # SQLModel field typed as bool; == creates SA expression at runtime
@@ -811,10 +776,7 @@ def update_datasource(
     datasource_id: str,
     update: DataSourceUpdate,
 ) -> DataSourceResponse:
-    datasource = session.get(DataSource, datasource_id)
-
-    if not datasource:
-        raise DataSourceNotFoundError(datasource_id)
+    datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
 
     # Update name if provided
     if update.name is not None:
@@ -961,117 +923,8 @@ def update_datasource(
     return response
 
 
-class DatasourceStorageCleanup:
-    def delete(self, datasource: DataSource) -> None:
-        if datasource.source_type_kind() == DataSourceType.FILE and isinstance(datasource.config, dict):
-            file_path = datasource.config.get("file_path")
-            if isinstance(file_path, str):
-                self._delete_file_path(file_path)
-        if not datasource.is_iceberg or not isinstance(datasource.config, dict):
-            return
-        config = datasource.config
-        self._drop_iceberg_catalog_table(config)
-        metadata_path = config.get("metadata_path")
-        if isinstance(metadata_path, str):
-            root = self._iceberg_cleanup_root(metadata_path)
-            if root:
-                try:
-                    if root.exists() and root.is_dir():
-                        shutil.rmtree(root)
-                        logger.info(f"Deleted Iceberg directory: {root}")
-                except OSError as exc:
-                    logger.error(f"OS error when deleting Iceberg directory {root}: {exc}")
-                    raise FileError(
-                        f"Failed to delete Iceberg directory: {root}",
-                        error_code="FILE_DELETE_ERROR",
-                        details={"path": str(root), "error": str(exc)},
-                    ) from exc
-        source = config.get("source")
-        if not isinstance(source, dict):
-            return
-        if source.get("source_type") != DataSourceType.FILE:
-            return
-        file_path = source.get("file_path")
-        if not isinstance(file_path, str):
-            return
-        if not self._is_within(Path(file_path), namespace_paths().upload_dir):
-            return
-        self._delete_file_path(file_path)
-
-    def _delete_file_path(self, file_path: str) -> None:
-        path = Path(file_path)
-        if not path.exists():
-            return
-        try:
-            if not path.is_file():
-                logger.warning(f"Path exists but is not a file: {path}")
-                return
-            path.unlink()
-            logger.info(f"Deleted file: {path}")
-        except PermissionError as exc:
-            logger.error(f"Permission denied when deleting file {path}: {exc}")
-            raise FileError(
-                f"Permission denied when deleting file: {path}",
-                error_code="FILE_PERMISSION_DENIED",
-                details={"file_path": str(path)},
-            ) from exc
-        except OSError as exc:
-            logger.error(f"OS error when deleting file {path}: {exc}")
-            raise FileError(
-                f"Failed to delete file: {path}",
-                error_code="FILE_DELETE_ERROR",
-                details={"file_path": str(path), "error": str(exc)},
-            ) from exc
-
-    def _iceberg_cleanup_root(self, metadata_path: str) -> Path | None:
-        path = Path(os.path.realpath(metadata_path))
-        start = path if path.is_dir() else path.parent
-        paths = namespace_paths()
-        clean_dir = Path(os.path.realpath(paths.clean_dir))
-        exports_dir = Path(os.path.realpath(paths.exports_dir))
-        for candidate in [start, *start.parents]:
-            if candidate.parent == clean_dir or candidate.parent == exports_dir:
-                return candidate
-            if candidate in (clean_dir, exports_dir):
-                return None
-        return None
-
-    @staticmethod
-    def _is_within(path: Path, root: Path) -> bool:
-        resolved_path = Path(os.path.realpath(path))
-        resolved_root = Path(os.path.realpath(root))
-        return resolved_root in resolved_path.parents or resolved_root == resolved_path
-
-    @staticmethod
-    def _drop_iceberg_catalog_table(config: dict[str, Any]) -> None:
-        catalog_type = config.get("catalog_type")
-        catalog_uri = config.get("catalog_uri")
-        warehouse = config.get("warehouse")
-        namespace = config.get("namespace")
-        table = config.get("table")
-        if not all(isinstance(value, str) and value for value in [catalog_type, catalog_uri, warehouse, namespace, table]):
-            return
-        catalog = load_runtime_catalog(
-            "local",
-            type=catalog_type,
-            uri=catalog_uri,
-            warehouse=warehouse,
-        )
-        identifier = f"{namespace}.{table}"
-        if catalog.table_exists(identifier):
-            catalog.drop_table(identifier)
-            logger.info(f"Deleted Iceberg catalog table: {identifier}")
-
-
-_STORAGE_CLEANUP = DatasourceStorageCleanup()
-
-
-def cleanup_datasource_storage(datasource: DataSource) -> None:
-    _STORAGE_CLEANUP.delete(datasource)
-
-
 def delete_datasource(session: Session, datasource_id: str) -> None:
-    datasource = session.get(DataSource, datasource_id)
+    datasource = datasource_delete_service.get_datasource(session, datasource_id)
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
     cleanup_datasource_storage(datasource)

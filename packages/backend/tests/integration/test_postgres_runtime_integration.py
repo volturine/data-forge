@@ -16,6 +16,7 @@ from harness.postgres_harness import (
     WORKER_ROOT,
     ManagedProcess,
     PostgresContainer,
+    RustfsContainer,
     docker_env,
     free_port,
     require_docker,
@@ -64,7 +65,7 @@ def _make_csv(rows: int) -> str:
     return header + body
 
 
-def _runtime_env(*, data_dir: Path, database_url: str, port: int) -> dict[str, str]:
+def _runtime_env(*, data_dir: Path, database_url: str, port: int, rustfs: RustfsContainer) -> dict[str, str]:
     return docker_env(
         {
             "ENV_FILE": "",
@@ -84,6 +85,12 @@ def _runtime_env(*, data_dir: Path, database_url: str, port: int) -> dict[str, s
             "WORKER_CONNECTIONS": "100",
             "CORS_ORIGINS": f"http://127.0.0.1:{port}",
             "AUTH_FRONTEND_URL": f"http://127.0.0.1:{port}",
+            "OBJECT_STORE_ENDPOINT": rustfs.endpoint,
+            "OBJECT_STORE_REGION": "us-east-1",
+            "OBJECT_STORE_ACCESS_KEY": rustfs.access_key,
+            "OBJECT_STORE_SECRET_KEY": rustfs.secret_key,
+            "OBJECT_STORE_BUCKET": rustfs.bucket,
+            "OBJECT_STORE_PREFIX": "dataforge-runtime-tests",
         }
     )
 
@@ -516,6 +523,7 @@ async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path
 @pytest.mark.timeout(300)
 async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
     tmp_path: Path,
+    rustfs_container: RustfsContainer,
 ) -> None:
     require_docker()
 
@@ -525,26 +533,26 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
         api_one_port = free_port()
         api_two_port = free_port()
 
-        base_env = _runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port)
+        base_env = _runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container)
         _init_runtime_db(base_env)
 
         api_one = ManagedProcess(
             name="api-one",
             command=["uv", "run", "--no-env-file", str(BACKEND_ROOT / "main.py")],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port),
+            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container),
         )
         api_two = ManagedProcess(
             name="api-two",
             command=["uv", "run", "--no-env-file", str(BACKEND_ROOT / "main.py")],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_two_port),
+            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_two_port, rustfs=rustfs_container),
         )
         worker = ManagedProcess(
             name="worker",
             command=["uv", "run", "--no-env-file", str(WORKER_ROOT / "main.py")],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port),
+            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container),
         )
         try:
             api_one.start()
@@ -616,7 +624,7 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
 
 
 @pytest.mark.timeout(300)
-def test_postgres_runtime_supports_cross_api_cancellation(tmp_path: Path) -> None:
+def test_postgres_runtime_supports_cross_api_cancellation(tmp_path: Path, rustfs_container: RustfsContainer) -> None:
     require_docker()
 
     with PostgresContainer() as container:
@@ -625,26 +633,26 @@ def test_postgres_runtime_supports_cross_api_cancellation(tmp_path: Path) -> Non
         api_one_port = free_port()
         api_two_port = free_port()
 
-        base_env = _runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port)
+        base_env = _runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container)
         _init_runtime_db(base_env)
 
         api_one = ManagedProcess(
             name="api-one",
             command=["uv", "run", "--no-env-file", str(BACKEND_ROOT / "main.py")],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port),
+            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container),
         )
         api_two = ManagedProcess(
             name="api-two",
             command=["uv", "run", "--no-env-file", str(BACKEND_ROOT / "main.py")],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_two_port),
+            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_two_port, rustfs=rustfs_container),
         )
         worker = ManagedProcess(
             name="worker",
             command=["uv", "run", "--no-env-file", str(WORKER_ROOT / "main.py")],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port),
+            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container),
         )
         try:
             api_one.start()

@@ -10,6 +10,9 @@ PG_CONTAINER="dataforge-e2e-pg-$$"
 PG_LABEL="data-forge.test-postgres=1"
 PG_VOLUME="${PG_CONTAINER}-data"
 PG_PORT=""
+RUSTFS_CONTAINER="dataforge-e2e-rustfs-$$"
+RUSTFS_LABEL="data-forge.test-rustfs=1"
+RUSTFS_PORT=""
 kill_tree() {
     local pid="$1"
     if [ -z "$pid" ] || ! kill -0 "$pid" >/dev/null 2>&1; then
@@ -54,6 +57,7 @@ cleanup() {
     for pid in ${FRONTEND_PID:-} ${SCHEDULER_PID:-} ${WORKER_PID:-} ${BACKEND_PID:-}; do
         kill_tree_force "$pid"
     done
+    docker rm -f "${RUSTFS_CONTAINER}" >/dev/null 2>&1 || true
     docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
     docker volume rm -f "${PG_VOLUME}" >/dev/null 2>&1 || true
     lsof -ti "tcp:${PORT}" | xargs -r kill >/dev/null 2>&1 || true
@@ -95,6 +99,32 @@ until docker exec "${PG_CONTAINER}" pg_isready -U dataforge -d dataforge >/dev/n
     fi
     sleep 1
 done
+
+echo "Starting e2e RustFS"
+docker ps -aq --filter "label=${RUSTFS_LABEL}" | xargs -r docker rm -f >/dev/null 2>&1 || true
+docker rm -f "${RUSTFS_CONTAINER}" >/dev/null 2>&1 || true
+docker run -d --rm \
+    --label "${RUSTFS_LABEL}" \
+    --name "${RUSTFS_CONTAINER}" \
+    -e RUSTFS_ACCESS_KEY="${OBJECT_STORE_ACCESS_KEY}" \
+    -e RUSTFS_SECRET_KEY="${OBJECT_STORE_SECRET_KEY}" \
+    -p 127.0.0.1::9000 \
+    rustfs/rustfs:latest /data >/dev/null
+RUSTFS_PORT="$(docker port "${RUSTFS_CONTAINER}" 9000/tcp | awk -F: '{print $NF}')"
+if [ -z "$RUSTFS_PORT" ]; then
+    echo "Failed to resolve e2e RustFS host port" >&2
+    exit 1
+fi
+export OBJECT_STORE_ENDPOINT="http://127.0.0.1:${RUSTFS_PORT}"
+deadline=$((SECONDS + 60))
+until [ "$(curl -s -o /dev/null -w '%{http_code}' "${OBJECT_STORE_ENDPOINT}" || true)" != "000" ]; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+        echo "Timed out waiting for e2e RustFS" >&2
+        exit 1
+    fi
+    sleep 1
+done
+
 echo "Starting e2e services"
 if [ -n "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) >"$LOG_DIR/backend.log" 2>&1 & BACKEND_PID=$!

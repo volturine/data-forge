@@ -15,7 +15,9 @@ from sqlmodel import Session, create_engine
 from harness.postgres_harness import (
     ExternalPostgres,
     PostgresContainer,
+    RustfsContainer,
     cleanup_stale_test_postgres,
+    cleanup_stale_test_rustfs,
     docker_available,
     require_docker,
 )
@@ -35,6 +37,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         return
     if docker_available():
         cleanup_stale_test_postgres()
+        cleanup_stale_test_rustfs()
 
 
 def _settings():
@@ -104,6 +107,13 @@ def _reset_settings_state(engine: Engine) -> None:
 
 
 @pytest.fixture(scope='session')
+def rustfs_container() -> Generator[RustfsContainer]:
+    require_docker()
+    with RustfsContainer() as container:
+        yield container
+
+
+@pytest.fixture(scope='session')
 def postgres_container() -> Generator[ExternalPostgres | PostgresContainer]:
     external_url = os.environ.get('TEST_POSTGRES_URL')
     if external_url:
@@ -163,15 +173,29 @@ def temp_upload_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(autouse=True, scope='function')
-def isolate_data_dir(tmp_path: Path, monkeypatch, postgres_container: PostgresContainer):
+def isolate_data_dir(tmp_path: Path, monkeypatch, postgres_container: PostgresContainer, rustfs_container: RustfsContainer):
     settings = _settings()
     data_dir = tmp_path / 'data'
     data_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv('ENV_FILE', '')
     monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+    monkeypatch.setenv('DATA_DIR', str(data_dir))
+    monkeypatch.setenv('DATABASE_URL', postgres_container.url)
+    monkeypatch.setenv('OBJECT_STORE_ENDPOINT', rustfs_container.endpoint)
+    monkeypatch.setenv('OBJECT_STORE_REGION', 'us-east-1')
+    monkeypatch.setenv('OBJECT_STORE_ACCESS_KEY', rustfs_container.access_key)
+    monkeypatch.setenv('OBJECT_STORE_SECRET_KEY', rustfs_container.secret_key)
+    monkeypatch.setenv('OBJECT_STORE_BUCKET', rustfs_container.bucket)
+    monkeypatch.setenv('OBJECT_STORE_PREFIX', 'dataforge-tests')
     monkeypatch.setattr(settings, 'settings_encryption_key', 'test-key', raising=False)
     monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
     monkeypatch.setattr(settings, 'database_url', postgres_container.url, raising=False)
+    monkeypatch.setattr(settings, 'object_store_endpoint', rustfs_container.endpoint, raising=False)
+    monkeypatch.setattr(settings, 'object_store_region', 'us-east-1', raising=False)
+    monkeypatch.setattr(settings, 'object_store_access_key', rustfs_container.access_key, raising=False)
+    monkeypatch.setattr(settings, 'object_store_secret_key', rustfs_container.secret_key, raising=False)
+    monkeypatch.setattr(settings, 'object_store_bucket', rustfs_container.bucket, raising=False)
+    monkeypatch.setattr(settings, 'object_store_prefix', 'dataforge-tests', raising=False)
 
 
 @pytest.fixture(autouse=True, scope='function')
@@ -205,9 +229,11 @@ def isolate_settings_engine(
 @pytest.fixture(autouse=True, scope='function')
 def cleanup_namespace_engines():
     from core import database
+    from core.object_store import reset_object_store_client_cache
 
     yield
     database.clear_namespace_init_cache()
+    reset_object_store_client_cache()
     if database.tenant_engine is not None:
         database.tenant_engine.dispose()
         database.tenant_engine = None
@@ -262,12 +288,40 @@ def sample_json_file(temp_upload_dir: Path) -> Path:
     return json_path
 
 
+def _upload_test_object(local_path: Path) -> str:
+    from core.object_store import object_store_url, upload_file
+
+    target_url = object_store_url('tests', uuid.uuid4().hex, local_path.name)
+    upload_file(local_path, target_url)
+    return target_url
+
+
 @pytest.fixture(scope='function')
-def sample_datasource(test_db_session: Session, sample_csv_file: Path) -> DataSource:
+def sample_csv_object_url(sample_csv_file: Path) -> str:
+    return _upload_test_object(sample_csv_file)
+
+
+@pytest.fixture(scope='function')
+def sample_parquet_object_url(sample_parquet_file: Path) -> str:
+    return _upload_test_object(sample_parquet_file)
+
+
+@pytest.fixture(scope='function')
+def sample_ndjson_object_url(sample_ndjson_file: Path) -> str:
+    return _upload_test_object(sample_ndjson_file)
+
+
+@pytest.fixture(scope='function')
+def sample_json_object_url(sample_json_file: Path) -> str:
+    return _upload_test_object(sample_json_file)
+
+
+@pytest.fixture(scope='function')
+def sample_datasource(test_db_session: Session, sample_csv_object_url: str) -> DataSource:
     from contracts.datasource.models import DataSource
 
     datasource_id = str(uuid.uuid4())
-    config = {'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}}
+    config = {'file_path': sample_csv_object_url, 'file_type': 'csv', 'options': {}}
 
     datasource = DataSource(
         id=datasource_id, name='Test DataSource', description='Fixture datasource description', source_type='file', config=config, created_at=datetime.now(UTC)
@@ -281,14 +335,14 @@ def sample_datasource(test_db_session: Session, sample_csv_file: Path) -> DataSo
 
 
 @pytest.fixture(scope='function')
-def sample_datasources(test_db_session: Session, sample_csv_file: Path, sample_parquet_file: Path) -> list[DataSource]:
+def sample_datasources(test_db_session: Session, sample_csv_object_url: str, sample_parquet_object_url: str) -> list[DataSource]:
     from contracts.datasource.models import DataSource
 
     datasources = []
 
-    for file_path, file_type, name in [(sample_csv_file, 'csv', 'CSV DataSource'), (sample_parquet_file, 'parquet', 'Parquet DataSource')]:
+    for file_path, file_type, name in [(sample_csv_object_url, 'csv', 'CSV DataSource'), (sample_parquet_object_url, 'parquet', 'Parquet DataSource')]:
         datasource_id = str(uuid.uuid4())
-        config = {'file_path': str(file_path), 'file_type': file_type, 'options': {}}
+        config = {'file_path': file_path, 'file_type': file_type, 'options': {}}
 
         datasource = DataSource(id=datasource_id, name=name, description=f'{name} description', source_type='file', config=config, created_at=datetime.now(UTC))
 

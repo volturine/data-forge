@@ -30,6 +30,7 @@ from core.namespace import reset_namespace, set_namespace_context
 
 from runtime.compute_manager import ProcessManager
 from runtime.compute_request_runtime import compute_request_loop
+from runtime.datasource_delete_runtime import datasource_delete_loop
 from runtime.engine_notifications import create_snapshot_notifier
 from runtime.runtime_notifications import handle_runtime_payload
 from runtime.worker_runtime import (
@@ -265,6 +266,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
     request_tasks = [
         asyncio.create_task(compute_request_loop(local_stop, worker_id=worker_id, manager=manager)) for _ in range(settings.compute_request_concurrency)
     ]
+    datasource_delete_task = asyncio.create_task(datasource_delete_loop(local_stop, manager=manager))
     children: dict[int, ManagedWorkerProcess] = {}
     last_seen = build_job_hub.version()
     try:
@@ -313,7 +315,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
         for child in children.values():
             _stop_worker_process(child)
         manager.shutdown_all()
-        await asyncio.gather(*request_tasks)
+        await asyncio.gather(*request_tasks, datasource_delete_task)
         _stop_manager(worker_id)
         logger.info("Build worker manager shutdown complete")
 

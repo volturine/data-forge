@@ -50,13 +50,6 @@ logger = logging.getLogger(__name__)
 
 
 def _compute_mp_context() -> Any:
-    if sys.platform == "win32":
-        return mp.get_context("spawn")
-    available = set(mp.get_all_start_methods())
-    if "forkserver" in available:
-        return mp.get_context("forkserver")
-    if "fork" in available:
-        return mp.get_context("fork")
     return mp.get_context("spawn")
 
 

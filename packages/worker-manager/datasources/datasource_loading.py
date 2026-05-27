@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import polars as pl
@@ -8,6 +11,7 @@ from contracts.datasource.source_types import DataSourceFileType
 from contracts.enums import DataForgeStrEnum
 from core.iceberg_metadata import resolve_iceberg_branch_metadata_path
 from core.iceberg_snapshot_reader import scan_iceberg_snapshot
+from core.object_store import download_file, is_object_store_url, object_store_storage_options
 from openpyxl import load_workbook
 
 
@@ -129,6 +133,15 @@ def _assert_select_only(query: str) -> None:
         raise ValueError("Only SELECT queries (including CTEs starting with WITH) are permitted for database datasources")
 
 
+def _download_object_store_file(path: str) -> Path:
+    suffix = Path(path).suffix or ".dat"
+    fd, temp_name = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    temp_path = Path(temp_name)
+    download_file(path, temp_path)
+    return temp_path
+
+
 def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
     source_type = str(config.get("source_type") or "")
     if source_type == DatasourceSourceType.FILE.value:
@@ -136,12 +149,32 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         file_type = DataSourceFileType.read(config.get("file_type"), default=None)
         if not file_path or file_type is None:
             raise ValueError("Datasource file loading requires file_path and file_type")
-        if file_type == DataSourceFileType.EXCEL and _has_bounds(config):
-            return _read_excel_bounds(config)
         opts = config.get("csv_options") or config.get("options") or {}
         if not isinstance(opts, dict):
             opts = {}
         opts = _merge_excel_opts(config, opts)
+        if is_object_store_url(str(file_path)):
+            temp_path = _download_object_store_file(str(file_path))
+            local_path = str(temp_path)
+            local_config = {**config, "file_path": local_path}
+            try:
+                if file_type == DataSourceFileType.EXCEL and _has_bounds(local_config):
+                    return _read_excel_bounds(local_config)
+                match file_type:
+                    case DataSourceFileType.CSV:
+                        return pl.read_csv(local_path, **_csv_opts(opts)).lazy()
+                    case DataSourceFileType.PARQUET:
+                        return pl.read_parquet(local_path).lazy()
+                    case DataSourceFileType.JSON:
+                        return pl.read_json(local_path).lazy()
+                    case DataSourceFileType.NDJSON:
+                        return pl.read_ndjson(local_path).lazy()
+                    case DataSourceFileType.EXCEL:
+                        return _read_excel(local_path, opts)
+            finally:
+                temp_path.unlink(missing_ok=True)
+        if file_type == DataSourceFileType.EXCEL and _has_bounds(config):
+            return _read_excel_bounds(config)
         match file_type:
             case DataSourceFileType.CSV:
                 return pl.scan_csv(file_path, **_csv_opts(opts))
@@ -197,20 +230,20 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
                 snapshot_value = int(snapshot_id)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"Iceberg snapshot ID must be an integer: {snapshot_id}") from exc
+        storage_options = config.get("storage_options")
+        resolved_storage_options = storage_options if isinstance(storage_options, dict) and storage_options else object_store_storage_options()
         if snapshot_value is not None:
-            storage_options = config.get("storage_options")
             return scan_iceberg_snapshot(
                 resolved_metadata_path,
                 snapshot_value,
-                storage_options if isinstance(storage_options, dict) else None,
+                resolved_storage_options,
             )
         reader = config.get("reader")
         reader_override = IcebergReader.NATIVE if reader == IcebergReader.NATIVE.value else IcebergReader.PYICEBERG
-        storage_options = config.get("storage_options")
         return pl.scan_iceberg(
             resolved_metadata_path,
             snapshot_id=snapshot_value,
-            storage_options=storage_options if isinstance(storage_options, dict) else None,
+            storage_options=resolved_storage_options,
             reader_override=reader_override.value,
         )
 

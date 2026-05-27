@@ -6,6 +6,7 @@ import pyarrow as pa  # type: ignore[import-untyped]
 from pyiceberg.table import Table as IcebergTable
 
 from core.namespace import namespace_paths
+from core.object_store import is_object_store_url, join_object_store_url, list_metadata_files, object_exists
 
 
 class IcebergMetadataPathNotFoundError(ValueError):
@@ -36,6 +37,8 @@ def sync_iceberg_schema(table: IcebergTable, new_schema: pa.Schema) -> bool:
 
 def resolve_iceberg_metadata_path(metadata_path: str, *, namespace_name: str | None = None, data_root: str | Path | None = None) -> str:
     normalized = _strip_file_scheme(metadata_path)
+    if is_object_store_url(normalized):
+        return _resolve_object_store_metadata_path(normalized)
     path = Path(normalized)
     resolved = path.resolve()
     root = _resolve_iceberg_data_root(namespace_name=namespace_name, data_root=data_root)
@@ -63,6 +66,15 @@ def resolve_iceberg_branch_metadata_path(
     metadata_path: str, branch: str | None, *, namespace_name: str | None = None, data_root: str | Path | None = None
 ) -> str:
     normalized = _strip_file_scheme(metadata_path)
+    if is_object_store_url(normalized):
+        if normalized.endswith('.metadata.json'):
+            return resolve_iceberg_metadata_path(normalized, namespace_name=namespace_name, data_root=data_root)
+        if branch:
+            branch_url = join_object_store_url(normalized, branch)
+            with_branch = list_metadata_files(branch_url)
+            if with_branch:
+                return resolve_iceberg_metadata_path(branch_url, namespace_name=namespace_name, data_root=data_root)
+        return resolve_iceberg_metadata_path(normalized, namespace_name=namespace_name, data_root=data_root)
     path = Path(normalized)
     if path.suffix == '.metadata.json' or path.name == 'metadata' or path.is_file():
         return resolve_iceberg_metadata_path(metadata_path, namespace_name=namespace_name, data_root=data_root)
@@ -87,6 +99,17 @@ def _resolve_iceberg_data_root(*, namespace_name: str | None = None, data_root: 
     if data_root is not None:
         return Path(os.path.realpath(Path(data_root).resolve()))
     return Path(os.path.realpath(namespace_paths(namespace_name).base_dir.resolve()))
+
+
+def _resolve_object_store_metadata_path(metadata_path: str) -> str:
+    if metadata_path.endswith('.metadata.json'):
+        if not object_exists(metadata_path):
+            raise IcebergMetadataPathNotFoundError(metadata_path)
+        return metadata_path
+    files = list_metadata_files(metadata_path)
+    if not files:
+        raise IcebergMetadataPathNotFoundError(metadata_path)
+    return files[-1]
 
 
 def _latest_metadata_file(metadata_dir: Path, metadata_path: str) -> str:

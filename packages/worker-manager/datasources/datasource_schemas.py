@@ -277,17 +277,6 @@ class DataSourceUpdate(DataSourceDescriptionModel):
         return cls.normalize_description(value)
 
 
-class FileListItem(BaseModel):
-    name: str
-    path: str
-    is_dir: bool
-
-
-class FileListResponse(BaseModel):
-    base_path: str
-    entries: list[FileListItem]
-
-
 class BulkUploadResult(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
