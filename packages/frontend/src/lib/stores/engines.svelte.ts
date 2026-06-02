@@ -54,6 +54,10 @@ export class EnginesStore {
 			() => {},
 			(err) => {
 				this.shuttingDown.delete(analysisId);
+				if (err.status === 404 || err.status === 409) {
+					this.error = null;
+					return;
+				}
 				this.error = err.message;
 				throw new Error(err.message);
 			}

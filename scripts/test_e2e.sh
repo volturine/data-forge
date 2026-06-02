@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 set -a; source packages/shared/e2e.env; set +a
+# Playwright forces FORCE_COLOR=1 for worker processes, so drop NO_COLOR to
+# keep the warning scanner clean and avoid conflicting color policies.
+unset NO_COLOR
 unset VIRTUAL_ENV
 export UV_PYTHON="${E2E_PYTHON_VERSION}"
 DATA_DIR="${DATA_DIR}-run-$$"
@@ -221,4 +224,3 @@ for pid in "${pids[@]}"; do
 done
 set -e
 exit "$status"
-

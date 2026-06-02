@@ -33,6 +33,9 @@
 	];
 
 	const currentStrategy = $derived(strategies.find((s) => s.value === config.strategy));
+	const appliesToNumericColumnsOnly = $derived(
+		config.strategy === 'mean' || config.strategy === 'median'
+	);
 </script>
 
 <div class={stepConfig()} role="region" aria-label="Fill null configuration">
@@ -152,7 +155,11 @@
 		/>
 
 		{#if !config.columns || config.columns.length === 0}
-			<Callout>No columns selected - will apply to all columns</Callout>
+			<Callout>
+				{appliesToNumericColumnsOnly
+					? 'No columns selected - will apply to all numeric columns'
+					: 'No columns selected - will apply to all columns'}
+			</Callout>
 		{/if}
 	</div>
 </div>

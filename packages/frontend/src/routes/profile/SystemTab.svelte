@@ -13,7 +13,9 @@
 
 	let loading = $state(true);
 	let saving = $state(false);
-	let feedback = $state<{ type: 'success' | 'error'; message: string } | null>(null);
+	type FeedbackScope = 'save' | 'toggle';
+	type Feedback = { type: 'success' | 'error'; message: string; scope: FeedbackScope };
+	let feedback = $state<Feedback | null>(null);
 	let internalTables = $state<InternalPostgresTable[]>([]);
 	let internalTablesLoading = $state(true);
 	let internalTablesError = $state<string | null>(null);
@@ -160,7 +162,7 @@
 				);
 			},
 			(error) => {
-				feedback = { type: 'error', message: error.message };
+				feedback = { type: 'error', message: error.message, scope: 'toggle' };
 			}
 		);
 		togglingKey = null;
@@ -175,13 +177,17 @@
 		const result = await updateSettings(payload);
 		result.match(
 			() => {
-				feedback = { type: 'success', message: 'System settings saved' };
+				feedback = { type: 'success', message: 'System settings saved', scope: 'save' };
 			},
 			(err) => {
-				feedback = { type: 'error', message: err.message };
+				feedback = { type: 'error', message: err.message, scope: 'save' };
 			}
 		);
 		saving = false;
+	}
+
+	function scopedFeedback(scope: FeedbackScope): Feedback | null {
+		return feedback?.scope === scope ? feedback : null;
 	}
 
 	const feedbackStyle = (type: 'success' | 'error') =>
@@ -219,14 +225,14 @@
 	</div>
 {:else}
 	<div class={css({ display: 'flex', flexDirection: 'column', gap: '6' })}>
-		{#if feedback}
-			<div class={feedbackStyle(feedback.type)}>
-				{#if feedback.type === 'success'}
+		{#if scopedFeedback('toggle')}
+			<div class={feedbackStyle(scopedFeedback('toggle')!.type)}>
+				{#if scopedFeedback('toggle')!.type === 'success'}
 					<CheckCircle size={14} />
 				{:else}
 					<XCircle size={14} />
 				{/if}
-				{feedback.message}
+				{scopedFeedback('toggle')!.message}
 			</div>
 		{/if}
 
@@ -485,7 +491,26 @@
 			{/if}
 		</div>
 
-		<div class={css({ display: 'flex', justifyContent: 'flex-end' })}>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				gap: '3'
+			})}
+		>
+			<div class={css({ minHeight: '6', display: 'flex', alignItems: 'center' })}>
+				{#if scopedFeedback('save')}
+					<div class={feedbackStyle(scopedFeedback('save')!.type)}>
+						{#if scopedFeedback('save')!.type === 'success'}
+							<CheckCircle size={14} />
+						{:else}
+							<XCircle size={14} />
+						{/if}
+						{scopedFeedback('save')!.message}
+					</div>
+				{/if}
+			</div>
 			<button
 				class={css({
 					display: 'flex',

@@ -76,6 +76,42 @@ export async function waitForDatasourceList(page: Page, timeout = 5_000): Promis
 }
 
 /**
+ * Wait for datasource preview to finish loading.
+ *
+ * Terminal outcomes:
+ *  - ready state: `[data-preview-ready="true"]` becomes visible
+ *  - failed state: a visible preview error appears
+ *
+ * Throws immediately on failed state so tests don't keep waiting on a preview
+ * that will never become ready.
+ */
+export async function waitForDatasourcePreviewReady(page: Page, timeout = 5_000): Promise<void> {
+	const ready = page.locator('[data-preview-ready="true"]');
+	const failure = page.locator(':text("Failed to fetch"), :text("Preview failed")');
+	const start = Date.now();
+
+	while (Date.now() - start < timeout) {
+		if (await ready.isVisible().catch(() => false)) return;
+		if (
+			await failure
+				.first()
+				.isVisible()
+				.catch(() => false)
+		) {
+			const message =
+				(await failure
+					.first()
+					.textContent()
+					.catch(() => null)) ?? 'Preview failed';
+			throw new Error(`Datasource preview failed before ready: ${message}`);
+		}
+		await page.waitForTimeout(100);
+	}
+
+	throw new Error(`Timed out waiting for datasource preview readiness after ${timeout}ms`);
+}
+
+/**
  * Navigate to the home page (analyses gallery), wait for the TanStack Query
  * data to load, and clear any persisted search filter from IndexedDB that
  * might hide analysis cards.

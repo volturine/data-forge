@@ -200,6 +200,19 @@ describe('ChatStore — pure local logic', () => {
 			expect(chatApi.getHistory).toHaveBeenCalledWith('session-1');
 		});
 
+		test('open_panel falls back to a usable provider when the default one is not configured', async () => {
+			vi.mocked(settingsApi.getSettings).mockReturnValue(okAsync(makeSettings()));
+			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listModels).mockReturnValue(okAsync([]));
+
+			await store.open_panel();
+
+			expect(store.provider).toBe('openai');
+			expect(store.configured).toBe(true);
+			expect(chatApi.listModels).toHaveBeenCalled();
+		});
+
 		test('reset clears session-backed configured state when no provider key is stored', () => {
 			store.provider = 'openrouter';
 			store.settings = makeSettings();
@@ -213,7 +226,8 @@ describe('ChatStore — pure local logic', () => {
 
 			store.reset();
 			expect(store.sessionId).toBeNull();
-			expect(store.configured).toBe(false);
+			expect(store.provider).toBe('openai');
+			expect(store.configured).toBe(true);
 		});
 	});
 

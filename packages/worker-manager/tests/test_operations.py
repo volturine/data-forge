@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Any
 
 import polars as pl
@@ -6,12 +7,14 @@ from contracts.datasource.source_types import DataSourceType
 from pydantic import ValidationError
 
 from operations.datasource import _resolve_pipeline_datasource
+from operations.deduplicate import DeduplicateHandler
 from operations.expression import parse_expression
 from operations.fill_null import FillNullHandler
 from operations.filter import FilterHandler
 from operations.groupby import GroupByHandler
 from operations.join import JoinHandler
 from operations.pivot import PivotHandler
+from operations.sample import SampleHandler
 from operations.select import SelectHandler
 from operations.sort import SortHandler
 from operations.strings import StringTransformHandler, StringTransformMethod
@@ -20,7 +23,9 @@ from operations.timeseries import (
     TimeseriesHandler,
     TimeseriesOperationType,
 )
+from operations.topk import TopKHandler
 from operations.union import UnionByNameHandler
+from operations.unpivot import UnpivotHandler
 from operations.with_columns import WithColumnsExprType, WithColumnsHandler
 
 
@@ -474,6 +479,21 @@ def test_timeseries_add_missing_value():
         ).collect()
 
 
+def test_timeseries_add_rejects_fractional_value() -> None:
+    handler = TimeseriesHandler()
+    with pytest.raises(ValueError, match="whole number"):
+        handler(
+            _frame(),
+            {
+                "column": "date",
+                "operation_type": "add",
+                "new_column": "shifted",
+                "value": 1.5,
+                "unit": "days",
+            },
+        ).collect()
+
+
 def test_timeseries_add_missing_unit():
     handler = TimeseriesHandler()
     with pytest.raises(ValueError, match="requires unit"):
@@ -520,6 +540,16 @@ def test_string_transform_accepts_enum_method() -> None:
     assert lf.collect()["name_upper"].to_list()[0] == "ALICE"
 
 
+def test_string_transform_slice_uses_end_index_semantics() -> None:
+    handler = StringTransformHandler()
+    lf = handler(
+        _frame(),
+        {"column": "name", "method": "slice", "start": 1, "end": 3, "new_column": "name_slice"},
+    )
+
+    assert lf.collect()["name_slice"].to_list() == ["li", "ob", "ha"]
+
+
 def test_fill_null_literal():
     handler = FillNullHandler()
     lf = handler(
@@ -527,6 +557,79 @@ def test_fill_null_literal():
         {"strategy": "literal", "value": 0, "value_type": "Int64"},
     )
     assert lf.collect()["a"].to_list() == [1, 0]
+
+
+def test_fill_null_literal_preserves_existing_float_values():
+    handler = FillNullHandler()
+    result = handler(
+        pl.DataFrame({"a": [1.5, None]}).lazy(),
+        {"strategy": "literal", "columns": ["a"], "value": 0, "value_type": "Int64"},
+    ).collect()
+
+    assert result["a"].to_list() == [1.5, 0.0]
+    assert result.dtypes == [pl.Float64]
+
+
+def test_fill_null_mean_without_columns_targets_numeric_columns_only():
+    handler = FillNullHandler()
+    result = handler(
+        pl.DataFrame(
+            {
+                "name": ["Alice", "Bob", "Charlie"],
+                "event_date": [date(2024, 1, 15), date(2024, 3, 22), date(2024, 6, 10)],
+                "amount": [100, None, 75],
+            }
+        ).lazy(),
+        {"strategy": "mean"},
+    ).collect()
+
+    assert result["name"].to_list() == ["Alice", "Bob", "Charlie"]
+    assert result["event_date"].to_list() == [
+        date(2024, 1, 15),
+        date(2024, 3, 22),
+        date(2024, 6, 10),
+    ]
+    assert result["amount"].to_list() == [100.0, 87.5, 75.0]
+    assert result.schema["amount"] == pl.Float64()
+
+
+def test_fill_null_mean_rejects_non_numeric_selected_columns():
+    handler = FillNullHandler()
+
+    with pytest.raises(ValueError, match="Unsupported columns: name"):
+        handler(
+            pl.DataFrame({"name": ["Alice", None], "amount": [100, None]}).lazy(),
+            {"strategy": "mean", "columns": ["name", "amount"]},
+        )
+
+
+def test_sample_handler_respects_non_reciprocal_fraction():
+    handler = SampleHandler()
+    result = handler(
+        pl.DataFrame({"id": list(range(1000))}).lazy(),
+        {"fraction": 0.6, "seed": 7},
+    ).collect()
+
+    assert 500 <= result.height <= 700
+    assert result.height < 1000
+
+
+def test_deduplicate_handler_keep_last_on_subset():
+    handler = DeduplicateHandler()
+    result = handler(
+        pl.DataFrame(
+            {
+                "id": [1, 1, 2, 2],
+                "value": ["first", "last", "alpha", "beta"],
+                "tag": ["a", "b", "c", "d"],
+            }
+        ).lazy(),
+        {"subset": ["id"], "keep": "last"},
+    ).collect()
+
+    assert result["id"].to_list() == [1, 2]
+    assert result["value"].to_list() == ["last", "beta"]
+    assert result["tag"].to_list() == ["b", "d"]
 
 
 def test_join_handler_inner_correctness():
@@ -564,6 +667,66 @@ def test_join_handler_outer_uses_shared_join_how() -> None:
     ).collect()
 
     assert result.height == 3
+
+
+def test_join_handler_right_columns_filters_unsuffixed_right_columns() -> None:
+    handler = JoinHandler()
+    left = pl.DataFrame({"id": [1, 2], "left_val": ["a", "b"]}).lazy()
+    right = pl.DataFrame({"id": [2, 3], "right_keep": [10, 20], "right_drop": [100, 200]}).lazy()
+
+    result = handler(
+        left,
+        {
+            "join_columns": [{"left_column": "id", "right_column": "id"}],
+            "how": "inner",
+            "right_source": "right",
+            "right_columns": ["right_keep"],
+            "suffix": "_r",
+        },
+        right_lf=right,
+    ).collect()
+
+    assert result.columns == ["id", "left_val", "right_keep"]
+    assert result["right_keep"].to_list() == [10]
+
+
+def test_join_handler_right_columns_with_empty_suffix_keeps_requested_columns() -> None:
+    handler = JoinHandler()
+    left = pl.DataFrame({"id": [1, 2], "left_val": ["a", "b"]}).lazy()
+    right = pl.DataFrame({"id": [2, 3], "right_keep": [10, 20], "right_drop": [100, 200]}).lazy()
+
+    result = handler(
+        left,
+        {
+            "join_columns": [{"left_column": "id", "right_column": "id"}],
+            "how": "inner",
+            "right_source": "right",
+            "right_columns": ["right_keep"],
+            "suffix": "",
+        },
+        right_lf=right,
+    ).collect()
+
+    assert result.columns == ["id", "left_val", "right_keep"]
+    assert result["right_keep"].to_list() == [10]
+
+
+def test_join_handler_right_columns_reject_unknown_columns() -> None:
+    handler = JoinHandler()
+    left = pl.DataFrame({"id": [1, 2], "left_val": ["a", "b"]}).lazy()
+    right = pl.DataFrame({"id": [2, 3], "right_keep": [10, 20]}).lazy()
+
+    with pytest.raises(ValueError, match="unknown column"):
+        handler(
+            left,
+            {
+                "join_columns": [{"left_column": "id", "right_column": "id"}],
+                "how": "inner",
+                "right_source": "right",
+                "right_columns": ["does_not_exist"],
+            },
+            right_lf=right,
+        )
 
 
 def test_with_columns_zero_arg_udf_uses_row_count(monkeypatch: pytest.MonkeyPatch):
@@ -689,6 +852,34 @@ def test_union_by_name_handler():
         right_sources={"right": right},
     )
     assert lf.collect().height == 2
+
+
+def test_unpivot_handler_accepts_alias_params():
+    handler = UnpivotHandler()
+    result = handler(
+        pl.DataFrame({"city": ["Brno"], "jan": [10], "feb": [20]}).lazy(),
+        {
+            "id_vars": ["city"],
+            "value_vars": ["jan", "feb"],
+            "variable_name": "month",
+            "value_name": "sales",
+        },
+    ).collect()
+
+    assert result["city"].to_list() == ["Brno", "Brno"]
+    assert result["month"].to_list() == ["jan", "feb"]
+    assert result["sales"].to_list() == [10, 20]
+
+
+def test_topk_handler_descending_returns_largest_rows_first():
+    handler = TopKHandler()
+    result = handler(
+        pl.DataFrame({"name": ["a", "b", "c"], "score": [10, 30, 20]}).lazy(),
+        {"column": "score", "k": 2, "descending": True},
+    ).collect()
+
+    assert result["name"].to_list() == ["b", "c"]
+    assert result["score"].to_list() == [30, 20]
 
 
 def test_pivot_handler():

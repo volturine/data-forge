@@ -1384,6 +1384,36 @@ class TestProductionHardening:
         error_events = [e for e in history if e.get("type") == "error"]
         assert any("timed out" in e.get("content", "") for e in error_events)
 
+    async def test_ai_client_error_pushes_provider_message(self, client: TestClient) -> None:
+        """AI client failures expose actionable provider details to the UI."""
+        from core.ai_clients import AIError
+
+        resp = client.post(
+            "/api/v1/ai/chat/sessions",
+            json={
+                "provider": "ollama",
+                "model": "llama3.2",
+                "api_key": "",
+            },
+        )
+        sid = resp.json()["session_id"]
+
+        mock_client = MagicMock()
+        mock_client.generate.side_effect = AIError("Cannot connect to AI provider at http://localhost:11434")
+
+        with patch("modules.chat.routes.get_ai_client", return_value=mock_client):
+            client.post("/api/v1/ai/chat/message", json={"session_id": sid, "content": "hi"})
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        assert live.busy is False
+        history = live.get_history()
+        error_events = [e for e in history if e.get("type") == "error"]
+        assert any("Cannot connect to AI provider" in e.get("content", "") for e in error_events)
+
     async def test_unexpected_error_pushes_error_event(self, client: TestClient) -> None:
         """Unexpected RuntimeError during agent turn emits error+done events."""
         resp = client.post(

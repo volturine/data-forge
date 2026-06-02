@@ -7,8 +7,16 @@
 
 	let loading = $state(true);
 	let saving = $state(false);
-	let testingProvider = $state<string | null>(null);
-	let feedback = $state<{ type: 'success' | 'error'; message: string } | null>(null);
+	type ProviderId = 'openrouter' | 'openai' | 'ollama' | 'huggingface';
+	type FeedbackScope = 'save' | ProviderId;
+	type Feedback = {
+		type: 'success' | 'error';
+		message: string;
+		scope: FeedbackScope;
+	};
+
+	let testingProvider = $state<ProviderId | null>(null);
+	let feedback = $state<Feedback | null>(null);
 
 	// OpenRouter
 	let openrouter_api_key = $state('');
@@ -82,18 +90,16 @@
 		const result = await updateSettings(payload);
 		result.match(
 			() => {
-				feedback = { type: 'success', message: 'AI provider settings saved' };
+				feedback = { type: 'success', message: 'AI provider settings saved', scope: 'save' };
 			},
 			(err) => {
-				feedback = { type: 'error', message: err.message };
+				feedback = { type: 'error', message: err.message, scope: 'save' };
 			}
 		);
 		saving = false;
 	}
 
-	async function handleTestAIProvider(
-		provider: 'openrouter' | 'openai' | 'ollama' | 'huggingface'
-	) {
+	async function handleTestAIProvider(provider: ProviderId) {
 		testingProvider = provider;
 		feedback = null;
 		const endpoint =
@@ -122,14 +128,19 @@
 				const modelsText = modelsCount > 0 ? ` (${modelsCount} model(s) listed)` : '';
 				feedback = {
 					type: result.ok ? 'success' : 'error',
-					message: `${provider}: ${result.detail}${modelsText}`
+					message: `${provider}: ${result.detail}${modelsText}`,
+					scope: provider
 				};
 			},
 			(err) => {
-				feedback = { type: 'error', message: err.message };
+				feedback = { type: 'error', message: err.message, scope: provider };
 			}
 		);
 		testingProvider = null;
+	}
+
+	function scopedFeedback(scope: FeedbackScope): Feedback | null {
+		return feedback?.scope === scope ? feedback : null;
 	}
 
 	const feedbackStyle = (type: 'success' | 'error') =>
@@ -167,14 +178,14 @@
 	</div>
 {:else}
 	<div class={css({ display: 'flex', flexDirection: 'column', gap: '6' })}>
-		{#if feedback}
-			<div class={feedbackStyle(feedback.type)}>
-				{#if feedback.type === 'success'}
+		{#if scopedFeedback('save')}
+			<div class={feedbackStyle(scopedFeedback('save')!.type)}>
+				{#if scopedFeedback('save')!.type === 'success'}
 					<CheckCircle size={14} />
 				{:else}
 					<XCircle size={14} />
 				{/if}
-				{feedback.message}
+				{scopedFeedback('save')!.message}
 			</div>
 		{/if}
 
@@ -212,6 +223,16 @@
 					{testingProvider === 'openrouter' ? 'Testing…' : 'Test'}
 				</button>
 			</div>
+			{#if scopedFeedback('openrouter')}
+				<div class={feedbackStyle(scopedFeedback('openrouter')!.type)}>
+					{#if scopedFeedback('openrouter')!.type === 'success'}
+						<CheckCircle size={14} />
+					{:else}
+						<XCircle size={14} />
+					{/if}
+					{scopedFeedback('openrouter')!.message}
+				</div>
+			{/if}
 			<label class={label({ variant: 'wrapper' })}>
 				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>API key</span>
 				<input
@@ -267,6 +288,16 @@
 					{testingProvider === 'openai' ? 'Testing…' : 'Test'}
 				</button>
 			</div>
+			{#if scopedFeedback('openai')}
+				<div class={feedbackStyle(scopedFeedback('openai')!.type)}>
+					{#if scopedFeedback('openai')!.type === 'success'}
+						<CheckCircle size={14} />
+					{:else}
+						<XCircle size={14} />
+					{/if}
+					{scopedFeedback('openai')!.message}
+				</div>
+			{/if}
 			<label class={label({ variant: 'wrapper' })}>
 				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>API key</span>
 				<input
@@ -334,6 +365,16 @@
 					{testingProvider === 'ollama' ? 'Testing…' : 'Test'}
 				</button>
 			</div>
+			{#if scopedFeedback('ollama')}
+				<div class={feedbackStyle(scopedFeedback('ollama')!.type)}>
+					{#if scopedFeedback('ollama')!.type === 'success'}
+						<CheckCircle size={14} />
+					{:else}
+						<XCircle size={14} />
+					{/if}
+					{scopedFeedback('ollama')!.message}
+				</div>
+			{/if}
 			<div
 				class={css({
 					display: 'grid',
@@ -386,6 +427,16 @@
 					{testingProvider === 'huggingface' ? 'Testing…' : 'Test'}
 				</button>
 			</div>
+			{#if scopedFeedback('huggingface')}
+				<div class={feedbackStyle(scopedFeedback('huggingface')!.type)}>
+					{#if scopedFeedback('huggingface')!.type === 'success'}
+						<CheckCircle size={14} />
+					{:else}
+						<XCircle size={14} />
+					{/if}
+					{scopedFeedback('huggingface')!.message}
+				</div>
+			{/if}
 			<label class={label({ variant: 'wrapper' })}>
 				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>API token</span>
 				<input

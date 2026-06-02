@@ -89,9 +89,12 @@
 				})
 			: datasources
 	);
-	const selectedDatasource = $derived(
-		selectedDatasourceQuery.data ?? datasources.find((d) => d.id === activeSelectedId) ?? null
-	);
+	const selectedDatasource = $derived.by(() => {
+		if (!activeSelectedId || ns.switching) return null;
+		return (
+			selectedDatasourceQuery.data ?? datasources.find((d) => d.id === activeSelectedId) ?? null
+		);
+	});
 	const staleSelection = $derived(
 		!!activeSelectedId &&
 			!!query.data &&

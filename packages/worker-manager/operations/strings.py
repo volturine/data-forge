@@ -55,7 +55,9 @@ class StringTransformHandler(OperationHandler):
             return lf.with_columns(method(base).alias(target))
 
         if validated.method == StringTransformMethod.SLICE:
-            return lf.with_columns(base.str.slice(validated.start or 0, validated.end).alias(target))
+            start = validated.start or 0
+            length = None if validated.end is None else max(validated.end - start, 0)
+            return lf.with_columns(base.str.slice(start, length).alias(target))
 
         if validated.method == StringTransformMethod.REPLACE:
             if not validated.pattern:

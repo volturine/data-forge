@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 from contracts.step_config_enums import AIProvider
-from core.ai_clients import get_ai_client, resolve_ai_provider
+from core.ai_clients import AIError, get_ai_client, resolve_ai_provider
 from core.namespace import get_namespace
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -572,6 +572,9 @@ async def _run_agent_turn(
         session.push_event({"type": "usage", **turn_usage})
     except OpenRouterError as exc:
         logger.error("OpenRouter error session=%s: %s", session.id, exc)
+        session.push_event({"type": "error", "content": f"AI provider error: {exc}"})
+    except AIError as exc:
+        logger.error("AI client error session=%s: %s", session.id, exc)
         session.push_event({"type": "error", "content": f"AI provider error: {exc}"})
     except asyncio.CancelledError:
         logger.info("Agent turn cancelled session=%s", session.id)

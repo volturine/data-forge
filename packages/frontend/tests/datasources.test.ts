@@ -7,7 +7,8 @@ import {
 	selectDatasourceAndWaitForConfig,
 	openSchemaTabAndWait,
 	waitForDatasourceList,
-	waitForLayoutReady
+	waitForLayoutReady,
+	waitForDatasourcePreviewReady
 } from './utils/readiness.js';
 import { dialogByHeading } from './utils/locators.js';
 
@@ -304,7 +305,7 @@ test.describe('Datasources – detail view', () => {
 		await page.locator(`[data-ds-row="${ds}"]`).click();
 
 		// Preview loads in the right pane (DatasourcePreview), not in a config tab
-		await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 5_000 });
+		await waitForDatasourcePreviewReady(page);
 
 		// Verify actual column headers from the CSV are rendered
 		await expect(page.locator('[data-column-id="id"]')).toBeVisible({ timeout: 5_000 });
@@ -328,7 +329,7 @@ test.describe('Datasources – preview pagination', () => {
 			await page.goto('/datasources');
 			await waitForDatasourceList(page);
 			await page.locator(`[data-ds-row="${ds}"]`).click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 5_000 });
+			await waitForDatasourcePreviewReady(page);
 
 			const pageLabel = page.locator('[data-testid="pagination-page"]');
 			await expect(pageLabel).toHaveText('Page 1');
@@ -342,14 +343,14 @@ test.describe('Datasources – preview pagination', () => {
 			await expect(nextBtn).toBeEnabled();
 
 			await nextBtn.click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 5_000 });
+			await waitForDatasourcePreviewReady(page);
 			await expect(pageLabel).toHaveText('Page 2');
 			await expect(prevBtn).toBeEnabled();
 
 			await screenshot(page, 'datasources', 'preview-pagination-page2');
 
 			await prevBtn.click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 5_000 });
+			await waitForDatasourcePreviewReady(page);
 			await expect(pageLabel).toHaveText('Page 1');
 			await expect(prevBtn).toBeDisabled();
 		} finally {
@@ -361,11 +362,10 @@ test.describe('Datasources – preview pagination', () => {
 test.describe('Datasources – column stats panel', () => {
 	test('column stats panel opens, shows content, and closes', async ({ page, request }) => {
 		const ds = `e2e-stats-${uid()}`;
-		await createDatasource(request, ds);
+		const dsId = await createDatasource(request, ds);
 		try {
-			await page.goto('/datasources');
-			await page.locator(`[data-ds-row="${ds}"]`).click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 5_000 });
+			await page.goto(`/datasources?id=${dsId}`);
+			await waitForDatasourcePreviewReady(page);
 
 			const ageHeader = page.locator('[data-column-id="age"]');
 			await ageHeader.locator('button[aria-label="Column options"]').click();

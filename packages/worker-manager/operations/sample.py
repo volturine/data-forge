@@ -1,7 +1,11 @@
 """Sample rows operation."""
 
+import math
+
 import polars as pl
 from contracts.compute.base import OperationHandler, OperationParams
+
+_MAX_HASH = (1 << 64) - 1
 
 
 class SampleParams(OperationParams):
@@ -21,8 +25,8 @@ class SampleHandler(OperationHandler):
         validated = SampleParams.model_validate(params)
         if validated.fraction <= 0 or validated.fraction > 1:
             raise ValueError("Sample fraction must be between 0 and 1")
-        mod = int(1 / validated.fraction)
-        if mod <= 0 or mod > 2**31 - 1:
-            raise ValueError("Sample fraction is too small (minimum ~4.7e-10)")
+        if validated.fraction == 1:
+            return lf
+        threshold = max(1, math.ceil(validated.fraction * _MAX_HASH))
         seed = validated.seed if validated.seed is not None else 0
-        return lf.with_row_index("_idx").filter(pl.col("_idx").hash(seed=seed) % mod == 0).drop("_idx")
+        return lf.with_row_index("_idx").filter(pl.col("_idx").hash(seed=seed) <= pl.lit(threshold, dtype=pl.UInt64)).drop("_idx")

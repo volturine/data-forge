@@ -77,7 +77,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			await buildBtn.click();
 			const buildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
 			await expect(buildTrigger).toBeVisible({ timeout: 5_000 });
-			await expect(buildTrigger).toContainText(/Completed/i, { timeout: 5_000 });
+			await expectCompletedEventually(buildTrigger);
 
 			const toggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
 			await expect(toggleBtn).toBeEnabled({ timeout: 5_000 });
@@ -485,16 +485,12 @@ test.describe('Analyses – row count on non-view steps', () => {
 		const aName = `E2E Row Count Limit ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
-			await gotoAnalysisEditor(page, aId);
-
-			await page.locator('button[data-step="limit"]').click();
+			const configPanel = await addStepAndOpenConfig(page, aId, 'limit');
 			const limitNode = page.locator('[data-step-type="limit"]');
 			await expect(limitNode).toHaveCount(1, { timeout: 5_000 });
 			await expect(limitNode).toBeVisible({ timeout: 5_000 });
 
 			// Apply the step
-			await limitNode.locator('[data-action="edit"]').click();
-			const configPanel = page.locator('[data-step-config="limit"]');
 			await expect(configPanel).toBeVisible({ timeout: 5_000 });
 			await configPanel.locator('[data-testid="limit-rows-input"]').fill('2');
 			await configPanel.getByRole('button', { name: 'Apply' }).click();

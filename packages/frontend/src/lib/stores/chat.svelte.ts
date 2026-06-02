@@ -26,6 +26,8 @@ const MAX_BACKOFF = 30_000;
 const BASE_BACKOFF = 1_000;
 const MAX_RETRIES = 10;
 
+export type ChatProvider = 'openrouter' | 'openai' | 'ollama' | 'huggingface';
+
 export type AgentMode = 'plan' | 'execute';
 
 const PLAN_SYSTEM_PROMPT =
@@ -86,7 +88,7 @@ export interface ToolDraft {
 export class ChatStore {
 	open = $state(false);
 	sessionId = $state<string | null>(null);
-	provider = $state('openrouter');
+	provider = $state<ChatProvider>('openrouter');
 	model = $state('openai/gpt-4o-mini');
 	apiKey = $state('');
 	endpointUrl = $state('');
@@ -368,7 +370,7 @@ export class ChatStore {
 		}
 	}
 
-	setProvider(provider: 'openrouter' | 'openai' | 'ollama' | 'huggingface'): void {
+	setProvider(provider: ChatProvider): void {
 		this.provider = provider;
 		this.models = [];
 		this._applyProviderDefaults();
@@ -381,11 +383,37 @@ export class ChatStore {
 		}
 	}
 
-	private _hasStoredProviderKey(): boolean {
+	private _hasStoredProviderKey(provider: ChatProvider = this.provider): boolean {
 		if (!this.settings) return false;
-		if (this.provider === 'openrouter') return this.settings.openrouter_api_key.length > 0;
-		if (this.provider === 'huggingface') return this.settings.huggingface_api_token.length > 0;
-		return false;
+		if (provider === 'openrouter') return this.settings.openrouter_api_key.length > 0;
+		if (provider === 'openai') return this.settings.openai_api_key.length > 0;
+		if (provider === 'huggingface') return this.settings.huggingface_api_token.length > 0;
+		return provider === 'ollama';
+	}
+
+	private _providerCanStart(provider: ChatProvider): boolean {
+		if (!this.settings) return provider === 'openai' || provider === 'ollama';
+		if (provider === 'openrouter' || provider === 'huggingface') {
+			return this._hasStoredProviderKey(provider);
+		}
+		if (provider === 'openai') {
+			return this._hasStoredProviderKey(provider) || this.settings.openai_endpoint_url.length > 0;
+		}
+		return (this.settings.ollama_endpoint_url || 'http://localhost:11434').length > 0;
+	}
+
+	private _pickPreferredProvider(): ChatProvider {
+		const candidates: ChatProvider[] = [
+			this.provider,
+			'openrouter',
+			'openai',
+			'ollama',
+			'huggingface'
+		];
+		for (const candidate of candidates) {
+			if (this._providerCanStart(candidate)) return candidate;
+		}
+		return 'openai';
 	}
 
 	private _refreshConfigured(): void {
@@ -505,6 +533,9 @@ export class ChatStore {
 				}
 				return;
 			}
+		}
+		if (!this.configured) {
+			this.setProvider(this._pickPreferredProvider());
 		}
 		if (this.configured && this.models.length === 0) {
 			void this.loadModels();
@@ -923,6 +954,9 @@ export class ChatStore {
 		this.maxTurns = null;
 		this.pendingConfirm = null;
 		this._refreshConfigured();
+		if (!this.configured && this.settings) {
+			this.setProvider(this._pickPreferredProvider());
+		}
 		if (typeof window !== 'undefined') {
 			localStorage.removeItem(SESSION_KEY);
 		}

@@ -73,10 +73,10 @@ function mockShutdownSuccess() {
 	});
 }
 
-function mockShutdownError(message: string) {
+function mockShutdownError(message: string, status?: number) {
 	mockShutdownEngine.mockReturnValue({
-		match: (_onOk: unknown, onErr: (e: { message: string }) => void) => {
-			onErr({ message });
+		match: (_onOk: unknown, onErr: (e: { message: string; status?: number }) => void) => {
+			onErr({ message, status });
 			return Promise.resolve();
 		}
 	});
@@ -241,6 +241,19 @@ describe('EnginesStore', () => {
 		expect(store.error).toBe('Permission denied');
 		stream.emitSnapshot(engines);
 		expect(store.engines).toEqual(engines);
+		expect(store.error).toBeNull();
+	});
+
+	test('shutdownEngine ignores not-found races', async () => {
+		const stream = mockStreamConnection();
+		const engines = [makeEngine({ analysis_id: 'a-1' })];
+		mockShutdownError('Engine not found', 404);
+
+		store.startStream();
+		stream.emitSnapshot(engines);
+
+		await expect(store.shutdownEngine('a-1')).resolves.toBeUndefined();
+		expect(store.engines).toEqual([]);
 		expect(store.error).toBeNull();
 	});
 

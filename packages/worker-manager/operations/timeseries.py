@@ -87,14 +87,16 @@ class TimeseriesHandler(OperationHandler):
         }:
             if validated.value is None:
                 raise ValueError("timeseries operation requires numeric value parameter")
+            if not float(validated.value).is_integer():
+                raise ValueError("timeseries operation requires a whole number value")
             duration_unit = validated.require_duration_unit()
             subtracting = validated.operation_type == TimeseriesOperationType.SUBTRACT or validated.direction == TimeDirection.SUBTRACT
+            value_int = int(validated.value)
 
             if duration_unit == DurationUnit.MONTHS:
-                offset = f"-{validated.value}mo" if subtracting else f"{validated.value}mo"
+                offset = f"-{value_int}mo" if subtracting else f"{value_int}mo"
                 return lf.with_columns(pl.col(validated.column).dt.offset_by(offset).alias(validated.new_column))
 
-            value_int = int(validated.value)
             if not (-10_000_000 <= value_int <= 10_000_000):
                 raise ValueError("Timeseries value must be between -10000000 and 10000000")
             duration = validated.duration_expr(value_int)
