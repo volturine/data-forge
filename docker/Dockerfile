@@ -30,6 +30,9 @@ RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 RUN addgroup --gid 1000 appgroup && adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
 
 COPY packages/shared/ ./
+COPY packages/contracts/ /app/packages/contracts/
+COPY packages/persistence/ /app/packages/persistence/
+COPY packages/runtime-common/ /app/packages/runtime-common/
 COPY packages/backend/ /app/packages/backend/
 COPY packages/scheduler/ /app/packages/scheduler/
 COPY packages/worker-manager/ /app/packages/worker-manager/
@@ -58,19 +61,19 @@ FROM backend-base AS runtime-base
 RUN chown -R appuser:appgroup /app/data /app/packages/shared/database
 
 FROM runtime-base AS api
-ENV PYTHONPATH="/app/packages/backend:/app/packages/shared"
+ENV PYTHONPATH="/app/packages/backend:/app/packages/shared:/app/packages/contracts:/app/packages/persistence:/app/packages/runtime-common"
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD python3 -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready').status==200 else 1)"
 CMD ["python3", "../backend/main.py"]
 
 FROM runtime-base AS scheduler
-ENV PYTHONPATH="/app/packages/scheduler:/app/packages/shared"
+ENV PYTHONPATH="/app/packages/scheduler:/app/packages/shared:/app/packages/contracts:/app/packages/persistence:/app/packages/runtime-common"
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD python3 -c "import sys; from core.docker_healthcheck import worker_healthy; from contracts.runtime_workers.models import RuntimeWorkerKind; sys.exit(0 if worker_healthy(kind=RuntimeWorkerKind.SCHEDULER) else 1)"
 CMD ["python3", "../scheduler/main.py"]
 
 FROM runtime-base AS worker
-ENV PYTHONPATH="/app/packages/worker-manager:/app/packages/shared"
+ENV PYTHONPATH="/app/packages/worker-manager:/app/packages/shared:/app/packages/contracts:/app/packages/persistence:/app/packages/runtime-common"
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD python3 -c "import sys; from core.docker_healthcheck import worker_healthy; from contracts.runtime_workers.models import RuntimeWorkerKind; sys.exit(0 if worker_healthy(kind=RuntimeWorkerKind.BUILD_MANAGER) else 1)"
 CMD ["python3", "../worker-manager/main.py"]
