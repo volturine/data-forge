@@ -32,13 +32,16 @@ jobs:
         run: uv sync
 
       - name: Format check
-        run: uv run ruff format --check . ../backend ../scheduler ../worker-manager
+        run: uv run ruff format --check . ../contracts ../persistence ../runtime-common ../backend ../scheduler ../worker-manager
 
       - name: Lint
-        run: uv run ruff check . ../backend ../scheduler ../worker-manager
+        run: uv run ruff check . ../contracts ../persistence ../runtime-common ../backend ../scheduler ../worker-manager
 
       - name: Type check
         run: |
+          uv run python -m mypy ../contracts
+          uv run python -m mypy ../persistence
+          uv run python -m mypy ../runtime-common
           uv run python -m mypy .
           uv run python -m mypy ../backend
           uv run python -m mypy ../scheduler
@@ -180,4 +183,3 @@ jobs:
           target: ${{ matrix.target }}
           push: true
           tags: ${{ steps.tags.outputs.tags }}
-
