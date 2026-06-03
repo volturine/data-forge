@@ -1,7 +1,7 @@
 import logging
 from datetime import UTC, datetime
 
-from contracts.telegram_models import TelegramListener, TelegramSubscriber
+from persistence.telegram.models import TelegramListener, TelegramSubscriber
 from sqlalchemy import select
 from sqlmodel import Session
 

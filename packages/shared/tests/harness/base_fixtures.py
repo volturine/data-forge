@@ -23,8 +23,8 @@ from harness.postgres_harness import (
 )
 
 if TYPE_CHECKING:
-    from contracts.analysis.models import Analysis
-    from contracts.datasource.models import DataSource
+    from persistence.analysis.models import Analysis
+    from persistence.datasource.models import DataSource
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -47,21 +47,22 @@ def _settings():
 
 
 def _register_sqlmodel_metadata() -> None:
-    from contracts.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
-    from contracts.analysis_versions.models import AnalysisVersion
-    from contracts.build_jobs.models import BuildJob
-    from contracts.build_runs.models import BuildEvent, BuildRun
-    from contracts.datasource.models import DataSource, DataSourceColumnMetadata
-    from contracts.engine_instances.models import EngineInstance
-    from contracts.engine_runs.models import EngineRun
-    from contracts.healthcheck_models import HealthCheck, HealthCheckResult
-    from contracts.locks.models import ResourceLock
-    from contracts.namespaces.models import RuntimeNamespace
-    from contracts.runtime_workers.models import RuntimeWorker
-    from contracts.scheduler.models import Schedule
-    from contracts.settings_models import AppSettings
-    from contracts.telegram_models import TelegramListener, TelegramSubscriber
-    from contracts.udf_models import Udf
+    from persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
+    from persistence.analysis_versions.models import AnalysisVersion
+    from persistence.build_jobs.models import BuildJob
+    from persistence.build_runs.models import BuildEvent, BuildRun
+    from persistence.datasource.models import DataSource, DataSourceColumnMetadata
+    from persistence.engine_instances.models import EngineInstance
+    from persistence.engine_runs.models import EngineRun
+    from persistence.healthchecks.models import HealthCheck, HealthCheckResult
+    from persistence.locks.models import ResourceLock
+    from persistence.namespaces.models import RuntimeNamespace
+    from persistence.runtime_events.models import RuntimeOutboxEvent
+    from persistence.runtime_workers.models import RuntimeWorker
+    from persistence.scheduler.models import Schedule
+    from persistence.settings.models import AppSettings
+    from persistence.telegram.models import TelegramListener, TelegramSubscriber
+    from persistence.udfs.models import Udf
 
     del Analysis
     del AnalysisDataSource
@@ -79,6 +80,7 @@ def _register_sqlmodel_metadata() -> None:
     del HealthCheckResult
     del ResourceLock
     del RuntimeNamespace
+    del RuntimeOutboxEvent
     del RuntimeWorker
     del Schedule
     del TelegramListener
@@ -87,10 +89,10 @@ def _register_sqlmodel_metadata() -> None:
 
 
 def _settings_tables() -> list[Any]:
-    from contracts.engine_instances.models import EngineInstance
-    from contracts.namespaces.models import RuntimeNamespace
-    from contracts.runtime_workers.models import RuntimeWorker
-    from contracts.settings_models import AppSettings
+    from persistence.engine_instances.models import EngineInstance
+    from persistence.namespaces.models import RuntimeNamespace
+    from persistence.runtime_workers.models import RuntimeWorker
+    from persistence.settings.models import AppSettings
 
     table_names = {AppSettings.__tablename__, EngineInstance.__tablename__, RuntimeWorker.__tablename__, RuntimeNamespace.__tablename__}
     return [table for table in AppSettings.metadata.sorted_tables if table.name in table_names]
@@ -206,8 +208,8 @@ def isolate_settings_engine(
         yield None
         return
 
-    from contracts.settings_models import AppSettings
     from core import database
+    from persistence.settings.models import AppSettings
 
     schema = f'settings_{uuid.uuid4().hex}'
     engine = _schema_engine(postgres_container.url, schema)
@@ -318,7 +320,7 @@ def sample_json_object_url(sample_json_file: Path) -> str:
 
 @pytest.fixture(scope='function')
 def sample_datasource(test_db_session: Session, sample_csv_object_url: str) -> DataSource:
-    from contracts.datasource.models import DataSource
+    from persistence.datasource.models import DataSource
 
     datasource_id = str(uuid.uuid4())
     config = {'file_path': sample_csv_object_url, 'file_type': 'csv', 'options': {}}
@@ -336,7 +338,7 @@ def sample_datasource(test_db_session: Session, sample_csv_object_url: str) -> D
 
 @pytest.fixture(scope='function')
 def sample_datasources(test_db_session: Session, sample_csv_object_url: str, sample_parquet_object_url: str) -> list[DataSource]:
-    from contracts.datasource.models import DataSource
+    from persistence.datasource.models import DataSource
 
     datasources = []
 
@@ -359,7 +361,8 @@ def sample_datasources(test_db_session: Session, sample_csv_object_url: str, sam
 
 @pytest.fixture(scope='function')
 def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
-    from contracts.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
+    from contracts.analysis.models import AnalysisStatus
+    from persistence.analysis.models import Analysis, AnalysisDataSource
 
     analysis_id = str(uuid.uuid4())
     tab1_result_id = str(uuid.uuid4())
@@ -398,7 +401,8 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
 
 @pytest.fixture(scope='function')
 def sample_analyses(test_db_session: Session, sample_datasources: list[DataSource]) -> list[Analysis]:
-    from contracts.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
+    from contracts.analysis.models import AnalysisStatus
+    from persistence.analysis.models import Analysis, AnalysisDataSource
 
     analyses = []
 

@@ -10,10 +10,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from contracts.build_runs.models import BuildRunStatus
-from contracts.runtime import ipc as runtime_ipc
-from contracts.runtime.ipc import RuntimeListenerKind, RuntimePayloadKind
+from contracts.runtime.events import RuntimePayloadKind
 from contracts.runtime_workers.models import RuntimeWorkerKind
-from contracts.scheduler.models import Schedule
 from core import (
     build_jobs_service as build_job_service,
 )
@@ -26,6 +24,9 @@ from core import (
 from core.database import run_db, run_settings_db
 from core.namespace import reset_namespace, set_namespace_context
 from core.namespaces_service import list_runtime_namespaces
+from persistence.scheduler.models import Schedule
+from runtime_common import ipc as runtime_ipc
+from runtime_common.ipc import RuntimeListenerKind
 
 logger = logging.getLogger(__name__)
 

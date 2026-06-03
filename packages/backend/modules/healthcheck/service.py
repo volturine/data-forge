@@ -1,9 +1,10 @@
 import uuid
 from datetime import UTC, datetime
 
-from contracts.datasource.models import DataSource
-from contracts.healthcheck_models import HealthCheck, HealthCheckResult, HealthCheckType
+from contracts.healthcheck_models import HealthCheckType
 from core.exceptions import HealthcheckNotFoundError, HealthcheckValidationError
+from persistence.datasource.models import DataSource
+from persistence.healthchecks.models import HealthCheck, HealthCheckResult
 from sqlalchemy import select
 from sqlmodel import Session
 

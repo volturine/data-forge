@@ -5,8 +5,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from contracts.compute.base import EngineStatusInfo
-from contracts.engine_instances.models import EngineInstance, EngineInstanceStatus
+from contracts.engine_instances.models import EngineInstanceStatus
 from core.engine_identity import parse_engine_identity
+from persistence.engine_instances.models import EngineInstance
 
 
 def _utcnow() -> datetime:

@@ -2,11 +2,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from contracts.analysis.models import Analysis, AnalysisStatus
-from contracts.analysis_versions.models import AnalysisVersion
-from contracts.datasource.models import DataSource
+from contracts.analysis.models import AnalysisStatus
 from contracts.datasource.source_types import DataSourceType
-from contracts.locks.models import ResourceLock
+from persistence.analysis.models import Analysis
+from persistence.analysis_versions.models import AnalysisVersion
+from persistence.datasource.models import DataSource
+from persistence.locks.models import ResourceLock
 
 from modules.analysis_versions.service import create_version, get_version
 

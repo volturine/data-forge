@@ -40,6 +40,9 @@ def test_worker_converter_and_handler_registries_cover_catalog() -> None:
         WORKER_ROOT / "operations" / "__init__.py",
     )
     assert set(compute_operations.HANDLERS) == operations
+    assert set(compute_operations.PARAM_MODELS) == operations
+    for operation, params_model in compute_operations.PARAM_MODELS.items():
+        assert issubclass(params_model, compute_operations.OperationParams), operation
 
 
 def test_generated_frontend_step_schema_exports_catalog_configs() -> None:

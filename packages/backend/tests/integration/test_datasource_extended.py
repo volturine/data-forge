@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, patch
 
 import polars as pl
 import pytest
-from contracts.analysis.models import Analysis
-from contracts.datasource.models import DataSource
-from contracts.engine_runs.models import EngineRun
 from core.exceptions import DataSourceValidationError
 from openpyxl import Workbook
+from persistence.analysis.models import Analysis
+from persistence.datasource.models import DataSource
+from persistence.engine_runs.models import EngineRun
 from sqlmodel import select
 
 from modules.datasource.service import create_analysis_datasource

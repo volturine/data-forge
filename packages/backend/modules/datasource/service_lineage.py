@@ -1,10 +1,10 @@
 from collections import deque
 from typing import Any, TypeAlias
 
-from contracts.analysis.models import Analysis, AnalysisDataSource
-from contracts.datasource.models import DataSource
 from contracts.enums import DataForgeStrEnum
 from core.namespace import get_namespace
+from persistence.analysis.models import Analysis, AnalysisDataSource
+from persistence.datasource.models import DataSource
 from sqlalchemy import select
 from sqlmodel import Session
 

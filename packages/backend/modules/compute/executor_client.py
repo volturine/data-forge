@@ -7,9 +7,8 @@ from pathlib import Path
 from contracts.compute import schemas as compute_schemas
 from contracts.compute_requests.live import response_hub
 from contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
-from contracts.runtime import ipc as runtime_ipc
 from contracts.runtime_workers.models import RuntimeWorkerKind
-from core import compute_requests_service
+from core import compute_requests_service, runtime_outbox_service
 from core.exceptions import PipelineExecutionError
 from core.namespace import get_namespace
 from core.object_store import delete_object, download_bytes, is_object_store_url
@@ -34,14 +33,22 @@ async def _submit_and_wait(
     runtime_probe: RuntimeAvailabilityProbe,
 ):
     _ensure_runtime_available(runtime_probe)
-    request = compute_requests_service.create_request(
-        session,
-        namespace=get_namespace(),
-        kind=kind,
-        request_json=request_json,
-    )
+    try:
+        request = compute_requests_service.create_request(
+            session,
+            namespace=get_namespace(),
+            kind=kind,
+            request_json=request_json,
+            commit=False,
+        )
+        runtime_outbox_service.enqueue_compute_request_notification(session, request_id=request.id, commit=False)
+        session.commit()
+        session.refresh(request)
+    except Exception:
+        session.rollback()
+        raise
     wait_task = asyncio.create_task(response_hub.wait(request.id))
-    await asyncio.to_thread(runtime_ipc.notify_compute_request, request.id)
+    runtime_outbox_service.dispatch_pending_events(session)
     while True:
         session.expire_all()
         completed = compute_requests_service.get_request(session, request.id)
@@ -58,7 +65,7 @@ async def _submit_and_wait(
             wait_task = asyncio.create_task(response_hub.wait(request.id))
     if completed.status == ComputeRequestStatus.COMPLETED:
         return completed
-    payload = completed.response_json or {}
+    payload = compute_requests_service.response_payload(completed)
     message = str(payload.get("error") or completed.error_message or "Compute request failed")
     status_code = payload.get("status_code")
     if isinstance(status_code, int):
@@ -78,7 +85,7 @@ async def preview_step(
         request_json=request.model_dump(mode="json"),
         runtime_probe=runtime_probe,
     )
-    return compute_schemas.StepPreviewResponse.model_validate(completed.response_json)
+    return compute_schemas.StepPreviewResponse.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def get_step_schema(
@@ -93,7 +100,7 @@ async def get_step_schema(
         request_json=request.model_dump(mode="json"),
         runtime_probe=runtime_probe,
     )
-    return compute_schemas.StepSchemaResponse.model_validate(completed.response_json)
+    return compute_schemas.StepSchemaResponse.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def get_step_row_count(
@@ -108,7 +115,7 @@ async def get_step_row_count(
         request_json=request.model_dump(mode="json"),
         runtime_probe=runtime_probe,
     )
-    return compute_schemas.StepRowCountResponse.model_validate(completed.response_json)
+    return compute_schemas.StepRowCountResponse.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def download_step(
@@ -147,7 +154,7 @@ async def export_data(
         request_json=request.model_dump(mode="json"),
         runtime_probe=runtime_probe,
     )
-    return compute_schemas.ExportResponse.model_validate(completed.response_json)
+    return compute_schemas.ExportResponse.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def create_file_datasource(
@@ -194,7 +201,7 @@ async def create_file_datasource(
             "owner_id": owner_id,
         },
     )
-    return datasource_schemas.DataSourceResponse.model_validate(completed.response_json)
+    return datasource_schemas.DataSourceResponse.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def create_database_datasource(
@@ -221,7 +228,7 @@ async def create_database_datasource(
             "owner_id": owner_id,
         },
     )
-    return datasource_schemas.DataSourceResponse.model_validate(completed.response_json)
+    return datasource_schemas.DataSourceResponse.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def create_iceberg_datasource(
@@ -246,7 +253,7 @@ async def create_iceberg_datasource(
             "owner_id": owner_id,
         },
     )
-    return datasource_schemas.DataSourceResponse.model_validate(completed.response_json)
+    return datasource_schemas.DataSourceResponse.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def ingest_datasource(
@@ -261,7 +268,7 @@ async def ingest_datasource(
         request_json={"datasource_id": datasource_id},
         runtime_probe=runtime_probe,
     )
-    return datasource_schemas.DataSourceResponse.model_validate(completed.response_json)
+    return datasource_schemas.DataSourceResponse.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def get_datasource_schema(
@@ -282,7 +289,7 @@ async def get_datasource_schema(
         },
         runtime_probe=runtime_probe,
     )
-    return datasource_schemas.SchemaInfo.model_validate(completed.response_json)
+    return datasource_schemas.SchemaInfo.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def get_column_stats(
@@ -307,7 +314,7 @@ async def get_column_stats(
         },
         runtime_probe=runtime_probe,
     )
-    return datasource_schemas.ColumnStatsResponse.model_validate(completed.response_json)
+    return datasource_schemas.ColumnStatsResponse.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def compare_iceberg_snapshots(
@@ -330,7 +337,7 @@ async def compare_iceberg_snapshots(
         },
         runtime_probe=runtime_probe,
     )
-    return datasource_schemas.SnapshotCompareResponse.model_validate(completed.response_json)
+    return datasource_schemas.SnapshotCompareResponse.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def spawn_engine(
@@ -349,7 +356,7 @@ async def spawn_engine(
         },
         runtime_probe=runtime_probe,
     )
-    return compute_schemas.EngineStatusSchema.model_validate(completed.response_json)
+    return compute_schemas.EngineStatusSchema.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def configure_engine(
@@ -365,7 +372,7 @@ async def configure_engine(
         request_json={"analysis_id": analysis_id, "resource_config": resource_config},
         runtime_probe=runtime_probe,
     )
-    return compute_schemas.EngineStatusSchema.model_validate(completed.response_json)
+    return compute_schemas.EngineStatusSchema.model_validate(compute_requests_service.response_payload(completed))
 
 
 async def shutdown_engine(

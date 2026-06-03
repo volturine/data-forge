@@ -6,13 +6,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
-from contracts.datasource.models import DataSource, DataSourceColumnMetadata, DataSourceCreatedBy
+from contracts.datasource.models import DataSourceCreatedBy
 from contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from core import datasource_delete_service
 from core.datasource_storage import cleanup_datasource_storage
 from core.exceptions import DataSourceNotFoundError, DataSourceValidationError
 from openpyxl import load_workbook
 from openpyxl.utils.cell import get_column_letter, range_boundaries
+from persistence.analysis.models import Analysis
+from persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import defer
 from sqlmodel import Session, col
@@ -283,8 +285,6 @@ def create_analysis_datasource(
     is_hidden: bool = False,
     source_type: DataSourceType = DataSourceType.ANALYSIS,
 ) -> DataSourceResponse:
-    from contracts.analysis.models import Analysis
-
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
         raise ValueError(f"Analysis {analysis_id} not found")

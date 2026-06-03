@@ -2,8 +2,8 @@ import ast
 import uuid
 from datetime import UTC, datetime
 
-from contracts.udf_models import Udf
 from core.exceptions import UdfNotFoundError, UdfValidationError
+from persistence.udfs.models import Udf
 from sqlalchemy import or_, select
 from sqlmodel import Session
 

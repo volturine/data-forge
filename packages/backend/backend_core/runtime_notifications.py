@@ -3,7 +3,7 @@ from __future__ import annotations
 from contracts.build_runs.live import BuildNotification
 from contracts.build_runs.live import hub as build_hub
 from contracts.compute_requests.live import response_hub
-from contracts.runtime.ipc import RuntimePayloadKind
+from contracts.runtime.events import RuntimePayloadKind
 
 from backend_core.engine_live import registry as engine_registry
 

@@ -9,7 +9,6 @@ from typing import Any
 
 from contracts.analysis.pipeline_types import PipelineDefinition, PipelineTab
 from contracts.analysis.step_types import STEP_TYPES, get_step_dependency_values
-from contracts.datasource.models import DataSource
 from contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from contracts.step_config_enums import (
     DeduplicateKeep,
@@ -20,6 +19,7 @@ from contracts.step_config_enums import (
     JoinHow,
     PivotAggregateFunction,
 )
+from persistence.datasource.models import DataSource
 
 from modules.analysis.step_schemas import FilterConfig
 from modules.export.models import CodeExportFormat

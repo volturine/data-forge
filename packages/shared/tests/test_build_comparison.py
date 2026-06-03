@@ -6,9 +6,9 @@ from datetime import UTC, datetime
 import pytest
 from sqlmodel import Session
 
-from contracts.engine_runs.models import EngineRun
 from core.engine_runs_service import _compute_schema_diff, _compute_timing_diff, _safe_int, compare_engine_runs
 from core.exceptions import EngineRunComparisonError, EngineRunNotFoundError
+from persistence.engine_runs.models import EngineRun
 
 
 def _create_run(

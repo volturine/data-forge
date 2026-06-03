@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 
 import pyarrow as pa  # type: ignore[import-untyped]
 from contracts.compute.base import EngineResult
-from contracts.datasource.models import DataSource
 from core.namespace import namespace_paths
+from persistence.datasource.models import DataSource
 from pyiceberg.schema import Schema as IcebergSchema
 from pyiceberg.types import NestedField, StringType
 from sqlmodel import Session

@@ -61,9 +61,9 @@ logger = logging.getLogger(__name__)
 
 
 def _clear_owned_resources(session: Session, user_id: str) -> None:
-    from contracts.analysis.models import Analysis
-    from contracts.datasource.models import DataSource
-    from contracts.udf_models import Udf
+    from persistence.analysis.models import Analysis
+    from persistence.datasource.models import DataSource
+    from persistence.udfs.models import Udf
 
     tables = set(inspect(session.get_bind()).get_table_names())
     ownership_models: dict[str, type[DataSource | Analysis | Udf]] = {

@@ -1,7 +1,7 @@
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from contracts.datasource.models import DataSource
+from persistence.datasource.models import DataSource
 
 
 def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataSource):

@@ -5,9 +5,10 @@ from typing import Any
 from sqlalchemy import desc, func, or_, select, update
 from sqlmodel import Session
 
-from contracts.build_runs.models import BuildEvent, BuildRun, BuildRunStatus
+from contracts.build_runs.models import BuildRunStatus
 from contracts.compute import schemas as compute_schemas
 from contracts.engine_runs.schemas import EngineRunKind
+from persistence.build_runs.models import BuildEvent, BuildRun
 
 _TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus if status.is_terminal)
 
@@ -43,6 +44,7 @@ def create_build_run(
     total_tabs: int = 0,
     created_at: datetime | None = None,
     started_at: datetime | None = None,
+    commit: bool = True,
 ) -> BuildRun:
     now = created_at or _utcnow()
     run_started_at = started_at or now
@@ -70,8 +72,11 @@ def create_build_run(
         total_tabs=total_tabs,
     )
     session.add(run)
-    session.commit()
-    session.refresh(run)
+    if commit:
+        session.commit()
+        session.refresh(run)
+    else:
+        session.flush()
     return run
 
 

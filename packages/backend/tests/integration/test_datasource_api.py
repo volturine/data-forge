@@ -4,9 +4,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import polars as pl
-from contracts.datasource.models import DataSource, DataSourceColumnMetadata
 from core.exceptions import DataSourceValidationError
 from core.object_store import is_object_store_url
+from persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from sqlmodel import select
 
 from main import app

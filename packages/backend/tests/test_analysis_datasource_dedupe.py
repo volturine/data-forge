@@ -1,7 +1,7 @@
 import uuid
 
-from contracts.analysis.models import AnalysisDataSource
-from contracts.datasource.models import DataSource
+from persistence.analysis.models import AnalysisDataSource
+from persistence.datasource.models import DataSource
 from sqlalchemy import select
 
 

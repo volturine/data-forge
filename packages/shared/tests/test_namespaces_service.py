@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 
 from sqlalchemy.exc import IntegrityError
 
-from contracts.namespaces.models import RuntimeNamespace
 from core import namespaces_service
+from persistence.namespaces.models import RuntimeNamespace
 
 
 class _RacingNamespaceSession:

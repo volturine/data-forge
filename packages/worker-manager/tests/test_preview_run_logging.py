@@ -1,6 +1,6 @@
 import uuid
 
-from contracts.engine_runs.models import EngineRun
+from persistence.engine_runs.models import EngineRun
 from sqlmodel import select
 
 from runtime import compute_service

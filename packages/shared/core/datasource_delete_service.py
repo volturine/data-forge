@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 
-from contracts.datasource.models import DataSource
 from core.exceptions import DataSourceNotFoundError
+from persistence.datasource.models import DataSource
 
 
 def _utcnow() -> datetime:

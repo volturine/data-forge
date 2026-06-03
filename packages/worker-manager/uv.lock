@@ -301,6 +301,55 @@ wheels = [
 ]
 
 [[package]]
+name = "dataforge-contracts"
+version = "1.0.0"
+source = { editable = "../contracts" }
+dependencies = [
+    { name = "polars" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "polars" },
+    { name = "pydantic", specifier = ">=2.12" },
+]
+
+[[package]]
+name = "dataforge-persistence"
+version = "1.0.0"
+source = { editable = "../persistence" }
+dependencies = [
+    { name = "croniter" },
+    { name = "dataforge-contracts" },
+    { name = "sqlalchemy" },
+    { name = "sqlmodel" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "croniter" },
+    { name = "dataforge-contracts", editable = "../contracts" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "sqlmodel", specifier = ">=0.0.24" },
+]
+
+[[package]]
+name = "dataforge-runtime-common"
+version = "1.0.0"
+source = { editable = "../runtime-common" }
+dependencies = [
+    { name = "dataforge-contracts" },
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dataforge-contracts", editable = "../contracts" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
+]
+
+[[package]]
 name = "dataforge-shared"
 version = "1.0.0"
 source = { editable = "../shared" }
@@ -309,6 +358,9 @@ dependencies = [
     { name = "boto3" },
     { name = "croniter" },
     { name = "cryptography" },
+    { name = "dataforge-contracts" },
+    { name = "dataforge-persistence" },
+    { name = "dataforge-runtime-common" },
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "fastexcel" },
@@ -337,6 +389,9 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.43.15" },
     { name = "croniter" },
     { name = "cryptography", specifier = ">=46.0.6" },
+    { name = "dataforge-contracts", editable = "../contracts" },
+    { name = "dataforge-persistence", editable = "../persistence" },
+    { name = "dataforge-runtime-common", editable = "../runtime-common" },
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "fastexcel", specifier = ">=0.19.0" },

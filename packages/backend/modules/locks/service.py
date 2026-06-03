@@ -1,8 +1,8 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from contracts.locks.models import ResourceLock
 from core.config import settings
+from persistence.locks.models import ResourceLock
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import Session

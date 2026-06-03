@@ -4,7 +4,8 @@ from datetime import UTC, datetime
 import polars as pl
 from sqlmodel import Session
 
-from contracts.healthcheck_models import HealthCheck, HealthCheckResult, HealthCheckType
+from contracts.healthcheck_models import HealthCheckType
+from persistence.healthchecks.models import HealthCheck, HealthCheckResult
 
 
 def _build_expressions(checks: list[HealthCheck], schema_names: set[str]) -> tuple[list[pl.Expr], list[HealthCheck]]:

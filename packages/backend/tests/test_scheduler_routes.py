@@ -2,8 +2,8 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from contracts.analysis.models import Analysis
-from contracts.datasource.models import DataSource
+from persistence.analysis.models import Analysis
+from persistence.datasource.models import DataSource
 from sqlmodel import Session
 
 

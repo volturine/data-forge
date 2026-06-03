@@ -4,10 +4,10 @@ import asyncio
 from collections.abc import Callable
 
 from contracts.compute.base import EngineStatusInfo
-from contracts.runtime import ipc as runtime_ipc
 from core import engine_instances_service as engine_instance_service
 from core.database import run_settings_db
 from core.namespace import get_namespace
+from runtime_common import ipc as runtime_ipc
 
 
 def persist_engine_snapshot(

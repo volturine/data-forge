@@ -6,7 +6,10 @@ from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
 
-from contracts.compute_requests.models import ComputeRequest, ComputeRequestKind, ComputeRequestStatus
+from contracts.compute_requests.models import ComputeCommandEnvelope, ComputeRequestKind, ComputeRequestStatus, ComputeResponseEnvelope
+from core import runtime_outbox_service
+from core.config import settings
+from persistence.compute_requests.models import ComputeRequest
 
 _HIGH_PRIORITY_REQUEST_KINDS = frozenset(
     {
@@ -45,21 +48,60 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def create_request(session: Session, *, namespace: str, kind: ComputeRequestKind | str, request_json: dict[str, object]) -> ComputeRequest:
+def create_request(
+    session: Session,
+    *,
+    namespace: str,
+    kind: ComputeRequestKind | str,
+    request_json: dict[str, object],
+    commit: bool = True,
+) -> ComputeRequest:
     now = _utcnow()
+    request_id = str(uuid.uuid4())
+    request_kind = kind if isinstance(kind, ComputeRequestKind) else ComputeRequestKind(kind)
+    envelope = ComputeCommandEnvelope(
+        kind=request_kind,
+        version=1,
+        idempotency_key=request_id,
+        correlation_id=request_id,
+        payload=request_json,
+    )
     request = ComputeRequest(
-        id=str(uuid.uuid4()),
+        id=request_id,
         namespace=namespace,
-        kind=kind if isinstance(kind, ComputeRequestKind) else ComputeRequestKind(kind),
+        kind=request_kind,
         status=ComputeRequestStatus.QUEUED,
-        request_json=request_json,
+        request_json=envelope.model_dump(mode='json'),
         created_at=now,
         updated_at=now,
     )
     session.add(request)
-    session.commit()
-    session.refresh(request)
+    if commit:
+        session.commit()
+        session.refresh(request)
+    else:
+        session.flush()
     return request
+
+
+def command_payload(request: ComputeRequest) -> dict[str, object]:
+    envelope = ComputeCommandEnvelope.model_validate(request.request_json)
+    if envelope.kind != request.kind:
+        raise ValueError(f'Compute request {request.id} envelope kind {envelope.kind.value!r} does not match row kind {request.kind.value!r}')
+    return dict(envelope.payload)
+
+
+def response_payload(request: ComputeRequest) -> dict[str, object]:
+    if request.response_json is None:
+        raise ValueError(f'Compute request {request.id} has no response envelope')
+    envelope = ComputeResponseEnvelope.model_validate(request.response_json)
+    if envelope.kind != request.kind:
+        raise ValueError(f'Compute request {request.id} response kind {envelope.kind.value!r} does not match row kind {request.kind.value!r}')
+    if envelope.status != request.status:
+        raise ValueError(f'Compute request {request.id} response status {envelope.status.value!r} does not match row status {request.status.value!r}')
+    if envelope.correlation_id != request.id:
+        raise ValueError(f'Compute request {request.id} response correlation id {envelope.correlation_id!r} does not match request id')
+    return dict(envelope.payload)
 
 
 def get_request(session: Session, request_id: str) -> ComputeRequest | None:
@@ -71,7 +113,10 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
     queued_clause = table.c.status == ComputeRequestStatus.QUEUED
-    reclaimable_clause = and_(table.c.status == ComputeRequestStatus.RUNNING, or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable)))
+    reclaimable_clause = and_(
+        table.c.status == ComputeRequestStatus.RUNNING,
+        or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable), table.c.lease_expires_at <= now),
+    )
     base = select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).order_by(_request_priority_clause(table), table.c.created_at).limit(1)
     dialect = session.get_bind().dialect.name
     stmt = base.with_for_update(skip_locked=True) if dialect == 'postgresql' else base
@@ -85,7 +130,15 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
         claim.where(table.c.lease_owner.is_(None)) if previous_owner is None else claim.where(ComputeRequest.lease_owner == previous_owner)  # type: ignore[arg-type]
     )
     result = cast(
-        CursorResult[Any], session.execute(claim.values(status=ComputeRequestStatus.RUNNING, lease_owner=worker_id, lease_expires_at=None, updated_at=now))
+        CursorResult[Any],
+        session.execute(
+            claim.values(
+                status=ComputeRequestStatus.RUNNING,
+                lease_owner=worker_id,
+                lease_expires_at=now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
+                updated_at=now,
+            )
+        ),
     )
     if result.rowcount != 1:
         session.rollback()
@@ -108,7 +161,13 @@ def mark_request_completed(
     if request is None:
         raise ValueError(f'Compute request {request_id} not found')
     request.status = ComputeRequestStatus.COMPLETED
-    request.response_json = response_json
+    request.response_json = ComputeResponseEnvelope(
+        kind=request.kind,
+        version=1,
+        correlation_id=request.id,
+        status=ComputeRequestStatus.COMPLETED,
+        payload=response_json or {},
+    ).model_dump(mode='json')
     request.error_message = None
     request.artifact_path = artifact_path
     request.artifact_name = artifact_name
@@ -118,6 +177,7 @@ def mark_request_completed(
     request.lease_owner = None
     request.lease_expires_at = None
     session.add(request)
+    runtime_outbox_service.enqueue_compute_response_notification(session, request_id=request.id, commit=False)
     session.commit()
     session.refresh(request)
     return request
@@ -130,12 +190,20 @@ def mark_request_failed(session: Session, request_id: str, *, error_message: str
         raise ValueError(f'Compute request {request_id} not found')
     request.status = ComputeRequestStatus.FAILED
     request.error_message = error_message
-    request.response_json = response_json
+    request.response_json = ComputeResponseEnvelope(
+        kind=request.kind,
+        version=1,
+        correlation_id=request.id,
+        status=ComputeRequestStatus.FAILED,
+        payload=response_json or {},
+        error_message=error_message,
+    ).model_dump(mode='json')
     request.completed_at = _utcnow()
     request.updated_at = request.completed_at
     request.lease_owner = None
     request.lease_expires_at = None
     session.add(request)
+    runtime_outbox_service.enqueue_compute_response_notification(session, request_id=request.id, commit=False)
     session.commit()
     session.refresh(request)
     return request

@@ -2,7 +2,8 @@ from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 
-from contracts.runtime_workers.models import RuntimeWorker, RuntimeWorkerKind
+from contracts.runtime_workers.models import RuntimeWorkerKind
+from persistence.runtime_workers.models import RuntimeWorker
 
 
 def _utcnow() -> datetime:

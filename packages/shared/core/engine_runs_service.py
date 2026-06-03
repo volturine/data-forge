@@ -10,7 +10,6 @@ from sqlmodel import Session
 from contracts.analysis.step_types import get_step_timing_key
 from contracts.compute import schemas as compute_schemas
 from contracts.compute.schemas import BuildLogLevel, BuildStepState
-from contracts.engine_runs.models import EngineRun
 from contracts.engine_runs.schemas import (
     BuildComparisonResponse,
     ColumnDiff,
@@ -26,6 +25,7 @@ from contracts.engine_runs.schemas import (
 )
 from core.engine_runs_utils import normalize_step_timings
 from core.exceptions import EngineRunComparisonError, EngineRunNotFoundError
+from persistence.engine_runs.models import EngineRun
 
 logger = logging.getLogger(__name__)
 

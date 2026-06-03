@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from contracts.engine_runs.models import EngineRun
+from persistence.engine_runs.models import EngineRun
 from sqlmodel import Session
 
 

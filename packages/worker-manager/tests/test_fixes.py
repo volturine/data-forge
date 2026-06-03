@@ -11,9 +11,9 @@ from zoneinfo import ZoneInfo
 import polars as pl
 import pytest
 from contracts.compute import schemas as compute_schemas
-from contracts.datasource.models import DataSource
 from contracts.engine_runs.schemas import EngineRunResponseSchema
 from core.engine_identity import datasource_preview_engine_key
+from persistence.datasource.models import DataSource
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
@@ -57,7 +57,7 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
     monkeypatch.setattr(
         compute_request_runtime.compute_requests_service, "mark_request_completed", lambda session, request_id, response_json: completed.append(response_json)
     )
-    monkeypatch.setattr(compute_request_runtime.runtime_ipc, "notify_compute_response", lambda request_id: None)
+    monkeypatch.setattr(compute_request_runtime.runtime_outbox_service, "dispatch_pending_events", lambda session: 0)
     monkeypatch.setattr(compute_request_runtime.time, "sleep", fake_sleep)
 
     manager = SimpleNamespace(

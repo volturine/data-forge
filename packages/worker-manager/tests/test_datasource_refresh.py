@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import polars as pl
 import pytest
-from contracts.datasource.models import DataSource
-from contracts.engine_runs.models import EngineRun
+from persistence.datasource.models import DataSource
+from persistence.engine_runs.models import EngineRun
 from sqlmodel import Session, select
 
 

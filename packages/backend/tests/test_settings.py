@@ -198,8 +198,8 @@ class TestUpdateSettings:
         assert get_resolved_openrouter_key() == "sk-live"
 
     def test_encrypts_settings_secrets_at_rest(self, client: TestClient, monkeypatch) -> None:
-        from contracts.settings_models import AppSettings
         from core.database import run_settings_db
+        from persistence.settings.models import AppSettings
 
         monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", "test-key")
         client.put(
@@ -229,8 +229,8 @@ class TestUpdateSettings:
         assert row.openrouter_api_key.startswith("enc:v1:")
 
     def test_get_rejects_unsupported_secret_storage_format(self, client: TestClient, monkeypatch) -> None:
-        from contracts.settings_models import AppSettings
         from core.database import run_settings_db
+        from persistence.settings.models import AppSettings
 
         monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", "test-key")
 
@@ -746,8 +746,8 @@ class TestSeedSettingsFromEnv:
         return engine
 
     def test_seeds_all_fields_when_db_is_empty(self, monkeypatch) -> None:
-        from contracts.settings_models import AppSettings
         from core.config import settings as app_settings
+        from persistence.settings.models import AppSettings
 
         from backend_core.settings_store import seed_settings_from_env
 
@@ -776,8 +776,8 @@ class TestSeedSettingsFromEnv:
             assert row.env_bootstrap_complete is True
 
     def test_does_not_overwrite_existing_db_values(self, monkeypatch) -> None:
-        from contracts.settings_models import AppSettings
         from core.config import settings as app_settings
+        from persistence.settings.models import AppSettings
 
         from backend_core.settings_store import seed_settings_from_env
 
@@ -807,8 +807,8 @@ class TestSeedSettingsFromEnv:
             assert row.openrouter_default_model == "db/model"
 
     def test_seeds_openrouter_default_model_field(self, monkeypatch) -> None:
-        from contracts.settings_models import AppSettings
         from core.config import settings as app_settings
+        from persistence.settings.models import AppSettings
 
         from backend_core.settings_store import seed_settings_from_env
 
@@ -827,8 +827,8 @@ class TestSeedSettingsFromEnv:
             assert row.openrouter_default_model == "anthropic/claude-3-5-sonnet"
 
     def test_seed_is_idempotent(self, monkeypatch) -> None:
-        from contracts.settings_models import AppSettings
         from core.config import settings as app_settings
+        from persistence.settings.models import AppSettings
 
         from backend_core.settings_store import seed_settings_from_env
 
@@ -848,8 +848,8 @@ class TestSeedSettingsFromEnv:
             assert row.env_bootstrap_complete is True
 
     def test_existing_row_preserves_explicit_default_values(self, monkeypatch) -> None:
-        from contracts.settings_models import AppSettings
         from core.config import settings as app_settings
+        from persistence.settings.models import AppSettings
 
         from backend_core.settings_store import seed_settings_from_env
 
@@ -874,8 +874,8 @@ class TestSeedSettingsFromEnv:
             assert row.telegram_bot_enabled is False
 
     def test_password_seed_logs_warning_until_encryption_key_exists(self, monkeypatch, caplog) -> None:
-        from contracts.settings_models import AppSettings
         from core.config import settings as app_settings
+        from persistence.settings.models import AppSettings
 
         from backend_core.settings_store import seed_settings_from_env
 
@@ -897,9 +897,9 @@ class TestSeedSettingsFromEnv:
             assert "SETTINGS_ENCRYPTION_KEY" in caplog.text
 
     def test_lifespan_bot_check_uses_decrypted_settings_db(self, monkeypatch):
-        from contracts.settings_models import AppSettings
         from core import database
         from core.secrets import encrypt_secret
+        from persistence.settings.models import AppSettings
 
         monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", "test-key")
         engine, _schema = _make_postgres_engine("settings")
@@ -922,8 +922,8 @@ class TestSeedSettingsFromEnv:
         assert resolved["token"] == "bot:tok"
 
     def test_update_settings_disables_future_env_bootstrap(self, monkeypatch) -> None:
-        from contracts.settings_models import AppSettings
         from core.config import settings as app_settings
+        from persistence.settings.models import AppSettings
 
         from backend_core.settings_schemas import SettingsUpdate
         from backend_core.settings_store import seed_settings_from_env, update_settings

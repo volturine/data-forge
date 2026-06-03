@@ -14,7 +14,6 @@ from urllib.parse import urlparse
 
 import polars as pl
 import psycopg
-from contracts.datasource.models import DataSource, DataSourceColumnMetadata
 from contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from core import engine_runs_service
@@ -35,6 +34,7 @@ from core.object_store import (
     object_store_storage_options,
     object_store_url,
 )
+from persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from polars.datatypes import Array, List, Struct
 from pyiceberg.table import Table
 from sqlalchemy.exc import IntegrityError

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from contracts.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite, AnalysisStatus
+from contracts.analysis.models import AnalysisStatus
 from contracts.analysis.pipeline_types import (
     PipelineDefinition,
     PipelineStep,
@@ -15,7 +15,6 @@ from contracts.analysis.pipeline_types import (
     TabDatasource,
     TabOutput,
 )
-from contracts.datasource.models import DataSource
 from contracts.step_config_enums import AIProvider
 from core.ai_clients import AIError, get_ai_client
 from core.analysis_cycles import assert_no_analysis_cycle
@@ -24,6 +23,8 @@ from core.exceptions import (
     AnalysisValidationError,
     DataSourceNotFoundError,
 )
+from persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
+from persistence.datasource.models import DataSource
 from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import defer

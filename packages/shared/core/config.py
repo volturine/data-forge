@@ -19,6 +19,9 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('max_concurrent_engines', 1, 100),
     ('workers', 0, 32),
     ('compute_request_concurrency', 1, 100),
+    ('runtime_reconciliation_poll_interval_seconds', 1, None),
+    ('runtime_outbox_retry_seconds', 1, None),
+    ('runtime_work_lease_ttl_seconds', 1, None),
     ('build_worker_min_processes', 0, 100),
     ('build_worker_max_processes', 0, 100),
     ('build_worker_idle_exit_seconds', 1, None),
@@ -121,6 +124,9 @@ class Settings(BaseSettings):
     # Number of Gunicorn/Uvicorn workers (0 = auto: 2 * cores + 1)
     workers: int = Field(default=1, alias='WORKERS')
     compute_request_concurrency: int = Field(default=4, alias='COMPUTE_REQUEST_CONCURRENCY')
+    runtime_reconciliation_poll_interval_seconds: int = Field(default=1, alias='RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS')
+    runtime_outbox_retry_seconds: int = Field(default=5, alias='RUNTIME_OUTBOX_RETRY_SECONDS')
+    runtime_work_lease_ttl_seconds: int = Field(default=300, alias='RUNTIME_WORK_LEASE_TTL_SECONDS')
     embedded_build_worker_enabled: bool = Field(default=False, alias='EMBEDDED_BUILD_WORKER_ENABLED')
 
     # Maximum connections per worker
@@ -325,3 +331,12 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def _configure_runtime_ipc() -> None:
+    from runtime_common import ipc as runtime_ipc
+
+    runtime_ipc.configure_database_url_provider(lambda: settings.database_url)
+
+
+_configure_runtime_ipc()

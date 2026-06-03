@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from contracts.datasource.models import DataSource
 from contracts.datasource.source_types import DataSourceType
+from persistence.datasource.models import DataSource
 
 from modules.datasource import service
 

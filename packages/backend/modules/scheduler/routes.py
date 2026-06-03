@@ -1,11 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from contracts.analysis.models import Analysis
-from contracts.datasource.models import DataSource
-from contracts.runtime import ipc as runtime_ipc
 from contracts.scheduler import schemas
-from contracts.scheduler.models import Schedule
 from core.database import get_db
 from core.exceptions import (
     DataSourceNotFoundError,
@@ -13,6 +9,10 @@ from core.exceptions import (
     ScheduleValidationError,
 )
 from fastapi import Depends
+from persistence.analysis.models import Analysis
+from persistence.datasource.models import DataSource
+from persistence.scheduler.models import Schedule
+from runtime_common import ipc as runtime_ipc
 from sqlalchemy import select
 from sqlmodel import Session, col
 

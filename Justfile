@@ -6,6 +6,9 @@ pytest := 'uv run python -m pytest -c pyproject.toml -q'
 python := 'uv run python'
 
 install:
+    cd packages/contracts && uv sync
+    cd packages/persistence && uv sync
+    cd packages/runtime-common && uv sync
     cd packages/shared && uv sync
     cd packages/backend && uv sync
     cd packages/scheduler && uv sync
@@ -16,6 +19,12 @@ install:
 # - frontend: bun update --latest updates package.json ranges to latest majors
 # - python: uv lock --upgrade refreshes to the latest versions allowed by pyproject constraints
 update-deps:
+    @echo "Updating contracts dependencies to latest allowed releases..."
+    cd packages/contracts && uv lock --upgrade --resolution highest && uv sync
+    @echo "Updating persistence dependencies to latest allowed releases..."
+    cd packages/persistence && uv lock --upgrade --resolution highest && uv sync
+    @echo "Updating runtime-common dependencies to latest allowed releases..."
+    cd packages/runtime-common && uv lock --upgrade --resolution highest && uv sync
     @echo "Updating backend dependencies to latest allowed releases..."
     cd packages/backend && uv lock --upgrade --resolution highest && uv sync
     @echo "Updating frontend dependencies to latest releases (including majors)..."
@@ -74,18 +83,23 @@ dev-clean:
 
 format:
     cd packages/shared && uv run ruff check --select I --fix .
+    cd packages/shared && uv run ruff check --select I --fix ../contracts ../persistence ../runtime-common
     cd packages/backend && uv run --project ../shared ruff check --select I --fix .
     cd packages/scheduler && uv run --project ../shared ruff check --select I --fix .
     cd packages/worker-manager && uv run --project ../shared ruff check --select I --fix .
     cd packages/shared && uv run ruff format .
+    cd packages/shared && uv run ruff format ../contracts ../persistence ../runtime-common
     cd packages/backend && uv run --project ../shared ruff format .
     cd packages/scheduler && uv run --project ../shared ruff format .
     cd packages/worker-manager && uv run --project ../shared ruff format .
     cd packages/frontend && bun run format
 
 check:
-    cd packages/shared && uv run ruff format --check . ../backend ../scheduler ../worker-manager
-    cd packages/shared && uv run ruff check . ../backend ../scheduler ../worker-manager
+    cd packages/shared && uv run ruff format --check . ../contracts ../persistence ../runtime-common ../backend ../scheduler ../worker-manager
+    cd packages/shared && uv run ruff check . ../contracts ../persistence ../runtime-common ../backend ../scheduler ../worker-manager
+    cd packages/shared && uv run python -m mypy ../contracts
+    cd packages/shared && uv run python -m mypy ../persistence
+    cd packages/shared && uv run python -m mypy ../runtime-common
     cd packages/shared && uv run python -m mypy .
     cd packages/shared && uv run python -m mypy ../backend
     cd packages/shared && uv run python -m mypy ../scheduler

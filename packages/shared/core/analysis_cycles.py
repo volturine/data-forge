@@ -3,9 +3,9 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlmodel import Session, col
 
-from contracts.analysis.models import AnalysisDataSource
-from contracts.datasource.models import DataSource
 from core.exceptions import AnalysisCycleError
+from persistence.analysis.models import AnalysisDataSource
+from persistence.datasource.models import DataSource
 
 
 def detect_analysis_cycle(session: Session, analysis_id: str, source_analysis_id: str) -> bool:

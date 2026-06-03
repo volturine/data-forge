@@ -6,8 +6,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from contracts.runtime import ipc as runtime_ipc
-from contracts.runtime.ipc import RuntimeListenerKind
 from contracts.runtime_workers.models import RuntimeWorkerKind
 from core import build_runs_service as build_run_service
 from core import runtime_workers_service as runtime_worker_service
@@ -35,6 +33,8 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from runtime_common import ipc as runtime_ipc
+from runtime_common.ipc import RuntimeListenerKind
 from sqlmodel import Session, text
 
 from api import router

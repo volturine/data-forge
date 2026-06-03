@@ -3,14 +3,16 @@ from __future__ import annotations
 import socket
 from datetime import UTC, datetime
 
-from contracts.build_jobs.models import BuildJob, BuildJobStatus
-from contracts.engine_instances.models import EngineInstance
-from contracts.runtime_workers.models import RuntimeWorker, RuntimeWorkerKind
+from contracts.build_jobs.models import BuildJobStatus
+from contracts.runtime_workers.models import RuntimeWorkerKind
 from core import runtime_workers_service
 from core.config import settings
 from core.database import run_db, run_settings_db, supports_distributed_runtime
 from core.engine_identity import parse_engine_identity
 from core.namespace import list_namespaces, reset_namespace, set_namespace_context
+from persistence.build_jobs.models import BuildJob
+from persistence.engine_instances.models import EngineInstance
+from persistence.runtime_workers.models import RuntimeWorker
 from sqlmodel import Session, select
 
 from . import schemas

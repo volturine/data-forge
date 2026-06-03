@@ -15,7 +15,13 @@ function confirmDialog(page: Page, heading: string | RegExp): Locator {
 async function bestEffortShutdownAnalysisEngine(page: Page, name: string): Promise<void> {
 	const analysisId = findAnalysisIdByName(name);
 	if (!analysisId) return;
-	await shutdownEngineViaUi(page, analysisId, { timeoutMs: 1_500 }).catch(() => undefined);
+	try {
+		await shutdownEngineViaUi(page, analysisId, { timeoutMs: 1_500 });
+	} catch {
+		return;
+	} finally {
+		await page.keyboard.press('Escape').catch(() => undefined);
+	}
 }
 
 async function waitForHealthChecksList(page: Page, timeout: number): Promise<void> {

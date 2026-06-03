@@ -1,8 +1,8 @@
 """Unit tests for UDF module."""
 
 import pytest
-from contracts.udf_models import Udf
 from core.exceptions import UdfNotFoundError, UdfValidationError
+from persistence.udfs.models import Udf
 
 from main import app
 from modules.auth.dependencies import get_optional_user

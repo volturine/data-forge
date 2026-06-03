@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
-from contracts.locks.models import ResourceLock
 from core.database import run_settings_db
+from persistence.locks.models import ResourceLock
 
 from modules.auth.service import ensure_default_user
 

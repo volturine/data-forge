@@ -1,12 +1,14 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import and_, desc, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
 
-from contracts.build_jobs.models import BuildJob, BuildJobStatus
+from contracts.build_jobs.models import BuildJobStatus
+from core.config import settings
+from persistence.build_jobs.models import BuildJob
 
 
 def _utcnow() -> datetime:
@@ -22,6 +24,7 @@ def create_job(
     priority: int = 0,
     max_attempts: int = 1,
     available_at: datetime | None = None,
+    commit: bool = True,
 ) -> BuildJob:
     now = _utcnow()
     job = BuildJob(
@@ -37,8 +40,11 @@ def create_job(
         updated_at=now,
     )
     session.add(job)
-    session.commit()
-    session.refresh(job)
+    if commit:
+        session.commit()
+        session.refresh(job)
+    else:
+        session.flush()
     return job
 
 
@@ -53,9 +59,10 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
     reclaimable = set(reclaimable_owner_ids or ())
     queued_clause = table.c.status == BuildJobStatus.QUEUED
     reclaimable_statuses = [status for status in BuildJobStatus if status.is_reclaimable]
+    lease_expired_clause = table.c.lease_expires_at <= now
     reclaimable_clause = and_(
         table.c.status.in_(reclaimable_statuses),
-        or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable)),
+        or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable), lease_expired_clause),
         table.c.attempts < table.c.max_attempts,
     )
     base = (
@@ -85,7 +92,13 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
     result = cast(
         CursorResult[Any],
         session.execute(
-            claim.values(status=BuildJobStatus.RUNNING, lease_owner=worker_id, lease_expires_at=None, attempts=current_attempts + 1, updated_at=now)
+            claim.values(
+                status=BuildJobStatus.RUNNING,
+                lease_owner=worker_id,
+                lease_expires_at=now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
+                attempts=current_attempts + 1,
+                updated_at=now,
+            )
         ),
     )
     if result.rowcount != 1:

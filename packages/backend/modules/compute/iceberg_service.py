@@ -1,10 +1,8 @@
 from datetime import UTC
 from pathlib import Path
 
-from contracts.build_runs.models import BuildRun, BuildRunStatus
+from contracts.build_runs.models import BuildRunStatus
 from contracts.compute import schemas
-from contracts.datasource.models import DataSource
-from contracts.engine_runs.models import EngineRun
 from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError
 from core.iceberg_catalog import load_runtime_catalog
@@ -13,6 +11,9 @@ from core.iceberg_metadata import (
     resolve_iceberg_metadata_path,
 )
 from core.object_store import object_store_storage_options
+from persistence.build_runs.models import BuildRun
+from persistence.datasource.models import DataSource
+from persistence.engine_runs.models import EngineRun
 from sqlalchemy import or_, select
 from sqlmodel import Session
 

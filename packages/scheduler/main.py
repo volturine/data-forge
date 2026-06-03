@@ -9,8 +9,7 @@ import threading
 import uuid
 
 from contracts.build_jobs.live import hub as build_job_hub
-from contracts.runtime import ipc as runtime_ipc
-from contracts.runtime.ipc import RuntimePayloadKind
+from contracts.runtime.events import RuntimePayloadKind
 from contracts.runtime_workers.models import RuntimeWorkerKind
 from core import runtime_workers_service as runtime_worker_service
 from core.config import settings
@@ -18,6 +17,7 @@ from core.database import init_db, run_db, run_settings_db
 from core.logging import configure_logging
 from core.namespace import reset_namespace, set_namespace_context
 from core.namespaces_service import list_runtime_namespaces
+from runtime_common import ipc as runtime_ipc
 from sqlmodel import Session
 
 import scheduler_service

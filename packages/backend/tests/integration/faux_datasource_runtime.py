@@ -10,8 +10,8 @@ from typing import Any
 
 import polars as pl
 import pytest
-from contracts.datasource.models import DataSource
 from contracts.datasource.source_types import DataSourceType
+from persistence.datasource.models import DataSource
 from sqlmodel import Session
 
 

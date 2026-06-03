@@ -1,8 +1,8 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from contracts.datasource.models import DataSource
-from contracts.healthcheck_models import HealthCheck, HealthCheckResult
+from persistence.datasource.models import DataSource
+from persistence.healthchecks.models import HealthCheck, HealthCheckResult
 
 
 def _create_datasource(session, ds_id: str | None = None) -> DataSource:

@@ -2,9 +2,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import cast
 
-from contracts.analysis.models import Analysis, AnalysisDataSource
-from contracts.analysis_versions.models import AnalysisVersion
-from contracts.datasource.models import DataSource
 from core.analysis_cycles import assert_no_analysis_cycle
 from core.exceptions import (
     AnalysisNotFoundError,
@@ -12,6 +9,9 @@ from core.exceptions import (
     AnalysisVersionNotFoundError,
     DataSourceNotFoundError,
 )
+from persistence.analysis.models import Analysis, AnalysisDataSource
+from persistence.analysis_versions.models import AnalysisVersion
+from persistence.datasource.models import DataSource
 from sqlalchemy import delete, desc, func, insert, select
 from sqlmodel import Session, col
 

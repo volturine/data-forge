@@ -14,12 +14,11 @@ import uuid
 from multiprocessing.synchronize import Event as ProcessEvent
 
 from contracts.build_jobs.live import hub as build_job_hub
-from contracts.runtime import ipc as runtime_ipc
-from contracts.runtime.ipc import RuntimeListenerKind
 from contracts.runtime_workers.models import RuntimeWorkerKind
 from core import (
     build_jobs_service as build_job_service,
 )
+from core import runtime_outbox_service
 from core import (
     runtime_workers_service as runtime_worker_service,
 )
@@ -27,6 +26,8 @@ from core.config import settings
 from core.database import init_db, run_db, run_settings_db
 from core.logging import configure_logging
 from core.namespace import reset_namespace, set_namespace_context
+from runtime_common import ipc as runtime_ipc
+from runtime_common.ipc import RuntimeListenerKind
 
 from runtime.compute_manager import ProcessManager
 from runtime.compute_request_runtime import compute_request_loop
@@ -101,6 +102,17 @@ def queued_job_count() -> int:
         finally:
             reset_namespace(token)
     return count
+
+
+def dispatch_runtime_outbox_events() -> int:
+    dispatched = 0
+    for namespace in runtime_namespaces():
+        token = set_namespace_context(namespace)
+        try:
+            dispatched += run_db(runtime_outbox_service.dispatch_pending_events)
+        finally:
+            reset_namespace(token)
+    return dispatched
 
 
 def _manager_heartbeat_loop(stop_signal: threading.Event, worker_id: str, *, heartbeat_seconds: float = 5.0) -> None:
@@ -272,6 +284,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
     try:
         while not local_stop.is_set():
             _reap_dead_children(children)
+            await asyncio.to_thread(dispatch_runtime_outbox_events)
 
             queued = await asyncio.to_thread(queued_job_count)
             desired = min(
@@ -291,7 +304,8 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
             if len(children) >= desired and queued == 0:
                 wait_task = asyncio.create_task(build_job_hub.wait(last_seen))
                 stop_task = asyncio.create_task(local_stop.wait())
-                done, pending = await asyncio.wait({wait_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+                poll_task = asyncio.create_task(asyncio.sleep(settings.runtime_reconciliation_poll_interval_seconds))
+                done, pending = await asyncio.wait({wait_task, stop_task, poll_task}, return_when=asyncio.FIRST_COMPLETED)
                 for task in pending:
                     task.cancel()
                 if pending:

@@ -2,10 +2,11 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from contracts.build_runs.models import BuildRunStatus
-from contracts.datasource.models import DataSource, DataSourceCreatedBy
+from contracts.datasource.models import DataSourceCreatedBy
 from contracts.datasource.source_types import DataSourceType
 from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from core import build_runs_service, engine_runs_service
+from persistence.datasource.models import DataSource
 
 from modules.compute import iceberg_service
 

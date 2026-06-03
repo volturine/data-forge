@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 
-from contracts.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
-from contracts.datasource.models import DataSource
+from contracts.analysis.models import AnalysisStatus
+from persistence.analysis.models import Analysis, AnalysisDataSource
+from persistence.datasource.models import DataSource
 
 
 def _create_analysis(analysis_id: str, name: str) -> Analysis:

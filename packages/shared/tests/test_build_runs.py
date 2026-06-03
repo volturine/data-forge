@@ -3,10 +3,11 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel import select
 
-from contracts.build_runs.models import BuildEvent, BuildRunStatus
+from contracts.build_runs.models import BuildRunStatus
 from contracts.compute import schemas as compute_schemas
 from contracts.engine_runs.schemas import EngineRunKind
 from core import build_runs_service as build_run_service
+from persistence.build_runs.models import BuildEvent
 
 
 def _starter() -> dict[str, object]:

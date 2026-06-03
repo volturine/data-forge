@@ -12,7 +12,9 @@ PYTHON_SOURCE_ROOTS = [
     ROOT / 'packages/worker-manager',
     ROOT / 'packages/scheduler',
     ROOT / 'packages/shared/core',
-    ROOT / 'packages/shared/contracts',
+    ROOT / 'packages/contracts/contracts',
+    ROOT / 'packages/persistence/persistence',
+    ROOT / 'packages/runtime-common/runtime_common',
 ]
 
 TODO_PATTERN = re.compile(r'\b(TODO|FIXME|HACK)\b')

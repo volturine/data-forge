@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from contracts.telegram_models import TelegramSubscriber
 from fastapi.testclient import TestClient
+from persistence.telegram.models import TelegramSubscriber
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 

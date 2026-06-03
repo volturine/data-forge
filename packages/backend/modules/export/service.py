@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from contracts.analysis.models import Analysis
-from contracts.datasource.models import DataSource
 from core.exceptions import AnalysisNotFoundError
+from persistence.analysis.models import Analysis
+from persistence.datasource.models import DataSource
 from sqlmodel import Session
 
 from modules.export.generators import generate_code, select_tabs

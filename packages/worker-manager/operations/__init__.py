@@ -1,35 +1,36 @@
 from contracts.compute.base import OperationHandler, OperationParams
 
-from operations.ai import AIHandler
-from operations.datasource import DatasourceHandler
-from operations.deduplicate import DeduplicateHandler
-from operations.download import DownloadHandler
-from operations.drop import DropHandler
-from operations.explode import ExplodeHandler
-from operations.export import ExportHandler
-from operations.expression import ExpressionHandler
-from operations.fill_null import FillNullHandler
-from operations.filter import FilterHandler
-from operations.groupby import GroupByHandler
-from operations.join import JoinHandler
-from operations.limit import LimitHandler
-from operations.notification import NotificationHandler
-from operations.pivot import PivotHandler
-from operations.plot import ChartHandler
-from operations.rename import RenameHandler
-from operations.sample import SampleHandler
-from operations.select import SelectHandler
-from operations.sort import SortHandler
-from operations.strings import StringTransformHandler
-from operations.timeseries import TimeseriesHandler
-from operations.topk import TopKHandler
-from operations.union import UnionByNameHandler
-from operations.unpivot import UnpivotHandler
-from operations.view import ViewHandler
-from operations.with_columns import WithColumnsHandler
+from operations.ai import AIHandler, AIParams
+from operations.datasource import DatasourceHandler, DatasourceParams
+from operations.deduplicate import DeduplicateHandler, DeduplicateParams
+from operations.download import DownloadHandler, DownloadParams
+from operations.drop import DropHandler, DropParams
+from operations.explode import ExplodeHandler, ExplodeParams
+from operations.export import ExportHandler, ExportParams
+from operations.expression import ExpressionHandler, ExpressionParams
+from operations.fill_null import FillNullHandler, FillNullParams
+from operations.filter import FilterHandler, FilterParams
+from operations.groupby import GroupByHandler, GroupByParams
+from operations.join import JoinHandler, JoinParams
+from operations.limit import LimitHandler, LimitParams
+from operations.notification import NotificationHandler, NotificationParams
+from operations.pivot import PivotHandler, PivotParams
+from operations.plot import ChartHandler, ChartParams
+from operations.rename import RenameHandler, RenameParams
+from operations.sample import SampleHandler, SampleParams
+from operations.select import SelectHandler, SelectParams
+from operations.sort import SortHandler, SortParams
+from operations.strings import StringTransformHandler, StringTransformParams
+from operations.timeseries import TimeseriesHandler, TimeseriesParams
+from operations.topk import TopKHandler, TopKParams
+from operations.union import UnionByNameHandler, UnionParams
+from operations.unpivot import UnpivotHandler, UnpivotParams
+from operations.view import ViewHandler, ViewParams
+from operations.with_columns import WithColumnsHandler, WithColumnsParams
 
 __all__ = [
     "HANDLERS",
+    "PARAM_MODELS",
     "OperationHandler",
     "OperationParams",
 ]
@@ -62,4 +63,34 @@ HANDLERS: dict[str, OperationHandler] = {
     "with_columns": WithColumnsHandler(),
     "expression": ExpressionHandler(),
     "chart": ChartHandler(),
+}
+
+PARAM_MODELS: dict[str, type[OperationParams]] = {
+    "datasource": DatasourceParams,
+    "ai": AIParams,
+    "deduplicate": DeduplicateParams,
+    "download": DownloadParams,
+    "drop": DropParams,
+    "explode": ExplodeParams,
+    "export": ExportParams,
+    "fill_null": FillNullParams,
+    "filter": FilterParams,
+    "groupby": GroupByParams,
+    "join": JoinParams,
+    "limit": LimitParams,
+    "notification": NotificationParams,
+    "pivot": PivotParams,
+    "rename": RenameParams,
+    "sample": SampleParams,
+    "select": SelectParams,
+    "sort": SortParams,
+    "string_transform": StringTransformParams,
+    "timeseries": TimeseriesParams,
+    "topk": TopKParams,
+    "union_by_name": UnionParams,
+    "unpivot": UnpivotParams,
+    "view": ViewParams,
+    "with_columns": WithColumnsParams,
+    "expression": ExpressionParams,
+    "chart": ChartParams,
 }

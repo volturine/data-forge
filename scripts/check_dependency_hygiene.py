@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FRONTEND_PACKAGE_JSON = ROOT / 'packages/frontend/package.json'
 PYPROJECT_FILES = {
+    'contracts': ROOT / 'packages/contracts/pyproject.toml',
+    'persistence': ROOT / 'packages/persistence/pyproject.toml',
+    'runtime-common': ROOT / 'packages/runtime-common/pyproject.toml',
     'shared': ROOT / 'packages/shared/pyproject.toml',
     'backend': ROOT / 'packages/backend/pyproject.toml',
     'worker-manager': ROOT / 'packages/worker-manager/pyproject.toml',

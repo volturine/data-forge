@@ -1,6 +1,5 @@
 import logging
 
-from contracts.settings_models import AppSettings
 from core.exceptions import SettingsConfigurationError
 from core.secrets import decrypt_secret, encrypt_secret, is_masked_secret, mask_secret
 from core.settings_projection import (
@@ -30,6 +29,7 @@ from core.settings_projection import (
 from core.settings_projection import (
     invalidate_resolved_settings_cache,
 )
+from persistence.settings.models import AppSettings
 from sqlmodel import Session
 
 from backend_core.settings_schemas import SettingsResponse, SettingsUpdate

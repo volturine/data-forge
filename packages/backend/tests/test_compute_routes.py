@@ -1,5 +1,10 @@
-from contracts.datasource.models import DataSource, DataSourceCreatedBy
+from contracts.datasource.models import DataSourceCreatedBy
 from contracts.datasource.source_types import DataSourceType
+from persistence.build_jobs.models import BuildJob
+from persistence.build_runs.models import BuildRun
+from persistence.datasource.models import DataSource
+from persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
+from sqlalchemy import select
 
 from backend_core.dependencies import get_manager, get_runtime_availability_probe
 from main import app
@@ -163,6 +168,7 @@ def test_start_build_recreates_deleted_output_placeholder(client, test_db_sessio
         app.dependency_overrides.pop(get_runtime_availability_probe, None)
 
     assert response.status_code == 200
+    build_id = response.json()["build_id"]
     datasource = test_db_session.get(DataSource, "11111111-1111-4111-8111-111111111111")
     assert datasource is not None
     assert datasource.name == "source_1"
@@ -175,3 +181,8 @@ def test_start_build_recreates_deleted_output_placeholder(client, test_db_sessio
     assert datasource.created_by == DataSourceCreatedBy.ANALYSIS.value
     assert datasource.created_by_analysis_id == "analysis-1"
     assert datasource.is_hidden is True
+    assert test_db_session.get(BuildRun, build_id) is not None
+    assert test_db_session.execute(select(BuildJob).where(BuildJob.build_id == build_id)).scalars().first() is not None
+    outbox_table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
+    outbox_rows = test_db_session.execute(select(RuntimeOutboxEvent).order_by(outbox_table.c.created_at)).scalars().all()
+    assert [row.status for row in outbox_rows] == [RuntimeOutboxStatus.DISPATCHED, RuntimeOutboxStatus.DISPATCHED]

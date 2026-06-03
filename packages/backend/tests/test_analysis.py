@@ -1,9 +1,9 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from contracts.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
-from contracts.datasource.models import DataSource
-from contracts.locks.models import ResourceLock
+from persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
+from persistence.datasource.models import DataSource
+from persistence.locks.models import ResourceLock
 from sqlalchemy import select
 from sqlmodel import Session
 
@@ -822,7 +822,7 @@ class TestAnalysisUpdate:
         assert response.status_code == 422
 
     def test_update_analysis_derived_tab_no_new_datasource_rows(self, client, sample_analysis: Analysis, test_db_session):
-        from contracts.datasource.models import DataSource as DS
+        from persistence.datasource.models import DataSource as DS
         from sqlalchemy import select as sa_select
 
         tab1_result_id = str(uuid.uuid4())

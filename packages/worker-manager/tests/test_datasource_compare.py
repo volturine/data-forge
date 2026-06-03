@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 import polars as pl
-from contracts.datasource.models import DataSource
+from persistence.datasource.models import DataSource
 
 from datasources.datasource_service import compare_iceberg_snapshots
 

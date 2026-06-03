@@ -7,8 +7,8 @@ from sqlmodel import Session
 
 from contracts.build_runs.live import BuildNotification, hub as build_hub
 from contracts.compute import schemas as compute_schemas
-from contracts.runtime import ipc as runtime_ipc
 from core import build_runs_service as build_run_service
+from runtime_common import ipc as runtime_ipc
 
 
 async def publish_build_notification(namespace: str, build_id: str, latest_sequence: int) -> None:

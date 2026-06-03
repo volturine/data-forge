@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contracts.build_jobs.live import hub as build_job_hub
 from contracts.compute_requests.live import request_hub
-from contracts.runtime.ipc import RuntimePayloadKind
+from contracts.runtime.events import RuntimePayloadKind
 
 
 async def handle_runtime_payload(payload: dict[str, object]) -> None:

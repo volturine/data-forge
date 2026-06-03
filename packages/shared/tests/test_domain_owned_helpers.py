@@ -1,15 +1,15 @@
 from datetime import UTC, datetime
 
 from contracts.analysis.step_types import STEP_TYPES
-from contracts.build_jobs.models import BuildJob, BuildJobStatus
-from contracts.build_runs.models import BuildRun, BuildRunStatus
+from contracts.build_jobs.models import BuildJobStatus
+from contracts.build_runs.models import BuildRunStatus
 from contracts.compute import schemas as compute_schemas
-from contracts.datasource.models import DataSource, DataSourceCreatedBy, DataSourceTargetKind
+from contracts.datasource.models import DataSourceCreatedBy, DataSourceTargetKind
 from contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from contracts.engine_instances.models import EngineInstanceStatus
 from contracts.engine_runs.schemas import EngineRunExecutionCategory, EngineRunStatus
-from contracts.healthcheck_models import HealthCheck, HealthCheckType
-from contracts.runtime.ipc import RuntimePayloadKind
+from contracts.healthcheck_models import HealthCheckType
+from contracts.runtime.events import RuntimePayloadKind
 from contracts.step_config_enums import (
     AIProvider,
     ChartAggregation,
@@ -21,6 +21,10 @@ from contracts.step_config_enums import (
     RecipientSource,
     SortBy,
 )
+from persistence.build_jobs.models import BuildJob
+from persistence.build_runs.models import BuildRun
+from persistence.datasource.models import DataSource
+from persistence.healthchecks.models import HealthCheck
 
 
 def test_datasource_type_owns_ingestion_classification() -> None:

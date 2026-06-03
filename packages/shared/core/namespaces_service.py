@@ -3,9 +3,9 @@ from datetime import UTC, datetime
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from contracts.namespaces.models import RuntimeNamespace
 from core.config import settings
 from core.namespace import normalize_namespace
+from persistence.namespaces.models import RuntimeNamespace
 
 
 def register_namespace(session: Session, namespace: str | None) -> RuntimeNamespace:

@@ -6,9 +6,7 @@ from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from contracts.analysis.models import Analysis, AnalysisStatus
-from contracts.datasource.models import DataSource
-from contracts.udf_models import Udf
+from contracts.analysis.models import AnalysisStatus
 from core.database import (
     clear_settings_engine_override,
     get_settings_db,
@@ -17,6 +15,9 @@ from core.database import (
 from core.namespace import namespace_paths
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from persistence.analysis.models import Analysis
+from persistence.datasource.models import DataSource
+from persistence.udfs.models import Udf
 from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine, select
 

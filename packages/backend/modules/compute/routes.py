@@ -8,15 +8,14 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
-from contracts.analysis.models import Analysis
 from contracts.build_runs.live import BuildNotification
 from contracts.build_runs.live import hub as build_hub
 from contracts.compute import schemas
 from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
-from contracts.runtime import ipc as runtime_ipc
 from contracts.runtime_workers.models import RuntimeWorkerKind
 from core import (
     build_event_service,
+    runtime_outbox_service,
 )
 from core import (
     build_jobs_service as build_job_service,
@@ -35,6 +34,7 @@ from core.object_store import object_store_url
 from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
+from persistence.analysis.models import Analysis
 from sqlmodel import Session
 
 from backend_core.auth_config import settings as auth_settings
@@ -547,83 +547,92 @@ async def start_active_build(
             current_tab_id = active_tab.get("id")
         if isinstance(active_tab.get("name"), str):
             current_tab_name = active_tab.get("name")
-    for tab in tabs:
-        if not isinstance(tab, dict):
-            continue
-        tab_id = tab.get("id")
-        output = tab.get("output")
-        if not isinstance(tab_id, str) or not isinstance(output, dict):
-            continue
-        result_id = output.get("result_id")
-        if not isinstance(result_id, str):
-            continue
-        iceberg = output.get("iceberg")
-        table_name = iceberg.get("table_name") if isinstance(iceberg, dict) else None
-        filename = output.get("filename")
-        output_name = table_name if isinstance(table_name, str) and table_name.strip() else filename
-        branch_name = iceberg.get("branch") if isinstance(iceberg, dict) else None
-        namespace_name = iceberg.get("namespace") if isinstance(iceberg, dict) else None
-        placeholder_config: dict[str, Any] | None = None
-        placeholder_source_type = datasource_service.DataSourceType.ANALYSIS
-        if isinstance(branch_name, str) and branch_name.strip():
-            safe_branch = re.sub(r"[^a-zA-Z0-9_]+", "_", branch_name).strip("_")
-            table_name = f"{result_id}_{safe_branch}"
-            warehouse_path = object_store_url("namespaces", get_namespace(), "exports")
-            placeholder_source_type = datasource_service.DataSourceType.ICEBERG
-            placeholder_config = {
-                "catalog_type": "sql",
-                "catalog_uri": settings.database_url,
-                "warehouse": warehouse_path,
-                "namespace": namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else "outputs",
-                "table": table_name,
-                "table_name": output_name if isinstance(output_name, str) and output_name.strip() else table_name,
-                "metadata_path": object_store_url("namespaces", get_namespace(), "exports", str(result_id)),
-                "branch": branch_name,
-                "namespace_name": get_namespace(),
-                "reader": "native",
-            }
-        datasource_service.create_placeholder_output_datasource(
-            session,
-            result_id=result_id,
-            analysis_id=analysis_id,
-            analysis_tab_id=tab_id,
-            name=output_name if isinstance(output_name, str) else None,
-            source_type=placeholder_source_type,
-            config=placeholder_config,
-        )
     starter = schemas.BuildStarter.for_user(user)
-    build_run_service.create_build_run(
-        session,
-        build_id=build_id,
-        namespace=namespace,
-        analysis_id=analysis_id,
-        analysis_name=analysis_name,
-        request_json=request.model_dump(mode="json"),
-        starter_json=starter.model_dump(mode="json"),
-        status=build_run_service.BuildRunStatus.QUEUED,
-        current_kind=current_kind,
-        current_datasource_id=current_datasource_id,
-        current_tab_id=current_tab_id,
-        current_tab_name=current_tab_name,
-        current_output_id=current_output_id,
-        current_output_name=current_output_name,
-        total_tabs=len(tabs),
-        created_at=started_at,
-        started_at=started_at,
-    )
-    build_job_service.create_job(
-        session,
-        build_id=build_id,
-        namespace=namespace,
-    )
+    try:
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            tab_id = tab.get("id")
+            output = tab.get("output")
+            if not isinstance(tab_id, str) or not isinstance(output, dict):
+                continue
+            result_id = output.get("result_id")
+            if not isinstance(result_id, str):
+                continue
+            iceberg = output.get("iceberg")
+            table_name = iceberg.get("table_name") if isinstance(iceberg, dict) else None
+            filename = output.get("filename")
+            output_name = table_name if isinstance(table_name, str) and table_name.strip() else filename
+            branch_name = iceberg.get("branch") if isinstance(iceberg, dict) else None
+            namespace_name = iceberg.get("namespace") if isinstance(iceberg, dict) else None
+            placeholder_config: dict[str, Any] | None = None
+            placeholder_source_type = datasource_service.DataSourceType.ANALYSIS
+            if isinstance(branch_name, str) and branch_name.strip():
+                safe_branch = re.sub(r"[^a-zA-Z0-9_]+", "_", branch_name).strip("_")
+                table_name = f"{result_id}_{safe_branch}"
+                warehouse_path = object_store_url("namespaces", get_namespace(), "exports")
+                placeholder_source_type = datasource_service.DataSourceType.ICEBERG
+                placeholder_config = {
+                    "catalog_type": "sql",
+                    "catalog_uri": settings.database_url,
+                    "warehouse": warehouse_path,
+                    "namespace": namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else "outputs",
+                    "table": table_name,
+                    "table_name": output_name if isinstance(output_name, str) and output_name.strip() else table_name,
+                    "metadata_path": object_store_url("namespaces", get_namespace(), "exports", str(result_id)),
+                    "branch": branch_name,
+                    "namespace_name": get_namespace(),
+                    "reader": "native",
+                }
+            datasource_service.create_placeholder_output_datasource(
+                session,
+                result_id=result_id,
+                analysis_id=analysis_id,
+                analysis_tab_id=tab_id,
+                name=output_name if isinstance(output_name, str) else None,
+                source_type=placeholder_source_type,
+                config=placeholder_config,
+            )
+        build_run_service.create_build_run(
+            session,
+            build_id=build_id,
+            namespace=namespace,
+            analysis_id=analysis_id,
+            analysis_name=analysis_name,
+            request_json=request.model_dump(mode="json"),
+            starter_json=starter.model_dump(mode="json"),
+            status=build_run_service.BuildRunStatus.QUEUED,
+            current_kind=current_kind,
+            current_datasource_id=current_datasource_id,
+            current_tab_id=current_tab_id,
+            current_tab_name=current_tab_name,
+            current_output_id=current_output_id,
+            current_output_name=current_output_name,
+            total_tabs=len(tabs),
+            created_at=started_at,
+            started_at=started_at,
+            commit=False,
+        )
+        build_job_service.create_job(
+            session,
+            build_id=build_id,
+            namespace=namespace,
+            commit=False,
+        )
+        runtime_outbox_service.enqueue_api_build_notification(session, namespace=namespace, build_id=build_id, latest_sequence=0, commit=False)
+        runtime_outbox_service.enqueue_build_job_notification(session, commit=False)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     detail = _get_durable_build_detail(session, build_id)
     if detail is None:
         raise HTTPException(status_code=500, detail="Failed to create build")
-    await build_event_service.publish_build_notification(namespace, build_id, latest_sequence=0)
+    await build_hub.publish(BuildNotification(namespace=namespace, build_id=build_id, latest_sequence=0))
     from contracts.build_jobs.live import hub as build_job_hub
 
     build_job_hub.publish()
-    await asyncio.to_thread(runtime_ipc.notify_build_job)
+    runtime_outbox_service.dispatch_pending_events(session)
     return detail
 
 

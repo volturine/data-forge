@@ -10,6 +10,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from core.migrations import _PUBLIC_REVISION, _TENANT_REVISION
 from harness.postgres_harness import (
     BACKEND_ROOT,
     CORE_ROOT,
@@ -268,12 +269,14 @@ def test_init_db_bootstraps_public_and_tenant_schemas_in_postgres(monkeypatch, t
             assert _table_exists(connection, "public", "engine_instances")
             assert _table_exists(connection, "default", "build_runs")
             assert _table_exists(connection, "default", "build_jobs")
+            assert _table_exists(connection, "default", "runtime_outbox_events")
             assert _table_exists(connection, "alpha", "build_runs")
             assert _table_exists(connection, "alpha", "build_jobs")
+            assert _table_exists(connection, "alpha", "runtime_outbox_events")
             assert _query_value(connection, "SELECT count(*) FROM public.app_settings") == 1
-            assert _query_value(connection, "SELECT version_num FROM public.alembic_version") == "0001_runtime_public"
-            assert _query_value(connection, 'SELECT version_num FROM "default".alembic_version') == "0002_runtime_tenant"
-            assert _query_value(connection, "SELECT version_num FROM alpha.alembic_version") == "0002_runtime_tenant"
+            assert _query_value(connection, "SELECT version_num FROM public.alembic_version") == _PUBLIC_REVISION
+            assert _query_value(connection, 'SELECT version_num FROM "default".alembic_version') == _TENANT_REVISION
+            assert _query_value(connection, "SELECT version_num FROM alpha.alembic_version") == _TENANT_REVISION
 
         _clear_database_state()
 
@@ -481,9 +484,9 @@ def test_tenant_engine_checkout_tracks_current_namespace(monkeypatch, tmp_path: 
 async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path: Path) -> None:
     require_docker()
 
-    from contracts.runtime import ipc as runtime_ipc
-    from contracts.runtime.ipc import RuntimePayloadKind
+    from contracts.runtime.events import RuntimePayloadKind
     from core.config import settings
+    from runtime_common import ipc as runtime_ipc
 
     with PostgresContainer() as container:
         monkeypatch.setattr(settings, "database_url", container.url, raising=False)

@@ -10,9 +10,8 @@ from dataclasses import dataclass
 from contracts.compute import schemas as compute_schemas
 from contracts.compute_requests.live import request_hub
 from contracts.compute_requests.models import ComputeRequestKind
-from contracts.runtime import ipc as runtime_ipc
 from contracts.runtime_workers.models import RuntimeWorkerKind
-from core import compute_requests_service, runtime_workers_service
+from core import compute_requests_service, runtime_outbox_service, runtime_workers_service
 from core.app_error_status import status_for_app_error
 from core.config import settings
 from core.database import get_db, run_db, run_settings_db
@@ -83,7 +82,7 @@ def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:
                     id=request.id,
                     namespace=request.namespace,
                     kind=request.kind,
-                    request_json=request.request_json,
+                    request_json=compute_requests_service.command_payload(request),
                 )
 
             claimed = run_db(_claim)
@@ -109,8 +108,9 @@ async def compute_request_loop(
                 continue
             wait_task = asyncio.create_task(request_hub.wait(last_seen))
             stop_task = asyncio.create_task(stop_event.wait())
+            poll_task = asyncio.create_task(asyncio.sleep(settings.runtime_reconciliation_poll_interval_seconds))
             done, pending = await asyncio.wait(
-                {wait_task, stop_task},
+                {wait_task, stop_task, poll_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
             for task in pending:
@@ -410,10 +410,13 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             response_json=payload,
         )
     finally:
+        try:
+            runtime_outbox_service.dispatch_pending_events(session)
+        except Exception:
+            logger.warning("Compute response outbox fast-path dispatch failed for request %s", claimed.id, exc_info=True)
         session.close()
         session_gen.close()
         reset_namespace(token)
-        runtime_ipc.notify_compute_response(claimed.id)
 
 
 def _write_artifact(request_id: str, filename: str, content: bytes) -> str:

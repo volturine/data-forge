@@ -3,8 +3,8 @@
 import uuid
 from typing import Any
 
-from contracts.analysis.models import Analysis
-from contracts.datasource.models import DataSource
+from persistence.analysis.models import Analysis
+from persistence.datasource.models import DataSource
 
 
 class TestAnalysisValidation:

@@ -188,28 +188,29 @@ def run_settings_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P
 
 
 def _shared_tables():
-    from contracts.engine_instances.models import EngineInstance
-    from contracts.namespaces.models import RuntimeNamespace
-    from contracts.runtime_workers.models import RuntimeWorker
-    from contracts.settings_models import AppSettings
+    from persistence.engine_instances.models import EngineInstance
+    from persistence.namespaces.models import RuntimeNamespace
+    from persistence.runtime_workers.models import RuntimeWorker
+    from persistence.settings.models import AppSettings
 
     table_names = {AppSettings.__tablename__, EngineInstance.__tablename__, RuntimeNamespace.__tablename__, RuntimeWorker.__tablename__}
     return [table for table in AppSettings.metadata.sorted_tables if table.name in table_names]
 
 
 def _tenant_tables():
-    from contracts.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
-    from contracts.analysis_versions.models import AnalysisVersion
-    from contracts.build_jobs.models import BuildJob
-    from contracts.build_runs.models import BuildEvent, BuildRun
-    from contracts.compute_requests.models import ComputeRequest
-    from contracts.datasource.models import DataSource, DataSourceColumnMetadata
-    from contracts.engine_runs.models import EngineRun
-    from contracts.healthcheck_models import HealthCheck, HealthCheckResult
-    from contracts.locks.models import ResourceLock
-    from contracts.scheduler.models import Schedule
-    from contracts.telegram_models import TelegramListener, TelegramSubscriber
-    from contracts.udf_models import Udf
+    from persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
+    from persistence.analysis_versions.models import AnalysisVersion
+    from persistence.build_jobs.models import BuildJob
+    from persistence.build_runs.models import BuildEvent, BuildRun
+    from persistence.compute_requests.models import ComputeRequest
+    from persistence.datasource.models import DataSource, DataSourceColumnMetadata
+    from persistence.engine_runs.models import EngineRun
+    from persistence.healthchecks.models import HealthCheck, HealthCheckResult
+    from persistence.locks.models import ResourceLock
+    from persistence.runtime_events.models import RuntimeOutboxEvent
+    from persistence.scheduler.models import Schedule
+    from persistence.telegram.models import TelegramListener, TelegramSubscriber
+    from persistence.udfs.models import Udf
 
     table_names = {
         Analysis.__tablename__,
@@ -226,6 +227,7 @@ def _tenant_tables():
         HealthCheck.__tablename__,
         HealthCheckResult.__tablename__,
         ResourceLock.__tablename__,
+        RuntimeOutboxEvent.__tablename__,
         Schedule.__tablename__,
         TelegramListener.__tablename__,
         TelegramSubscriber.__tablename__,

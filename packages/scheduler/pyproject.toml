@@ -6,7 +6,10 @@
     dependencies    = ["dataforge-shared"]
 
 [tool.uv.sources]
-    dataforge-shared = { path = "../shared", editable = true }
+    dataforge-contracts      = { path = "../contracts", editable = true }
+    dataforge-persistence    = { path = "../persistence", editable = true }
+    dataforge-runtime-common = { path = "../runtime-common", editable = true }
+    dataforge-shared         = { path = "../shared", editable = true }
 
 [build-system]
     requires      = ["hatchling"]

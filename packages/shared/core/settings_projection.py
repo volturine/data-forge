@@ -5,8 +5,8 @@ from threading import Lock
 
 from sqlmodel import Session
 
-from contracts.settings_models import AppSettings
 from core.secrets import decrypt_secret
+from persistence.settings.models import AppSettings
 
 logger = logging.getLogger(__name__)
 

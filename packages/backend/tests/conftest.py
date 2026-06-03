@@ -71,21 +71,22 @@ if TYPE_CHECKING:
 
 
 def _register_backend_sqlmodel_metadata() -> None:
-    from contracts.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
-    from contracts.analysis_versions.models import AnalysisVersion
-    from contracts.build_jobs.models import BuildJob
-    from contracts.build_runs.models import BuildEvent, BuildRun
-    from contracts.datasource.models import DataSource, DataSourceColumnMetadata
-    from contracts.engine_instances.models import EngineInstance
-    from contracts.engine_runs.models import EngineRun
-    from contracts.healthcheck_models import HealthCheck, HealthCheckResult
-    from contracts.locks.models import ResourceLock
-    from contracts.namespaces.models import RuntimeNamespace
-    from contracts.runtime_workers.models import RuntimeWorker
-    from contracts.scheduler.models import Schedule
-    from contracts.settings_models import AppSettings
-    from contracts.telegram_models import TelegramListener, TelegramSubscriber
-    from contracts.udf_models import Udf
+    from persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
+    from persistence.analysis_versions.models import AnalysisVersion
+    from persistence.build_jobs.models import BuildJob
+    from persistence.build_runs.models import BuildEvent, BuildRun
+    from persistence.datasource.models import DataSource, DataSourceColumnMetadata
+    from persistence.engine_instances.models import EngineInstance
+    from persistence.engine_runs.models import EngineRun
+    from persistence.healthchecks.models import HealthCheck, HealthCheckResult
+    from persistence.locks.models import ResourceLock
+    from persistence.namespaces.models import RuntimeNamespace
+    from persistence.runtime_events.models import RuntimeOutboxEvent
+    from persistence.runtime_workers.models import RuntimeWorker
+    from persistence.scheduler.models import Schedule
+    from persistence.settings.models import AppSettings
+    from persistence.telegram.models import TelegramListener, TelegramSubscriber
+    from persistence.udfs.models import Udf
 
     from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
     from modules.chat.models import ChatSession
@@ -108,6 +109,7 @@ def _register_backend_sqlmodel_metadata() -> None:
     del HealthCheckResult
     del ResourceLock
     del RuntimeNamespace
+    del RuntimeOutboxEvent
     del RuntimeWorker
     del Schedule
     del TelegramListener
@@ -119,10 +121,10 @@ def _register_backend_sqlmodel_metadata() -> None:
 
 
 def _backend_settings_tables() -> list[Any]:
-    from contracts.engine_instances.models import EngineInstance
-    from contracts.namespaces.models import RuntimeNamespace
-    from contracts.runtime_workers.models import RuntimeWorker
-    from contracts.settings_models import AppSettings
+    from persistence.engine_instances.models import EngineInstance
+    from persistence.namespaces.models import RuntimeNamespace
+    from persistence.runtime_workers.models import RuntimeWorker
+    from persistence.settings.models import AppSettings
 
     from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
     from modules.chat.models import ChatSession
@@ -170,8 +172,8 @@ class _BackendTestManager:
 
 @pytest.fixture(scope="function")
 def test_engine(postgres_container):
-    from contracts.locks.models import ResourceLock
-    from contracts.udf_models import Udf
+    from persistence.locks.models import ResourceLock
+    from persistence.udfs.models import Udf
 
     del ResourceLock
     del Udf
@@ -304,8 +306,8 @@ def clear_engine_registry():
 
 @pytest.fixture(autouse=True, scope="function")
 def isolate_settings_engine(tmp_path, isolate_data_dir, postgres_container):
-    from contracts.settings_models import AppSettings
     from core import database
+    from persistence.settings.models import AppSettings
 
     schema = f"settings_{uuid.uuid4().hex}"
     engine = base_fixtures._schema_engine(postgres_container.url, schema)

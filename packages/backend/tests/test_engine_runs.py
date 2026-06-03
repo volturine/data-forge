@@ -1,12 +1,12 @@
 import uuid
 from datetime import UTC, datetime
 
-from contracts.engine_runs.models import EngineRun
 from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from core import engine_runs_service as engine_run_service
 from core.database import run_db
 from core.namespace import reset_namespace, set_namespace_context
 from fastapi.testclient import TestClient
+from persistence.engine_runs.models import EngineRun
 
 from main import app
 

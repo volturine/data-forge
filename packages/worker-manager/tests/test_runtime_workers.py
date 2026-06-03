@@ -10,9 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from contracts.build_jobs.models import BuildJobStatus
 from contracts.build_runs.models import BuildRunStatus
-from contracts.datasource.models import DataSource
 from contracts.runtime_workers.models import RuntimeWorkerKind
-from contracts.scheduler.models import Schedule
 from core import (
     build_jobs_service as build_job_service,
 )
@@ -25,6 +23,8 @@ from core import (
 from core.database import run_db, run_settings_db
 from core.namespace import reset_namespace, set_namespace_context
 from core.namespaces_service import register_namespace
+from persistence.datasource.models import DataSource
+from persistence.scheduler.models import Schedule
 
 from builds import build_execution
 from runtime.worker_runtime import _reconcile_schedule_run, build_worker_loop, next_job
@@ -108,7 +108,7 @@ def test_claim_next_job_reclaims_stopped_worker_job(test_db_session) -> None:
     assert claimed.status == BuildJobStatus.RUNNING
     assert claimed.lease_owner == "worker-2"
     assert claimed.attempts == 1
-    assert claimed.lease_expires_at is None
+    assert claimed.lease_expires_at is not None
 
 
 def test_claim_next_job_reclaims_stale_running_job(test_db_session) -> None:
@@ -198,6 +198,31 @@ def test_claim_next_job_does_not_reclaim_live_running_job(test_db_session) -> No
     )
 
     assert claimed is None
+
+
+def test_claim_next_job_reclaims_expired_lease(test_db_session) -> None:
+    job = build_job_service.create_job(
+        test_db_session,
+        build_id=str(uuid.uuid4()),
+        namespace="default",
+    )
+    job.status = BuildJobStatus.RUNNING
+    job.lease_owner = "live-worker"
+    job.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    job.attempts = 0
+    test_db_session.add(job)
+    test_db_session.commit()
+
+    claimed = build_job_service.claim_next_job(
+        test_db_session,
+        worker_id="worker-2",
+        reclaimable_owner_ids=set(),
+    )
+
+    assert claimed is not None
+    assert claimed.id == job.id
+    assert claimed.lease_owner == "worker-2"
+    assert claimed.lease_expires_at is not None
 
 
 @pytest.mark.asyncio

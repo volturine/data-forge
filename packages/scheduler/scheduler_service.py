@@ -6,14 +6,11 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import croniter  # type: ignore[import-untyped]
-from contracts.analysis.models import Analysis
 from contracts.build_jobs.live import hub as build_job_hub
 from contracts.build_runs.models import BuildRunStatus
 from contracts.compute import schemas as compute_schemas
-from contracts.datasource.models import DataSource, DataSourceTargetKind
+from contracts.datasource.models import DataSourceTargetKind
 from contracts.engine_runs.schemas import EngineRunKind
-from contracts.runtime import ipc as runtime_ipc
-from contracts.scheduler.models import Schedule
 from contracts.scheduler.schemas import ScheduleCreate, ScheduleResponse, ScheduleUpdate
 from core import (
     build_jobs_service as build_job_service,
@@ -21,12 +18,16 @@ from core import (
 from core import (
     build_runs_service as build_run_service,
 )
+from core import runtime_outbox_service
 from core.exceptions import (
     DataSourceNotFoundError,
     ScheduleNotFoundError,
     ScheduleValidationError,
 )
 from core.namespace import get_namespace
+from persistence.analysis.models import Analysis, AnalysisDataSource
+from persistence.datasource.models import DataSource
+from persistence.scheduler.models import Schedule
 from sqlalchemy import or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlmodel import Session, col
@@ -266,8 +267,10 @@ def _enqueue_schedule_ingest_build(
         total_tabs=1,
         created_at=now,
         started_at=now,
+        commit=False,
     )
-    build_job_service.create_job(session, build_id=build_id, namespace=namespace)
+    build_job_service.create_job(session, build_id=build_id, namespace=namespace, commit=False)
+    runtime_outbox_service.enqueue_build_job_notification(session, commit=False)
     return run
 
 
@@ -303,8 +306,10 @@ def _enqueue_schedule_analysis_build(
         total_tabs=len(request.analysis_pipeline.tabs),
         created_at=now,
         started_at=now,
+        commit=False,
     )
-    build_job_service.create_job(session, build_id=build_id, namespace=namespace)
+    build_job_service.create_job(session, build_id=build_id, namespace=namespace, commit=False)
+    runtime_outbox_service.enqueue_build_job_notification(session, commit=False)
     return run
 
 
@@ -518,8 +523,6 @@ def get_build_order(session: Session, analysis_id: str) -> list[str]:
 
     Returns list of analysis IDs in dependency order (upstream first).
     """
-    from contracts.analysis.models import Analysis, AnalysisDataSource
-
     graph: dict[str, set[str]] = {}
     in_degree: dict[str, int] = {}
 
@@ -752,8 +755,10 @@ def enqueue_schedule_run(session: Session, schedule_id: str, *, worker_id: str) 
             namespace=namespace,
             now=stamp,
         )
+        session.add(schedule)
+        session.commit()
         build_job_hub.publish()
-        runtime_ipc.notify_build_job()
+        runtime_outbox_service.dispatch_pending_events(session)
         return run.id
 
     if target_kind == DataSourceTargetKind.DATASOURCE:
@@ -764,8 +769,10 @@ def enqueue_schedule_run(session: Session, schedule_id: str, *, worker_id: str) 
             namespace=namespace,
             now=stamp,
         )
+        session.add(schedule)
+        session.commit()
         build_job_hub.publish()
-        runtime_ipc.notify_build_job()
+        runtime_outbox_service.dispatch_pending_events(session)
         return run.id
 
     if analysis_id is None:
@@ -782,8 +789,10 @@ def enqueue_schedule_run(session: Session, schedule_id: str, *, worker_id: str) 
         request=request,
         now=stamp,
     )
+    session.add(schedule)
+    session.commit()
     build_job_hub.publish()
-    runtime_ipc.notify_build_job()
+    runtime_outbox_service.dispatch_pending_events(session)
     return run.id
 
 

@@ -8,11 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from contracts.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
+from contracts.analysis.models import AnalysisStatus
 from contracts.build_runs.models import BuildRunStatus
-from contracts.datasource.models import DataSource
 from contracts.engine_runs.schemas import EngineRunKind
-from contracts.scheduler.models import Schedule
 from contracts.scheduler.schemas import ScheduleCreate, ScheduleUpdate
 from core import (
     build_jobs_service as build_job_service,
@@ -21,6 +19,9 @@ from core import (
     build_runs_service as build_run_service,
 )
 from core.exceptions import DataSourceNotFoundError, ScheduleNotFoundError
+from persistence.analysis.models import Analysis, AnalysisDataSource
+from persistence.datasource.models import DataSource
+from persistence.scheduler.models import Schedule
 from sqlmodel import Session
 
 from scheduler_service import (

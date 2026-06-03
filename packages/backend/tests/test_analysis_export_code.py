@@ -1,8 +1,8 @@
 import uuid
 from datetime import UTC, datetime
 
-from contracts.datasource.models import DataSource
 from contracts.datasource.source_types import DataSourceFileType, DataSourceType
+from persistence.datasource.models import DataSource
 
 from modules.export.generators import _scan_expression
 

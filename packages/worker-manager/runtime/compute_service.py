@@ -17,15 +17,11 @@ from typing import Final, TypedDict, cast
 import polars as pl
 import pyarrow as pa  # type: ignore[import-untyped]
 import pyarrow.parquet as pq  # type: ignore[import-untyped]
-from contracts.analysis.models import Analysis
 from contracts.compute import schemas as compute_schemas
 from contracts.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
-from contracts.datasource.models import DataSource, DataSourceCreatedBy
+from contracts.datasource.models import DataSourceCreatedBy
 from contracts.datasource.source_types import DataSourceType
-from contracts.engine_runs.models import EngineRun
 from contracts.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
-from contracts.healthcheck_models import HealthCheck, HealthCheckResult
-from contracts.udf_models import Udf
 from core import (
     build_runs_service as build_run_service,
 )
@@ -50,6 +46,11 @@ from core.iceberg_metadata import (
 )
 from core.namespace import get_namespace
 from core.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
+from persistence.analysis.models import Analysis
+from persistence.datasource.models import DataSource
+from persistence.engine_runs.models import EngineRun
+from persistence.healthchecks.models import HealthCheck, HealthCheckResult
+from persistence.udfs.models import Udf
 from pyiceberg.table import Table as IcebergTable
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
