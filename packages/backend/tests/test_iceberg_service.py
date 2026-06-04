@@ -1,13 +1,12 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from contracts.build_runs.models import BuildRunStatus
-from contracts.datasource.models import DataSourceCreatedBy
-from contracts.datasource.source_types import DataSourceType
-from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
-from core import build_runs_service, engine_runs_service
-from persistence.datasource.models import DataSource
-
+from backend_contracts.build_runs.models import BuildRunStatus
+from backend_contracts.datasource.models import DataSourceCreatedBy
+from backend_contracts.datasource.source_types import DataSourceType
+from backend_contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core import build_runs_service, engine_runs_service
+from backend_core.persistence.datasource.models import DataSource
 from modules.compute import iceberg_service
 
 
@@ -30,7 +29,7 @@ class _FakeTable:
     def __init__(self, snapshots: list[_FakeSnapshot], current_snapshot_id: str | None) -> None:
         self._snapshots = snapshots
         self._current_snapshot_id = current_snapshot_id
-        self.metadata_location = "/tmp/warehouse/outputs/table1/metadata/v1.metadata.json"
+        self.metadata_location = '/tmp/warehouse/outputs/table1/metadata/v1.metadata.json'
 
     def snapshots(self) -> list[_FakeSnapshot]:
         return self._snapshots
@@ -53,21 +52,21 @@ class _FakeCatalog:
 
 def test_list_iceberg_snapshots_can_filter_to_completed_build_results(test_db_session, monkeypatch) -> None:
     datasource = DataSource(
-        id="ds-1",
-        name="Output datasource",
+        id='ds-1',
+        name='Output datasource',
         description=None,
         source_type=DataSourceType.ICEBERG.value,
         config={
-            "catalog_type": "sql",
-            "catalog_uri": "postgresql://test",
-            "namespace": "outputs",
-            "table": "table1",
-            "warehouse": "file:///tmp/warehouse",
-            "metadata_path": "/tmp/warehouse/outputs/table1/metadata/v1.metadata.json",
-            "branch": "master",
+            'catalog_type': 'sql',
+            'catalog_uri': 'postgresql://test',
+            'namespace': 'outputs',
+            'table': 'table1',
+            'warehouse': 'file:///tmp/warehouse',
+            'metadata_path': '/tmp/warehouse/outputs/table1/metadata/v1.metadata.json',
+            'branch': 'master',
         },
         created_by=DataSourceCreatedBy.ANALYSIS.value,
-        created_by_analysis_id="analysis-1",
+        created_by_analysis_id='analysis-1',
         is_hidden=True,
         created_at=datetime.now(UTC),
     )
@@ -76,76 +75,76 @@ def test_list_iceberg_snapshots_can_filter_to_completed_build_results(test_db_se
 
     build_runs_service.create_build_run(
         test_db_session,
-        build_id="build-1",
-        namespace="default",
-        analysis_id="analysis-1",
-        analysis_name="Analysis 1",
+        build_id='build-1',
+        namespace='default',
+        analysis_id='analysis-1',
+        analysis_name='Analysis 1',
         request_json={},
         starter_json={},
-        result_json={"snapshot_id": "snap-build-1", "branch": "master"},
+        result_json={'snapshot_id': 'snap-build-1', 'branch': 'master'},
         status=BuildRunStatus.COMPLETED,
-        current_kind="build",
-        current_output_id="ds-1",
+        current_kind='build',
+        current_output_id='ds-1',
     )
     build_runs_service.create_build_run(
         test_db_session,
-        build_id="build-2",
-        namespace="default",
-        analysis_id="analysis-1",
-        analysis_name="Analysis 1",
+        build_id='build-2',
+        namespace='default',
+        analysis_id='analysis-1',
+        analysis_name='Analysis 1',
         request_json={},
         starter_json={},
-        result_json={"snapshot_id": "snap-build-2", "branch": "dev"},
+        result_json={'snapshot_id': 'snap-build-2', 'branch': 'dev'},
         status=BuildRunStatus.COMPLETED,
-        current_kind="build",
-        current_output_id="ds-1",
+        current_kind='build',
+        current_output_id='ds-1',
     )
 
     fake_table = _FakeTable(
         [
-            _FakeSnapshot("snap-delete", 3000, operation="delete"),
-            _FakeSnapshot("snap-build-2", 2000, operation="append"),
-            _FakeSnapshot("snap-build-1", 1000, operation="append"),
+            _FakeSnapshot('snap-delete', 3000, operation='delete'),
+            _FakeSnapshot('snap-build-2', 2000, operation='append'),
+            _FakeSnapshot('snap-build-1', 1000, operation='append'),
         ],
-        current_snapshot_id="snap-delete",
+        current_snapshot_id='snap-delete',
     )
     monkeypatch.setattr(
         iceberg_service,
-        "load_runtime_catalog",
-        lambda *_args, **_kwargs: _FakeCatalog(fake_table, expected_identifier="outputs.table1"),
+        'load_runtime_catalog',
+        lambda *_args, **_kwargs: _FakeCatalog(fake_table, expected_identifier='outputs.table1'),
     )
     monkeypatch.setattr(
         iceberg_service,
-        "resolve_iceberg_metadata_path",
+        'resolve_iceberg_metadata_path',
         lambda path: path,
     )
 
     response = iceberg_service.list_iceberg_snapshots(
         test_db_session,
-        "ds-1",
-        branch="master",
+        'ds-1',
+        branch='master',
         build_results_only=True,
     )
 
-    assert [snapshot.snapshot_id for snapshot in response.snapshots] == ["snap-build-1"]
-    assert response.snapshots[0].operation == "append"
+    assert [snapshot.snapshot_id for snapshot in response.snapshots] == ['snap-build-1']
+    assert response.snapshots[0].operation == 'append'
 
 
 def test_list_iceberg_snapshots_can_collapse_ingest_churn_to_logical_results(test_db_session, monkeypatch) -> None:
     datasource = DataSource(
-        id="ds-raw-1",
-        name="Imported datasource",
+        id='ds-raw-1',
+        name='Imported datasource',
         description=None,
         source_type=DataSourceType.ICEBERG.value,
         config={
-            "catalog_type": "sql",
-            "catalog_uri": "postgresql://test",
-            "namespace": "clean",
-            "table": "table1",
-            "warehouse": "file:///tmp/warehouse",
-            "metadata_path": "/tmp/warehouse/clean/table1/metadata/v1.metadata.json",
-            "branch": "master",
-            "source": {"source_type": "file", "file_path": "/tmp/source.csv", "file_type": "csv"},
+            'catalog_type': 'sql',
+            'catalog_uri': 'postgresql://test',
+            'namespace': 'clean',
+            'table': 'table1',
+            'warehouse': 'file:///tmp/warehouse',
+            'metadata_path': '/tmp/warehouse/clean/table1/metadata/v1.metadata.json',
+            'branch': 'master',
+            'source': {'source_type': 'file', 'file_path': '/tmp/source.csv', 'file_type': 'csv'},
         },
         created_by=DataSourceCreatedBy.IMPORT.value,
         is_hidden=False,
@@ -164,10 +163,10 @@ def test_list_iceberg_snapshots_can_collapse_ingest_churn_to_logical_results(tes
             test_db_session,
             engine_runs_service.create_engine_run_payload(
                 analysis_id=None,
-                datasource_id="ds-raw-1",
+                datasource_id='ds-raw-1',
                 kind=EngineRunKind.INGEST,
                 status=EngineRunStatus.SUCCESS,
-                request_json={"branch": "master", "mode": "manual_ingest"},
+                request_json={'branch': 'master', 'mode': 'manual_ingest'},
                 created_at=completed_at,
                 completed_at=completed_at,
             ),
@@ -175,34 +174,34 @@ def test_list_iceberg_snapshots_can_collapse_ingest_churn_to_logical_results(tes
 
     fake_table = _FakeTable(
         [
-            _FakeSnapshot("snap-initial", 1779491921000, operation="append"),
-            _FakeSnapshot("snap-delete-1", 1779491930000, operation="delete"),
-            _FakeSnapshot("snap-refresh-1", 1779491930000, operation="append"),
-            _FakeSnapshot("snap-delete-2", 1779491936000, operation="delete"),
-            _FakeSnapshot("snap-refresh-2", 1779491936000, operation="append"),
+            _FakeSnapshot('snap-initial', 1779491921000, operation='append'),
+            _FakeSnapshot('snap-delete-1', 1779491930000, operation='delete'),
+            _FakeSnapshot('snap-refresh-1', 1779491930000, operation='append'),
+            _FakeSnapshot('snap-delete-2', 1779491936000, operation='delete'),
+            _FakeSnapshot('snap-refresh-2', 1779491936000, operation='append'),
         ],
-        current_snapshot_id="snap-refresh-2",
+        current_snapshot_id='snap-refresh-2',
     )
     monkeypatch.setattr(
         iceberg_service,
-        "load_runtime_catalog",
-        lambda *_args, **_kwargs: _FakeCatalog(fake_table, expected_identifier="clean.table1"),
+        'load_runtime_catalog',
+        lambda *_args, **_kwargs: _FakeCatalog(fake_table, expected_identifier='clean.table1'),
     )
     monkeypatch.setattr(
         iceberg_service,
-        "resolve_iceberg_metadata_path",
+        'resolve_iceberg_metadata_path',
         lambda path: path,
     )
 
     response = iceberg_service.list_iceberg_snapshots(
         test_db_session,
-        "ds-raw-1",
-        branch="master",
+        'ds-raw-1',
+        branch='master',
         build_results_only=True,
     )
 
     assert [snapshot.snapshot_id for snapshot in response.snapshots] == [
-        "snap-refresh-2",
-        "snap-refresh-1",
-        "snap-initial",
+        'snap-refresh-2',
+        'snap-refresh-1',
+        'snap-initial',
     ]

@@ -1,5 +1,4 @@
-from core.database import get_settings_engine
-
+from backend_core.database import get_settings_engine
 from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
 from modules.chat.models import ChatSession
 

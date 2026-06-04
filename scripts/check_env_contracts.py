@@ -8,9 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 RUNTIME_ENV_FILES = [
-    ROOT / 'packages/shared/dev.env',
-    ROOT / 'packages/shared/prod.env',
-    ROOT / 'packages/shared/e2e.env',
+    ROOT / 'config/env/dev.env',
+    ROOT / 'config/env/prod.env',
+    ROOT / 'config/env/e2e.env',
 ]
 
 DOCKER_ENV_TO_COMPOSE: dict[Path, tuple[Path, ...]] = {
@@ -34,6 +34,7 @@ EXTRA_RUNTIME_KEYS = {
     'E2E_LOG_DIR',
     'DB_USERNAME',
     'DB_PASSWORD',
+    'INTERNAL_API_BASE_URL',
 }
 
 ENV_KEY_RE = re.compile(r'^[A-Z][A-Z0-9_]*$')
@@ -129,10 +130,10 @@ def _compose_vars(paths: tuple[Path, ...]) -> tuple[set[str], set[str]]:
 def main() -> int:
     errors: list[str] = []
 
-    shared_config_path = ROOT / 'packages/shared/core/config.py'
+    runtime_config_path = ROOT / 'packages/backend/backend_core/config.py'
     auth_config_path = ROOT / 'packages/backend/backend_core/auth_config.py'
 
-    runtime_allowed = _collect_class_env_keys(shared_config_path, 'Settings')
+    runtime_allowed = _collect_class_env_keys(runtime_config_path, 'Settings')
     runtime_allowed.update(_collect_class_env_keys(auth_config_path, 'AuthSettings'))
     runtime_allowed.update(EXTRA_RUNTIME_KEYS)
 

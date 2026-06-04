@@ -15,7 +15,6 @@ from typing import Any
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'packages' / 'shared'))
 sys.path.insert(0, str(ROOT / 'packages' / 'backend'))
 
 from modules.analysis.step_schemas import (  # noqa: E402

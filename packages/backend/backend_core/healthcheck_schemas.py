@@ -3,8 +3,9 @@
 import datetime as dt
 from typing import Any
 
-from contracts.healthcheck_models import HealthCheckType
 from pydantic import BaseModel, ConfigDict
+
+from backend_contracts.healthcheck_models import HealthCheckType
 
 
 class HealthCheckCreate(BaseModel):

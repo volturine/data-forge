@@ -35,7 +35,7 @@ These areas are currently stable, but they remain the first places to inspect if
 - [ ] `packages/frontend/src/lib/components/pipeline/InlineDataTable.svelte`
 - [ ] `packages/frontend/src/lib/stores/analysis.svelte.ts`
 - [ ] `packages/backend/modules/compute/routes.py`
-- [ ] `packages/worker-manager/runtime/compute_service.py`
+- [ ] `packages/worker/runtime/compute_service.py`
 
 Failure smell:
 - analysis shell readiness or preview readiness starts missing the 5s budget again
@@ -44,8 +44,8 @@ Failure smell:
 
 - [ ] `packages/frontend/src/lib/components/pipeline/OutputNode.svelte`
 - [ ] `packages/backend/modules/analysis/routes.py`
-- [ ] `packages/worker-manager/runtime/compute_service.py`
-- [ ] `packages/worker-manager/datasources/datasource_service.py`
+- [ ] `packages/worker/runtime/compute_service.py`
+- [ ] `packages/worker/datasources/datasource_service.py`
 
 Failure smell:
 - output rebuilds linger in visible `Active Build` state instead of reaching `Completed`
@@ -65,7 +65,7 @@ Failure smell:
 - [ ] `packages/frontend/src/routes/datasources/new/+page.svelte`
 - [ ] `packages/frontend/src/routes/datasources/+page.svelte`
 - [ ] `packages/frontend/tests/utils/user-flows.ts`
-- [ ] `packages/worker-manager/datasources/datasource_service.py`
+- [ ] `packages/worker/datasources/datasource_service.py`
 
 Failure smell:
 - datasource upload feels synchronous but behaves like background work again

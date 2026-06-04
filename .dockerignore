@@ -20,6 +20,14 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 .venv/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/__pycache__/
+**/.artifacts/
+**/test-results/
+**/playwright-report/
 backend/.env
 backend/.env.*
 backend/.prod.env

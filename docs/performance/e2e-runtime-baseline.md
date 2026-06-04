@@ -82,7 +82,7 @@ Fix:
 - then cap the executor so compute requests do not starve build workers
 
 Owner:
-- `packages/worker-manager/runtime/compute_request_runtime.py`
+- `packages/worker/runtime/compute_request_runtime.py`
 
 ### 3. Interactive work no longer waits behind background ingest
 
@@ -108,7 +108,7 @@ Fix:
 - serialize same-datasource ingest writes with a process-local mutex
 
 Owner:
-- `packages/worker-manager/datasources/datasource_service.py`
+- `packages/worker/datasources/datasource_service.py`
 
 ### 5. Concurrent namespace bootstrap became idempotent
 
@@ -119,8 +119,8 @@ Fix:
 - treat concurrent namespace creation as harmless/idempotent
 
 Owners:
-- `packages/worker-manager/datasources/datasource_service.py`
-- `packages/worker-manager/runtime/compute_service.py`
+- `packages/worker/datasources/datasource_service.py`
+- `packages/worker/runtime/compute_service.py`
 
 ### 6. Datasource creation stayed UI-first without adding helper drag
 

@@ -2,60 +2,48 @@
 
 default: dev
 
-pytest := 'uv run python -m pytest -c pyproject.toml -q'
-python := 'uv run python'
+pytest := 'env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q'
+python := 'env -u VIRTUAL_ENV uv run python'
 
 install:
-    cd packages/contracts && uv sync
-    cd packages/persistence && uv sync
-    cd packages/runtime-common && uv sync
-    cd packages/shared && uv sync
     cd packages/backend && uv sync
     cd packages/scheduler && uv sync
-    cd packages/worker-manager && uv sync
+    cd packages/worker && uv sync
     cd packages/frontend && bun install
 
 # Update dependencies to the newest available releases.
 # - frontend: bun update --latest updates package.json ranges to latest majors
 # - python: uv lock --upgrade refreshes to the latest versions allowed by pyproject constraints
 update-deps:
-    @echo "Updating contracts dependencies to latest allowed releases..."
-    cd packages/contracts && uv lock --upgrade --resolution highest && uv sync
-    @echo "Updating persistence dependencies to latest allowed releases..."
-    cd packages/persistence && uv lock --upgrade --resolution highest && uv sync
-    @echo "Updating runtime-common dependencies to latest allowed releases..."
-    cd packages/runtime-common && uv lock --upgrade --resolution highest && uv sync
     @echo "Updating backend dependencies to latest allowed releases..."
     cd packages/backend && uv lock --upgrade --resolution highest && uv sync
     @echo "Updating frontend dependencies to latest releases (including majors)..."
     cd packages/frontend && bun update --latest
     @echo "Updating scheduler dependencies to latest allowed releases..."
     cd packages/scheduler && uv lock --upgrade --resolution highest && uv sync
-    @echo "Updating shared dependencies to latest allowed releases..."
-    cd packages/shared && uv lock --upgrade --resolution highest && uv sync
-    @echo "Updating worker-manager dependencies to latest allowed releases..."
-    cd packages/worker-manager && uv lock --upgrade --resolution highest && uv sync
+    @echo "Updating worker dependencies to latest allowed releases..."
+    cd packages/worker && uv lock --upgrade --resolution highest && uv sync
 
 dev:
     #!/usr/bin/env bash
     set -euo pipefail
-    set -a; source packages/shared/dev.env; set +a
-    uv run --project packages/shared python scripts/ensure_dev_postgres.py
-    uv run --project packages/shared python scripts/ensure_dev_rustfs.py
-    (cd packages/backend && uv run --env-file ../shared/dev.env main.py) & \
-    (cd packages/scheduler && uv run --env-file ../shared/dev.env main.py) & \
-    (cd packages/worker-manager && uv run --env-file ../shared/dev.env main.py) & \
+    set -a; source config/env/dev.env; set +a
+    env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_postgres.py
+    env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_rustfs.py
+    (cd packages/backend && env -u VIRTUAL_ENV uv run --env-file ../../config/env/dev.env main.py) & \
+    (cd packages/scheduler && env -u VIRTUAL_ENV uv run --env-file ../../config/env/dev.env main.py) & \
+    (cd packages/worker && env -u VIRTUAL_ENV uv run --env-file ../../config/env/dev.env main.py) & \
     (cd packages/frontend && bun run dev) & wait
 
 dev-clean:
     #!/usr/bin/env bash
     set -euo pipefail
-    set -a; source packages/shared/dev.env; set +a
-    cd packages/shared
-    uv run python - <<'PY'
+    set -a; source config/env/dev.env; set +a
+    cd packages/backend
+    env -u VIRTUAL_ENV uv run python - <<'PY'
     from sqlalchemy import create_engine, text
     from sqlalchemy.exc import OperationalError
-    from core.config import settings
+    from backend_core.config import settings
 
     engine = create_engine(settings.database_url, isolation_level='AUTOCOMMIT')
     try:
@@ -77,72 +65,69 @@ dev-clean:
         engine.dispose()
     PY
     cd ../..
-    rm -rf .runtime/data packages/shared/data packages/shared/packages packages/backend/data packages/scheduler/data packages/worker-manager/data
-    uv run --project packages/shared python scripts/ensure_dev_rustfs.py --remove
+    rm -rf .runtime/data packages/backend/data packages/scheduler/data packages/worker/data
+    env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_rustfs.py --remove
     echo "✓ Local dev database and runtime data reset. Run 'just dev' to recreate everything."
 
 format:
-    cd packages/shared && uv run ruff check --select I --fix .
-    cd packages/shared && uv run ruff check --select I --fix ../contracts ../persistence ../runtime-common
-    cd packages/backend && uv run --project ../shared ruff check --select I --fix .
-    cd packages/scheduler && uv run --project ../shared ruff check --select I --fix .
-    cd packages/worker-manager && uv run --project ../shared ruff check --select I --fix .
-    cd packages/shared && uv run ruff format .
-    cd packages/shared && uv run ruff format ../contracts ../persistence ../runtime-common
-    cd packages/backend && uv run --project ../shared ruff format .
-    cd packages/scheduler && uv run --project ../shared ruff format .
-    cd packages/worker-manager && uv run --project ../shared ruff format .
+    cd packages/backend && env -u VIRTUAL_ENV uv run ruff check --select I --fix .
+    cd packages/scheduler && env -u VIRTUAL_ENV uv run ruff check --select I --fix .
+    cd packages/worker && env -u VIRTUAL_ENV uv run ruff check --select I --fix .
+    cd packages/backend && env -u VIRTUAL_ENV uv run ruff format .
+    cd packages/scheduler && env -u VIRTUAL_ENV uv run ruff format .
+    cd packages/worker && env -u VIRTUAL_ENV uv run ruff format .
     cd packages/frontend && bun run format
 
 check:
-    cd packages/shared && uv run ruff format --check . ../contracts ../persistence ../runtime-common ../backend ../scheduler ../worker-manager
-    cd packages/shared && uv run ruff check . ../contracts ../persistence ../runtime-common ../backend ../scheduler ../worker-manager
-    cd packages/shared && uv run python -m mypy ../contracts
-    cd packages/shared && uv run python -m mypy ../persistence
-    cd packages/shared && uv run python -m mypy ../runtime-common
-    cd packages/shared && uv run python -m mypy .
-    cd packages/shared && uv run python -m mypy ../backend
-    cd packages/shared && uv run python -m mypy ../scheduler
-    cd packages/shared && uv run python -m mypy ../worker-manager
-    cd packages/shared && uv run python ../../scripts/generate_ts_build_stream_types.py --check
-    cd packages/shared && uv run python ../../scripts/generate_ts_step_types.py --check
-    cd packages/shared && uv run python ../../scripts/check_package_boundaries.py
-    cd packages/shared && uv run python ../../scripts/check_env_contracts.py
-    cd packages/shared && uv run python ../../scripts/check_dependency_hygiene.py
-    cd packages/shared && uv run python ../../scripts/check_code_hygiene.py
-    cd packages/shared && uv run python ../../scripts/check_test_layout.py
+    cd packages/backend && env -u VIRTUAL_ENV uv run ruff format --check .
+    cd packages/scheduler && env -u VIRTUAL_ENV uv run ruff format --check .
+    cd packages/worker && env -u VIRTUAL_ENV uv run ruff format --check .
+    cd packages/backend && env -u VIRTUAL_ENV uv run ruff check .
+    cd packages/scheduler && env -u VIRTUAL_ENV uv run ruff check .
+    cd packages/worker && env -u VIRTUAL_ENV uv run ruff check .
+    cd packages/backend && env -u VIRTUAL_ENV uv run python -m mypy .
+    cd packages/scheduler && env -u VIRTUAL_ENV uv run python -m mypy .
+    cd packages/worker && env -u VIRTUAL_ENV uv run python -m mypy .
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_build_stream_types.py --check
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_step_types.py --check
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_worker_contracts.py --check
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_package_boundaries.py
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_env_contracts.py
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_dependency_hygiene.py
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_code_hygiene.py
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_test_layout.py
     cd packages/frontend && bun run panda:codegen && bun run check && bun run lint
 
 verify:
-    cd packages/shared && uv run python ../../scripts/scan_warnings.py -- just format
-    cd packages/shared && uv run python ../../scripts/scan_warnings.py -- just check
+    env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py -- just format
+    env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py -- just check
 
 
 test:
-    cd packages/shared && uv run python ../../scripts/scan_warnings.py -- just test-backend-raw
-    cd packages/shared && uv run python ../../scripts/scan_warnings.py -- just test-frontend-raw
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-backend-raw
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-frontend-raw
 
 test-backend-raw:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd packages/shared
+    cd packages/backend
+    {{pytest}} tests --ignore=tests/integration
+    {{pytest}} tests/integration
+    PYTHONPATH="../worker:${PYTHONPATH:-}" {{pytest}} ../worker/tests --ignore=../worker/tests/integration
+    cd ../scheduler
     {{pytest}} tests
-    {{pytest}} ../backend/tests --ignore=../backend/tests/integration
-    {{pytest}} ../backend/tests/integration
-    {{pytest}} ../worker-manager/tests --ignore=../worker-manager/tests/integration
-    {{pytest}} ../scheduler/tests
 
 test-frontend-raw:
     cd packages/frontend && bun run test:unit
 
 test-e2e:
-    cd packages/shared && uv run python ../../scripts/scan_warnings.py --cwd . -- scripts/test_e2e.sh
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py --cwd . -- scripts/test_e2e.sh
 
 generate-step-types:
-    cd packages/shared && uv run python ../../scripts/generate_ts_step_types.py
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_step_types.py
 
 generate-build-stream-types:
-    cd packages/shared && uv run python ../../scripts/generate_ts_build_stream_types.py
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_build_stream_types.py
 
 docker-dev:
     docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build

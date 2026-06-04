@@ -14,11 +14,10 @@ from typing import Any
 from pydantic import BaseModel, TypeAdapter
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'packages' / 'shared'))
 sys.path.insert(0, str(ROOT / 'packages' / 'backend'))
 
-from contracts.compute import schemas as compute_schemas  # noqa: E402
-from contracts.compute.schemas import (  # noqa: E402
+from backend_contracts.compute import schemas as compute_schemas  # noqa: E402
+from backend_contracts.compute.schemas import (  # noqa: E402
     ActiveBuildDetail,
     ActiveBuildSummary,
     BuildEvent,

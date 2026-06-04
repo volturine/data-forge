@@ -16,7 +16,6 @@ services:
     volumes:
       - data:/app/data
       - ../packages/:/app/packages/
-      - shared-venv:/app/packages/shared/.venv
 
   scheduler:
     environment:
@@ -27,7 +26,6 @@ services:
     volumes:
       - data:/app/data
       - ../packages/:/app/packages/
-      - shared-venv:/app/packages/shared/.venv
 
   worker:
     environment:
@@ -39,7 +37,6 @@ services:
     volumes:
       - data:/app/data
       - ../packages/:/app/packages/
-      - shared-venv:/app/packages/shared/.venv
 
   frontend:
     image: oven/bun:1
@@ -77,8 +74,6 @@ services:
       retries: 30
 
 volumes:
-  shared-venv:
-    driver: local
   frontend-node-modules:
     driver: local
   frontend-svelte-kit:

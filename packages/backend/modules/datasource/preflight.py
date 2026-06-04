@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from core.object_store import delete_object, is_object_store_url
 from openpyxl import load_workbook
+
+from backend_core.object_store import delete_object, is_object_store_url
 
 
 @dataclass
@@ -29,7 +30,7 @@ async def create_preflight(file_path: Path, *, source_path: str | None = None, d
     sheets = workbook.sheetnames
     tables: dict[str, list[str]] = {}
     for sheet in workbook.worksheets:
-        if not hasattr(sheet, "tables") or not sheet.tables:
+        if not hasattr(sheet, 'tables') or not sheet.tables:
             continue
         tables[sheet.title] = list(sheet.tables.keys())
 

@@ -12,13 +12,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FRONTEND_PACKAGE_JSON = ROOT / 'packages/frontend/package.json'
 PYPROJECT_FILES = {
-    'contracts': ROOT / 'packages/contracts/pyproject.toml',
-    'persistence': ROOT / 'packages/persistence/pyproject.toml',
-    'runtime-common': ROOT / 'packages/runtime-common/pyproject.toml',
-    'shared': ROOT / 'packages/shared/pyproject.toml',
     'backend': ROOT / 'packages/backend/pyproject.toml',
-    'worker-manager': ROOT / 'packages/worker-manager/pyproject.toml',
+    'worker': ROOT / 'packages/worker/pyproject.toml',
     'scheduler': ROOT / 'packages/scheduler/pyproject.toml',
+}
+
+REMOVED_PYTHON_DISTRIBUTIONS = {
+    'dataforge-contracts',
+    'dataforge-persistence',
+    'dataforge-runtime-common',
+    'dataforge-shared',
+}
+LOCAL_RUNTIME_DISTRIBUTIONS = {
+    'dataforge-backend',
+    'dataforge-scheduler',
+    'dataforge-worker',
 }
 
 LEGACY_TEST_ARTIFACT_PATH_TOKENS = (
@@ -79,8 +87,16 @@ def main() -> int:
         if duplicates:
             errors.append(f'{pyproject_path.relative_to(ROOT)} has duplicated dependencies: {", ".join(duplicates)}')
 
-        if package_name in {'backend', 'worker-manager', 'scheduler'} and normalized != ['dataforge-shared']:
-            errors.append(f'{pyproject_path.relative_to(ROOT)} must depend only on dataforge-shared; got: {dependencies}')
+        removed_deps = sorted(set(normalized) & REMOVED_PYTHON_DISTRIBUTIONS)
+        if removed_deps:
+            errors.append(f'{pyproject_path.relative_to(ROOT)} depends on removed split packages: {", ".join(removed_deps)}')
+
+        local_runtime_deps = sorted(set(normalized) & LOCAL_RUNTIME_DISTRIBUTIONS)
+
+        if package_name == 'scheduler' and normalized:
+            errors.append(f'{pyproject_path.relative_to(ROOT)} scheduler must not depend on local runtime packages; got: {dependencies}')
+        elif package_name == 'worker' and local_runtime_deps:
+            errors.append(f'{pyproject_path.relative_to(ROOT)} worker must not depend on local runtime packages: {", ".join(local_runtime_deps)}')
 
     if errors:
         print('Dependency hygiene violations:')

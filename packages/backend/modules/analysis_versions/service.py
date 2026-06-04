@@ -2,19 +2,19 @@ import uuid
 from datetime import UTC, datetime
 from typing import cast
 
-from core.analysis_cycles import assert_no_analysis_cycle
-from core.exceptions import (
+from sqlalchemy import delete, desc, func, insert, select
+from sqlmodel import Session, col
+
+from backend_core.analysis_cycles import assert_no_analysis_cycle
+from backend_core.exceptions import (
     AnalysisNotFoundError,
     AnalysisValidationError,
     AnalysisVersionNotFoundError,
     DataSourceNotFoundError,
 )
-from persistence.analysis.models import Analysis, AnalysisDataSource
-from persistence.analysis_versions.models import AnalysisVersion
-from persistence.datasource.models import DataSource
-from sqlalchemy import delete, desc, func, insert, select
-from sqlmodel import Session, col
-
+from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
+from backend_core.persistence.analysis_versions.models import AnalysisVersion
+from backend_core.persistence.datasource.models import DataSource
 from modules.analysis import service as analysis_service
 
 
@@ -42,7 +42,7 @@ def create_version(session: Session, analysis: Analysis, *, commit: bool = True)
         session.flush()
     version = session.get(AnalysisVersion, version_id)
     if not version:
-        raise AnalysisValidationError("Failed to create analysis version")
+        raise AnalysisValidationError('Failed to create analysis version')
     return version
 
 
@@ -98,7 +98,7 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
 
     pipeline_definition = analysis.pipeline_definition
     analysis_service.validate_stored_pipeline_definition(session, pipeline_definition, analysis_id)
-    tabs = pipeline_definition.get("tabs", [])
+    tabs = pipeline_definition.get('tabs', [])
 
     stmt = delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id)  # type: ignore[arg-type]
     session.execute(stmt)
@@ -106,12 +106,12 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
     for tab in tabs:
         if not isinstance(tab, dict):
             continue
-        datasource = tab.get("datasource")
+        datasource = tab.get('datasource')
         if not isinstance(datasource, dict):
             continue
-        if datasource.get("analysis_tab_id") is not None:
+        if datasource.get('analysis_tab_id') is not None:
             continue
-        datasource_id = datasource.get("id")
+        datasource_id = datasource.get('id')
         if datasource_id:
             datasource_ids.append(str(datasource_id))
     for datasource_id in set(datasource_ids):

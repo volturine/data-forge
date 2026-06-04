@@ -9,12 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SOURCE_ROOT = ROOT / 'packages/frontend/src'
 PYTHON_SOURCE_ROOTS = [
     ROOT / 'packages/backend',
-    ROOT / 'packages/worker-manager',
+    ROOT / 'packages/worker',
     ROOT / 'packages/scheduler',
-    ROOT / 'packages/shared/core',
-    ROOT / 'packages/contracts/contracts',
-    ROOT / 'packages/persistence/persistence',
-    ROOT / 'packages/runtime-common/runtime_common',
 ]
 
 TODO_PATTERN = re.compile(r'\b(TODO|FIXME|HACK)\b')

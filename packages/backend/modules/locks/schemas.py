@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import Annotated
 
-from contracts.enums import DataForgeStrEnum
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+from backend_contracts.enums import DataForgeStrEnum
 
 LockText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 
@@ -40,10 +41,10 @@ class LockReleaseResponse(BaseModel):
 
 
 class LockWebsocketAction(DataForgeStrEnum):
-    WATCH = "watch"
-    ACQUIRE = "acquire"
-    RELEASE = "release"
-    PING = "ping"
+    WATCH = 'watch'
+    ACQUIRE = 'acquire'
+    RELEASE = 'release'
+    PING = 'ping'
 
 
 class LockWebsocketRequest(BaseModel):
@@ -53,17 +54,17 @@ class LockWebsocketRequest(BaseModel):
     lock_token: LockText | None = None
     ttl_seconds: int | None = Field(default=None, ge=1)
 
-    @model_validator(mode="after")
-    def validate_action(self) -> "LockWebsocketRequest":
+    @model_validator(mode='after')
+    def validate_action(self) -> LockWebsocketRequest:
         if self.action == LockWebsocketAction.WATCH and (self.resource_type is None or self.resource_id is None):
-            raise ValueError("resource_type and resource_id are required for watch")
+            raise ValueError('resource_type and resource_id are required for watch')
         return self
 
 
 class LockWebsocketMessageType(DataForgeStrEnum):
-    CONNECTED = "connected"
-    STATUS = "status"
-    ERROR = "error"
+    CONNECTED = 'connected'
+    STATUS = 'status'
+    ERROR = 'error'
 
 
 class LockWebsocketConnectedMessage(BaseModel):

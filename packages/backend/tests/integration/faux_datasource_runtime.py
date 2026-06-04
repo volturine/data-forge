@@ -10,21 +10,22 @@ from typing import Any
 
 import polars as pl
 import pytest
-from contracts.datasource.source_types import DataSourceType
-from persistence.datasource.models import DataSource
 from sqlmodel import Session
+
+from backend_contracts.datasource.source_types import DataSourceType
+from backend_core.persistence.datasource.models import DataSource
 
 
 class FauxDatasourceRuntime:
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from modules.datasource import routes
 
-        monkeypatch.setattr(routes, "create_remote_file_datasource", self.create_file_datasource)
-        monkeypatch.setattr(routes, "create_remote_database_datasource", self.create_database_datasource)
-        monkeypatch.setattr(routes, "create_remote_iceberg_datasource", self.create_iceberg_datasource)
-        monkeypatch.setattr(routes, "get_remote_datasource_schema", self.get_datasource_schema)
-        monkeypatch.setattr(routes, "ingest_remote_datasource", self.ingest_datasource)
-        monkeypatch.setattr(routes, "get_remote_column_stats", self.get_column_stats)
+        monkeypatch.setattr(routes, 'create_remote_file_datasource', self.create_file_datasource)
+        monkeypatch.setattr(routes, 'create_remote_database_datasource', self.create_database_datasource)
+        monkeypatch.setattr(routes, 'create_remote_iceberg_datasource', self.create_iceberg_datasource)
+        monkeypatch.setattr(routes, 'get_remote_datasource_schema', self.get_datasource_schema)
+        monkeypatch.setattr(routes, 'ingest_remote_datasource', self.ingest_datasource)
+        monkeypatch.setattr(routes, 'get_remote_column_stats', self.get_column_stats)
 
     async def create_file_datasource(
         self,
@@ -39,11 +40,11 @@ class FauxDatasourceRuntime:
         owner_id: str | None = None,
         **kwargs: Any,
     ):
-        from core.namespace import get_namespace
-        from core.object_store import join_object_store_url, object_store_url, upload_bytes
+        from backend_core.namespace import get_namespace
+        from backend_core.object_store import join_object_store_url, object_store_url, upload_bytes
 
-        metadata_root = object_store_url("namespaces", get_namespace(), "clean", uuid.uuid4().hex, "master")
-        upload_bytes(b'{"metadata":"placeholder"}', join_object_store_url(metadata_root, "metadata", "00000-placeholder.metadata.json"))
+        metadata_root = object_store_url('namespaces', get_namespace(), 'clean', uuid.uuid4().hex, 'master')
+        upload_bytes(b'{"metadata":"placeholder"}', join_object_store_url(metadata_root, 'metadata', '00000-placeholder.metadata.json'))
 
         datasource = DataSource(
             id=str(uuid.uuid4()),
@@ -51,18 +52,18 @@ class FauxDatasourceRuntime:
             description=description,
             source_type=DataSourceType.ICEBERG,
             config={
-                "metadata_path": metadata_root,
-                "branch": "master",
-                "source": {
-                    "source_type": "file",
-                    "file_path": file_path,
-                    "file_type": file_type,
-                    "options": options or csv_options or {},
-                    **{key: value for key, value in kwargs.items() if value is not None and key not in {"runtime_probe", "branch"}},
+                'metadata_path': metadata_root,
+                'branch': 'master',
+                'source': {
+                    'source_type': 'file',
+                    'file_path': file_path,
+                    'file_type': file_type,
+                    'options': options or csv_options or {},
+                    **{key: value for key, value in kwargs.items() if value is not None and key not in {'runtime_probe', 'branch'}},
                 },
             },
             owner_id=owner_id,
-            created_by="import",
+            created_by='import',
             created_at=datetime.now(UTC),
         )
         datasource.schema_cache = self._schema_for(datasource).model_dump(exclude_none=True)
@@ -90,12 +91,12 @@ class FauxDatasourceRuntime:
             description=description,
             source_type=DataSourceType.DATABASE,
             config={
-                "connection_string": connection_string,
-                "query": query,
-                "branch": branch,
+                'connection_string': connection_string,
+                'query': query,
+                'branch': branch,
             },
             owner_id=owner_id,
-            created_by="import",
+            created_by='import',
             created_at=datetime.now(UTC),
         )
         session.add(datasource)
@@ -118,8 +119,8 @@ class FauxDatasourceRuntime:
             session,
             name=name,
             description=description,
-            file_path=str(source.get("file_path")),
-            file_type=str(source.get("file_type", "csv")),
+            file_path=str(source.get('file_path')),
+            file_type=str(source.get('file_type', 'csv')),
             options=self._source_options(source),
             owner_id=owner_id,
             branch=branch,
@@ -164,7 +165,7 @@ class FauxDatasourceRuntime:
         )
 
     def _source_options(self, source: dict[str, object]) -> dict[str, Any]:
-        options = source.get("options")
+        options = source.get('options')
         return options if isinstance(options, dict) else {}
 
     def _stat_value(self, value: object) -> float | str | None:
@@ -177,7 +178,7 @@ class FauxDatasourceRuntime:
     def _get_datasource(self, session: Session, datasource_id: str) -> DataSource:
         datasource = session.get(DataSource, datasource_id)
         if datasource is None:
-            from core.exceptions import DataSourceNotFoundError
+            from backend_core.exceptions import DataSourceNotFoundError
 
             raise DataSourceNotFoundError(datasource_id)
         return datasource
@@ -203,17 +204,17 @@ class FauxDatasourceRuntime:
         from modules.datasource import schemas
 
         response = schemas.DataSourceResponse.model_validate(datasource)
-        response.output_of_tab_id = datasource.config.get("analysis_tab_id") if isinstance(datasource.config, dict) else None
+        response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
         return response
 
     @contextlib.contextmanager
     def _materialized_source_path(self, file_path: str):
-        from core.object_store import download_file, is_object_store_url
+        from backend_core.object_store import download_file, is_object_store_url
 
         if not is_object_store_url(file_path):
             yield file_path
             return
-        suffix = Path(file_path).suffix or ".dat"
+        suffix = Path(file_path).suffix or '.dat'
         fd, temp_name = tempfile.mkstemp(suffix=suffix)
         os.close(fd)
         temp_path = Path(temp_name)
@@ -226,20 +227,20 @@ class FauxDatasourceRuntime:
 
     def _read_dataframe(self, datasource: DataSource) -> pl.DataFrame:
         config = datasource.config if isinstance(datasource.config, dict) else {}
-        source = config.get("source") if datasource.source_type == DataSourceType.ICEBERG else config
+        source = config.get('source') if datasource.source_type == DataSourceType.ICEBERG else config
         if not isinstance(source, dict):
             source = config
-        file_path = source.get("file_path")
-        file_type = source.get("file_type")
+        file_path = source.get('file_path')
+        file_type = source.get('file_type')
         if not isinstance(file_path, str):
             return pl.DataFrame()
         with self._materialized_source_path(file_path) as local_file_path:
-            if file_type == "parquet":
+            if file_type == 'parquet':
                 return pl.read_parquet(local_file_path)
-            if file_type == "json":
+            if file_type == 'json':
                 return pl.read_json(local_file_path)
-            if file_type == "ndjson":
+            if file_type == 'ndjson':
                 return pl.read_ndjson(local_file_path)
-            if file_type == "excel":
+            if file_type == 'excel':
                 return pl.read_excel(local_file_path)
             return pl.read_csv(local_file_path)

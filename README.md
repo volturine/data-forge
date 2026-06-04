@@ -126,7 +126,7 @@ See [`docker/README.md`](docker/README.md) for the Docker production, evaluation
 # Install all dependencies
 just install
 
-# Review packages/shared/dev.env for local settings
+# Review config/env/dev.env for local settings
 
 # Start the full local runtime with hot-reload
 just dev
@@ -212,7 +212,7 @@ just test
 just test-e2e
 ```
 
-For code or config changes, run all three commands before opening a PR. For targeted local work, the tests live under `packages/shared/tests/`, `packages/backend/tests/`, `packages/scheduler/tests/`, `packages/worker-manager/tests/`, and `packages/frontend/tests/`.
+For code or config changes, run all three commands before opening a PR. For targeted local work, the tests live under `packages/shared/tests/`, `packages/backend/tests/`, `packages/scheduler/tests/`, `packages/worker/tests/`, and `packages/frontend/tests/`.
 
 ### Code Style
 
@@ -232,7 +232,7 @@ data-forge/
 │   ├── shared/               # Shared Python runtime, contracts, tests, and env files
 │   ├── backend/              # FastAPI API service
 │   ├── scheduler/            # Scheduler runtime
-│   ├── worker-manager/       # Dynamic build worker runtime
+│   ├── worker/       # Dynamic build worker runtime
 │   └── frontend/             # SvelteKit frontend + Playwright/Vitest tests
 ├── docs/                     # Product docs, PRDs, and references
 ├── docker/                   # Docker image targets, compose, and env files

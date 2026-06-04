@@ -1,7 +1,6 @@
 import uuid
 from datetime import UTC, datetime
 
-from contracts.enums import DataForgeStrEnum
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -14,29 +13,31 @@ from sqlalchemy import (
 )
 from sqlmodel import Field, SQLModel
 
+from backend_contracts.enums import DataForgeStrEnum
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
 class UserStatus(DataForgeStrEnum):
-    ACTIVE = "active"
-    DISABLED = "disabled"
+    ACTIVE = 'active'
+    DISABLED = 'disabled'
 
 
 class AuthProviderName(DataForgeStrEnum):
-    PASSWORD = "password"
-    GOOGLE = "google"
-    GITHUB = "github"
+    PASSWORD = 'password'
+    GOOGLE = 'google'
+    GITHUB = 'github'
 
 
 class VerificationTokenType(DataForgeStrEnum):
-    EMAIL_VERIFY = "email_verify"
-    PASSWORD_RESET = "password_reset"
+    EMAIL_VERIFY = 'email_verify'
+    PASSWORD_RESET = 'password_reset'
 
 
 class User(SQLModel, table=True):  # type: ignore[call-arg]
-    __tablename__ = "users"
+    __tablename__ = 'users'
 
     id: str = Field(
         default_factory=lambda: uuid.uuid4().hex,
@@ -47,10 +48,10 @@ class User(SQLModel, table=True):  # type: ignore[call-arg]
     avatar_url: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     status: UserStatus = Field(
         default=UserStatus.ACTIVE,
-        sa_column=Column(String, nullable=False, server_default="active"),
+        sa_column=Column(String, nullable=False, server_default='active'),
     )
-    email_verified: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default="0"))
-    has_password: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default="0"))
+    email_verified: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0'))
+    has_password: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0'))
     preferences: dict[str, object] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     created_at: datetime = Field(
         default_factory=_utcnow,
@@ -64,17 +65,17 @@ class User(SQLModel, table=True):  # type: ignore[call-arg]
 
 
 class AuthProvider(SQLModel, table=True):  # type: ignore[call-arg]
-    __tablename__ = "auth_providers"
+    __tablename__ = 'auth_providers'
     __table_args__ = (
-        UniqueConstraint("provider", "provider_subject", name="uq_auth_provider_subject"),
-        Index("ix_auth_providers_user_id", "user_id"),
+        UniqueConstraint('provider', 'provider_subject', name='uq_auth_provider_subject'),
+        Index('ix_auth_providers_user_id', 'user_id'),
     )
 
     id: str = Field(
         default_factory=lambda: uuid.uuid4().hex,
         sa_column=Column(String, primary_key=True),
     )
-    user_id: str = Field(sa_column=Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False))
+    user_id: str = Field(sa_column=Column(String, ForeignKey('users.id', ondelete='CASCADE'), nullable=False))
     provider: AuthProviderName = Field(sa_column=Column(String, nullable=False))
     provider_subject: str = Field(sa_column=Column(String, nullable=False))
     provider_metadata: dict[str, object] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
@@ -85,7 +86,7 @@ class AuthProvider(SQLModel, table=True):  # type: ignore[call-arg]
 
 
 class UserSession(SQLModel, table=True):  # type: ignore[call-arg]
-    __tablename__ = "user_sessions"
+    __tablename__ = 'user_sessions'
 
     id: str = Field(
         default_factory=lambda: uuid.uuid4().hex,
@@ -94,7 +95,7 @@ class UserSession(SQLModel, table=True):  # type: ignore[call-arg]
     user_id: str = Field(
         sa_column=Column(
             String,
-            ForeignKey("users.id", ondelete="CASCADE"),
+            ForeignKey('users.id', ondelete='CASCADE'),
             nullable=False,
             index=True,
         )
@@ -106,18 +107,18 @@ class UserSession(SQLModel, table=True):  # type: ignore[call-arg]
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
-    revoked: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default="0"))
+    revoked: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0'))
 
 
 class VerificationToken(SQLModel, table=True):  # type: ignore[call-arg]
-    __tablename__ = "verification_tokens"
-    __table_args__ = (Index("ix_verification_tokens_user_id", "user_id"),)
+    __tablename__ = 'verification_tokens'
+    __table_args__ = (Index('ix_verification_tokens_user_id', 'user_id'),)
 
     id: str = Field(
         default_factory=lambda: uuid.uuid4().hex,
         sa_column=Column(String, primary_key=True),
     )
-    user_id: str = Field(sa_column=Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False))
+    user_id: str = Field(sa_column=Column(String, ForeignKey('users.id', ondelete='CASCADE'), nullable=False))
     token: str = Field(sa_column=Column(String, nullable=False, unique=True, index=True))
     token_type: VerificationTokenType = Field(sa_column=Column(String, nullable=False))
     created_at: datetime = Field(
@@ -125,4 +126,4 @@ class VerificationToken(SQLModel, table=True):  # type: ignore[call-arg]
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
-    used: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default="0"))
+    used: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0'))

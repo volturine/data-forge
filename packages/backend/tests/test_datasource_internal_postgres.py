@@ -1,9 +1,8 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from contracts.datasource.source_types import DataSourceType
-from persistence.datasource.models import DataSource
-
+from backend_contracts.datasource.source_types import DataSourceType
+from backend_core.persistence.datasource.models import DataSource
 from modules.datasource import service
 
 
@@ -27,13 +26,13 @@ def _create_database_datasource_stub(
 ):
     del kwargs
     datasource = DataSource(
-        id="internal-ds-1",
+        id='internal-ds-1',
         name=name,
         description=description,
         source_type=DataSourceType.DATABASE.value,
-        config={"connection_string": connection_string, "query": query, "branch": branch},
+        config={'connection_string': connection_string, 'query': query, 'branch': branch},
         owner_id=owner_id,
-        created_by="import",
+        created_by='import',
         created_at=datetime.now(UTC),
     )
     session.add(datasource)
@@ -45,45 +44,45 @@ def _create_database_datasource_stub(
 def test_list_internal_postgres_tables_reports_application_tables(client, test_db_session) -> None:
     del test_db_session
 
-    response = client.get("/api/v1/datasource/internal-postgres/tables")
+    response = client.get('/api/v1/datasource/internal-postgres/tables')
 
     assert response.status_code == 200
     rows = response.json()
-    names = {(row["schema_name"], row["table_name"]) for row in rows}
-    assert ("default", "analyses") in names
-    row = next(row for row in rows if row["schema_name"] == "default" and row["table_name"] == "analyses")
-    assert row["is_onboarded"] is False
+    names = {(row['schema_name'], row['table_name']) for row in rows}
+    assert ('default', 'analyses') in names
+    row = next(row for row in rows if row['schema_name'] == 'default' and row['table_name'] == 'analyses')
+    assert row['is_onboarded'] is False
 
 
 def test_internal_postgres_display_names_strip_internal_namespace_storage_prefix(test_db_session) -> None:
     namespace_public = DataSource(
-        id="namespace-public-ds",
-        name="internal.df$tenant$public.users",
-        source_type="iceberg",
+        id='namespace-public-ds',
+        name='internal.df$tenant$public.users',
+        source_type='iceberg',
         config={
-            "metadata_path": "/tmp/namespace-public",
-            "source": {
-                "source_type": "database",
-                "connection_string": service.internal_postgres_connection_string(),
-                "query": 'SELECT * FROM "df$tenant$public"."users"',
+            'metadata_path': '/tmp/namespace-public',
+            'source': {
+                'source_type': 'database',
+                'connection_string': service.internal_postgres_connection_string(),
+                'query': 'SELECT * FROM "df$tenant$public"."users"',
             },
         },
-        created_by="import",
+        created_by='import',
         created_at=datetime.now(UTC),
     )
     default_namespace = DataSource(
-        id="default-namespace-ds",
-        name="internal.default.users",
-        source_type="iceberg",
+        id='default-namespace-ds',
+        name='internal.default.users',
+        source_type='iceberg',
         config={
-            "metadata_path": "/tmp/default-namespace",
-            "source": {
-                "source_type": "database",
-                "connection_string": service.internal_postgres_connection_string(),
-                "query": 'SELECT * FROM "default"."users"',
+            'metadata_path': '/tmp/default-namespace',
+            'source': {
+                'source_type': 'database',
+                'connection_string': service.internal_postgres_connection_string(),
+                'query': 'SELECT * FROM "default"."users"',
             },
         },
-        created_by="import",
+        created_by='import',
         created_at=datetime.now(UTC),
     )
     test_db_session.add(namespace_public)
@@ -92,10 +91,10 @@ def test_internal_postgres_display_names_strip_internal_namespace_storage_prefix
 
     listed = {item.id: item.name for item in service.list_datasources(test_db_session, include_hidden=True)}
 
-    assert listed[namespace_public.id] == "internal.public.users"
-    assert listed[default_namespace.id] == "internal.default.users"
-    assert service.get_datasource(test_db_session, namespace_public.id).name == "internal.public.users"
-    assert service.get_datasource(test_db_session, default_namespace.id).name == "internal.default.users"
+    assert listed[namespace_public.id] == 'internal.public.users'
+    assert listed[default_namespace.id] == 'internal.default.users'
+    assert service.get_datasource(test_db_session, namespace_public.id).name == 'internal.public.users'
+    assert service.get_datasource(test_db_session, default_namespace.id).name == 'internal.default.users'
 
 
 def test_toggle_internal_postgres_table_creates_database_datasource_once_and_deletes_on_disable(
@@ -110,47 +109,47 @@ def test_toggle_internal_postgres_table_creates_database_datasource_once_and_del
         calls += 1
         return _create_database_datasource_stub(*args, **kwargs)
 
-    monkeypatch.setattr(service, "create_database_datasource_record", _stub)
+    monkeypatch.setattr(service, 'create_database_datasource_record', _stub)
 
     enabled = client.post(
-        "/api/v1/datasource/internal-postgres/toggle",
-        json={"schema_name": "default", "table_name": "analyses", "enabled": True},
+        '/api/v1/datasource/internal-postgres/toggle',
+        json={'schema_name': 'default', 'table_name': 'analyses', 'enabled': True},
     )
     assert enabled.status_code == 200
     assert enabled.json() == {
-        "schema_name": "default",
-        "table_name": "analyses",
-        "is_onboarded": True,
+        'schema_name': 'default',
+        'table_name': 'analyses',
+        'is_onboarded': True,
     }
     assert calls == 1
 
     enabled_again = client.post(
-        "/api/v1/datasource/internal-postgres/toggle",
-        json={"schema_name": "default", "table_name": "analyses", "enabled": True},
+        '/api/v1/datasource/internal-postgres/toggle',
+        json={'schema_name': 'default', 'table_name': 'analyses', 'enabled': True},
     )
     assert enabled_again.status_code == 200
-    assert enabled_again.json()["is_onboarded"] is True
+    assert enabled_again.json()['is_onboarded'] is True
     assert calls == 1
 
-    listed = client.get("/api/v1/datasource/internal-postgres/tables")
+    listed = client.get('/api/v1/datasource/internal-postgres/tables')
     assert listed.status_code == 200
-    row = next(item for item in listed.json() if item["schema_name"] == "default" and item["table_name"] == "analyses")
-    assert row["is_onboarded"] is True
-    assert test_db_session.get(DataSource, "internal-ds-1") is not None
+    row = next(item for item in listed.json() if item['schema_name'] == 'default' and item['table_name'] == 'analyses')
+    assert row['is_onboarded'] is True
+    assert test_db_session.get(DataSource, 'internal-ds-1') is not None
 
     disabled = client.post(
-        "/api/v1/datasource/internal-postgres/toggle",
-        json={"schema_name": "default", "table_name": "analyses", "enabled": False},
+        '/api/v1/datasource/internal-postgres/toggle',
+        json={'schema_name': 'default', 'table_name': 'analyses', 'enabled': False},
     )
     assert disabled.status_code == 200
     assert disabled.json() == {
-        "schema_name": "default",
-        "table_name": "analyses",
-        "is_onboarded": False,
+        'schema_name': 'default',
+        'table_name': 'analyses',
+        'is_onboarded': False,
     }
-    assert test_db_session.get(DataSource, "internal-ds-1") is None
+    assert test_db_session.get(DataSource, 'internal-ds-1') is None
 
-    relisted = client.get("/api/v1/datasource/internal-postgres/tables")
+    relisted = client.get('/api/v1/datasource/internal-postgres/tables')
     assert relisted.status_code == 200
-    row = next(item for item in relisted.json() if item["schema_name"] == "default" and item["table_name"] == "analyses")
-    assert row["is_onboarded"] is False
+    row = next(item for item in relisted.json() if item['schema_name'] == 'default' and item['table_name'] == 'analyses')
+    assert row['is_onboarded'] is False

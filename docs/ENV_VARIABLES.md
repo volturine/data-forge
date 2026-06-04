@@ -3,10 +3,10 @@
 This project uses environment variables for two layers:
 
 1. **Backend runtime** — loaded by `packages/shared/core/config.py` from process env and the env file selected by `ENV_FILE`
-2. **Frontend dev server (Vite)** — read from the process environment; `just dev` sources `packages/shared/dev.env` so local dev variables come from the same file
+2. **Frontend dev server (Vite)** — read from the process environment; `just dev` sources `config/env/dev.env` so local dev variables come from the same file
 
 There is no separate `packages/frontend/.env` file. All local dev configuration — including Vite
-dev-server settings (`FRONTEND_PORT`, `BACKEND_HOST`) — lives in `packages/shared/dev.env`.
+dev-server settings (`FRONTEND_PORT`, `BACKEND_HOST`) — lives in `config/env/dev.env`.
 
 ## Deployment topologies
 
@@ -36,7 +36,7 @@ Browser  ──►  FastAPI (PORT 8000)
 
 - Customer install: copy `docker/docker-compose.yml` to `compose.yml` plus `docker/env/prod.env` to `.env`, then run `docker compose pull && docker compose up -d`
 - Maintainer local smoke test: `just docker-prod` uses the same `docker/env/prod.env` but overrides image tags to local builds at runtime
-- Bare-metal (`just prod`): edit `packages/shared/prod.env`
+- Bare-metal (`just prod`): edit `config/env/prod.env`
 
 ### Development — local runtime
 
@@ -48,7 +48,7 @@ Browser  ──►  Vite dev server (FRONTEND_PORT 3000)
 Repo-level local runtime:
   - backend/main.py API process
   - scheduler/main.py scheduler process
-  - worker-manager/main.py worker-manager process
+  - worker/main.py worker process
   - dynamically spawned build-worker subprocesses
 ```
 
@@ -66,7 +66,7 @@ Repo-level local runtime:
 
 **Templates for this topology:**
 
-- Edit `packages/shared/dev.env` (covers both backend and Vite dev-server settings)
+- Edit `config/env/dev.env` (covers both backend and Vite dev-server settings)
 
 ---
 
@@ -94,7 +94,7 @@ If you only want the high-value knobs, start with these:
 
 ### Frontend dev server
 
-- `just dev` sources `packages/shared/dev.env` into the shell before starting Vite, so `FRONTEND_PORT` and `BACKEND_HOST` are inherited from the same file as the backend.
+- `just dev` sources `config/env/dev.env` into the shell before starting Vite, so `FRONTEND_PORT` and `BACKEND_HOST` are inherited from the same file as the backend.
 - No `packages/frontend/.env` file is needed or used.
 - No variables are exposed to browser code — the `VITE_` prefix convention is not used.
 
@@ -124,16 +124,16 @@ The checked-in Docker production env defaults to `DF_WORKERS=4` for the API proc
 # Build the frontend first
 cd packages/frontend && bun run build && cd ../..
 # Configure the backend
-# Edit packages/shared/prod.env with your host, secrets, resource limits
+# Edit config/env/prod.env with your host, secrets, resource limits
 just prod
 ```
 
-The checked-in `packages/shared/prod.env` now defaults to `WORKERS=4` and dynamic build-worker scaling with zero warm workers.
+The checked-in `config/env/prod.env` now defaults to `WORKERS=4` and dynamic build-worker scaling with zero warm workers.
 
 ### Local development
 
 ```bash
-# Edit packages/shared/dev.env with your settings — covers both backend and Vite dev-server
+# Edit config/env/dev.env with your settings — covers both backend and Vite dev-server
 just dev
 ```
 
@@ -254,7 +254,7 @@ just dev
 ## Frontend dev-server variables
 
 > **Development only.** These configure the Vite dev server and its proxy.
-> They live in `packages/shared/dev.env` alongside the backend variables. `just dev`
+> They live in `config/env/dev.env` alongside the backend variables. `just dev`
 > sources that file so both processes share the same configuration.
 > In production the Vite dev server is not running, so none of these have any
 > effect on the deployed application.

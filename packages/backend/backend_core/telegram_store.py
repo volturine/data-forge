@@ -1,10 +1,10 @@
 import logging
 from datetime import UTC, datetime
 
-from persistence.telegram.models import TelegramListener, TelegramSubscriber
 from sqlalchemy import select
 from sqlmodel import Session
 
+from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
 from backend_core.telegram_schemas import (
     ListenerCreate,
     ListenerResponse,

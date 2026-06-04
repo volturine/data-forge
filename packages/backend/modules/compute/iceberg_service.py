@@ -1,27 +1,28 @@
 from datetime import UTC
 from pathlib import Path
 
-from contracts.build_runs.models import BuildRunStatus
-from contracts.compute import schemas
-from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
-from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError
-from core.iceberg_catalog import load_runtime_catalog
-from core.iceberg_metadata import (
+from sqlalchemy import or_, select
+from sqlmodel import Session
+
+from backend_contracts.build_runs.models import BuildRunStatus
+from backend_contracts.compute import schemas
+from backend_contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError
+from backend_core.iceberg_catalog import load_runtime_catalog
+from backend_core.iceberg_metadata import (
     resolve_iceberg_branch_metadata_path,
     resolve_iceberg_metadata_path,
 )
-from core.object_store import object_store_storage_options
-from persistence.build_runs.models import BuildRun
-from persistence.datasource.models import DataSource
-from persistence.engine_runs.models import EngineRun
-from sqlalchemy import or_, select
-from sqlmodel import Session
+from backend_core.object_store import object_store_storage_options
+from backend_core.persistence.build_runs.models import BuildRun
+from backend_core.persistence.datasource.models import DataSource
+from backend_core.persistence.engine_runs.models import EngineRun
 
 
 def _read_snapshot_id(payload: dict[str, object] | None) -> str | None:
     if not isinstance(payload, dict):
         return None
-    snapshot_id = payload.get("snapshot_id")
+    snapshot_id = payload.get('snapshot_id')
     if isinstance(snapshot_id, str) and snapshot_id:
         return snapshot_id
     if isinstance(snapshot_id, int):
@@ -34,7 +35,7 @@ def _matches_branch(payload: dict[str, object] | None, branch: str | None) -> bo
         return True
     if not isinstance(payload, dict):
         return False
-    run_branch = payload.get("branch")
+    run_branch = payload.get('branch')
     return isinstance(run_branch, str) and run_branch == branch
 
 
@@ -160,25 +161,25 @@ def list_iceberg_snapshots(
     if datasource is None:
         raise DataSourceNotFoundError(datasource_id)
     if not datasource.is_iceberg:
-        raise ValueError("Snapshots are only available for Iceberg datasources")
+        raise ValueError('Snapshots are only available for Iceberg datasources')
 
-    metadata_path = datasource.config.get("metadata_path")
+    metadata_path = datasource.config.get('metadata_path')
     if not metadata_path:
-        raise ValueError("Iceberg datasource missing metadata_path")
-    branch_name = branch or datasource.config.get("branch")
+        raise ValueError('Iceberg datasource missing metadata_path')
+    branch_name = branch or datasource.config.get('branch')
 
-    catalog_type = datasource.config.get("catalog_type")
-    catalog_uri = datasource.config.get("catalog_uri")
-    namespace = datasource.config.get("namespace")
-    table_name = datasource.config.get("table")
-    warehouse = datasource.config.get("warehouse")
+    catalog_type = datasource.config.get('catalog_type')
+    catalog_uri = datasource.config.get('catalog_uri')
+    namespace = datasource.config.get('namespace')
+    table_name = datasource.config.get('table')
+    warehouse = datasource.config.get('warehouse')
 
     if catalog_type and catalog_uri and namespace and table_name:
-        catalog_config = {"type": catalog_type, "uri": catalog_uri, **object_store_storage_options()}
+        catalog_config = {'type': catalog_type, 'uri': catalog_uri, **object_store_storage_options()}
         if warehouse:
-            catalog_config["warehouse"] = warehouse
-        catalog = load_runtime_catalog("local", **catalog_config)
-        identifier = f"{namespace}.{table_name}"
+            catalog_config['warehouse'] = warehouse
+        catalog = load_runtime_catalog('local', **catalog_config)
+        identifier = f'{namespace}.{table_name}'
         table = catalog.load_table(identifier)
         resolved = resolve_iceberg_metadata_path(str(table.metadata_location))
     else:
@@ -208,7 +209,7 @@ def list_iceberg_snapshots(
         )
         snapshots = [snapshot for snapshot in snapshots if snapshot.snapshot_id in allowed_snapshot_ids]
     snapshots.sort(key=lambda snapshot: snapshot.timestamp_ms, reverse=True)
-    table_path = resolved if resolved.startswith("s3://") else str(Path(resolved).parents[1])
+    table_path = resolved if resolved.startswith('s3://') else str(Path(resolved).parents[1])
     return schemas.IcebergSnapshotsResponse(
         datasource_id=datasource_id,
         table_path=table_path,
@@ -221,65 +222,65 @@ def delete_iceberg_snapshot(session: Session, datasource_id: str, snapshot_id: s
     if datasource is None:
         raise DataSourceNotFoundError(datasource_id)
     if not datasource.is_iceberg:
-        raise ValueError("Snapshots are only available for Iceberg datasources")
+        raise ValueError('Snapshots are only available for Iceberg datasources')
 
     try:
         snapshot_value = int(snapshot_id)
     except (TypeError, ValueError) as exc:
-        raise DataSourceSnapshotError("Snapshot ID must be an integer", details={"snapshot_id": snapshot_id}) from exc
+        raise DataSourceSnapshotError('Snapshot ID must be an integer', details={'snapshot_id': snapshot_id}) from exc
 
-    catalog_type = datasource.config.get("catalog_type")
-    catalog_uri = datasource.config.get("catalog_uri")
-    namespace = datasource.config.get("namespace")
-    table_name = datasource.config.get("table")
-    warehouse = datasource.config.get("warehouse")
+    catalog_type = datasource.config.get('catalog_type')
+    catalog_uri = datasource.config.get('catalog_uri')
+    namespace = datasource.config.get('namespace')
+    table_name = datasource.config.get('table')
+    warehouse = datasource.config.get('warehouse')
     if not (catalog_type and catalog_uri and namespace and table_name):
         raise DataSourceSnapshotError(
-            "Snapshot deletion requires a catalog-backed Iceberg datasource",
-            details={"snapshot_id": snapshot_id},
+            'Snapshot deletion requires a catalog-backed Iceberg datasource',
+            details={'snapshot_id': snapshot_id},
         )
 
-    catalog_config = {"type": catalog_type, "uri": catalog_uri, **object_store_storage_options()}
+    catalog_config = {'type': catalog_type, 'uri': catalog_uri, **object_store_storage_options()}
     if warehouse:
-        catalog_config["warehouse"] = warehouse
-    catalog = load_runtime_catalog("local", **catalog_config)
-    table = catalog.load_table(f"{namespace}.{table_name}")
+        catalog_config['warehouse'] = warehouse
+    catalog = load_runtime_catalog('local', **catalog_config)
+    table = catalog.load_table(f'{namespace}.{table_name}')
 
-    if not hasattr(table, "maintenance"):
+    if not hasattr(table, 'maintenance'):
         raise DataSourceSnapshotError(
-            "Snapshot deletion is not supported by the current Iceberg runtime",
-            details={"snapshot_id": snapshot_id},
+            'Snapshot deletion is not supported by the current Iceberg runtime',
+            details={'snapshot_id': snapshot_id},
         )
     maintenance = table.maintenance
-    if not hasattr(maintenance, "expire_snapshots"):
+    if not hasattr(maintenance, 'expire_snapshots'):
         raise DataSourceSnapshotError(
-            "Snapshot deletion is not supported by the current Iceberg runtime",
-            details={"snapshot_id": snapshot_id},
+            'Snapshot deletion is not supported by the current Iceberg runtime',
+            details={'snapshot_id': snapshot_id},
         )
 
     try:
         current = table.current_snapshot()
         if current and current.snapshot_id == snapshot_value:
             raise DataSourceSnapshotError(
-                "Cannot delete the current snapshot",
-                details={"snapshot_id": snapshot_id},
+                'Cannot delete the current snapshot',
+                details={'snapshot_id': snapshot_id},
             )
         available_ids = [snapshot.snapshot_id for snapshot in table.snapshots()]
         if snapshot_value not in available_ids:
             raise DataSourceSnapshotError(
-                f"Snapshot with snapshot id {snapshot_value} does not exist",
+                f'Snapshot with snapshot id {snapshot_value} does not exist',
                 details={
-                    "snapshot_id": snapshot_id,
-                    "available_snapshot_ids": available_ids,
+                    'snapshot_id': snapshot_id,
+                    'available_snapshot_ids': available_ids,
                 },
             )
         maintenance.expire_snapshots().by_id(snapshot_value).commit()
     except ValueError as exc:
-        raise DataSourceSnapshotError(str(exc), details={"snapshot_id": snapshot_id}) from exc
+        raise DataSourceSnapshotError(str(exc), details={'snapshot_id': snapshot_id}) from exc
     except NotImplementedError as exc:
         raise DataSourceSnapshotError(
-            "Snapshot deletion is not supported by the current Iceberg catalog",
-            details={"snapshot_id": snapshot_id},
+            'Snapshot deletion is not supported by the current Iceberg catalog',
+            details={'snapshot_id': snapshot_id},
         ) from exc
 
     return schemas.IcebergSnapshotDeleteResponse(datasource_id=datasource_id, snapshot_id=snapshot_id)

@@ -5,16 +5,16 @@ from __future__ import annotations
 import time
 import uuid
 
-from core.config import settings
 from fastapi import Query
 from pydantic import BaseModel
 
 from backend_core.auth_config import settings as auth_settings
+from backend_core.config import settings
 from backend_core.error_handlers import handle_errors
 from backend_core.settings_store import get_settings
 from modules.mcp.router import MCPRouter
 
-router = MCPRouter(prefix="/config", tags=["config"])
+router = MCPRouter(prefix='/config', tags=['config'])
 
 
 class FrontendConfig(BaseModel):
@@ -53,8 +53,8 @@ def invalidate_config_cache() -> None:
     _config_cache_time = 0.0
 
 
-@router.get("/uuid", response_model=UuidResponse, mcp=True)
-@handle_errors(operation="generate UUID")
+@router.get('/uuid', response_model=UuidResponse, mcp=True)
+@handle_errors(operation='generate UUID')
 def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
     """Generate UUID v4 values for use in analysis creation (output.result_id) or any UUID field.
 
@@ -63,8 +63,8 @@ def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
     return UuidResponse(uuids=[str(uuid.uuid4()) for _ in range(count)])
 
 
-@router.get("", response_model=FrontendConfig, mcp=True)
-@handle_errors(operation="get config")
+@router.get('', response_model=FrontendConfig, mcp=True)
+@handle_errors(operation='get config')
 def get_config() -> FrontendConfig:
     """Get application configuration: runtime settings, logging settings, feature flags, and default namespace."""
     global _config_cache, _config_cache_time  # noqa: PLW0603
@@ -73,7 +73,7 @@ def get_config() -> FrontendConfig:
     if _config_cache is not None and (now - _config_cache_time) < _CONFIG_CACHE_TTL:
         return _config_cache
 
-    from core.database import run_settings_db
+    from backend_core.database import run_settings_db
 
     db_settings = run_settings_db(get_settings)
     config = FrontendConfig(

@@ -1,50 +1,34 @@
 import logging
 
-from core.exceptions import SettingsConfigurationError
-from core.secrets import decrypt_secret, encrypt_secret, is_masked_secret, mask_secret
-from core.settings_projection import (
-    get_resolved_default_model as get_resolved_default_model,
-)
-from core.settings_projection import (
-    get_resolved_huggingface_settings as get_resolved_huggingface_settings,
-)
-from core.settings_projection import (
-    get_resolved_ollama_settings as get_resolved_ollama_settings,
-)
-from core.settings_projection import (
-    get_resolved_openai_settings as get_resolved_openai_settings,
-)
-from core.settings_projection import (
-    get_resolved_openrouter_key as get_resolved_openrouter_key,
-)
-from core.settings_projection import (
-    get_resolved_smtp as get_resolved_smtp,
-)
-from core.settings_projection import (
-    get_resolved_telegram_settings as get_resolved_telegram_settings,
-)
-from core.settings_projection import (
-    get_resolved_telegram_token as get_resolved_telegram_token,
-)
-from core.settings_projection import (
-    invalidate_resolved_settings_cache,
-)
-from persistence.settings.models import AppSettings
 from sqlmodel import Session
 
+from backend_core.exceptions import SettingsConfigurationError
+from backend_core.persistence.settings.models import AppSettings
+from backend_core.secrets import decrypt_secret, encrypt_secret, is_masked_secret, mask_secret
+from backend_core.settings_projection import (
+    get_resolved_default_model as get_resolved_default_model,
+    get_resolved_huggingface_settings as get_resolved_huggingface_settings,
+    get_resolved_ollama_settings as get_resolved_ollama_settings,
+    get_resolved_openai_settings as get_resolved_openai_settings,
+    get_resolved_openrouter_key as get_resolved_openrouter_key,
+    get_resolved_smtp as get_resolved_smtp,
+    get_resolved_telegram_settings as get_resolved_telegram_settings,
+    get_resolved_telegram_token as get_resolved_telegram_token,
+    invalidate_resolved_settings_cache,
+)
 from backend_core.settings_schemas import SettingsResponse, SettingsUpdate
 
 logger = logging.getLogger(__name__)
 
 
 def _warn_bootstrap_secret_missing(name: str) -> None:
-    logging.warning("Skipping %s bootstrap because SETTINGS_ENCRYPTION_KEY is not set", name)
+    logging.warning('Skipping %s bootstrap because SETTINGS_ENCRYPTION_KEY is not set', name)
 
 
 def _read_secret(row: AppSettings, field: str) -> str:
-    stored = str(getattr(row, field, "") or "")
+    stored = str(getattr(row, field, '') or '')
     if not stored:
-        return ""
+        return ''
     return decrypt_secret(stored)
 
 
@@ -61,11 +45,11 @@ def _resolve_updated_secret(row: AppSettings, field: str, value: str | None) -> 
 
 
 def _masked_settings_response(row: AppSettings) -> SettingsResponse:
-    smtp_password = _read_secret(row, "smtp_password")
-    telegram_bot_token = _read_secret(row, "telegram_bot_token")
-    openrouter_api_key = _read_secret(row, "openrouter_api_key")
-    openai_api_key = _read_secret(row, "openai_api_key")
-    huggingface_api_token = _read_secret(row, "huggingface_api_token")
+    smtp_password = _read_secret(row, 'smtp_password')
+    telegram_bot_token = _read_secret(row, 'telegram_bot_token')
+    openrouter_api_key = _read_secret(row, 'openrouter_api_key')
+    openai_api_key = _read_secret(row, 'openai_api_key')
+    huggingface_api_token = _read_secret(row, 'huggingface_api_token')
     return SettingsResponse(
         smtp_host=row.smtp_host,
         smtp_port=row.smtp_port,
@@ -95,7 +79,7 @@ def seed_settings_from_env(session: Session) -> None:
     Existing rows are treated as user-owned state and are not re-seeded on
     restart, even when a saved value is empty, False, or a default like 587.
     """
-    from core.config import settings as app_settings
+    from backend_core.config import settings as app_settings
 
     row = session.get(AppSettings, 1)
     if row and row.env_bootstrap_complete:
@@ -118,38 +102,38 @@ def seed_settings_from_env(session: Session) -> None:
     bootstrap_complete = True
     if not row.smtp_password and app_settings.smtp_password:
         try:
-            _write_secret(row, "smtp_password", app_settings.smtp_password)
+            _write_secret(row, 'smtp_password', app_settings.smtp_password)
             changed = True
         except SettingsConfigurationError:
             bootstrap_complete = False
-            _warn_bootstrap_secret_missing("SMTP password")
+            _warn_bootstrap_secret_missing('SMTP password')
     if not row.telegram_bot_token and app_settings.telegram_bot_token:
         try:
-            _write_secret(row, "telegram_bot_token", app_settings.telegram_bot_token)
+            _write_secret(row, 'telegram_bot_token', app_settings.telegram_bot_token)
             changed = True
         except SettingsConfigurationError:
             bootstrap_complete = False
-            _warn_bootstrap_secret_missing("Telegram token")
+            _warn_bootstrap_secret_missing('Telegram token')
     if not row.telegram_bot_enabled and app_settings.telegram_bot_enabled:
         row.telegram_bot_enabled = app_settings.telegram_bot_enabled
         changed = True
     if not row.openrouter_api_key and app_settings.openrouter_api_key:
         try:
-            _write_secret(row, "openrouter_api_key", app_settings.openrouter_api_key)
+            _write_secret(row, 'openrouter_api_key', app_settings.openrouter_api_key)
             changed = True
         except SettingsConfigurationError:
             bootstrap_complete = False
-            _warn_bootstrap_secret_missing("OpenRouter key")
+            _warn_bootstrap_secret_missing('OpenRouter key')
     if not row.openrouter_default_model and app_settings.openrouter_default_model:
         row.openrouter_default_model = app_settings.openrouter_default_model
         changed = True
     if not row.openai_api_key and app_settings.openai_api_key:
         try:
-            _write_secret(row, "openai_api_key", app_settings.openai_api_key)
+            _write_secret(row, 'openai_api_key', app_settings.openai_api_key)
             changed = True
         except SettingsConfigurationError:
             bootstrap_complete = False
-            _warn_bootstrap_secret_missing("OpenAI key")
+            _warn_bootstrap_secret_missing('OpenAI key')
     if not row.openai_endpoint_url and app_settings.openai_base_url:
         row.openai_endpoint_url = app_settings.openai_base_url
         changed = True
@@ -167,11 +151,11 @@ def seed_settings_from_env(session: Session) -> None:
         changed = True
     if not row.huggingface_api_token and app_settings.huggingface_api_token:
         try:
-            _write_secret(row, "huggingface_api_token", app_settings.huggingface_api_token)
+            _write_secret(row, 'huggingface_api_token', app_settings.huggingface_api_token)
             changed = True
         except SettingsConfigurationError:
             bootstrap_complete = False
-            _warn_bootstrap_secret_missing("Hugging Face token")
+            _warn_bootstrap_secret_missing('Hugging Face token')
     if not row.huggingface_default_model and app_settings.huggingface_default_model:
         row.huggingface_default_model = app_settings.huggingface_default_model
         changed = True
@@ -212,16 +196,16 @@ def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
         row.smtp_port = data.smtp_port
     if data.smtp_user is not None:
         row.smtp_user = data.smtp_user
-    smtp_password = _resolve_updated_secret(row, "smtp_password", data.smtp_password)
-    telegram_bot_token = _resolve_updated_secret(row, "telegram_bot_token", data.telegram_bot_token)
-    openrouter_api_key = _resolve_updated_secret(row, "openrouter_api_key", data.openrouter_api_key)
-    openai_api_key = _resolve_updated_secret(row, "openai_api_key", data.openai_api_key)
-    huggingface_api_token = _resolve_updated_secret(row, "huggingface_api_token", data.huggingface_api_token)
-    _write_secret(row, "smtp_password", smtp_password)
-    _write_secret(row, "telegram_bot_token", telegram_bot_token)
-    _write_secret(row, "openrouter_api_key", openrouter_api_key)
-    _write_secret(row, "openai_api_key", openai_api_key)
-    _write_secret(row, "huggingface_api_token", huggingface_api_token)
+    smtp_password = _resolve_updated_secret(row, 'smtp_password', data.smtp_password)
+    telegram_bot_token = _resolve_updated_secret(row, 'telegram_bot_token', data.telegram_bot_token)
+    openrouter_api_key = _resolve_updated_secret(row, 'openrouter_api_key', data.openrouter_api_key)
+    openai_api_key = _resolve_updated_secret(row, 'openai_api_key', data.openai_api_key)
+    huggingface_api_token = _resolve_updated_secret(row, 'huggingface_api_token', data.huggingface_api_token)
+    _write_secret(row, 'smtp_password', smtp_password)
+    _write_secret(row, 'telegram_bot_token', telegram_bot_token)
+    _write_secret(row, 'openrouter_api_key', openrouter_api_key)
+    _write_secret(row, 'openai_api_key', openai_api_key)
+    _write_secret(row, 'huggingface_api_token', huggingface_api_token)
     if data.telegram_bot_enabled is not None:
         row.telegram_bot_enabled = data.telegram_bot_enabled
     if data.openrouter_default_model is not None:

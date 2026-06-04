@@ -6,11 +6,17 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from contracts.runtime_workers.models import RuntimeWorkerKind
-from core import build_runs_service as build_run_service
-from core import runtime_workers_service as runtime_worker_service
-from core.config import settings
-from core.database import (
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from sqlmodel import Session, text
+
+from api import router
+from backend_contracts.runtime_workers.models import RuntimeWorkerKind
+from backend_core import build_runs_service as build_run_service, runtime_ipc, runtime_workers_service as runtime_worker_service
+from backend_core.config import settings
+from backend_core.database import (
     get_settings_db,
     init_db,
     register_settings_bootstrap_hook,
@@ -19,30 +25,22 @@ from core.database import (
     run_settings_db,
     supports_distributed_runtime,
 )
-from core.exceptions import AppError
-from core.http import close_clients
-from core.logging import RequestLoggingMiddleware, configure_logging
-from core.namespace import (
-    list_namespaces,
-    namespace_paths,
-    reset_namespace,
-    set_namespace_context,
-)
-from core.namespaces_service import register_namespace
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from runtime_common import ipc as runtime_ipc
-from runtime_common.ipc import RuntimeListenerKind
-from sqlmodel import Session, text
-
-from api import router
 from backend_core.error_handlers import (
     app_error_handler,
     generic_error_handler,
     validation_error_handler,
 )
+from backend_core.exceptions import AppError
+from backend_core.http import close_clients
+from backend_core.logging import RequestLoggingMiddleware, configure_logging
+from backend_core.namespace import (
+    list_namespaces,
+    namespace_paths,
+    reset_namespace,
+    set_namespace_context,
+)
+from backend_core.namespaces_service import register_namespace
+from backend_core.runtime_ipc import RuntimeListenerKind
 from backend_core.runtime_notifications import handle_runtime_payload
 from backend_core.settings_store import (
     invalidate_resolved_settings_cache,
@@ -93,7 +91,7 @@ try:
 except NameError:
     _NUITKA_COMPILED = False
 
-frontend_build_dir = Path(__file__).parent / "frontend" / "build" if _NUITKA_COMPILED else ROOT / "packages" / "frontend" / "build"
+frontend_build_dir = Path(__file__).parent / 'frontend' / 'build' if _NUITKA_COMPILED else ROOT / 'packages' / 'frontend' / 'build'
 
 
 def _resolve_uvicorn_workers() -> int:
@@ -110,7 +108,7 @@ def _guard_runtime_workers(workers: int) -> int:
         return workers
     if supports_distributed_runtime():
         return workers
-    raise RuntimeError("Multiple workers are not supported in the current runtime mode. Set WORKERS=1.")
+    raise RuntimeError('Multiple workers are not supported in the current runtime mode. Set WORKERS=1.')
 
 
 def _resolve_uvicorn_limit_concurrency() -> int | None:
@@ -154,7 +152,7 @@ async def chat_sweep_loop(stop_event: asyncio.Event) -> None:
         try:
             session_store.sweep()
         except Exception as e:
-            logger.error("Chat sweep error: %s", e, exc_info=True)
+            logger.error('Chat sweep error: %s', e, exc_info=True)
 
 
 async def api_worker_heartbeat_loop(stop_event: asyncio.Event, worker_id: str, *, heartbeat_seconds: float = 5.0) -> None:
@@ -168,8 +166,8 @@ async def api_worker_heartbeat_loop(stop_event: asyncio.Event, worker_id: str, *
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_db()
     configure_logging()
-    logger.info("Starting application...")
-    api_worker_id = f"api:{os.getpid()}"
+    logger.info('Starting application...')
+    api_worker_id = f'api:{os.getpid()}'
     app.state.api_worker_id = api_worker_id
     from backend_core.public_schema import ensure_backend_public_tables
     from modules.auth.service import ensure_default_user
@@ -197,8 +195,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         del session
         resolved = get_resolved_telegram_settings()
-        enabled = bool(resolved.get("enabled"))
-        token = str(resolved.get("token", ""))
+        enabled = bool(resolved.get('enabled'))
+        token = str(resolved.get('token', ''))
         return enabled, token
 
     enabled, token = run_settings_db(_check_bot_enabled)
@@ -223,7 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await close_clients()
     await asyncio.to_thread(_stop_api_worker, api_worker_id)
 
-    logger.info("Application shutdown complete")
+    logger.info('Application shutdown complete')
 
 
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
@@ -234,9 +232,9 @@ app.add_exception_handler(RequestValidationError, validation_error_handler)  # t
 app.add_exception_handler(Exception, generic_error_handler)  # type: ignore[arg-type]
 
 
-@app.middleware("http")
+@app.middleware('http')
 async def namespace_middleware(request: Request, call_next) -> Response:
-    raw = request.headers.get("X-Namespace")
+    raw = request.headers.get('X-Namespace')
     token = set_namespace_context(raw)
     try:
         await asyncio.to_thread(run_settings_db, register_namespace, raw)
@@ -249,28 +247,28 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
     allow_origins=settings.cors_origins_list,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allow_headers=[
-        "Content-Type",
-        "Authorization",
-        "If-Match",
-        "X-Client-Id",
-        "X-Namespace",
-        "X-Session-Token",
+        'Content-Type',
+        'Authorization',
+        'If-Match',
+        'X-Client-Id',
+        'X-Namespace',
+        'X-Session-Token',
     ],
 )
 
 
-@app.middleware("http")
+@app.middleware('http')
 async def security_headers(request: Request, call_next) -> Response:
     response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "0"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '0'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
     if not settings.debug:
-        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        response.headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains'
     return response
 
 
@@ -280,28 +278,28 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(router)
 
 
-@app.get("/", response_model=None)
+@app.get('/', response_model=None)
 async def root() -> FileResponse | dict[str, str]:
-    index_path = frontend_build_dir / "index.html"
+    index_path = frontend_build_dir / 'index.html'
 
     if settings.prod_mode_enabled and index_path.exists():
         return FileResponse(str(index_path))
 
-    return {"message": "Welcome to Svelte-FastAPI Template"}
+    return {'message': 'Welcome to Svelte-FastAPI Template'}
 
 
 # Health Check Endpoints
-@app.get("/health")
+@app.get('/health')
 async def health() -> dict[str, str]:
     """Basic liveness check - returns 200 if app is running."""
     return {
-        "status": "healthy",
-        "service": settings.app_name,
-        "version": settings.app_version,
+        'status': 'healthy',
+        'service': settings.app_name,
+        'version': settings.app_version,
     }
 
 
-@app.get("/health/ready")
+@app.get('/health/ready')
 async def readiness(session: Session = Depends(get_settings_db)) -> JSONResponse:
     """Readiness check - verifies app can handle requests.
     Checks database connectivity and filesystem.
@@ -311,69 +309,69 @@ async def readiness(session: Session = Depends(get_settings_db)) -> JSONResponse
 
     # Check database
     try:
-        session.execute(text("SELECT 1"))
-        checks["database"] = "ok"
+        session.execute(text('SELECT 1'))
+        checks['database'] = 'ok'
     except Exception as e:
-        checks["database"] = f"error: {e!s}"
+        checks['database'] = f'error: {e!s}'
         is_ready = False
 
     # Check filesystem (data directories)
     try:
         paths = namespace_paths(settings.default_namespace)
-        checks["upload_dir"] = "ok" if paths.upload_dir.exists() else "missing"
-        checks["clean_dir"] = "ok" if paths.clean_dir.exists() else "missing"
-        checks["exports_dir"] = "ok" if paths.exports_dir.exists() else "missing"
+        checks['upload_dir'] = 'ok' if paths.upload_dir.exists() else 'missing'
+        checks['clean_dir'] = 'ok' if paths.clean_dir.exists() else 'missing'
+        checks['exports_dir'] = 'ok' if paths.exports_dir.exists() else 'missing'
 
         if not all(d.exists() for d in [paths.upload_dir, paths.clean_dir, paths.exports_dir]):
             is_ready = False
     except Exception as e:
-        checks["filesystem"] = f"error: {e!s}"
+        checks['filesystem'] = f'error: {e!s}'
         is_ready = False
 
     status_code = 200 if is_ready else 503
     return JSONResponse(
-        content={"status": "ready" if is_ready else "not_ready", "checks": checks},
+        content={'status': 'ready' if is_ready else 'not_ready', 'checks': checks},
         status_code=status_code,
     )
 
 
-@app.get("/health/startup")
+@app.get('/health/startup')
 async def startup() -> dict[str, str]:
     """Startup probe - quick check for container startup.
     Returns 200 when app is initialized and ready to accept traffic.
     """
     try:
         _ = settings.app_name
-        return {"status": "ready"}
+        return {'status': 'ready'}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {'status': 'error', 'message': str(e)}
 
 
-@app.get("/{full_path:path}", include_in_schema=False, response_model=None)
+@app.get('/{full_path:path}', include_in_schema=False, response_model=None)
 async def serve_static_or_index(full_path: str) -> FileResponse:
     if not settings.prod_mode_enabled:
-        logger.info("Frontend build not served (development mode or build missing)")
-        raise HTTPException(status_code=404, detail="Frontend build not found")
+        logger.info('Frontend build not served (development mode or build missing)')
+        raise HTTPException(status_code=404, detail='Frontend build not found')
 
-    if full_path.startswith("api/") or full_path == "api":
-        raise HTTPException(status_code=404, detail="Not Found")
+    if full_path.startswith('api/') or full_path == 'api':
+        raise HTTPException(status_code=404, detail='Not Found')
 
     path = frontend_build_dir / full_path
     if path.is_file():
         return FileResponse(str(path))
 
-    fallback_path = frontend_build_dir / "200.html"
+    fallback_path = frontend_build_dir / '200.html'
     if fallback_path.exists():
         return FileResponse(str(fallback_path))
 
-    index_path = frontend_build_dir / "index.html"
+    index_path = frontend_build_dir / 'index.html'
     if index_path.exists():
         return FileResponse(str(index_path))
 
-    raise HTTPException(status_code=404, detail="File not found")
+    raise HTTPException(status_code=404, detail='File not found')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     import multiprocessing
 
     import uvicorn
@@ -387,8 +385,8 @@ if __name__ == "__main__":
     # so pass the app object directly and disable hot reload.
     # In source mode, the string form 'main:app' is required for --reload to work.
     uvicorn.run(
-        app if _NUITKA_COMPILED else "main:app",
-        host="0.0.0.0",
+        app if _NUITKA_COMPILED else 'main:app',
+        host='0.0.0.0',
         port=settings.port,
         reload=False if _NUITKA_COMPILED else settings.debug,
         workers=workers,

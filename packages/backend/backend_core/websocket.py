@@ -46,10 +46,10 @@ async def safe_send_json(websocket: WebSocket, payload: dict) -> bool:
 
 
 def resolve_websocket_session_token(websocket: WebSocket) -> str | None:
-    cookie_token = websocket.cookies.get("session_token")
+    cookie_token = websocket.cookies.get('session_token')
     if cookie_token:
         return cookie_token
-    header_token = websocket.headers.get("X-Session-Token")
+    header_token = websocket.headers.get('X-Session-Token')
     if header_token:
         return header_token
     return None

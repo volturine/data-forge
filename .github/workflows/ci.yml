@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: packages/shared
+        working-directory: packages/backend
     steps:
       - uses: actions/checkout@v6
 
@@ -32,23 +32,20 @@ jobs:
         run: uv sync
 
       - name: Format check
-        run: uv run ruff format --check . ../contracts ../persistence ../runtime-common ../backend ../scheduler ../worker-manager
+        run: uv run ruff format --check ../shared . ../scheduler ../worker
 
       - name: Lint
-        run: uv run ruff check . ../contracts ../persistence ../runtime-common ../backend ../scheduler ../worker-manager
+        run: uv run ruff check ../shared . ../scheduler ../worker
 
       - name: Type check
         run: |
-          uv run python -m mypy ../contracts
-          uv run python -m mypy ../persistence
-          uv run python -m mypy ../runtime-common
+          uv run python -m mypy ../shared
           uv run python -m mypy .
-          uv run python -m mypy ../backend
           uv run python -m mypy ../scheduler
-          uv run python -m mypy ../worker-manager
+          uv run python -m mypy ../worker
 
       - name: Tests
-        run: uv run python -m pytest -c pyproject.toml --tb=short -q ../backend/tests
+        run: uv run python -m pytest -c pyproject.toml --tb=short -q tests
 
   frontend:
     runs-on: ubuntu-latest
@@ -110,7 +107,7 @@ jobs:
       - uses: taiki-e/install-action@just
 
       - name: Install backend dependencies
-        working-directory: packages/shared
+        working-directory: packages/backend
         run: uv sync
 
       - name: Install frontend dependencies

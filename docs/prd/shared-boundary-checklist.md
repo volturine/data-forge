@@ -5,7 +5,7 @@ Goal: `packages/shared` contains only neutral contracts, persistence primitives,
 ## Rules
 
 - [x] `backend` owns HTTP/API concerns, auth/session wiring, route validation, response shaping, settings CRUD, Telegram CRUD, and websocket delivery state
-- [x] `worker-manager` owns execution/runtime behavior, datasource execution/loading, notification execution, and runtime-local build state
+- [x] `worker` owns execution/runtime behavior, datasource execution/loading, notification execution, and runtime-local build state
 - [x] `scheduler` owns schedule orchestration and scheduled-build request construction
 - [x] `shared` owns only neutral contracts, DB models, migrations, persistence primitives, runtime IPC transport, config/database/logging/http helpers, and generic libraries
 - [x] No production package imports another owner package's internals
@@ -22,9 +22,9 @@ Goal: `packages/shared` contains only neutral contracts, persistence primitives,
 - [x] Move `packages/shared/core/telegram_store.py` into a backend-owned package
 
 ### Worker-manager-owned code currently in shared
-- [x] Remove `packages/shared/core/build_live.py` from shared; keep build runtime state local to worker-manager or replace with durable DB-backed flow
+- [x] Remove `packages/shared/core/build_live.py` from shared; keep build runtime state local to worker or replace with durable DB-backed flow
 - [x] Remove `packages/shared/core/engine_live.py` from shared; backend websocket state must be backend-owned, worker snapshot persistence must be worker-owned
-- [x] Move `packages/shared/core/datasource_loading.py` into worker-manager ownership
+- [x] Move `packages/shared/core/datasource_loading.py` into worker ownership
 - [x] Move notification execution out of `packages/shared/core/notification_delivery.py`
 
 ### Scheduler-owned / orchestration code currently in shared
@@ -45,9 +45,9 @@ Goal: `packages/shared` contains only neutral contracts, persistence primitives,
 
 ### Datasource execution flow
 - [x] Backend no longer loads datasource frames directly
-- [x] Datasource schema extraction runs through worker-manager compute/datasource execution
-- [x] Datasource snapshot comparison runs through worker-manager compute/datasource execution
-- [x] Datasource column stats run through worker-manager compute/datasource execution
+- [x] Datasource schema extraction runs through worker compute/datasource execution
+- [x] Datasource snapshot comparison runs through worker compute/datasource execution
+- [x] Datasource column stats run through worker compute/datasource execution
 
 ### Settings / Telegram / notifications
 - [x] Backend owns settings CRUD/update/bootstrap logic
@@ -56,11 +56,11 @@ Goal: `packages/shared` contains only neutral contracts, persistence primitives,
 - [x] Notification sending is owned by a single package and does not rely on shared app-domain service code
 
 ## Dependency cleanup
-- [x] Remove `dataforge-worker-manager` dependency from `packages/backend/pyproject.toml`
-- [x] Remove `dataforge-worker-manager` dependency from `packages/scheduler/pyproject.toml`
+- [x] Remove `dataforge-worker` dependency from `packages/backend/pyproject.toml`
+- [x] Remove `dataforge-worker` dependency from `packages/scheduler/pyproject.toml`
 - [x] Ensure backend imports only backend-owned modules + shared neutral modules
 - [x] Ensure scheduler imports only scheduler-owned modules + shared neutral modules
-- [x] Ensure worker-manager imports only worker-manager-owned modules + shared neutral modules
+- [x] Ensure worker imports only worker-owned modules + shared neutral modules
 
 ## Remaining strict-separation tasks
 - [x] Remove `packages/backend/modules/compute/routes.py` test-support imports and replace them with a first-class owner-local test/runtime seam or real-runtime-only tests
@@ -76,9 +76,9 @@ Goal: `packages/shared` contains only neutral contracts, persistence primitives,
 
 ## Verification
 - [x] Repo audit shows no owner-specific code left in `packages/shared`
-- [x] Repo audit shows no backend -> worker-manager production imports
-- [x] Repo audit shows no scheduler -> worker-manager production imports
-- [x] Repo audit shows backend-only auth ownership with no auth semantics in shared/worker-manager/scheduler
+- [x] Repo audit shows no backend -> worker production imports
+- [x] Repo audit shows no scheduler -> worker production imports
+- [x] Repo audit shows backend-only auth ownership with no auth semantics in shared/worker/scheduler
 - [x] Repo audit shows no production imports of test-support modules
 - [x] `just verify`
 - [x] `just test`

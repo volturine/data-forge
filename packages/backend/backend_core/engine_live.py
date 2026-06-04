@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-from contracts.compute import schemas
-from core import engine_instances_service as engine_instance_service
+from backend_contracts.compute import schemas
+from backend_core import engine_instances_service as engine_instance_service
 
 
 class EngineRegistry:

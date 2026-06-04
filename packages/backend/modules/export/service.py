@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.exceptions import AnalysisNotFoundError
-from persistence.analysis.models import Analysis
-from persistence.datasource.models import DataSource
 from sqlmodel import Session
 
+from backend_core.exceptions import AnalysisNotFoundError
+from backend_core.persistence.analysis.models import Analysis
+from backend_core.persistence.datasource.models import DataSource
 from modules.export.generators import generate_code, select_tabs
 from modules.export.models import CodeExportFormat
 from modules.export.utils import build_export_filename

@@ -124,7 +124,7 @@ Evidence:
 - `backend/modules/build_jobs/models.py` defines the durable queue
 - `backend/modules/build_jobs/service.py` implements claim, renew, expire, and finalize operations
 - `backend/modules/runtime/worker.py` owns queued build execution and lease renewal
-- `backend/worker.py` is the worker-manager entrypoint that spawns one-shot build workers on demand
+- `backend/worker.py` is the worker entrypoint that spawns one-shot build workers on demand
 - `backend/modules/compute/routes.py` enqueues builds instead of running them inline
 
 Notes:

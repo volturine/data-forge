@@ -1,79 +1,80 @@
 import uuid
 from typing import Annotated
 
-from core.engine_identity import PREVIEW_PREFIX, datasource_preview_engine_key, is_datasource_preview_engine_key
-from core.exceptions import InvalidIdError
 from fastapi import Path
+
+from backend_core.engine_identity import PREVIEW_PREFIX, datasource_preview_engine_key, is_datasource_preview_engine_key
+from backend_core.exceptions import InvalidIdError
 
 
 def _parse_uuid(value: str) -> str:
     try:
         return str(uuid.UUID(value))
     except (TypeError, ValueError) as exc:
-        raise InvalidIdError(message=f"Invalid UUID: {value}", details={"value": value}) from exc
+        raise InvalidIdError(message=f'Invalid UUID: {value}', details={'value': value}) from exc
 
 
 AnalysisId = Annotated[
     str,
     Path(
-        description="Analysis ID",
-        examples=["b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a"],
+        description='Analysis ID',
+        examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'],
         min_length=1,
     ),
 ]
 ComputeAnalysisId = Annotated[
     str,
     Path(
-        description="Compute analysis or datasource preview ID",
-        examples=["b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a", "__preview__datasource-1"],
+        description='Compute analysis or datasource preview ID',
+        examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a', '__preview__datasource-1'],
         min_length=1,
     ),
 ]
 DataSourceId = Annotated[
     str,
     Path(
-        description="Datasource ID",
-        examples=["b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a", "ds-lineage-output"],
+        description='Datasource ID',
+        examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a', 'ds-lineage-output'],
         min_length=1,
     ),
 ]
 ScheduleId = Annotated[
     str,
     Path(
-        description="Schedule ID",
-        examples=["b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a"],
+        description='Schedule ID',
+        examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'],
         min_length=1,
     ),
 ]
 EngineRunId = Annotated[
     str,
     Path(
-        description="Engine run ID",
-        examples=["b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a"],
+        description='Engine run ID',
+        examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'],
         min_length=1,
     ),
 ]
 HealthcheckId = Annotated[
     str,
     Path(
-        description="Healthcheck ID",
-        examples=["b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a"],
+        description='Healthcheck ID',
+        examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'],
         min_length=1,
     ),
 ]
 UdfId = Annotated[
     str,
     Path(
-        description="UDF ID",
-        examples=["b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a"],
+        description='UDF ID',
+        examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'],
         min_length=1,
     ),
 ]
 PreflightId = Annotated[
     str,
     Path(
-        description="Preflight ID",
-        examples=["b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a"],
+        description='Preflight ID',
+        examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'],
         min_length=1,
     ),
 ]
@@ -92,7 +93,7 @@ def parse_compute_analysis_id(value: str) -> str:
         datasource_id = parse_datasource_id(value[len(PREVIEW_PREFIX) :])
         if is_datasource_preview_engine_key(value) and datasource_id:
             return datasource_preview_engine_key(datasource_id)
-        raise InvalidIdError(message=f"Invalid preview analysis ID: {value}", details={"value": value})
+        raise InvalidIdError(message=f'Invalid preview analysis ID: {value}', details={'value': value})
     return parse_analysis_id(value)
 
 

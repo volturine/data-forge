@@ -1,12 +1,12 @@
 import contextlib
 
-from contracts.analysis.step_types import is_step_type
-from contracts.compute import schemas as compute_schemas
-from core.database import get_db
 from fastapi import Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session
 
+from backend_contracts.analysis.step_types import is_step_type
+from backend_contracts.compute import schemas as compute_schemas
+from backend_core.database import get_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
     get_optional_lock_owner_id,
@@ -24,7 +24,7 @@ from modules.export import service as export_service
 from modules.locks import service as lock_service
 from modules.mcp.router import MCPRouter
 
-router = MCPRouter(prefix="/analysis", tags=["analysis"])
+router = MCPRouter(prefix='/analysis', tags=['analysis'])
 
 
 def _analysis_etag(analysis: schemas.AnalysisResponseSchema) -> str:
@@ -39,13 +39,13 @@ def _validate_if_match(current_version: str, current_etag: str, if_match: str | 
     if if_match is None:
         return
     normalized = if_match.strip()
-    if normalized == "*":
+    if normalized == '*':
         return
     if normalized == current_version:
         return
     if normalized == current_etag:
         return
-    raise HTTPException(status_code=412, detail="Analysis version mismatch")
+    raise HTTPException(status_code=412, detail='Analysis version mismatch')
 
 
 async def require_analysis_lock(
@@ -54,13 +54,13 @@ async def require_analysis_lock(
     owner_id: str | None = Depends(get_optional_lock_owner_id),
 ) -> None:
     try:
-        lock_service.ensure_mutation_lock(session, "analysis", parse_analysis_id(analysis_id), owner_id)
+        lock_service.ensure_mutation_lock(session, 'analysis', parse_analysis_id(analysis_id), owner_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/validate", mcp=True)
-@handle_errors(operation="validate analysis", value_error_status=400)
+@router.post('/validate', mcp=True)
+@handle_errors(operation='validate analysis', value_error_status=400)
 async def validate_analysis(
     data: schemas.AnalysisCreateSchema,
     session: Session = Depends(get_db),
@@ -69,8 +69,8 @@ async def validate_analysis(
     return service.validate_analysis(session, data)
 
 
-@router.post("", response_model=schemas.AnalysisResponseSchema, mcp=True)
-@handle_errors(operation="create analysis", value_error_status=400)
+@router.post('', response_model=schemas.AnalysisResponseSchema, mcp=True)
+@handle_errors(operation='create analysis', value_error_status=400)
 async def create_analysis(
     data: schemas.AnalysisCreateSchema,
     session: Session = Depends(get_db),
@@ -93,26 +93,26 @@ async def create_analysis(
     return service.create_analysis(session, data, owner_id=owner_id)
 
 
-@router.get("/templates", response_model=list[schemas.AnalysisTemplateSummarySchema], mcp=True)
-@handle_errors(operation="list analysis templates", value_error_status=404)
+@router.get('/templates', response_model=list[schemas.AnalysisTemplateSummarySchema], mcp=True)
+@handle_errors(operation='list analysis templates', value_error_status=404)
 async def list_analysis_templates():
     """List built-in analysis templates available in the guided creation flow."""
     return service.list_analysis_templates()
 
 
 @router.get(
-    "/templates/{template_id}",
+    '/templates/{template_id}',
     response_model=schemas.AnalysisTemplateDetailSchema,
     mcp=True,
 )
-@handle_errors(operation="get analysis template", value_error_status=404)
+@handle_errors(operation='get analysis template', value_error_status=404)
 async def get_analysis_template(template_id: str):
     """Get one analysis template including the step skeleton used for creation."""
     return service.get_analysis_template(template_id)
 
 
-@router.post("/generate", response_model=schemas.GeneratedAnalysisResponseSchema, mcp=True)
-@handle_errors(operation="generate analysis pipeline", value_error_status=400)
+@router.post('/generate', response_model=schemas.GeneratedAnalysisResponseSchema, mcp=True)
+@handle_errors(operation='generate analysis pipeline', value_error_status=400)
 async def generate_analysis_pipeline(
     data: schemas.GenerateAnalysisSchema,
     session: Session = Depends(get_db),
@@ -121,8 +121,8 @@ async def generate_analysis_pipeline(
     return service.generate_analysis_pipeline(session, data)
 
 
-@router.post("/import", response_model=schemas.AnalysisResponseSchema, mcp=True)
-@handle_errors(operation="import analysis", value_error_status=400)
+@router.post('/import', response_model=schemas.AnalysisResponseSchema, mcp=True)
+@handle_errors(operation='import analysis', value_error_status=400)
 async def import_analysis(
     data: schemas.ImportAnalysisSchema,
     session: Session = Depends(get_db),
@@ -133,15 +133,15 @@ async def import_analysis(
     return service.import_analysis(session, data, owner_id=owner_id)
 
 
-@router.get("", response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
-@handle_errors(operation="list analyses")
+@router.get('', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
+@handle_errors(operation='list analyses')
 async def list_analyses(session: Session = Depends(get_db)):
     """List all analyses as gallery items with id, name, and thumbnail metadata."""
     return service.list_analyses(session)
 
 
-@router.get("/favorites", response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
-@handle_errors(operation="list favorite analyses")
+@router.get('/favorites', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
+@handle_errors(operation='list favorite analyses')
 async def list_favorite_analyses(
     session: Session = Depends(get_db),
     user: User | None = Depends(get_optional_user),
@@ -150,8 +150,8 @@ async def list_favorite_analyses(
     return service.list_favorite_analyses(session, user.id if user else None)
 
 
-@router.get("/step-types", mcp=True)
-@handle_errors(operation="list step types")
+@router.get('/step-types', mcp=True)
+@handle_errors(operation='list step types')
 async def list_step_types():
     """List all available pipeline step types with descriptions and config schemas.
 
@@ -161,8 +161,8 @@ async def list_step_types():
     return get_step_catalog()
 
 
-@router.get("/{analysis_id}", response_model=schemas.AnalysisResponseSchema, mcp=True)
-@handle_errors(operation="get analysis", value_error_status=404)
+@router.get('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)
+@handle_errors(operation='get analysis', value_error_status=404)
 async def get_analysis(
     analysis_id: AnalysisId,
     response: Response,
@@ -170,13 +170,13 @@ async def get_analysis(
 ):
     """Get a single analysis by ID with full pipeline definition including all tabs and steps."""
     analysis = service.get_analysis(session, parse_analysis_id(analysis_id))
-    response.headers["ETag"] = _analysis_etag(analysis)
-    response.headers["X-Analysis-Version"] = _analysis_version(analysis)
+    response.headers['ETag'] = _analysis_etag(analysis)
+    response.headers['X-Analysis-Version'] = _analysis_version(analysis)
     return analysis
 
 
-@router.post("/{analysis_id}/duplicate", response_model=schemas.AnalysisResponseSchema, mcp=True)
-@handle_errors(operation="duplicate analysis", value_error_status=400)
+@router.post('/{analysis_id}/duplicate', response_model=schemas.AnalysisResponseSchema, mcp=True)
+@handle_errors(operation='duplicate analysis', value_error_status=400)
 async def duplicate_analysis(
     analysis_id: AnalysisId,
     data: schemas.DuplicateAnalysisSchema,
@@ -188,13 +188,13 @@ async def duplicate_analysis(
     return service.duplicate_analysis(session, parse_analysis_id(analysis_id), data, owner_id=owner_id)
 
 
-@router.put("/{analysis_id}", response_model=schemas.AnalysisResponseSchema, mcp=True)
-@handle_errors(operation="update analysis")
+@router.put('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)
+@handle_errors(operation='update analysis')
 async def update_analysis(
     analysis_id: AnalysisId,
     response: Response,
     data: schemas.AnalysisUpdateSchema,
-    if_match: str | None = Header(default=None, alias="If-Match"),
+    if_match: str | None = Header(default=None, alias='If-Match'),
     _lock: None = Depends(require_analysis_lock),
     session: Session = Depends(get_db),
 ):
@@ -212,17 +212,17 @@ async def update_analysis(
     _validate_if_match(_analysis_version(analysis), _analysis_etag(analysis), if_match)
 
     updated = service.update_analysis(session, analysis_id_value, data)
-    response.headers["ETag"] = _analysis_etag(updated)
-    response.headers["X-Analysis-Version"] = _analysis_version(updated)
+    response.headers['ETag'] = _analysis_etag(updated)
+    response.headers['X-Analysis-Version'] = _analysis_version(updated)
     return updated
 
 
 @router.post(
-    "/{analysis_id}/favorite",
+    '/{analysis_id}/favorite',
     response_model=schemas.AnalysisFavoriteStatusSchema,
     mcp=True,
 )
-@handle_errors(operation="favorite analysis", value_error_status=404)
+@handle_errors(operation='favorite analysis', value_error_status=404)
 async def favorite_analysis(
     analysis_id: AnalysisId,
     user_id: str = Depends(get_current_user_id),
@@ -233,11 +233,11 @@ async def favorite_analysis(
 
 
 @router.delete(
-    "/{analysis_id}/favorite",
+    '/{analysis_id}/favorite',
     response_model=schemas.AnalysisFavoriteStatusSchema,
     mcp=True,
 )
-@handle_errors(operation="unfavorite analysis", value_error_status=404)
+@handle_errors(operation='unfavorite analysis', value_error_status=404)
 async def unfavorite_analysis(
     analysis_id: AnalysisId,
     user_id: str = Depends(get_current_user_id),
@@ -247,8 +247,8 @@ async def unfavorite_analysis(
     return service.set_favorite(session, parse_analysis_id(analysis_id), user_id, False)
 
 
-@router.delete("/{analysis_id}", status_code=204, mcp=True)
-@handle_errors(operation="delete analysis", value_error_status=404)
+@router.delete('/{analysis_id}', status_code=204, mcp=True)
+@handle_errors(operation='delete analysis', value_error_status=404)
 async def delete_analysis(
     analysis_id: AnalysisId,
     _lock: None = Depends(require_analysis_lock),
@@ -265,8 +265,8 @@ async def delete_analysis(
         await executor_client.shutdown_engine(session, analysis_id=analysis_id_value, runtime_probe=runtime_probe)
 
 
-@router.post("/{analysis_id}/preview", mcp=True)
-@handle_errors(operation="preview analysis", value_error_status=400)
+@router.post('/{analysis_id}/preview', mcp=True)
+@handle_errors(operation='preview analysis', value_error_status=400)
 async def preview_analysis(
     analysis_id: AnalysisId,
     request: Request,
@@ -279,43 +279,43 @@ async def preview_analysis(
     with contextlib.suppress(ValueError):
         body = await request.json()
     if isinstance(body, dict):
-        analysis_payload = body.get("pipeline")
+        analysis_payload = body.get('pipeline')
 
     analysis_id_value = parse_analysis_id(analysis_id)
 
     if not isinstance(analysis_payload, dict):
-        raise HTTPException(status_code=400, detail="pipeline payload must be provided")
+        raise HTTPException(status_code=400, detail='pipeline payload must be provided')
 
-    tabs = analysis_payload.get("tabs", [])
+    tabs = analysis_payload.get('tabs', [])
     if not isinstance(tabs, list):
-        raise HTTPException(status_code=400, detail="pipeline tabs must be a list")
-    selected = next((tab for tab in tabs if tab.get("steps")), None)
+        raise HTTPException(status_code=400, detail='pipeline tabs must be a list')
+    selected = next((tab for tab in tabs if tab.get('steps')), None)
     if not selected:
-        raise HTTPException(status_code=400, detail="pipeline payload missing tab steps")
-    datasource = selected.get("datasource")
+        raise HTTPException(status_code=400, detail='pipeline payload missing tab steps')
+    datasource = selected.get('datasource')
     if not isinstance(datasource, dict):
-        raise HTTPException(status_code=400, detail="Analysis tab datasource must be a dict")
-    datasource_id = datasource.get("id")
-    steps = selected.get("steps", [])
+        raise HTTPException(status_code=400, detail='Analysis tab datasource must be a dict')
+    datasource_id = datasource.get('id')
+    steps = selected.get('steps', [])
     if not datasource_id:
-        raise HTTPException(status_code=400, detail="Analysis tab missing datasource.id")
+        raise HTTPException(status_code=400, detail='Analysis tab missing datasource.id')
     if not isinstance(steps, list):
-        raise HTTPException(status_code=400, detail="Analysis tab steps must be a list")
-    config = datasource.get("config") or {}
+        raise HTTPException(status_code=400, detail='Analysis tab steps must be a list')
+    config = datasource.get('config') or {}
     if not isinstance(config, dict):
-        raise HTTPException(status_code=400, detail="Analysis tab datasource.config must be a dict")
-    branch = config.get("branch")
+        raise HTTPException(status_code=400, detail='Analysis tab datasource.config must be a dict')
+    branch = config.get('branch')
     if not isinstance(branch, str) or not branch.strip():
-        raise HTTPException(status_code=400, detail="Analysis tab datasource.config.branch is required")
-    output_config = selected.get("output")
+        raise HTTPException(status_code=400, detail='Analysis tab datasource.config.branch is required')
+    output_config = selected.get('output')
     if not isinstance(output_config, dict):
-        raise HTTPException(status_code=400, detail="Analysis tab output must be a dict")
+        raise HTTPException(status_code=400, detail='Analysis tab output must be a dict')
 
     preview = await executor_client.preview_step(
         session,
         compute_schemas.StepPreviewRequest(
             analysis_id=analysis_id_value,
-            target_step_id=steps[-1]["id"] if steps else "source",
+            target_step_id=steps[-1]['id'] if steps else 'source',
             analysis_pipeline=compute_schemas.AnalysisPipelinePayload.model_validate(analysis_payload),
             row_limit=50,
             page=1,
@@ -325,18 +325,18 @@ async def preview_analysis(
     )
 
     return {
-        "schema": preview.column_types,
-        "rows": preview.data,
-        "row_count": preview.total_rows,
+        'schema': preview.column_types,
+        'rows': preview.data,
+        'row_count': preview.total_rows,
     }
 
 
 @router.post(
-    "/{analysis_id}/export-code",
+    '/{analysis_id}/export-code',
     response_model=schemas.CodeExportResponseSchema,
     mcp=True,
 )
-@handle_errors(operation="export analysis code", value_error_status=400)
+@handle_errors(operation='export analysis code', value_error_status=400)
 async def export_analysis_code(
     analysis_id: AnalysisId,
     data: schemas.CodeExportRequestSchema,
@@ -352,15 +352,15 @@ async def export_analysis_code(
 
 
 class AddStepBody(BaseModel):
-    type: str = Field(description="The step type. Use GET /step-types to see valid types.")
+    type: str = Field(description='The step type. Use GET /step-types to see valid types.')
     config: dict = Field(
         default_factory=dict,
-        description="Step configuration. Schema depends on step type.",
+        description='Step configuration. Schema depends on step type.',
     )
-    position: int | None = Field(None, description="Insert position (0-based index). Omit to append at end.")
-    depends_on: list[str] = Field(default_factory=list, description="List of step IDs this step depends on.")
+    position: int | None = Field(None, description='Insert position (0-based index). Omit to append at end.')
+    depends_on: list[str] = Field(default_factory=list, description='List of step IDs this step depends on.')
 
-    @field_validator("type")
+    @field_validator('type')
     @classmethod
     def validate_type(cls, value: str) -> str:
         if not is_step_type(value):
@@ -369,10 +369,10 @@ class AddStepBody(BaseModel):
 
 
 class UpdateStepBody(BaseModel):
-    type: str | None = Field(None, description="New step type. Omit to keep current type.")
-    config: dict | None = Field(None, description="New config. Omit to keep current config.")
+    type: str | None = Field(None, description='New step type. Omit to keep current type.')
+    config: dict | None = Field(None, description='New config. Omit to keep current config.')
 
-    @field_validator("type")
+    @field_validator('type')
     @classmethod
     def validate_type(cls, value: str | None) -> str | None:
         if value is not None and not is_step_type(value):
@@ -380,8 +380,8 @@ class UpdateStepBody(BaseModel):
         return value
 
 
-@router.post("/{analysis_id}/tabs/{tab_id}/steps", mcp=True)
-@handle_errors(operation="add step", value_error_status=400)
+@router.post('/{analysis_id}/tabs/{tab_id}/steps', mcp=True)
+@handle_errors(operation='add step', value_error_status=400)
 async def add_step(
     analysis_id: AnalysisId,
     tab_id: str,
@@ -396,7 +396,7 @@ async def add_step(
     Steps are appended to the end by default; use 'position' to insert at a specific index.
     """
     compiled = compile_step(
-        step_id="new-step",
+        step_id='new-step',
         step_type=data.type,
         config=data.config,
         depends_on=data.depends_on,
@@ -413,8 +413,8 @@ async def add_step(
     )
 
 
-@router.put("/{analysis_id}/tabs/{tab_id}/steps/{step_id}", mcp=True)
-@handle_errors(operation="update step", value_error_status=400)
+@router.put('/{analysis_id}/tabs/{tab_id}/steps/{step_id}', mcp=True)
+@handle_errors(operation='update step', value_error_status=400)
 async def update_step(
     analysis_id: AnalysisId,
     tab_id: str,
@@ -468,8 +468,8 @@ async def update_step(
     )
 
 
-@router.delete("/{analysis_id}/tabs/{tab_id}/steps/{step_id}", status_code=204, mcp=True)
-@handle_errors(operation="remove step", value_error_status=400)
+@router.delete('/{analysis_id}/tabs/{tab_id}/steps/{step_id}', status_code=204, mcp=True)
+@handle_errors(operation='remove step', value_error_status=400)
 async def remove_step(
     analysis_id: AnalysisId,
     tab_id: str,
@@ -490,8 +490,8 @@ class DeriveTabBody(BaseModel):
     name: str | None = Field(None, description='Name for the new derived tab. Defaults to "Derived N".')
 
 
-@router.post("/{analysis_id}/tabs/{tab_id}/derive", mcp=True)
-@handle_errors(operation="derive tab", value_error_status=400)
+@router.post('/{analysis_id}/tabs/{tab_id}/derive', mcp=True)
+@handle_errors(operation='derive tab', value_error_status=400)
 async def derive_tab(
     analysis_id: AnalysisId,
     tab_id: str,
@@ -511,8 +511,8 @@ class DuplicateTabBody(BaseModel):
     name: str | None = Field(None, description='Name for the duplicated tab. Defaults to "<source> Copy".')
 
 
-@router.post("/{analysis_id}/tabs/{tab_id}/duplicate", mcp=True)
-@handle_errors(operation="duplicate tab", value_error_status=400)
+@router.post('/{analysis_id}/tabs/{tab_id}/duplicate', mcp=True)
+@handle_errors(operation='duplicate tab', value_error_status=400)
 async def duplicate_tab(
     analysis_id: AnalysisId,
     tab_id: str,

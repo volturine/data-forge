@@ -1,8 +1,10 @@
 from pathlib import Path
 
 import pytest
-from core.config import settings
-from core.namespace import (
+from fastapi.testclient import TestClient
+
+from backend_core.config import settings
+from backend_core.namespace import (
     get_namespace,
     list_namespaces,
     namespace_database_schema,
@@ -10,94 +12,92 @@ from core.namespace import (
     normalize_namespace,
     set_namespace_context,
 )
-from fastapi.testclient import TestClient
-
 from modules.namespaces import routes as namespace_routes
 
 
 def test_normalize_namespace_default():
     assert normalize_namespace(None) == settings.default_namespace
-    assert normalize_namespace("") == settings.default_namespace
+    assert normalize_namespace('') == settings.default_namespace
 
 
 def test_normalize_namespace_rejects_invalid():
-    with pytest.raises(ValueError, match="Namespace must be alphanumeric"):
-        normalize_namespace("bad name")
+    with pytest.raises(ValueError, match='Namespace must be alphanumeric'):
+        normalize_namespace('bad name')
 
 
 def test_namespace_paths_creates_dirs(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("ENV_FILE", "")
-    from core.config import Settings
+    monkeypatch.setenv('DATA_DIR', str(tmp_path))
+    monkeypatch.setenv('ENV_FILE', '')
+    from backend_core.config import Settings
 
     Settings()
-    paths = namespace_paths("alpha")
+    paths = namespace_paths('alpha')
 
-    assert paths.base_dir == tmp_path / "data" / "namespaces" / "alpha"
+    assert paths.base_dir == tmp_path / 'data' / 'namespaces' / 'alpha'
     assert paths.upload_dir.is_dir()
     assert paths.clean_dir.is_dir()
     assert paths.exports_dir.is_dir()
-    assert paths.db_path == tmp_path / "data" / "namespaces" / "alpha" / "namespace.db"
+    assert paths.db_path == tmp_path / 'data' / 'namespaces' / 'alpha' / 'namespace.db'
 
 
 def test_set_namespace_context():
-    token = set_namespace_context("alpha")
+    token = set_namespace_context('alpha')
     try:
-        assert get_namespace() == "alpha"
+        assert get_namespace() == 'alpha'
     finally:
-        from core.namespace import reset_namespace
+        from backend_core.namespace import reset_namespace
 
         reset_namespace(token)
 
 
 def test_namespace_database_schema_keeps_regular_namespaces() -> None:
-    assert namespace_database_schema("alpha") == "alpha"
+    assert namespace_database_schema('alpha') == 'alpha'
 
 
 def test_namespace_database_schema_maps_public_namespace_away_from_public_schema() -> None:
-    assert namespace_database_schema("public") == "df$tenant$public"
+    assert namespace_database_schema('public') == 'df$tenant$public'
 
 
 def test_list_namespaces(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("ENV_FILE", "")
-    from core.config import Settings
+    monkeypatch.setenv('DATA_DIR', str(tmp_path))
+    monkeypatch.setenv('ENV_FILE', '')
+    from backend_core.config import Settings
 
     Settings()
-    base = tmp_path / "data" / "namespaces"
-    (base / "alpha").mkdir(parents=True)
-    (base / "beta").mkdir(parents=True)
-    (base / "file.txt").write_text("x")
+    base = tmp_path / 'data' / 'namespaces'
+    (base / 'alpha').mkdir(parents=True)
+    (base / 'beta').mkdir(parents=True)
+    (base / 'file.txt').write_text('x')
 
-    assert list_namespaces() == ["alpha", "beta"]
+    assert list_namespaces() == ['alpha', 'beta']
 
 
 def test_list_namespaces_endpoint_merges_filesystem_and_runtime_namespaces(monkeypatch):
-    monkeypatch.setattr(namespace_routes, "list_namespaces", lambda: ["alpha", "default"])
-    monkeypatch.setattr(namespace_routes, "list_runtime_namespaces", lambda session: ["beta", "default"])
+    monkeypatch.setattr(namespace_routes, 'list_namespaces', lambda: ['alpha', 'default'])
+    monkeypatch.setattr(namespace_routes, 'list_runtime_namespaces', lambda session: ['beta', 'default'])
 
     from main import app
 
     client = TestClient(app)
-    response = client.get("/api/v1/namespaces")
+    response = client.get('/api/v1/namespaces')
 
     assert response.status_code == 200
-    assert response.json() == {"namespaces": ["alpha", "beta", "default"]}
+    assert response.json() == {'namespaces': ['alpha', 'beta', 'default']}
 
 
 def test_create_namespace_endpoint_registers_namespace(monkeypatch):
     created: list[str] = []
     registered: list[str] = []
 
-    monkeypatch.setattr(namespace_routes, "namespace_paths", lambda name: created.append(name))
-    monkeypatch.setattr(namespace_routes, "register_namespace", lambda session, name: registered.append(name))
+    monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda name: created.append(name))
+    monkeypatch.setattr(namespace_routes, 'register_namespace', lambda session, name: registered.append(name))
 
     from main import app
 
     client = TestClient(app)
-    response = client.post("/api/v1/namespaces", json={"name": "test"})
+    response = client.post('/api/v1/namespaces', json={'name': 'test'})
 
     assert response.status_code == 200
-    assert response.json() == {"name": "test"}
-    assert created == ["test"]
-    assert registered == ["test"]
+    assert response.json() == {'name': 'test'}
+    assert created == ['test']
+    assert registered == ['test']

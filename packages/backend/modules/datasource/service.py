@@ -4,21 +4,21 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
-from contracts.datasource.models import DataSourceCreatedBy
-from contracts.datasource.source_types import DataSourceFileType, DataSourceType
-from core import datasource_delete_service
-from core.datasource_storage import cleanup_datasource_storage
-from core.exceptions import DataSourceNotFoundError, DataSourceValidationError
 from openpyxl import load_workbook
 from openpyxl.utils.cell import get_column_letter, range_boundaries
-from persistence.analysis.models import Analysis
-from persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import defer
 from sqlmodel import Session, col
 
+from backend_contracts.datasource.models import DataSourceCreatedBy
+from backend_contracts.datasource.source_types import DataSourceFileType, DataSourceType
+from backend_core import datasource_delete_service
+from backend_core.datasource_storage import cleanup_datasource_storage
+from backend_core.exceptions import DataSourceNotFoundError, DataSourceValidationError
+from backend_core.persistence.analysis.models import Analysis
+from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from modules.datasource.schemas import (
     BatchColumnDescriptionUpdate,
     ColumnDescriptionPatch,
@@ -33,8 +33,8 @@ from modules.datasource.schemas import (
 logger = logging.getLogger(__name__)
 
 
-_INTERNAL_POSTGRES_EXCLUDED_TABLES = {"alembic_version"}
-_INTERNAL_POSTGRES_NAMESPACE_SCHEMA_PREFIX = "df$tenant$"
+_INTERNAL_POSTGRES_EXCLUDED_TABLES = {'alembic_version'}
+_INTERNAL_POSTGRES_NAMESPACE_SCHEMA_PREFIX = 'df$tenant$'
 _INTERNAL_POSTGRES_QUERY_RE = re.compile(r'^SELECT \* FROM "([^"]+)"\."([^"]+)"$')
 
 
@@ -49,7 +49,7 @@ class InternalPostgresOnboarding:
 
     @classmethod
     def query_for(cls, schema_name: str, table_name: str) -> str:
-        return f"SELECT * FROM {cls._quote_identifier(schema_name)}.{cls._quote_identifier(table_name)}"
+        return f'SELECT * FROM {cls._quote_identifier(schema_name)}.{cls._quote_identifier(table_name)}'
 
     @staticmethod
     def display_schema_name(schema_name: str) -> str:
@@ -59,11 +59,11 @@ class InternalPostgresOnboarding:
 
     @classmethod
     def datasource_name_for(cls, schema_name: str, table_name: str) -> str:
-        return f"internal.{cls.display_schema_name(schema_name)}.{table_name}"
+        return f'internal.{cls.display_schema_name(schema_name)}.{table_name}'
 
     @classmethod
     def datasource_description_for(cls, schema_name: str, table_name: str) -> str:
-        return f"Internal PostgreSQL table {cls.display_schema_name(schema_name)}.{table_name}"
+        return f'Internal PostgreSQL table {cls.display_schema_name(schema_name)}.{table_name}'
 
     @staticmethod
     def query_schema_and_table(query: str | None) -> tuple[str, str] | None:
@@ -76,7 +76,7 @@ class InternalPostgresOnboarding:
 
     @staticmethod
     def connection_string() -> str:
-        from core.config import settings
+        from backend_core.config import settings
 
         return DataSource.normalize_connection_string(settings.database_url)
 
@@ -100,7 +100,7 @@ class InternalPostgresOnboarding:
     def list_tables(self) -> list[InternalPostgresTable]:
         rows: list[InternalPostgresTable] = []
         for schema_name in sorted(self.inspector.get_schema_names()):
-            if schema_name.startswith("pg_") or schema_name == "information_schema":
+            if schema_name.startswith('pg_') or schema_name == 'information_schema':
                 continue
             for table_name in sorted(self.inspector.get_table_names(schema=schema_name)):
                 if table_name in _INTERNAL_POSTGRES_EXCLUDED_TABLES:
@@ -115,12 +115,12 @@ class InternalPostgresOnboarding:
         return rows
 
     def table_query(self, schema_name: str, table_name: str) -> str:
-        if schema_name.startswith("pg_") or schema_name == "information_schema":
-            raise ValueError("System schemas cannot be onboarded")
+        if schema_name.startswith('pg_') or schema_name == 'information_schema':
+            raise ValueError('System schemas cannot be onboarded')
         if table_name in _INTERNAL_POSTGRES_EXCLUDED_TABLES:
-            raise ValueError(f"Table {schema_name}.{table_name} cannot be onboarded")
+            raise ValueError(f'Table {schema_name}.{table_name} cannot be onboarded')
         if not self.inspector.has_table(table_name, schema=schema_name):
-            raise ValueError(f"Internal Postgres table {schema_name}.{table_name} does not exist")
+            raise ValueError(f'Internal Postgres table {schema_name}.{table_name} does not exist')
         return self.query_for(schema_name, table_name)
 
     def is_onboarded(self, schema_name: str, table_name: str) -> bool:
@@ -145,9 +145,6 @@ def internal_postgres_connection_string() -> str:
     return InternalPostgresOnboarding.connection_string()
 
 
-_DatasourceResponseT = TypeVar("_DatasourceResponseT", DataSourceResponse, DataSourceListItem)
-
-
 def _canonical_internal_postgres_name(datasource: DataSource) -> str | None:
     query, connection_string = datasource.query_and_connection()
     if connection_string != internal_postgres_connection_string():
@@ -157,13 +154,15 @@ def _canonical_internal_postgres_name(datasource: DataSource) -> str | None:
         return None
     schema_name, table_name = source
     canonical = InternalPostgresOnboarding.datasource_name_for(schema_name, table_name)
-    legacy = f"internal.{schema_name}.{table_name}"
+    legacy = f'internal.{schema_name}.{table_name}'
     if datasource.name not in {legacy, canonical}:
         return None
     return canonical
 
 
-def _apply_display_name(response: _DatasourceResponseT, datasource: DataSource) -> _DatasourceResponseT:
+def _apply_display_name[DatasourceResponseT: (DataSourceResponse, DataSourceListItem)](
+    response: DatasourceResponseT, datasource: DataSource
+) -> DatasourceResponseT:
     canonical = _canonical_internal_postgres_name(datasource)
     if canonical is not None:
         response.name = canonical
@@ -208,7 +207,7 @@ def create_placeholder_output_datasource(
     try:
         uuid.UUID(result_id)
     except ValueError:
-        raise ValueError(f"result_id must be a valid UUID, got: {result_id!r}") from None
+        raise ValueError(f'result_id must be a valid UUID, got: {result_id!r}') from None
     existing = session.get(DataSource, result_id)
     if existing:
         existing_owner = existing.created_by_analysis_id
@@ -223,7 +222,7 @@ def create_placeholder_output_datasource(
         next_config = dict(existing.config) if isinstance(existing.config, dict) else {}
         if config is not None:
             next_config = {**config, **next_config}
-        next_config["analysis_tab_id"] = analysis_tab_id
+        next_config['analysis_tab_id'] = analysis_tab_id
         existing.config = next_config
         existing.source_type = DataSourceType.require(source_type).value
         existing.created_by_analysis_id = analysis_id
@@ -235,7 +234,7 @@ def create_placeholder_output_datasource(
         id=result_id,
         name=name or result_id,
         source_type=DataSourceType.require(source_type).value,
-        config={**(config or {}), "analysis_tab_id": analysis_tab_id},
+        config={**(config or {}), 'analysis_tab_id': analysis_tab_id},
         created_by_analysis_id=analysis_id,
         created_by=DataSourceCreatedBy.ANALYSIS.value,
         is_hidden=True,
@@ -261,9 +260,9 @@ def create_database_datasource_record(
         description=DataSourceDescriptionModel.normalize_description(description),
         source_type=DataSourceType.DATABASE.value,
         config={
-            "connection_string": connection_string,
-            "query": query,
-            "branch": branch,
+            'connection_string': connection_string,
+            'query': query,
+            'branch': branch,
         },
         owner_id=owner_id,
         created_at=datetime.now(UTC).replace(tzinfo=None),
@@ -287,11 +286,11 @@ def create_analysis_datasource(
 ) -> DataSourceResponse:
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise ValueError(f"Analysis {analysis_id} not found")
+        raise ValueError(f'Analysis {analysis_id} not found')
     datasource_id = str(uuid.uuid4())
     config = {}
     if analysis_tab_id:
-        config["analysis_tab_id"] = analysis_tab_id
+        config['analysis_tab_id'] = analysis_tab_id
 
     datasource = DataSource(
         id=datasource_id,
@@ -410,7 +409,7 @@ class ExcelPreviewBuilder:
             try:
                 target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
                 if not target_sheet:
-                    raise ValueError("No sheets found in file")
+                    raise ValueError('No sheets found in file')
                 resolved = self._resolve_bounds(
                     workbook,
                     target_sheet,
@@ -443,7 +442,7 @@ class ExcelPreviewBuilder:
             finally:
                 workbook.close()
         except ValueError as exc:
-            raise DataSourceValidationError(str(exc), details={"file_path": str(self.file_path)}) from exc
+            raise DataSourceValidationError(str(exc), details={'file_path': str(self.file_path)}) from exc
 
     def _open_workbook(self, *, table_name: str | None) -> Any:
         # Table metadata is unavailable in openpyxl read_only mode.
@@ -463,27 +462,27 @@ class ExcelPreviewBuilder:
     ) -> _ExcelBounds:
         if table_name:
             sheet = workbook[sheet_name]
-            tables = getattr(sheet, "tables", None)
+            tables = getattr(sheet, 'tables', None)
             if not tables:
-                raise ValueError(f"No tables available in sheet: {sheet_name}")
+                raise ValueError(f'No tables available in sheet: {sheet_name}')
             table = tables.get(table_name)
             if not table:
-                raise ValueError(f"Table not found: {table_name}")
+                raise ValueError(f'Table not found: {table_name}')
             min_col, min_row, max_col, max_row = range_boundaries(table.ref)
             if min_col is None or min_row is None or max_col is None or max_row is None:
-                raise ValueError(f"Invalid table range: {table_name}")
+                raise ValueError(f'Invalid table range: {table_name}')
             return _ExcelBounds(sheet_name, int(min_row) - 1, int(min_col) - 1, int(max_col) - 1, int(max_row) - 1)
         if named_range:
             defined = workbook.defined_names.get(named_range)
             if not defined:
-                raise ValueError(f"Named range not found: {named_range}")
+                raise ValueError(f'Named range not found: {named_range}')
             destinations = list(defined.destinations)
             if not destinations:
-                raise ValueError(f"Named range has no destinations: {named_range}")
+                raise ValueError(f'Named range has no destinations: {named_range}')
             dest_sheet, coord = destinations[0]
             min_col, min_row, max_col, max_row = range_boundaries(coord)
             if min_col is None or min_row is None or max_col is None or max_row is None:
-                raise ValueError(f"Invalid named range: {named_range}")
+                raise ValueError(f'Invalid named range: {named_range}')
             return _ExcelBounds(dest_sheet, int(min_row) - 1, int(min_col) - 1, int(max_col) - 1, int(max_row) - 1)
         if cell_range:
             return self._parse_cell_range(workbook, cell_range, sheet_name)
@@ -508,25 +507,25 @@ class ExcelPreviewBuilder:
     def _parse_cell_range(self, workbook: Any, cell_range: str, default_sheet: str | None) -> _ExcelBounds:
         raw = cell_range.strip()
         if not raw:
-            raise ValueError("Cell range cannot be empty")
+            raise ValueError('Cell range cannot be empty')
         target_sheet = default_sheet
         coord = raw
-        if "!" in raw:
-            sheet_part, coord_part = raw.split("!", maxsplit=1)
+        if '!' in raw:
+            sheet_part, coord_part = raw.split('!', maxsplit=1)
             sheet_part = sheet_part.strip()
             if sheet_part.startswith("'") and sheet_part.endswith("'"):
                 sheet_part = sheet_part[1:-1]
             if not sheet_part:
-                raise ValueError(f"Invalid cell range sheet: {cell_range}")
+                raise ValueError(f'Invalid cell range sheet: {cell_range}')
             target_sheet = sheet_part
             coord = coord_part.strip()
         if not target_sheet:
             target_sheet = workbook.sheetnames[0] if workbook.sheetnames else None
         if not target_sheet or target_sheet not in workbook.sheetnames:
-            raise ValueError(f"Sheet not found for cell range: {target_sheet}")
+            raise ValueError(f'Sheet not found for cell range: {target_sheet}')
         min_col, min_row, max_col, max_row = range_boundaries(coord)
         if min_col is None or min_row is None or max_col is None or max_row is None:
-            raise ValueError(f"Invalid cell range: {cell_range}")
+            raise ValueError(f'Invalid cell range: {cell_range}')
         return _ExcelBounds(
             target_sheet,
             int(min_row) - 1,
@@ -537,24 +536,24 @@ class ExcelPreviewBuilder:
 
     @staticmethod
     def format_cell_range(sheet_name: str, start_row: int, start_col: int, end_row: int, end_col: int) -> str:
-        start_cell = f"{get_column_letter(start_col + 1)}{start_row + 1}"
-        end_cell = f"{get_column_letter(end_col + 1)}{end_row + 1}"
-        return f"{sheet_name}!{start_cell}:{end_cell}"
+        start_cell = f'{get_column_letter(start_col + 1)}{start_row + 1}'
+        end_cell = f'{get_column_letter(end_col + 1)}{end_row + 1}'
+        return f'{sheet_name}!{start_cell}:{end_cell}'
 
     @staticmethod
     def _validate_bounds(sheet: Any, start_row: int, start_col: int, end_col: int, end_row: int) -> None:
         if start_row < 0 or start_col < 0:
-            raise ValueError("Excel bounds must be non-negative")
+            raise ValueError('Excel bounds must be non-negative')
         if end_row < start_row or end_col < start_col:
-            raise ValueError("Excel bounds are invalid")
+            raise ValueError('Excel bounds are invalid')
         max_row = sheet.max_row or 0
         max_col = sheet.max_column or 0
         if max_row <= 0 or max_col <= 0:
-            raise ValueError("Excel sheet has no data")
+            raise ValueError('Excel sheet has no data')
         if start_row >= max_row or end_row >= max_row:
-            raise ValueError("Excel row bounds exceed sheet size")
+            raise ValueError('Excel row bounds exceed sheet size')
         if start_col >= max_col or end_col >= max_col:
-            raise ValueError("Excel column bounds exceed sheet size")
+            raise ValueError('Excel column bounds exceed sheet size')
 
     @staticmethod
     def _detect_end_col(sheet: Any, start_row: int, start_col: int) -> int:
@@ -571,7 +570,7 @@ class ExcelPreviewBuilder:
             for item in cell:
                 if item.value is None:
                     continue
-                if str(item.value).strip() == "":
+                if str(item.value).strip() == '':
                     continue
                 last_col = item.column - 1
         return last_col
@@ -590,7 +589,7 @@ class ExcelPreviewBuilder:
                 max_col=end_col + 1,
             ):
                 values = [item.value for item in cell]
-            if all(value is None or str(value).strip() == "" for value in values):
+            if all(value is None or str(value).strip() == '' for value in values):
                 return max(start_row, row_index - 2)
         return max_row - 1
 
@@ -687,8 +686,8 @@ def attach_column_descriptions(
     schema_info: SchemaInfo,
 ) -> SchemaInfo:
     descriptions = _get_column_metadata_map(session, datasource_id)
-    columns = [col.model_copy(update={"description": descriptions.get(col.name)}) for col in schema_info.columns]
-    return schema_info.model_copy(update={"columns": columns})
+    columns = [col.model_copy(update={'description': descriptions.get(col.name)}) for col in schema_info.columns]
+    return schema_info.model_copy(update={'columns': columns})
 
 
 def update_column_descriptions(
@@ -706,10 +705,10 @@ def update_column_descriptions(
     for patch in payload.columns:
         if patch.column_name not in active_columns:
             raise DataSourceValidationError(
-                f"Column not found in active schema: {patch.column_name}",
+                f'Column not found in active schema: {patch.column_name}',
                 details={
-                    "datasource_id": datasource_id,
-                    "column_name": patch.column_name,
+                    'datasource_id': datasource_id,
+                    'column_name': patch.column_name,
                 },
             )
 
@@ -749,7 +748,7 @@ def update_column_descriptions(
 def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
     datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
     response = _apply_display_name(DataSourceResponse.model_validate(datasource), datasource)
-    response.output_of_tab_id = datasource.config.get("analysis_tab_id") if isinstance(datasource.config, dict) else None
+    response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
     return response
 
 
@@ -766,7 +765,7 @@ def list_datasources(session: Session, include_hidden: bool = False) -> list[Dat
     results: list[DataSourceListItem] = []
     for ds in datasources:
         item = _apply_display_name(DataSourceListItem.model_validate(ds), ds)
-        item.output_of_tab_id = ds.config.get("analysis_tab_id") if isinstance(ds.config, dict) else None
+        item.output_of_tab_id = ds.config.get('analysis_tab_id') if isinstance(ds.config, dict) else None
         results.append(item)
     return results
 
@@ -782,7 +781,7 @@ def update_datasource(
     if update.name is not None:
         datasource.name = update.name
 
-    if "description" in update.model_fields_set:
+    if 'description' in update.model_fields_set:
         datasource.description = DataSourceDescriptionModel.normalize_description(update.description)
 
     # Update is_hidden if provided
@@ -791,34 +790,34 @@ def update_datasource(
 
     # Update config if provided
     if update.config is not None:
-        if "column_schema" in update.config:
+        if 'column_schema' in update.config:
             raise DataSourceValidationError(
-                "Datasource schemas are read-only and cannot be modified",
-                details={"datasource_id": datasource_id},
+                'Datasource schemas are read-only and cannot be modified',
+                details={'datasource_id': datasource_id},
             )
 
         protected_snapshot_keys = {
-            "snapshot_id",
-            "snapshot_timestamp_ms",
-            "current_snapshot_id",
-            "current_snapshot_timestamp_ms",
-            "time_travel_snapshot_id",
-            "time_travel_snapshot_timestamp_ms",
-            "time_travel_ui",
+            'snapshot_id',
+            'snapshot_timestamp_ms',
+            'current_snapshot_id',
+            'current_snapshot_timestamp_ms',
+            'time_travel_snapshot_id',
+            'time_travel_snapshot_timestamp_ms',
+            'time_travel_ui',
         }
         for key in protected_snapshot_keys:
             if key not in update.config:
                 continue
             raise DataSourceValidationError(
-                "Snapshot metadata fields are system-managed and cannot be modified",
-                details={"datasource_id": datasource_id, "field": key},
+                'Snapshot metadata fields are system-managed and cannot be modified',
+                details={'datasource_id': datasource_id, 'field': key},
             )
 
         source_type = datasource.source_type_kind()
         immutable_keys = {
-            DataSourceType.FILE: ["file_path"],
-            DataSourceType.DATABASE: ["connection_string"],
-            DataSourceType.ICEBERG: ["metadata_path"],
+            DataSourceType.FILE: ['file_path'],
+            DataSourceType.DATABASE: ['connection_string'],
+            DataSourceType.ICEBERG: ['metadata_path'],
         }
         for key in immutable_keys.get(source_type, []):
             if key not in update.config:
@@ -826,23 +825,23 @@ def update_datasource(
             if update.config.get(key) == datasource.config.get(key):
                 continue
             raise DataSourceValidationError(
-                "Datasource location is immutable. Create a new datasource to change location.",
-                details={"datasource_id": datasource_id, "field": key},
+                'Datasource location is immutable. Create a new datasource to change location.',
+                details={'datasource_id': datasource_id, 'field': key},
             )
 
         # Check if parsing options changed (requires schema re-extraction)
         parsing_keys = [
-            "csv_options",
-            "sheet_name",
-            "start_row",
-            "start_col",
-            "end_col",
-            "end_row",
-            "has_header",
-            "skip_rows",
-            "table_name",
-            "named_range",
-            "cell_range",
+            'csv_options',
+            'sheet_name',
+            'start_row',
+            'start_col',
+            'end_col',
+            'end_row',
+            'has_header',
+            'skip_rows',
+            'table_name',
+            'named_range',
+            'cell_range',
         ]
         parsing_changed = any(key in update.config for key in parsing_keys)
 
@@ -850,31 +849,31 @@ def update_datasource(
         has_excel_bounds = any(
             key in update.config
             for key in [
-                "sheet_name",
-                "start_row",
-                "start_col",
-                "end_col",
-                "end_row",
-                "table_name",
-                "named_range",
-                "cell_range",
+                'sheet_name',
+                'start_row',
+                'start_col',
+                'end_col',
+                'end_row',
+                'table_name',
+                'named_range',
+                'cell_range',
             ]
         )
-        is_excel_file = DataSourceFileType.read(next_config.get("file_type"), default=None) == DataSourceFileType.EXCEL
+        is_excel_file = DataSourceFileType.read(next_config.get('file_type'), default=None) == DataSourceFileType.EXCEL
         if source_type == DataSourceType.FILE and is_excel_file and has_excel_bounds:
-            file_path = next_config.get("file_path")
+            file_path = next_config.get('file_path')
             if not file_path:
                 raise DataSourceValidationError(
-                    "Excel datasource requires file_path",
-                    details={"datasource_id": datasource_id},
+                    'Excel datasource requires file_path',
+                    details={'datasource_id': datasource_id},
                 )
-            start_row = next_config.get("start_row")
+            start_row = next_config.get('start_row')
             if start_row is None:
                 start_row = 0
-            start_col = next_config.get("start_col")
+            start_col = next_config.get('start_col')
             if start_col is None:
                 start_col = 0
-            end_col = next_config.get("end_col")
+            end_col = next_config.get('end_col')
             if end_col is None:
                 end_col = 0
             try:
@@ -886,27 +885,27 @@ def update_datasource(
                     resolved_end_row,
                 ) = resolve_excel_selection(
                     Path(file_path),
-                    next_config.get("sheet_name"),
+                    next_config.get('sheet_name'),
                     int(start_row),
                     int(start_col),
                     int(end_col),
-                    next_config.get("end_row"),
-                    next_config.get("table_name"),
-                    next_config.get("named_range"),
-                    next_config.get("cell_range"),
+                    next_config.get('end_row'),
+                    next_config.get('table_name'),
+                    next_config.get('named_range'),
+                    next_config.get('cell_range'),
                 )
             except Exception as exc:
                 raise DataSourceValidationError(
                     str(exc),
-                    details={"datasource_id": datasource_id},
+                    details={'datasource_id': datasource_id},
                 ) from exc
             next_config = {
                 **next_config,
-                "sheet_name": resolved_sheet,
-                "start_row": resolved_start_row,
-                "start_col": resolved_start_col,
-                "end_col": resolved_end_col,
-                "end_row": resolved_end_row,
+                'sheet_name': resolved_sheet,
+                'start_row': resolved_start_row,
+                'start_col': resolved_start_col,
+                'end_col': resolved_end_col,
+                'end_row': resolved_end_row,
             }
 
         # Merge new config with existing config
@@ -917,9 +916,9 @@ def update_datasource(
     session.commit()
     session.refresh(datasource)
 
-    logger.info(f"Updated datasource {datasource_id}")
+    logger.info(f'Updated datasource {datasource_id}')
     response = _apply_display_name(DataSourceResponse.model_validate(datasource), datasource)
-    response.output_of_tab_id = datasource.config.get("analysis_tab_id") if isinstance(datasource.config, dict) else None
+    response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
     return response
 
 
@@ -930,4 +929,4 @@ def delete_datasource(session: Session, datasource_id: str) -> None:
     cleanup_datasource_storage(datasource)
     session.delete(datasource)
     session.commit()
-    logger.info(f"Deleted datasource {datasource_id}")
+    logger.info(f'Deleted datasource {datasource_id}')

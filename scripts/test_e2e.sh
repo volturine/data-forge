@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-set -a; source packages/shared/e2e.env; set +a
+set -a; source config/env/e2e.env; set +a
 # Playwright forces FORCE_COLOR=1 for worker processes, so drop NO_COLOR to
 # keep the warning scanner clean and avoid conflicting color policies.
 unset NO_COLOR
 unset VIRTUAL_ENV
 export UV_PYTHON="${E2E_PYTHON_VERSION}"
+ROOT_DIR="$(pwd)"
 DATA_DIR="${DATA_DIR}-run-$$"
 export DATA_DIR
 LOG_DIR="${E2E_LOG_DIR:-}"
@@ -38,15 +39,12 @@ kill_tree_force() {
     done < <(pgrep -P "$pid" || true)
     kill -9 "$pid" >/dev/null 2>&1 || true
 }
-cleanup() {
-    status=$?
-    for pid in ${FRONTEND_PID:-} ${SCHEDULER_PID:-} ${WORKER_PID:-} ${BACKEND_PID:-}; do
-        kill_tree "$pid"
-    done
-    local deadline=$((SECONDS + 10))
+wait_for_processes_to_exit() {
+    local deadline="$1"
+    shift
     while [ "$SECONDS" -lt "$deadline" ]; do
         local any_alive=0
-        for pid in ${FRONTEND_PID:-} ${SCHEDULER_PID:-} ${WORKER_PID:-} ${BACKEND_PID:-}; do
+        for pid in "$@"; do
             if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
                 any_alive=1
                 break
@@ -57,9 +55,20 @@ cleanup() {
         fi
         sleep 0.5
     done
-    for pid in ${FRONTEND_PID:-} ${SCHEDULER_PID:-} ${WORKER_PID:-} ${BACKEND_PID:-}; do
+}
+terminate_processes() {
+    for pid in "$@"; do
+        kill_tree "$pid"
+    done
+    wait_for_processes_to_exit "$((SECONDS + 10))" "$@"
+    for pid in "$@"; do
         kill_tree_force "$pid"
     done
+}
+cleanup() {
+    status=$?
+    terminate_processes "${FRONTEND_PID:-}" "${SCHEDULER_PID:-}" "${WORKER_PID:-}"
+    terminate_processes "${BACKEND_PID:-}"
     docker rm -f "${RUSTFS_CONTAINER}" >/dev/null 2>&1 || true
     docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
     docker volume rm -f "${PG_VOLUME}" >/dev/null 2>&1 || true
@@ -131,13 +140,13 @@ done
 echo "Starting e2e services"
 if [ -n "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) >"$LOG_DIR/backend.log" 2>&1 & BACKEND_PID=$!
-    (cd packages/worker-manager && exec uv run --no-env-file main.py) >"$LOG_DIR/worker.log" 2>&1 & WORKER_PID=$!
+    (cd packages/worker && exec uv run --no-env-file main.py) >"$LOG_DIR/worker.log" 2>&1 & WORKER_PID=$!
     (cd packages/scheduler && exec uv run --no-env-file main.py) >"$LOG_DIR/scheduler.log" 2>&1 & SCHEDULER_PID=$!
     (cd packages/frontend && bun run predev && exec node ./node_modules/vite/bin/vite.js dev) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
 fi
 if [ -z "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) & BACKEND_PID=$!
-    (cd packages/worker-manager && exec uv run --no-env-file main.py) & WORKER_PID=$!
+    (cd packages/worker && exec uv run --no-env-file main.py) & WORKER_PID=$!
     (cd packages/scheduler && exec uv run --no-env-file main.py) & SCHEDULER_PID=$!
     (cd packages/frontend && bun run predev && exec node ./node_modules/vite/bin/vite.js dev) & FRONTEND_PID=$!
 fi
@@ -153,13 +162,37 @@ wait_for_url() {
         sleep 1
     done
 }
+wait_for_runtime_worker() {
+    local kind="$1"
+    local min_count="$2"
+    local label="$3"
+    local deadline=$((SECONDS + 120))
+    local sql="SELECT count(*) FROM public.runtime_workers WHERE kind = '${kind}' AND stopped_at IS NULL;"
+    while true; do
+        local count
+        count="$(docker exec "${PG_CONTAINER}" psql -U dataforge -d dataforge -Atc "$sql" 2>/dev/null || echo 0)"
+        count="${count//$'\n'/}"
+        if [ "${count:-0}" -ge "$min_count" ]; then
+            return
+        fi
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "Timed out waiting for ${label} registration" >&2
+            exit 1
+        fi
+        sleep 1
+    done
+}
 echo "Waiting for backend readiness"
 wait_for_url "http://127.0.0.1:${PORT}/health/ready" "backend readiness"
 echo "Backend is ready"
+echo "Waiting for runtime worker registrations"
+wait_for_runtime_worker "build_manager" 1 "worker build manager"
+wait_for_runtime_worker "scheduler" 1 "scheduler"
+echo "Runtime workers are ready"
 echo "Waiting for frontend readiness"
 wait_for_url "http://127.0.0.1:${FRONTEND_PORT}" "frontend"
 echo "Frontend is ready"
-echo "Starting Playwright e2e tests across 4 shards"
+echo "Starting Playwright e2e tests in 4 deterministic shards"
 mkdir -p packages/frontend/tests/.artifacts/playwright
 for shard_index in 1 2 3 4; do
     mkdir -p "packages/frontend/tests/.artifacts/playwright/shard-${shard_index}-of-4/test-results"
@@ -171,56 +204,43 @@ run_playwright_shard() {
     local shard_index="${shard_label%%/*}"
     local shard_total="${shard_label##*/}"
     echo "Starting Playwright shard ${shard_label}"
-    cd packages/frontend
+    cd "${ROOT_DIR}/packages/frontend"
     local output_dir="$PWD/tests/.artifacts/playwright/shard-${shard_index}-of-${shard_total}/test-results"
-    rm -rf "$output_dir"
-    mkdir -p "$output_dir"
+    local report_dir="$PWD/tests/.artifacts/playwright/shard-${shard_index}-of-${shard_total}/playwright-report"
+    rm -rf "$output_dir" "$report_dir"
+    mkdir -p "$output_dir" "$report_dir"
     PLAYWRIGHT_DISABLE_WEB_SERVER=true \
+    PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir" \
     PLAYWRIGHT_OUTPUT_DIR="$output_dir" \
-    exec python3 ../../scripts/run_with_timeout.py \
+    python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        -- npx playwright test --config=playwright.config.ts "$@"
+        -- ./node_modules/.bin/playwright test --config=playwright.config.ts "$@"
 }
 
-set +e
-pids=()
-(
-    run_playwright_shard "1/4" \
-        tests/analysis-editor.test.ts \
-        tests/analysis-crud.test.ts \
-        tests/analysis-locking.test.ts \
-        tests/lineage.test.ts
-) & pids+=("$!")
-(
-    run_playwright_shard "2/4" \
-        --grep "Monitoring –|Navigation –|Profile –|Analyses – SQL/Polars snippet export|Datasources – detail view|Datasources – preview pagination|Datasources – column stats panel|Datasources – config tab interactions" \
-        tests/monitoring.test.ts \
-        tests/navigation.test.ts \
-        tests/profile.test.ts \
-        tests/sql-polars-snippet-export.test.ts \
-        tests/datasources.test.ts
-) & pids+=("$!")
-(
-    run_playwright_shard "3/4" \
-        --grep "Analyses –|Datasources – list & management|Datasources – upload page|Namespace –|Build Preview –|Cancel Build –" \
-        tests/analysis-operations.test.ts \
-        tests/datasources.test.ts \
-        tests/namespace-isolation.test.ts \
-        tests/build-preview.test.ts \
-        tests/cancel-build.test.ts
-) & pids+=("$!")
-(
-    run_playwright_shard "4/4" \
-        tests/analysis-pipeline.test.ts \
-        tests/analysis-output.test.ts \
-        tests/udfs.test.ts
-) & pids+=("$!")
-status=0
-for pid in "${pids[@]}"; do
-    if ! wait "$pid"; then
-        status=1
-    fi
-done
-set -e
-exit "$status"
+run_playwright_shard "1/4" \
+    tests/analysis-editor.test.ts \
+    tests/analysis-crud.test.ts \
+    tests/analysis-locking.test.ts \
+    tests/lineage.test.ts
+
+run_playwright_shard "2/4" \
+    --grep "Monitoring –|Navigation –|Profile –|Analyses – SQL/Polars snippet export|Datasources – detail view|Datasources – preview pagination|Datasources – column stats panel|Datasources – config tab interactions" \
+    tests/monitoring.test.ts \
+    tests/navigation.test.ts \
+    tests/profile.test.ts \
+    tests/sql-polars-snippet-export.test.ts \
+    tests/datasources.test.ts
+
+run_playwright_shard "3/4" \
+    --grep "Analyses –|Datasources – list & management|Datasources – upload page|Namespace –|Build Preview –|Cancel Build –" \
+    tests/analysis-operations.test.ts \
+    tests/datasources.test.ts \
+    tests/namespace-isolation.test.ts \
+    tests/build-preview.test.ts \
+    tests/cancel-build.test.ts
+
+run_playwright_shard "4/4" \
+    tests/analysis-pipeline.test.ts \
+    tests/analysis-output.test.ts \
+    tests/udfs.test.ts

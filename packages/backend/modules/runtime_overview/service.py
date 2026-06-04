@@ -3,17 +3,18 @@ from __future__ import annotations
 import socket
 from datetime import UTC, datetime
 
-from contracts.build_jobs.models import BuildJobStatus
-from contracts.runtime_workers.models import RuntimeWorkerKind
-from core import runtime_workers_service
-from core.config import settings
-from core.database import run_db, run_settings_db, supports_distributed_runtime
-from core.engine_identity import parse_engine_identity
-from core.namespace import list_namespaces, reset_namespace, set_namespace_context
-from persistence.build_jobs.models import BuildJob
-from persistence.engine_instances.models import EngineInstance
-from persistence.runtime_workers.models import RuntimeWorker
 from sqlmodel import Session, select
+
+from backend_contracts.build_jobs.models import BuildJobStatus
+from backend_contracts.runtime_workers.models import RuntimeWorkerKind
+from backend_core import runtime_workers_service
+from backend_core.config import settings
+from backend_core.database import run_db, run_settings_db, supports_distributed_runtime
+from backend_core.engine_identity import parse_engine_identity
+from backend_core.namespace import list_namespaces, reset_namespace, set_namespace_context
+from backend_core.persistence.build_jobs.models import BuildJob
+from backend_core.persistence.engine_instances.models import EngineInstance
+from backend_core.persistence.runtime_workers.models import RuntimeWorker
 
 from . import schemas
 
@@ -35,16 +36,16 @@ def _age_seconds(value: datetime, *, now: datetime | None = None) -> float:
 
 def runtime_mode() -> schemas.RuntimeMode:
     if supports_distributed_runtime():
-        return "distributed"
+        return 'distributed'
     if settings.embedded_build_worker_enabled:
-        return "single_process"
-    return "durable_single_node"
+        return 'single_process'
+    return 'durable_single_node'
 
 
 def api_process(worker_id: str | None) -> schemas.ApiProcessSummary:
     return schemas.ApiProcessSummary(
         worker_id=worker_id,
-        pid=0 if worker_id is None else int(worker_id.split(":")[-1]),
+        pid=0 if worker_id is None else int(worker_id.split(':')[-1]),
         hostname=socket.gethostname(),
         version=settings.app_version,
     )

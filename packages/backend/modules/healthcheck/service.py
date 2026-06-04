@@ -1,19 +1,19 @@
 import uuid
 from datetime import UTC, datetime
 
-from contracts.healthcheck_models import HealthCheckType
-from core.exceptions import HealthcheckNotFoundError, HealthcheckValidationError
-from persistence.datasource.models import DataSource
-from persistence.healthchecks.models import HealthCheck, HealthCheckResult
 from sqlalchemy import select
 from sqlmodel import Session
 
+from backend_contracts.healthcheck_models import HealthCheckType
+from backend_core.exceptions import HealthcheckNotFoundError, HealthcheckValidationError
 from backend_core.healthcheck_schemas import (
     HealthCheckCreate,
     HealthCheckResponse,
     HealthCheckResultResponse,
     HealthCheckUpdate,
 )
+from backend_core.persistence.datasource.models import DataSource
+from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
 
 
 def list_healthchecks(session: Session, datasource_id: str) -> list[HealthCheckResponse]:
@@ -128,4 +128,4 @@ def _ensure_unique_row_count(
         query = query.where(HealthCheck.id != exclude_id)  # type: ignore[arg-type]
     existing = session.execute(query).scalars().first()
     if existing:
-        raise HealthcheckValidationError("Only one row_count healthcheck is allowed per datasource")
+        raise HealthcheckValidationError('Only one row_count healthcheck is allowed per datasource')

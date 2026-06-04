@@ -2,40 +2,121 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
+import signal
 import socket
 import threading
+import time
 import uuid
-
-from contracts.build_jobs.live import hub as build_job_hub
-from contracts.runtime.events import RuntimePayloadKind
-from contracts.runtime_workers.models import RuntimeWorkerKind
-from core import runtime_workers_service as runtime_worker_service
-from core.config import settings
-from core.database import init_db, run_db, run_settings_db
-from core.logging import configure_logging
-from core.namespace import reset_namespace, set_namespace_context
-from core.namespaces_service import list_runtime_namespaces
-from runtime_common import ipc as runtime_ipc
-from sqlmodel import Session
-
-import scheduler_service
+from dataclasses import dataclass
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SchedulerSettings:
+    internal_api_base_url: str
+    internal_api_token: str
+    scheduler_check_interval: int
+    log_level: str
+
+    @classmethod
+    def from_env(cls) -> SchedulerSettings:
+        return cls(
+            internal_api_base_url=_required_env("INTERNAL_API_BASE_URL").rstrip("/"),
+            internal_api_token=_required_env("INTERNAL_API_TOKEN"),
+            scheduler_check_interval=_required_positive_int_env("SCHEDULER_CHECK_INTERVAL"),
+            log_level=os.environ.get("LOG_LEVEL", "info").lower(),
+        )
+
+
+class SchedulerApiClient:
+    def __init__(self, *, base_url: str, token: str, timeout_seconds: float = 30.0, registration_retry_seconds: float = 90.0) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._token = token
+        self._timeout_seconds = timeout_seconds
+        self._registration_retry_seconds = registration_retry_seconds
+
+    def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int) -> None:
+        self._post_registration(
+            "/scheduler/register",
+            {
+                "worker_id": worker_id,
+                "hostname": hostname,
+                "pid": pid,
+                "capacity": capacity,
+            },
+        )
+
+    def heartbeat(self, *, worker_id: str) -> None:
+        self._post("/scheduler/heartbeat", {"worker_id": worker_id})
+
+    def stop(self, *, worker_id: str) -> None:
+        self._post("/scheduler/stop", {"worker_id": worker_id})
+
+    def run_due(self, *, worker_id: str) -> dict[str, Any]:
+        return self._post("/scheduler/run-due", {"worker_id": worker_id})
+
+    def _post(self, path: str, payload: dict[str, object]) -> dict[str, Any]:
+        body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            f"{self._base_url}{path}",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Internal-Token": self._token,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self._timeout_seconds) as response:
+                raw = response.read()
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Backend scheduler RPC failed with HTTP {exc.code}: {detail}") from exc
+        if not raw:
+            return {}
+        decoded = json.loads(raw.decode("utf-8"))
+        if not isinstance(decoded, dict):
+            raise RuntimeError(f"Backend scheduler RPC returned non-object JSON: {decoded!r}")
+        return decoded
+
+    def _post_registration(self, path: str, payload: dict[str, object]) -> dict[str, Any]:
+        deadline = time.monotonic() + self._registration_retry_seconds
+        while True:
+            try:
+                return self._post(path, payload)
+            except URLError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(1.0)
 
 
 async def scheduler_loop(
     stop_event: asyncio.Event,
     worker_id: str,
     *,
+    client: SchedulerApiClient,
+    check_interval_seconds: int,
     heartbeat_seconds: float = 5.0,
 ) -> None:
-    _register_worker(worker_id=worker_id)
+    await asyncio.to_thread(
+        client.register,
+        worker_id=worker_id,
+        hostname=socket.gethostname(),
+        pid=os.getpid(),
+        capacity=1,
+    )
     heartbeat_stop = threading.Event()
     heartbeat_thread = threading.Thread(
         target=_heartbeat_loop_sync,
         kwargs={
+            "client": client,
             "stop_signal": heartbeat_stop,
             "worker_id": worker_id,
             "heartbeat_seconds": heartbeat_seconds,
@@ -43,138 +124,80 @@ async def scheduler_loop(
         daemon=True,
     )
     heartbeat_thread.start()
-    last_seen = build_job_hub.version()
     try:
         while not stop_event.is_set():
-            handled = await _run_once(worker_id=worker_id)
-            if handled:
-                last_seen = build_job_hub.version()
+            result = await asyncio.to_thread(client.run_due, worker_id=worker_id)
+            if _response_handled_work(result):
+                _log_run_due_result(result)
                 continue
-            wait_task = asyncio.create_task(build_job_hub.wait(last_seen))
-            stop_task = asyncio.create_task(stop_event.wait())
-            sleep_task = asyncio.create_task(asyncio.sleep(settings.scheduler_check_interval))
-            done, pending = await asyncio.wait({wait_task, stop_task, sleep_task}, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-            for task in done:
-                with contextlib.suppress(asyncio.CancelledError):
-                    value = await task
-                    if task is wait_task and isinstance(value, int):
-                        last_seen = value
+            await _sleep_until_tick_or_stop(stop_event, check_interval_seconds)
     finally:
         heartbeat_stop.set()
         heartbeat_thread.join()
-        _stop_worker(worker_id)
+        await asyncio.to_thread(client.stop, worker_id=worker_id)
 
 
-async def _run_once(*, worker_id: str) -> bool:
-    namespaces = _runtime_namespaces()
-    handled = False
-    for namespace in namespaces:
-        token = set_namespace_context(namespace)
-        try:
-            claimed = await asyncio.to_thread(
-                run_db,
-                lambda session: _claim_due_schedule_refs(session, worker_id=worker_id),
-            )
-            if not claimed:
-                continue
-            handled = True
-            for sched_id, datasource_id in claimed:
-                try:
-                    run_id = await asyncio.to_thread(
-                        run_db,
-                        lambda session, target_id=sched_id: scheduler_service.enqueue_schedule_run(
-                            session,
-                            target_id,
-                            worker_id=worker_id,
-                        ),
-                    )
-                    logger.info(
-                        "Scheduler: enqueued schedule %s as build %s (datasource=%s)",
-                        sched_id,
-                        run_id,
-                        datasource_id,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "Scheduler: enqueue failed for schedule %s: %s",
-                        sched_id,
-                        exc,
-                        exc_info=True,
-                    )
-                    await asyncio.to_thread(
-                        run_db,
-                        lambda session, target_id=sched_id, error=str(exc): scheduler_service.mark_schedule_enqueue_failed(
-                            session,
-                            target_id,
-                            error=error,
-                        ),
-                    )
-        finally:
-            reset_namespace(token)
-    return handled
+def _response_handled_work(result: dict[str, Any]) -> bool:
+    handled = result.get("handled")
+    if isinstance(handled, bool):
+        return handled
+    raise RuntimeError(f"Backend scheduler RPC response is missing boolean handled: {result!r}")
 
 
-def _claim_due_schedule_refs(session: Session, *, worker_id: str) -> list[tuple[str, str]]:
-    reclaimable_owner_ids = run_settings_db(
-        runtime_worker_service.reclaimable_worker_ids,
-        kind=RuntimeWorkerKind.SCHEDULER,
-    )
-    schedules = scheduler_service.claim_due_schedules(
-        session,
-        worker_id=worker_id,
-        reclaimable_owner_ids=reclaimable_owner_ids,
-    )
-    return [(schedule.id, schedule.datasource_id) for schedule in schedules]
-
-
-def _runtime_namespaces() -> list[str]:
-    return run_settings_db(list_runtime_namespaces)
-
-
-def _register_worker(*, worker_id: str) -> None:
-    def _register(session):
-        return runtime_worker_service.register_worker(
-            session,
-            worker_id=worker_id,
-            kind=RuntimeWorkerKind.SCHEDULER,
-            hostname=socket.gethostname(),
-            pid=os.getpid(),
-            capacity=1,
+def _log_run_due_result(result: dict[str, Any]) -> None:
+    for item in _list_response_items(result, "enqueued"):
+        logger.info(
+            "Scheduler: enqueued schedule %s as build %s (namespace=%s datasource=%s)",
+            item.get("schedule_id"),
+            item.get("build_id"),
+            item.get("namespace"),
+            item.get("datasource_id"),
+        )
+    for item in _list_response_items(result, "failures"):
+        logger.error(
+            "Scheduler: enqueue failed for schedule %s (namespace=%s datasource=%s): %s",
+            item.get("schedule_id"),
+            item.get("namespace"),
+            item.get("datasource_id"),
+            item.get("error"),
         )
 
-    run_settings_db(_register)
+
+def _list_response_items(result: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    raw_items = result.get(key, [])
+    if not isinstance(raw_items, list):
+        raise RuntimeError(f"Backend scheduler RPC response has invalid {key}: {result!r}")
+    items: list[dict[str, Any]] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            raise RuntimeError(f"Backend scheduler RPC response has invalid {key} item: {raw_item!r}")
+        items.append(raw_item)
+    return items
 
 
-def _heartbeat_worker(*, worker_id: str) -> None:
-    def _heartbeat(session):
-        return runtime_worker_service.heartbeat_worker(session, worker_id=worker_id)
+async def _sleep_until_tick_or_stop(stop_event: asyncio.Event, seconds: int) -> None:
+    sleep_task = asyncio.create_task(asyncio.sleep(seconds))
+    stop_task = asyncio.create_task(stop_event.wait())
+    done, pending = await asyncio.wait({sleep_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    for task in done:
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
-    run_settings_db(_heartbeat)
 
-
-def _stop_worker(worker_id: str) -> None:
-    def _stop(session):
-        return runtime_worker_service.mark_worker_stopped(session, worker_id=worker_id)
-
-    run_settings_db(_stop)
-
-
-def _heartbeat_loop_sync(*, stop_signal: threading.Event, worker_id: str, heartbeat_seconds: float) -> None:
+def _heartbeat_loop_sync(*, client: SchedulerApiClient, stop_signal: threading.Event, worker_id: str, heartbeat_seconds: float) -> None:
     while not stop_signal.wait(heartbeat_seconds):
-        _heartbeat_worker(worker_id=worker_id)
+        try:
+            client.heartbeat(worker_id=worker_id)
+        except Exception:
+            logger.exception("Scheduler heartbeat failed")
 
 
 def scheduler_id() -> str:
     return f"scheduler:{uuid.uuid4()}"
-
-
-async def handle_runtime_payload(payload: dict[str, object]) -> None:
-    if RuntimePayloadKind.from_payload(payload) == RuntimePayloadKind.JOB:
-        build_job_hub.publish()
 
 
 def install_stop_handlers(stop_event: asyncio.Event) -> None:
@@ -183,30 +206,42 @@ def install_stop_handlers(stop_event: asyncio.Event) -> None:
     def _stop() -> None:
         stop_event.set()
 
-    import signal
-
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, _stop)
 
 
 async def main() -> None:
-    await init_db()
-    configure_logging()
+    settings = SchedulerSettings.from_env()
+    logging.basicConfig(level=settings.log_level.upper())
     logger.info("Starting scheduler process...")
     stop_event = asyncio.Event()
     install_stop_handlers(stop_event)
-    ipc_server = await runtime_ipc.start_api_server()
-    ipc_task = None
-    if ipc_server is not None:
-        ipc_task = asyncio.create_task(runtime_ipc.serve_api_notifications(ipc_server, stop_event, handle_runtime_payload))
+    client = SchedulerApiClient(base_url=settings.internal_api_base_url, token=settings.internal_api_token)
+    await scheduler_loop(
+        stop_event,
+        scheduler_id(),
+        client=client,
+        check_interval_seconds=settings.scheduler_check_interval,
+    )
+
+
+def _required_env(name: str) -> str:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        raise RuntimeError(f"{name} must be configured for the scheduler runtime")
+    return value.strip()
+
+
+def _required_positive_int_env(name: str) -> int:
+    raw_value = _required_env(name)
     try:
-        await scheduler_loop(stop_event, scheduler_id())
-    finally:
-        stop_event.set()
-        await runtime_ipc.stop_api_server(ipc_server)
-        if ipc_task is not None:
-            await asyncio.gather(ipc_task, return_exceptions=True)
+        value = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer, got {raw_value!r}") from exc
+    if value < 1:
+        raise RuntimeError(f"{name} must be at least 1, got {value}")
+    return value
 
 
 if __name__ == "__main__":

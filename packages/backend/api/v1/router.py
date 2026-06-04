@@ -17,11 +17,13 @@ from modules.mcp.routes import router as mcp_router
 from modules.namespaces import router as namespaces_router
 from modules.runtime_overview import router as runtime_overview_router
 from modules.scheduler import router as scheduler_router
+from modules.scheduler.internal_routes import router as scheduler_internal_router
 from modules.settings import router as settings_router
 from modules.telegram import router as telegram_router
 from modules.udf import router as udf_router
+from modules.worker.internal_routes import router as worker_internal_router
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix='/v1')
 
 
 router.include_router(ai_router)
@@ -40,7 +42,9 @@ router.include_router(locks_router)
 router.include_router(mcp_router)
 router.include_router(namespaces_router)
 router.include_router(runtime_overview_router)
+router.include_router(scheduler_internal_router)
 router.include_router(settings_router)
 router.include_router(telegram_router)
 router.include_router(udf_router)
+router.include_router(worker_internal_router)
 router.include_router(scheduler_router)
