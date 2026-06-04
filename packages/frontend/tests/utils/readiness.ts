@@ -86,6 +86,9 @@ export async function waitForDatasourceList(page: Page, timeout = 5_000): Promis
  * that will never become ready.
  */
 export async function waitForDatasourcePreviewReady(page: Page, timeout = 5_000): Promise<void> {
+	await waitForLayoutReady(page, timeout);
+	await expect(page.locator('[data-ds-config]')).toBeVisible({ timeout });
+
 	const ready = page.locator('[data-preview-ready="true"]');
 	const failure = page.locator(':text("Failed to fetch"), :text("Preview failed")');
 	const start = Date.now();
