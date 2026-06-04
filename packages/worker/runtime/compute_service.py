@@ -3604,6 +3604,7 @@ async def run_analysis_build_stream(
                 build.current_engine_run_id = result.engine_run_id
                 return result
 
+            await build_engine_prewarm_task
             export_result = await asyncio.to_thread(run_export_job)
 
             if progress_task is not None:
