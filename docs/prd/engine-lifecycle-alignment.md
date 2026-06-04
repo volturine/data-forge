@@ -88,15 +88,15 @@ Those belong to the later Docker-native runtime swap.
 
 Primary implementation files:
 
-- `packages/shared/core/engine_identity.py`
+- `packages/backend/backend_core/engine_identity.py`
 - `packages/worker/runtime/compute_manager.py`
 - `packages/worker/runtime/compute_service.py`
 - `packages/frontend/src/routes/analysis/[id]/+page.svelte`
-- `packages/shared/core/engine_instances_service.py`
+- `packages/backend/backend_core/engine_instances_service.py`
 
 Primary verification files:
 
-- `packages/shared/tests/test_engine_identity.py`
+- `packages/backend/tests/test_engine_identity.py`
 - `packages/worker/tests/test_engine_lifecycle.py`
 - `packages/worker/tests/test_fixes.py`
 - `packages/backend/tests/test_runtime_overview.py`

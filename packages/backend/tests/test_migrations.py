@@ -26,7 +26,6 @@ def test_migrate_runtime_runs_public_then_each_tenant(monkeypatch) -> None:
         return revisions[schema]
 
     monkeypatch.setattr('backend_core.migrations._current_revision', fake_current_revision)
-    monkeypatch.setattr('backend_core.migrations._schema_has_table', lambda *, schema, table_name: False)
     monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: calls.append(('ensure_database', 'db')))
     monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
     monkeypatch.setattr('backend_core.migrations.settings.database_url', 'postgresql+psycopg://user:pass@host:5432/db')
@@ -105,7 +104,6 @@ def test_migrate_runtime_maps_public_namespace_to_tenant_schema(monkeypatch) -> 
         return revisions.get(schema)
 
     monkeypatch.setattr('backend_core.migrations._current_revision', fake_current_revision)
-    monkeypatch.setattr('backend_core.migrations._schema_has_table', lambda *, schema, table_name: False)
     monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: calls.append(('ensure_database', 'db')))
     monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
 

@@ -11,9 +11,7 @@ from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
 _PUBLIC_REVISION = '0001_runtime_public'
-_TENANT_BASE_REVISION = '0002_runtime_tenant'
-_TENANT_OUTBOX_REVISION = '0003_runtime_outbox'
-_TENANT_REVISION = '0004_engine_run_namespace'
+_TENANT_REVISION = '0002_runtime_tenant'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 
@@ -105,23 +103,6 @@ def _current_revision(schema: str) -> str | None:
         engine.dispose()
 
 
-def _schema_has_table(*, schema: str, table_name: str) -> bool:
-    engine = create_engine(settings.database_url, pool_pre_ping=True)
-    try:
-        with engine.begin() as connection:
-            row = connection.execute(
-                text('SELECT 1 FROM information_schema.tables WHERE table_schema = :schema AND table_name = :table_name'),
-                {'schema': schema, 'table_name': table_name},
-            ).first()
-        return row is not None
-    finally:
-        engine.dispose()
-
-
-def _stamp_schema(*, scope: str, schema: str, revision: str) -> None:
-    command.stamp(_alembic_config(scope=scope, schema=schema), revision)
-
-
 def _upgrade_schema(*, scope: str, schema: str, revision: str) -> None:
     command.upgrade(_alembic_config(scope=scope, schema=schema), revision, tag=scope)
 
@@ -132,17 +113,12 @@ def migrate_runtime(namespaces: list[str]) -> None:
     if public_revision is not None and public_revision != _PUBLIC_REVISION:
         raise RuntimeError(f'Unsupported existing public schema revision: {public_revision}. Expected {_PUBLIC_REVISION}.')
     if public_revision is None:
-        if _schema_has_table(schema='public', table_name='app_settings'):
-            _stamp_schema(scope='public', schema='public', revision=_PUBLIC_REVISION)
-        else:
-            _upgrade_schema(scope='public', schema='public', revision=_PUBLIC_REVISION)
+        _upgrade_schema(scope='public', schema='public', revision=_PUBLIC_REVISION)
     for namespace in namespaces:
         tenant_schema = namespace_database_schema(namespace)
         revision = _current_revision(tenant_schema)
-        if revision is not None and revision not in {_TENANT_BASE_REVISION, _TENANT_OUTBOX_REVISION, _TENANT_REVISION}:
+        if revision is not None and revision != _TENANT_REVISION:
             raise RuntimeError(f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected {_TENANT_REVISION}.')
         if revision == _TENANT_REVISION:
             continue
-        if revision is None and _schema_has_table(schema=tenant_schema, table_name='datasources'):
-            _stamp_schema(scope='tenant', schema=tenant_schema, revision=_TENANT_BASE_REVISION)
         _upgrade_schema(scope='tenant', schema=tenant_schema, revision=_TENANT_REVISION)

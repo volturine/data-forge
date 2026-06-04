@@ -2,7 +2,7 @@
 
 This project uses environment variables for two layers:
 
-1. **Backend runtime** — loaded by `packages/shared/core/config.py` from process env and the env file selected by `ENV_FILE`
+1. **Backend runtime** — loaded by `packages/backend/backend_core/config.py` from process env and the env file selected by `ENV_FILE`
 2. **Frontend dev server (Vite)** — read from the process environment; `just dev` sources `config/env/dev.env` so local dev variables come from the same file
 
 There is no separate `packages/frontend/.env` file. All local dev configuration — including Vite

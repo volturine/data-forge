@@ -45,7 +45,7 @@ Failure smell:
 - [ ] `packages/frontend/src/lib/components/pipeline/OutputNode.svelte`
 - [ ] `packages/backend/modules/analysis/routes.py`
 - [ ] `packages/worker/runtime/compute_service.py`
-- [ ] `packages/worker/datasources/datasource_service.py`
+- [ ] `packages/worker/runtime/compute_service.py`
 
 Failure smell:
 - output rebuilds linger in visible `Active Build` state instead of reaching `Completed`
@@ -65,7 +65,7 @@ Failure smell:
 - [ ] `packages/frontend/src/routes/datasources/new/+page.svelte`
 - [ ] `packages/frontend/src/routes/datasources/+page.svelte`
 - [ ] `packages/frontend/tests/utils/user-flows.ts`
-- [ ] `packages/worker/datasources/datasource_service.py`
+- [ ] `packages/worker/runtime/compute_service.py`
 
 Failure smell:
 - datasource upload feels synchronous but behaves like background work again

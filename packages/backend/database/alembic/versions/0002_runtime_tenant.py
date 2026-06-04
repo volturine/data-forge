@@ -142,8 +142,10 @@ def upgrade() -> None:
         sa.Column('progress', sa.Float(), nullable=False, server_default='0'),
         sa.Column('current_step', sa.String(), nullable=True),
         sa.Column('triggered_by', sa.String(), nullable=True),
+        sa.Column('namespace', sa.String(), nullable=False),
         sa.PrimaryKeyConstraint('id'),
     )
+    op.create_index('ix_engine_runs_namespace', 'engine_runs', ['namespace'])
     op.create_table(
         'build_runs',
         sa.Column('id', sa.String(), nullable=False),
@@ -249,6 +251,23 @@ def upgrade() -> None:
     op.create_index('ix_compute_requests_kind', 'compute_requests', ['kind'])
     op.create_index('ix_compute_requests_status', 'compute_requests', ['status'])
     op.create_index('ix_compute_requests_lease_owner', 'compute_requests', ['lease_owner'])
+    op.create_table(
+        'runtime_outbox_events',
+        sa.Column('id', sa.String(), nullable=False),
+        sa.Column('kind', sa.String(), nullable=False),
+        sa.Column('status', sa.String(length=10), nullable=False),
+        sa.Column('payload_json', sa.JSON(), nullable=False),
+        sa.Column('attempts', sa.Integer(), nullable=False, server_default='0'),
+        sa.Column('last_error', sa.String(), nullable=True),
+        sa.Column('available_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('dispatched_at', sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint('id'),
+    )
+    op.create_index('ix_runtime_outbox_events_kind', 'runtime_outbox_events', ['kind'])
+    op.create_index('ix_runtime_outbox_events_status', 'runtime_outbox_events', ['status'])
+    op.create_index('ix_runtime_outbox_events_available_at', 'runtime_outbox_events', ['available_at'])
     op.create_table(
         'healthchecks',
         sa.Column('id', sa.String(), nullable=False),
@@ -360,6 +379,10 @@ def downgrade() -> None:
     op.drop_table('healthcheck_results')
     op.drop_index('ix_healthchecks_datasource_id', table_name='healthchecks')
     op.drop_table('healthchecks')
+    op.drop_index('ix_runtime_outbox_events_available_at', table_name='runtime_outbox_events')
+    op.drop_index('ix_runtime_outbox_events_status', table_name='runtime_outbox_events')
+    op.drop_index('ix_runtime_outbox_events_kind', table_name='runtime_outbox_events')
+    op.drop_table('runtime_outbox_events')
     op.drop_index('ix_compute_requests_lease_owner', table_name='compute_requests')
     op.drop_index('ix_compute_requests_status', table_name='compute_requests')
     op.drop_index('ix_compute_requests_kind', table_name='compute_requests')
@@ -381,6 +404,7 @@ def downgrade() -> None:
     op.drop_index('ix_build_runs_schedule_id', table_name='build_runs')
     op.drop_index('ix_build_runs_namespace', table_name='build_runs')
     op.drop_table('build_runs')
+    op.drop_index('ix_engine_runs_namespace', table_name='engine_runs')
     op.drop_table('engine_runs')
     op.drop_table('analysis_versions')
     op.drop_index('ix_analysis_favorites_analysis_id', table_name='analysis_favorites')

@@ -96,7 +96,7 @@ Fix:
   - background ingest
 
 Owner:
-- `packages/shared/core/compute_requests_service.py`
+- `packages/backend/backend_core/compute_requests_service.py`
 
 ### 4. Same-datasource ingest stopped racing itself
 
@@ -108,7 +108,7 @@ Fix:
 - serialize same-datasource ingest writes with a process-local mutex
 
 Owner:
-- `packages/worker/datasources/datasource_service.py`
+- `packages/worker/runtime/compute_service.py`
 
 ### 5. Concurrent namespace bootstrap became idempotent
 
@@ -119,7 +119,7 @@ Fix:
 - treat concurrent namespace creation as harmless/idempotent
 
 Owners:
-- `packages/worker/datasources/datasource_service.py`
+- `packages/worker/runtime/compute_service.py`
 - `packages/worker/runtime/compute_service.py`
 
 ### 6. Datasource creation stayed UI-first without adding helper drag
