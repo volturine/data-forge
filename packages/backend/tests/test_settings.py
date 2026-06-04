@@ -92,8 +92,10 @@ class TestNamespaceDatabaseConcurrency:
         from backend_core.database import run_db
         from backend_core.namespace import reset_namespace, set_namespace_context
 
+        namespace = f'concurrency_{uuid.uuid4().hex}'
+
         def call() -> int:
-            token = set_namespace_context('alpha')
+            token = set_namespace_context(namespace)
             try:
                 return run_db(lambda session: 1)
             finally:

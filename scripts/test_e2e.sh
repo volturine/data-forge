@@ -154,7 +154,7 @@ wait_for_url() {
     local url="$1"
     local label="$2"
     local deadline=$((SECONDS + 90))
-    until curl -fsS "$url" >/dev/null; do
+    until curl -fs "$url" >/dev/null 2>&1; do
         if [ "$SECONDS" -ge "$deadline" ]; then
             echo "Timed out waiting for ${label} at ${url}" >&2
             exit 1
