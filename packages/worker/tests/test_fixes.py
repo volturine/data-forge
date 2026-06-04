@@ -6,12 +6,9 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
-from zoneinfo import ZoneInfo
 
 import polars as pl
 import pytest
-from backend_core.engine_identity import datasource_preview_engine_key
-from backend_core.persistence.datasource.models import DataSource
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
@@ -20,6 +17,7 @@ from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_service import ExportDatasourceResult
+from runtime.engine_identity import datasource_preview_engine_key
 from runtime.internal_api import PendingDatasourceDelete
 from worker_contracts.compute import schemas as compute_schemas
 from worker_contracts.engine_runs.schemas import EngineRunResponseSchema
@@ -80,21 +78,8 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
 
 
 @pytest.mark.asyncio
-async def test_pending_datasource_delete_waits_for_busy_preview_engine(test_db_session, monkeypatch) -> None:
+async def test_pending_datasource_delete_waits_for_busy_preview_engine(monkeypatch) -> None:
     datasource_id = "datasource-1"
-    test_db_session.add(
-        DataSource(
-            id=datasource_id,
-            name="Pending datasource",
-            source_type="file",
-            config={"file_path": "s3://dataforge-tests/pending.csv", "file_type": "csv", "options": {}},
-            is_hidden=True,
-            is_pending_delete=True,
-            created_at=datetime.now(UTC),
-            delete_requested_at=datetime.now(UTC),
-        )
-    )
-    test_db_session.commit()
 
     cleanup_calls: list[str] = []
     finalized: list[tuple[str, str]] = []
@@ -117,25 +102,11 @@ async def test_pending_datasource_delete_waits_for_busy_preview_engine(test_db_s
     assert cleanup_calls == []
     assert finalized == []
     assert shutdown_calls == []
-    assert test_db_session.get(DataSource, datasource_id) is not None
 
 
 @pytest.mark.asyncio
-async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(test_db_session, monkeypatch) -> None:
+async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(monkeypatch) -> None:
     datasource_id = "datasource-2"
-    test_db_session.add(
-        DataSource(
-            id=datasource_id,
-            name="Pending datasource",
-            source_type="file",
-            config={"file_path": "s3://dataforge-tests/pending.csv", "file_type": "csv", "options": {}},
-            is_hidden=True,
-            is_pending_delete=True,
-            created_at=datetime.now(UTC),
-            delete_requested_at=datetime.now(UTC),
-        )
-    )
-    test_db_session.commit()
 
     cleanup_calls: list[str] = []
     finalized: list[tuple[str, str]] = []
@@ -158,12 +129,10 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(t
     assert cleanup_calls == []
     assert finalized == [("default", datasource_id)]
     assert shutdown_calls == [datasource_preview_engine_key(datasource_id)]
-    assert test_db_session.get(DataSource, datasource_id) is not None
 
 
 @pytest.mark.asyncio
 async def test_run_analysis_build_stream_shuts_down_build_engine_after_completion(
-    test_db_session,
     monkeypatch,
 ) -> None:
     pipeline = {
@@ -231,7 +200,7 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
         events.append(event)
 
     result = await compute_service.run_analysis_build_stream(
-        session=test_db_session,
+        session=None,
         manager=manager,
         pipeline=pipeline,
         build=build,
@@ -249,56 +218,6 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
 # ---------------------------------------------------------------------------
 # EngineRunResponseSchema.progress default
 # ---------------------------------------------------------------------------
-
-
-def test_database_iceberg_coercion_stringifies_null_nested_and_timezone_columns():
-    from modules.datasource.runtime_service import _coerce_database_iceberg_compatible_lazyframe
-
-    lazy = pl.DataFrame(
-        {
-            "description": [None, None],
-            "pipeline_definition": [
-                {"tabs": [{"datasource": {"analysis_tab_id": None}}]},
-                {"tabs": [{"datasource": {"analysis_tab_id": None}}]},
-            ],
-            "config": [
-                {
-                    "catalog_type": "sql",
-                    "source": {
-                        "connection_string": "postgresql://example",
-                        "query": "select 1",
-                    },
-                },
-                {
-                    "catalog_type": "sql",
-                    "source": {
-                        "connection_string": "postgresql://example",
-                        "query": "select 2",
-                    },
-                },
-            ],
-            "tags": [["one", "two"], ["three"]],
-            "created_at": [
-                datetime(2024, 1, 1, 12, 0, tzinfo=ZoneInfo("Europe/Prague")),
-                datetime(2024, 7, 1, 12, 0, tzinfo=ZoneInfo("Europe/Prague")),
-            ],
-            "value": [1, 2],
-        },
-    ).lazy()
-
-    coerced = _coerce_database_iceberg_compatible_lazyframe(lazy).collect()
-    schema = coerced.schema
-    assert schema["description"] == pl.String
-    assert schema["pipeline_definition"] == pl.String
-    assert schema["config"] == pl.String
-    assert schema["tags"] == pl.String
-    assert schema["created_at"] == pl.Datetime(time_zone="UTC")
-    assert schema["value"] == pl.Int64
-    assert '"analysis_tab_id": null' in coerced["pipeline_definition"][0]
-    assert '"catalog_type": "sql"' in coerced["config"][0]
-    assert coerced["tags"][0] == '["one", "two"]'
-    assert str(coerced["created_at"][0]) == "2024-01-01 11:00:00+00:00"
-    assert str(coerced["created_at"][1]) == "2024-07-01 10:00:00+00:00"
 
 
 class TestEngineRunProgressDefault:

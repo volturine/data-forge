@@ -6,14 +6,15 @@ from unittest.mock import patch
 
 import polars as pl
 import pytest
+from sqlmodel import Session, select
+
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.engine_runs.models import EngineRun
-from sqlmodel import Session, select
 
 
 class TestDatasourceIngest:
-    @patch("modules.datasource.runtime_service.load_datasource")
-    @patch("modules.datasource.runtime_service._write_iceberg_table")
+    @patch('modules.datasource.runtime_service.load_datasource')
+    @patch('modules.datasource.runtime_service._write_iceberg_table')
     def test_create_file_datasource_persists_ingest_run(
         self,
         mock_write,
@@ -31,20 +32,20 @@ class TestDatasourceIngest:
             def current_snapshot(self):
                 return _Snap()
 
-        mock_load.return_value = pl.DataFrame({"x": [1]}).lazy()
+        mock_load.return_value = pl.DataFrame({'x': [1]}).lazy()
         mock_write.return_value = _Table()
 
         out = create_file_datasource(
             test_db_session,
-            name="Uploaded CSV",
+            name='Uploaded CSV',
             description=None,
             file_path=sample_csv_object_url,
-            file_type="csv",
+            file_type='csv',
         )
 
-        assert out.source_type == "iceberg"
-        assert out.config["source"]["source_type"] == "file"
-        assert out.config["source"]["file_type"] == "csv"
+        assert out.source_type == 'iceberg'
+        assert out.config['source']['source_type'] == 'file'
+        assert out.config['source']['file_type'] == 'csv'
 
         runs = (
             test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == out.id))  # type: ignore[arg-type]
@@ -52,25 +53,25 @@ class TestDatasourceIngest:
             .all()
         )
         assert len(runs) == 1
-        assert runs[0].kind == "ingest"
-        assert runs[0].status == "success"
+        assert runs[0].kind == 'ingest'
+        assert runs[0].status == 'success'
         assert runs[0].result_json is not None
-        assert runs[0].result_json["original_source_type"] == "file"
+        assert runs[0].result_json['original_source_type'] == 'file'
 
     def test_create_file_datasource_rejects_local_path(self, test_db_session, sample_csv_file: Path):
         from modules.datasource.runtime_service import create_file_datasource
 
-        with pytest.raises(Exception, match="file_path must be an s3:// URL"):
+        with pytest.raises(Exception, match='file_path must be an s3:// URL'):
             create_file_datasource(
                 test_db_session,
-                name="Local CSV",
+                name='Local CSV',
                 description=None,
                 file_path=str(sample_csv_file),
-                file_type="csv",
+                file_type='csv',
             )
 
-    @patch("modules.datasource.runtime_service.load_datasource")
-    @patch("modules.datasource.runtime_service._write_iceberg_table")
+    @patch('modules.datasource.runtime_service.load_datasource')
+    @patch('modules.datasource.runtime_service._write_iceberg_table')
     def test_create_database_datasource_marks_database_source_type(
         self,
         mock_write,
@@ -87,21 +88,21 @@ class TestDatasourceIngest:
             def current_snapshot(self):
                 return _Snap()
 
-        mock_load.return_value = pl.DataFrame({"x": [1]}).lazy()
+        mock_load.return_value = pl.DataFrame({'x': [1]}).lazy()
         mock_write.return_value = _Table()
 
         out = create_database_datasource(
             test_db_session,
-            name="Ingestable Database",
+            name='Ingestable Database',
             description=None,
-            connection_string="postgresql://example/db",
-            query="select * from public.users",
+            connection_string='postgresql://example/db',
+            query='select * from public.users',
         )
 
-        assert out.source_type == "iceberg"
-        assert out.config["source"]["source_type"] == "database"
-        assert out.config["source"]["connection_string"] == "postgresql://example/db"
-        assert out.config["source"]["query"] == "select * from public.users"
+        assert out.source_type == 'iceberg'
+        assert out.config['source']['source_type'] == 'database'
+        assert out.config['source']['connection_string'] == 'postgresql://example/db'
+        assert out.config['source']['query'] == 'select * from public.users'
 
         runs = (
             test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == out.id))  # type: ignore[arg-type]
@@ -109,13 +110,13 @@ class TestDatasourceIngest:
             .all()
         )
         assert len(runs) == 1
-        assert runs[0].kind == "ingest"
-        assert runs[0].status == "success"
+        assert runs[0].kind == 'ingest'
+        assert runs[0].status == 'success'
         assert runs[0].result_json is not None
-        assert runs[0].result_json["original_source_type"] == "database"
+        assert runs[0].result_json['original_source_type'] == 'database'
 
-    @patch("modules.datasource.runtime_service.load_datasource")
-    @patch("modules.datasource.runtime_service._write_iceberg_table")
+    @patch('modules.datasource.runtime_service.load_datasource')
+    @patch('modules.datasource.runtime_service._write_iceberg_table')
     def test_create_iceberg_datasource_persists_ingest_run(
         self,
         mock_write,
@@ -133,23 +134,23 @@ class TestDatasourceIngest:
             def current_snapshot(self):
                 return _Snap()
 
-        mock_load.return_value = pl.DataFrame({"x": [1]}).lazy()
+        mock_load.return_value = pl.DataFrame({'x': [1]}).lazy()
         mock_write.return_value = _Table()
 
         out = create_iceberg_datasource(
             test_db_session,
-            name="External File Raw",
+            name='External File Raw',
             description=None,
             source={
-                "source_type": "file",
-                "file_path": sample_csv_object_url,
-                "file_type": "csv",
-                "options": {},
+                'source_type': 'file',
+                'file_path': sample_csv_object_url,
+                'file_type': 'csv',
+                'options': {},
             },
         )
 
-        assert out.source_type == "iceberg"
-        assert out.config["source"]["source_type"] == "file"
+        assert out.source_type == 'iceberg'
+        assert out.config['source']['source_type'] == 'file'
 
         runs = (
             test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == out.id))  # type: ignore[arg-type]
@@ -157,13 +158,13 @@ class TestDatasourceIngest:
             .all()
         )
         assert len(runs) == 1
-        assert runs[0].kind == "ingest"
-        assert runs[0].status == "success"
+        assert runs[0].kind == 'ingest'
+        assert runs[0].status == 'success'
         assert runs[0].result_json is not None
-        assert runs[0].result_json["original_source_type"] == "file"
+        assert runs[0].result_json['original_source_type'] == 'file'
 
-    @patch("modules.datasource.runtime_service.load_datasource")
-    @patch("modules.datasource.runtime_service._write_iceberg_table")
+    @patch('modules.datasource.runtime_service.load_datasource')
+    @patch('modules.datasource.runtime_service._write_iceberg_table')
     def test_ingest_external_builds_snapshot_fields(
         self,
         mock_write,
@@ -181,36 +182,36 @@ class TestDatasourceIngest:
             def current_snapshot(self):
                 return _Snap()
 
-        mock_load.return_value = pl.DataFrame({"x": [1]}).lazy()
+        mock_load.return_value = pl.DataFrame({'x': [1]}).lazy()
         mock_write.return_value = _Table()
 
         ds = DataSource(
             id=str(uuid.uuid4()),
-            name="Ingestable Raw",
-            source_type="iceberg",
+            name='Ingestable Raw',
+            source_type='iceberg',
             config={
-                "metadata_path": str(Path("data") / "clean" / str(uuid.uuid4()) / "master"),
-                "branch": "master",
-                "source": {
-                    "source_type": "file",
-                    "file_path": sample_csv_object_url,
-                    "file_type": "csv",
-                    "options": {},
+                'metadata_path': str(Path('data') / 'clean' / str(uuid.uuid4()) / 'master'),
+                'branch': 'master',
+                'source': {
+                    'source_type': 'file',
+                    'file_path': sample_csv_object_url,
+                    'file_type': 'csv',
+                    'options': {},
                 },
             },
-            created_by="import",
+            created_by='import',
             created_at=datetime.now(UTC),
         )
         test_db_session.add(ds)
         test_db_session.commit()
 
         out = ingest_external_datasource(test_db_session, ds.id)
-        assert out.config["snapshot_id"] == "222"
-        assert out.config["snapshot_timestamp_ms"] == 654321
-        assert out.config["current_snapshot_id"] == "222"
-        assert out.config["current_snapshot_timestamp_ms"] == 654321
-        assert out.config["ingest"] is not None
-        mock_write.assert_called_once_with(mock_load.return_value, out.config["metadata_path"], build_mode="full")
+        assert out.config['snapshot_id'] == '222'
+        assert out.config['snapshot_timestamp_ms'] == 654321
+        assert out.config['current_snapshot_id'] == '222'
+        assert out.config['current_snapshot_timestamp_ms'] == 654321
+        assert out.config['ingest'] is not None
+        mock_write.assert_called_once_with(mock_load.return_value, out.config['metadata_path'], build_mode='full')
 
         runs = (
             test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == ds.id))  # type: ignore[arg-type]
@@ -218,13 +219,13 @@ class TestDatasourceIngest:
             .all()
         )
         assert len(runs) == 1
-        assert runs[0].kind == "ingest"
-        assert runs[0].status == "success"
+        assert runs[0].kind == 'ingest'
+        assert runs[0].status == 'success'
         assert runs[0].result_json is not None
-        assert runs[0].result_json["original_source_type"] == "file"
+        assert runs[0].result_json['original_source_type'] == 'file'
 
-    @patch("modules.datasource.runtime_service.load_datasource")
-    @patch("modules.datasource.runtime_service._write_iceberg_table")
+    @patch('modules.datasource.runtime_service.load_datasource')
+    @patch('modules.datasource.runtime_service._write_iceberg_table')
     def test_ingest_external_serializes_same_datasource_writes(
         self,
         mock_write,
@@ -243,7 +244,7 @@ class TestDatasourceIngest:
             def current_snapshot(self):
                 return _Snap()
 
-        mock_load.return_value = pl.DataFrame({"x": [1]}).lazy()
+        mock_load.return_value = pl.DataFrame({'x': [1]}).lazy()
 
         entered = threading.Event()
         release = threading.Event()
@@ -267,19 +268,19 @@ class TestDatasourceIngest:
 
         ds = DataSource(
             id=str(uuid.uuid4()),
-            name="Concurrent Raw",
-            source_type="iceberg",
+            name='Concurrent Raw',
+            source_type='iceberg',
             config={
-                "metadata_path": str(Path("data") / "clean" / str(uuid.uuid4()) / "master"),
-                "branch": "master",
-                "source": {
-                    "source_type": "file",
-                    "file_path": sample_csv_object_url,
-                    "file_type": "csv",
-                    "options": {},
+                'metadata_path': str(Path('data') / 'clean' / str(uuid.uuid4()) / 'master'),
+                'branch': 'master',
+                'source': {
+                    'source_type': 'file',
+                    'file_path': sample_csv_object_url,
+                    'file_type': 'csv',
+                    'options': {},
                 },
             },
-            created_by="import",
+            created_by='import',
             created_at=datetime.now(UTC),
         )
         test_db_session.add(ds)

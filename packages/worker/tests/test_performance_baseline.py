@@ -14,7 +14,7 @@ def _measure(func, *args, **kwargs):
     return result, duration_ms
 
 
-def test_performance_baseline(test_db_session, sample_datasource, sample_analysis):
+def test_performance_baseline(sample_datasource):
     analysis_id = f"perf-{uuid.uuid4()}"
     pipeline = {
         "analysis_id": analysis_id,
@@ -45,7 +45,7 @@ def test_performance_baseline(test_db_session, sample_datasource, sample_analysi
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
             preview_result, preview_ms = _measure(
                 compute_service.preview_step,
-                session=test_db_session,
+                session=None,
                 manager=manager,
                 target_step_id="source",
                 analysis_pipeline=pipeline,
@@ -61,7 +61,7 @@ def test_performance_baseline(test_db_session, sample_datasource, sample_analysi
 
             schema_result, schema_ms = _measure(
                 compute_service.get_step_schema,
-                session=test_db_session,
+                session=None,
                 manager=manager,
                 target_step_id="source",
                 analysis_id=analysis_id,
@@ -70,7 +70,7 @@ def test_performance_baseline(test_db_session, sample_datasource, sample_analysi
 
             export_result, export_ms = _measure(
                 compute_service.download_step,
-                session=test_db_session,
+                session=None,
                 manager=manager,
                 target_step_id="source",
                 analysis_pipeline=pipeline,

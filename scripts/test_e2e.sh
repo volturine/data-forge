@@ -192,7 +192,9 @@ echo "Runtime workers are ready"
 echo "Waiting for frontend readiness"
 wait_for_url "http://127.0.0.1:${FRONTEND_PORT}" "frontend"
 echo "Frontend is ready"
-echo "Starting Playwright e2e tests in 4 deterministic shards"
+E2E_SHARD_WORKERS="${E2E_SHARD_WORKERS:-1}"
+echo "Starting Playwright e2e tests across 4 deterministic shards"
+echo "Using ${E2E_SHARD_WORKERS} Playwright worker(s) per shard"
 mkdir -p packages/frontend/tests/.artifacts/playwright
 for shard_index in 1 2 3 4; do
     mkdir -p "packages/frontend/tests/.artifacts/playwright/shard-${shard_index}-of-4/test-results"
@@ -215,16 +217,27 @@ run_playwright_shard() {
     python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        -- ./node_modules/.bin/playwright test --config=playwright.config.ts "$@"
+        -- ./node_modules/.bin/playwright test --config=playwright.config.ts --workers "$E2E_SHARD_WORKERS" "$@"
 }
 
-run_playwright_shard "1/4" \
+SHARD_PIDS=()
+SHARD_LABELS=()
+
+start_playwright_shard() {
+    local shard_label="$1"
+    shift
+    (run_playwright_shard "$shard_label" "$@") &
+    SHARD_PIDS+=("$!")
+    SHARD_LABELS+=("$shard_label")
+}
+
+start_playwright_shard "1/4" \
     tests/analysis-editor.test.ts \
     tests/analysis-crud.test.ts \
     tests/analysis-locking.test.ts \
     tests/lineage.test.ts
 
-run_playwright_shard "2/4" \
+start_playwright_shard "2/4" \
     --grep "Monitoring –|Navigation –|Profile –|Analyses – SQL/Polars snippet export|Datasources – detail view|Datasources – preview pagination|Datasources – column stats panel|Datasources – config tab interactions" \
     tests/monitoring.test.ts \
     tests/navigation.test.ts \
@@ -232,7 +245,7 @@ run_playwright_shard "2/4" \
     tests/sql-polars-snippet-export.test.ts \
     tests/datasources.test.ts
 
-run_playwright_shard "3/4" \
+start_playwright_shard "3/4" \
     --grep "Analyses –|Datasources – list & management|Datasources – upload page|Namespace –|Build Preview –|Cancel Build –" \
     tests/analysis-operations.test.ts \
     tests/datasources.test.ts \
@@ -240,7 +253,23 @@ run_playwright_shard "3/4" \
     tests/build-preview.test.ts \
     tests/cancel-build.test.ts
 
-run_playwright_shard "4/4" \
+start_playwright_shard "4/4" \
     tests/analysis-pipeline.test.ts \
     tests/analysis-output.test.ts \
     tests/udfs.test.ts
+
+shard_failures=0
+for shard_position in "${!SHARD_PIDS[@]}"; do
+    shard_pid="${SHARD_PIDS[$shard_position]}"
+    shard_label="${SHARD_LABELS[$shard_position]}"
+    if wait "$shard_pid"; then
+        echo "Playwright shard ${shard_label} passed"
+    else
+        echo "Playwright shard ${shard_label} failed" >&2
+        shard_failures=1
+    fi
+done
+
+if [ "$shard_failures" -ne 0 ]; then
+    exit 1
+fi

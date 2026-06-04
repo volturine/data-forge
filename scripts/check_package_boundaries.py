@@ -8,6 +8,7 @@ PACKAGES = ROOT / 'packages'
 
 EXCLUDED_DIRS = {
     '.git',
+    '.artifacts',
     '.mypy_cache',
     '.pytest_cache',
     '.ruff_cache',
@@ -15,7 +16,6 @@ EXCLUDED_DIRS = {
     '.venv',
     'node_modules',
     '__pycache__',
-    'tests',
     'tests-e2e',
     'test-results',
     'playwright-report',

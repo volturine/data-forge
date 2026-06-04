@@ -43,7 +43,7 @@ def _preview_request(analysis_id: str, pipeline: dict[str, object]) -> dict[str,
     }
 
 
-def test_preview_step_persists_engine_run_by_default(test_db_session, sample_datasource, monkeypatch) -> None:
+def test_preview_step_persists_engine_run_by_default(sample_datasource, monkeypatch) -> None:
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", True)
     analysis_id = f"preview-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
@@ -52,7 +52,7 @@ def test_preview_step_persists_engine_run_by_default(test_db_session, sample_dat
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
             result = compute_service.preview_step(
-                session=test_db_session,
+                session=None,
                 manager=manager,
                 target_step_id="source",
                 analysis_pipeline=pipeline,
@@ -77,7 +77,7 @@ def test_preview_step_persists_engine_run_by_default(test_db_session, sample_dat
     assert update_kwargs["fields"]["status"] == "success"
 
 
-def test_preview_step_skips_engine_run_persistence_when_disabled(test_db_session, sample_datasource, monkeypatch) -> None:
+def test_preview_step_skips_engine_run_persistence_when_disabled(sample_datasource, monkeypatch) -> None:
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", False)
     analysis_id = f"preview-no-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
@@ -86,7 +86,7 @@ def test_preview_step_skips_engine_run_persistence_when_disabled(test_db_session
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
             result = compute_service.preview_step(
-                session=test_db_session,
+                session=None,
                 manager=manager,
                 target_step_id="source",
                 analysis_pipeline=pipeline,

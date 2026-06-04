@@ -37,7 +37,6 @@ from tests.harness.base_fixtures import (
 __all__ = [
     'cleanup_namespace_engines',
     'client',
-    'clear_active_build_registry',
     'clear_build_job_hub',
     'clear_build_notification_hub',
     'clear_compute_request_hubs',
@@ -249,15 +248,6 @@ def client(test_db_session, test_user):
 @pytest.fixture(autouse=True, scope='function')
 def clear_lock_watchers():
     from modules.locks.watchers import registry
-
-    asyncio.run(registry.clear())
-    yield
-    asyncio.run(registry.clear())
-
-
-@pytest.fixture(autouse=True, scope='function')
-def clear_active_build_registry():
-    from builds.build_live import registry
 
     asyncio.run(registry.clear())
     yield

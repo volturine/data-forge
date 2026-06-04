@@ -91,7 +91,6 @@
 [tool.mypy]
     mypy_path = [
         ".",
-        "../worker",
         "../..",
     ]
     exclude = ["(^|/)conftest\\.py$"]
@@ -102,7 +101,6 @@
     pythonpath = [
         ".",
         "tests",
-        "../worker",
         "../..",
     ]
     python_files = ["test_*.py"]

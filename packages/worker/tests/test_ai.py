@@ -4,18 +4,11 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
-from backend_core.ai_clients import (
-    AIError,
-    HuggingFaceClient,
-    OllamaClient,
-    OpenAIClient,
-    get_ai_client,
-    parse_request_options,
-)
 from pydantic import ValidationError
 
-from operations.ai import AIHandler, AIParams
+from operations.ai import AIError, AIHandler, AIParams, InternalAIClient, get_ai_client, parse_request_options
 from operations.step_converter import convert_ai_config
+from worker_contracts.step_config_enums import AIProvider
 
 # ---------------------------------------------------------------------------
 # parse_request_options
@@ -41,7 +34,7 @@ class TestParseRequestOptions:
         assert parse_request_options(d) is d
 
     def test_invalid_json_raises(self):
-        with pytest.raises(ValueError, match="Invalid JSON"):
+        with pytest.raises(ValueError):
             parse_request_options("{bad json}")
 
     def test_json_array_raises(self):
@@ -159,221 +152,49 @@ class TestAIParams:
 class TestGetAIClient:
     def test_ollama_default(self):
         client = get_ai_client("ollama")
-        assert isinstance(client, OllamaClient)
+        assert isinstance(client, InternalAIClient)
+
+    def test_internal_client_delegates_to_worker_api(self):
+        api_client = MagicMock()
+        api_client.generate_ai.return_value = ["one", "two"]
+        client = InternalAIClient(
+            provider=AIProvider.OPENAI,
+            endpoint_url="https://custom.api.com",
+            api_key="sk-test",
+            client=api_client,
+        )
+
+        result = client.generate_batch(["p1", "p2"], model="gpt-4o", options={"temperature": 0.2})
+
+        assert result == ["one", "two"]
+        api_client.generate_ai.assert_called_once_with(
+            provider="openai",
+            prompts=["p1", "p2"],
+            model="gpt-4o",
+            endpoint_url="https://custom.api.com",
+            api_key="sk-test",
+            options={"temperature": 0.2},
+        )
 
     def test_ollama_custom_url(self):
         client = get_ai_client("ollama", endpoint_url="http://myhost:11434")
-        assert isinstance(client, OllamaClient)
-        assert client.base_url == "http://myhost:11434"
+        assert isinstance(client, InternalAIClient)
 
     def test_openai_with_key(self):
         client = get_ai_client("openai", api_key="sk-test")
-        assert isinstance(client, OpenAIClient)
-        assert client.api_key == "sk-test"
+        assert isinstance(client, InternalAIClient)
 
     def test_openai_custom_url(self):
         client = get_ai_client("openai", api_key="sk-test", endpoint_url="https://custom.api.com/")
-        assert isinstance(client, OpenAIClient)
-        assert client.base_url == "https://custom.api.com"
+        assert isinstance(client, InternalAIClient)
 
-    def test_openai_no_key_raises(self):
-        with patch("backend_core.ai_clients.settings") as mock_settings:
-            mock_settings.openai_api_key = ""
-            with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-                get_ai_client("openai")
-
-    def test_huggingface_api_alias_uses_huggingface_client(self):
+    def test_huggingface_api_alias_uses_internal_client(self):
         client = get_ai_client("huggingface-api")
-        assert isinstance(client, HuggingFaceClient)
+        assert isinstance(client, InternalAIClient)
 
     def test_unknown_provider_raises(self):
         with pytest.raises(ValueError, match="Unknown AI provider"):
             get_ai_client("anthropic")
-
-
-# ---------------------------------------------------------------------------
-# OllamaClient
-# ---------------------------------------------------------------------------
-
-
-class TestOllamaClient:
-    def test_generate_calls_api(self):
-        client = OllamaClient("http://localhost:11434")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"response": "Hello world"}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("backend_core.ai_clients._retry_request", return_value=mock_response) as mock_req:
-            result = client.generate("Say hello", model="llama2")
-            assert result == "Hello world"
-            mock_req.assert_called_once_with(
-                "POST",
-                "http://localhost:11434/api/generate",
-                payload={"model": "llama2", "prompt": "Say hello", "stream": False},
-            )
-
-    def test_generate_with_options(self):
-        client = OllamaClient("http://localhost:11434")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"response": "result"}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("backend_core.ai_clients._retry_request", return_value=mock_response) as mock_req:
-            client.generate("prompt", model="llama2", options={"temperature": 0.1})
-            call_payload = mock_req.call_args[1]["payload"]
-            assert call_payload["options"] == {"temperature": 0.1}
-
-    def test_generate_empty_response(self):
-        client = OllamaClient("http://localhost:11434")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("backend_core.ai_clients._retry_request", return_value=mock_response):
-            result = client.generate("prompt", model="llama2")
-            assert result == ""
-
-    def test_list_models(self):
-        client = OllamaClient("http://localhost:11434")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "models": [
-                {"name": "llama2", "size": 3800000000},
-                {"name": "mistral", "size": 4100000000},
-            ],
-        }
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("backend_core.ai_clients._retry_request", return_value=mock_response):
-            models = client.list_models()
-            assert len(models) == 2
-            assert models[0]["name"] == "llama2"
-            assert models[1]["name"] == "mistral"
-
-    def test_list_models_error_returns_empty(self):
-        client = OllamaClient("http://localhost:11434")
-        with patch("backend_core.ai_clients._retry_request", side_effect=AIError("connection failed")):
-            models = client.list_models()
-            assert models == []
-
-    def test_test_connection_success(self):
-        client = OllamaClient("http://localhost:11434")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"models": [{"name": "llama2"}]}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("backend_core.ai_clients.http_client.get", return_value=mock_response):
-            result = client.test_connection()
-            assert result["ok"] is True
-            assert "1 model(s)" in result["detail"]
-
-    def test_test_connection_failure(self):
-        client = OllamaClient("http://localhost:11434")
-        with patch("backend_core.ai_clients.http_client.get", side_effect=ConnectionError("refused")):
-            result = client.test_connection()
-            assert result["ok"] is False
-
-
-# ---------------------------------------------------------------------------
-# OpenAIClient
-# ---------------------------------------------------------------------------
-
-
-class TestOpenAIClient:
-    def test_generate_calls_api(self):
-        client = OpenAIClient("sk-test")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"choices": [{"message": {"content": "AI response"}}]}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("backend_core.ai_clients._retry_request", return_value=mock_response) as mock_req:
-            result = client.generate("Hello", model="gpt-4o")
-            assert result == "AI response"
-            call_args = mock_req.call_args
-            assert call_args[0][0] == "POST"
-            assert "/v1/chat/completions" in call_args[0][1]
-            assert call_args[1]["headers"]["Authorization"] == "Bearer sk-test"
-
-    def test_generate_with_options(self):
-        client = OpenAIClient("sk-test")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"choices": [{"message": {"content": "result"}}]}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("backend_core.ai_clients._retry_request", return_value=mock_response) as mock_req:
-            client.generate("prompt", model="gpt-4o", options={"temperature": 0.5})
-            call_payload = mock_req.call_args[1]["payload"]
-            assert call_payload["temperature"] == 0.5
-
-    def test_generate_empty_choices(self):
-        client = OpenAIClient("sk-test")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"choices": []}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("backend_core.ai_clients._retry_request", return_value=mock_response):
-            result = client.generate("prompt", model="gpt-4o")
-            assert result == ""
-
-    def test_list_models(self):
-        client = OpenAIClient("sk-test")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "data": [
-                {"id": "gpt-4o", "owned_by": "openai"},
-                {"id": "gpt-3.5-turbo", "owned_by": "openai"},
-            ],
-        }
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("backend_core.ai_clients._retry_request", return_value=mock_response):
-            models = client.list_models()
-            assert len(models) == 2
-            assert models[0]["name"] == "gpt-4o"
-
-    def test_list_models_error_returns_empty(self):
-        client = OpenAIClient("sk-test")
-        with patch("backend_core.ai_clients._retry_request", side_effect=AIError("auth failed")):
-            models = client.list_models()
-            assert models == []
-
-    def test_custom_base_url(self):
-        client = OpenAIClient("sk-test", base_url="https://custom.ai/")
-        assert client.base_url == "https://custom.ai"
-
-    def test_test_connection_success(self):
-        client = OpenAIClient("sk-test")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"data": [{"id": "gpt-4o"}]}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("backend_core.ai_clients.http_client.get", return_value=mock_response):
-            result = client.test_connection()
-            assert result["ok"] is True
-
-    def test_test_connection_failure(self):
-        client = OpenAIClient("sk-test")
-        with patch("backend_core.ai_clients.http_client.get", side_effect=Exception("timeout")):
-            result = client.test_connection()
-            assert result["ok"] is False
-
-
-# ---------------------------------------------------------------------------
-# AIClient.generate_batch
-# ---------------------------------------------------------------------------
-
-
-class TestAIClientBatch:
-    def test_generate_batch_delegates(self):
-        client = OllamaClient("http://localhost:11434")
-        responses = ["resp1", "resp2", "resp3"]
-
-        with patch.object(client, "generate", side_effect=responses):
-            results = client.generate_batch(
-                ["prompt1", "prompt2", "prompt3"],
-                model="llama2",
-            )
-            assert results == ["resp1", "resp2", "resp3"]
 
 
 # ---------------------------------------------------------------------------

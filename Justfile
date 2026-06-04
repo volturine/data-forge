@@ -113,7 +113,8 @@ test-backend-raw:
     cd packages/backend
     {{pytest}} tests --ignore=tests/integration
     {{pytest}} tests/integration
-    PYTHONPATH="../worker:${PYTHONPATH:-}" {{pytest}} ../worker/tests --ignore=../worker/tests/integration
+    cd ../worker
+    {{pytest}} tests --ignore=tests/integration
     cd ../scheduler
     {{pytest}} tests
 

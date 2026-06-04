@@ -1,7 +1,7 @@
 from runtime.compute_engine import PolarsComputeEngine
 
 
-def test_query_plan_merges_eager_segments(test_db_session, tmp_path):
+def test_query_plan_merges_eager_segments(tmp_path):
     csv_path = tmp_path / "plan.csv"
     csv_path.write_text("name,age\nAlice,30\nBob,40\n")
     datasource_config = {
@@ -67,7 +67,7 @@ def test_query_plan_merges_eager_segments(test_db_session, tmp_path):
     assert result["query_plan"]
 
 
-def test_chart_preview_metadata_includes_overlays_and_reference_lines(test_db_session, tmp_path):
+def test_chart_preview_metadata_includes_overlays_and_reference_lines(tmp_path):
     csv_path = tmp_path / "chart.csv"
     csv_path.write_text("category,value,value2\nA,1,10\nB,2,20\n")
     datasource_config = {

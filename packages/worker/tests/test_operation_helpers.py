@@ -2,14 +2,6 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from backend_core.config import settings
-from backend_core.export_formats import get_export_format
-from backend_core.iceberg_metadata import (
-    IcebergMetadataPathNotFoundError,
-    resolve_iceberg_branch_metadata_path,
-    resolve_iceberg_metadata_path,
-)
-from backend_core.namespace import namespace_paths
 
 from operations.fill_null import cast_value, get_fill_strategy, get_polars_type
 from operations.filter import FilterOperatorDefinition
@@ -17,6 +9,14 @@ from operations.groupby import GroupByAggregationDefinition
 from operations.plot import ChartAggregationDefinition
 from operations.template_placeholders import render_template_placeholders
 from operations.timeseries import TimeseriesParams
+from runtime.config import settings
+from runtime.export_formats import get_export_format
+from runtime.iceberg_metadata import (
+    IcebergMetadataPathNotFoundError,
+    resolve_iceberg_branch_metadata_path,
+    resolve_iceberg_metadata_path,
+)
+from runtime.namespace import namespace_paths
 from worker_contracts.step_config_enums import TimeComponent
 
 

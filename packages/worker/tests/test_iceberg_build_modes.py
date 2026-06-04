@@ -1,14 +1,13 @@
 import uuid
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pyarrow as pa  # type: ignore[import-untyped]
-from backend_core.namespace import namespace_paths
-from backend_core.persistence.datasource.models import DataSource
 from pyiceberg.schema import Schema as IcebergSchema
 from pyiceberg.types import NestedField, StringType
-from sqlmodel import Session
 
 from runtime.compute_service import _sync_iceberg_schema, export_data
+from runtime.namespace import namespace_paths
 from worker_contracts.compute.base import EngineResult
 
 
@@ -111,7 +110,7 @@ class TestSyncIcebergSchema:
 
 
 class TestBuildModeWiring:
-    def _make_pipeline(self, datasource: DataSource, output_ds_id: str, build_mode: str = "full") -> dict:
+    def _make_pipeline(self, datasource: SimpleNamespace, output_ds_id: str, build_mode: str = "full") -> dict:
         return {
             "analysis_id": str(uuid.uuid4()),
             "tabs": [
@@ -176,7 +175,7 @@ class TestBuildModeWiring:
         mock_arrow = MagicMock(schema=pa.schema([pa.field("id", pa.int64())]))
         return mock_catalog, mock_table, mock_arrow
 
-    def test_full_mode_calls_overwrite(self, test_db_session: Session, sample_datasource: DataSource):
+    def test_full_mode_calls_overwrite(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="full")
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
@@ -190,7 +189,7 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=test_db_session,
+                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
@@ -212,7 +211,7 @@ class TestBuildModeWiring:
         mock_table.overwrite.assert_called_once_with(mock_arrow)
         mock_table.append.assert_not_called()
 
-    def test_incremental_mode_calls_append(self, test_db_session: Session, sample_datasource: DataSource):
+    def test_incremental_mode_calls_append(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="incremental")
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
@@ -226,7 +225,7 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=test_db_session,
+                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
@@ -248,7 +247,7 @@ class TestBuildModeWiring:
         mock_table.append.assert_called_once_with(mock_arrow)
         mock_table.overwrite.assert_not_called()
 
-    def test_new_table_always_creates_and_appends(self, test_db_session: Session, sample_datasource: DataSource):
+    def test_new_table_always_creates_and_appends(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="full")
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=False)
@@ -261,7 +260,7 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=test_db_session,
+                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
@@ -282,7 +281,7 @@ class TestBuildModeWiring:
         mock_catalog.create_table.assert_called_once()
         mock_table.append.assert_called_once_with(mock_arrow)
 
-    def test_recreate_mode_drops_and_creates(self, test_db_session: Session, sample_datasource: DataSource):
+    def test_recreate_mode_drops_and_creates(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="recreate")
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
@@ -294,7 +293,7 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=test_db_session,
+                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
@@ -317,7 +316,7 @@ class TestBuildModeWiring:
         mock_table.append.assert_called_once_with(mock_arrow)
         mock_table.overwrite.assert_not_called()
 
-    def test_recreate_mode_no_table_skips_drop(self, test_db_session: Session, sample_datasource: DataSource):
+    def test_recreate_mode_no_table_skips_drop(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="recreate")
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=False)
@@ -330,7 +329,7 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=test_db_session,
+                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
@@ -352,7 +351,7 @@ class TestBuildModeWiring:
         mock_catalog.create_table.assert_called_once()
         mock_table.append.assert_called_once_with(mock_arrow)
 
-    def test_default_build_mode_is_full(self, test_db_session: Session, sample_datasource: DataSource):
+    def test_default_build_mode_is_full(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id)
         del pipeline["tabs"][0]["output"]["build_mode"]
@@ -371,7 +370,7 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=test_db_session,
+                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
