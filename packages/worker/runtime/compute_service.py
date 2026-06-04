@@ -3810,9 +3810,7 @@ async def run_analysis_build_stream(
         )
     if not build_engine_prewarm_task.done():
         build_engine_prewarm_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await build_engine_prewarm_task
-    else:
+    with contextlib.suppress(asyncio.CancelledError):
         await build_engine_prewarm_task
     with contextlib.suppress(Exception):
         await asyncio.to_thread(manager.shutdown_engine, build_engine_id)

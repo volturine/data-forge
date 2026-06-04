@@ -123,13 +123,14 @@ def test_toggle_internal_postgres_table_creates_database_datasource_once_and_del
     }
     assert calls == 1
 
+    calls_before_enabled_again = calls
     enabled_again = client.post(
         '/api/v1/datasource/internal-postgres/toggle',
         json={'schema_name': 'default', 'table_name': 'analyses', 'enabled': True},
     )
     assert enabled_again.status_code == 200
     assert enabled_again.json()['is_onboarded'] is True
-    assert calls == 1
+    assert calls == calls_before_enabled_again
 
     listed = client.get('/api/v1/datasource/internal-postgres/tables')
     assert listed.status_code == 200

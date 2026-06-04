@@ -52,11 +52,13 @@ def get_mcp_tool_meta(fn: Callable) -> dict[str, Any] | None:
 
 
 @overload
-def deterministic_tool[F: Callable](fn: F, /) -> F: ...
+def deterministic_tool[F: Callable](fn: F, /) -> F:
+    pass
 
 
 @overload
-def deterministic_tool(*, confirm_required: bool | None = None) -> Callable[[F], F]: ...
+def deterministic_tool(*, confirm_required: bool | None = None) -> Callable[[F], F]:
+    pass
 
 
 def deterministic_tool[F: Callable](fn: F | None = None, /, *, confirm_required: bool | None = None) -> F | Callable[[F], F]:
