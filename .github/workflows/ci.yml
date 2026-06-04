@@ -16,9 +16,6 @@ concurrency:
 jobs:
   backend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/backend
     steps:
       - uses: actions/checkout@v6
 
@@ -28,24 +25,44 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Install dependencies
+      - name: Install backend dependencies
+        working-directory: packages/backend
+        run: uv sync
+
+      - name: Install scheduler dependencies
+        working-directory: packages/scheduler
+        run: uv sync
+
+      - name: Install worker dependencies
+        working-directory: packages/worker
         run: uv sync
 
       - name: Format check
-        run: uv run ruff format --check ../shared . ../scheduler ../worker
+        run: |
+          cd packages/backend && uv run ruff format --check .
+          cd ../scheduler && uv run ruff format --check .
+          cd ../worker && uv run ruff format --check .
 
       - name: Lint
-        run: uv run ruff check ../shared . ../scheduler ../worker
+        run: |
+          cd packages/backend && uv run ruff check .
+          cd ../scheduler && uv run ruff check .
+          cd ../worker && uv run ruff check .
 
       - name: Type check
         run: |
-          uv run python -m mypy ../shared
-          uv run python -m mypy .
-          uv run python -m mypy ../scheduler
-          uv run python -m mypy ../worker
+          cd packages/backend && uv run python -m mypy .
+          cd ../scheduler && uv run python -m mypy .
+          cd ../worker && uv run python -m mypy .
 
       - name: Tests
-        run: uv run python -m pytest -c pyproject.toml --tb=short -q tests
+        run: |
+          cd packages/backend
+          uv run python -m pytest -c pyproject.toml --tb=short -q tests --ignore=tests/integration
+          uv run python -m pytest -c pyproject.toml --tb=short -q tests/integration
+          PYTHONPATH="../worker:${PYTHONPATH:-}" uv run python -m pytest -c pyproject.toml --tb=short -q ../worker/tests --ignore=../worker/tests/integration
+          cd ../scheduler
+          uv run python -m pytest -c pyproject.toml --tb=short -q tests
 
   frontend:
     runs-on: ubuntu-latest

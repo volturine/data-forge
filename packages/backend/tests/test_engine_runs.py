@@ -1,14 +1,10 @@
 import uuid
 from datetime import UTC, datetime
 
-from fastapi.testclient import TestClient
-
 from backend_contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core import engine_runs_service as engine_run_service
-from backend_core.database import run_db
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.engine_runs.models import EngineRun
-from main import app
 
 
 def _create_payload(
@@ -330,7 +326,7 @@ def test_get_engine_run_http_returns_404_for_missing_run(client) -> None:
     assert response.json() == {'detail': 'Engine run not found'}
 
 
-def test_engine_runs_http_respects_namespace() -> None:
+def test_engine_runs_http_respects_namespace(client, test_db_session) -> None:
     payload = engine_run_service.create_engine_run_payload(
         analysis_id='analysis-default',
         datasource_id='ds-default',
@@ -343,13 +339,12 @@ def test_engine_runs_http_respects_namespace() -> None:
 
     default = set_namespace_context('default')
     try:
-        run_db(engine_run_service.create_engine_run, payload)
+        engine_run_service.create_engine_run(test_db_session, payload)
     finally:
         reset_namespace(default)
 
-    with TestClient(app) as client:
-        default_response = client.get('/api/v1/engine-runs')
-        beta_response = client.get('/api/v1/engine-runs', headers={'X-Namespace': 'beta'})
+    default_response = client.get('/api/v1/engine-runs')
+    beta_response = client.get('/api/v1/engine-runs', headers={'X-Namespace': 'beta'})
 
     assert default_response.status_code == 200
     assert len(default_response.json()) == 1

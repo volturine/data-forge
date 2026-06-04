@@ -9,17 +9,13 @@
 		updateDatasource,
 		updateDatasourceColumnDescriptions
 	} from '$lib/api/datasource';
-	import { type EngineRun } from '$lib/api/engine-runs';
 	import { BuildsStore } from '$lib/stores/builds.svelte';
-	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
 	import type { ActiveBuildSummary } from '$lib/types/build-stream';
 	import {
 		activeBuildStatusLabel,
 		activeBuildStatusTone,
 		engineRunDisplayKind,
-		engineRunKindLabel,
-		engineRunStatusToActiveBuildStatus,
-		readActiveBuildStatus
+		engineRunKindLabel
 	} from '$lib/types/build-stream';
 	import {
 		Save,
@@ -102,7 +98,6 @@
 	}));
 
 	const buildRunsStore = new BuildsStore();
-	const engineRunsStore = new EngineRunsStore();
 	let runsRequested = false;
 
 	// Network: keep run history dormant until the user opens the Runs tab.
@@ -110,19 +105,16 @@
 		if (activeTab !== 'runs' || !datasource.id) return;
 		if (!untrack(() => runsRequested)) {
 			buildRunsStore.load({ datasource_id: datasource.id, limit: 50 });
-			engineRunsStore.load({ datasource_id: datasource.id, limit: 50 });
 			runsRequested = true;
 			return;
 		}
 		buildRunsStore.refresh();
-		engineRunsStore.refresh();
 	});
 
 	// Subscription: keep any in-flight runs requests alive during normal tab switches.
 	$effect(() => {
 		return () => {
 			buildRunsStore.close();
-			engineRunsStore.close();
 		};
 	});
 
@@ -191,7 +183,6 @@
 		if (currentDatasourceId === ds.id) return;
 		currentDatasourceId = ds.id;
 		buildRunsStore.reset();
-		engineRunsStore.reset();
 		runsRequested = false;
 
 		// Reset all state for new datasource
@@ -570,7 +561,7 @@
 	type DatasourceRunRow = {
 		id: string;
 		kind: string;
-		status: EngineRun['status'] | ActiveBuildSummary['status'];
+		status: ActiveBuildSummary['status'];
 		durationMs: number | null;
 		createdAt: string;
 		builtTag: boolean;
@@ -589,19 +580,7 @@
 			builtTag:
 				run.current_output_id === datasource.id || run.result_json?.datasource_id === datasource.id
 		}));
-		const engineRows = engineRunsStore.runs
-			.filter((run: EngineRun) => run.kind !== 'build')
-			.map((run: EngineRun) => ({
-				id: run.id,
-				kind: run.kind,
-				status: run.status,
-				durationMs: run.duration_ms,
-				createdAt: run.created_at,
-				builtTag: false
-			}));
-		const rows = [...buildRows, ...engineRows].filter(
-			(run) => showPreviews || run.kind !== 'preview'
-		);
+		const rows = buildRows.filter((run) => showPreviews || run.kind !== 'preview');
 		return rows.sort(
 			(left, right) => toEpochDisplay(right.createdAt) - toEpochDisplay(left.createdAt)
 		);
@@ -627,19 +606,13 @@
 	}
 
 	function runStatusLabel(status: DatasourceRunRow['status']): string {
-		const activeStatus = readActiveBuildStatus(status);
-		if (activeStatus !== null) return activeBuildStatusLabel(activeStatus);
-		return activeBuildStatusLabel(
-			engineRunStatusToActiveBuildStatus(status as EngineRun['status'])
-		);
+		return activeBuildStatusLabel(status);
 	}
 
 	function runStatusTone(
 		status: DatasourceRunRow['status']
 	): 'success' | 'active' | 'warning' | 'error' {
-		const activeStatus = readActiveBuildStatus(status);
-		if (activeStatus !== null) return activeBuildStatusTone(activeStatus);
-		return activeBuildStatusTone(engineRunStatusToActiveBuildStatus(status as EngineRun['status']));
+		return activeBuildStatusTone(status);
 	}
 </script>
 
@@ -1662,7 +1635,7 @@
 						Show previews
 					{/if}
 				</button>
-				{#if buildRunsStore.status === 'connecting' || engineRunsStore.status === 'connecting'}
+				{#if buildRunsStore.status === 'connecting'}
 					<div
 						class={css({
 							display: 'flex',
@@ -1677,14 +1650,14 @@
 						<Loader size={24} class={css({ animation: 'spin 1s linear infinite' })} />
 						<p class={css({ fontSize: 'sm' })}>Loading runs...</p>
 					</div>
-				{:else if buildRunsStore.status === 'error' || engineRunsStore.status === 'error'}
+				{:else if buildRunsStore.status === 'error'}
 					<Callout tone="error">
 						<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
 							<CircleAlert size={20} />
 							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 								<p class={css({ margin: '0', fontWeight: 'semibold' })}>Failed to load runs</p>
 								<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>
-									{buildRunsStore.error ?? engineRunsStore.error ?? 'Unknown error'}
+									{buildRunsStore.error ?? 'Unknown error'}
 								</p>
 							</div>
 						</div>

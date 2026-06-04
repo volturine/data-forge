@@ -78,6 +78,7 @@ class EngineRunExecutionEntry(BaseModel):
 class EngineRunBaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    namespace: str
     analysis_id: str | None = None
     datasource_id: str
     kind: EngineRunKind

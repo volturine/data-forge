@@ -16,6 +16,7 @@ class EngineRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
         return EngineRunStatus.require(self.status)
 
     id: str = Field(sa_column=Column(String, primary_key=True))
+    namespace: str = Field(default='default', sa_column=Column(String, nullable=False, index=True))
     analysis_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     datasource_id: str = Field(sa_column=Column(String, nullable=False))
     kind: str = Field(sa_column=Column(String, nullable=False))

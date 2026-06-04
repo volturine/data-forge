@@ -2,7 +2,10 @@ from sqlalchemy import select
 
 from backend_contracts.datasource.models import DataSourceCreatedBy
 from backend_contracts.datasource.source_types import DataSourceType
+from backend_contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core import engine_runs_service as engine_run_service
 from backend_core.dependencies import get_manager, get_runtime_availability_probe
+from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
@@ -186,3 +189,77 @@ def test_start_build_recreates_deleted_output_placeholder(client, test_db_sessio
     outbox_table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
     outbox_rows = test_db_session.execute(select(RuntimeOutboxEvent).order_by(outbox_table.c.created_at)).scalars().all()
     assert [row.status for row in outbox_rows] == [RuntimeOutboxStatus.DISPATCHED, RuntimeOutboxStatus.DISPATCHED]
+
+
+def test_list_builds_includes_preview_engine_runs(client, test_db_session) -> None:
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id='__preview__datasource-1',
+            datasource_id='datasource-1',
+            kind=EngineRunKind.PREVIEW,
+            status=EngineRunStatus.SUCCESS,
+            request_json={'target_step_id': 'source'},
+            result_json={'row_count': 2, 'current_tab_name': 'Preview'},
+            progress=1.0,
+            current_step='Preview completed',
+            triggered_by='test',
+        ),
+    )
+
+    response = client.get('/api/v1/compute/builds?datasource_id=datasource-1&kind=preview')
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['total'] == 1
+    assert body['builds'][0]['build_id'] == created.id
+    assert body['builds'][0]['current_kind'] == 'preview'
+    assert body['builds'][0]['current_datasource_id'] == 'datasource-1'
+    assert body['builds'][0]['status'] == 'completed'
+
+
+def test_get_build_returns_preview_engine_run_detail(client, test_db_session) -> None:
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id='__preview__datasource-1',
+            datasource_id='datasource-1',
+            kind=EngineRunKind.PREVIEW,
+            status=EngineRunStatus.SUCCESS,
+            request_json={'target_step_id': 'source'},
+            result_json={'row_count': 2},
+            duration_ms=123,
+        ),
+    )
+
+    response = client.get(f'/api/v1/compute/builds/{created.id}')
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['build_id'] == created.id
+    assert body['current_kind'] == 'preview'
+    assert body['duration_ms'] == 123
+    assert body['request_json'] == {'target_step_id': 'source'}
+    assert body['result_json'] == {'row_count': 2}
+
+
+def test_list_builds_excludes_engine_runs_from_other_namespaces(client, test_db_session) -> None:
+    token = set_namespace_context('other')
+    try:
+        engine_run_service.create_engine_run(
+            test_db_session,
+            engine_run_service.create_engine_run_payload(
+                analysis_id='__preview__datasource-1',
+                datasource_id='datasource-1',
+                kind=EngineRunKind.PREVIEW,
+                status=EngineRunStatus.SUCCESS,
+                request_json={'target_step_id': 'source'},
+            ),
+        )
+    finally:
+        reset_namespace(token)
+
+    response = client.get('/api/v1/compute/builds?datasource_id=datasource-1&kind=preview')
+
+    assert response.status_code == 200
+    assert response.json() == {'builds': [], 'total': 0}

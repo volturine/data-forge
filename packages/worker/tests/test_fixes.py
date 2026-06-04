@@ -306,6 +306,7 @@ class TestEngineRunProgressDefault:
         """progress: float = 0.0 means NULL from DB should not crash."""
         data = {
             "id": "run-1",
+            "namespace": "default",
             "analysis_id": None,
             "datasource_id": "ds-1",
             "kind": "preview",
@@ -326,6 +327,7 @@ class TestEngineRunProgressDefault:
     def test_progress_explicit_value(self):
         data = {
             "id": "run-2",
+            "namespace": "default",
             "analysis_id": None,
             "datasource_id": "ds-1",
             "kind": "preview",

@@ -66,6 +66,108 @@ logger = logging.getLogger(__name__)
 router = MCPRouter(prefix='/compute', tags=['compute'])
 
 
+def _engine_run_active_status(status: EngineRunStatus) -> schemas.ActiveBuildStatus:
+    match status:
+        case EngineRunStatus.RUNNING:
+            return schemas.ActiveBuildStatus.RUNNING
+        case EngineRunStatus.SUCCESS:
+            return schemas.ActiveBuildStatus.COMPLETED
+        case EngineRunStatus.FAILED:
+            return schemas.ActiveBuildStatus.FAILED
+        case EngineRunStatus.CANCELLED:
+            return schemas.ActiveBuildStatus.CANCELLED
+
+
+def _engine_run_status_filter(status: schemas.ActiveBuildStatus | None) -> EngineRunStatus | None:
+    match status:
+        case None:
+            return None
+        case schemas.ActiveBuildStatus.RUNNING:
+            return EngineRunStatus.RUNNING
+        case schemas.ActiveBuildStatus.COMPLETED:
+            return EngineRunStatus.SUCCESS
+        case schemas.ActiveBuildStatus.FAILED:
+            return EngineRunStatus.FAILED
+        case schemas.ActiveBuildStatus.CANCELLED:
+            return EngineRunStatus.CANCELLED
+        case schemas.ActiveBuildStatus.QUEUED:
+            return EngineRunStatus.RUNNING
+
+
+def _engine_run_kind_filter(kind: str | None) -> EngineRunKind | str | None:
+    if kind == 'build':
+        return EngineRunKind.INGEST
+    return kind
+
+
+def _elapsed_ms_for_engine_run(run) -> int:
+    if run.duration_ms is not None:
+        return run.duration_ms
+    if run.status != EngineRunStatus.RUNNING:
+        return 0
+    started_at = run.created_at if run.created_at.tzinfo is not None else run.created_at.replace(tzinfo=UTC)
+    return max(int((datetime.now(UTC) - started_at).total_seconds() * 1000), 0)
+
+
+def _engine_run_result_dict(run) -> dict[str, object]:
+    return dict(run.result_json) if isinstance(run.result_json, dict) else {}
+
+
+def _optional_result_str(result_json: dict[str, object], key: str) -> str | None:
+    value = result_json.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _engine_run_summary(run, *, namespace: str) -> schemas.ActiveBuildSummary:
+    result_json = _engine_run_result_dict(run)
+    return schemas.ActiveBuildSummary(
+        build_id=run.id,
+        analysis_id=run.analysis_id or '',
+        analysis_name=run.analysis_id or '',
+        namespace=namespace,
+        status=_engine_run_active_status(run.status),
+        started_at=run.created_at,
+        starter=schemas.BuildStarter(user_id=None, display_name=None, email=None, triggered_by=run.triggered_by),
+        resource_config=None,
+        progress=run.progress,
+        elapsed_ms=_elapsed_ms_for_engine_run(run),
+        estimated_remaining_ms=None,
+        current_step=run.current_step,
+        current_step_index=None,
+        total_steps=0,
+        current_kind=run.kind,
+        current_datasource_id=run.datasource_id,
+        current_tab_id=_optional_result_str(result_json, 'current_tab_id'),
+        current_tab_name=_optional_result_str(result_json, 'current_tab_name'),
+        current_output_id=_optional_result_str(result_json, 'current_output_id'),
+        current_output_name=_optional_result_str(result_json, 'current_output_name'),
+        current_engine_run_id=run.id,
+        total_tabs=0,
+        cancelled_at=run.completed_at if run.status == EngineRunStatus.CANCELLED else None,
+        cancelled_by=None,
+        result_json=result_json,
+    )
+
+
+def _engine_run_detail(run, *, namespace: str) -> schemas.ActiveBuildDetail:
+    summary = _engine_run_summary(run, namespace=namespace)
+    summary_payload = summary.model_dump()
+    summary_payload.pop('result_json', None)
+    return schemas.ActiveBuildDetail(
+        **summary_payload,
+        steps=[],
+        query_plans=[],
+        latest_resources=None,
+        resources=[],
+        logs=[],
+        results=[],
+        duration_ms=run.duration_ms,
+        error=run.error_message,
+        request_json=dict(run.request_json),
+        result_json=_engine_run_result_dict(run),
+    )
+
+
 async def _wait_for_websocket_disconnect(websocket: WebSocket) -> None:
     while not websocket_disconnected(websocket):
         try:
@@ -703,17 +805,33 @@ async def list_builds(
     _user: User = Depends(get_current_user),
 ):
     del request
+    namespace = get_namespace()
+    fetch_limit = limit + offset
     runs = build_run_service.list_build_runs(
         session,
         analysis_id=analysis_id.strip() if analysis_id else None,
         datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
         kind=kind,
         status=status,
-        limit=limit,
-        offset=offset,
+        limit=fetch_limit,
+        offset=0,
     )
-    visible = [build_run_service.build_summary(run) for run in runs if run.namespace == get_namespace()]
-    return schemas.ActiveBuildListResponse(builds=visible, total=len(visible))
+    build_rows = [build_run_service.build_summary(run) for run in runs if run.namespace == namespace]
+    engine_rows: list[schemas.ActiveBuildSummary] = []
+    if status != schemas.ActiveBuildStatus.QUEUED:
+        engine_runs = engine_run_service.list_engine_runs(
+            session,
+            analysis_id=analysis_id.strip() if analysis_id else None,
+            datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
+            kind=_engine_run_kind_filter(kind),
+            status=_engine_run_status_filter(status),
+            limit=fetch_limit,
+            offset=0,
+        )
+        engine_rows = [_engine_run_summary(run, namespace=namespace) for run in engine_runs]
+    visible = sorted([*build_rows, *engine_rows], key=lambda run: run.started_at, reverse=True)
+    paged = visible[offset : offset + limit]
+    return schemas.ActiveBuildListResponse(builds=paged, total=len(visible))
 
 
 @router.get('/builds/active', response_model=schemas.ActiveBuildListResponse, mcp=True)
@@ -754,9 +872,12 @@ async def get_active_build(
     _user: User = Depends(get_current_user),
 ):
     detail = _get_durable_build_detail(session, build_id)
-    if detail is None:
-        raise HTTPException(status_code=404, detail='Active build not found')
-    return detail
+    if detail is not None:
+        return detail
+    engine_run = engine_run_service.get_engine_run(session, build_id)
+    if engine_run is not None:
+        return _engine_run_detail(engine_run, namespace=get_namespace())
+    raise HTTPException(status_code=404, detail='Active build not found')
 
 
 # Engine lifecycle endpoints

@@ -234,8 +234,10 @@ def test_postgres_runtime_bootstraps_public_and_tenant_schemas() -> None:
     assert _psql_value("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'runtime_workers'") == '1'
     assert _psql_value('SELECT count(*) FROM public.app_settings') == '1'
     assert _psql_value('SELECT count(*) FROM public.users') == '1'
-    assert _psql_value('SELECT version_num FROM public.alembic_version') == '0001_runtime_public'
-    assert _psql_value('SELECT version_num FROM "default".alembic_version') == '0002_runtime_tenant'
+    from backend_core.migrations import _PUBLIC_REVISION, _TENANT_REVISION
+
+    assert _psql_value('SELECT version_num FROM public.alembic_version') == _PUBLIC_REVISION
+    assert _psql_value('SELECT version_num FROM "default".alembic_version') == _TENANT_REVISION
 
 
 @pytest.mark.timeout(300)

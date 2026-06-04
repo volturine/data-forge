@@ -25,6 +25,7 @@ from backend_contracts.engine_runs.schemas import (
 )
 from backend_core.engine_runs_utils import normalize_step_timings
 from backend_core.exceptions import EngineRunComparisonError, EngineRunNotFoundError
+from backend_core.namespace import get_namespace
 from backend_core.persistence.engine_runs.models import EngineRun
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,7 @@ def _latest_completed_step_name(result_json: dict[str, Any]) -> str | None:
 
 def cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str | None) -> compute_schemas.CancelBuildResponse:
     run = session.get(EngineRun, run_id)
-    if run is None:
+    if run is None or run.namespace != get_namespace():
         raise ValueError('Engine run not found')
     session.refresh(run)
     if run.status_kind() != EngineRunStatus.RUNNING:
@@ -228,6 +229,8 @@ def get_engine_run(session: Session, run_id: str) -> EngineRunResponseSchema | N
     run = session.get(EngineRun, run_id)
     if run is None:
         return None
+    if run.namespace != get_namespace():
+        return None
     return _serialize_run(run)
 
 
@@ -239,6 +242,7 @@ def create_engine_run(session: Session, payload: EngineRunPayload) -> EngineRunR
 
     run = EngineRun(
         id=payload.id,
+        namespace=get_namespace(),
         analysis_id=payload.analysis_id,
         datasource_id=payload.datasource_id,
         kind=payload.kind.value,
@@ -283,7 +287,7 @@ def update_engine_run(
     triggered_by: str | None | _UnsetType = _UNSET,
 ) -> EngineRunResponseSchema:
     run = session.get(EngineRun, run_id)
-    if run is None:
+    if run is None or run.namespace != get_namespace():
         raise EngineRunNotFoundError(run_id)
     session.refresh(run)
 
@@ -386,7 +390,7 @@ def list_engine_runs(
     limit: int = 100,
     offset: int = 0,
 ) -> list[EngineRunResponseSchema]:
-    stmt = select(EngineRun)
+    stmt = select(EngineRun).where(EngineRun.namespace == get_namespace())  # type: ignore[arg-type]
     # SQLModel type annotations not fully compatible with Pydantic v2 - needed for .where() calls
     if analysis_id is not None:
         stmt = stmt.where(EngineRun.analysis_id == analysis_id)  # type: ignore[arg-type]
@@ -411,6 +415,11 @@ def compare_engine_runs(session: Session, run_a_id: str, run_b_id: str, datasour
     """Compare two engine runs side-by-side: schema diff, row count delta, timing delta."""
     run_a = session.get(EngineRun, run_a_id)
     run_b = session.get(EngineRun, run_b_id)
+    namespace = get_namespace()
+    if run_a is not None and run_a.namespace != namespace:
+        run_a = None
+    if run_b is not None and run_b.namespace != namespace:
+        run_b = None
     if not run_a or not run_b:
         missing = run_a_id if not run_a else run_b_id
         raise EngineRunNotFoundError(missing)

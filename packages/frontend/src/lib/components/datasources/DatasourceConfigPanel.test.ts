@@ -31,16 +31,10 @@ vi.mock('$lib/api/datasource', () => ({
 const mockBuildLoad = vi.fn();
 const mockBuildClose = vi.fn();
 const mockBuildReset = vi.fn();
-const mockEngineLoad = vi.fn();
-const mockEngineClose = vi.fn();
-const mockEngineReset = vi.fn();
 
 let mockBuilds: unknown[] = [];
 let mockBuildStatus = 'disconnected';
 let mockBuildError: string | null = null;
-let mockRuns: unknown[] = [];
-let mockRunStatus = 'disconnected';
-let mockRunError: string | null = null;
 
 vi.mock('$lib/stores/builds.svelte', () => ({
 	BuildsStore: class {
@@ -67,35 +61,6 @@ vi.mock('$lib/stores/builds.svelte', () => ({
 		reset() {
 			mockBuildReset();
 			mockBuildStatus = 'disconnected';
-		}
-	}
-}));
-
-vi.mock('$lib/stores/engine-runs.svelte', () => ({
-	EngineRunsStore: class {
-		get runs() {
-			return mockRuns;
-		}
-		get status() {
-			return mockRunStatus;
-		}
-		get error() {
-			return mockRunError;
-		}
-		load(params?: unknown) {
-			mockEngineLoad(params);
-			mockRunStatus = 'connected';
-		}
-		refresh() {
-			mockEngineLoad('refresh');
-			mockRunStatus = 'connected';
-		}
-		close() {
-			mockEngineClose();
-		}
-		reset() {
-			mockEngineReset();
-			mockRunStatus = 'disconnected';
 		}
 	}
 }));
@@ -180,15 +145,9 @@ beforeEach(() => {
 	mockBuildLoad.mockReset();
 	mockBuildClose.mockReset();
 	mockBuildReset.mockReset();
-	mockEngineLoad.mockReset();
-	mockEngineClose.mockReset();
-	mockEngineReset.mockReset();
 	mockBuilds = [];
 	mockBuildStatus = 'disconnected';
 	mockBuildError = null;
-	mockRuns = [];
-	mockRunStatus = 'disconnected';
-	mockRunError = null;
 	const datasource = makeDatasource();
 	datasourceQueryState = makeQueryResult({ data: datasource });
 	schemaQueryState = makeQueryResult({ data: makeSchema() });
@@ -199,7 +158,6 @@ describe('DatasourceConfigPanel', () => {
 		renderPanel();
 
 		expect(mockBuildLoad).not.toHaveBeenCalled();
-		expect(mockEngineLoad).not.toHaveBeenCalled();
 	});
 
 	test('loads run history only when the Runs tab is opened and keeps requests alive across tab switches', async () => {
@@ -208,18 +166,14 @@ describe('DatasourceConfigPanel', () => {
 		await fireEvent.click(screen.getByRole('tab', { name: 'Runs' }));
 
 		expect(mockBuildLoad).toHaveBeenCalledTimes(1);
-		expect(mockEngineLoad).toHaveBeenCalledTimes(1);
 		expect(mockBuildLoad).toHaveBeenCalledWith({ datasource_id: 'ds-1', limit: 50 });
-		expect(mockEngineLoad).toHaveBeenCalledWith({ datasource_id: 'ds-1', limit: 50 });
 
 		await fireEvent.click(screen.getByRole('tab', { name: 'General' }));
 
 		expect(mockBuildClose).not.toHaveBeenCalled();
-		expect(mockEngineClose).not.toHaveBeenCalled();
 
 		view.unmount();
 
 		expect(mockBuildClose).toHaveBeenCalledTimes(1);
-		expect(mockEngineClose).toHaveBeenCalledTimes(1);
 	});
 });
