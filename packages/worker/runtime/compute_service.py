@@ -3810,8 +3810,10 @@ async def run_analysis_build_stream(
         )
     if not build_engine_prewarm_task.done():
         build_engine_prewarm_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await build_engine_prewarm_task
+    prewarm_results = await asyncio.gather(build_engine_prewarm_task, return_exceptions=True)
+    prewarm_result = prewarm_results[0]
+    if isinstance(prewarm_result, BaseException) and not isinstance(prewarm_result, asyncio.CancelledError):
+        raise prewarm_result
     with contextlib.suppress(Exception):
         await asyncio.to_thread(manager.shutdown_engine, build_engine_id)
     return {

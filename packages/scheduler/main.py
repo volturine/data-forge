@@ -185,7 +185,7 @@ async def _sleep_until_tick_or_stop(stop_event: asyncio.Event, seconds: int) -> 
         await asyncio.gather(*pending, return_exceptions=True)
     for task in done:
         with contextlib.suppress(asyncio.CancelledError):
-            await task
+            _task_result = task.result()
 
 
 def _heartbeat_loop_sync(*, client: SchedulerApiClient, stop_signal: threading.Event, worker_id: str, heartbeat_seconds: float) -> None:
