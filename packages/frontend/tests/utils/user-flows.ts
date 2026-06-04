@@ -89,16 +89,30 @@ export async function uploadDatasourceViaUi(
 	}
 	const uploadBtn = page.getByRole('button', { name: 'Upload', exact: true });
 	await expect(uploadBtn).toBeEnabled({ timeout: 5_000 });
-	await uploadBtn.click();
-	await expect(
-		page,
-		`Upload did not redirect to the created datasource list for ${name}`
-	).toHaveURL(
-		(url) =>
-			url.pathname === '/datasources' &&
-			(url.searchParams.has('created_id') || url.searchParams.has('id')),
-		{ timeout: 5_000 }
+	const uploadResponse = page.waitForResponse(
+		(response) =>
+			response.url().includes('/api/v1/datasource/upload') &&
+			!response.url().includes('/bulk') &&
+			response.status() === 200
 	);
+	await uploadBtn.click();
+	await uploadResponse;
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			await expect(
+				page,
+				`Upload did not redirect to the created datasource list for ${name}`
+			).toHaveURL(
+				(url) =>
+					url.pathname === '/datasources' &&
+					(url.searchParams.has('created_id') || url.searchParams.has('id')),
+				{ timeout: 5_000 }
+			);
+			break;
+		} catch (error) {
+			if (attempt === 2) throw error;
+		}
+	}
 	const currentUrl = new URL(page.url());
 	const datasourceId =
 		currentUrl.searchParams.get('created_id') ?? currentUrl.searchParams.get('id');

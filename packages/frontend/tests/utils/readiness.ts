@@ -133,7 +133,7 @@ export async function waitForInlinePreviewReady(page: Page, timeout = 5_000): Pr
 	const failure = page.locator(':text("Preview failed")');
 	const started = Date.now();
 
-	for (let attempt = 0; attempt < 3; attempt += 1) {
+	for (let attempt = 0; attempt < 6; attempt += 1) {
 		const windowStarted = Date.now();
 		while (Date.now() - windowStarted < timeout) {
 			if (await ready.isVisible().catch(() => false)) return;

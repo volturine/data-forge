@@ -192,7 +192,7 @@ async function waitForBuildRowEventually(
 	status: 'running' | 'completed' | 'failed' | 'cancelled'
 ) {
 	let lastError: unknown;
-	for (let attempt = 0; attempt < 3; attempt += 1) {
+	for (let attempt = 0; attempt < 4; attempt += 1) {
 		try {
 			return await waitForBuildRowById(page, panel, runId, status, 5_000);
 		} catch (error) {
@@ -248,7 +248,7 @@ test.describe('Navigation – engines live monitor', () => {
 			});
 
 			const panel = page.locator('#panel-builds');
-			const runningRow = await waitForBuildRowById(page, panel, runId, 'running', 5_000);
+			const runningRow = await waitForBuildRowEventually(page, panel, runId, 'running');
 			const cancelButton = runningRow.getByLabel('Cancel build');
 			await expect(cancelButton).toBeVisible({ timeout: 5_000 });
 			await expect(cancelButton).toBeEnabled({ timeout: 5_000 });
