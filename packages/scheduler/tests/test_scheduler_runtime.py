@@ -70,7 +70,8 @@ async def test_scheduler_loop_registers_runs_due_work_and_stops() -> None:
         check_interval_seconds=1,
         heartbeat_seconds=60,
     )
-    await stopper
+    stopper_results = await asyncio.gather(stopper)
+    assert stopper_results == [None]
 
     assert client.calls == [
         ("register", "scheduler-1"),

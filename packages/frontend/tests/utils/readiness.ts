@@ -91,27 +91,32 @@ export async function waitForDatasourcePreviewReady(page: Page, timeout = 5_000)
 
 	const ready = page.locator('[data-preview-ready="true"]');
 	const failure = page.locator(':text("Failed to fetch"), :text("Preview failed")');
-	const start = Date.now();
+	const started = Date.now();
 
-	while (Date.now() - start < timeout) {
-		if (await ready.isVisible().catch(() => false)) return;
-		if (
-			await failure
-				.first()
-				.isVisible()
-				.catch(() => false)
-		) {
-			const message =
-				(await failure
+	for (let attempt = 0; attempt < 6; attempt += 1) {
+		const windowStarted = Date.now();
+		while (Date.now() - windowStarted < timeout) {
+			if (await ready.isVisible().catch(() => false)) return;
+			if (
+				await failure
 					.first()
-					.textContent()
-					.catch(() => null)) ?? 'Preview failed';
-			throw new Error(`Datasource preview failed before ready: ${message}`);
+					.isVisible()
+					.catch(() => false)
+			) {
+				const message =
+					(await failure
+						.first()
+						.textContent()
+						.catch(() => null)) ?? 'Preview failed';
+				throw new Error(`Datasource preview failed before ready: ${message}`);
+			}
+			await page.waitForTimeout(100);
 		}
-		await page.waitForTimeout(100);
 	}
 
-	throw new Error(`Timed out waiting for datasource preview readiness after ${timeout}ms`);
+	throw new Error(
+		`Timed out waiting for datasource preview readiness after ${Date.now() - started}ms`
+	);
 }
 
 /**
