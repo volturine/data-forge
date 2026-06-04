@@ -18,7 +18,7 @@ from runtime import compute_request_runtime, compute_service, datasource_delete_
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_service import ExportDatasourceResult
 from runtime.engine_identity import datasource_preview_engine_key
-from runtime.internal_api import PendingDatasourceDelete
+from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
 from worker_contracts.compute import schemas as compute_schemas
 from worker_contracts.engine_runs.schemas import EngineRunResponseSchema
 
@@ -75,6 +75,55 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
     assert shutdown_calls == ["analysis-1"]
     assert completed == [{"success": True}]
     assert dispatched == [True]
+
+
+def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
+    failed: list[dict[str, object]] = []
+    dispatched: list[bool] = []
+
+    monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
+    monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
+
+    class _Client:
+        def execute_datasource_request(self, **_kwargs):
+            raise BackendWorkerRpcError(
+                status_code=404,
+                error="DataSource datasource-1 not found",
+                error_code="DATASOURCE_NOT_FOUND",
+                details={"datasource_id": "datasource-1"},
+            )
+
+        def fail_compute_request(self, **kwargs):
+            failed.append(kwargs["response_json"])
+
+        def dispatch_runtime_outbox(self):
+            dispatched.append(True)
+            return 0
+
+    monkeypatch.setattr(compute_request_runtime, "worker_internal_api_client", lambda: _Client())
+
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-404",
+        namespace="default",
+        kind=compute_request_runtime.ComputeRequestKind.DATASOURCE_SCHEMA,
+        request_json={"datasource_id": "datasource-1"},
+    )
+
+    with caplog.at_level("INFO"):
+        compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
+
+    assert failed == [
+        {
+            "error": "DataSource datasource-1 not found",
+            "status_code": 404,
+            "error_code": "DATASOURCE_NOT_FOUND",
+            "details": {"datasource_id": "datasource-1"},
+        }
+    ]
+    assert dispatched == [True]
+    assert [(record.levelname, record.getMessage()) for record in caplog.records] == [
+        ("INFO", "Compute request req-404 rejected: DataSource datasource-1 not found")
+    ]
 
 
 @pytest.mark.asyncio

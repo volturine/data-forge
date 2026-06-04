@@ -13,6 +13,7 @@ import {
 	deleteAnalysisViaUI,
 	deleteDatasourceViaUI
 } from './utils/ui-cleanup.js';
+import { waitForInlinePreviewReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -130,8 +131,7 @@ async function leaveAnalysisPage(page: Page): Promise<void> {
  */
 async function navigateAndWaitForTable(page: Page, analysisId: string): Promise<void> {
 	await gotoAnalysisEditor(page, analysisId);
-	await expect(page.locator('[data-testid="inline-data-table"]')).toBeVisible({ timeout: 5_000 });
-	await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 5_000 });
+	await waitForInlinePreviewReady(page);
 }
 
 // ────────────────────────────────────────────────────────────────────────────────

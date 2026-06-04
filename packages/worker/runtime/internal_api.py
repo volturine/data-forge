@@ -78,6 +78,22 @@ class ClaimedComputeRequest:
     request_json: dict[str, object]
 
 
+class BackendWorkerRpcError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        error: str,
+        error_code: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(error)
+        self.status_code = status_code
+        self.error = error
+        self.error_code = error_code
+        self.details = details or {}
+
+
 class WorkerInternalApiClient:
     def __init__(self, *, base_url: str, token: str, timeout_seconds: float = 30.0, registration_retry_seconds: float = 90.0) -> None:
         self._base_url = base_url.rstrip("/")
@@ -592,7 +608,7 @@ class WorkerInternalApiClient:
                 raw = response.read()
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Backend worker RPC failed with HTTP {exc.code}: {detail}") from exc
+            raise _rpc_error_from_http_error(exc.code, detail) from exc
         if not raw:
             return {}
         decoded = json.loads(raw.decode("utf-8"))
@@ -609,6 +625,33 @@ class WorkerInternalApiClient:
                 if time.monotonic() >= deadline:
                     raise
                 time.sleep(1.0)
+
+
+def _rpc_error_from_http_error(status_code: int, detail: str) -> BackendWorkerRpcError:
+    try:
+        payload = json.loads(detail)
+    except json.JSONDecodeError:
+        return BackendWorkerRpcError(
+            status_code=status_code,
+            error=f"Backend worker RPC failed with HTTP {status_code}: {detail}",
+        )
+
+    if not isinstance(payload, dict):
+        return BackendWorkerRpcError(
+            status_code=status_code,
+            error=f"Backend worker RPC failed with HTTP {status_code}: {payload!r}",
+        )
+
+    raw_detail = payload.get("detail")
+    error = raw_detail if isinstance(raw_detail, str) else f"Backend worker RPC failed with HTTP {status_code}"
+    error_code = payload.get("error_code")
+    details = payload.get("details")
+    return BackendWorkerRpcError(
+        status_code=status_code,
+        error=error,
+        error_code=error_code if isinstance(error_code, str) else None,
+        details=details if isinstance(details, dict) else None,
+    )
 
 
 def _required_str(payload: dict[str, Any], key: str) -> str:

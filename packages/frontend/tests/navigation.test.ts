@@ -131,7 +131,18 @@ async function confirmCancelBuild(page: Page) {
 	await expect(dialog).toBeVisible({ timeout: 5_000 });
 	await expect(confirmButton).toBeVisible({ timeout: 5_000 });
 	await expect(confirmButton).toBeEnabled({ timeout: 5_000 });
+	const responsePromise = page
+		.waitForResponse(
+			(apiResponse) =>
+				apiResponse.url().includes('/api/v1/compute/builds/') &&
+				apiResponse.url().includes('/cancel') &&
+				apiResponse.status() === 200,
+			{ timeout: 5_000 }
+		)
+		.then(async (response) => (await response.json()) as { status: string });
 	await confirmButton.click({ force: true, timeout: 5_000 });
+	const payload = await responsePromise;
+	expect(payload.status).toBe('cancelled');
 	await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 }
 
@@ -153,11 +164,45 @@ async function waitForBuildRowById(
 	const row = panel.locator(`[data-build-row="${runId}"][data-build-status="${status}"]`);
 	const started = Date.now();
 	while (Date.now() - started < timeout) {
+		const failedToLoad = panel.getByText(/Failed to load builds/i).first();
+		if (await failedToLoad.isVisible().catch(() => false)) {
+			throw new Error(`Build history failed while waiting for build row ${runId}`);
+		}
 		if (await row.isVisible().catch(() => false)) return row;
+		if (status === 'cancelled') {
+			const completed = panel.locator(`[data-build-row="${runId}"][data-build-status="completed"]`);
+			const failed = panel.locator(`[data-build-row="${runId}"][data-build-status="failed"]`);
+			if (await completed.isVisible().catch(() => false)) {
+				throw new Error(`Build row ${runId} completed after a confirmed cancellation`);
+			}
+			if (await failed.isVisible().catch(() => false)) {
+				throw new Error(`Build row ${runId} failed after a confirmed cancellation`);
+			}
+		}
 		await refreshBuildHistory(page);
 		await page.waitForTimeout(250);
 	}
 	throw new Error(`Timed out waiting for build row ${runId} to reach ${status}`);
+}
+
+async function waitForBuildRowEventually(
+	page: Page,
+	panel: ReturnType<Page['locator']>,
+	runId: string,
+	status: 'running' | 'completed' | 'failed' | 'cancelled'
+) {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			return await waitForBuildRowById(page, panel, runId, status, 5_000);
+		} catch (error) {
+			if (error instanceof Error && error.message.includes('after a confirmed cancellation')) {
+				throw error;
+			}
+			lastError = error;
+		}
+	}
+	throw lastError;
 }
 
 test.describe('Navigation – engines live monitor', () => {
@@ -210,7 +255,7 @@ test.describe('Navigation – engines live monitor', () => {
 			await cancelButton.click({ force: true, timeout: 5_000 });
 			await confirmCancelBuild(page);
 
-			const cancelledRow = await waitForBuildRowById(page, panel, runId, 'cancelled', 5_000);
+			const cancelledRow = await waitForBuildRowEventually(page, panel, runId, 'cancelled');
 			await expect(cancelledRow.getByText('Cancelled')).toBeVisible({ timeout: 5_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);

@@ -115,6 +115,49 @@ export async function waitForDatasourcePreviewReady(page: Page, timeout = 5_000)
 }
 
 /**
+ * Wait for an analysis inline preview to finish loading.
+ *
+ * Terminal outcomes:
+ *  - ready state: the inline table advertises `[data-preview-ready="true"]`
+ *  - failed state: a visible preview error appears
+ *
+ * The inline table can mount before its TanStack query has resolved, so tests
+ * must wait on the preview readiness contract before asserting cell content.
+ */
+export async function waitForInlinePreviewReady(page: Page, timeout = 5_000): Promise<void> {
+	await waitForLayoutReady(page, timeout);
+	const table = page.locator('[data-testid="inline-data-table"]');
+	await expect(table).toBeVisible({ timeout });
+
+	const ready = page.locator('[data-testid="inline-data-table"][data-preview-ready="true"]');
+	const failure = page.locator(':text("Preview failed")');
+	const started = Date.now();
+
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const windowStarted = Date.now();
+		while (Date.now() - windowStarted < timeout) {
+			if (await ready.isVisible().catch(() => false)) return;
+			if (
+				await failure
+					.first()
+					.isVisible()
+					.catch(() => false)
+			) {
+				const message =
+					(await failure
+						.first()
+						.textContent()
+						.catch(() => null)) ?? 'Preview failed';
+				throw new Error(`Inline preview failed before ready: ${message}`);
+			}
+			await page.waitForTimeout(100);
+		}
+	}
+
+	throw new Error(`Timed out waiting for inline preview readiness after ${Date.now() - started}ms`);
+}
+
+/**
  * Navigate to the home page (analyses gallery), wait for the TanStack Query
  * data to load, and clear any persisted search filter from IndexedDB that
  * might hide analysis cards.

@@ -11,7 +11,7 @@ from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager
 from runtime.config import settings
 from runtime.exceptions import AppError, EngineBusyError, EngineNotFoundError, status_for_app_error
-from runtime.internal_api import WorkerInternalApiClient, client_from_env
+from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
 from worker_contracts.compute import schemas as compute_schemas
@@ -298,12 +298,24 @@ def _complete_request(
 
 
 def _error_message(exc: Exception) -> str:
+    if isinstance(exc, BackendWorkerRpcError):
+        return exc.error
     if isinstance(exc, AppError):
         return exc.message
     return str(exc)
 
 
 def _error_payload(exc: Exception) -> dict[str, object]:
+    if isinstance(exc, BackendWorkerRpcError):
+        payload: dict[str, object] = {
+            "error": exc.error,
+            "status_code": exc.status_code,
+        }
+        if exc.error_code is not None:
+            payload["error_code"] = exc.error_code
+        if exc.details:
+            payload["details"] = exc.details
+        return payload
     if isinstance(exc, AppError):
         return {
             "error": exc.message,
