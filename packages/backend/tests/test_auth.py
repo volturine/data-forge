@@ -43,6 +43,8 @@ from modules.auth.models import (
 from modules.auth.routes import invalidate_me_cache
 from modules.auth.schemas import UserPublic
 from modules.auth.service import (
+    _DEFAULT_USER_LOCK_ID,
+    _acquire_default_user_lock,
     change_password,
     create_session,
     create_user,
@@ -239,6 +241,31 @@ class TestUserService:
         assert isinstance(provider.provider_metadata, dict)
         assert provider.provider_metadata['managed_by'] == 'env_default_user'
         assert verify_password('GuestPass123', cast(str, provider.provider_metadata['password_hash'])) is True
+
+    def test_ensure_default_user_uses_postgres_advisory_lock(self) -> None:
+        class _Dialect:
+            name = 'postgresql'
+
+        class _Bind:
+            dialect = _Dialect()
+
+        class _FakeSession:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, int]]] = []
+
+            def get_bind(self) -> _Bind:
+                return _Bind()
+
+            def execute(self, statement, params) -> None:
+                self.calls.append((str(statement), dict(params)))
+
+        session = _FakeSession()
+
+        assert _acquire_default_user_lock(cast(Session, session)) is True
+
+        assert session.calls == [
+            ('SELECT pg_advisory_xact_lock(:lock_id)', {'lock_id': _DEFAULT_USER_LOCK_ID}),
+        ]
 
     def test_ensure_default_user_updates_existing_account(self, auth_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.default_user_email', 'first@example.com')

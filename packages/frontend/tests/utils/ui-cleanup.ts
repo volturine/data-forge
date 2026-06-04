@@ -12,6 +12,16 @@ function confirmDialog(page: Page, heading: string | RegExp): Locator {
 		.first();
 }
 
+async function closeFloatingPanels(page: Page): Promise<void> {
+	const enginesPopup = page.locator('[data-engines-popup="true"]');
+	if (await enginesPopup.isVisible().catch(() => false)) {
+		await enginesPopup
+			.getByLabel('Close engines')
+			.click({ timeout: 1_000 })
+			.catch(() => undefined);
+	}
+}
+
 async function bestEffortShutdownAnalysisEngine(page: Page, name: string): Promise<void> {
 	const analysisId = findAnalysisIdByName(name);
 	if (!analysisId) return;
@@ -153,15 +163,37 @@ async function deleteDatasourceViaUIOnPage(
 		}
 	}
 	if (!(await row.isVisible().catch(() => false))) return;
+	const datasourceId = options?.id ?? (await row.getAttribute('data-ds-id'));
+	const deleteResponse = datasourceId
+		? page
+				.waitForResponse(
+					(response) =>
+						response.request().method() === 'DELETE' &&
+						response.url().includes(`/api/v1/datasource/${datasourceId}`),
+					{ timeout: 5_000 }
+				)
+				.catch(() => null)
+		: Promise.resolve(null);
 	const deleteButton = row.locator('button[title="Delete"]');
 	await expect(deleteButton).toBeEnabled({ timeout: 1_500 });
-	await deleteButton.click();
+	await deleteButton.click({ timeout: 3_000 });
 	const dialog = confirmDialog(page, 'Delete Datasource');
-	await dialog.getByRole('button', { name: /^Delete$/ }).click();
-	await expect(dialog).toBeHidden({ timeout: 1_500 });
+	await Promise.all([
+		deleteResponse,
+		dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 3_000 })
+	]).then(([response]) => {
+		if (response && !response.ok()) {
+			throw new Error(`Failed to delete datasource ${name}: HTTP ${response.status()}`);
+		}
+	});
+	await expect(dialog).toBeHidden({ timeout: 5_000 });
 	await expect(row)
-		.toBeHidden({ timeout: 1_500 })
-		.catch(() => undefined);
+		.toBeHidden({ timeout: 5_000 })
+		.catch(async () => {
+			await page.goto('/datasources', { waitUntil: 'domcontentloaded' });
+			await waitForDatasourceList(page, 5_000);
+			await expect(row).toBeHidden({ timeout: 5_000 });
+		});
 }
 
 export async function deleteDatasourceViaUI(
@@ -182,26 +214,49 @@ async function deleteAnalysisViaUIOnPage(
 	if (!options?.skipNavigation) {
 		await gotoAnalysesGallery(page, 1_500).catch(() => undefined);
 	}
+	await closeFloatingPanels(page);
 	if (!options?.skipEngineShutdown) {
 		await bestEffortShutdownAnalysisEngine(page, name);
 	}
+	await closeFloatingPanels(page);
 	const card = page.locator(`[data-analysis-card="${name}"]`);
 	try {
 		await card.waitFor({ state: 'visible', timeout: 1_500 });
 	} catch {
 		return;
 	}
-	await card.getByRole('button', { name: /Delete analysis/ }).click();
+	const analysisId = findAnalysisIdByName(name);
+	const deleteResponse = analysisId
+		? page
+				.waitForResponse(
+					(response) =>
+						response.request().method() === 'DELETE' &&
+						response.url().includes(`/api/v1/analysis/${analysisId}`),
+					{ timeout: 5_000 }
+				)
+				.catch(() => null)
+		: Promise.resolve(null);
+	await card.getByRole('button', { name: /Delete analysis/ }).click({ timeout: 3_000 });
 	const dialog = confirmDialog(page, 'Delete Analysis');
-	await dialog.getByRole('button', { name: /^Delete$/ }).click();
-	await expect(dialog).toBeHidden({ timeout: 1_500 });
+	await Promise.all([
+		deleteResponse,
+		dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 3_000 })
+	]).then(([response]) => {
+		if (response && !response.ok()) {
+			throw new Error(`Failed to delete analysis ${name}: HTTP ${response.status()}`);
+		}
+	});
+	await expect(dialog).toBeHidden({ timeout: 5_000 });
 	const deleteError = page.getByText(/^Failed to delete:/).first();
 	if (await deleteError.isVisible().catch(() => false)) {
 		throw new Error((await deleteError.textContent()) ?? `Failed to delete analysis ${name}`);
 	}
 	await expect(card)
-		.toBeHidden({ timeout: 1_500 })
-		.catch(() => undefined);
+		.toBeHidden({ timeout: 5_000 })
+		.catch(async () => {
+			await gotoAnalysesGallery(page, 5_000);
+			await expect(card).toBeHidden({ timeout: 5_000 });
+		});
 }
 
 export async function deleteAnalysisViaUI(

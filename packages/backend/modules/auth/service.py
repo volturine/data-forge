@@ -10,7 +10,7 @@ from email.message import EmailMessage
 from string import hexdigits
 from typing import Any, cast
 
-from sqlalchemy import inspect, update
+from sqlalchemy import inspect, text, update
 from sqlmodel import Session, select
 
 from backend_core.auth_config import settings as auth_settings
@@ -56,8 +56,16 @@ _PASSWORD_RESET = VerificationTokenType.PASSWORD_RESET
 _RESEND_COOLDOWN_MINUTES = 5
 _DEFAULT_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, 'data-forge-default-user').hex
 _DEFAULT_USER_MARKER = 'env_default_user'
+_DEFAULT_USER_LOCK_ID = 0x4446474555534552
 
 logger = logging.getLogger(__name__)
+
+
+def _acquire_default_user_lock(session: Session) -> bool:
+    if session.get_bind().dialect.name != 'postgresql':
+        return False
+    session.execute(text('SELECT pg_advisory_xact_lock(:lock_id)'), {'lock_id': _DEFAULT_USER_LOCK_ID})
+    return True
 
 
 def _clear_owned_resources(session: Session, user_id: str) -> None:
@@ -169,6 +177,11 @@ def get_default_user(session: Session) -> User | None:
 
 
 def ensure_default_user(session: Session) -> User:
+    _acquire_default_user_lock(session)
+    return _ensure_default_user_locked(session)
+
+
+def _ensure_default_user_locked(session: Session) -> User:
     desired_email = _normalize_default_user_email(auth_settings.default_user_email)
     desired_name = _normalize_default_user_name(auth_settings.default_user_name, desired_email)
     desired_password = auth_settings.default_user_password
@@ -192,8 +205,7 @@ def ensure_default_user(session: Session) -> User:
             updated_at=now,
         )
         session.add(user)
-        session.commit()
-        session.refresh(user)
+        session.flush()
         session.add(
             AuthProvider(
                 id=uuid.uuid4().hex,
@@ -205,6 +217,7 @@ def ensure_default_user(session: Session) -> User:
             ),
         )
         session.commit()
+        session.refresh(user)
         return user
 
     if user.display_name != desired_name:
