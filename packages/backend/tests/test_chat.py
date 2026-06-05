@@ -297,15 +297,15 @@ class TestSessionStore:
         store = SessionStore()
         with store._db() as db:
             row = ChatSession(
-                id='legacy',
+                id='unsupported',
                 provider='openrouter',
                 model='gpt-4o-mini',
-                api_key='legacy-key',
+                api_key='plain-key',
             )
             db.add(row)
             db.commit()
         with pytest.raises(SettingsConfigurationError, match='supported format'):
-            store.get('legacy')
+            store.get('unsupported')
 
 
 class TestChatRoutes:
@@ -486,7 +486,7 @@ class TestChatRoutes:
         assert isinstance(session['created_at'], int)
         assert session['created_at'] > 10_000_000_000
 
-    def test_history_normalizes_legacy_float_timestamps(self, client: TestClient) -> None:
+    def test_history_normalizes_float_epoch_timestamps(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
             json={

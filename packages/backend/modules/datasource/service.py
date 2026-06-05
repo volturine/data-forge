@@ -154,8 +154,7 @@ def _canonical_internal_postgres_name(datasource: DataSource) -> str | None:
         return None
     schema_name, table_name = source
     canonical = InternalPostgresOnboarding.datasource_name_for(schema_name, table_name)
-    legacy = f'internal.{schema_name}.{table_name}'
-    if datasource.name not in {legacy, canonical}:
+    if datasource.name != canonical:
         return None
     return canonical
 

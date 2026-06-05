@@ -81,7 +81,7 @@ def test_ensure_database_exists_creates_missing_database(monkeypatch: pytest.Mon
 def test_migrate_runtime_rejects_existing_public_revision(monkeypatch, tmp_path: Path) -> None:
     del tmp_path
     monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: None)
-    monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: 'legacy-public' if schema == 'public' else None)
+    monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: 'unsupported-public' if schema == 'public' else None)
 
     with pytest.raises(RuntimeError, match='Unsupported existing public schema revision'):
         migrate_runtime(['default'])
@@ -90,7 +90,7 @@ def test_migrate_runtime_rejects_existing_public_revision(monkeypatch, tmp_path:
 def test_migrate_runtime_rejects_existing_tenant_revision(monkeypatch, tmp_path: Path) -> None:
     del tmp_path
     monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: None)
-    monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: _PUBLIC_REVISION if schema == 'public' else 'legacy-tenant')
+    monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: _PUBLIC_REVISION if schema == 'public' else 'unsupported-tenant')
 
     with pytest.raises(RuntimeError, match='Unsupported existing tenant schema revision'):
         migrate_runtime(['default'])

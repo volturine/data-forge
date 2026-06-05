@@ -130,3 +130,18 @@ def test_validate_step_rejects_unknown_nested_config_fields() -> None:
             'with_columns',
             {'expressions': [{'name': 'x', 'type': 'literal', 'value': 1, 'surprise': True}]},
         )
+
+
+def test_validate_step_rejects_flat_filter_config() -> None:
+    with pytest.raises(ValueError, match='Extra inputs are not permitted'):
+        validate_step('filter', {'column': 'city', 'operator': 'equals', 'value': 'NYC'})
+
+
+def test_validate_step_rejects_flat_groupby_config() -> None:
+    with pytest.raises(ValueError, match='Extra inputs are not permitted'):
+        validate_step('groupby', {'column': 'city', 'operation': 'count'})
+
+
+def test_validate_step_rejects_flat_join_config() -> None:
+    with pytest.raises(ValueError, match='Extra inputs are not permitted'):
+        validate_step('join', {'right': 'orders', 'on': 'customer_id'})

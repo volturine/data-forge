@@ -57,7 +57,7 @@ def test_list_internal_postgres_tables_reports_application_tables(client, test_d
 def test_internal_postgres_display_names_strip_internal_namespace_storage_prefix(test_db_session) -> None:
     namespace_public = DataSource(
         id='namespace-public-ds',
-        name='internal.df$tenant$public.users',
+        name='internal.public.users',
         source_type='iceberg',
         config={
             'metadata_path': '/tmp/namespace-public',

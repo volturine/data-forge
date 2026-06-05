@@ -46,6 +46,19 @@ def _settings():
     return settings
 
 
+def _filter_config(column: str, operator: str, value: object) -> dict[str, object]:
+    return {
+        'conditions': [
+            {
+                'column': column,
+                'operator': operator,
+                'value': value,
+            }
+        ],
+        'logic': 'AND',
+    }
+
+
 def _register_sqlmodel_metadata() -> None:
     from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
     from backend_core.persistence.analysis_versions.models import AnalysisVersion
@@ -375,7 +388,7 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
                 'parent_id': None,
                 'datasource': {'id': sample_datasource.id, 'analysis_tab_id': None, 'config': {'branch': 'master'}},
                 'output': {'result_id': tab1_result_id, 'datasource_type': 'iceberg', 'format': 'parquet', 'filename': 'fixture_output'},
-                'steps': [{'id': 'step1', 'type': 'filter', 'config': {'column': 'age', 'operator': '>', 'value': 30}, 'depends_on': []}],
+                'steps': [{'id': 'step1', 'type': 'filter', 'config': _filter_config('age', '>', 30), 'depends_on': []}],
             }
         ]
     }
@@ -416,7 +429,7 @@ def sample_analyses(test_db_session: Session, sample_datasources: list[DataSourc
                     'parent_id': None,
                     'datasource': {'id': sample_datasources[0].id, 'analysis_tab_id': None, 'config': {'branch': 'master'}},
                     'output': {'result_id': str(uuid.uuid4()), 'datasource_type': 'iceberg', 'format': 'parquet', 'filename': 'fixture_output'},
-                    'steps': [{'id': f'step{idx}', 'type': 'filter', 'config': {'column': 'id', 'operator': '>', 'value': idx}, 'depends_on': []}],
+                    'steps': [{'id': f'step{idx}', 'type': 'filter', 'config': _filter_config('id', '>', idx), 'depends_on': []}],
                 }
             ]
         }

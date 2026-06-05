@@ -76,7 +76,7 @@ def main() -> int:
         if script_name == 'test:e2e:report':
             continue
         if any(token in script_value for token in LEGACY_TEST_ARTIFACT_PATH_TOKENS):
-            errors.append(f'packages/frontend/package.json script "{script_name}" uses legacy artifact path: {script_value}')
+            errors.append(f'packages/frontend/package.json script "{script_name}" uses unsupported artifact path: {script_value}')
 
     for package_name, pyproject_path in PYPROJECT_FILES.items():
         data = tomllib.loads(pyproject_path.read_text())

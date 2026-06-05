@@ -165,7 +165,7 @@ def test_ensure_local_postgres_starts_existing_stopped_container() -> None:
     ]
 
 
-def test_ensure_local_postgres_recreates_stale_legacy_mount_container() -> None:
+def test_ensure_local_postgres_recreates_stale_mount_container() -> None:
     calls: list[list[str]] = []
     probes = iter([False, False, True])
 

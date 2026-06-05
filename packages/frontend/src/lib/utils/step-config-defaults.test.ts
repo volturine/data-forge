@@ -227,7 +227,7 @@ describe('normalizeConfig', () => {
 		expect(config).toEqual({ custom: 42 });
 	});
 
-	test('does not migrate legacy groupBy to group_by', () => {
+	test('does not migrate unsupported groupBy to group_by', () => {
 		const input = {
 			groupBy: ['region'],
 			aggregations: [{ column: 'sales', function: 'sum', alias: 'total' }]
@@ -236,7 +236,7 @@ describe('normalizeConfig', () => {
 		expect(config).toEqual(input);
 	});
 
-	test('keeps explicit group_by and ignores legacy groupBy', () => {
+	test('keeps explicit group_by and ignores unsupported groupBy', () => {
 		const config = normalizeConfig('groupby', {
 			groupBy: ['old'],
 			group_by: ['new'],
@@ -245,28 +245,28 @@ describe('normalizeConfig', () => {
 		expect(config).toHaveProperty('group_by', ['new']);
 	});
 
-	test('does not migrate legacy topk by or reverse', () => {
+	test('does not migrate unsupported topk by or reverse', () => {
 		const input = { by: 'score', k: 5, reverse: true };
 		const config = normalizeConfig('topk', input);
 		expect(config).toEqual(input);
 	});
 
-	test('keeps explicit topk column when legacy by is also present', () => {
+	test('keeps explicit topk column when unsupported by is also present', () => {
 		const config = normalizeConfig('topk', { by: 'old', column: 'new', k: 3, descending: false });
 		expect(config).toHaveProperty('column', 'new');
 	});
 
-	test('does not overwrite existing topk descending with legacy reverse', () => {
+	test('does not overwrite existing topk descending with unsupported reverse', () => {
 		const config = normalizeConfig('topk', { reverse: true, column: 'x', k: 3, descending: false });
 		expect(config).toHaveProperty('descending', false);
 	});
 
-	test('does not migrate legacy topk by when reverse is absent', () => {
+	test('does not migrate unsupported topk by when reverse is absent', () => {
 		const config = normalizeConfig('topk', { by: 'price', k: 10 });
 		expect(config).toEqual({ by: 'price', k: 10 });
 	});
 
-	test('does not migrate legacy topk reverse when by is absent', () => {
+	test('does not migrate unsupported topk reverse when by is absent', () => {
 		const config = normalizeConfig('topk', { column: 'price', k: 10, reverse: true });
 		expect(config).toEqual({ column: 'price', k: 10, reverse: true });
 	});

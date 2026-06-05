@@ -7,6 +7,19 @@ from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 
 
+def _filter_config(column: str, operator: str, value: object) -> dict[str, object]:
+    return {
+        'conditions': [
+            {
+                'column': column,
+                'operator': operator,
+                'value': value,
+            }
+        ],
+        'logic': 'AND',
+    }
+
+
 class TestAnalysisValidation:
     """Test analysis validation logic."""
 
@@ -236,7 +249,7 @@ class TestAnalysisPipeline:
                         {
                             'id': 'step1',
                             'type': 'filter',
-                            'config': {'column': 'age', 'operator': '>', 'value': 30},
+                            'config': _filter_config('age', '>', 30),
                             'depends_on': [],
                         },
                         {
@@ -268,7 +281,7 @@ class TestAnalysisPipeline:
             {
                 'id': 'new_step',
                 'type': 'filter',
-                'config': {'column': 'id', 'operator': '=', 'value': 1},
+                'config': _filter_config('id', '=', 1),
                 'depends_on': [],
             },
         ]
@@ -630,7 +643,7 @@ class TestDuplicateTab:
             {
                 'id': 'step2',
                 'type': 'filter',
-                'config': {'column': 'age', 'operator': '>', 'value': 40},
+                'config': _filter_config('age', '>', 40),
                 'depends_on': ['step1'],
             }
         )

@@ -119,17 +119,6 @@ class FilterConfig(BaseModel):
     )
     logic: FilterLogic = FilterLogic.AND
 
-    @model_validator(mode='before')
-    @classmethod
-    def normalize_legacy_single_condition(cls, data: object) -> object:
-        if not isinstance(data, dict) or 'conditions' in data:
-            return data
-        condition_keys = {'column', 'operator', 'value', 'value_type', 'compare_column'}
-        if 'column' not in data:
-            return data
-        condition = {key: data[key] for key in condition_keys if key in data}
-        return {'conditions': [condition], 'logic': data.get('logic', FilterLogic.AND)}
-
 
 class AggregationSchema(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -150,26 +139,6 @@ class GroupByConfig(BaseModel):
         default_factory=list,
         description='Aggregation expressions',
     )
-
-    @model_validator(mode='before')
-    @classmethod
-    def normalize_legacy_single_aggregation(cls, data: object) -> object:
-        if not isinstance(data, dict) or 'group_by' in data or 'aggregations' in data:
-            return data
-        column = data.get('column')
-        operation = data.get('operation')
-        if not isinstance(column, str) or not isinstance(operation, str):
-            return data
-        return {
-            'group_by': [],
-            'aggregations': [
-                {
-                    'column': column,
-                    'function': operation,
-                    'alias': f'{operation}_{column}',
-                }
-            ],
-        }
 
 
 class SortConfig(BaseModel):
@@ -337,23 +306,6 @@ class JoinConfig(BaseModel):
         description='Columns to select from right table',
     )
     suffix: str = '_right'
-
-    @model_validator(mode='before')
-    @classmethod
-    def normalize_legacy_join(cls, data: object) -> object:
-        if not isinstance(data, dict) or 'right_source' in data or 'join_columns' in data:
-            return data
-        right = data.get('right')
-        on = data.get('on')
-        if not isinstance(right, str) or not isinstance(on, str):
-            return data
-        return {
-            'how': data.get('how', JoinHow.INNER),
-            'right_source': right,
-            'join_columns': [{'id': 'join-1', 'left_column': on, 'right_column': on}],
-            'right_columns': data.get('right_columns', []),
-            'suffix': data.get('suffix', '_right'),
-        }
 
 
 class ViewConfig(BaseModel):

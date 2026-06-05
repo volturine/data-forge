@@ -32,6 +32,48 @@ def _schema_enum_values(schema: dict, field_name: str) -> list[str]:
     return []
 
 
+def _filter_config(column: str, operator: str, value: object) -> dict[str, object]:
+    return {
+        'conditions': [
+            {
+                'column': column,
+                'operator': operator,
+                'value': value,
+            }
+        ],
+        'logic': 'AND',
+    }
+
+
+def _groupby_config(column: str, function: str, alias: str) -> dict[str, object]:
+    return {
+        'group_by': [],
+        'aggregations': [
+            {
+                'column': column,
+                'function': function,
+                'alias': alias,
+            }
+        ],
+    }
+
+
+def _join_config(right_source: str, left_column: str = 'id', right_column: str = 'id') -> dict[str, object]:
+    return {
+        'how': 'inner',
+        'right_source': right_source,
+        'join_columns': [
+            {
+                'id': 'join-1',
+                'left_column': left_column,
+                'right_column': right_column,
+            }
+        ],
+        'right_columns': [],
+        'suffix': '_right',
+    }
+
+
 def test_analysis_response_schema_omits_status() -> None:
     schema = AnalysisResponseSchema.model_json_schema()
     assert 'status' not in schema.get('properties', {})
@@ -62,7 +104,7 @@ class TestAnalysisCreate:
                         {
                             'id': 'step1',
                             'type': 'filter',
-                            'config': {'column': 'age', 'operator': '>', 'value': 25},
+                            'config': _filter_config('age', '>', 25),
                             'depends_on': [],
                         },
                     ],
@@ -112,11 +154,7 @@ class TestAnalysisCreate:
                         {
                             'id': 'step1',
                             'type': 'join',
-                            'config': {
-                                'left': datasource_ids[0],
-                                'right': datasource_ids[1],
-                                'on': 'id',
-                            },
+                            'config': _join_config(datasource_ids[1]),
                             'depends_on': [],
                         },
                     ],
@@ -236,7 +274,7 @@ class TestAnalysisCreate:
                         {
                             'id': 'step1',
                             'type': 'filter',
-                            'config': {'column': 'age', 'operator': '>', 'value': 25},
+                            'config': _filter_config('age', '>', 25),
                             'depends_on': [],
                         },
                         {
@@ -267,7 +305,7 @@ class TestAnalysisCreate:
 
     def test_create_analysis_rejects_pipeline_steps(self, client, sample_datasource: DataSource):
         payload = {
-            'name': 'Legacy Payload',
+            'name': 'Unsupported Payload',
             'pipeline_steps': [{'id': 'step1', 'type': 'filter', 'config': {}}],
             'tabs': [
                 {
@@ -283,7 +321,7 @@ class TestAnalysisCreate:
                         'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
-                        'filename': 'source_legacy',
+                        'filename': 'source_unsupported',
                     },
                     'steps': [],
                 },
@@ -528,19 +566,19 @@ class TestAnalysisList:
 
 class TestAnalysisImport:
     def test_import_analysis_applies_datasource_remap_before_missing_check(self, client, sample_datasource: DataSource):
-        legacy_source_id = 'legacy-source-id'
+        imported_source_id = 'imported-source-id'
         payload = {
             'name': 'Imported Analysis',
             'description': 'Imported with datasource remap',
-            'datasource_remap': {legacy_source_id: sample_datasource.id},
+            'datasource_remap': {imported_source_id: sample_datasource.id},
             'pipeline': {
                 'tabs': [
                     {
-                        'id': 'tab-legacy',
-                        'name': 'Legacy Source',
+                        'id': 'tab-imported',
+                        'name': 'Imported Source',
                         'parent_id': None,
                         'datasource': {
-                            'id': legacy_source_id,
+                            'id': imported_source_id,
                             'analysis_tab_id': None,
                             'config': {'branch': 'master'},
                         },
@@ -548,7 +586,7 @@ class TestAnalysisImport:
                             'result_id': str(uuid.uuid4()),
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
-                            'filename': 'legacy_source',
+                            'filename': 'imported_source',
                         },
                         'steps': [],
                     },
@@ -564,19 +602,19 @@ class TestAnalysisImport:
         assert body['pipeline_definition']['tabs'][0]['datasource']['id'] == sample_datasource.id
 
     def test_import_analysis_remaps_join_right_source(self, client, sample_datasource: DataSource):
-        legacy_source_id = 'legacy-source-id'
+        imported_source_id = 'imported-source-id'
         payload = {
             'name': 'Imported Join Analysis',
             'description': 'Imported with self-join datasource remap',
-            'datasource_remap': {legacy_source_id: sample_datasource.id},
+            'datasource_remap': {imported_source_id: sample_datasource.id},
             'pipeline': {
                 'tabs': [
                     {
-                        'id': 'tab-legacy',
-                        'name': 'Legacy Source',
+                        'id': 'tab-imported',
+                        'name': 'Imported Source',
                         'parent_id': None,
                         'datasource': {
-                            'id': legacy_source_id,
+                            'id': imported_source_id,
                             'analysis_tab_id': None,
                             'config': {'branch': 'master'},
                         },
@@ -584,7 +622,7 @@ class TestAnalysisImport:
                             'result_id': str(uuid.uuid4()),
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
-                            'filename': 'legacy_join_source',
+                            'filename': 'imported_join_source',
                         },
                         'steps': [
                             {
@@ -592,7 +630,7 @@ class TestAnalysisImport:
                                 'type': 'join',
                                 'config': {
                                     'how': 'inner',
-                                    'right_source': legacy_source_id,
+                                    'right_source': imported_source_id,
                                     'join_columns': [{'id': 'jc1', 'left_column': 'a', 'right_column': 'a'}],
                                     'suffix': '_right',
                                 },
@@ -743,7 +781,7 @@ class TestAnalysisUpdate:
                         {
                             'id': 'new_step',
                             'type': 'groupby',
-                            'config': {'column': 'age', 'operation': 'mean'},
+                            'config': _groupby_config('age', 'mean', 'mean_age'),
                             'depends_on': [],
                         },
                     ],
@@ -1086,7 +1124,7 @@ class TestUpdateStep:
         tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']
         step_id = sample_analysis.pipeline_definition['tabs'][0]['steps'][0]['id']
         payload = {
-            'config': {'column': 'name', 'operator': '=', 'value': 'Alice'},
+            'config': _filter_config('name', '=', 'Alice'),
         }
 
         response = client.put(

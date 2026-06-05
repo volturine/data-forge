@@ -4,6 +4,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from backend_core.persistence.datasource.models import DataSource
 
 
+def _filter_config(column: str, operator: str, value: object) -> dict[str, object]:
+    return {
+        'conditions': [
+            {
+                'column': column,
+                'operator': operator,
+                'value': value,
+            }
+        ],
+        'logic': 'AND',
+    }
+
+
 def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataSource):
     pipeline = {
         'analysis_id': 'analysis-payload',
@@ -25,7 +38,7 @@ def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataS
                     {
                         'id': 'step1',
                         'type': 'filter',
-                        'config': {'column': 'age', 'operator': '>', 'value': 25},
+                        'config': _filter_config('age', '>', 25),
                         'depends_on': [],
                     },
                 ],
