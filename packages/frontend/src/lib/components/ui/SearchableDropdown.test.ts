@@ -228,6 +228,18 @@ describe('SearchableDropdown', () => {
 			await fireEvent.focus(screen.getByLabelText('Search'));
 			expect(screen.getByRole('listbox')).toBeInTheDocument();
 		});
+
+		test('opens menu on input click', async () => {
+			renderDropdown({ triggerType: 'input' });
+			await fireEvent.click(screen.getByLabelText('Search'));
+			expect(screen.getByRole('listbox')).toBeInTheDocument();
+		});
+
+		test('opens menu when typing into input trigger', async () => {
+			renderDropdown({ triggerType: 'input' });
+			await fireEvent.input(screen.getByLabelText('Search'), { target: { value: 'alp' } });
+			expect(screen.getByRole('listbox')).toBeInTheDocument();
+		});
 	});
 
 	describe('selected list display', () => {

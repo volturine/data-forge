@@ -249,6 +249,8 @@
 			bind:value={searchValue}
 			{placeholder}
 			onfocus={openMenu}
+			onclick={openMenu}
+			oninput={openMenu}
 			aria-haspopup="listbox"
 			use:setTriggerRef={undefined}
 			{disabled}
