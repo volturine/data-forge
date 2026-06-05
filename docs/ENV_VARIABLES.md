@@ -160,6 +160,17 @@ just dev
 | `UPLOAD_CHUNK_SIZE`          | `5242880`                                                                                 | Upload chunk size in bytes. Valid range: `1024` to `104857600`.                                                                                               |
 | `UPLOAD_MAX_FILE_SIZE_BYTES` | `2147483648`                                                                              | Maximum upload size in bytes.                                                                                                                                 |
 
+### Internal runtime (gRPC)
+
+These variables configure the gRPC channel that the scheduler and worker use to communicate with the backend API process. They replace the legacy HTTP internal-runtime path.
+
+| Variable               | Default                   | Notes                                                                                                 |
+| ---------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `INTERNAL_API_TOKEN`   | empty                     | Shared secret used to authenticate internal gRPC calls between scheduler, worker, and API. Required when distributed runtime is enabled. |
+| `INTERNAL_GRPC_HOST`   | `127.0.0.1`               | Host the API gRPC server binds to.                                                                    |
+| `INTERNAL_GRPC_PORT`   | `50051`                   | Port the API gRPC server listens on.                                                                    |
+| `INTERNAL_GRPC_TARGET` | `127.0.0.1:50051`         | Full `host:port` target string that scheduler and worker clients connect to.                          |
+
 ### Engine, scheduling, and resource limits
 
 | Variable                          | Default | Notes                                                           |

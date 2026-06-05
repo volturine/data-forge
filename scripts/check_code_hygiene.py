@@ -35,6 +35,7 @@ EXCLUDED_DIR_NAMES = {
     '.venv',
     '.venv311',
     'build',
+    'generated',
     'node_modules',
     'styled-system',
     'tests',
