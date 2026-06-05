@@ -13,9 +13,9 @@ from datasources.datasource_loading import load_datasource_frame
 from operations.step_converter import convert_step_format
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path
 from runtime.object_store import object_store_storage_options
-from worker_contracts.compute.base import OperationHandler, OperationParams
-from worker_contracts.datasource.source_types import DataSourceType
-from worker_contracts.enums import DataForgeStrEnum
+from worker_models.compute.base import OperationHandler, OperationParams
+from worker_models.datasource.source_types import DataSourceType
+from worker_models.enums import DataForgeStrEnum
 
 
 class DatasourceLoadType(DataForgeStrEnum):

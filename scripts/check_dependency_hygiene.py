@@ -68,9 +68,7 @@ def main() -> int:
 
     overlap = sorted(set(dep_names) & set(dev_dep_names))
     if overlap:
-        errors.append(
-            'packages/frontend/package.json has dependency overlap between dependencies and devDependencies: ' + ', '.join(overlap)
-        )
+        errors.append('packages/frontend/package.json has dependency overlap between dependencies and devDependencies: ' + ', '.join(overlap))
 
     for script_name, script_value in scripts.items():
         if script_name == 'test:e2e:report':
@@ -93,10 +91,8 @@ def main() -> int:
 
         local_runtime_deps = sorted(set(normalized) & LOCAL_RUNTIME_DISTRIBUTIONS)
 
-        if package_name == 'scheduler' and normalized:
-            errors.append(f'{pyproject_path.relative_to(ROOT)} scheduler must not depend on local runtime packages; got: {dependencies}')
-        elif package_name == 'worker' and local_runtime_deps:
-            errors.append(f'{pyproject_path.relative_to(ROOT)} worker must not depend on local runtime packages: {", ".join(local_runtime_deps)}')
+        if package_name in {'scheduler', 'worker'} and local_runtime_deps:
+            errors.append(f'{pyproject_path.relative_to(ROOT)} {package_name} must not depend on local runtime packages: {", ".join(local_runtime_deps)}')
 
     if errors:
         print('Dependency hygiene violations:')

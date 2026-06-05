@@ -16,8 +16,8 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from operations.template_placeholders import render_template_placeholders
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
-from worker_contracts.compute.base import OperationHandler, OperationParams
-from worker_contracts.step_config_enums import AIProvider
+from worker_models.compute.base import OperationHandler, OperationParams
+from worker_models.step_config_enums import AIProvider
 
 logger = logging.getLogger(__name__)
 

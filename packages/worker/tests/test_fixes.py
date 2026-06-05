@@ -19,8 +19,8 @@ from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_service import ExportDatasourceResult
 from runtime.engine_identity import datasource_preview_engine_key
 from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
-from worker_contracts.compute import schemas as compute_schemas
-from worker_contracts.engine_runs.schemas import EngineRunResponseSchema
+from worker_models.compute import schemas as compute_schemas
+from worker_models.engine_runs.schemas import EngineRunResponseSchema
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions

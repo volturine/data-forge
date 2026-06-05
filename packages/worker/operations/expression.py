@@ -3,7 +3,7 @@
 import polars as pl
 
 from operations.validation import validate_no_reflection_escape
-from worker_contracts.compute.base import OperationHandler, OperationParams
+from worker_models.compute.base import OperationHandler, OperationParams
 
 
 class ExpressionParams(OperationParams):

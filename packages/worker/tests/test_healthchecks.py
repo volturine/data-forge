@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from runtime.compute_service import _build_subscriber_message, _resolve_build_status
-from worker_contracts.compute.schemas import BuildStatus
+from worker_models.compute.schemas import BuildStatus
 
 
 def _result(healthcheck_id: str, *, passed: bool, message: str):

@@ -3,7 +3,10 @@
     version         = "1.0.0"
     description     = "Data-Forge scheduler runtime package"
     requires-python = ">=3.14"
-    dependencies    = []
+    dependencies    = [
+    "grpcio>=1.81.0",
+    "protobuf>=7.35.0",
+]
 
 [build-system]
     requires      = ["hatchling"]
@@ -13,13 +16,14 @@
     target-version = "py314"
     line-length    = 160
     indent-width   = 4
+    extend-exclude = ["scheduler_grpc/generated"]
 
 [tool.mypy]
     mypy_path = [
         ".",
         "../..",
     ]
-    exclude = ["(^|/)conftest\\.py$"]
+    exclude = ["(^|/)conftest\\.py$", "scheduler_grpc/generated"]
 
 [tool.pytest.ini_options]
     cache_dir = "tests/.artifacts/pytest-cache"
@@ -33,7 +37,8 @@
         "pytest-timeout>=2.4.0",
         "pytest-xdist>=3.8.0",
         "ruff>=0.14.7",
-    ]
+        "types-grpcio>=1.0.0.20260518",
+]
 
 [tool.hatch.build.targets.wheel]
-    only-include = ["main.py"]
+    only-include = ["main.py", "scheduler_grpc"]

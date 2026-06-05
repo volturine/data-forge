@@ -14,9 +14,9 @@ from runtime.exceptions import AppError, EngineBusyError, EngineNotFoundError, s
 from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
-from worker_contracts.compute import schemas as compute_schemas
-from worker_contracts.compute_requests.live import request_hub
-from worker_contracts.compute_requests.models import ComputeRequestKind
+from worker_models.compute import schemas as compute_schemas
+from worker_models.compute_requests.live import request_hub
+from worker_models.compute_requests.models import ComputeRequestKind
 
 logger = logging.getLogger(__name__)
 

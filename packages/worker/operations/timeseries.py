@@ -1,8 +1,8 @@
 import polars as pl
 
-from worker_contracts.compute.base import OperationHandler, OperationParams
-from worker_contracts.enums import DataForgeStrEnum
-from worker_contracts.step_config_enums import (
+from worker_models.compute.base import OperationHandler, OperationParams
+from worker_models.enums import DataForgeStrEnum
+from worker_models.step_config_enums import (
     DurationUnit,
     TimeComponent,
     TimeDirection,

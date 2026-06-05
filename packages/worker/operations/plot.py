@@ -5,9 +5,9 @@ from dataclasses import dataclass
 import polars as pl
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from worker_contracts.analysis.step_types import ChartType
-from worker_contracts.compute.base import OperationHandler, OperationParams
-from worker_contracts.step_config_enums import (
+from worker_models.analysis.step_types import ChartType
+from worker_models.compute.base import OperationHandler, OperationParams
+from worker_models.step_config_enums import (
     AxisScale,
     ChartAggregation,
     DateBucket,

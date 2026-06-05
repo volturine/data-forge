@@ -46,6 +46,7 @@ from backend_core.settings_store import (
     invalidate_resolved_settings_cache,
     seed_settings_from_env,
 )
+from backend_grpc.server import start_runtime_grpc_server
 from modules.udf import service as udf_service
 
 register_settings_bootstrap_hook(seed_settings_from_env)
@@ -180,6 +181,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Start background cleanup task
     stop_event = asyncio.Event()
     ipc_server = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.API)
+    grpc_server = await start_runtime_grpc_server()
 
     chat_sweep_task = asyncio.create_task(chat_sweep_loop(stop_event))
     api_heartbeat_task = asyncio.create_task(api_worker_heartbeat_loop(stop_event, api_worker_id))
@@ -218,6 +220,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         shutdown_tasks.append(ipc_task)
     await asyncio.gather(*shutdown_tasks)
     await runtime_ipc.stop_api_server(ipc_server, listener=RuntimeListenerKind.API)
+    await grpc_server.stop(grace=5)
     await close_clients()
     await asyncio.to_thread(_stop_api_worker, api_worker_id)
 

@@ -68,7 +68,10 @@ def _make_csv(rows: int) -> str:
     return header + body
 
 
-def _runtime_env(*, data_dir: Path, database_url: str, port: int, rustfs: RustfsContainer) -> dict[str, str]:
+def _runtime_env(
+    *, data_dir: Path, database_url: str, port: int, grpc_port: int, rustfs: RustfsContainer, grpc_target_port: int | None = None
+) -> dict[str, str]:
+    target_port = grpc_target_port if grpc_target_port is not None else grpc_port
     return docker_env(
         {
             'ENV_FILE': '',
@@ -94,8 +97,10 @@ def _runtime_env(*, data_dir: Path, database_url: str, port: int, rustfs: Rustfs
             'OBJECT_STORE_SECRET_KEY': rustfs.secret_key,
             'OBJECT_STORE_BUCKET': rustfs.bucket,
             'OBJECT_STORE_PREFIX': 'dataforge-runtime-tests',
-            'INTERNAL_API_BASE_URL': f'http://127.0.0.1:{port}/api/v1/internal',
             'INTERNAL_API_TOKEN': INTERNAL_API_TOKEN,
+            'INTERNAL_GRPC_HOST': '127.0.0.1',
+            'INTERNAL_GRPC_PORT': str(grpc_port),
+            'INTERNAL_GRPC_TARGET': f'127.0.0.1:{target_port}',
         }
     )
 
@@ -548,27 +553,36 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
         data_dir.mkdir(parents=True, exist_ok=True)
         api_one_port = free_port()
         api_two_port = free_port()
+        api_one_grpc_port = free_port()
+        api_two_grpc_port = free_port()
 
-        base_env = _runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container)
+        base_env = _runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, grpc_port=api_one_grpc_port, rustfs=rustfs_container)
         _init_runtime_db(base_env)
 
         api_one = ManagedProcess(
             name='api-one',
             command=['uv', 'run', '--no-env-file', str(BACKEND_ROOT / 'main.py')],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container),
+            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, grpc_port=api_one_grpc_port, rustfs=rustfs_container),
         )
         api_two = ManagedProcess(
             name='api-two',
             command=['uv', 'run', '--no-env-file', str(BACKEND_ROOT / 'main.py')],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_two_port, rustfs=rustfs_container),
+            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_two_port, grpc_port=api_two_grpc_port, rustfs=rustfs_container),
         )
         worker = ManagedProcess(
             name='worker',
             command=['uv', 'run', '--no-env-file', str(WORKER_ROOT / 'main.py')],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container),
+            env=_runtime_env(
+                data_dir=data_dir,
+                database_url=container.url,
+                port=api_one_port,
+                grpc_port=api_one_grpc_port,
+                rustfs=rustfs_container,
+                grpc_target_port=api_one_grpc_port,
+            ),
         )
         try:
             api_one.start()
@@ -645,27 +659,36 @@ def test_postgres_runtime_supports_cross_api_cancellation(tmp_path: Path, rustfs
         data_dir.mkdir(parents=True, exist_ok=True)
         api_one_port = free_port()
         api_two_port = free_port()
+        api_one_grpc_port = free_port()
+        api_two_grpc_port = free_port()
 
-        base_env = _runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container)
+        base_env = _runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, grpc_port=api_one_grpc_port, rustfs=rustfs_container)
         _init_runtime_db(base_env)
 
         api_one = ManagedProcess(
             name='api-one',
             command=['uv', 'run', '--no-env-file', str(BACKEND_ROOT / 'main.py')],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container),
+            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, grpc_port=api_one_grpc_port, rustfs=rustfs_container),
         )
         api_two = ManagedProcess(
             name='api-two',
             command=['uv', 'run', '--no-env-file', str(BACKEND_ROOT / 'main.py')],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_two_port, rustfs=rustfs_container),
+            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_two_port, grpc_port=api_two_grpc_port, rustfs=rustfs_container),
         )
         worker = ManagedProcess(
             name='worker',
             command=['uv', 'run', '--no-env-file', str(WORKER_ROOT / 'main.py')],
             cwd=CORE_ROOT,
-            env=_runtime_env(data_dir=data_dir, database_url=container.url, port=api_one_port, rustfs=rustfs_container),
+            env=_runtime_env(
+                data_dir=data_dir,
+                database_url=container.url,
+                port=api_one_port,
+                grpc_port=api_one_grpc_port,
+                rustfs=rustfs_container,
+                grpc_target_port=api_one_grpc_port,
+            ),
         )
         try:
             api_one.start()

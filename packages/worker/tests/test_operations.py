@@ -26,7 +26,7 @@ from operations.topk import TopKHandler
 from operations.union import UnionByNameHandler
 from operations.unpivot import UnpivotHandler
 from operations.with_columns import WithColumnsExprType, WithColumnsHandler
-from worker_contracts.datasource.source_types import DataSourceType
+from worker_models.datasource.source_types import DataSourceType
 
 
 def _frame() -> pl.LazyFrame:

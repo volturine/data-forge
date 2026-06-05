@@ -16,6 +16,14 @@ PYTHON_SOURCE_ROOTS = [
 TODO_PATTERN = re.compile(r'\b(TODO|FIXME|HACK)\b')
 CONSOLE_LOG_PATTERN = re.compile(r'\bconsole\.log\s*\(')
 DEBUGGER_PATTERN = re.compile(r'\bdebugger\b')
+FORBIDDEN_RUNTIME_HTTP_TOKENS = (
+    'INTERNAL_API_BASE_URL',
+    '/api/v1/internal/worker',
+    '/api/v1/internal/scheduler',
+    '/internal/worker',
+    '/internal/scheduler',
+    'generate_worker_contracts.py',
+)
 
 EXCLUDED_DIR_NAMES = {
     '.artifacts',
@@ -89,6 +97,9 @@ def _check_python_sources(errors: list[str]) -> None:
             for line_number, line in enumerate(content.splitlines(), start=1):
                 if TODO_PATTERN.search(line):
                     errors.append(f'{path.relative_to(ROOT)}:{line_number}: TODO/FIXME/HACK marker is not allowed in source files')
+                for token in FORBIDDEN_RUNTIME_HTTP_TOKENS:
+                    if token in line:
+                        errors.append(f'{path.relative_to(ROOT)}:{line_number}: legacy internal HTTP runtime token is not allowed: {token}')
 
             tree = ast.parse(content, filename=str(path))
             visitor = _PrintCallVisitor()

@@ -28,6 +28,9 @@
         "uvicorn",
         "websockets>=16.0",
         "xlsxwriter>=3.2.9",
+        "grpcio>=1.81.0",
+        "grpcio-tools>=1.81.0",
+        "protobuf>=6.33.6",
 ]
 
 [build-system]
@@ -38,6 +41,7 @@
     target-version = "py314"
     line-length    = 160
     indent-width   = 4
+    extend-exclude = ["backend_grpc/generated"]
 
     [tool.ruff.lint]
         select = [
@@ -73,7 +77,7 @@
 
         [tool.ruff.lint.isort]
             combine-as-imports = true
-            known-first-party = ["api", "backend_contracts", "backend_core", "modules"]
+            known-first-party = ["api", "backend_contracts", "backend_core", "backend_grpc", "modules"]
 
         [tool.ruff.lint.pydocstyle]
             convention = "google"
@@ -93,7 +97,7 @@
         ".",
         "../..",
     ]
-    exclude = ["(^|/)conftest\\.py$"]
+    exclude = ["(^|/)conftest\\.py$", "backend_grpc/generated"]
 
 [tool.pytest.ini_options]
     asyncio_mode = "auto"
@@ -120,10 +124,12 @@
         "pytest-timeout>=2.4.0",
         "pytest-xdist>=3.8.0",
         "ruff>=0.14.7",
+        "types-grpcio>=1.0.0.20260518",
         "types-jsonschema>=4.26.0.20260202",
         "types-openpyxl>=3.1.5.20250919",
-    ]
+        "types-protobuf>=7.34.1.20260518",
+]
 
 [tool.hatch.build.targets.wheel]
-    packages = ["api", "backend_contracts", "backend_core", "modules"]
+    packages = ["api", "backend_contracts", "backend_core", "backend_grpc", "modules"]
     include  = ["main.py", "database/**"]

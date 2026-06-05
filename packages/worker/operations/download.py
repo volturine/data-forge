@@ -2,7 +2,7 @@
 
 import polars as pl
 
-from worker_contracts.compute.base import OperationHandler, OperationParams
+from worker_models.compute.base import OperationHandler, OperationParams
 
 
 class DownloadParams(OperationParams):

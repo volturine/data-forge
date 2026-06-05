@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "common.proto";
+
+service SchedulerRuntimeService {
+  rpc RegisterScheduler(SchedulerRegisterRequest) returns (RuntimeWorkerResponse);
+  rpc HeartbeatScheduler(RuntimeWorkerRequest) returns (RuntimeWorkerResponse);
+  rpc StopScheduler(RuntimeWorkerRequest) returns (RuntimeWorkerResponse);
+  rpc RunDueSchedules(RuntimeWorkerRequest) returns (SchedulerRunDueResponse);
+}
+
+message SchedulerRegisterRequest {
+  string worker_id = 1;
+  string hostname = 2;
+  int32 pid = 3;
+  int32 capacity = 4;
+}
+
+message SchedulerEnqueuedRun {
+  string namespace = 1;
+  string schedule_id = 2;
+  string datasource_id = 3;
+  string build_id = 4;
+}
+
+message SchedulerRunFailure {
+  string namespace = 1;
+  string schedule_id = 2;
+  string datasource_id = 3;
+  string error = 4;
+}
+
+message SchedulerRunDueResponse {
+  bool handled = 1;
+  repeated SchedulerEnqueuedRun enqueued = 2;
+  repeated SchedulerRunFailure failures = 3;
+}

@@ -90,7 +90,7 @@ check:
     cd packages/worker && env -u VIRTUAL_ENV uv run python -m mypy .
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_build_stream_types.py --check
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_step_types.py --check
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_worker_contracts.py --check
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_grpc.py --check
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_package_boundaries.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_env_contracts.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_dependency_hygiene.py

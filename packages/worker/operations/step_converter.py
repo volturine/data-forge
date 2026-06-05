@@ -21,7 +21,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
-from worker_contracts.analysis.step_types import (
+from worker_models.analysis.step_types import (
     STEP_TYPES,
     ChartType,
     chart_type_for_step,
@@ -29,7 +29,7 @@ from worker_contracts.analysis.step_types import (
     is_step_type,
     normalize_step_type,
 )
-from worker_contracts.step_config_enums import (
+from worker_models.step_config_enums import (
     AIProvider,
     ChartAggregation,
     DeduplicateKeep,

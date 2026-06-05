@@ -1,7 +1,7 @@
 import polars as pl
 
-from worker_contracts.compute.base import OperationHandler, OperationParams
-from worker_contracts.step_config_enums import PivotAggregateFunction
+from worker_models.compute.base import OperationHandler, OperationParams
+from worker_models.step_config_enums import PivotAggregateFunction
 
 _MAX_AUTO_PIVOT_VALUES = 200
 

@@ -34,7 +34,7 @@ EXTRA_RUNTIME_KEYS = {
     'E2E_LOG_DIR',
     'DB_USERNAME',
     'DB_PASSWORD',
-    'INTERNAL_API_BASE_URL',
+    'INTERNAL_GRPC_TARGET',
 }
 
 ENV_KEY_RE = re.compile(r'^[A-Z][A-Z0-9_]*$')
@@ -143,8 +143,7 @@ def main() -> int:
         unknown = sorted(item for item in parsed if item.key not in runtime_allowed)
         for item in unknown:
             errors.append(
-                f'{env_path.relative_to(ROOT)}:{item.line}: unknown runtime env key: {item.key} '
-                f'(not defined by Settings/AuthSettings or approved extras)'
+                f'{env_path.relative_to(ROOT)}:{item.line}: unknown runtime env key: {item.key} (not defined by Settings/AuthSettings or approved extras)'
             )
 
     for env_path, compose_paths in DOCKER_ENV_TO_COMPOSE.items():

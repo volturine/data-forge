@@ -4,7 +4,7 @@ import polars as pl
 
 from runtime.config import settings
 from runtime.exceptions import StepNotFoundError
-from worker_contracts.compute.base import ComputeEngine, EngineResult
+from worker_models.compute.base import ComputeEngine, EngineResult
 
 
 def find_step_index(steps: list[dict], target_step_id: str) -> int:

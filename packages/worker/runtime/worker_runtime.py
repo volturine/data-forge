@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
-from worker_contracts.runtime_workers.models import RuntimeWorkerKind
+from worker_models.runtime_workers.models import RuntimeWorkerKind
 
 logger = logging.getLogger(__name__)
 

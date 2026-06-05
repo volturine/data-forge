@@ -26,7 +26,7 @@ from runtime.worker_runtime import (
 from runtime.worker_runtime import (
     worker_id as build_worker_id,
 )
-from worker_contracts.runtime_workers.models import RuntimeWorkerKind
+from worker_models.runtime_workers.models import RuntimeWorkerKind
 
 logger = logging.getLogger(__name__)
 _SPAWN = multiprocessing.get_context("spawn")

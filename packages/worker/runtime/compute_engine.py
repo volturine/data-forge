@@ -34,8 +34,8 @@ from runtime.compute_utils import apply_steps, normalize_timezones
 from runtime.config import settings
 from runtime.exceptions import IcebergMetadataPathNotFoundError, PipelineValidationError
 from runtime.export_formats import get_export_format
-from worker_contracts.analysis.step_types import is_chart_step_type
-from worker_contracts.compute.base import (
+from worker_models.analysis.step_types import is_chart_step_type
+from worker_models.compute.base import (
     EngineProgressEvent,
     EngineResult,
     ExportCommand,

@@ -65,13 +65,13 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 CMD ["python3", "../backend/main.py"]
 
 FROM runtime-base AS scheduler
-ENV PYTHONPATH="/app/packages/scheduler:/app/packages/backend"
+ENV PYTHONPATH="/app/packages/scheduler"
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD python3 -c "import sys; from backend_core.docker_healthcheck import worker_healthy; from backend_contracts.runtime_workers.models import RuntimeWorkerKind; sys.exit(0 if worker_healthy(kind=RuntimeWorkerKind.SCHEDULER) else 1)"
+    CMD python3 -c "import main"
 CMD ["python3", "../scheduler/main.py"]
 
 FROM runtime-base AS worker
-ENV PYTHONPATH="/app/packages/worker:/app/packages/backend"
+ENV PYTHONPATH="/app/packages/worker"
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD python3 -c "import sys; from backend_core.docker_healthcheck import worker_healthy; from backend_contracts.runtime_workers.models import RuntimeWorkerKind; sys.exit(0 if worker_healthy(kind=RuntimeWorkerKind.BUILD_MANAGER) else 1)"
+    CMD python3 -c "import main"
 CMD ["python3", "../worker/main.py"]

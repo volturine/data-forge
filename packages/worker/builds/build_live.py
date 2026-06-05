@@ -12,8 +12,8 @@ from datetime import UTC, datetime
 
 from fastapi import WebSocket
 
-from worker_contracts.compute import schemas
-from worker_contracts.engine_runs.schemas import EngineRunKind
+from worker_models.compute import schemas
+from worker_models.engine_runs.schemas import EngineRunKind
 
 logger = logging.getLogger(__name__)
 

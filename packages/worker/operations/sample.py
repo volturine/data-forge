@@ -4,7 +4,7 @@ import math
 
 import polars as pl
 
-from worker_contracts.compute.base import OperationHandler, OperationParams
+from worker_models.compute.base import OperationHandler, OperationParams
 
 _MAX_HASH = (1 << 64) - 1
 

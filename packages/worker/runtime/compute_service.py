@@ -43,12 +43,12 @@ from runtime.internal_api import HealthCheckSpec, client_from_env
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import notification_service, render_template
 from runtime.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
-from worker_contracts.analysis.step_types import get_step_timing_key
-from worker_contracts.compute import schemas as compute_schemas
-from worker_contracts.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
-from worker_contracts.datasource.source_types import DataSourceType
-from worker_contracts.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
-from worker_contracts.healthcheck_models import HealthCheckType
+from worker_models.analysis.step_types import get_step_timing_key
+from worker_models.compute import schemas as compute_schemas
+from worker_models.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
+from worker_models.datasource.source_types import DataSourceType
+from worker_models.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
+from worker_models.healthcheck_models import HealthCheckType
 
 logger = logging.getLogger(__name__)
 
@@ -1724,7 +1724,7 @@ def preview_step(
     triggered_by: str | None = None,
 ):
     """Preview the result of executing pipeline up to a specific step with pagination."""
-    from worker_contracts.compute.schemas import StepPreviewResponse
+    from worker_models.compute.schemas import StepPreviewResponse
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
@@ -1915,7 +1915,7 @@ def get_step_schema(
     tab_id: str | None = None,
 ):
     """Get the output schema of a pipeline step without returning data."""
-    from worker_contracts.compute.schemas import StepSchemaResponse
+    from worker_models.compute.schemas import StepSchemaResponse
 
     resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
@@ -1984,7 +1984,7 @@ def get_step_row_count(
     triggered_by: str | None = None,
 ):
     """Get the row count of a pipeline step without collecting full data."""
-    from worker_contracts.compute.schemas import StepRowCountResponse
+    from worker_models.compute.schemas import StepRowCountResponse
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
@@ -3824,7 +3824,7 @@ async def run_analysis_build_stream(
 
 
 def list_iceberg_snapshots(session: object, datasource_id: str, branch: str | None = None):
-    from worker_contracts.compute.schemas import IcebergSnapshotInfo, IcebergSnapshotsResponse
+    from worker_models.compute.schemas import IcebergSnapshotInfo, IcebergSnapshotsResponse
 
     del session
     datasource = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
@@ -3890,7 +3890,7 @@ def list_iceberg_snapshots(session: object, datasource_id: str, branch: str | No
 
 
 def delete_iceberg_snapshot(session: object, datasource_id: str, snapshot_id: str):
-    from worker_contracts.compute.schemas import IcebergSnapshotDeleteResponse
+    from worker_models.compute.schemas import IcebergSnapshotDeleteResponse
 
     del session
     datasource = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)

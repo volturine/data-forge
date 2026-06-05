@@ -21,7 +21,7 @@ EXCLUDED_DIRS = {
     'playwright-report',
 }
 
-EXPECTED_PACKAGES = {'backend', 'frontend', 'scheduler', 'worker'}
+EXPECTED_PACKAGES = {'backend', 'frontend', 'protocol', 'scheduler', 'worker'}
 REMOVED_PACKAGE_DIRS = {'contracts', 'persistence', 'runtime-common', 'shared'}
 
 ROOT_TEST_RESIDUE = [
@@ -44,9 +44,9 @@ FORBIDDEN_OWNER_DUPLICATES = [
 ]
 
 PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
-    'backend': {'builds', 'datasources', 'operations', 'runtime', 'scheduler_service', 'worker_contracts'},
-    'scheduler': {'api', 'backend_contracts', 'backend_core', 'builds', 'datasources', 'modules', 'operations', 'runtime', 'shared', 'worker_contracts'},
-    'worker': {'api', 'backend_contracts', 'modules', 'scheduler_service', 'shared'},
+    'backend': {'builds', 'datasources', 'operations', 'runtime', 'scheduler_service', 'worker_models'},
+    'scheduler': {'api', 'backend_contracts', 'backend_core', 'builds', 'datasources', 'modules', 'operations', 'runtime', 'shared', 'worker_models'},
+    'worker': {'api', 'backend_contracts', 'backend_core', 'modules', 'scheduler_service', 'shared', 'sqlmodel'},
 }
 
 

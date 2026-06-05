@@ -8,8 +8,8 @@ from runtime.compute_engine import PolarsComputeEngine
 from runtime.config import settings
 from runtime.engine_identity import parse_engine_identity
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
-from worker_contracts.compute.base import ComputeEngine, EngineStatusInfo
-from worker_contracts.compute.schemas import EngineStatus
+from worker_models.compute.base import ComputeEngine, EngineStatusInfo
+from worker_models.compute.schemas import EngineStatus
 
 logger = logging.getLogger(__name__)
 

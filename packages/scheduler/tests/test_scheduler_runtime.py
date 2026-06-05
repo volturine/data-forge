@@ -25,29 +25,29 @@ class FakeSchedulerClient:
     def stop(self, *, worker_id: str) -> None:
         self.calls.append(("stop", worker_id))
 
-    def run_due(self, *, worker_id: str) -> dict[str, object]:
+    def run_due(self, *, worker_id: str) -> scheduler_main.SchedulerRunDueResult:
         self.run_due_calls += 1
         self.calls.append(("run_due", worker_id))
-        return {"handled": False, "enqueued": [], "failures": []}
+        return scheduler_main.SchedulerRunDueResult(handled=False, enqueued=[], failures=[])
 
 
 def test_scheduler_settings_require_internal_rpc_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("INTERNAL_API_BASE_URL", raising=False)
+    monkeypatch.delenv("INTERNAL_GRPC_TARGET", raising=False)
     monkeypatch.setenv("INTERNAL_API_TOKEN", "token")
     monkeypatch.setenv("SCHEDULER_CHECK_INTERVAL", "5")
 
-    with pytest.raises(RuntimeError, match="INTERNAL_API_BASE_URL"):
+    with pytest.raises(RuntimeError, match="INTERNAL_GRPC_TARGET"):
         scheduler_main.SchedulerSettings.from_env()
 
 
 def test_scheduler_settings_loads_internal_rpc_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("INTERNAL_API_BASE_URL", "http://api:8000/api/v1/internal/")
+    monkeypatch.setenv("INTERNAL_GRPC_TARGET", "api:50051")
     monkeypatch.setenv("INTERNAL_API_TOKEN", "token")
     monkeypatch.setenv("SCHEDULER_CHECK_INTERVAL", "5")
 
     settings = scheduler_main.SchedulerSettings.from_env()
 
-    assert settings.internal_api_base_url == "http://api:8000/api/v1/internal"
+    assert settings.internal_grpc_target == "api:50051"
     assert settings.internal_api_token == "token"
     assert settings.scheduler_check_interval == 5
 

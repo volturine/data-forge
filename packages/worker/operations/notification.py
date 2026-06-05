@@ -5,8 +5,8 @@ from pydantic import ConfigDict, Field, model_validator
 
 from operations.template_placeholders import render_template_placeholders
 from runtime.notification_delivery import notification_service
-from worker_contracts.compute.base import OperationHandler, OperationParams
-from worker_contracts.step_config_enums import NotificationMethod
+from worker_models.compute.base import OperationHandler, OperationParams
+from worker_models.step_config_enums import NotificationMethod
 
 logger = logging.getLogger(__name__)
 

@@ -1,8 +1,8 @@
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
-from worker_contracts.compute.base import OperationHandler, OperationParams
-from worker_contracts.step_config_enums import JoinHow
+from worker_models.compute.base import OperationHandler, OperationParams
+from worker_models.step_config_enums import JoinHow
 
 
 class JoinColumn(BaseModel):

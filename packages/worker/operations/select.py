@@ -4,8 +4,8 @@ import polars as pl
 from pydantic import Field
 
 from operations.type_casting import require_polars_type
-from worker_contracts.compute.base import OperationHandler, OperationParams
-from worker_contracts.enums import DataForgeStrEnum
+from worker_models.compute.base import OperationHandler, OperationParams
+from worker_models.enums import DataForgeStrEnum
 
 
 class PolarsCastType(DataForgeStrEnum):

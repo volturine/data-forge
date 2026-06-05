@@ -3,8 +3,8 @@ from collections.abc import Callable
 import polars as pl
 
 from operations.validation import validate_regex_pattern
-from worker_contracts.compute.base import OperationHandler, OperationParams
-from worker_contracts.step_config_enums import StringTransformMethod
+from worker_models.compute.base import OperationHandler, OperationParams
+from worker_models.step_config_enums import StringTransformMethod
 
 
 class StringTransformParams(OperationParams):

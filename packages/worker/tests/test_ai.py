@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from operations.ai import AIError, AIHandler, AIParams, InternalAIClient, get_ai_client, parse_request_options
 from operations.step_converter import convert_ai_config
-from worker_contracts.step_config_enums import AIProvider
+from worker_models.step_config_enums import AIProvider
 
 # ---------------------------------------------------------------------------
 # parse_request_options

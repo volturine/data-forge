@@ -25,7 +25,7 @@ from operations.union import UnionByNameHandler, UnionParams
 from operations.unpivot import UnpivotHandler, UnpivotParams
 from operations.view import ViewHandler, ViewParams
 from operations.with_columns import WithColumnsHandler, WithColumnsParams
-from worker_contracts.compute.base import OperationHandler, OperationParams
+from worker_models.compute.base import OperationHandler, OperationParams
 
 __all__ = [
     "HANDLERS",

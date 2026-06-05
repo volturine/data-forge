@@ -8,9 +8,9 @@ from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
 from runtime.namespace import reset_namespace, set_namespace_context
-from worker_contracts.compute import schemas
-from worker_contracts.datasource.models import DataSourceTargetKind
-from worker_contracts.engine_runs.schemas import EngineRunKind
+from worker_models.compute import schemas
+from worker_models.datasource.models import DataSourceTargetKind
+from worker_models.engine_runs.schemas import EngineRunKind
 
 logger = logging.getLogger(__name__)
 
