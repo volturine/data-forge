@@ -22,7 +22,6 @@ EXCLUDED_DIRS = {
 }
 
 EXPECTED_PACKAGES = {'backend', 'frontend', 'protocol', 'scheduler', 'worker'}
-REMOVED_PACKAGE_DIRS = {'contracts', 'persistence', 'runtime-common', 'shared'}
 
 ROOT_TEST_RESIDUE = [
     ROOT / 'tests',
@@ -82,10 +81,6 @@ def main() -> int:
     unexpected = sorted((actual_packages - EXPECTED_PACKAGES) - {'__pycache__'})
     if unexpected:
         errors.append(f'unexpected package directories under packages/: {", ".join(unexpected)}')
-
-    for package in sorted(REMOVED_PACKAGE_DIRS):
-        if (PACKAGES / package).exists():
-            errors.append(f'removed split package must not exist: packages/{package}')
 
     for path in ROOT_TEST_RESIDUE:
         if path.exists():
