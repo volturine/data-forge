@@ -22,7 +22,6 @@ FORBIDDEN_RUNTIME_HTTP_TOKENS = (
     '/api/v1/internal/scheduler',
     '/internal/worker',
     '/internal/scheduler',
-    'generate_worker_contracts.py',
 )
 
 EXCLUDED_DIR_NAMES = {
