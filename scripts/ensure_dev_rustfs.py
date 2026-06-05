@@ -205,8 +205,6 @@ def ensure_local_rustfs(
     cfg = parse_config(endpoint, access_key, secret_key)
     if not is_local_host(cfg.host):
         return
-    if probe(endpoint, timeout=1.0):
-        return
     if not docker_available(run):
         raise RuntimeError(
             f'RustFS is not reachable at {cfg.host}:{cfg.port} and Docker is unavailable. '
