@@ -49,26 +49,9 @@ def test_ensure_local_postgres_skips_remote_hosts() -> None:
     assert calls == []
 
 
-def test_ensure_local_postgres_skips_when_database_is_reachable() -> None:
-    calls: list[list[str]] = []
-
-    def run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        return done(args)
-
-    MODULE.ensure_local_postgres(
-        'postgresql+psycopg://user:pass@127.0.0.1:5432/dataforge',
-        run=run,
-        probe=lambda database_url, timeout=1.0: True,
-        sleep=lambda _: None,
-    )
-
-    assert calls == []
-
-
 def test_ensure_local_postgres_creates_container_when_missing() -> None:
     calls: list[list[str]] = []
-    probes = iter([False, True])
+    probes = iter([True])
 
     def run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
         calls.append(args)
@@ -122,7 +105,7 @@ def test_ensure_local_postgres_creates_container_when_missing() -> None:
 
 def test_ensure_local_postgres_starts_existing_stopped_container() -> None:
     calls: list[list[str]] = []
-    probes = iter([False, True])
+    probes = iter([True])
 
     def run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
         calls.append(args)
@@ -167,7 +150,7 @@ def test_ensure_local_postgres_starts_existing_stopped_container() -> None:
 
 def test_ensure_local_postgres_recreates_stale_mount_container() -> None:
     calls: list[list[str]] = []
-    probes = iter([False, False, True])
+    probes = iter([False, True])
 
     def run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
         calls.append(args)
