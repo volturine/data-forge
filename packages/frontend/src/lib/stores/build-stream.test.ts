@@ -4,22 +4,52 @@ import type { BuildRequest } from '$lib/api/compute';
 
 const mockStartActiveBuild = vi.fn();
 const mockGetActiveBuild = vi.fn();
-const mockGetBuild = vi.fn();
 const mockRetainActivity = vi.fn();
 const mockReleaseActivity = vi.fn();
 
-vi.mock('$lib/api/build-stream', async () => {
-	const actual =
-		await vi.importActual<typeof import('$lib/api/build-stream')>('$lib/api/build-stream');
-	return {
-		...actual,
-		startActiveBuild: (...args: unknown[]) => mockStartActiveBuild(...args),
-		getActiveBuild: (...args: unknown[]) => mockGetActiveBuild(...args)
-	};
-});
-
-vi.mock('$lib/api/builds', () => ({
-	getBuild: (...args: unknown[]) => mockGetBuild(...args)
+vi.mock('$lib/api/build-stream', () => ({
+	startActiveBuild: (...args: unknown[]) => mockStartActiveBuild(...args),
+	getActiveBuild: (...args: unknown[]) => mockGetActiveBuild(...args),
+	connectBuildDetailStream: (
+		buildId: string,
+		_lastSequence: number,
+		callbacks: {
+			onSnapshot: (snapshot: unknown) => void;
+			onEvent: (event: unknown) => void;
+			onError: (error: string) => void;
+			onClose: () => void;
+		}
+	) => {
+		const ws = new MockWebSocket(`ws://localhost/api/v1/compute/ws/builds/${buildId}`);
+		ws.addEventListener('message', (event?: { data?: string }) => {
+			let msg: Record<string, unknown>;
+			try {
+				msg = JSON.parse(event?.data ?? '{}') as Record<string, unknown>;
+			} catch {
+				callbacks.onError('Invalid build stream message');
+				return;
+			}
+			if (msg.type === 'snapshot') {
+				callbacks.onSnapshot(msg);
+			} else if (msg.type === 'error') {
+				callbacks.onError(typeof msg.error === 'string' ? msg.error : 'Invalid build stream message');
+			} else {
+				callbacks.onEvent(msg);
+			}
+		});
+		ws.addEventListener('error', () => {
+			callbacks.onError('WebSocket connection failed');
+		});
+		ws.addEventListener('close', (event?: { code?: number; reason?: string }) => {
+			if (event?.code !== 1000 && event?.code !== 1001 && event?.code !== 1005) {
+				callbacks.onError(event?.reason || `Connection closed (code ${event?.code})`);
+			}
+			callbacks.onClose();
+		});
+		return {
+			close: () => ws.close()
+		};
+	}
 }));
 
 vi.mock('$lib/stores/clientIdentity.svelte', () => ({
@@ -174,21 +204,6 @@ function mockGetActiveBuildSuccess(detail: ActiveBuildDetail) {
 	});
 }
 
-function mockGetBuildError(message = 'missing persisted build') {
-	mockGetBuild.mockReturnValue({
-		match: (_onOk: unknown, onErr: (err: { message: string }) => void) => {
-			onErr({ message });
-			return Promise.resolve(false);
-		}
-	});
-}
-
-function mockGetBuildSuccess(detail: ActiveBuildDetail) {
-	mockGetBuild.mockReturnValue({
-		match: (onOk: (build: ActiveBuildDetail) => boolean) => Promise.resolve(onOk(detail))
-	});
-}
-
 const { BuildStreamStore } = await import('./build-stream.svelte');
 
 describe('BuildStreamStore', () => {
@@ -197,14 +212,11 @@ describe('BuildStreamStore', () => {
 		vi.clearAllMocks();
 		mockStartSuccess();
 		mockGetActiveBuildError();
-		mockGetBuildError();
-		vi.stubGlobal('WebSocket', MockWebSocket);
 		vi.useFakeTimers();
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
-		vi.unstubAllGlobals();
 	});
 
 	test('initial state', () => {
@@ -1003,29 +1015,6 @@ describe('BuildStreamStore', () => {
 
 		expect(mockGetActiveBuild).toHaveBeenCalledWith('build-1');
 		expect(store.buildId).toBe('build-1');
-	});
-
-	test('falls back to persisted terminal detail when active build polling misses', async () => {
-		const store = new BuildStreamStore();
-		store.start(MINIMAL_BUILD_REQUEST);
-		mockGetActiveBuildError();
-		mockGetBuildSuccess(
-			makeDetail({
-				status: 'completed',
-				duration_ms: 1750,
-				progress: 1,
-				current_step: null
-			})
-		);
-
-		await vi.advanceTimersByTimeAsync(250);
-		await flushAsyncWork();
-
-		expect(mockGetActiveBuild).toHaveBeenCalledWith('build-1');
-		expect(mockGetBuild).toHaveBeenCalledWith('build-1');
-		expect(store.status).toBe('completed');
-		expect(store.duration).toBe(1750);
-		expect(store.done).toBe(true);
 	});
 
 	test('hydrates terminal build detail after socket close before final event arrives', async () => {

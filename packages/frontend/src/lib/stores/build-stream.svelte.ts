@@ -13,11 +13,9 @@ import type {
 import {
 	buildStatusFromActiveBuild,
 	coerceBuildStepState,
-	isTerminalActiveBuildStatus,
 	isTerminalBuildStatus
 } from '$lib/types/build-stream';
 import { connectBuildDetailStream, getActiveBuild, startActiveBuild } from '$lib/api/build-stream';
-import { getBuild } from '$lib/api/builds';
 import type { BuildRequest, CancelBuildResponse } from '$lib/api/compute';
 import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
 
@@ -255,22 +253,10 @@ export class BuildStreamStore {
 	}
 
 	private async refreshBuildDetail(buildId: string, generation: number): Promise<boolean> {
-		const activeHydrated = await getActiveBuild(buildId).match(
+		return getActiveBuild(buildId).match(
 			(build) => {
 				if (generation !== this.generation) return false;
 				if (this.buildId !== buildId) return false;
-				this.pendingError = null;
-				this.applySnapshot(build);
-				return true;
-			},
-			() => false
-		);
-		if (activeHydrated) return true;
-		return getBuild(buildId).match(
-			(build) => {
-				if (generation !== this.generation) return false;
-				if (this.buildId !== buildId) return false;
-				if (!isTerminalActiveBuildStatus(build.status)) return false;
 				this.pendingError = null;
 				this.applySnapshot(build);
 				return true;
@@ -340,7 +326,11 @@ export class BuildStreamStore {
 		this.results = build.results ?? [];
 		this.duration = build.duration_ms ?? null;
 		this.error = build.error ?? null;
-		this.status = buildStatusFromActiveBuild(build.status);
+		const incomingStatus = buildStatusFromActiveBuild(build.status);
+		if (isTerminalBuildStatus(this.status) && !isTerminalBuildStatus(incomingStatus)) {
+			return;
+		}
+		this.status = incomingStatus;
 		if (this.done) {
 			this.shouldReconnect = false;
 			this.clearReconnectTimer();
