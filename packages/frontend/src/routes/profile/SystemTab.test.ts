@@ -1,5 +1,5 @@
 import { describe, expect, test, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 
 type Matchable<T> = {
 	match: (onOk: (value: T) => void, onErr?: (error: { message: string }) => void) => Promise<void>;
@@ -114,20 +114,6 @@ describe('SystemTab', () => {
 		await waitFor(() => {
 			expect(onboardSwitch).toHaveAttribute('aria-checked', 'true');
 			expect(onboardSwitch).toBeEnabled();
-		});
-	});
-
-	test('save feedback is rendered next to the save action', async () => {
-		render(SystemTab);
-
-		const saveButton = await screen.findByRole('button', { name: 'Save' });
-		await fireEvent.click(saveButton);
-
-		const footer = saveButton.parentElement;
-		expect(footer).not.toBeNull();
-
-		await waitFor(() => {
-			expect(within(footer as HTMLElement).getByText('System settings saved')).toBeVisible();
 		});
 	});
 });

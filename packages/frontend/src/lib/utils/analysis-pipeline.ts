@@ -63,6 +63,7 @@ export function normalizeSnapshotConfig(
 		time_travel_snapshot_id,
 		time_travel_snapshot_timestamp_ms,
 		time_travel_ui: _ui,
+		branches: _branches,
 		...rest
 	} = typedConfig;
 	const normalized: AnalysisTabDatasourceConfig = { ...rest, branch: rest.branch };

@@ -37,7 +37,6 @@
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 	import type { MCPTool } from '$lib/api/mcp';
 	import type { ChatUiPatchEvent } from '$lib/api/chat';
-	import { stopGeneration as stopGenerationRequest } from '$lib/api/chat';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { renderMarkdown, timeAgo } from '$lib/utils/markdown';
 	import { formatEpoch, isSameLocalDay, isYesterday, nowEpochMs } from '$lib/utils/temporal';
@@ -70,7 +69,8 @@
 
 	async function stopGeneration() {
 		if (chatStore.sessionId) {
-			await stopGenerationRequest(chatStore.sessionId);
+			const { stopGeneration: stopGen } = await import('$lib/api/chat');
+			await stopGen(chatStore.sessionId);
 		}
 		chatStore.loading = false;
 	}
@@ -547,7 +547,7 @@
 
 	const inputPlaceholder = $derived(
 		!chatStore.configured
-			? 'Add an API key in Settings to start chatting\u2026'
+			? 'Loading\u2026'
 			: chatStore.mode === 'plan'
 				? 'Describe what you want to analyze\u2026'
 				: 'Tell me what to do\u2026'

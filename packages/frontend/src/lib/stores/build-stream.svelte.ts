@@ -13,9 +13,11 @@ import type {
 import {
 	buildStatusFromActiveBuild,
 	coerceBuildStepState,
+	isTerminalActiveBuildStatus,
 	isTerminalBuildStatus
 } from '$lib/types/build-stream';
 import { connectBuildDetailStream, getActiveBuild, startActiveBuild } from '$lib/api/build-stream';
+import { getBuild } from '$lib/api/builds';
 import type { BuildRequest, CancelBuildResponse } from '$lib/api/compute';
 import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
 
@@ -23,6 +25,7 @@ const MAX_LOGS = 500;
 const MAX_RESOURCE_HISTORY = 120;
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
+const ACTIVE_BUILD_REFRESH_MS = 250;
 
 export class BuildStreamStore {
 	status = $state<BuildStatus>('disconnected');
@@ -55,6 +58,7 @@ export class BuildStreamStore {
 	private lastSequence = 0;
 	private pendingError: string | null = null;
 	private releaseActivity: (() => void) | null = null;
+	private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 	done = $derived(isTerminalBuildStatus(this.status));
 	succeeded = $derived(this.status === 'completed');
@@ -75,11 +79,14 @@ export class BuildStreamStore {
 		this.pendingError = null;
 		this.retainActivity();
 		this.status = 'connecting';
+		this.scheduleRefresh(generation);
 		void startActiveBuild(request).match(
 			(build) => {
 				if (generation !== this.generation) return;
 				this.applySnapshot(build);
 				this.targetBuildId = build.build_id;
+				void this.refreshBuildDetail(build.build_id, generation);
+				this.scheduleRefresh(generation);
 				this.openConnection(build.build_id, generation);
 			},
 			(err) => {
@@ -102,6 +109,8 @@ export class BuildStreamStore {
 		this.targetBuildId = buildId;
 		this.buildId = buildId;
 		this.status = 'connecting';
+		void this.refreshBuildDetail(buildId, generation);
+		this.scheduleRefresh(generation);
 		this.openConnection(buildId, generation);
 	}
 
@@ -109,6 +118,7 @@ export class BuildStreamStore {
 		this.shouldReconnect = false;
 		this.generation += 1;
 		this.clearReconnectTimer();
+		this.clearRefreshTimer();
 		this.connection?.close();
 		this.connection = null;
 		this.pendingError = null;
@@ -147,6 +157,7 @@ export class BuildStreamStore {
 		this.generation += 1;
 		this.shouldReconnect = false;
 		this.clearReconnectTimer();
+		this.clearRefreshTimer();
 		this.connection?.close();
 		this.connection = null;
 		this.pendingError = null;
@@ -217,11 +228,49 @@ export class BuildStreamStore {
 		this.reconnectTimer = null;
 	}
 
+	private scheduleRefresh(generation: number): void {
+		if (this.refreshTimer !== null) return;
+		this.refreshTimer = setTimeout(() => {
+			this.refreshTimer = null;
+			void this.runRefresh(generation);
+		}, ACTIVE_BUILD_REFRESH_MS);
+	}
+
+	private clearRefreshTimer(): void {
+		if (this.refreshTimer === null) return;
+		clearTimeout(this.refreshTimer);
+		this.refreshTimer = null;
+	}
+
+	private async runRefresh(generation: number): Promise<void> {
+		if (generation !== this.generation || this.done || !this.shouldReconnect) return;
+		const buildId = this.buildId;
+		if (!buildId) {
+			this.scheduleRefresh(generation);
+			return;
+		}
+		await this.refreshBuildDetail(buildId, generation);
+		if (generation !== this.generation || this.done || !this.shouldReconnect) return;
+		this.scheduleRefresh(generation);
+	}
+
 	private async refreshBuildDetail(buildId: string, generation: number): Promise<boolean> {
-		return getActiveBuild(buildId).match(
+		const activeHydrated = await getActiveBuild(buildId).match(
 			(build) => {
 				if (generation !== this.generation) return false;
 				if (this.buildId !== buildId) return false;
+				this.pendingError = null;
+				this.applySnapshot(build);
+				return true;
+			},
+			() => false
+		);
+		if (activeHydrated) return true;
+		return getBuild(buildId).match(
+			(build) => {
+				if (generation !== this.generation) return false;
+				if (this.buildId !== buildId) return false;
+				if (!isTerminalActiveBuildStatus(build.status)) return false;
 				this.pendingError = null;
 				this.applySnapshot(build);
 				return true;
@@ -295,6 +344,7 @@ export class BuildStreamStore {
 		if (this.done) {
 			this.shouldReconnect = false;
 			this.clearReconnectTimer();
+			this.clearRefreshTimer();
 			this.releaseActivityLease();
 		}
 	}
@@ -412,6 +462,7 @@ export class BuildStreamStore {
 				this.results = event.results;
 				this.shouldReconnect = false;
 				this.clearReconnectTimer();
+				this.clearRefreshTimer();
 				this.releaseActivityLease();
 				break;
 
@@ -425,6 +476,7 @@ export class BuildStreamStore {
 				this.error = event.error;
 				this.shouldReconnect = false;
 				this.clearReconnectTimer();
+				this.clearRefreshTimer();
 				this.releaseActivityLease();
 				break;
 
@@ -438,6 +490,7 @@ export class BuildStreamStore {
 				this.error = `Cancelled${event.cancelled_by ? ` by ${event.cancelled_by}` : ''}`;
 				this.shouldReconnect = false;
 				this.clearReconnectTimer();
+				this.clearRefreshTimer();
 				this.releaseActivityLease();
 				break;
 		}

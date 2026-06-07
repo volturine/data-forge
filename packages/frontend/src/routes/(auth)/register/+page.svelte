@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { css, button, input, label, spinner } from '$lib/styles/panda';
 	import { configStore } from '$lib/stores/config.svelte';
@@ -98,11 +99,21 @@
 		</div>
 
 		{#if verifyEmailAddress}
-			<a href={resolve('/verify')} class={button({ variant: 'primary' })}>
+			<button
+				type="button"
+				class={button({ variant: 'primary' })}
+				onclick={() => goto(resolve('/verify'))}
+			>
 				Check verification status
-			</a>
+			</button>
 		{:else}
-			<a href={resolve('/')} class={button({ variant: 'primary' })}> Continue </a>
+			<button
+				type="button"
+				class={button({ variant: 'primary' })}
+				onclick={() => goto(resolve('/'))}
+			>
+				Continue
+			</button>
 		{/if}
 	{:else}
 		<form

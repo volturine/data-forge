@@ -139,11 +139,7 @@
 	const outputDefaults = $derived.by(() => {
 		return outputConfig;
 	});
-	const hasSavedOutputId = $derived(isUuid(outputDatasourceId));
-	const shouldQueryOutputDatasource = $derived(
-		hasSavedOutputId &&
-			(toggling || scheduleOpen || healthOpen || buildStore.status === 'completed')
-	);
+	const canQueryOutput = $derived(isUuid(outputDatasourceId));
 
 	const outputDatasourceQuery = createQuery(() => ({
 		queryKey: ['datasource', outputDatasourceId],
@@ -156,7 +152,7 @@
 			}
 			return result.value;
 		},
-		enabled: shouldQueryOutputDatasource
+		enabled: canQueryOutput
 	}));
 	const hasOutputDatasource = $derived(outputDatasourceQuery.data != null);
 	const hidden = $derived(hiddenOverride ?? outputDatasourceQuery.data?.is_hidden ?? true);
@@ -169,7 +165,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: shouldQueryOutputDatasource && hasOutputDatasource
+		enabled: canQueryOutput && hasOutputDatasource
 	}));
 
 	const healthResultsQuery = createQuery(() => ({
@@ -180,7 +176,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: shouldQueryOutputDatasource && hasOutputDatasource
+		enabled: canQueryOutput && hasOutputDatasource
 	}));
 
 	const healthCount = $derived(healthChecksQuery.data?.length ?? 0);
@@ -207,7 +203,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: shouldQueryOutputDatasource && hasOutputDatasource
+		enabled: canQueryOutput && hasOutputDatasource
 	}));
 
 	const scheduleCount = $derived(schedulesQuery.data?.length ?? 0);
@@ -1478,7 +1474,7 @@
 						>
 							Analysis is locked. Health checks are read-only from this view.
 						</div>
-					{:else if hasSavedOutputId && hasOutputDatasource}
+					{:else if canQueryOutput && hasOutputDatasource}
 						<div
 							class={css({
 								marginTop: '2',
@@ -1502,7 +1498,7 @@
 							})}
 							data-testid="output-health-empty-state"
 						>
-							{#if hasSavedOutputId}
+							{#if canQueryOutput}
 								Build this output once to materialize its datasource before adding health checks.
 							{:else}
 								Save this analysis to create an output datasource before adding health checks.
@@ -1563,7 +1559,7 @@
 					>
 						Analysis is locked. Schedules are read-only from this view.
 					</div>
-				{:else if scheduleOpen && hasSavedOutputId && hasOutputDatasource}
+				{:else if scheduleOpen && canQueryOutput && hasOutputDatasource}
 					<div
 						class={css({
 							marginTop: '2',
@@ -1586,7 +1582,7 @@
 							color: 'fg.tertiary'
 						})}
 					>
-						{#if hasSavedOutputId}
+						{#if canQueryOutput}
 							Build this output once to materialize its datasource before adding schedules.
 						{:else}
 							Save this analysis to create an output datasource before adding schedules.

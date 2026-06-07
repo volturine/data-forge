@@ -229,6 +229,14 @@
 		namespaceOpen = false;
 		await switchNamespace(value, {
 			async beforeCommit() {
+				if (currentPath === '/datasources' && page.url.searchParams.has('id')) {
+					await goto(resolve('/datasources'), {
+						replaceState: true,
+						invalidateAll: false,
+						keepFocus: true,
+						noScroll: true
+					});
+				}
 				await queryClient.cancelQueries();
 				computeActivityStore.reset();
 				enginesStore.reset();
@@ -239,11 +247,15 @@
 				schemaStore.reset();
 			},
 			async afterCommit() {
-				await goto(resolve(`${currentPath}${page.url.search}${page.url.hash}` as '/'), {
+				const nextUrl = new URL(page.url);
+				if (nextUrl.pathname === '/datasources') {
+					nextUrl.searchParams.delete('id');
+				}
+				await goto(resolve(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}` as '/'), {
 					invalidateAll: true,
 					replaceState: true
 				});
-				await queryClient.resetQueries();
+				queryClient.clear();
 			}
 		});
 	}

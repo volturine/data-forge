@@ -292,7 +292,6 @@
 						id="ts-input-value"
 						data-testid="ts-value-input"
 						type="number"
-						step="1"
 						class={css({
 							width: 'full',
 							fontSize: 'sm2',
