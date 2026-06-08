@@ -871,6 +871,100 @@ test.describe('Monitoring – Builds tab', () => {
 			// actual product assertion, while the e2e environment is ephemeral per run.
 		}
 	});
+
+	test('build row toggles expand and collapse on click', async ({ page, request }) => {
+		const ds = `e2e-expand-toggle-${uid()}`;
+		const dsId = await createDatasource(request, ds);
+		try {
+			await page.goto('/monitoring?tab=builds');
+			const panel = page.locator('#panel-builds');
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 5_000);
+			const buildRowId = await buildRow.getAttribute('data-build-row');
+			if (!buildRowId) throw new Error('Expected build row id');
+
+			// First click expands
+			await buildRow.click();
+			const detailRow = panel.locator(`[data-build-detail="${buildRowId}"]`);
+			await expect(detailRow).toBeVisible({ timeout: 5_000 });
+
+			// Second click collapses
+			await buildRow.click();
+			await expect(detailRow).not.toBeVisible({ timeout: 5_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+
+	test('build detail Steps tab shows step content', async ({ page, request }) => {
+		const ds = `e2e-steps-${uid()}`;
+		const dsId = await createDatasource(request, ds);
+		try {
+			await page.goto('/monitoring?tab=builds');
+			const panel = page.locator('#panel-builds');
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 5_000);
+			const buildRowId = await buildRow.getAttribute('data-build-row');
+			if (!buildRowId) throw new Error('Expected build row id');
+
+			await buildRow.click();
+			const detailRow = panel.locator(`[data-build-detail="${buildRowId}"]`);
+			await expect(detailRow).toBeVisible({ timeout: 5_000 });
+
+			const stepsTab = detailRow.getByRole('tab', { name: 'Steps' });
+			await expect(stepsTab).toBeVisible();
+			await stepsTab.click();
+
+			// Steps panel should show build progress or step names
+			await expect(detailRow.locator('[data-testid="build-steps-panel"]')).toBeVisible({
+				timeout: 5_000
+			});
+			// Verify at least some step-related content is rendered
+			await expect(detailRow.getByText(/Build ID:|step|progress/i).first()).toBeVisible({
+				timeout: 5_000
+			});
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+
+	test('build detail Logs tab shows log entries', async ({ page, request }) => {
+		const ds = `e2e-logs-${uid()}`;
+		const dsId = await createDatasource(request, ds);
+		try {
+			await page.goto('/monitoring?tab=builds');
+			const panel = page.locator('#panel-builds');
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 5_000);
+			const buildRowId = await buildRow.getAttribute('data-build-row');
+			if (!buildRowId) throw new Error('Expected build row id');
+
+			await buildRow.click();
+			const detailRow = panel.locator(`[data-build-detail="${buildRowId}"]`);
+			await expect(detailRow).toBeVisible({ timeout: 5_000 });
+
+			const logsTab = detailRow.getByRole('tab', { name: 'Logs' });
+			await expect(logsTab).toBeVisible();
+			await logsTab.click();
+
+			// Logs panel should render
+			await expect(detailRow.locator('[data-testid="build-logs-panel"]')).toBeVisible({
+				timeout: 5_000
+			});
+
+			// Verify log level filter buttons and either log entries or "No logs" state
+			await expect(detailRow.locator('[data-testid="log-level-filter"]')).toBeVisible({
+				timeout: 5_000
+			});
+			const hasLogs = await detailRow
+				.locator(':text("No logs captured")')
+				.isVisible()
+				.catch(() => false);
+			if (!hasLogs) {
+				// If logs exist, verify at least one log entry format marker
+				await expect(detailRow.locator(':text("[")').first()).toBeVisible({ timeout: 5_000 });
+			}
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
 });
 
 // ── Live build history (real e2e, no WS mocking) ───────────────────────────

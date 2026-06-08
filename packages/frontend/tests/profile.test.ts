@@ -765,6 +765,24 @@ test.describe('Profile – AI Providers tab functional', () => {
 		// Key should be cleared (masked) after reload since server returns masked
 		await expect(keyInput).toHaveValue('');
 	});
+
+	test('AI provider OpenAI endpoint edit persists after save and reload', async ({ page }) => {
+		await page.goto('/profile#ai-providers');
+		await waitForProfileTab(page, 'AI Providers');
+
+		const endpointInput = page.locator('#openai-endpoint-url');
+		await expect(endpointInput).toBeVisible({ timeout: 3_000 });
+
+		const customEndpoint = 'https://e2e-openai.example.com';
+		await endpointInput.fill(customEndpoint);
+
+		await page.getByRole('button', { name: 'Save' }).click();
+		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
+
+		await page.reload();
+		await waitForProfileTab(page, 'AI Providers');
+		await expect(endpointInput).toHaveValue(customEndpoint);
+	});
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -791,6 +809,25 @@ test.describe('Profile – Notifications tab functional', () => {
 		await expect(page.getByText(/SMTP|test|sent|error|failed/i).first()).toBeVisible({
 			timeout: 10_000
 		});
+	});
+
+	test('SMTP test button toggles enabled state with recipient input', async ({ page }) => {
+		await page.goto('/profile#notifications');
+		await waitForProfileTab(page, 'Notifications');
+
+		const testBtn = page.locator('[data-testid="settings-smtp-test-button"]');
+		const recipient = page.locator('[data-testid="settings-smtp-test-recipient"]');
+
+		// Initially disabled
+		await expect(testBtn).toBeDisabled();
+
+		// Typing enables the button
+		await recipient.fill('user@example.com');
+		await expect(testBtn).toBeEnabled({ timeout: 3_000 });
+
+		// Clearing disables again
+		await recipient.fill('');
+		await expect(testBtn).toBeDisabled({ timeout: 3_000 });
 	});
 
 	test('Telegram toggle on/off persists after save and reload', async ({ page }) => {

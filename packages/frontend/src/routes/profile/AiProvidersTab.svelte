@@ -286,7 +286,12 @@
 			>
 				<label class={label({ variant: 'wrapper' })}>
 					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Endpoint URL</span>
-					<input type="text" class={input()} bind:value={openai_endpoint_url} />
+					<input
+						type="text"
+						id="openai-endpoint-url"
+						class={input()}
+						bind:value={openai_endpoint_url}
+					/>
 				</label>
 				<label class={label({ variant: 'wrapper' })}>
 					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Default model</span>

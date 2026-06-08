@@ -210,6 +210,10 @@ run_playwright_shard() {
     local report_dir="$PWD/tests/.artifacts/playwright/shard-${shard_index}-of-${shard_total}/playwright-report"
     rm -rf "$output_dir" "$report_dir"
     mkdir -p "$output_dir" "$report_dir"
+    # Suppress Node.js runtime deprecation warnings (e.g. DEP0205 module.register)
+    # that come from Playwright/Vite internals on Node v26+; these are third-party
+    # warnings we cannot fix without upgrading those dependencies.
+    NODE_NO_WARNINGS=1 \
     PLAYWRIGHT_DISABLE_WEB_SERVER=true \
     PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir" \
     PLAYWRIGHT_OUTPUT_DIR="$output_dir" \

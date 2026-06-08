@@ -335,6 +335,26 @@ test.describe('Navigation – chat panel smoke', () => {
 		await trigger.click();
 		await expect(panel).not.toBeVisible({ timeout: 3_000 });
 	});
+
+	test('chat panel provider switch updates model selector', async ({ page }) => {
+		await page.goto('/');
+		await waitForAppShell(page);
+
+		const trigger = page.getByRole('button', { name: 'AI Assistant' });
+		await trigger.click();
+		const panel = page.locator('#chat-panel');
+		await expect(panel).toBeVisible({ timeout: 5_000 });
+
+		const providerSelect = panel.locator('select[title="Chat provider"]');
+		await expect(providerSelect).toBeVisible({ timeout: 3_000 });
+
+		// Switch to Ollama — no API key required, so UI stays responsive
+		await providerSelect.selectOption('ollama');
+		await expect(providerSelect).toHaveValue('ollama');
+
+		// Model button should update to Ollama default
+		await expect(panel.getByRole('button', { name: 'llama3.2' })).toBeVisible({ timeout: 5_000 });
+	});
 });
 
 test.describe('Navigation – namespace persistence', () => {
@@ -373,5 +393,24 @@ test.describe('Navigation – namespace persistence', () => {
 
 		await expect(sidebar.getByText(ns)).toBeVisible({ timeout: 5_000 });
 		await screenshot(page, 'navigation', 'namespace-persisted');
+	});
+
+	test('namespace picker search filters and selecting closes modal', async ({ page }) => {
+		await page.goto('/');
+		await waitForAppShell(page);
+
+		await page.getByRole('button', { name: 'Select namespace' }).click();
+		const dialog = page.locator('[role="dialog"]');
+		await expect(dialog).toBeVisible({ timeout: 5_000 });
+
+		const search = dialog.locator('#namespace-picker-search');
+		await search.fill('default');
+		await expect(dialog.locator('[data-namespace-option="default"]')).toBeVisible({
+			timeout: 3_000
+		});
+
+		await dialog.locator('[data-namespace-option="default"]').click();
+		await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+		await expect(page.getByRole('button', { name: 'Select namespace' })).toContainText('default');
 	});
 });

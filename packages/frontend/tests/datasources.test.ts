@@ -611,6 +611,33 @@ test.describe('Datasources – schema refresh', () => {
 			await deleteDatasourceViaUI(page, ds);
 		}
 	});
+
+	test('refresh schema button returns to idle after loading', async ({ page, request }) => {
+		const ds = `e2e-refresh-idle-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await page.goto('/datasources');
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 5_000 });
+
+			const refreshBtn = config.getByRole('button', {
+				name: /Refresh schema|Re-ingest from source/i
+			});
+			await refreshBtn.click();
+
+			// Loading state appears
+			await expect(config.getByRole('button', { name: /Refreshing|Re-ingesting/i })).toBeVisible({
+				timeout: 5_000
+			});
+
+			// Button returns to idle after API completes
+			await expect(refreshBtn).toBeVisible({ timeout: 15_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
 });
 
 test.describe('Datasources – error states', () => {
