@@ -1,5 +1,10 @@
 # PRD: Dataset Column Descriptions
 
+> **Status (2026-05-28): Implemented.**
+> **Current truth:** Datasource schema UI and backend write paths for column descriptions exist today.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Add first-class per-column descriptions so users and AI agents can explain what each dataset column means, what it is used for, and any important semantic caveats.

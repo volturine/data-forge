@@ -207,8 +207,18 @@ export function datasourceNeedsExternalIngest(datasource: DataSource): boolean {
 	return datasourceIsIceberg(datasource) && datasourceIsIngestableExternal(datasource);
 }
 
+export function datasourceHasMaterializedSnapshot(datasource: DataSource): boolean {
+	if (!datasourceIsIceberg(datasource)) return true;
+	if (!datasourceIsAnalysisOutput(datasource)) return true;
+	return !!(
+		datasource.config.snapshot_id ||
+		(typeof datasource.config.snapshot_timestamp_ms === 'number' &&
+			Number.isFinite(datasource.config.snapshot_timestamp_ms))
+	);
+}
+
 export function datasourceSupportsSchemaRefresh(datasource: DataSource): boolean {
-	return !datasourceIsAnalysis(datasource);
+	return !datasourceIsAnalysis(datasource) && datasourceHasMaterializedSnapshot(datasource);
 }
 
 export function datasourceIsSchedulableRaw(datasource: DataSource): boolean {

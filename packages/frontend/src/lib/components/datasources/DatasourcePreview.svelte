@@ -2,17 +2,16 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import {
 		previewStepData,
-		spawnEngine,
 		type StepPreviewRequest,
 		type StepPreviewResponse
 	} from '$lib/api/compute';
 	import DataTable from '$lib/components/common/DataTable.svelte';
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
-	import type { DataSource } from '$lib/types/datasource';
+	import { datasourceHasMaterializedSnapshot, type DataSource } from '$lib/types/datasource';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import {
 		buildDatasourcePreviewPipelinePayload,
-		datasourcePreviewAnalysisId
+		normalizeSnapshotConfig
 	} from '$lib/utils/analysis-pipeline';
 	import { css } from '$lib/styles/panda';
 
@@ -42,6 +41,9 @@
 	}
 
 	const resolvedDatasource = $derived(datasource ?? null);
+	const canPreviewDatasource = $derived(
+		!!resolvedDatasource && datasourceHasMaterializedSnapshot(resolvedDatasource)
+	);
 	const analysisPipeline = $derived.by(() => {
 		if (!resolvedDatasource) return null;
 		if (!datasourceConfig) return null;
@@ -51,22 +53,8 @@
 		});
 	});
 
-	const configKey = $derived(JSON.stringify(datasourceConfig));
+	const configKey = $derived(JSON.stringify(normalizeSnapshotConfig(datasourceConfig)));
 	const pipelineKey = $derived(JSON.stringify(analysisPipeline));
-	const previewAnalysisId = $derived(datasourcePreviewAnalysisId(datasourceId));
-
-	const warmQuery = createQuery(() => ({
-		queryKey: ['datasource-preview-engine', ns.value, previewAnalysisId],
-		queryFn: async () => {
-			const result = await spawnEngine(previewAnalysisId);
-			if (result.isErr()) return null;
-			return result.value;
-		},
-		staleTime: 30000,
-		refetchOnMount: false,
-		retry: false,
-		enabled: !!datasourceId && !!analysisPipeline && !ns.switching
-	}));
 
 	const query = createQuery(() => ({
 		queryKey: [
@@ -95,11 +83,7 @@
 		staleTime: 30000,
 		refetchOnMount: false,
 		retry: false,
-		enabled:
-			!!datasourceId &&
-			!!analysisPipeline &&
-			!ns.switching &&
-			(!warmQuery.isFetching || !!warmQuery.data || !!warmQuery.error)
+		enabled: !!datasourceId && !!analysisPipeline && !ns.switching && canPreviewDatasource
 	}));
 
 	const data = $derived(query.data);
@@ -130,33 +114,49 @@
 	})}
 	data-preview-ready={data && !isLoading ? 'true' : undefined}
 >
-	<div class={css({ overflow: 'hidden', height: 'full' })}>
-		<DataTable
-			columns={data?.columns ?? []}
-			data={data?.data ?? []}
-			columnTypes={data?.column_types ?? {}}
-			loading={isLoading}
-			{error}
-			fillContainer
-			bind:columnSearch
-			showHeader
-			showPagination
-			pagination={{
-				page,
-				canPrev,
-				canNext,
-				onPrev: goPrev,
-				onNext: goNext
-			}}
-			showTypeBadges
-			onColumnStats={handleColumnStats}
+	{#if !canPreviewDatasource}
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				height: 'full',
+				padding: '6',
+				textAlign: 'center',
+				color: 'fg.muted'
+			})}
+		>
+			Build this output before previewing or refreshing its schema.
+		</div>
+	{:else}
+		<div class={css({ overflow: 'hidden', height: 'full' })}>
+			<DataTable
+				columns={data?.columns ?? []}
+				data={data?.data ?? []}
+				columnTypes={data?.column_types ?? {}}
+				loading={isLoading}
+				{error}
+				fillContainer
+				bind:columnSearch
+				showHeader
+				showPagination
+				pagination={{
+					page,
+					canPrev,
+					canNext,
+					onPrev: goPrev,
+					onNext: goNext
+				}}
+				showTypeBadges
+				onColumnStats={handleColumnStats}
+			/>
+		</div>
+		<ColumnStatsPanel
+			{datasourceId}
+			columnName={statsColumn}
+			open={statsOpen}
+			{datasourceConfig}
+			onClose={handleStatsClose}
 		/>
-	</div>
-	<ColumnStatsPanel
-		{datasourceId}
-		columnName={statsColumn}
-		open={statsOpen}
-		{datasourceConfig}
-		onClose={handleStatsClose}
-	/>
+	{/if}
 </div>

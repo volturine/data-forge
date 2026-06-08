@@ -110,8 +110,8 @@ def _heartbeat_loop_sync(*, client: WorkerInternalApiClient, stop_signal: thread
     while not stop_signal.wait(heartbeat_seconds):
         try:
             client.heartbeat_worker(worker_id=worker_id)
-        except Exception:
-            logger.exception("Build worker heartbeat failed")
+        except Exception as exc:
+            logger.warning("Build worker heartbeat failed: %s", exc)
 
 
 def worker_id() -> str:

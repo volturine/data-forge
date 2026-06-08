@@ -1,5 +1,10 @@
 # PRD: Time Since Last Updated
 
+> **Status (2026-05-28): Not implemented.**
+> **Current truth:** A cross-product relative-time freshness surface is not fully shipped as described here.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Display "time since last updated" indicators across the platform — on datasources, analyses, and build outputs — so users can quickly assess data freshness and identify stale resources.

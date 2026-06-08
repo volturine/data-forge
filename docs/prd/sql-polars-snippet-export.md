@@ -1,5 +1,10 @@
 # PRD: SQL & Polars Snippet Export
 
+> **Status (2026-05-28): Implemented.**
+> **Current truth:** SQL/Polars snippet export is shipped and covered by tests.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Allow users to export any analysis pipeline (or individual tab/step) as a standalone SQL query or Polars Python script. This gives users a portable, reproducible version of their visual pipeline that can run outside Data-Forge.
@@ -13,18 +18,18 @@ Data-Forge pipelines are defined as visual DAGs of operations (filter, join, gro
 - Audit the exact computation performed
 - Migrate away from Data-Forge
 
-...have no way to extract the pipeline as executable code. They must manually reconstruct the logic by reading each step's configuration.
+...historically had no way to extract the pipeline as executable code. The current product now ships SQL/Polars snippet export, but this PRD remains useful as the design record and backlog for future expansion.
 
 ### Current State
 
 | Capability | Status |
 |-----------|--------|
 | Visual pipeline builder | ✅ Full DAG editor |
-| Pipeline stored as JSON | ✅ `pipeline_definition` on Analysis |
-| Polars execution engine | ✅ Steps compiled to Polars LazyFrame ops |
-| SQL execution | ✅ Some steps use SQL under the hood |
-| Export as code | ❌ Not available |
-| Export as SQL | ❌ Not available |
+| Pipeline stored as JSON | ✅ Analysis pipeline definitions are persisted |
+| Polars execution engine | ✅ Steps compile to Polars/Docker runtime execution |
+| SQL execution | ✅ SQL snippet export is supported for translatable steps |
+| Export as code | ✅ Shipped |
+| Export as SQL | ✅ Shipped |
 
 ## Goals
 

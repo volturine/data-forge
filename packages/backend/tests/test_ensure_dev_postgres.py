@@ -51,7 +51,7 @@ def test_ensure_local_postgres_skips_remote_hosts() -> None:
 
 def test_ensure_local_postgres_creates_container_when_missing() -> None:
     calls: list[list[str]] = []
-    probes = iter([True])
+    probes = iter([False, True])
 
     def run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
         calls.append(args)
@@ -105,7 +105,7 @@ def test_ensure_local_postgres_creates_container_when_missing() -> None:
 
 def test_ensure_local_postgres_starts_existing_stopped_container() -> None:
     calls: list[list[str]] = []
-    probes = iter([True])
+    probes = iter([False, True])
 
     def run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
         calls.append(args)

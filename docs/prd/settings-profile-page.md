@@ -1,12 +1,17 @@
 # PRD: Migrate Settings Under Profile Page
 
+> **Status (2026-05-28): Implemented.**
+> **Current truth:** Profile/settings consolidation is shipped and covered by frontend tests.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Consolidate the existing standalone settings page into a tabbed section within the user profile page, creating a unified "account & configuration" hub. The profile page becomes the single entry point for user identity, preferences, and system-wide settings.
 
 ## Problem Statement
 
-Settings and profile are currently separate destinations in the app. Users navigate to different pages to change their display name vs. configure SMTP or AI providers. This creates:
+Historically, settings and profile were separate destinations in the app. Users navigate to different pages to change their display name vs. configure SMTP or AI providers. This creates:
 
 - **Fragmented UX**: Two separate navigation targets for closely related concepts.
 - **Unclear information architecture**: Users don't know whether a setting lives under "profile" or "settings."
@@ -16,8 +21,8 @@ Settings and profile are currently separate destinations in the app. Users navig
 
 | Page | Contains | Route |
 |------|----------|-------|
-| Profile | Display name, avatar, password, sessions | `/profile` |
-| Settings | SMTP, Telegram, AI providers, API keys | `/settings` |
+| Profile | Account, notifications, AI providers, and system tabs | `/profile` |
+| Settings | Redirects to profile system tab | `/settings` |
 
 ### Target State
 

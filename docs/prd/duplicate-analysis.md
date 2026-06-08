@@ -1,5 +1,10 @@
 # PRD: Duplicate Analysis
 
+> **Status (2026-05-28): Implemented.**
+> **Current truth:** Whole-analysis duplication is shipped in the current product.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Add first-class analysis duplication so a user can clone an existing analysis with the same inputs, tab graph, and transform logic, while regenerating all output identities so the clone never overlaps with the source analysis's managed outputs.

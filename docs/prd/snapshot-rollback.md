@@ -1,5 +1,10 @@
 # PRD: Snapshot Rollback
 
+> **Status (2026-05-28): Not implemented.**
+> **Current truth:** Snapshot browsing/time travel exists, but rollback itself is not a shipped feature.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Enable users to rollback datasources to a previous Iceberg snapshot, restoring the data state to an earlier point in time. This provides a transactional undo mechanism for builds that produced incorrect or undesired results.

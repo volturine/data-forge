@@ -275,7 +275,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
         for child in children.values():
             _stop_worker_process(child)
         manager.shutdown_all()
-        await asyncio.gather(*request_tasks, datasource_delete_task)
+        await asyncio.gather(*request_tasks, datasource_delete_task, return_exceptions=True)
         client.stop_worker(worker_id=worker_id)
         logger.info("Build worker manager shutdown complete")
 

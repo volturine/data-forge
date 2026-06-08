@@ -1,5 +1,10 @@
 # PRD: Distributed Runtime v2
 
+> **Status (2026-05-28): Implemented core with follow-up backlog.**
+> **Current truth:** The durable Postgres runtime is now the shipped architecture. Remaining work is mainly observability polish and cleanup, not the original core migration.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Move Data-Forge from a single-process live-build runtime to a deliberate distributed runtime. API workers must become stateless, build execution must move behind a durable queue, live build state must be persisted, websocket delivery must become a projection of durable state, and event contracts must be schema-enforced end to end.

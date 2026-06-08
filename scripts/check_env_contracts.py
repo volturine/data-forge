@@ -34,6 +34,7 @@ EXTRA_RUNTIME_KEYS = {
     'DB_USERNAME',
     'DB_PASSWORD',
     'INTERNAL_GRPC_TARGET',
+    'GRPC_ENABLE_FORK_SUPPORT',
 }
 
 ENV_KEY_RE = re.compile(r'^[A-Z][A-Z0-9_]*$')

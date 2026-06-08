@@ -1,5 +1,10 @@
 # PRD: Dataset Descriptions
 
+> **Status (2026-05-28): Implemented.**
+> **Current truth:** Datasource descriptions are shipped in upload, list, detail, and edit flows.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Add a first-class dataset description field so every datasource can carry durable human and AI-readable context about what the dataset is, where it comes from, and how it should be used.

@@ -18,8 +18,13 @@ def worker_internal_api_client() -> WorkerInternalApiClient:
 
 async def datasource_delete_loop(stop_event: asyncio.Event, *, manager: ProcessManager) -> None:
     while not stop_event.is_set():
-        handled = await _run_once(manager=manager)
-        if handled:
+        try:
+            handled = await _run_once(manager=manager)
+            if handled:
+                continue
+        except Exception as exc:
+            logger.warning("Datasource delete loop iteration failed; will retry: %s", exc)
+            await asyncio.sleep(1.0)
             continue
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=_DATASOURCE_DELETE_POLL_SECONDS)

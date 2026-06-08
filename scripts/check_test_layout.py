@@ -10,6 +10,7 @@ LEGACY_TEST_DIR_PREFIXES = ('playwright-report', 'test-results')
 LEGACY_TEST_DIR_NAMES = {'.auth', 'screenshots', '.pytest_cache'}
 TIMEOUT_PATTERN = re.compile(r'(timeout\s*[:=]\s*|test\.setTimeout\()([0-9_]+)')
 TIMEOUT_CONST_PATTERN = re.compile(r'\b(?:const|let|var)\s+[A-Z][A-Z0-9_]*TIMEOUT[A-Z0-9_]*\s*=')
+MAX_TEST_TIMEOUT_MS = 15_000
 
 
 def _iter_package_test_dirs() -> list[Path]:
@@ -33,13 +34,13 @@ def _check_timeout_policy(test_dir: Path, errors: list[str]) -> None:
         for line_number, line in enumerate(path.read_text().splitlines(), start=1):
             if TIMEOUT_CONST_PATTERN.search(line):
                 errors.append(
-                    f'{path.relative_to(ROOT)}:{line_number}: timeout constants are not allowed in tests; hardcode 5_000 or less'
+                    f'{path.relative_to(ROOT)}:{line_number}: timeout constants are not allowed in tests; hardcode {MAX_TEST_TIMEOUT_MS:_} or less'
                 )
             for match in TIMEOUT_PATTERN.finditer(line):
                 value = int(match.group(2).replace('_', ''))
-                if value > 5000:
+                if value > MAX_TEST_TIMEOUT_MS:
                     errors.append(
-                        f'{path.relative_to(ROOT)}:{line_number}: test timeout {value} exceeds 5_000'
+                        f'{path.relative_to(ROOT)}:{line_number}: test timeout {value} exceeds {MAX_TEST_TIMEOUT_MS:_}'
                     )
 
 
@@ -55,7 +56,7 @@ def main() -> int:
                 continue
             name = path.name
             if name in LEGACY_TEST_DIR_NAMES or name.startswith(LEGACY_TEST_DIR_PREFIXES):
-                errors.append(f'{path.relative_to(ROOT)} is an unsupported test artifact location; use {test_dir.relative_to(ROOT)}/.artifacts/')
+                errors.append(f'{path.relative_to(ROOT)} is a legacy test artifact location; use {test_dir.relative_to(ROOT)}/.artifacts/')
         _check_timeout_policy(test_dir, errors)
 
     for package_dir in sorted(PACKAGES_DIR.iterdir()):

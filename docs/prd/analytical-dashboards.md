@@ -1,5 +1,10 @@
 # PRD: Analytical Dashboards
 
+> **Status (2026-05-28): Not implemented.**
+> **Current truth:** Dashboards are not a shipped product surface in the current repository. Keep this as backlog only.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Add analytical dashboards as a first-class layer on top of analyses. Dashboards let users define configurable variables, bind those variables into analysis logic for filters and similar controls, and assemble interactive runtime views from dataset previews and charts for real-world decision-making.

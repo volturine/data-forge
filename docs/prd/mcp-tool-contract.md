@@ -1,5 +1,10 @@
 # MCP Tool Contract
 
+> **Status (2026-05-28): Implemented reference.**
+> **Current truth:** This is a maintainer/reference doc for a shipped capability.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 Maintainer reference for how `/api/v1` routes are exposed as MCP tools, how AI agents consume them, and how to safely add or change tools without drift.
 
 ---

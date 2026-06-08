@@ -32,7 +32,9 @@ vi.mock('$lib/api/build-stream', () => ({
 			if (msg.type === 'snapshot') {
 				callbacks.onSnapshot(msg);
 			} else if (msg.type === 'error') {
-				callbacks.onError(typeof msg.error === 'string' ? msg.error : 'Invalid build stream message');
+				callbacks.onError(
+					typeof msg.error === 'string' ? msg.error : 'Invalid build stream message'
+				);
 			} else {
 				callbacks.onEvent(msg);
 			}

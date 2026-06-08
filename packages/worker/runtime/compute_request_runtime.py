@@ -91,9 +91,14 @@ async def compute_request_loop(
     last_seen = request_hub.version()
     try:
         while not stop_event.is_set():
-            handled = await _run_once(worker_id=worker_id, manager=manager)
-            if handled:
-                last_seen = request_hub.version()
+            try:
+                handled = await _run_once(worker_id=worker_id, manager=manager)
+                if handled:
+                    last_seen = request_hub.version()
+                    continue
+            except Exception as exc:
+                logger.warning("Compute request loop iteration failed; will retry: %s", exc)
+                await asyncio.sleep(1.0)
                 continue
             wait_task = asyncio.create_task(request_hub.wait(last_seen))
             stop_task = asyncio.create_task(stop_event.wait())
@@ -267,8 +272,8 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
     finally:
         try:
             client.dispatch_runtime_outbox()
-        except Exception:
-            logger.warning("Compute response outbox fast-path dispatch failed for request %s", claimed.id, exc_info=True)
+        except Exception as exc:
+            logger.warning("Compute response outbox fast-path dispatch failed for request %s: %s", claimed.id, exc)
         reset_namespace(token)
 
 

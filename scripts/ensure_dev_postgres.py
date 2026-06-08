@@ -235,6 +235,8 @@ def ensure_local_postgres(
     cfg = parse_database_url(database_url)
     if not is_local_host(cfg.host):
         return
+    if probe(database_url, timeout=1.0):
+        return
     if not docker_available(run):
         raise RuntimeError(
             f'PostgreSQL is not reachable at {cfg.host}:{cfg.port} and Docker is unavailable. '

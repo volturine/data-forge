@@ -1,5 +1,10 @@
 # PRD: Build Length Tracking
 
+> **Status (2026-05-28): Partially implemented.**
+> **Current truth:** Build duration data exists and some timing/build-preview surfaces ship today, but the dedicated duration UX/trends/alerts described here are not fully implemented.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Track and display build execution duration at the overall build level and per-step level, enabling users to identify slow steps, compare build performance over time, and set duration-based alerts.
