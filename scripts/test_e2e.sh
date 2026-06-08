@@ -142,13 +142,13 @@ if [ -n "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) >"$LOG_DIR/backend.log" 2>&1 & BACKEND_PID=$!
     (cd packages/worker && exec uv run --no-env-file main.py) >"$LOG_DIR/worker.log" 2>&1 & WORKER_PID=$!
     (cd packages/scheduler && exec uv run --no-env-file main.py) >"$LOG_DIR/scheduler.log" 2>&1 & SCHEDULER_PID=$!
-    (cd packages/frontend && bun run predev && exec node ./node_modules/vite/bin/vite.js dev) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
+    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 node ./node_modules/vite/bin/vite.js dev) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
 fi
 if [ -z "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) & BACKEND_PID=$!
     (cd packages/worker && exec uv run --no-env-file main.py) & WORKER_PID=$!
     (cd packages/scheduler && exec uv run --no-env-file main.py) & SCHEDULER_PID=$!
-    (cd packages/frontend && bun run predev && exec node ./node_modules/vite/bin/vite.js dev) & FRONTEND_PID=$!
+    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 node ./node_modules/vite/bin/vite.js dev) & FRONTEND_PID=$!
 fi
 wait_for_url() {
     local url="$1"
@@ -217,10 +217,13 @@ run_playwright_shard() {
     PLAYWRIGHT_DISABLE_WEB_SERVER=true \
     PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir" \
     PLAYWRIGHT_OUTPUT_DIR="$output_dir" \
+    # CI runners are shared VMs; cap each shard to 1 worker so 4 shards
+    # = 4 concurrent browsers max, avoiding resource starvation under load.
+    local shard_workers="${E2E_SHARD_WORKERS:-1}"
     python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        -- ./node_modules/.bin/playwright test --config=playwright.config.ts "$@"
+        -- ./node_modules/.bin/playwright test --config=playwright.config.ts --workers "$shard_workers" "$@"
 }
 
 SHARD_PIDS=()

@@ -87,7 +87,7 @@ async function waitForAnalysisEditor(
 export async function gotoAnalysisEditor(
 	page: Page,
 	analysisId: string,
-	timeout = 5_000
+	timeout = process.env.CI ? 10_000 : 5_000
 ): Promise<void> {
 	let lastError: unknown;
 
@@ -111,7 +111,7 @@ export async function gotoAnalysisEditor(
 export async function gotoReadOnlyAnalysisEditor(
 	page: Page,
 	analysisId: string,
-	timeout = 5_000
+	timeout = process.env.CI ? 10_000 : 5_000
 ): Promise<void> {
 	let lastError: unknown;
 
@@ -136,7 +136,10 @@ export async function gotoReadOnlyAnalysisEditor(
  * After a `page.reload()` inside the analysis editor, re-confirm readiness.
  * Same gates as `gotoAnalysisEditor` but without the navigation step.
  */
-export async function waitForEditorReload(page: Page, timeout = 5_000): Promise<void> {
+export async function waitForEditorReload(
+	page: Page,
+	timeout = process.env.CI ? 10_000 : 5_000
+): Promise<void> {
 	await waitForLayoutReady(page, timeout);
 	await waitForAnalysisEditor(page, Date.now() + timeout, 'editable');
 }

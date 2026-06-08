@@ -23,7 +23,9 @@ interface WorkerAuth {
 }
 
 async function expectSignedIn(page: Page): Promise<void> {
-	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 5_000 });
+	// Under CI load the shell can take longer to hydrate after navigation
+	const timeout = process.env.CI ? 10_000 : 5_000;
+	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout });
 }
 
 async function authFileIsValid(browser: Browser, workerAuth: WorkerAuth): Promise<boolean> {
@@ -34,7 +36,7 @@ async function authFileIsValid(browser: Browser, workerAuth: WorkerAuth): Promis
 	});
 	const page = await context.newPage();
 	try {
-		await page.goto('/', { waitUntil: 'domcontentloaded' });
+		await page.goto('/', { waitUntil: 'networkidle' });
 		if (
 			await page
 				.getByLabel('Main navigation')
@@ -68,7 +70,10 @@ async function createAuthFile(browser: Browser, workerAuth: WorkerAuth): Promise
 		if (authRequired) {
 			const email = `e2e-ui-${E2E_RUN_STAMP}-w${workerAuth.workerIndex}@example.com`;
 			await page.goto('/register', { waitUntil: 'domcontentloaded' });
-			await page.locator('[data-auth-form-ready="true"]').waitFor({ timeout: 5_000 });
+			// Wait for SvelteKit hydration to complete before interacting;
+			// under CI load hydration can lag behind DOMContentLoaded.
+			await page.waitForLoadState('networkidle');
+			await page.locator('[data-auth-form-ready="true"]').waitFor({ timeout: 10_000 });
 			const nameInput = page.locator('#name');
 			const emailInput = page.locator('#email');
 			const passwordInput = page.locator('#password');
@@ -93,7 +98,7 @@ async function createAuthFile(browser: Browser, workerAuth: WorkerAuth): Promise
 			if (await continueLink.isVisible().catch(() => false)) {
 				await continueLink.click();
 			} else {
-				await page.goto('/', { waitUntil: 'domcontentloaded' });
+				await page.goto('/', { waitUntil: 'networkidle' });
 			}
 			await expectSignedIn(page);
 		}
