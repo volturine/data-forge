@@ -3,6 +3,7 @@ import { switchNamespace } from './utils/namespace.js';
 import { waitForAppShell, waitForProfileTabs, waitForProfileTab } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
+import { E2E_PASSWORD } from './utils/user-flows.js';
 
 async function expandSystemExportGroup(page: import('@playwright/test').Page, schemaName: string) {
 	const toggle = page.locator(
@@ -361,6 +362,31 @@ test.describe('Profile – System tab', () => {
 		await screenshot(page, 'profile', 'system-tab');
 	});
 
+	test('IndexedDB toggle persists after save and reload', async ({ page }) => {
+		await page.goto('/profile#system');
+		await waitForProfileTab(page, 'System');
+
+		const toggle = page.getByRole('switch', { name: 'Toggle IndexedDB inspector' });
+		const wasEnabled = (await toggle.getAttribute('aria-checked')) === 'true';
+
+		// Toggle to the opposite state
+		await toggle.click();
+		await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 3_000 });
+
+		await page.getByRole('button', { name: 'Save' }).click();
+		await expect(page.getByText('System settings saved')).toBeVisible({ timeout: 5_000 });
+
+		await page.reload();
+		await waitForProfileTab(page, 'System');
+		await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 5_000 });
+
+		// Restore original state
+		await toggle.click();
+		await expect(toggle).toHaveAttribute('aria-checked', String(wasEnabled), { timeout: 3_000 });
+		await page.getByRole('button', { name: 'Save' }).click();
+		await expect(page.getByText('System settings saved')).toBeVisible({ timeout: 5_000 });
+	});
+
 	test('system tab shows collapsible schema groups for export options', async ({ page }) => {
 		await page.goto('/profile#system');
 		await waitForProfileTab(page, 'System');
@@ -593,5 +619,231 @@ test.describe('Profile – accessibility', () => {
 			'aria-selected',
 			'true'
 		);
+	});
+});
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Profile – Account tab functional
+// ────────────────────────────────────────────────────────────────────────────────
+
+test.describe('Profile – Account tab functional', () => {
+	test('password change with correct current password succeeds', async ({ page }) => {
+		await page.goto('/profile#account');
+		await waitForProfileTabs(page);
+
+		const panel = page.locator('#panel-account');
+		await panel.locator('#current').fill(E2E_PASSWORD);
+		await panel.locator('#fresh').fill('NewValidPass123!');
+		await panel.locator('#confirm').fill('NewValidPass123!');
+
+		await panel.getByRole('button', { name: 'Change password' }).click();
+
+		await expect(panel.getByText('Password changed')).toBeVisible({ timeout: 5_000 });
+
+		// Fields should be cleared after success
+		await expect(panel.locator('#current')).toHaveValue('');
+		await expect(panel.locator('#fresh')).toHaveValue('');
+		await expect(panel.locator('#confirm')).toHaveValue('');
+	});
+
+	test('password change with wrong current password shows error', async ({ page }) => {
+		await page.goto('/profile#account');
+		await waitForProfileTabs(page);
+
+		const panel = page.locator('#panel-account');
+		await panel.locator('#current').fill('WrongPassword123!');
+		await panel.locator('#fresh').fill('NewValidPass123!');
+		await panel.locator('#confirm').fill('NewValidPass123!');
+
+		await panel.getByRole('button', { name: 'Change password' }).click();
+
+		// Backend returns "Invalid email or password" for wrong current password
+		await expect(panel.getByText(/Invalid email or password/i)).toBeVisible({ timeout: 5_000 });
+	});
+
+	test('password change with mismatched new passwords shows error', async ({ page }) => {
+		await page.goto('/profile#account');
+		await waitForProfileTabs(page);
+
+		const panel = page.locator('#panel-account');
+		await panel.locator('#current').fill(E2E_PASSWORD);
+		await panel.locator('#fresh').fill('NewValidPass123!');
+		await panel.locator('#confirm').fill('DifferentPass123!');
+
+		await panel.getByRole('button', { name: 'Change password' }).click();
+
+		await expect(panel.getByText(/Passwords do not match/i)).toBeVisible({ timeout: 5_000 });
+	});
+
+	test('password change with short new password is blocked by HTML5 validation', async ({
+		page
+	}) => {
+		await page.goto('/profile#account');
+		await waitForProfileTabs(page);
+
+		const panel = page.locator('#panel-account');
+		await panel.locator('#current').fill(E2E_PASSWORD);
+		await panel.locator('#fresh').fill('short');
+		await panel.locator('#confirm').fill('short');
+
+		// The #fresh input has minlength=8, so browser blocks submission before JS runs
+		await expect(panel.locator('#fresh')).toHaveAttribute('minlength', '8');
+
+		// Clicking submit should not navigate away or show a success message
+		await panel.getByRole('button', { name: 'Change password' }).click();
+		await expect(page).toHaveURL('/profile#account');
+		await expect(panel.getByText('Password changed')).not.toBeVisible();
+	});
+
+	test('display name can be edited and persists after save and reload', async ({ page }) => {
+		await page.goto('/profile#account');
+		await waitForProfileTabs(page);
+
+		const panel = page.locator('#panel-account');
+		const newName = `E2E Display ${uid()}`;
+		await panel.locator('#name').fill(newName);
+		await panel.getByRole('button', { name: 'Save' }).click();
+		await expect(panel.getByText('Profile updated')).toBeVisible({ timeout: 5_000 });
+
+		await page.reload();
+		await waitForProfileTabs(page);
+		await expect(panel.locator('#name')).toHaveValue(newName);
+	});
+});
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Profile – AI Providers tab functional
+// ────────────────────────────────────────────────────────────────────────────────
+
+test.describe('Profile – AI Providers tab functional', () => {
+	test('clicking Test Ollama button triggers feedback message', async ({ page }) => {
+		await page.goto('/profile#ai-providers');
+		await waitForProfileTab(page, 'AI Providers');
+
+		const testBtn = page.getByRole('button', { name: 'Test Ollama' });
+		await expect(testBtn).toBeVisible();
+		await testBtn.click();
+
+		// Wait for feedback to appear (either success or error)
+		await expect(
+			page.locator(':text("ollama:")').or(page.getByText(/error|failed/i).first())
+		).toBeVisible({ timeout: 10_000 });
+	});
+
+	test('clicking Test OpenRouter without key triggers error feedback', async ({ page }) => {
+		await page.goto('/profile#ai-providers');
+		await waitForProfileTab(page, 'AI Providers');
+
+		const testBtn = page.getByRole('button', { name: 'Test OpenRouter' });
+		await expect(testBtn).toBeVisible();
+		await testBtn.click();
+
+		await expect(
+			page.locator(':text("openrouter:")').or(page.getByText(/error|failed|key/i).first())
+		).toBeVisible({ timeout: 10_000 });
+	});
+
+	test('AI provider model and key dirty state persists after save and reload', async ({ page }) => {
+		await page.goto('/profile#ai-providers');
+		await waitForProfileTab(page, 'AI Providers');
+
+		const modelInput = page.locator('input[placeholder="openai/gpt-4o-mini"]');
+		const keyInput = page.locator('input[type="password"]').first();
+
+		const testModel = `e2e-model-${uid()}`;
+		await modelInput.fill(testModel);
+		await keyInput.fill('e2e-fake-key-12345');
+
+		await page.getByRole('button', { name: 'Save' }).click();
+		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
+
+		await page.reload();
+		await waitForProfileTab(page, 'AI Providers');
+
+		// Model should persist
+		await expect(modelInput).toHaveValue(testModel);
+		// Key should be cleared (masked) after reload since server returns masked
+		await expect(keyInput).toHaveValue('');
+	});
+});
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Profile – Notifications tab functional
+// ────────────────────────────────────────────────────────────────────────────────
+
+test.describe('Profile – Notifications tab functional', () => {
+	test('SMTP test button is disabled when recipient is empty', async ({ page }) => {
+		await page.goto('/profile#notifications');
+		await waitForProfileTab(page, 'Notifications');
+
+		const testBtn = page.locator('[data-testid="settings-smtp-test-button"]');
+		await expect(testBtn).toBeDisabled();
+	});
+
+	test('SMTP test with recipient triggers feedback', async ({ page }) => {
+		await page.goto('/profile#notifications');
+		await waitForProfileTab(page, 'Notifications');
+
+		await page.locator('[data-testid="settings-smtp-test-recipient"]').fill('test@example.com');
+		await page.locator('[data-testid="settings-smtp-test-button"]').click();
+
+		// Wait for feedback (success or error)
+		await expect(page.getByText(/SMTP|test|sent|error|failed/i).first()).toBeVisible({
+			timeout: 10_000
+		});
+	});
+
+	test('Telegram toggle on/off persists after save and reload', async ({ page }) => {
+		await page.goto('/profile#notifications');
+		await waitForProfileTab(page, 'Notifications');
+
+		// Expand Telegram section
+		await page.getByRole('button', { name: /Telegram/i }).click();
+		await expect(page.locator('#telegram-bot-token')).toBeVisible({ timeout: 3_000 });
+
+		const toggle = page.locator('[role="switch"][aria-label="Toggle Telegram bot"]');
+		await expect(toggle).toBeVisible();
+
+		// Toggle on if not already
+		const wasEnabled = (await toggle.getAttribute('aria-checked')) === 'true';
+		if (!wasEnabled) {
+			await toggle.click();
+			await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 3_000 });
+		}
+
+		// Save
+		await page.getByRole('button', { name: 'Save' }).click();
+		await expect(page.getByText('Notification settings saved')).toBeVisible({ timeout: 5_000 });
+
+		// Reload and verify toggle state persisted
+		await page.reload();
+		await waitForProfileTab(page, 'Notifications');
+		await page.getByRole('button', { name: /Telegram/i }).click();
+		await expect(page.locator('#telegram-bot-token')).toBeVisible({ timeout: 3_000 });
+		await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
+
+		// Toggle back off to clean up
+		await toggle.click();
+		await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 3_000 });
+		await page.getByRole('button', { name: 'Save' }).click();
+		await expect(page.getByText('Notification settings saved')).toBeVisible({ timeout: 5_000 });
+	});
+});
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Profile – Connected accounts functional
+// ────────────────────────────────────────────────────────────────────────────────
+
+test.describe('Profile – Connected accounts', () => {
+	test('Google and GitHub connect buttons are present when not connected', async ({ page }) => {
+		await page.goto('/profile#account');
+		await waitForProfileTabs(page);
+
+		const panel = page.locator('#panel-account');
+
+		// Since e2e worker registers via email, OAuth should not be connected.
+		// Look for Connect buttons in the connected-accounts section.
+		const connectButtons = panel.getByRole('button', { name: 'Connect' });
+		await expect(connectButtons).toHaveCount(2);
 	});
 });

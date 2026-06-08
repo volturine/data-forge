@@ -358,6 +358,44 @@ test.describe('UDFs – editor functional flows', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
+// UDF code editor functional
+// ────────────────────────────────────────────────────────────────────────────────
+
+test.describe('UDFs – code editor functional', () => {
+	test('typing code in CodeMirror persists after save and reload', async ({ page, request }) => {
+		const udf = `e2e_code_${uid()}`;
+		const udfId = await createUdf(request, udf);
+		try {
+			await gotoUdfEditor(page, udfId);
+
+			// Focus the CodeMirror contenteditable and replace text
+			const cmContent = page.locator('.cm-content');
+			await expect(cmContent).toBeVisible({ timeout: 5_000 });
+			await cmContent.click();
+			await cmContent.fill('def udf(value):\n    return value * 2\n');
+
+			// Save
+			const saveBtn = page.locator('[data-testid="udf-save-button"]');
+			await saveBtn.click();
+
+			// Wait for save to complete
+			await expect(saveBtn).toBeEnabled({ timeout: 5_000 });
+
+			// Reload and verify code persisted
+			await page.reload();
+			await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 5_000 });
+
+			// CodeMirror content should contain the new code
+			await expect(page.locator('.cm-editor')).toContainText('return value * 2', {
+				timeout: 5_000
+			});
+		} finally {
+			await deleteUdfViaUI(page, udf);
+		}
+	});
+});
+
+// ────────────────────────────────────────────────────────────────────────────────
 // UDF error-state regression tests
 // ────────────────────────────────────────────────────────────────────────────────
 

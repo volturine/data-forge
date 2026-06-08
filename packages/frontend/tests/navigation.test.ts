@@ -88,6 +88,29 @@ test.describe('Navigation – page load smoke tests', () => {
 	});
 });
 
+test.describe('Navigation – theme toggle', () => {
+	test('theme toggle switches between light and dark', async ({ page }) => {
+		await page.goto('/');
+		await waitForAppShell(page);
+
+		const theme = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+		const initial = theme === 'dark' ? 'dark' : 'light';
+
+		await page.getByRole('button', { name: 'Toggle theme' }).click();
+		const afterToggle = await page.evaluate(() =>
+			document.documentElement.getAttribute('data-theme')
+		);
+		expect(afterToggle).toBe(initial === 'light' ? 'dark' : 'light');
+
+		// Toggle back
+		await page.getByRole('button', { name: 'Toggle theme' }).click();
+		const afterSecond = await page.evaluate(() =>
+			document.documentElement.getAttribute('data-theme')
+		);
+		expect(afterSecond).toBe(initial);
+	});
+});
+
 test.describe('Navigation – profile access', () => {
 	test('profile link navigates to profile page', async ({ page }) => {
 		await page.goto('/');

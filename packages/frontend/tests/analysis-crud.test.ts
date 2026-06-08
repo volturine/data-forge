@@ -120,6 +120,130 @@ test.describe('Analyses – list & gallery', () => {
 	});
 });
 
+test.describe('Analyses – gallery interactions', () => {
+	test('sort dropdown A-Z reorders analysis cards', async ({ page, request }) => {
+		const suffix = uid();
+		const dsName = `e2e-sort-ds-${suffix}`;
+		const alphaName = `Alpha Sort ${suffix}`;
+		const zebraName = `Zebra Sort ${suffix}`;
+		const dsId = await createDatasource(request, dsName);
+		await createAnalysis(request, zebraName, dsId);
+		await createAnalysis(request, alphaName, dsId);
+		try {
+			await gotoAnalysesGallery(page);
+			await expect(page.locator(`[data-analysis-card="${zebraName}"]`)).toBeVisible();
+			await expect(page.locator(`[data-analysis-card="${alphaName}"]`)).toBeVisible();
+
+			// Switch to A-Z sort and verify Alpha comes first
+			await page.locator('#sort-select').selectOption('name-asc');
+			await page.waitForTimeout(200);
+			await expect
+				.poll(
+					async () => {
+						return await page
+							.locator('[data-analysis-card]')
+							.first()
+							.getAttribute('data-analysis-card');
+					},
+					{ timeout: 5_000 }
+				)
+				.toBe(alphaName);
+
+			// Switch to Z-A sort and verify Zebra comes first
+			await page.locator('#sort-select').selectOption('name-desc');
+			await page.waitForTimeout(200);
+			await expect
+				.poll(
+					async () => {
+						return await page
+							.locator('[data-analysis-card]')
+							.first()
+							.getAttribute('data-analysis-card');
+					},
+					{ timeout: 5_000 }
+				)
+				.toBe(zebraName);
+		} finally {
+			await deleteAnalysisViaUI(page, alphaName);
+			await deleteAnalysisViaUI(page, zebraName);
+			await deleteDatasourceViaUI(page, dsName);
+		}
+	});
+
+	test('duplicate analysis creates a copy via modal', async ({ page, request }) => {
+		const suffix = uid();
+		const dsName = `e2e-dup-ds-${suffix}`;
+		const aName = `E2E Duplicate ${suffix}`;
+		const dsId = await createDatasource(request, dsName);
+		await createAnalysis(request, aName, dsId);
+		try {
+			await gotoAnalysesGallery(page);
+			const card = page.locator(`[data-analysis-card="${aName}"]`);
+			await expect(card).toBeVisible();
+
+			// Click duplicate button on the card
+			await card.getByRole('button', { name: /Duplicate analysis/i }).click();
+
+			// Modal opens with pre-filled name
+			const modal = page.locator('[role="dialog"]').filter({ hasText: /Duplicate Analysis/i });
+			await expect(modal).toBeVisible({ timeout: 5_000 });
+			const nameInput = modal.locator('input').first();
+			await expect(nameInput).toHaveValue(`Copy of ${aName}`);
+
+			// Click Duplicate
+			await modal.getByRole('button', { name: /^Duplicate$/ }).click();
+
+			// Should navigate to the new analysis
+			await expect(page).toHaveURL(/\/analysis\//, { timeout: 10_000 });
+			await expect(page.getByRole('heading', { name: /Copy of /i, level: 1 })).toBeVisible({
+				timeout: 5_000
+			});
+		} finally {
+			await deleteAnalysisViaUI(page, `Copy of ${aName}`);
+			await deleteAnalysisViaUI(page, aName);
+			await deleteDatasourceViaUI(page, dsName);
+		}
+	});
+
+	test('bulk select and delete removes multiple analyses', async ({ page, request }) => {
+		const suffix = uid();
+		const dsName = `e2e-bulk-ds-${suffix}`;
+		const a1 = `Bulk One ${suffix}`;
+		const a2 = `Bulk Two ${suffix}`;
+		const dsId = await createDatasource(request, dsName);
+		const id1 = await createAnalysis(request, a1, dsId);
+		const id2 = await createAnalysis(request, a2, dsId);
+		try {
+			await gotoAnalysesGallery(page);
+			await expect(page.locator(`[data-analysis-card="${a1}"]`)).toBeVisible();
+			await expect(page.locator(`[data-analysis-card="${a2}"]`)).toBeVisible();
+
+			// Check both test analysis checkboxes individually
+			await page.locator(`#analysis-${id1}-select`).check();
+			await page.locator(`#analysis-${id2}-select`).check();
+
+			// Bulk action buttons should appear
+			await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible({
+				timeout: 3_000
+			});
+
+			// Click bulk Delete
+			await page.getByRole('button', { name: 'Delete', exact: true }).click();
+
+			// Confirm dialog
+			const dialog = dialogByHeading(page, /Delete Analyses/i);
+			await expect(dialog).toBeVisible({ timeout: 3_000 });
+			await dialog.getByRole('button', { name: /^Delete$/ }).click();
+
+			// Both cards should be removed
+			await expect(page.locator(`[data-analysis-card="${a1}"]`)).toBeHidden({ timeout: 10_000 });
+			await expect(page.locator(`[data-analysis-card="${a2}"]`)).toBeHidden({ timeout: 10_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, dsName);
+		}
+	});
+});
+
 test.describe('Analyses – create wizard', () => {
 	test('step 1: Next is disabled when name is empty', async ({ page }) => {
 		await gotoNewAnalysis(page);

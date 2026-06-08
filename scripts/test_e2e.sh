@@ -192,9 +192,8 @@ echo "Runtime workers are ready"
 echo "Waiting for frontend readiness"
 wait_for_url "http://127.0.0.1:${FRONTEND_PORT}" "frontend"
 echo "Frontend is ready"
-E2E_SHARD_WORKERS="${E2E_SHARD_WORKERS:-1}"
 echo "Starting Playwright e2e tests across 4 deterministic shards"
-echo "Using ${E2E_SHARD_WORKERS} Playwright worker(s) per shard"
+echo "Using $(grep -o 'workers: [0-9]*' playwright.config.ts | awk '{print $2}') worker(s) per shard (from playwright.config.ts)"
 mkdir -p packages/frontend/tests/.artifacts/playwright
 for shard_index in 1 2 3 4; do
     mkdir -p "packages/frontend/tests/.artifacts/playwright/shard-${shard_index}-of-4/test-results"
@@ -217,7 +216,7 @@ run_playwright_shard() {
     python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        -- ./node_modules/.bin/playwright test --config=playwright.config.ts --workers "$E2E_SHARD_WORKERS" "$@"
+        -- ./node_modules/.bin/playwright test --config=playwright.config.ts "$@"
 }
 
 SHARD_PIDS=()
@@ -235,18 +234,20 @@ start_playwright_shard "1/4" \
     tests/analysis-editor.test.ts \
     tests/analysis-crud.test.ts \
     tests/analysis-locking.test.ts \
+    tests/analysis-error-states.test.ts \
     tests/lineage.test.ts
 
 start_playwright_shard "2/4" \
-    --grep "Monitoring –|Navigation –|Profile –|Analyses – SQL/Polars snippet export|Datasources – detail view|Datasources – preview pagination|Datasources – column stats panel|Datasources – config tab interactions" \
+    --grep "Monitoring –|Navigation –|Profile –|Analyses – SQL/Polars snippet export|Datasources – detail view|Datasources – preview pagination|Datasources – column stats panel|Datasources – config tab interactions|Auth –" \
     tests/monitoring.test.ts \
     tests/navigation.test.ts \
     tests/profile.test.ts \
     tests/sql-polars-snippet-export.test.ts \
-    tests/datasources.test.ts
+    tests/datasources.test.ts \
+    tests/auth.test.ts
 
 start_playwright_shard "3/4" \
-    --grep "Analyses –|Datasources – list & management|Datasources – upload page|Namespace –|Build Preview –|Cancel Build –" \
+    --grep "Analyses –|Datasources – list & management|Datasources – upload page|Datasources – Runs tab|Datasources – Health Checks tab|Datasources – CSV config|Datasources – schema refresh|Datasources – error states|Datasources – preview table interactions|Datasources – build comparison|Namespace –|Build Preview –|Cancel Build –" \
     tests/analysis-operations.test.ts \
     tests/datasources.test.ts \
     tests/namespace-isolation.test.ts \

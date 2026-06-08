@@ -267,6 +267,77 @@ test.describe('Analyses – output node interactions', () => {
 		}
 	});
 
+	test('notification toggle enable and disable updates chip', async ({ page, request }) => {
+		const aName = `E2E Notify Toggle ${uid()}`;
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
+		try {
+			await gotoAnalysisEditor(page, aId);
+
+			// Expand notification section
+			const notifyToggle = page.locator('[data-testid="output-notify-toggle"]');
+			await expect(notifyToggle).toBeVisible({ timeout: 5_000 });
+			await notifyToggle.click();
+
+			const notifyPanel = page.locator('[data-testid="output-notify-panel"]');
+			await expect(notifyPanel).toBeVisible({ timeout: 3_000 });
+
+			// Check the "Notify subscribers on build" checkbox
+			const checkbox = notifyPanel.locator('input[name="notify_enabled"]');
+			await checkbox.check();
+
+			// Chip showing subscriber count should appear in the toggle button
+			await expect(notifyToggle).toContainText('/');
+
+			// Uncheck
+			await checkbox.uncheck();
+
+			// Chip should disappear
+			await expect(notifyToggle).not.toContainText('/', { timeout: 3_000 });
+		} finally {
+			await shutdownEngine(request, aId);
+			await deleteAnalysisViaUI(page, aName);
+		}
+	});
+
+	test('schedule section toggle opens and shows empty state', async ({ page, request }) => {
+		const aName = `E2E Schedule Toggle ${uid()}`;
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
+		try {
+			await gotoAnalysisEditor(page, aId);
+
+			const scheduleToggle = page.locator('[data-testid="output-schedule-toggle"]');
+			await expect(scheduleToggle).toBeVisible({ timeout: 5_000 });
+
+			// Schedule section should start collapsed
+			await expect(
+				page.getByText(/Save this analysis to create an output datasource/i)
+			).not.toBeVisible();
+
+			// Open schedule section
+			await scheduleToggle.click();
+			await expect(
+				page.getByText(
+					/Build this output once to materialize its datasource before adding schedules/i
+				)
+			).toBeVisible({
+				timeout: 5_000
+			});
+
+			// Close it
+			await scheduleToggle.click();
+			await expect(
+				page.getByText(
+					/Build this output once to materialize its datasource before adding schedules/i
+				)
+			).not.toBeVisible({
+				timeout: 3_000
+			});
+		} finally {
+			await shutdownEngine(request, aId);
+			await deleteAnalysisViaUI(page, aName);
+		}
+	});
+
 	test('table name inline edit', async ({ page, request }) => {
 		const aName = `E2E Output Rename ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
