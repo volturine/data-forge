@@ -427,6 +427,9 @@ test.describe('Analyses – output node persistence', () => {
 			await page.getByRole('button', { name: 'Save' }).click();
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 
+			// Verify mode is still correct immediately after save (before reload)
+			await expect(modeTrigger).toContainText('incremental');
+
 			// Reload and verify mode persisted
 			await page.reload();
 			await waitForEditorReload(page);
@@ -467,6 +470,12 @@ test.describe('Analyses – output node persistence', () => {
 			// Save
 			await page.getByRole('button', { name: 'Save' }).click();
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+
+			// Verify table name is still correct immediately after save (before reload)
+			await expect(page.locator('[data-testid="output-table-name-inline"]')).toHaveText(
+				'persisted_table',
+				{ timeout: 3_000 }
+			);
 
 			// Reload and verify table name persisted
 			await page.reload();

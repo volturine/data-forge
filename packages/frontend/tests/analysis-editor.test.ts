@@ -143,6 +143,11 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await page.getByRole('button', { name: 'Save' }).click();
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 
+			// Verify the description is visible immediately after save (before reload)
+			await expect(page.locator('header').first().getByText(nextDescription)).toBeVisible({
+				timeout: 5_000
+			});
+
 			await page.reload({ waitUntil: 'networkidle' });
 			await waitForEditorReload(page);
 			await expect(page.locator('header').first().getByText(nextDescription)).toBeVisible({
@@ -309,6 +314,11 @@ test.describe('Analyses – save persistence', () => {
 			await page.getByRole('button', { name: 'Save' }).click();
 			await expect(page.locator('[data-save-state="clean"]')).toBeVisible({ timeout: 5_000 });
 
+			// Verify the step is still present immediately after save (before reload)
+			await expect(page.locator('[data-step-type="filter"]')).toHaveCount(1, {
+				timeout: 5_000
+			});
+
 			// Reload the page completely
 			await page.reload();
 
@@ -471,6 +481,16 @@ test.describe('Analyses – step reorder persistence', () => {
 				timeout: 5_000
 			});
 
+			// Verify order is correct immediately after save (before reload)
+			const afterSaveNodes = page.locator('[data-step-type]');
+			const countAfterSave = await afterSaveNodes.count();
+			const typesAfterSave: string[] = [];
+			for (let i = 0; i < countAfterSave; i++) {
+				const attr = await afterSaveNodes.nth(i).getAttribute('data-step-type');
+				if (attr) typesAfterSave.push(attr);
+			}
+			expect(typesAfterSave).toEqual(typesBefore);
+
 			// Reload and wait for the editor to fully hydrate before asserting steps
 			await page.reload();
 			await waitForEditorReload(page);
@@ -511,6 +531,15 @@ test.describe('Analyses – save + reload config persistence', () => {
 
 			await page.getByRole('button', { name: 'Save' }).click();
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+
+			// Verify the limit value is correct immediately after save (before reload)
+			const limitNodeAfterSave = await latestNode(page, 'limit');
+			await expect(limitNodeAfterSave).toBeVisible({ timeout: 5_000 });
+			await limitNodeAfterSave.locator('[data-action="edit"]').click();
+			const afterSavePanel = page.locator('[data-step-config="limit"]');
+			await expect(afterSavePanel).toBeVisible({ timeout: 5_000 });
+			const afterSaveInput = afterSavePanel.locator('[data-testid="limit-rows-input"]');
+			await expect(afterSaveInput).toHaveValue('77');
 
 			await page.reload();
 			await waitForEditorReload(page);

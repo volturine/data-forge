@@ -376,6 +376,9 @@ test.describe('Profile – System tab', () => {
 		await page.getByRole('button', { name: 'Save' }).click();
 		await expect(page.getByText('System settings saved')).toBeVisible({ timeout: 5_000 });
 
+		// Verify toggle state is correct immediately after save (before reload)
+		await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 5_000 });
+
 		await page.reload();
 		await waitForProfileTab(page, 'System');
 		await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 5_000 });
@@ -705,6 +708,9 @@ test.describe('Profile – Account tab functional', () => {
 		await panel.getByRole('button', { name: 'Save' }).click();
 		await expect(panel.getByText('Profile updated')).toBeVisible({ timeout: 5_000 });
 
+		// Verify display name is correct immediately after save (before reload)
+		await expect(panel.locator('#name')).toHaveValue(newName);
+
 		await page.reload();
 		await waitForProfileTabs(page);
 		await expect(panel.locator('#name')).toHaveValue(newName);
@@ -757,6 +763,9 @@ test.describe('Profile – AI Providers tab functional', () => {
 		await page.getByRole('button', { name: 'Save' }).click();
 		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
 
+		// Verify model value is correct immediately after save (before reload)
+		await expect(modelInput).toHaveValue(testModel);
+
 		await page.reload();
 		await waitForProfileTab(page, 'AI Providers');
 
@@ -778,6 +787,9 @@ test.describe('Profile – AI Providers tab functional', () => {
 
 		await page.getByRole('button', { name: 'Save' }).click();
 		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
+
+		// Verify endpoint is correct immediately after save (before reload)
+		await expect(endpointInput).toHaveValue(customEndpoint);
 
 		await page.reload();
 		await waitForProfileTab(page, 'AI Providers');
@@ -851,6 +863,9 @@ test.describe('Profile – Notifications tab functional', () => {
 		// Save
 		await page.getByRole('button', { name: 'Save' }).click();
 		await expect(page.getByText('Notification settings saved')).toBeVisible({ timeout: 5_000 });
+
+		// Verify toggle state is correct immediately after save (before reload)
+		await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
 
 		// Reload and verify toggle state persisted
 		await page.reload();

@@ -447,6 +447,9 @@ test.describe('Datasources – config tab interactions', () => {
 			]);
 			expect(saveResponse.ok()).toBeTruthy();
 
+			// Verify the new name is visible immediately after save (before reload)
+			await expect(nameInput).toHaveValue(renamed, { timeout: 5_000 });
+
 			// After save, reload page and verify renamed datasource appears
 			await page.reload();
 			await expect(page.locator(`[data-ds-row="${renamed}"]`)).toBeVisible({ timeout: 5_000 });
@@ -539,6 +542,9 @@ test.describe('Datasources – CSV config tab functional', () => {
 				timeout: 5_000
 			});
 
+			// Verify delimiter is still semicolon immediately after save (before reload)
+			await expect(delimiterSelect).toHaveValue(';', { timeout: 5_000 });
+
 			// Reload and verify delimiter persisted
 			await page.reload();
 			await expect(config).toBeVisible({ timeout: 5_000 });
@@ -572,6 +578,9 @@ test.describe('Datasources – CSV config tab functional', () => {
 			await expect(config.getByText('Changes saved successfully!')).toBeVisible({
 				timeout: 5_000
 			});
+
+			// Verify checkbox state is correct immediately after save (before reload)
+			await expect(headerCheckbox).toBeChecked({ checked: !wasChecked, timeout: 5_000 });
 
 			// Reload and verify
 			await page.reload();

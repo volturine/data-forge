@@ -327,6 +327,11 @@ test.describe('UDFs – editor functional flows', () => {
 			const saveBtn = page.locator('[data-testid="udf-save-button"]');
 			await saveBtn.click();
 
+			// Verify description is correct immediately after save (before reload)
+			await expect(page.locator('#udf-description')).toHaveValue('Updated description from E2E', {
+				timeout: 5_000
+			});
+
 			// Reload and verify the changes persisted
 			await page.reload();
 			await expect(page.locator('#udf-description')).toHaveValue('Updated description from E2E', {
@@ -380,6 +385,11 @@ test.describe('UDFs – code editor functional', () => {
 
 			// Wait for save to complete
 			await expect(saveBtn).toBeEnabled({ timeout: 5_000 });
+
+			// Verify code is correct immediately after save (before reload)
+			await expect(page.locator('.cm-editor')).toContainText('return value * 2', {
+				timeout: 5_000
+			});
 
 			// Reload and verify code persisted
 			await page.reload();
