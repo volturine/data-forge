@@ -267,13 +267,15 @@ test.describe('Monitoring – page structure', () => {
 		}
 	});
 
-	test('search input is present', async ({ page }) => {
-		await expect(page.getByLabel(/Search builds, schedules, or health checks/i)).toBeVisible();
-	});
+	test('each tab has its own search input', async ({ page }) => {
+		await page.goto('/monitoring?tab=builds');
+		await expect(page.getByLabel(/Search builds/i)).toBeVisible();
 
-	test('typing in search does not crash the page', async ({ page }) => {
-		await page.getByLabel(/Search builds, schedules, or health checks/i).fill('test query');
-		await expect(page.getByRole('heading', { name: 'Monitoring' })).toBeVisible();
+		await page.goto('/monitoring?tab=schedules');
+		await expect(page.getByLabel(/Search schedules/i)).toBeVisible();
+
+		await page.goto('/monitoring?tab=health');
+		await expect(page.getByLabel(/Search health checks/i)).toBeVisible();
 	});
 });
 
@@ -302,6 +304,29 @@ test.describe('Monitoring – Schedules tab', () => {
 			const schedRow = page.locator(`tr[data-datasource-id="${dsId}"]`);
 			await expect(schedRow).toBeVisible({ timeout: 5_000 });
 			await expect(schedRow).toContainText('Cron: 0 6 * * *', { timeout: 5_000 });
+		} finally {
+			await deleteScheduleViaUI(page, ds);
+		}
+	});
+
+	test('schedules search filters by datasource name', async ({ page, request }) => {
+		const ds = `e2e-sched-search-${uid()}`;
+		const dsId = await createDatasource(request, ds);
+		await createSchedule(request, dsId, '0 9 * * *');
+		try {
+			await page.goto('/monitoring?tab=schedules');
+			const schedRow = page.locator(`tr[data-datasource-id="${dsId}"]`);
+			await expect(schedRow).toBeVisible({ timeout: 5_000 });
+
+			// Search for the datasource name should show the schedule
+			await page.getByLabel(/Search schedules/i).fill(ds);
+			await expect(schedRow).toBeVisible({ timeout: 5_000 });
+
+			// Search for non-matching term should show empty state
+			await page.getByLabel(/Search schedules/i).fill('ZZZNOMATCH');
+			await expect(page.getByText('No schedules match your search.')).toBeVisible({
+				timeout: 5_000
+			});
 		} finally {
 			await deleteScheduleViaUI(page, ds);
 		}
@@ -518,6 +543,31 @@ test.describe('Monitoring – Health Checks tab', () => {
 		}
 	});
 
+	test('health checks search filters by check name', async ({ page, request }) => {
+		const id = uid();
+		const ds = `e2e-hc-search-${id}`;
+		const hc = `e2e Searchable HC ${id}`;
+		const dsId = await createDatasource(request, ds);
+		await createHealthCheck(request, dsId, hc);
+		try {
+			await page.goto('/monitoring?tab=health');
+			const row = await waitForHealthCheckRow(page, hc);
+			await expect(row).toBeVisible({ timeout: 5_000 });
+
+			// Search for the check name should show it
+			await page.getByLabel(/Search health checks/i).fill(hc);
+			await expect(row).toBeVisible({ timeout: 5_000 });
+
+			// Search for non-matching term should show empty state
+			await page.getByLabel(/Search health checks/i).fill('ZZZNOMATCH');
+			await expect(page.getByText('No health checks match your search.')).toBeVisible({
+				timeout: 5_000
+			});
+		} finally {
+			await deleteHealthCheckViaUI(page, hc);
+		}
+	});
+
 	test('health check delete button removes it from list', async ({ page, request }) => {
 		const id = uid();
 		const ds = `e2e-hc-del-${id}`;
@@ -626,7 +676,7 @@ test.describe('Monitoring – Builds tab', () => {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
 			await expect(panel).toBeVisible({ timeout: 5_000 });
-			await page.getByLabel(/Search builds, schedules, or health checks/i).fill(ds);
+			await page.getByLabel(/Search builds/i).fill(ds);
 			const previewRow = await waitForDatasourcePreviewRow(page, panel, dsId);
 			await expect(previewRow).toContainText('Preview');
 		} finally {
@@ -641,7 +691,7 @@ test.describe('Monitoring – Builds tab', () => {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
 			await expect(panel).toBeVisible({ timeout: 5_000 });
-			await page.getByLabel(/Search builds, schedules, or health checks/i).fill(ds);
+			await page.getByLabel(/Search builds/i).fill(ds);
 			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId);
 			await expect(buildRow).toContainText('Build');
 			await expect(buildRow).not.toContainText('Preview');
@@ -659,10 +709,10 @@ test.describe('Monitoring – Builds tab', () => {
 			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 5_000);
 			await expect(buildRow).toBeVisible({ timeout: 5_000 });
 
-			await page.getByLabel(/Search builds, schedules, or health checks/i).fill('ZZZNOMATCH');
+			await page.getByLabel(/Search builds/i).fill('ZZZNOMATCH');
 			await expect(buildRow).not.toBeVisible({ timeout: 5_000 });
 
-			await page.getByLabel(/Search builds, schedules, or health checks/i).fill(ds);
+			await page.getByLabel(/Search builds/i).fill(ds);
 			await expect(buildRow).toBeVisible({ timeout: 5_000 });
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
@@ -811,7 +861,7 @@ test.describe('Monitoring – Builds tab', () => {
 			await expect.poll(() => previewRequests).toBe(1);
 
 			await monitorPage.goto('/monitoring?tab=builds');
-			await monitorPage.getByLabel(/Search builds, schedules, or health checks/i).fill(ds);
+			await monitorPage.getByLabel(/Search builds/i).fill(ds);
 			const previewRow = await waitForDatasourcePreviewRow(monitorPage, panel, dsId);
 			await expect(previewRow).toContainText('Preview');
 			await monitorPage.close();

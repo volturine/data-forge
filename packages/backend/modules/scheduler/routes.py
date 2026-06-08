@@ -20,13 +20,23 @@ router = MCPRouter(prefix='/schedules', tags=['schedules'])
 @handle_errors(operation='list schedules')
 def list_schedules(
     datasource_id: DataSourceId | None = None,
+    search: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
     session: Session = Depends(get_db),
 ):
     """List all schedules. Optionally filter by datasource_id to see schedules for a specific output.
 
+    Supports text search across schedule fields, datasource names, and analysis names.
     Returns schedule details including resolved analysis name and tab name.
     """
-    return service.list_schedules(session, datasource_id=datasource_id)
+    return service.list_schedules(
+        session,
+        datasource_id=datasource_id,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post('', response_model=schemas.ScheduleResponse, mcp=True)

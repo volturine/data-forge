@@ -158,6 +158,32 @@ def test_list_results_empty(test_db_session, client):
     assert response.json() == []
 
 
+def test_list_all_healthchecks_pagination(test_db_session, client):
+    datasource_id = str(uuid.uuid4())
+    _create_datasource(test_db_session, datasource_id)
+    for i in range(5):
+        check = _create_check(test_db_session, datasource_id, name=f'Check {i}')
+        check.created_at = datetime.now(UTC) - timedelta(minutes=i)
+        test_db_session.add(check)
+    test_db_session.commit()
+
+    response = client.get('/api/v1/healthchecks/all?limit=2&offset=0')
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+
+    response = client.get('/api/v1/healthchecks/all?limit=2&offset=2')
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+
+    response = client.get('/api/v1/healthchecks/all?search=Check%201')
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]['name'] == 'Check 1'
+
+
 def test_list_results_after_run(test_db_session, client):
     datasource_id = str(uuid.uuid4())
     _create_datasource(test_db_session, datasource_id)

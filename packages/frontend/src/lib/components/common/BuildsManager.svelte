@@ -85,6 +85,7 @@
 		datasource_id: (pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined,
 		kind: kindFilter || undefined,
 		status: statusFilter === 'all' ? undefined : statusFilter,
+		search: effectiveSearch.trim() || undefined,
 		limit,
 		offset: (page - 1) * limit
 	});

@@ -100,6 +100,7 @@ function sameParams(a?: ListBuildsParams, b?: ListBuildsParams): boolean {
 		a.datasource_id === b.datasource_id &&
 		a.kind === b.kind &&
 		a.status === b.status &&
+		a.search === b.search &&
 		a.limit === b.limit &&
 		a.offset === b.offset
 	);

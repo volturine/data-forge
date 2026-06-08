@@ -161,7 +161,7 @@
 		queryKey: ['healthchecks', outputDatasourceId],
 		queryFn: async () => {
 			if (!outputDatasourceId) return [];
-			const result = await listHealthChecks(outputDatasourceId);
+			const result = await listHealthChecks({ datasourceId: outputDatasourceId });
 			if (result.isErr()) return [];
 			return result.value;
 		},
@@ -199,7 +199,7 @@
 		queryKey: ['schedules', outputDatasourceId],
 		queryFn: async () => {
 			if (!outputDatasourceId) return [];
-			const result = await listSchedules(outputDatasourceId);
+			const result = await listSchedules({ datasourceId: outputDatasourceId });
 			if (result.isErr()) return [];
 			return result.value;
 		},

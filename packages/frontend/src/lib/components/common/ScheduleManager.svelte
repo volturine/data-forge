@@ -53,11 +53,25 @@
 	let editCronValue = $state('');
 	let searchQuery = $state('');
 	const effectiveSearch = $derived(externalSearch ?? searchQuery);
+	let schedPage = $state(1);
+	const schedLimit = 50;
 
 	const schedulesQuery = createQuery(() => ({
-		queryKey: ['schedules', ns.value, datasourceId ?? 'all'],
+		queryKey: [
+			'schedules',
+			ns.value,
+			datasourceId ?? 'all',
+			effectiveSearch.trim(),
+			schedPage,
+			schedLimit
+		],
 		queryFn: async () => {
-			const result = await listSchedules(datasourceId);
+			const result = await listSchedules({
+				datasourceId,
+				search: effectiveSearch.trim() || undefined,
+				limit: schedLimit,
+				offset: (schedPage - 1) * schedLimit
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -96,30 +110,7 @@
 	const schedules = $derived(schedulesQuery.data ?? []);
 	const allSchedules = $derived(allSchedulesQuery.data ?? []);
 	const hasSearch = $derived(effectiveSearch.trim().length > 0);
-	const visibleSchedules = $derived.by(() => {
-		const q = effectiveSearch.trim().toLowerCase();
-		if (!q) return schedules;
-		return schedules.filter((schedule) => {
-			const dsName = (datasourceMap.get(schedule.datasource_id)?.name ?? '').toLowerCase();
-			const triggerDs = schedule.trigger_on_datasource_id
-				? (datasourceMap.get(schedule.trigger_on_datasource_id)?.name ?? '')
-				: '';
-			const dep = schedule.depends_on
-				? (allSchedules.find((s) => s.id === schedule.depends_on)?.analysis_name ?? '')
-				: '';
-			return (
-				schedule.id.toLowerCase().includes(q) ||
-				schedule.datasource_id.toLowerCase().includes(q) ||
-				dsName.includes(q) ||
-				(schedule.analysis_id ?? '').toLowerCase().includes(q) ||
-				(schedule.analysis_name ?? '').toLowerCase().includes(q) ||
-				(schedule.tab_name ?? '').toLowerCase().includes(q) ||
-				triggerDs.toLowerCase().includes(q) ||
-				dep.toLowerCase().includes(q) ||
-				schedule.cron_expression.toLowerCase().includes(q)
-			);
-		});
-	});
+	const visibleSchedules = $derived(schedules);
 
 	const targetDatasource = $derived(
 		datasourceId ? (datasourceMap.get(datasourceId) ?? null) : null
@@ -1065,7 +1056,7 @@
 						? schedulesQuery.error.message
 						: 'Error loading schedules.'}
 		</div>
-	{:else if schedules.length === 0 && !creating}
+	{:else if schedules.length === 0 && !creating && !hasSearch}
 		<div
 			class={css(
 				{
@@ -1941,5 +1932,56 @@
 				</table>
 			</div>
 		{/if}
+	{/if}
+
+	{#if !compact && schedules.length > 0}
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				marginTop: '4',
+				justifyContent: 'space-between'
+			})}
+		>
+			<span class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
+				Page {schedPage}
+			</span>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+				<button
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'bg.primary',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
+					onclick={() => {
+						if (schedPage > 1) schedPage--;
+					}}
+					disabled={schedPage === 1}
+				>
+					Previous
+				</button>
+				<button
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'bg.primary',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
+					onclick={() => {
+						schedPage++;
+					}}
+					disabled={schedules.length < schedLimit}
+				>
+					Next
+				</button>
+			</div>
+		</div>
 	{/if}
 </div>

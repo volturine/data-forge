@@ -398,11 +398,30 @@ def _enrich_schedule_response_batch(
 def list_schedules(
     session: Session,
     datasource_id: str | None = None,
+    search: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[ScheduleResponse]:
-    """List schedules with optional filtering by target datasource."""
-    query = select(Schedule)
+    """List schedules with optional filtering by target datasource and text search."""
+    query = (
+        select(Schedule)
+        .join(DataSource, col(Schedule.datasource_id) == col(DataSource.id), isouter=True)
+        .join(Analysis, col(DataSource.created_by_analysis_id) == col(Analysis.id), isouter=True)
+    )  # type: ignore[arg-type]
     if datasource_id:
         query = query.where(col(Schedule.datasource_id) == datasource_id)
+    if search:
+        q = f'%{search}%'
+        query = query.where(
+            or_(
+                col(Schedule.id).ilike(q),  # type: ignore[arg-type]
+                col(Schedule.datasource_id).ilike(q),  # type: ignore[arg-type]
+                col(Schedule.cron_expression).ilike(q),  # type: ignore[arg-type]
+                col(DataSource.name).ilike(q),  # type: ignore[arg-type]
+                col(Analysis.name).ilike(q),  # type: ignore[arg-type]
+            )
+        )
+    query = query.order_by(col(Schedule.created_at).desc()).limit(limit).offset(offset)  # type: ignore[arg-type]
     result = session.execute(query)
     schedules = result.scalars().all()
     datasource_ids = {schedule.datasource_id for schedule in schedules}

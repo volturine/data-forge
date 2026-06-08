@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Final
 
-from sqlalchemy import desc, select
-from sqlmodel import Session
+from sqlalchemy import desc, or_, select
+from sqlmodel import Session, col
 
 from backend_contracts.analysis.step_types import get_step_timing_key
 from backend_contracts.compute import schemas as compute_schemas
@@ -26,6 +26,8 @@ from backend_contracts.engine_runs.schemas import (
 from backend_core.engine_runs_utils import normalize_step_timings
 from backend_core.exceptions import EngineRunComparisonError, EngineRunNotFoundError
 from backend_core.namespace import get_namespace
+from backend_core.persistence.analysis.models import Analysis
+from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.engine_runs.models import EngineRun
 
 logger = logging.getLogger(__name__)
@@ -387,10 +389,21 @@ def list_engine_runs(
     datasource_id: str | None = None,
     kind: EngineRunKind | str | None = None,
     status: EngineRunStatus | str | None = None,
+    search: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[EngineRunResponseSchema]:
     stmt = select(EngineRun).where(EngineRun.namespace == get_namespace())  # type: ignore[arg-type]
+    stmt = stmt.join(
+        DataSource,
+        col(EngineRun.datasource_id) == col(DataSource.id),
+        isouter=True,
+    )  # type: ignore[arg-type]
+    stmt = stmt.join(
+        Analysis,
+        col(EngineRun.analysis_id) == col(Analysis.id),
+        isouter=True,
+    )  # type: ignore[arg-type]
     # SQLModel type annotations not fully compatible with Pydantic v2 - needed for .where() calls
     if analysis_id is not None:
         stmt = stmt.where(EngineRun.analysis_id == analysis_id)  # type: ignore[arg-type]
@@ -405,6 +418,17 @@ def list_engine_runs(
         stmt = stmt.where(EngineRun.kind != EngineRunKind.BUILD.value)  # type: ignore[arg-type]
     if status is not None:
         stmt = stmt.where(EngineRun.status == EngineRunStatus.require(status).value)  # type: ignore[arg-type]
+    if search:
+        q = f'%{search}%'
+        stmt = stmt.where(
+            or_(
+                col(EngineRun.id).ilike(q),  # type: ignore[arg-type]
+                col(EngineRun.analysis_id).ilike(q),  # type: ignore[arg-type]
+                col(EngineRun.datasource_id).ilike(q),  # type: ignore[arg-type]
+                col(DataSource.name).ilike(q),  # type: ignore[arg-type]
+                col(Analysis.name).ilike(q),  # type: ignore[arg-type]
+            )
+        )
 
     stmt = stmt.order_by(desc(EngineRun.created_at)).limit(limit).offset(offset)  # type: ignore[arg-type]
     runs = session.execute(stmt).scalars().all()
@@ -492,15 +516,15 @@ def _load_result_summary(result_json: dict[str, Any] | None) -> EngineRunResultS
 def _compute_schema_diff(schema_a: dict[str, str], schema_b: dict[str, str]) -> list[ColumnDiff]:
     diffs: list[ColumnDiff] = []
     all_cols = sorted(set(schema_a) | set(schema_b))
-    for col in all_cols:
-        in_a = col in schema_a
-        in_b = col in schema_b
+    for column in all_cols:
+        in_a = column in schema_a
+        in_b = column in schema_b
         if in_a and not in_b:
-            diffs.append(ColumnDiff(column=col, status=SchemaDiffStatus.REMOVED, type_a=schema_a[col]))
+            diffs.append(ColumnDiff(column=column, status=SchemaDiffStatus.REMOVED, type_a=schema_a[column]))
         elif not in_a and in_b:
-            diffs.append(ColumnDiff(column=col, status=SchemaDiffStatus.ADDED, type_b=schema_b[col]))
-        elif schema_a[col] != schema_b[col]:
-            diffs.append(ColumnDiff(column=col, status=SchemaDiffStatus.TYPE_CHANGED, type_a=schema_a[col], type_b=schema_b[col]))
+            diffs.append(ColumnDiff(column=column, status=SchemaDiffStatus.ADDED, type_b=schema_b[column]))
+        elif schema_a[column] != schema_b[column]:
+            diffs.append(ColumnDiff(column=column, status=SchemaDiffStatus.TYPE_CHANGED, type_a=schema_a[column], type_b=schema_b[column]))
     return diffs
 
 

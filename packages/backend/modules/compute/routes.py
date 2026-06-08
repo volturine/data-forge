@@ -799,6 +799,7 @@ async def list_builds(
     datasource_id: str | None = None,
     kind: str | None = None,
     status: schemas.ActiveBuildStatus | None = None,
+    search: str | None = None,
     limit: int = 100,
     offset: int = 0,
     session: Session = Depends(get_db),
@@ -813,6 +814,7 @@ async def list_builds(
         datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
         kind=kind,
         status=status,
+        search=search,
         limit=fetch_limit,
         offset=0,
     )
@@ -825,6 +827,7 @@ async def list_builds(
             datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
             kind=_engine_run_kind_filter(kind),
             status=_engine_run_status_filter(status),
+            search=search,
             limit=fetch_limit,
             offset=0,
         )

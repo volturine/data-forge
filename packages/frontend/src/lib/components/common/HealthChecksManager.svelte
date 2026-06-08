@@ -74,12 +74,26 @@
 		return `${id.slice(0, 8)}...`;
 	}
 
+	let search = $state('');
+	let hcPage = $state(1);
+	const hcLimit = 50;
+	const effectiveSearch = $derived(searchQuery ?? search);
+
 	const listQuery = createQuery(() => ({
-		queryKey: ['healthchecks', ns.value, datasourceId ?? 'all'],
+		queryKey: [
+			'healthchecks',
+			ns.value,
+			datasourceId ?? 'all',
+			effectiveSearch.trim(),
+			hcPage,
+			hcLimit
+		],
 		queryFn: async (): Promise<HealthCheckItem[]> => {
+			const search = effectiveSearch.trim() || undefined;
+			const offset = (hcPage - 1) * hcLimit;
 			const result = datasourceId
-				? await listHealthChecks(datasourceId)
-				: await listAllHealthChecks();
+				? await listHealthChecks({ datasourceId, search, limit: hcLimit, offset })
+				: await listAllHealthChecks({ search, limit: hcLimit, offset });
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value.map((check) => ({
 				...check,
@@ -194,7 +208,6 @@
 
 	let creating = $state(false);
 	let createDatasources = $state.raw<DataSource[]>([]);
-	let search = $state('');
 	let name = $state('');
 	let checkType = $state<CheckType>('row_count');
 	let config = $state<Record<string, unknown>>({});
@@ -202,7 +215,6 @@
 	let duplicateColumns = $state('');
 	let targetDatasourceId = $state('');
 	let expandedId = $state<string | null>(null);
-	const effectiveSearch = $derived(searchQuery ?? search);
 	const effectiveDatasourceId = $derived(datasourceId ?? targetDatasourceId);
 	const targetChecks = $derived.by(() => {
 		const id = effectiveDatasourceId;
@@ -211,21 +223,7 @@
 	});
 	const rowCountExists = $derived(targetChecks.some((check) => check.check_type === 'row_count'));
 	const hasSearch = $derived(effectiveSearch.trim().length > 0);
-	const visibleChecks = $derived.by(() => {
-		let result = checks;
-		const q = effectiveSearch.trim().toLowerCase();
-		if (!q) return result;
-		return result.filter((check) => {
-			const dsName = (datasourceMap.get(check.datasource_id)?.name ?? '').toLowerCase();
-			return (
-				check.name.toLowerCase().includes(q) ||
-				check.id.toLowerCase().includes(q) ||
-				check.datasource_id.toLowerCase().includes(q) ||
-				dsName.includes(q) ||
-				check.check_type.toLowerCase().includes(q)
-			);
-		});
-	});
+	const visibleChecks = $derived(checks);
 
 	function toggleExpand(id: string): void {
 		expandedId = expandedId === id ? null : id;
@@ -1237,7 +1235,7 @@
 						? resultsQuery.error.message
 						: 'Failed to load health checks.'}
 		</div>
-	{:else if checks.length === 0 && !creating}
+	{:else if checks.length === 0 && !creating && !hasSearch}
 		<div
 			class={css({
 				display: 'flex',
@@ -1805,5 +1803,56 @@
 
 	{#if compact && creating}
 		{@render createForm()}
+	{/if}
+
+	{#if !compact && checks.length > 0}
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				marginTop: '4',
+				justifyContent: 'space-between'
+			})}
+		>
+			<span class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
+				Page {hcPage}
+			</span>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+				<button
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'bg.primary',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
+					onclick={() => {
+						if (hcPage > 1) hcPage--;
+					}}
+					disabled={hcPage === 1}
+				>
+					Previous
+				</button>
+				<button
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'bg.primary',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
+					onclick={() => {
+						hcPage++;
+					}}
+					disabled={checks.length < hcLimit}
+				>
+					Next
+				</button>
+			</div>
+		</div>
 	{/if}
 </div>

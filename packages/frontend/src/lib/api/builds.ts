@@ -10,6 +10,7 @@ export interface ListBuildsParams {
 	datasource_id?: string;
 	kind?: string;
 	status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+	search?: string;
 	limit?: number;
 	offset?: number;
 }
@@ -26,6 +27,7 @@ function buildQueryString(params?: ListBuildsParams): string {
 	if (params.datasource_id) query.set('datasource_id', params.datasource_id);
 	if (params.kind) query.set('kind', params.kind);
 	if (params.status) query.set('status', params.status);
+	if (params.search) query.set('search', params.search);
 	if (params.limit !== undefined) query.set('limit', String(params.limit));
 	if (params.offset !== undefined) query.set('offset', String(params.offset));
 	const str = query.toString();

@@ -3,12 +3,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import desc, func, or_, select, update
-from sqlmodel import Session
+from sqlmodel import Session, col
 
 from backend_contracts.build_runs.models import BuildRunStatus
 from backend_contracts.compute import schemas as compute_schemas
 from backend_contracts.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
+from backend_core.persistence.datasource.models import DataSource
 
 _TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus if status.is_terminal)
 
@@ -102,10 +103,15 @@ def list_build_runs(
     kind: str | None = None,
     status: BuildRunStatus | str | None = None,
     current_engine_run_id: str | None = None,
+    search: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[BuildRun]:
-    stmt = select(BuildRun)
+    stmt = select(BuildRun).join(
+        DataSource,
+        col(BuildRun.current_datasource_id) == col(DataSource.id),
+        isouter=True,
+    )  # type: ignore[arg-type]
     if analysis_id is not None:
         stmt = stmt.where(BuildRun.analysis_id == analysis_id)  # type: ignore[arg-type]
     if datasource_id is not None:
@@ -121,6 +127,21 @@ def list_build_runs(
         stmt = stmt.where(BuildRun.status == BuildRunStatus.require(status))  # type: ignore[arg-type]
     if current_engine_run_id is not None:
         stmt = stmt.where(BuildRun.current_engine_run_id == current_engine_run_id)  # type: ignore[arg-type]
+    if search:
+        q = f'%{search}%'
+        stmt = stmt.where(
+            or_(
+                col(BuildRun.id).ilike(q),  # type: ignore[arg-type]
+                col(BuildRun.analysis_id).ilike(q),  # type: ignore[arg-type]
+                col(BuildRun.current_datasource_id).ilike(q),  # type: ignore[arg-type]
+                col(BuildRun.current_output_id).ilike(q),  # type: ignore[arg-type]
+                col(BuildRun.current_tab_name).ilike(q),  # type: ignore[arg-type]
+                col(BuildRun.current_output_name).ilike(q),  # type: ignore[arg-type]
+                col(BuildRun.current_step).ilike(q),  # type: ignore[arg-type]
+                col(BuildRun.analysis_name).ilike(q),  # type: ignore[arg-type]
+                col(DataSource.name).ilike(q),  # type: ignore[arg-type]
+            )
+        )
     stmt = stmt.order_by(desc(BuildRun.created_at)).limit(limit).offset(offset)  # type: ignore[arg-type]
     runs = list(session.execute(stmt).scalars().all())
     for run in runs:

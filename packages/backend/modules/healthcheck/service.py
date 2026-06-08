@@ -1,8 +1,8 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
-from sqlmodel import Session
+from sqlalchemy import desc, or_, select
+from sqlmodel import Session, col
 
 from backend_contracts.healthcheck_models import HealthCheckType
 from backend_core.exceptions import HealthcheckNotFoundError, HealthcheckValidationError
@@ -16,18 +16,51 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
 
 
-def list_healthchecks(session: Session, datasource_id: str) -> list[HealthCheckResponse]:
+def list_healthchecks(
+    session: Session,
+    datasource_id: str,
+    search: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[HealthCheckResponse]:
     datasource = session.get(DataSource, datasource_id)
     if not datasource:
         return []
-    result = session.execute(select(HealthCheck).where(HealthCheck.datasource_id == datasource_id))  # type: ignore[arg-type]
-    checks = result.scalars().all()
+    query = select(HealthCheck).join(DataSource, HealthCheck.datasource_id == DataSource.id, isouter=True).where(HealthCheck.datasource_id == datasource_id)  # type: ignore[arg-type]
+    if search:
+        q = f'%{search}%'
+        query = query.where(
+            or_(
+                col(HealthCheck.id).ilike(q),  # type: ignore[arg-type]
+                col(HealthCheck.name).ilike(q),  # type: ignore[arg-type]
+                col(HealthCheck.check_type).ilike(q),  # type: ignore[arg-type]
+                col(DataSource.name).ilike(q),  # type: ignore[arg-type]
+            )
+        )
+    query = query.order_by(desc(HealthCheck.created_at)).limit(limit).offset(offset)  # type: ignore[arg-type]
+    checks = session.execute(query).scalars().all()
     return [HealthCheckResponse.model_validate(check) for check in checks]
 
 
-def list_all_healthchecks(session: Session) -> list[HealthCheckResponse]:
-    result = session.execute(select(HealthCheck))
-    checks = result.scalars().all()
+def list_all_healthchecks(
+    session: Session,
+    search: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[HealthCheckResponse]:
+    query = select(HealthCheck).join(DataSource, HealthCheck.datasource_id == DataSource.id, isouter=True)  # type: ignore[arg-type]
+    if search:
+        q = f'%{search}%'
+        query = query.where(
+            or_(
+                col(HealthCheck.id).ilike(q),  # type: ignore[arg-type]
+                col(HealthCheck.name).ilike(q),  # type: ignore[arg-type]
+                col(HealthCheck.check_type).ilike(q),  # type: ignore[arg-type]
+                col(DataSource.name).ilike(q),  # type: ignore[arg-type]
+            )
+        )
+    query = query.order_by(desc(HealthCheck.created_at)).limit(limit).offset(offset)  # type: ignore[arg-type]
+    checks = session.execute(query).scalars().all()
     return [HealthCheckResponse.model_validate(check) for check in checks]
 
 

@@ -20,16 +20,30 @@ router = MCPRouter(prefix='/healthchecks', tags=['healthchecks'])
 
 @router.get('', response_model=list[schemas.HealthCheckResponse], mcp=True)
 @handle_errors(operation='list healthchecks')
-async def list_healthchecks(datasource_id: str, session: Session = Depends(get_db)):
-    """List healthchecks for a datasource."""
-    return [schemas.HealthCheckResponse.model_validate(item) for item in service.list_healthchecks(session, parse_datasource_id(datasource_id))]
+async def list_healthchecks(
+    datasource_id: str,
+    search: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    session: Session = Depends(get_db),
+):
+    """List healthchecks for a datasource. Supports text search and pagination."""
+    return [
+        schemas.HealthCheckResponse.model_validate(item)
+        for item in service.list_healthchecks(session, parse_datasource_id(datasource_id), search=search, limit=limit, offset=offset)
+    ]
 
 
 @router.get('/all', response_model=list[schemas.HealthCheckResponse], mcp=True)
 @handle_errors(operation='list all healthchecks')
-async def list_all_healthchecks(session: Session = Depends(get_db)):
-    """List healthchecks across all datasources."""
-    return [schemas.HealthCheckResponse.model_validate(item) for item in service.list_all_healthchecks(session)]
+async def list_all_healthchecks(
+    search: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    session: Session = Depends(get_db),
+):
+    """List healthchecks across all datasources. Supports text search and pagination."""
+    return [schemas.HealthCheckResponse.model_validate(item) for item in service.list_all_healthchecks(session, search=search, limit=limit, offset=offset)]
 
 
 @router.get('/results', response_model=list[schemas.HealthCheckResultResponse], mcp=True)
