@@ -217,13 +217,10 @@ run_playwright_shard() {
     PLAYWRIGHT_DISABLE_WEB_SERVER=true \
     PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir" \
     PLAYWRIGHT_OUTPUT_DIR="$output_dir" \
-    # CI runners are shared VMs; cap each shard to 1 worker so 4 shards
-    # = 4 concurrent browsers max, avoiding resource starvation under load.
-    local shard_workers="${E2E_SHARD_WORKERS:-1}"
     python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        -- ./node_modules/.bin/playwright test --config=playwright.config.ts --workers "$shard_workers" "$@"
+        -- ./node_modules/.bin/playwright test --config=playwright.config.ts "$@"
 }
 
 SHARD_PIDS=()
