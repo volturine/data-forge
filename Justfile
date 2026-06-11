@@ -7,6 +7,7 @@ python := 'env -u VIRTUAL_ENV uv run python'
 
 install:
     cd packages/backend && uv sync
+    cd packages/protocol && uv sync
     cd packages/scheduler && uv sync
     cd packages/worker && uv sync
     cd packages/frontend && bun install
@@ -17,6 +18,8 @@ install:
 update-deps:
     @echo "Updating backend dependencies to latest allowed releases..."
     cd packages/backend && uv lock --upgrade --resolution highest && uv sync
+    @echo "Updating protocol dependencies to latest allowed releases..."
+    cd packages/protocol && uv lock --upgrade --resolution highest && uv sync
     @echo "Updating frontend dependencies to latest releases (including majors)..."
     cd packages/frontend && bun update --latest
     @echo "Updating scheduler dependencies to latest allowed releases..."
@@ -90,13 +93,16 @@ check:
     cd packages/worker && env -u VIRTUAL_ENV uv run python -m mypy .
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_build_stream_types.py --check
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_step_types.py --check
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_grpc.py --check
+    env -u VIRTUAL_ENV uv run --project packages/protocol python scripts/generate_grpc.py --check
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_package_boundaries.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_env_contracts.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_dependency_hygiene.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_code_hygiene.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_test_layout.py
     cd packages/frontend && bun run panda:codegen && bun run check && bun run lint
+
+generate-grpc:
+    env -u VIRTUAL_ENV uv run --project packages/protocol python scripts/generate_grpc.py
 
 verify:
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py -- just format

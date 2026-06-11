@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import atexit
 import json
 import logging
@@ -8,16 +9,14 @@ import queue
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 import psycopg
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import StreamingResponse
+from fastapi import Request
 
 from backend_contracts.enums import DataForgeStrEnum
 from backend_core.config import settings
@@ -45,6 +44,11 @@ _SENSITIVE_FIELDS = {
 }
 _SENSITIVE_PATHS = ('/api/v1/auth', '/api/v1/settings', '/api/v1/ai/chat', '/api/v1/ai/models', '/api/v1/ai/test')
 _REDACTED = '[REDACTED]'
+
+type AsgiMessage = dict[str, Any]
+type AsgiReceive = Callable[[], Awaitable[AsgiMessage]]
+type AsgiSend = Callable[[AsgiMessage], Awaitable[None]]
+type AsgiApp = Callable[[dict[str, Any], AsgiReceive, AsgiSend], Awaitable[None]]
 
 
 class RequestLogWriter(Protocol):
@@ -420,84 +424,116 @@ class DatabaseLogHandler(logging.Handler):
             self.handleError(record)
 
 
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, writer: RequestLogWriter | None = None, get_time: Callable[[], float] | None = None, max_body_size: int = 0):
-        super().__init__(app)
+class RequestLoggingMiddleware:
+    def __init__(self, app: AsgiApp, writer: RequestLogWriter | None = None, get_time: Callable[[], float] | None = None, max_body_size: int = 0):
+        self.app = app
         self.writer = writer
         self.get_time = get_time or time.perf_counter
         self.max_body_size = max_body_size or settings.log_max_body_size
 
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
+    async def __call__(self, scope: dict[str, Any], receive: AsgiReceive, send: AsgiSend) -> None:
+        if scope.get('type') != 'http':
+            await self.app(scope, receive, send)
+            return
+
         if not self.writer:
             self.writer = get_log_writer()
         start = self.get_time()
+        request = Request(scope, receive)
         request_id = request.headers.get('x-request-id') or uuid.uuid4().hex
-        request.state.request_id = request_id
+        scope.setdefault('state', {})['request_id'] = request_id
 
         content_length = int(request.headers.get('content-length', 0))
         should_log_body = self.max_body_size == 0 or content_length <= self.max_body_size
         body_for_log: bytes | None = None
+        replay_body_sent = False
+        request_complete = False
+        response_complete = asyncio.Event()
         if should_log_body:
             body = await request.body()
             body_for_log = body
+            request_complete = True
 
-            async def receive():
-                return {'type': 'http.request', 'body': body, 'more_body': False}
+        async def receive_for_app() -> AsgiMessage:
+            nonlocal replay_body_sent, request_complete
+            if should_log_body:
+                if not replay_body_sent:
+                    replay_body_sent = True
+                    return {'type': 'http.request', 'body': body_for_log or b'', 'more_body': False}
+                await response_complete.wait()
+                return {'type': 'http.disconnect'}
 
-            request = Request(request.scope, receive)
+            if not request_complete:
+                message = await receive()
+                if message['type'] == 'http.disconnect':
+                    request_complete = True
+                    return message
+                if message['type'] == 'http.request' and not message.get('more_body', False):
+                    request_complete = True
+                return message
+
+            await response_complete.wait()
+            return {'type': 'http.disconnect'}
+
+        response_logged = False
+        response_status = 500
+        response_headers: list[tuple[bytes, bytes]] = []
+        response_body: bytes | None = None
+
+        async def send_wrapper(message: AsgiMessage) -> None:
+            nonlocal response_logged, response_status, response_headers, response_body
+            if message['type'] == 'http.response.start':
+                response_status = int(message['status'])
+                headers = list(message.get('headers', []))
+                response_headers = headers
+                filtered_headers = [item for item in headers if item[0].lower() != b'x-request-id']
+                filtered_headers.append((b'x-request-id', request_id.encode()))
+                message = {**message, 'headers': filtered_headers}
+            elif message['type'] == 'http.response.body':
+                chunk = message.get('body', b'')
+                raw = chunk.encode('utf-8') if isinstance(chunk, str) else bytes(chunk)
+                if response_body is None and raw and (self.max_body_size == 0 or len(raw) <= self.max_body_size):
+                    response_body = raw
+                if not message.get('more_body', False) and not response_logged:
+                    duration_ms = (self.get_time() - start) * 1000
+                    self._log_request(
+                        request,
+                        response_status,
+                        self._header_value(response_headers, b'content-type'),
+                        duration_ms,
+                        request_id,
+                        body_for_log,
+                        response_body,
+                    )
+                    response_logged = True
+                    response_complete.set()
+            await send(message)
+
         try:
-            response = await call_next(request)
+            await self.app(scope, receive_for_app, send_wrapper)
         except Exception as exc:
+            response_complete.set()
             duration_ms = (self.get_time() - start) * 1000
-            self._log_request(request, None, duration_ms, request_id, body_for_log, None, error=str(exc))
+            self._log_request(request, None, None, duration_ms, request_id, body_for_log, None, error=str(exc))
             raise
-        duration_ms = (self.get_time() - start) * 1000
-        response = await self._capture_response(request, response, duration_ms, request_id, body_for_log)
-        response.headers['X-Request-Id'] = request_id
-        return response
-
-    async def _capture_response(self, request: Request, response: Response, duration_ms: float, request_id: str, request_body: bytes | None) -> Response:
-        stream = response.body_iterator if isinstance(response, StreamingResponse) else getattr(response, 'body_iterator', None)
-        if stream is not None:
-
-            async def stream_wrapper():
-                first_chunk: bytes | None = None
-                logged = False
-                try:
-                    async for chunk in stream:
-                        if first_chunk is None:
-                            raw = chunk.encode('utf-8') if isinstance(chunk, str) else bytes(chunk)
-                            if self.max_body_size == 0 or len(raw) <= self.max_body_size:
-                                first_chunk = raw
-                        yield chunk
-                finally:
-                    if not logged:
-                        self._log_request(request, response, duration_ms, request_id, request_body, first_chunk, chunk_index=0)
-                        logged = True
-
-            streamed = StreamingResponse(stream_wrapper(), status_code=response.status_code, media_type=response.media_type, background=response.background)
-            streamed.raw_headers = [item for item in response.raw_headers if item[0].lower() != b'content-length']
-            return streamed
-        response_data = getattr(response, 'body', None)
-        if response_data is None:
-            self._log_request(request, response, duration_ms, request_id, request_body, None, chunk_index=0)
-            return response
-        if isinstance(response_data, str):
-            response_body = response_data.encode('utf-8')
-        elif isinstance(response_data, memoryview):
-            response_body = bytes(response_data)
-        else:
-            response_body = response_data
-        body: bytes | None = response_body
-        if body is not None and self.max_body_size > 0 and len(body) > self.max_body_size:
-            body = None
-        self._log_request(request, response, duration_ms, request_id, request_body, body, chunk_index=0)
-        return response
+        if not response_logged:
+            response_complete.set()
+            duration_ms = (self.get_time() - start) * 1000
+            self._log_request(
+                request,
+                response_status,
+                self._header_value(response_headers, b'content-type'),
+                duration_ms,
+                request_id,
+                body_for_log,
+                response_body,
+            )
 
     def _log_request(
         self,
         request: Request,
-        response: Response | None,
+        response_status: int | None,
+        response_content_type: str | None,
         duration_ms: float,
         request_id: str,
         request_body: bytes | None,
@@ -509,8 +545,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             self.writer = get_log_writer()
         if not self.writer:
             return
-        status = response.status_code if response else 500
-        if not error and response and status >= 400:
+        status = response_status or 500
+        if not error and response_status is not None and status >= 400:
             error = f'HTTP {status}'
         ip = _client_ip(request)
         if isinstance(ip, str):
@@ -530,12 +566,18 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             'referer': request.headers.get('referer'),
             'error': error,
             'request_json': redact_logged_body(request.url.path, self._coerce_body(request.headers.get('content-type'), request_body)),
-            'response_json': redact_logged_body(request.url.path, self._coerce_body(response.headers.get('content-type') if response else None, response_body)),
+            'response_json': redact_logged_body(request.url.path, self._coerce_body(response_content_type, response_body)),
             'chunk_index': chunk_index,
         }
         if not self.writer:
             return
         self.writer.write_request_log(payload)
+
+    def _header_value(self, headers: list[tuple[bytes, bytes]], name: bytes) -> str | None:
+        for header_name, value in headers:
+            if header_name.lower() == name:
+                return value.decode('latin-1')
+        return None
 
     def _coerce_body(self, content_type: str | None, body: bytes | None) -> str | None:
         if not body:

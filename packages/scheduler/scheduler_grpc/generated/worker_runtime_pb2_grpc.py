@@ -6,7 +6,7 @@ import warnings
 import common_pb2 as common__pb2
 import worker_runtime_pb2 as worker__runtime__pb2
 
-GRPC_GENERATED_VERSION = '1.81.0'
+GRPC_GENERATED_VERSION = '1.81.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

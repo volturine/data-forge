@@ -142,13 +142,13 @@ if [ -n "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) >"$LOG_DIR/backend.log" 2>&1 & BACKEND_PID=$!
     (cd packages/worker && exec uv run --no-env-file main.py) >"$LOG_DIR/worker.log" 2>&1 & WORKER_PID=$!
     (cd packages/scheduler && exec uv run --no-env-file main.py) >"$LOG_DIR/scheduler.log" 2>&1 & SCHEDULER_PID=$!
-    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 node ./node_modules/vite/bin/vite.js dev) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
+    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 DATAFORGE_DISABLE_VITE_HMR=true node ./node_modules/vite/bin/vite.js dev) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
 fi
 if [ -z "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) & BACKEND_PID=$!
     (cd packages/worker && exec uv run --no-env-file main.py) & WORKER_PID=$!
     (cd packages/scheduler && exec uv run --no-env-file main.py) & SCHEDULER_PID=$!
-    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 node ./node_modules/vite/bin/vite.js dev) & FRONTEND_PID=$!
+    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 DATAFORGE_DISABLE_VITE_HMR=true node ./node_modules/vite/bin/vite.js dev) & FRONTEND_PID=$!
 fi
 wait_for_url() {
     local url="$1"

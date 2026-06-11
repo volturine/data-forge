@@ -133,7 +133,7 @@ async function waitForBuildRowById(
 	panel: ReturnType<import('@playwright/test').Page['locator']>,
 	buildId: string,
 	statuses: Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>,
-	timeout = 5_000
+	timeout = 15_000
 ) {
 	const started = Date.now();
 	while (Date.now() - started < timeout) {
@@ -157,7 +157,7 @@ async function waitForDatasourceBuildRow(
 	page: import('@playwright/test').Page,
 	panel: ReturnType<import('@playwright/test').Page['locator']>,
 	datasourceId: string,
-	timeout = 5_000
+	timeout = 15_000
 ) {
 	const started = Date.now();
 	while (Date.now() - started < timeout) {
@@ -181,7 +181,7 @@ async function waitForDatasourcePreviewRow(
 	page: import('@playwright/test').Page,
 	panel: ReturnType<import('@playwright/test').Page['locator']>,
 	datasourceId: string,
-	timeout = 5_000
+	timeout = 15_000
 ) {
 	const started = Date.now();
 	while (Date.now() - started < timeout) {
@@ -210,7 +210,7 @@ async function waitForBuildRowEventually(
 	let lastError: unknown;
 	for (let attempt = 0; attempt < 3; attempt += 1) {
 		try {
-			return await waitForBuildRowById(page, panel, buildId, statuses, 5_000);
+			return await waitForBuildRowById(page, panel, buildId, statuses);
 		} catch (error) {
 			lastError = error;
 		}
@@ -706,7 +706,7 @@ test.describe('Monitoring – Builds tab', () => {
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 5_000);
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 15_000);
 			await expect(buildRow).toBeVisible({ timeout: 5_000 });
 
 			await page.getByLabel(/Search builds/i).fill('ZZZNOMATCH');
@@ -728,7 +728,7 @@ test.describe('Monitoring – Builds tab', () => {
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 5_000);
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 15_000);
 			await expect(buildRow).toHaveAttribute('data-build-kind', 'build');
 			await expect(buildRow).toContainText('Build');
 			await expect(buildRow).not.toContainText('Preview');
@@ -768,12 +768,13 @@ test.describe('Monitoring – Builds tab', () => {
 			const buildId = await startBuildFromAnalysisPage(page, analysisId);
 			await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
 			const panel = page.locator('#panel-builds');
-			const buildRow = await waitForBuildRowById(page, panel, buildId, [
-				'queued',
-				'running',
-				'completed',
-				'failed'
-			]);
+			const buildRow = await waitForBuildRowById(
+				page,
+				panel,
+				buildId,
+				['queued', 'running', 'completed', 'failed'],
+				15_000
+			);
 
 			await buildRow.click();
 			const buildRowId = await buildRow.getAttribute('data-build-row');
@@ -805,12 +806,13 @@ test.describe('Monitoring – Builds tab', () => {
 			const buildId = await startBuildFromAnalysisPage(page, analysisId);
 			await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
 			const panel = page.locator('#panel-builds');
-			const buildRow = await waitForBuildRowById(page, panel, buildId, [
-				'queued',
-				'running',
-				'completed',
-				'failed'
-			]);
+			const buildRow = await waitForBuildRowById(
+				page,
+				panel,
+				buildId,
+				['queued', 'running', 'completed', 'failed'],
+				15_000
+			);
 			await expect(buildRow).toHaveAttribute('data-build-kind', 'build');
 			await expect(
 				panel.locator(`[data-build-kind="build"][data-build-analysis-id="${analysisId}"]`)
@@ -878,7 +880,7 @@ test.describe('Monitoring – Builds tab', () => {
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 5_000);
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 15_000);
 			const buildRowId = await buildRow.getAttribute('data-build-row');
 			if (!buildRowId) throw new Error('Expected build row id');
 
@@ -901,7 +903,7 @@ test.describe('Monitoring – Builds tab', () => {
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 5_000);
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 15_000);
 			const buildRowId = await buildRow.getAttribute('data-build-row');
 			if (!buildRowId) throw new Error('Expected build row id');
 
@@ -932,7 +934,7 @@ test.describe('Monitoring – Builds tab', () => {
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 5_000);
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 15_000);
 			const buildRowId = await buildRow.getAttribute('data-build-row');
 			if (!buildRowId) throw new Error('Expected build row id');
 

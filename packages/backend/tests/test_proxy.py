@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, cast
 
 from fastapi import Request
-from starlette.types import Scope
 
 from backend_core.proxy import client_ip, request_scheme
 
@@ -21,7 +20,7 @@ def _request(scope_overrides: dict[str, Any] | None = None) -> Request:
     }
     if scope_overrides:
         scope.update(scope_overrides)
-    return Request(cast(Scope, scope))
+    return Request(cast(Any, scope))
 
 
 def test_client_ip_uses_socket_client_without_trusted_proxy(monkeypatch) -> None:

@@ -7,6 +7,7 @@ type ProxyServer = Parameters<NonNullable<ProxyOptions['configure']>>[0];
 const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
 const apiPort = parseInt(process.env.BACKEND_PORT || process.env.PORT || '8000', 10);
 const apiHost = process.env.BACKEND_HOST || '127.0.0.1';
+const disableHmr = process.env.DATAFORGE_DISABLE_VITE_HMR === 'true';
 
 const proxy = {
 	'/api': {
@@ -75,6 +76,7 @@ export default defineConfig({
 		port,
 		strictPort: true,
 		allowedHosts: true,
+		hmr: disableHmr ? false : undefined,
 		watch: {
 			ignored: ['**/tests/.artifacts/**']
 		},

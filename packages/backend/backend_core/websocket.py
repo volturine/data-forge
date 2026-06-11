@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState
+from fastapi.websockets import WebSocketState
 
 _DISCONNECT_RUNTIME_ERRORS = (
     'Cannot call "receive" once a disconnect message has been received',
