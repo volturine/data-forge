@@ -2,7 +2,12 @@ import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures.js';
 import { createLongRunningAnalysis, createLargeDatasource } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
-import { waitForAppShell } from './utils/readiness.js';
+import {
+	gotoNewAnalysis,
+	readyTimeoutMs,
+	waitForAppShell,
+	waitForLayoutReady
+} from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
@@ -15,6 +20,7 @@ import { dialogByTextbox } from './utils/locators.js';
 test.describe('Navigation – page load smoke tests', () => {
 	test('home page renders Analyses heading', async ({ page }) => {
 		await page.goto('/');
+		await waitForLayoutReady(page);
 		await expect(page.getByRole('heading', { name: 'Analyses', level: 1 })).toBeVisible();
 		await expect(page.getByRole('link', { name: /New Analysis/i })).toBeVisible();
 		await screenshot(page, 'navigation', 'home-page');
@@ -22,17 +28,20 @@ test.describe('Navigation – page load smoke tests', () => {
 
 	test('datasources page renders Data Sources heading', async ({ page }) => {
 		await page.goto('/datasources');
+		await waitForLayoutReady(page);
 		await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible();
 		await screenshot(page, 'navigation', 'datasources-page');
 	});
 
 	test('UDF library page renders UDF Library heading', async ({ page }) => {
 		await page.goto('/udfs');
+		await waitForLayoutReady(page);
 		await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible();
 	});
 
 	test('monitoring page renders Monitoring heading', async ({ page }) => {
 		await page.goto('/monitoring');
+		await waitForLayoutReady(page);
 		await expect(page.getByRole('heading', { name: 'Monitoring' })).toBeVisible({
 			timeout: 5_000
 		});
@@ -41,7 +50,7 @@ test.describe('Navigation – page load smoke tests', () => {
 	});
 
 	test('new analysis page renders wizard', async ({ page }) => {
-		await page.goto('/analysis/new');
+		await gotoNewAnalysis(page);
 		await expect(page.getByRole('heading', { name: 'New Analysis' })).toBeVisible();
 		await screenshot(page, 'navigation', 'new-analysis-wizard');
 	});
@@ -60,12 +69,14 @@ test.describe('Navigation – page load smoke tests', () => {
 
 	test('clicking Analyses nav link goes to /', async ({ page }) => {
 		await page.goto('/datasources');
+		await waitForLayoutReady(page);
 		await page.getByRole('link', { name: 'Analyses' }).click();
 		await expect(page).toHaveURL('/');
 	});
 
 	test('"New Analysis" link navigates to /analysis/new', async ({ page }) => {
 		await page.goto('/');
+		await waitForLayoutReady(page);
 		const link = page.getByRole('link', { name: /New Analysis/i });
 		await expect(link).toBeVisible();
 		await link.click();
@@ -74,6 +85,7 @@ test.describe('Navigation – page load smoke tests', () => {
 
 	test('datasources "Add" link navigates to /datasources/new', async ({ page }) => {
 		await page.goto('/datasources');
+		await waitForLayoutReady(page);
 		// The "Add" link is the primary CTA in the datasource left panel header
 		await page.getByRole('link', { name: /^Add$/ }).click();
 		await expect(page).toHaveURL(/datasources\/new/, { timeout: 5_000 });
@@ -171,9 +183,9 @@ async function confirmCancelBuild(page: Page) {
 
 async function previewBuildId(page: Page) {
 	const preview = page.locator('[data-testid="build-preview"]');
-	await expect(preview).toBeVisible({ timeout: 5_000 });
+	await expect(preview).toBeVisible({ timeout: readyTimeoutMs() });
 	const id = preview.locator('[data-testid="build-preview-id"]');
-	await expect(id).toHaveText(/\S+/, { timeout: 5_000 });
+	await expect(id).toHaveText(/\S+/, { timeout: readyTimeoutMs() });
 	return (await id.textContent())?.trim() ?? '';
 }
 

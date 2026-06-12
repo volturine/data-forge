@@ -12,7 +12,7 @@ import {
 	deleteHealthCheckViaUI,
 	deleteAnalysisViaUI
 } from './utils/ui-cleanup.js';
-import { waitForLayoutReady } from './utils/readiness.js';
+import { readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
@@ -120,7 +120,7 @@ async function openBuildPreview(page: import('@playwright/test').Page) {
 async function previewBuildId(page: import('@playwright/test').Page): Promise<string> {
 	const preview = await openBuildPreview(page);
 	const id = preview.locator('[data-testid="build-preview-id"]');
-	await expect(id).toHaveText(/\S+/, { timeout: 5_000 });
+	await expect(id).toHaveText(/\S+/, { timeout: readyTimeoutMs() });
 	return (await id.textContent())?.trim() ?? '';
 }
 

@@ -6,11 +6,12 @@ import {
 	shutdownEngine,
 	type E2ERequest
 } from './utils/api.js';
-import { addStepAndOpenConfig } from './utils/analysis.js';
+import { addStepAndOpenConfig, gotoAnalysisEditor } from './utils/analysis.js';
 import { createCleanupPage } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
 import type { Browser } from '@playwright/test';
+import { waitForInlinePreviewReady } from './utils/readiness.js';
 
 const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
@@ -350,13 +351,8 @@ test.describe('Analyses – view node inline preview', () => {
 		const analysis = `E2E View Preview ${id}`;
 		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
-			await page.goto(`/analysis/${aId}`);
-			await expect(page.locator('button[data-step="view"]')).toBeVisible({ timeout: 5_000 });
-
-			// The analysis already has a view step from createAnalysis — the inline table should render
-			await expect(page.locator('[data-testid="inline-data-table"]')).toBeVisible({
-				timeout: 5_000
-			});
+			await gotoAnalysisEditor(page, aId);
+			await waitForInlinePreviewReady(page);
 
 			await screenshot(page, 'analysis/operations', 'view-inline-preview');
 		} finally {

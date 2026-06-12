@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { waitForLayoutReady } from './readiness.js';
+import { readyTimeoutMs, waitForLayoutReady } from './readiness.js';
 
 type EditorAccessState = 'editable' | 'locked';
 
@@ -70,6 +70,47 @@ async function waitForAnalysisEditor(
 	await expect(anyStepButton).toBeDisabled({ timeout: remaining() });
 }
 
+async function waitForCurrentAnalysisId(page: Page, deadline: number): Promise<string> {
+	let currentAnalysisId = '';
+	await expect
+		.poll(
+			async () => {
+				const match = page.url().match(/\/analysis\/([^/?#]+)/);
+				currentAnalysisId = match?.[1] ?? '';
+				return currentAnalysisId && currentAnalysisId !== 'new' ? currentAnalysisId : null;
+			},
+			{ timeout: Math.max(deadline - Date.now(), 1_000) }
+		)
+		.toBeTruthy();
+	return currentAnalysisId;
+}
+
+async function waitForCurrentAnalysisEditorByState(
+	page: Page,
+	accessState: EditorAccessState,
+	timeout: number
+): Promise<string> {
+	const deadline = Date.now() + timeout;
+	const analysisId = await waitForCurrentAnalysisId(page, deadline);
+	await waitForLayoutReady(page, Math.max(deadline - Date.now(), 1_000));
+	await waitForAnalysisEditor(page, deadline, accessState);
+	return analysisId;
+}
+
+export async function waitForCurrentAnalysisEditor(
+	page: Page,
+	timeout = readyTimeoutMs()
+): Promise<string> {
+	return waitForCurrentAnalysisEditorByState(page, 'editable', timeout);
+}
+
+export async function waitForCurrentReadOnlyAnalysisEditor(
+	page: Page,
+	timeout = readyTimeoutMs()
+): Promise<string> {
+	return waitForCurrentAnalysisEditorByState(page, 'locked', timeout);
+}
+
 /**
  * Navigate to an analysis page and wait until the step library is fully
  * rendered and interactable. Handles the case where the left pane is
@@ -87,7 +128,7 @@ async function waitForAnalysisEditor(
 export async function gotoAnalysisEditor(
 	page: Page,
 	analysisId: string,
-	timeout = process.env.CI ? 10_000 : 5_000
+	timeout = readyTimeoutMs()
 ): Promise<void> {
 	let lastError: unknown;
 
@@ -95,8 +136,7 @@ export async function gotoAnalysisEditor(
 		try {
 			await page.goto(`/analysis/${analysisId}`, { waitUntil: 'commit' });
 			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout });
-			await waitForLayoutReady(page, timeout);
-			await waitForAnalysisEditor(page, Date.now() + timeout, 'editable');
+			await waitForCurrentAnalysisEditor(page, timeout);
 			return;
 		} catch (error) {
 			lastError = error;
@@ -111,7 +151,7 @@ export async function gotoAnalysisEditor(
 export async function gotoReadOnlyAnalysisEditor(
 	page: Page,
 	analysisId: string,
-	timeout = process.env.CI ? 10_000 : 5_000
+	timeout = readyTimeoutMs()
 ): Promise<void> {
 	let lastError: unknown;
 
@@ -119,8 +159,7 @@ export async function gotoReadOnlyAnalysisEditor(
 		try {
 			await page.goto(`/analysis/${analysisId}`, { waitUntil: 'commit' });
 			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout });
-			await waitForLayoutReady(page, timeout);
-			await waitForAnalysisEditor(page, Date.now() + timeout, 'locked');
+			await waitForCurrentReadOnlyAnalysisEditor(page, timeout);
 			return;
 		} catch (error) {
 			lastError = error;
@@ -136,12 +175,8 @@ export async function gotoReadOnlyAnalysisEditor(
  * After a `page.reload()` inside the analysis editor, re-confirm readiness.
  * Same gates as `gotoAnalysisEditor` but without the navigation step.
  */
-export async function waitForEditorReload(
-	page: Page,
-	timeout = process.env.CI ? 10_000 : 5_000
-): Promise<void> {
-	await waitForLayoutReady(page, timeout);
-	await waitForAnalysisEditor(page, Date.now() + timeout, 'editable');
+export async function waitForEditorReload(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await waitForCurrentAnalysisEditor(page, timeout);
 }
 
 /**

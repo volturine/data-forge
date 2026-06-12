@@ -24,7 +24,7 @@ const reporter = [['line'] as const];
 export default defineConfig({
 	testDir: './tests',
 	timeout: 120_000,
-	expect: { timeout: 5_000 },
+	expect: { timeout: process.env.CI ? 10_000 : 5_000 },
 	fullyParallel: false,
 	globalSetup: './tests/global-setup.ts',
 	workers: DEFAULT_E2E_WORKERS,

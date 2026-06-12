@@ -3,6 +3,7 @@ import type { Locator } from '@playwright/test';
 import { test, expect } from './fixtures.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { createDatasource, createAnalysis, shutdownEngine } from './utils/api.js';
+import { readyTimeoutMs } from './utils/readiness.js';
 import {
 	createCleanupPage,
 	deleteAnalysisViaUI,
@@ -17,7 +18,7 @@ async function expectVisibleEventually(locator: Locator) {
 	let lastError: unknown;
 	for (let attempt = 0; attempt < 3; attempt += 1) {
 		try {
-			await expect(locator).toBeVisible({ timeout: 5_000 });
+			await expect(locator).toBeVisible({ timeout: readyTimeoutMs() });
 			return;
 		} catch (error) {
 			lastError = error;
