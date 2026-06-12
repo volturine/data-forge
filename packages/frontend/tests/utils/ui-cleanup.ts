@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import { findAnalysisIdByName, workerAuthFile } from './api.js';
 import {
 	gotoAnalysesGallery,
+	gotoUdfLibrary,
 	gotoMonitoringTab,
-	waitForDatasourceList,
-	waitForUdfList
+	waitForDatasourceList
 } from './readiness.js';
 import { shutdownEngineViaUi } from './user-flows.js';
 
@@ -275,8 +275,7 @@ export async function deleteAnalysisViaUI(
 }
 
 async function deleteUdfViaUIOnPage(page: Page, name: string): Promise<void> {
-	await page.goto('/udfs', { waitUntil: 'domcontentloaded' });
-	await waitForUdfList(page, 1_500).catch(() => undefined);
+	await gotoUdfLibrary(page, 5_000).catch(() => undefined);
 	const card = page.locator(`[data-udf-card="${name}"]`);
 	if (!(await card.isVisible().catch(() => false))) return;
 	const deleteResponse = page
@@ -294,13 +293,9 @@ async function deleteUdfViaUIOnPage(page: Page, name: string): Promise<void> {
 			}
 		}
 	);
-	await expect(card)
-		.toBeHidden({ timeout: 5_000 })
-		.catch(async () => {
-			await page.goto('/udfs', { waitUntil: 'domcontentloaded' });
-			await waitForUdfList(page, 5_000);
-			await expect(card).toBeHidden({ timeout: 5_000 });
-		});
+	await expect(card).toBeHidden({ timeout: 5_000 });
+	await gotoUdfLibrary(page, 10_000);
+	await expect(page.locator(`[data-udf-card="${name}"]`)).toHaveCount(0, { timeout: 10_000 });
 }
 
 export async function deleteUdfViaUI(

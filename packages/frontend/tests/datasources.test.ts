@@ -4,6 +4,7 @@ import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js'
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import {
+	gotoDatasourcesPage,
 	selectDatasourceAndWaitForConfig,
 	openSchemaTabAndWait,
 	waitForDatasourceList,
@@ -521,11 +522,10 @@ test.describe('Datasources – CSV config tab functional', () => {
 		const ds = `e2e-csv-config-${uid()}`;
 		await createDatasource(request, ds);
 		try {
-			await page.goto('/datasources');
-			await page.locator(`[data-ds-row="${ds}"]`).click();
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
 
 			const config = page.locator('[data-ds-config]');
-			await expect(config).toBeVisible({ timeout: 5_000 });
 
 			// Click CSV tab
 			await config.getByRole('tab', { name: 'CSV' }).click();
@@ -546,8 +546,8 @@ test.describe('Datasources – CSV config tab functional', () => {
 			await expect(delimiterSelect).toHaveValue(';', { timeout: 5_000 });
 
 			// Reload and verify delimiter persisted
-			await page.reload();
-			await expect(config).toBeVisible({ timeout: 5_000 });
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
 			await config.getByRole('tab', { name: 'CSV' }).click();
 			await expect(delimiterSelect).toHaveValue(';', { timeout: 5_000 });
 		} finally {
@@ -559,11 +559,10 @@ test.describe('Datasources – CSV config tab functional', () => {
 		const ds = `e2e-csv-header-${uid()}`;
 		await createDatasource(request, ds);
 		try {
-			await page.goto('/datasources');
-			await page.locator(`[data-ds-row="${ds}"]`).click();
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
 
 			const config = page.locator('[data-ds-config]');
-			await expect(config).toBeVisible({ timeout: 5_000 });
 
 			await config.getByRole('tab', { name: 'CSV' }).click();
 			await expect(config.getByText('CSV Options')).toBeVisible({ timeout: 5_000 });
@@ -583,8 +582,8 @@ test.describe('Datasources – CSV config tab functional', () => {
 			await expect(headerCheckbox).toBeChecked({ checked: !wasChecked, timeout: 5_000 });
 
 			// Reload and verify
-			await page.reload();
-			await expect(config).toBeVisible({ timeout: 5_000 });
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
 			await config.getByRole('tab', { name: 'CSV' }).click();
 			await expect(headerCheckbox).toBeChecked({ checked: !wasChecked, timeout: 5_000 });
 		} finally {

@@ -23,9 +23,25 @@ interface WorkerAuth {
 }
 
 async function expectSignedIn(page: Page): Promise<void> {
-	// Under CI load the shell can take longer to hydrate after navigation
-	const timeout = process.env.CI ? 10_000 : 5_000;
-	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout });
+	// Under CI load the shell can take longer to hydrate after navigation,
+	// and the Vite dev server can occasionally reload a route module while
+	// auth bootstrap is still warming a fresh worker session.
+	const timeout = process.env.CI ? 15_000 : 5_000;
+	let lastError: unknown;
+
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout });
+			return;
+		} catch (error) {
+			lastError = error;
+			if (attempt === 2) break;
+			await page.goto('/', { waitUntil: 'domcontentloaded' }).catch(() => undefined);
+			await page.waitForLoadState('networkidle', { timeout }).catch(() => undefined);
+		}
+	}
+
+	throw lastError;
 }
 
 async function authFileIsValid(browser: Browser, workerAuth: WorkerAuth): Promise<boolean> {

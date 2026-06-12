@@ -3,8 +3,11 @@ import { test, expect } from './fixtures.js';
 import { createLongRunningAnalysis, createLargeDatasource } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
 import {
+	gotoAuthedRoute,
 	gotoMonitoringTab,
 	gotoNewAnalysis,
+	gotoNewUdfPage,
+	gotoUdfLibrary,
 	waitForAppShell,
 	waitForLayoutReady
 } from './utils/readiness.js';
@@ -35,8 +38,7 @@ test.describe('Navigation – page load smoke tests', () => {
 	});
 
 	test('UDF library page renders UDF Library heading', async ({ page }) => {
-		await page.goto('/udfs');
-		await waitForLayoutReady(page);
+		await gotoUdfLibrary(page);
 		await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible();
 	});
 
@@ -57,12 +59,12 @@ test.describe('Navigation – page load smoke tests', () => {
 	});
 
 	test('new datasource page loads', async ({ page }) => {
-		await page.goto('/datasources/new');
+		await gotoAuthedRoute(page, '/datasources/new');
 		await expect(page).toHaveURL(/datasources\/new/);
 	});
 
 	test('new UDF page loads', async ({ page }) => {
-		await page.goto('/udfs/new');
+		await gotoNewUdfPage(page);
 		await expect(page).toHaveURL(/udfs\/new/);
 	});
 
@@ -93,7 +95,7 @@ test.describe('Navigation – page load smoke tests', () => {
 	});
 
 	test('UDFs "New UDF" button navigates to /udfs/new', async ({ page }) => {
-		await page.goto('/udfs');
+		await gotoUdfLibrary(page);
 		const newUdfBtn = page.getByRole('button', { name: 'New UDF' });
 		await expect(newUdfBtn).toBeVisible();
 		await newUdfBtn.click();

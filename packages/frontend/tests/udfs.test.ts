@@ -1,7 +1,13 @@
 import { readFileSync } from 'fs';
 import { test, expect } from './fixtures.js';
 import { createUdf } from './utils/api.js';
-import { waitForLayoutReady, waitForUdfList, gotoUdfEditor } from './utils/readiness.js';
+import {
+	gotoNewUdfPage,
+	gotoUdfEditor,
+	gotoUdfLibrary,
+	waitForLayoutReady,
+	waitForUdfList
+} from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { deleteUdfViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
@@ -169,7 +175,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import button opens the import dialog', async ({ page }) => {
-		await page.goto('/udfs');
+		await gotoUdfLibrary(page);
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -178,7 +184,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import dialog Cancel closes it', async ({ page }) => {
-		await page.goto('/udfs');
+		await gotoUdfLibrary(page);
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -191,7 +197,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import dialog: invalid JSON shows error', async ({ page }) => {
-		await page.goto('/udfs');
+		await gotoUdfLibrary(page);
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -203,7 +209,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import dialog: missing udfs array shows error', async ({ page }) => {
-		await page.goto('/udfs');
+		await gotoUdfLibrary(page);
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -218,7 +224,7 @@ test.describe('UDFs – export & import', () => {
 		const udf = `e2e_roundtrip_${uid()}`;
 		await createUdf(request, udf);
 		try {
-			await page.goto('/udfs');
+			await gotoUdfLibrary(page);
 
 			// Export
 			const [download] = await Promise.all([
@@ -232,10 +238,7 @@ test.describe('UDFs – export & import', () => {
 
 			// Delete the UDF via UI first
 			await deleteUdfViaUI(page, udf, { strict: true });
-			await page.goto('/udfs', { waitUntil: 'domcontentloaded' });
-			await waitForUdfList(page);
-			await page.reload({ waitUntil: 'domcontentloaded' });
-			await waitForUdfList(page);
+			await gotoUdfLibrary(page, 10_000);
 			await expect(page.locator(`[data-udf-card="${udf}"]`)).toHaveCount(0, {
 				timeout: 10_000
 			});
@@ -260,12 +263,12 @@ test.describe('UDFs – export & import', () => {
 
 test.describe('UDFs – editor page', () => {
 	test('new UDF editor has name field', async ({ page }) => {
-		await page.goto('/udfs/new');
+		await gotoNewUdfPage(page);
 		await expect(page.locator('#udf-name')).toBeVisible({ timeout: 5_000 });
 	});
 
 	test('new UDF editor has code editor', async ({ page }) => {
-		await page.goto('/udfs/new');
+		await gotoNewUdfPage(page);
 		await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 5_000 });
 		await screenshot(page, 'udfs', 'editor-page');
 	});

@@ -116,10 +116,16 @@ export async function waitForLineageToolbar(page: Page, timeout = readyTimeoutMs
  * the filtered-empty text, or an error callout.
  */
 export async function waitForDatasourceList(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await waitForLayoutReady(page, timeout);
 	const terminal = page.locator(
 		'[data-ds-row], :text("No data sources yet"), :text("No datasources match"), [aria-live="polite"]'
 	);
 	await waitForAnyVisible(terminal, timeout);
+}
+
+export async function gotoDatasourcesPage(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await gotoAuthedRoute(page, '/datasources', timeout);
+	await waitForDatasourceList(page, timeout);
 }
 
 /**
@@ -350,10 +356,21 @@ export async function gotoMonitoringTab(
  * the empty-state text, or an error callout.
  */
 export async function waitForUdfList(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await waitForLayoutReady(page, timeout);
 	await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible({ timeout });
 
 	const terminal = page.locator('[data-udf-card], :text("No UDFs yet"), [aria-live="polite"]');
 	await waitForAnyVisible(terminal, timeout);
+}
+
+export async function gotoUdfLibrary(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await gotoAuthedRoute(page, '/udfs', timeout);
+	await waitForUdfList(page, timeout);
+}
+
+export async function gotoNewUdfPage(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await gotoAuthedRoute(page, '/udfs/new', timeout);
+	await expect(page.locator('#udf-name')).toBeVisible({ timeout });
 }
 
 /**

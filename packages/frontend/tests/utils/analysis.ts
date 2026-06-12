@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { readyTimeoutMs, waitForLayoutReady } from './readiness.js';
+import { gotoAuthedRoute, readyTimeoutMs, waitForLayoutReady } from './readiness.js';
 
 type EditorAccessState = 'editable' | 'locked';
 
@@ -134,7 +134,7 @@ export async function gotoAnalysisEditor(
 
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		try {
-			await page.goto(`/analysis/${analysisId}`, { waitUntil: 'commit' });
+			await gotoAuthedRoute(page, `/analysis/${analysisId}`, timeout);
 			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout });
 			await waitForCurrentAnalysisEditor(page, timeout);
 			return;
@@ -157,7 +157,7 @@ export async function gotoReadOnlyAnalysisEditor(
 
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		try {
-			await page.goto(`/analysis/${analysisId}`, { waitUntil: 'commit' });
+			await gotoAuthedRoute(page, `/analysis/${analysisId}`, timeout);
 			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout });
 			await waitForCurrentReadOnlyAnalysisEditor(page, timeout);
 			return;
