@@ -2,7 +2,7 @@ import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
-import { waitForAnalysisLoadError } from './utils/readiness.js';
+import { gotoAuthedRoute, waitForAnalysisLoadError } from './utils/readiness.js';
 
 /**
  * E2E tests for analysis editor error states.
@@ -21,8 +21,7 @@ test.describe('Analysis – error states', () => {
 			await deleteDatasourceViaUI(page, dsName);
 
 			// Now open the analysis that used this datasource
-			await page.goto(`/analysis/${aId}`);
-			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 5_000 });
+			await gotoAuthedRoute(page, `/analysis/${aId}`);
 
 			// Shell should still be intact
 			await expect(page.getByLabel('Main navigation')).toBeVisible({ timeout: 5_000 });

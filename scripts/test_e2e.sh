@@ -202,6 +202,10 @@ fi
 echo "Starting Playwright e2e tests across 4 deterministic shards"
 echo "Using ${PLAYWRIGHT_WORKERS} worker(s) per shard (from ${PLAYWRIGHT_CONFIG_PATH})"
 mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}"
+for shard_index in 1 2 3 4; do
+    mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/test-results-shard-${shard_index}-of-4"
+    mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/playwright-report-shard-${shard_index}-of-4"
+done
 
 run_playwright_shard() {
     local shard_label="$1"
@@ -213,7 +217,6 @@ run_playwright_shard() {
     local artifact_suffix="shard-${shard_index}-of-${shard_total}"
     local output_dir="$PWD/tests/.artifacts/playwright/test-results-${artifact_suffix}"
     local report_dir="$PWD/tests/.artifacts/playwright/playwright-report-${artifact_suffix}"
-    rm -rf "$output_dir" "$report_dir"
     mkdir -p "$output_dir" "$report_dir"
     # Suppress Node.js runtime deprecation warnings (e.g. DEP0205 module.register)
     # that come from Playwright/Vite internals on Node v26+; these are third-party
@@ -221,10 +224,11 @@ run_playwright_shard() {
     NODE_NO_WARNINGS=1 \
     PLAYWRIGHT_DISABLE_WEB_SERVER=true \
     PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir" \
+    PLAYWRIGHT_OUTPUT_DIR="$output_dir" \
     python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        -- ./node_modules/.bin/playwright test --config=playwright.config.ts --output="$output_dir" "$@"
+        -- ./node_modules/.bin/playwright test --config=playwright.config.ts "$@"
 }
 
 SHARD_PIDS=()

@@ -914,26 +914,22 @@ test.describe('Analyses – join config editing', () => {
 			await addColumnButton.click();
 
 			const colGroup = configPanel.getByRole('group', { name: /Join column pair 1/ });
-			const leftDropdown = colGroup
-				.getByRole('group', { name: 'Left Column' })
-				.locator('button[aria-expanded]');
+			const leftGroup = colGroup.getByRole('group', { name: 'Left Column' });
+			const leftDropdown = leftGroup.locator('button[aria-expanded]');
 			await leftDropdown.click();
-			const leftListbox = page
-				.getByRole('listbox')
-				.filter({ has: page.locator('[data-column-option="id"]') })
-				.last();
-			await expect(leftListbox).toBeVisible({ timeout: 5_000 });
+			const leftListbox = leftGroup.getByRole('listbox');
+			await expect(leftListbox.locator('[data-column-option="id"]')).toBeVisible({
+				timeout: 10_000
+			});
 			await leftListbox.locator('[data-column-option="id"]').click({ timeout: 5_000 });
 
-			const rightDropdown = colGroup
-				.getByRole('group', { name: 'Right Column' })
-				.locator('button[aria-expanded]');
+			const rightGroup = colGroup.getByRole('group', { name: 'Right Column' });
+			const rightDropdown = rightGroup.locator('button[aria-expanded]');
 			await rightDropdown.click();
-			const rightListbox = page
-				.getByRole('listbox')
-				.filter({ has: page.locator('[data-column-option="id"]') })
-				.last();
-			await expect(rightListbox).toBeVisible({ timeout: 5_000 });
+			const rightListbox = rightGroup.getByRole('listbox');
+			await expect(rightListbox.locator('[data-column-option="id"]')).toBeVisible({
+				timeout: 10_000
+			});
 			await rightListbox.locator('[data-column-option="id"]').click({ timeout: 5_000 });
 
 			const suffixInput = configPanel.locator('[data-testid="join-suffix-input"]');
