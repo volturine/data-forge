@@ -231,10 +231,14 @@ test.describe('UDFs – export & import', () => {
 			});
 
 			// Delete the UDF via UI first
-			await deleteUdfViaUI(page, udf);
-			await page.goto('/udfs');
+			await deleteUdfViaUI(page, udf, { strict: true });
+			await page.goto('/udfs', { waitUntil: 'domcontentloaded' });
 			await waitForUdfList(page);
-			await expect(page.locator(`[data-udf-card="${udf}"]`)).toHaveCount(0);
+			await page.reload({ waitUntil: 'domcontentloaded' });
+			await waitForUdfList(page);
+			await expect(page.locator(`[data-udf-card="${udf}"]`)).toHaveCount(0, {
+				timeout: 10_000
+			});
 
 			// Import the exported UDF back via the UI import dialog
 			const importBtn = page.getByRole('button', { name: /Import/i });

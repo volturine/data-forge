@@ -2,6 +2,7 @@ import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
+import { waitForAnalysisLoadError } from './utils/readiness.js';
 
 /**
  * E2E tests for analysis editor error states.
@@ -40,11 +41,7 @@ test.describe('Analysis – error states', () => {
 	test('bad analysis ID shows error state without crashing shell', async ({ page }) => {
 		const BAD_ID = '00000000-0000-0000-0000-000000000000';
 		await page.goto(`/analysis/${BAD_ID}`);
-
-		await expect(page.locator('[data-testid="analysis-load-error"]')).toBeVisible({
-			timeout: 5_000
-		});
-		await expect(page.getByText('Error loading analysis')).toBeVisible();
+		await waitForAnalysisLoadError(page);
 
 		await expect(page.getByRole('button', { name: /Create analysis/i })).toBeVisible();
 
@@ -56,10 +53,6 @@ test.describe('Analysis – error states', () => {
 
 	test('invalid analysis ID format shows error state', async ({ page }) => {
 		await page.goto('/analysis/not-a-valid-uuid');
-
-		await expect(page.locator('[data-testid="analysis-load-error"]')).toBeVisible({
-			timeout: 5_000
-		});
-		await expect(page.getByText('Error loading analysis')).toBeVisible();
+		await waitForAnalysisLoadError(page);
 	});
 });

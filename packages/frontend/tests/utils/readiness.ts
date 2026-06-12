@@ -4,6 +4,10 @@ export function readyTimeoutMs(): number {
 	return process.env.CI ? 15_000 : 5_000;
 }
 
+function coldStartTimeoutMs(timeout: number): number {
+	return Math.max(timeout, 15_000);
+}
+
 async function waitForAnyVisible(locator: Locator, timeout: number): Promise<void> {
 	await expect
 		.poll(
@@ -29,6 +33,19 @@ async function waitForAnyVisible(locator: Locator, timeout: number): Promise<voi
 function mainNavigation(page: Page): Locator {
 	return page.locator('[aria-label="Main navigation"]').first();
 }
+
+async function shellIsInteractive(page: Page): Promise<boolean> {
+	const navigationVisible = await mainNavigation(page)
+		.isVisible()
+		.catch(() => false);
+	if (!navigationVisible) return false;
+	return page
+		.locator('[data-shell-interactive="true"]')
+		.isVisible()
+		.catch(() => false);
+}
+
+type MonitoringTabKey = 'builds' | 'schedules' | 'health';
 
 /**
  * Wait for the app shell to finish hydrating by confirming the main
@@ -57,6 +74,32 @@ export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs())
 	await expect(mainNavigation(page)).toBeVisible({ timeout });
 	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
 	await waitForAnyVisible(page.locator('main'), timeout);
+}
+
+/**
+ * Navigate to an authenticated route reliably on a fresh Playwright page.
+ *
+ * Some cold-page deep links can race the app-shell hydration and land on a
+ * blank document or the default route before the shell is ready. Warming the
+ * shell on `/` first makes subsequent route transitions deterministic while
+ * still preserving direct-route coverage for the actual page under test.
+ */
+export async function gotoAuthedRoute(
+	page: Page,
+	path: string,
+	timeout = readyTimeoutMs()
+): Promise<void> {
+	const shellReady = await shellIsInteractive(page);
+	const routeTimeout = shellReady ? timeout : coldStartTimeoutMs(timeout);
+
+	if (!shellReady) {
+		await page.goto('/', { waitUntil: 'domcontentloaded' });
+		await waitForLayoutReady(page, routeTimeout);
+		if (path === '/') return;
+	}
+
+	await page.goto(path, { waitUntil: 'domcontentloaded' });
+	await waitForLayoutReady(page, routeTimeout);
 }
 
 /**
@@ -172,6 +215,15 @@ export async function waitForInlinePreviewReady(
 	throw new Error(`Timed out waiting for inline preview readiness after ${Date.now() - started}ms`);
 }
 
+export async function waitForAnalysisLoadError(
+	page: Page,
+	timeout = readyTimeoutMs()
+): Promise<void> {
+	await waitForLayoutReady(page, timeout);
+	await expect(page.locator('[data-testid="analysis-load-error"]')).toBeVisible({ timeout });
+	await expect(page.getByText('Error loading analysis')).toBeVisible({ timeout });
+}
+
 /**
  * Navigate to the home page (analyses gallery), wait for the TanStack Query
  * data to load, and clear any persisted search filter from IndexedDB that
@@ -184,8 +236,7 @@ export async function waitForInlinePreviewReady(
  *     the full card list is visible for subsequent assertions.
  */
 export async function gotoAnalysesGallery(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	await page.goto('/');
-	await waitForLayoutReady(page, timeout);
+	await gotoAuthedRoute(page, '/', timeout);
 
 	// The analyses page hydrates the search box from IndexedDB asynchronously.
 	// A prior test may leave a non-empty filter (e.g. "ZZZNOMATCH") that hides
@@ -261,9 +312,34 @@ export async function selectDatasourceAndWaitForConfig(
  *     alone because the input is the interactable element tests need next.
  */
 export async function gotoNewAnalysis(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	await page.goto('/analysis/new');
-	await waitForLayoutReady(page, timeout);
+	await gotoAuthedRoute(page, '/analysis/new', timeout);
 	await expect(page.locator('#name')).toBeVisible({ timeout });
+}
+
+export async function gotoMonitoringTab(
+	page: Page,
+	tab: MonitoringTabKey,
+	timeout = readyTimeoutMs()
+): Promise<Locator> {
+	await gotoAuthedRoute(page, `/monitoring?tab=${tab}`, timeout);
+
+	const labels = {
+		builds: 'Builds',
+		schedules: 'Schedules',
+		health: 'Health Checks'
+	} satisfies Record<MonitoringTabKey, string>;
+	const panelIds = {
+		builds: '#panel-builds',
+		schedules: '#panel-schedules',
+		health: '#panel-health'
+	} satisfies Record<MonitoringTabKey, string>;
+
+	const activeTab = page.getByRole('tab', { name: labels[tab] });
+	await expect(activeTab).toHaveAttribute('aria-selected', 'true', { timeout });
+
+	const panel = page.locator(panelIds[tab]);
+	await expect(panel).toBeVisible({ timeout });
+	return panel;
 }
 
 /**
@@ -293,8 +369,7 @@ export async function gotoUdfEditor(
 	udfId: string,
 	timeout = readyTimeoutMs()
 ): Promise<void> {
-	await page.goto(`/udfs/${udfId}`);
-	await waitForLayoutReady(page, timeout);
+	await gotoAuthedRoute(page, `/udfs/${udfId}`, timeout);
 	await expect(page.locator('#udf-name')).toBeVisible({ timeout });
 }
 

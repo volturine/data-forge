@@ -1,6 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 import { waitForCurrentAnalysisEditor } from './analysis.js';
 import {
+	gotoAuthedRoute,
+	gotoMonitoringTab,
 	gotoNewAnalysis,
 	waitForDatasourceList,
 	waitForLayoutReady,
@@ -68,8 +70,7 @@ export async function uploadDatasourceViaUi(
 		csv?: string;
 	}
 ): Promise<{ id: string }> {
-	await page.goto('/datasources/new', { waitUntil: 'domcontentloaded' });
-	await waitForLayoutReady(page);
+	await gotoAuthedRoute(page, '/datasources/new');
 	const fileInput = page.locator('#file-input');
 	await expect(fileInput).toBeVisible({ timeout: 5_000 });
 	await fileInput.setInputFiles({
@@ -187,8 +188,7 @@ export async function importAnalysisViaUi(
 }
 
 export async function createUdfViaUi(page: Page, name: string): Promise<string> {
-	await page.goto('/udfs/new');
-	await waitForLayoutReady(page);
+	await gotoAuthedRoute(page, '/udfs/new');
 	await page.locator('#udf-name').fill(name);
 	await page.locator('#udf-description').fill(`Test UDF: ${name}`);
 	await page.locator('#udf-tags').fill('test');
@@ -208,8 +208,7 @@ export async function createScheduleViaUi(
 	datasourceId: string,
 	cron = '0 9 * * *'
 ): Promise<string> {
-	await page.goto('/monitoring?tab=schedules');
-	await waitForLayoutReady(page);
+	await gotoMonitoringTab(page, 'schedules');
 	await page.getByRole('button', { name: /New Schedule/i }).click();
 	const select = page.locator('#schedule-datasource');
 	await expect(select).toBeVisible({ timeout: 5_000 });
@@ -235,8 +234,7 @@ export async function createHealthCheckViaUi(
 	datasourceId: string,
 	name: string
 ): Promise<string> {
-	await page.goto('/monitoring?tab=health');
-	await waitForLayoutReady(page);
+	await gotoMonitoringTab(page, 'health');
 	await page.getByRole('button', { name: /New Check/i }).click();
 	const select = page.locator('#hc-target');
 	await expect(select).toBeVisible({ timeout: 5_000 });

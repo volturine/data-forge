@@ -7,7 +7,12 @@ import {
 } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
-import { gotoAnalysesGallery, gotoNewAnalysis, waitForLayoutReady } from './utils/readiness.js';
+import {
+	gotoAnalysesGallery,
+	gotoNewAnalysis,
+	waitForAnalysisLoadError,
+	waitForLayoutReady
+} from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { dialogByHeading } from './utils/locators.js';
 
@@ -443,11 +448,7 @@ test.describe('Analyses – detail error state', () => {
 
 	test('bad analysis ID shows error state without crashing the shell', async ({ page }) => {
 		await page.goto(`/analysis/${BAD_ID}`);
-
-		await expect(page.locator('[data-testid="analysis-load-error"]')).toBeVisible({
-			timeout: 5_000
-		});
-		await expect(page.getByText('Error loading analysis')).toBeVisible();
+		await waitForAnalysisLoadError(page);
 
 		await expect(page.getByRole('button', { name: /Create analysis/i })).toBeVisible();
 
@@ -456,9 +457,7 @@ test.describe('Analyses – detail error state', () => {
 
 	test('analysis error page does not crash navigation', async ({ page }) => {
 		await page.goto(`/analysis/${BAD_ID}`);
-		await expect(page.locator('[data-testid="analysis-load-error"]')).toBeVisible({
-			timeout: 5_000
-		});
+		await waitForAnalysisLoadError(page);
 
 		await page.getByRole('link', { name: 'Analyses' }).click();
 		await expect(page).toHaveURL('/');

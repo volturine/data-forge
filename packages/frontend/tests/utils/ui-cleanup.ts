@@ -2,7 +2,12 @@ import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 import fs from 'node:fs';
 import { findAnalysisIdByName, workerAuthFile } from './api.js';
-import { gotoAnalysesGallery, waitForDatasourceList, waitForUdfList } from './readiness.js';
+import {
+	gotoAnalysesGallery,
+	gotoMonitoringTab,
+	waitForDatasourceList,
+	waitForUdfList
+} from './readiness.js';
 import { shutdownEngineViaUi } from './user-flows.js';
 
 function confirmDialog(page: Page, heading: string | RegExp): Locator {
@@ -274,18 +279,47 @@ async function deleteUdfViaUIOnPage(page: Page, name: string): Promise<void> {
 	await waitForUdfList(page, 1_500).catch(() => undefined);
 	const card = page.locator(`[data-udf-card="${name}"]`);
 	if (!(await card.isVisible().catch(() => false))) return;
+	const deleteResponse = page
+		.waitForResponse(
+			(response) =>
+				response.request().method() === 'DELETE' && response.url().includes('/api/v1/udf/'),
+			{ timeout: 5_000 }
+		)
+		.catch(() => null);
 	await card.getByRole('button', { name: /^Delete$/i }).click();
-	await card.getByRole('button', { name: /Confirm/i }).click();
+	await Promise.all([deleteResponse, card.getByRole('button', { name: /Confirm/i }).click()]).then(
+		([response]) => {
+			if (response && !response.ok()) {
+				throw new Error(`Failed to delete UDF ${name}: HTTP ${response.status()}`);
+			}
+		}
+	);
+	await expect(card)
+		.toBeHidden({ timeout: 5_000 })
+		.catch(async () => {
+			await page.goto('/udfs', { waitUntil: 'domcontentloaded' });
+			await waitForUdfList(page, 5_000);
+			await expect(card).toBeHidden({ timeout: 5_000 });
+		});
 }
 
-export async function deleteUdfViaUI(page: Page, name: string): Promise<void> {
+export async function deleteUdfViaUI(
+	page: Page,
+	name: string,
+	options?: { strict?: boolean }
+): Promise<void> {
+	if (options?.strict) {
+		await deleteUdfViaUIOnPage(page, name);
+		return;
+	}
+
 	await runCleanupWithFallback(page, 'deleteUdfViaUI', name, async (cleanupPage) => {
 		await deleteUdfViaUIOnPage(cleanupPage, name);
 	});
 }
 
 async function deleteScheduleViaUIOnPage(page: Page, cronOrName: string): Promise<void> {
-	await page.goto('/monitoring?tab=schedules', { waitUntil: 'domcontentloaded' });
+	await gotoMonitoringTab(page, 'schedules', 1_500);
 	const row = page
 		.locator('tr')
 		.filter({ has: page.getByLabel('Delete schedule') })
@@ -307,7 +341,7 @@ export async function deleteScheduleViaUI(page: Page, cronOrName: string): Promi
 }
 
 async function deleteHealthCheckViaUIOnPage(page: Page, name: string): Promise<void> {
-	await page.goto('/monitoring?tab=health', { waitUntil: 'domcontentloaded' });
+	await gotoMonitoringTab(page, 'health', 1_500);
 	await waitForHealthChecksList(page, 1_500).catch(() => undefined);
 	const row = page.locator(`[data-healthcheck-name="${name}"]`);
 	await row.waitFor({ state: 'visible', timeout: 1_500 });

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { APIRequestContext, Browser, BrowserContext, Page } from '@playwright/test';
+import type { APIRequestContext, Browser, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 import {
 	createHealthCheckViaUi,
@@ -32,41 +32,28 @@ export interface E2ERequest extends APIRequestContext {
 const datasourceRegistry = new Map<string, { name: string; namespace?: string }>();
 const analysisRegistry = new Map<string, { name: string }>();
 const udfRegistry = new Map<string, { name: string }>();
-const authedSetupContexts = new Map<string, BrowserContext>();
 
 export function workerAuthFile(workerIndex: number): string {
 	return path.join(AUTH_DIR, `state-${E2E_RUN_STAMP}-w${workerIndex}.json`);
 }
 
-async function getAuthedSetupContext(request: E2ERequest): Promise<BrowserContext> {
-	const existingContext = authedSetupContexts.get(request.authFile);
-	if (existingContext) {
-		return existingContext;
-	}
+async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promise<T>): Promise<T> {
 	const context = await request.browser.newContext({
 		baseURL: request.baseURL,
 		storageState: request.authFile
 	});
-	authedSetupContexts.set(request.authFile, context);
-	return context;
-}
-
-async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promise<T>): Promise<T> {
-	const context = await getAuthedSetupContext(request);
 	const page = await context.newPage();
 	try {
 		return await fn(page);
 	} finally {
 		await page.close().catch(() => undefined);
+		await context.close().catch(() => undefined);
 	}
 }
 
-export async function disposeWorkerSetupContexts(authFile: string): Promise<void> {
-	const context = authedSetupContexts.get(authFile);
-	authedSetupContexts.delete(authFile);
-	if (context) {
-		await context.close().catch(() => undefined);
-	}
+export async function disposeWorkerSetupContexts(_authFile: string): Promise<void> {
+	// Setup helpers now use isolated auth contexts per call, so there is no
+	// worker-level setup context to dispose.
 }
 
 function buildOutput(filename: string) {

@@ -2,8 +2,9 @@ import { test, expect } from './fixtures.js';
 import type { Page } from '@playwright/test';
 import { createLargeDatasource, createLongRunningAnalysis } from './utils/api.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
-import { waitForLayoutReady } from './utils/readiness.js';
+import { readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
+import { waitForBuildPreview, waitForBuildPreviewId } from './utils/builds.js';
 import { uid } from './utils/uid.js';
 
 async function startBuildFromAnalysisPage(page: Page, analysisId: string): Promise<string> {
@@ -15,13 +16,9 @@ async function startBuildFromAnalysisPage(page: Page, analysisId: string): Promi
 	// full 240 s test budget.
 	await buildBtn.click({ timeout: 5_000 });
 	const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
-	await expect(openPreviewBtn).toBeVisible({ timeout: 5_000 });
+	await expect(openPreviewBtn).toBeVisible({ timeout: readyTimeoutMs() });
 	await openPreviewBtn.click({ timeout: 5_000 });
-	const preview = page.locator('[data-testid="build-preview"]');
-	await expect(preview).toBeVisible({ timeout: 5_000 });
-	const id = preview.locator('[data-testid="build-preview-id"]');
-	await expect(id).toHaveText(/\S+/, { timeout: 5_000 });
-	return (await id.textContent())?.trim() ?? '';
+	return waitForBuildPreviewId(page);
 }
 
 async function gotoMonitoringBuilds(page: Page, analysisId?: string) {
@@ -64,11 +61,11 @@ async function openCancelDialogFromPreview(page: Page, preview: ReturnType<Page[
 		}
 		if (await closeBtn.isVisible().catch(() => false)) {
 			await closeBtn.click({ timeout: 5_000 });
-			await expect(preview).not.toBeVisible({ timeout: 5_000 });
+			await expect(preview).not.toBeVisible({ timeout: readyTimeoutMs() });
 		}
 		await expect(openPreviewBtn).toBeVisible({ timeout: 5_000 });
 		await openPreviewBtn.click({ timeout: 5_000 });
-		await expect(preview).toBeVisible({ timeout: 5_000 });
+		await waitForBuildPreview(page);
 		await page.waitForTimeout(1_000);
 	}
 

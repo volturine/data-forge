@@ -2,7 +2,7 @@ import { test, expect } from './fixtures.js';
 import { createDatasource } from './utils/api.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
-import { waitForAppShell, waitForDatasourceList } from './utils/readiness.js';
+import { gotoMonitoringTab, waitForAppShell, waitForDatasourceList } from './utils/readiness.js';
 import { switchNamespace, expectNamespace } from './utils/namespace.js';
 
 /**
@@ -84,7 +84,7 @@ test.describe('Namespace – data isolation', () => {
 		await screenshot(page, 'namespace', 'route-preserved-datasources');
 
 		// Navigate to /monitoring?tab=schedules and switch again
-		await page.goto('/monitoring?tab=schedules');
+		await gotoMonitoringTab(page, 'schedules');
 		await expect(page.getByRole('button', { name: /New Schedule/i })).toBeVisible({
 			timeout: 5_000
 		});
@@ -117,29 +117,25 @@ test.describe('Namespace – data isolation', () => {
 		const nsB = `e2e-stale-b-${id}`;
 		const dsName = `e2e-stale-ds-${id}`;
 
-		try {
-			await page.goto('/');
-			await waitForAppShell(page);
-			await switchNamespace(page, nsA);
-			await createDatasource(request, dsName, nsA);
-			await page.goto('/datasources');
+		await page.goto('/');
+		await waitForAppShell(page);
+		await switchNamespace(page, nsA);
+		await createDatasource(request, dsName, nsA);
+		await page.goto('/datasources');
 
-			// 1. Select a datasource in nsA so the URL has ?id=
-			await page.goto('/datasources');
-			await waitForDatasourceList(page);
-			await page.locator(`[data-ds-row="${dsName}"]`).click();
-			await expect(page).toHaveURL(/id=/, { timeout: 5_000 });
+		// 1. Select a datasource in nsA so the URL has ?id=
+		await page.goto('/datasources');
+		await waitForDatasourceList(page);
+		await page.locator(`[data-ds-row="${dsName}"]`).click();
+		await expect(page).toHaveURL(/id=/, { timeout: 5_000 });
 
-			// 2. Switch to nsB — selection must clear, no crash
-			await switchNamespace(page, nsB);
-			await expect(page).toHaveURL(/datasources/, { timeout: 5_000 });
-			await expect(page).not.toHaveURL(/id=/, { timeout: 5_000 });
-			await waitForDatasourceList(page);
-			await expect(page.getByText(/No datasource selected/i)).toBeVisible({ timeout: 5_000 });
-			await screenshot(page, 'namespace', 'stale-selection-cleared');
-		} finally {
-			await switchNamespace(page, nsA);
-		}
+		// 2. Switch to nsB — selection must clear, no crash
+		await switchNamespace(page, nsB);
+		await expect(page).toHaveURL(/datasources/, { timeout: 5_000 });
+		await expect(page).not.toHaveURL(/id=/, { timeout: 5_000 });
+		await waitForDatasourceList(page);
+		await expect(page.getByText(/No datasource selected/i)).toBeVisible({ timeout: 5_000 });
+		await screenshot(page, 'namespace', 'stale-selection-cleared');
 	});
 
 	test('namespace switch with open preview sends no stale compute requests', async ({

@@ -909,9 +909,9 @@ test.describe('Analyses – join config editing', () => {
 			await dsPickerInput.fill(dsRight);
 			await page.locator(`[data-picker-option="${dsRight}"]`).click({ timeout: 5_000 });
 
-			await expect(configPanel.getByText(/columns available/)).toBeVisible({ timeout: 5_000 });
-
-			await configPanel.locator('[data-testid="join-add-column-button"]').click();
+			const addColumnButton = configPanel.locator('[data-testid="join-add-column-button"]');
+			await expect(addColumnButton).toBeEnabled({ timeout: 5_000 });
+			await addColumnButton.click();
 
 			const colGroup = configPanel.getByRole('group', { name: /Join column pair 1/ });
 			const leftDropdown = colGroup
