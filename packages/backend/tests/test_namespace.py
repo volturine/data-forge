@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from backend_core.config import settings
 from backend_core.namespace import (
@@ -13,6 +12,7 @@ from backend_core.namespace import (
     set_namespace_context,
 )
 from modules.namespaces import routes as namespace_routes
+from tests.http_client import TestClient
 
 
 def test_normalize_namespace_default():

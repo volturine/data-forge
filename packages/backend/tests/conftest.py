@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
@@ -33,6 +32,7 @@ from tests.harness.base_fixtures import (
     temp_upload_dir,
     test_db_session,
 )
+from tests.http_client import TestClient
 
 __all__ = [
     'cleanup_namespace_engines',

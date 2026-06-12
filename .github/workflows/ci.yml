@@ -138,9 +138,9 @@ jobs:
       - name: Run e2e tests
         run: |
           set -o pipefail
-          mkdir -p packages/frontend/tests/ci-artifacts
-          export E2E_LOG_DIR="$PWD/packages/frontend/tests/ci-artifacts/services"
-          just test-e2e 2>&1 | tee packages/frontend/tests/ci-artifacts/e2e.log
+          mkdir -p .artifacts/ci/e2e
+          export E2E_LOG_DIR="$PWD/.artifacts/ci/e2e/services"
+          just test-e2e 2>&1 | tee .artifacts/ci/e2e/e2e.log
           status=${PIPESTATUS[0]}
           if [ "$status" -eq 124 ]; then
             echo "e2e step hit the shared 27 minute harness timeout before the 30 minute job timeout"

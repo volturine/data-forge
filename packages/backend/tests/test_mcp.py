@@ -3,7 +3,6 @@
 import re
 
 import pytest
-from fastapi.testclient import TestClient
 
 from modules.mcp.decorators import (
     MCP_TOOL_MARKER,
@@ -13,6 +12,7 @@ from modules.mcp.decorators import (
 from modules.mcp.models import MCPHttpMethod, MCPToolDefinition, MCPToolSafety
 from modules.mcp.registry import _build_tool, _openapi_to_json_schema
 from modules.mcp.router import MCP_ROUTE_META, MCPRouter, get_mcp_route_meta
+from tests.http_client import TestClient
 
 
 class TestMCPToolDefinition:

@@ -6,11 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlmodel import Session, create_engine
 
 from backend_core.secrets import MASKED_SECRET, decrypt_secret, encrypt_secret
+from tests.http_client import TestClient
 
 
 def _make_postgres_engine(prefix: str = 'settings'):

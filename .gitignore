@@ -8,6 +8,7 @@
 
 # Test artifacts (package-local)
 packages/*/tests/.artifacts/
+.artifacts/
 
 # Node/tool caches
 node_modules/

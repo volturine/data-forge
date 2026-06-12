@@ -7,7 +7,6 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi import Depends, FastAPI
-from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -65,6 +64,7 @@ from modules.auth.service import (
     validate_verification_token,
     verify_password,
 )
+from tests.http_client import TestClient
 
 
 def _make_postgres_engine(prefix: str = 'auth', *, schema_name: str | None = None):

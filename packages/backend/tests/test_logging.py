@@ -3,9 +3,9 @@ from collections.abc import AsyncIterator
 import psycopg
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
-from fastapi.testclient import TestClient
 
 from backend_core.logging import DatabaseLogKind, DatabaseLogWriter, RequestLoggingMiddleware, redact_logged_body
+from tests.http_client import TestClient
 
 
 class TestLoggingRedaction:

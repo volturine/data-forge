@@ -78,7 +78,7 @@ export default defineConfig({
 		allowedHosts: true,
 		hmr: disableHmr ? false : undefined,
 		watch: {
-			ignored: ['**/tests/.artifacts/**']
+			ignored: ['**/.artifacts/**', '**/tests/ci-artifacts/**']
 		},
 		fs: {
 			allow: ['styled-system']

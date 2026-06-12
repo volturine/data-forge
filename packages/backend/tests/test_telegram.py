@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
@@ -24,6 +23,7 @@ from backend_core.telegram_store import (
     remove_listener,
 )
 from modules.telegram.bot import TelegramBot
+from tests.http_client import TestClient
 
 # ---------------------------------------------------------------------------
 # Service tests (direct DB calls)

@@ -8,10 +8,10 @@ from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from backend_core.secrets import encrypt_secret
 from modules.chat.sessions import ChatSession, LiveSession, SessionStore
+from tests.http_client import TestClient
 
 
 def _session_history(session_id: str) -> list[dict]:
