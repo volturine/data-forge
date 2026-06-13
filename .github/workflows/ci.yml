@@ -138,7 +138,7 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: packages/frontend
-        run: bun x playwright install chromium
+        run: bun x playwright install --with-deps chromium
 
       - name: Run e2e tests
         run: |
