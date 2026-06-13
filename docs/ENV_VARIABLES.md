@@ -280,7 +280,7 @@ These variables configure the gRPC channel that the scheduler and worker use to 
 
 | Variable         | Default | Notes                                |
 | ---------------- | ------- | ------------------------------------ |
-| `PW_E2E_WORKERS` | auto    | Optional Playwright worker override. |
+| `PW_E2E_WORKERS` | `2`     | Playwright workers per e2e shard. CI may lower this for smaller runners. |
 
 ## Recommended additions to consider later
 

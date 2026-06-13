@@ -10,7 +10,6 @@ ROOT_DIR="$(pwd)"
 DATA_DIR="${DATA_DIR}-run-$$"
 export DATA_DIR
 LOG_DIR="${E2E_LOG_DIR:-}"
-PLAYWRIGHT_CONFIG_PATH="${ROOT_DIR}/packages/frontend/playwright.config.ts"
 PLAYWRIGHT_ARTIFACTS_DIR="${ROOT_DIR}/packages/frontend/tests/.artifacts/playwright"
 PG_CONTAINER="dataforge-e2e-pg-$$"
 PG_LABEL="data-forge.test-postgres=1"
@@ -194,13 +193,13 @@ echo "Runtime workers are ready"
 echo "Waiting for frontend readiness"
 wait_for_url "http://127.0.0.1:${FRONTEND_PORT}" "frontend"
 echo "Frontend is ready"
-PLAYWRIGHT_WORKERS="$(grep -Eo 'const DEFAULT_E2E_WORKERS = [0-9]+' "${PLAYWRIGHT_CONFIG_PATH}" | awk '{print $4}')"
+PLAYWRIGHT_WORKERS="${PW_E2E_WORKERS:-}"
 if [ -z "${PLAYWRIGHT_WORKERS}" ]; then
-    echo "Failed to read DEFAULT_E2E_WORKERS from ${PLAYWRIGHT_CONFIG_PATH}" >&2
+    echo "PW_E2E_WORKERS must be set before running e2e tests" >&2
     exit 1
 fi
 echo "Starting Playwright e2e tests across 4 deterministic shards"
-echo "Using ${PLAYWRIGHT_WORKERS} worker(s) per shard (from ${PLAYWRIGHT_CONFIG_PATH})"
+echo "Using ${PLAYWRIGHT_WORKERS} worker(s) per shard"
 mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}"
 for shard_index in 1 2 3 4; do
     mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/test-results-shard-${shard_index}-of-4"

@@ -2,7 +2,19 @@
 import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
-const DEFAULT_E2E_WORKERS = 2;
+function resolveE2eWorkers(): number {
+	const raw = process.env.PW_E2E_WORKERS;
+	if (!raw) {
+		throw new Error('PW_E2E_WORKERS must be set before running Playwright e2e tests');
+	}
+
+	const workers = Number.parseInt(raw, 10);
+	if (!Number.isInteger(workers) || workers < 1 || workers.toString() !== raw) {
+		throw new Error(`PW_E2E_WORKERS must be a positive integer, got "${raw}"`);
+	}
+
+	return workers;
+}
 
 function shardSuffixFromArgs(): string {
 	const shardFlagIndex = process.argv.findIndex((arg) => arg === '--shard');
@@ -20,6 +32,7 @@ const ciArgs = process.env.CI ? ['--disable-dev-shm-usage', '--disable-gpu'] : [
 const artifactsRoot = path.resolve(process.cwd(), 'tests', '.artifacts');
 const shardSuffix = shardSuffixFromArgs();
 const reporter = [['line'] as const];
+const workers = resolveE2eWorkers();
 
 export default defineConfig({
 	testDir: './tests',
@@ -27,7 +40,7 @@ export default defineConfig({
 	expect: { timeout: process.env.CI ? 10_000 : 5_000 },
 	fullyParallel: false,
 	globalSetup: './tests/global-setup.ts',
-	workers: DEFAULT_E2E_WORKERS,
+	workers,
 	retries: 0,
 	outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR
 		? path.resolve(process.env.PLAYWRIGHT_OUTPUT_DIR)
