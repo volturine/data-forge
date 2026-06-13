@@ -221,10 +221,11 @@ if [ -z "${PLAYWRIGHT_WORKERS}" ]; then
 fi
 echo "Starting Playwright e2e tests across 4 deterministic shards"
 echo "Using ${PLAYWRIGHT_WORKERS} worker(s) per shard"
+rm -rf "${PLAYWRIGHT_ARTIFACTS_DIR}"
 mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}"
 for shard_index in 1 2 3 4; do
-    mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/test-results-shard-${shard_index}-of-4"
-    mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/playwright-report-shard-${shard_index}-of-4"
+    mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/shard-${shard_index}-of-4/test-results"
+    mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/shard-${shard_index}-of-4/playwright-report"
 done
 
 run_playwright_shard() {
@@ -235,8 +236,8 @@ run_playwright_shard() {
     echo "Starting Playwright shard ${shard_label}"
     cd "${ROOT_DIR}/packages/frontend"
     local artifact_suffix="shard-${shard_index}-of-${shard_total}"
-    local output_dir="$PWD/tests/.artifacts/playwright/test-results-${artifact_suffix}"
-    local report_dir="$PWD/tests/.artifacts/playwright/playwright-report-${artifact_suffix}"
+    local output_dir="$PWD/tests/.artifacts/playwright/${artifact_suffix}/test-results"
+    local report_dir="$PWD/tests/.artifacts/playwright/${artifact_suffix}/playwright-report"
     mkdir -p "$output_dir" "$report_dir"
     # Suppress Node.js runtime deprecation warnings (e.g. DEP0205 module.register)
     # that come from Playwright/Vite internals on Node v26+; these are third-party
