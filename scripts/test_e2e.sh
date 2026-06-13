@@ -66,6 +66,21 @@ terminate_processes() {
         kill_tree_force "$pid"
     done
 }
+dump_service_logs() {
+    if [ -z "$LOG_DIR" ] || [ ! -d "$LOG_DIR" ]; then
+        return
+    fi
+    local service
+    for service in backend worker scheduler frontend; do
+        local log_file="$LOG_DIR/${service}.log"
+        if [ ! -f "$log_file" ]; then
+            continue
+        fi
+        echo "::group::${service} service log tail"
+        tail -n 200 "$log_file" || true
+        echo "::endgroup::"
+    done
+}
 cleanup() {
     status=$?
     terminate_processes "${FRONTEND_PID:-}" "${SCHEDULER_PID:-}" "${WORKER_PID:-}"
@@ -141,15 +156,9 @@ done
 echo "Starting e2e services"
 if [ -n "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) >"$LOG_DIR/backend.log" 2>&1 & BACKEND_PID=$!
-    (cd packages/worker && exec uv run --no-env-file main.py) >"$LOG_DIR/worker.log" 2>&1 & WORKER_PID=$!
-    (cd packages/scheduler && exec uv run --no-env-file main.py) >"$LOG_DIR/scheduler.log" 2>&1 & SCHEDULER_PID=$!
-    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 DATAFORGE_DISABLE_VITE_HMR=true node ./node_modules/vite/bin/vite.js dev) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
 fi
 if [ -z "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) & BACKEND_PID=$!
-    (cd packages/worker && exec uv run --no-env-file main.py) & WORKER_PID=$!
-    (cd packages/scheduler && exec uv run --no-env-file main.py) & SCHEDULER_PID=$!
-    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 DATAFORGE_DISABLE_VITE_HMR=true node ./node_modules/vite/bin/vite.js dev) & FRONTEND_PID=$!
 fi
 wait_for_url() {
     local url="$1"
@@ -158,6 +167,7 @@ wait_for_url() {
     until curl -fs "$url" >/dev/null 2>&1; do
         if [ "$SECONDS" -ge "$deadline" ]; then
             echo "Timed out waiting for ${label} at ${url}" >&2
+            dump_service_logs >&2
             exit 1
         fi
         sleep 1
@@ -186,6 +196,17 @@ wait_for_runtime_worker() {
 echo "Waiting for backend readiness"
 wait_for_url "http://127.0.0.1:${PORT}/health/ready" "backend readiness"
 echo "Backend is ready"
+echo "Starting e2e worker, scheduler, and frontend"
+if [ -n "$LOG_DIR" ]; then
+    (cd packages/worker && exec uv run --no-env-file main.py) >"$LOG_DIR/worker.log" 2>&1 & WORKER_PID=$!
+    (cd packages/scheduler && exec uv run --no-env-file main.py) >"$LOG_DIR/scheduler.log" 2>&1 & SCHEDULER_PID=$!
+    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 DATAFORGE_DISABLE_VITE_HMR=true node ./node_modules/vite/bin/vite.js dev) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
+fi
+if [ -z "$LOG_DIR" ]; then
+    (cd packages/worker && exec uv run --no-env-file main.py) & WORKER_PID=$!
+    (cd packages/scheduler && exec uv run --no-env-file main.py) & SCHEDULER_PID=$!
+    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 DATAFORGE_DISABLE_VITE_HMR=true node ./node_modules/vite/bin/vite.js dev) & FRONTEND_PID=$!
+fi
 echo "Waiting for runtime worker registrations"
 wait_for_runtime_worker "build_manager" 1 "worker build manager"
 wait_for_runtime_worker "scheduler" 1 "scheduler"
