@@ -276,7 +276,7 @@ class _TestClientTransport(httpx.BaseTransport):
             with self.portal_factory() as portal:
                 response_complete = portal.call(anyio.Event)
                 portal.call(self.app, http_scope, receive, send)
-        except BaseException:
+        except Exception:
             if self.raise_server_exceptions:
                 raise
 
