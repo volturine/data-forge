@@ -10,8 +10,8 @@ from typing import Any, TypeVar, cast
 
 import grpc
 
+from dataforge_protocol import common_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
 from worker_grpc.codec import dict_to_struct, optional_struct_to_dict, struct_to_dict
-from worker_grpc.generated import common_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
 
 _TOKEN_METADATA_KEY = "x-internal-token"
 _T = TypeVar("_T")

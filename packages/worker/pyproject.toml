@@ -32,14 +32,14 @@
     target-version = "py314"
     line-length    = 160
     indent-width   = 4
-    extend-exclude = ["worker_grpc/generated"]
+    extend-exclude = ["dataforge_protocol"]
 
 [tool.mypy]
     mypy_path = [
         ".",
         "../..",
     ]
-    exclude = ["(^|/)conftest\\.py$", "^tests/", "worker_grpc/generated"]
+    exclude = ["(^|/)conftest\\.py$", "^tests/", "dataforge_protocol"]
 
 [tool.pytest.ini_options]
     cache_dir = "tests/.artifacts/pytest-cache"
@@ -60,5 +60,5 @@
 ]
 
 [tool.hatch.build.targets.wheel]
-    packages = ["builds", "datasources", "operations", "runtime", "worker_models", "worker_grpc"]
+    packages = ["builds", "dataforge_protocol", "datasources", "operations", "runtime", "worker_models", "worker_grpc"]
     include  = ["*.py"]

@@ -1,0 +1,22 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/python
+    out: ../backend
+  - remote: buf.build/protocolbuffers/pyi
+    out: ../backend
+  - remote: buf.build/grpc/python
+    out: ../backend
+  - remote: buf.build/protocolbuffers/python
+    out: ../worker
+  - remote: buf.build/protocolbuffers/pyi
+    out: ../worker
+  - remote: buf.build/grpc/python
+    out: ../worker
+  - remote: buf.build/protocolbuffers/python
+    out: ../scheduler
+  - remote: buf.build/protocolbuffers/pyi
+    out: ../scheduler
+  - remote: buf.build/grpc/python
+    out: ../scheduler
+inputs:
+  - directory: proto

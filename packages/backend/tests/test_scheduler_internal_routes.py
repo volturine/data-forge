@@ -13,8 +13,8 @@ from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 from backend_core.persistence.scheduler.models import Schedule
-from backend_grpc.generated import common_pb2, scheduler_runtime_pb2
 from backend_grpc.server import SchedulerRuntimeServicer
+from dataforge_protocol import common_pb2, scheduler_runtime_pb2
 
 
 class FakeGrpcContext:

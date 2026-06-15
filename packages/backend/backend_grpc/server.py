@@ -46,7 +46,7 @@ from backend_core.persistence.udfs.models import Udf
 from backend_core.settings_projection import get_resolved_smtp, get_resolved_telegram_settings, get_resolved_telegram_token
 from backend_core.smtp import send_smtp_message
 from backend_grpc.codec import dict_to_struct, repeated_structs_to_dicts, struct_field_to_dict, struct_to_dict
-from backend_grpc.generated import common_pb2, scheduler_runtime_pb2, scheduler_runtime_pb2_grpc, worker_runtime_pb2, worker_runtime_pb2_grpc
+from dataforge_protocol import common_pb2, scheduler_runtime_pb2, scheduler_runtime_pb2_grpc, worker_runtime_pb2, worker_runtime_pb2_grpc
 from modules.datasource import runtime_service as datasource_runtime_service
 from modules.scheduler import service as scheduler_service
 

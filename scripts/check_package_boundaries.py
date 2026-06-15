@@ -19,6 +19,7 @@ EXCLUDED_DIRS = {
     'tests-e2e',
     'test-results',
     'playwright-report',
+    'dataforge_protocol',
 }
 
 EXPECTED_PACKAGES = {'backend', 'frontend', 'protocol', 'scheduler', 'worker'}

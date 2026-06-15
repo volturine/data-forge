@@ -17,8 +17,8 @@ from backend_core.database import run_settings_db
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 from backend_grpc.codec import dict_to_struct, struct_to_dict
-from backend_grpc.generated import common_pb2, worker_runtime_pb2
 from backend_grpc.server import WorkerRuntimeServicer
+from dataforge_protocol import common_pb2, worker_runtime_pb2
 
 
 class FakeGrpcContext:

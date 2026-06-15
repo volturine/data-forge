@@ -27,6 +27,7 @@ EXCLUDED_DIR_NAMES = {
     '.venv',
     '.venv311',
     'build',
+    'dataforge_protocol',
     'generated',
     'node_modules',
     'styled-system',

@@ -3,9 +3,7 @@ name = "dataforge-protocol"
 version = "1.0.0"
 description = "Data-Forge shared protocol tooling package"
 requires-python = ">=3.14"
-dependencies = [
-    "grpcio-tools>=1.81.0",
-]
+dependencies = []
 
 [build-system]
 requires = ["hatchling"]

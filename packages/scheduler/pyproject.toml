@@ -16,14 +16,14 @@
     target-version = "py314"
     line-length    = 160
     indent-width   = 4
-    extend-exclude = ["scheduler_grpc/generated"]
+    extend-exclude = ["dataforge_protocol"]
 
 [tool.mypy]
     mypy_path = [
         ".",
         "../..",
     ]
-    exclude = ["(^|/)conftest\\.py$", "scheduler_grpc/generated"]
+    exclude = ["(^|/)conftest\\.py$", "dataforge_protocol"]
 
 [tool.pytest.ini_options]
     cache_dir = "tests/.artifacts/pytest-cache"
@@ -41,4 +41,4 @@
 ]
 
 [tool.hatch.build.targets.wheel]
-    only-include = ["main.py", "scheduler_grpc"]
+    only-include = ["main.py", "dataforge_protocol", "scheduler_grpc"]

@@ -15,7 +15,7 @@ from typing import TypeVar
 
 import grpc
 
-from scheduler_grpc.generated import common_pb2, scheduler_runtime_pb2, scheduler_runtime_pb2_grpc
+from dataforge_protocol import common_pb2, scheduler_runtime_pb2, scheduler_runtime_pb2_grpc
 
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"

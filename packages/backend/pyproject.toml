@@ -40,7 +40,7 @@
     target-version = "py314"
     line-length    = 160
     indent-width   = 4
-    extend-exclude = ["backend_grpc/generated"]
+    extend-exclude = ["dataforge_protocol"]
 
     [tool.ruff.lint]
         select = [
@@ -96,7 +96,7 @@
         ".",
         "../..",
     ]
-    exclude = ["(^|/)conftest\\.py$", "backend_grpc/generated"]
+    exclude = ["(^|/)conftest\\.py$", "dataforge_protocol"]
 
 [tool.pytest.ini_options]
     asyncio_mode = "auto"
@@ -130,5 +130,5 @@
 ]
 
 [tool.hatch.build.targets.wheel]
-    packages = ["api", "backend_contracts", "backend_core", "backend_grpc", "modules"]
+    packages = ["api", "backend_contracts", "backend_core", "backend_grpc", "dataforge_protocol", "modules"]
     include  = ["main.py", "database/**"]

@@ -4,6 +4,7 @@ default: dev
 
 pytest := 'env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q'
 python := 'env -u VIRTUAL_ENV uv run python'
+buf := 'bunx @bufbuild/buf@1.70.0'
 
 install:
     cd packages/backend && uv sync
@@ -93,7 +94,10 @@ check:
     cd packages/worker && env -u VIRTUAL_ENV uv run python -m mypy .
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_build_stream_types.py --check
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_step_types.py --check
-    env -u VIRTUAL_ENV uv run --project packages/protocol python scripts/generate_grpc.py --check
+    cd packages/protocol && {{buf}} format --diff --exit-code
+    cd packages/protocol && {{buf}} lint
+    if git cat-file -e HEAD:packages/protocol/buf.yaml 2>/dev/null; then cd packages/protocol && {{buf}} breaking --against '../../.git#branch=HEAD,subdir=packages/protocol'; else echo 'Skipping Buf breaking check: no protocol Buf module exists in HEAD yet.'; fi
+    just check-protocol-generated
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_package_boundaries.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_env_contracts.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_dependency_hygiene.py
@@ -101,8 +105,44 @@ check:
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_test_layout.py
     cd packages/frontend && bun run panda:codegen && bun run check && bun run lint
 
-generate-grpc:
-    env -u VIRTUAL_ENV uv run --project packages/protocol python scripts/generate_grpc.py
+generate-protocol:
+    cd packages/protocol && {{buf}} generate
+
+check-protocol-generated:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/backend" "$tmp/worker" "$tmp/scheduler"
+    cat > "$tmp/buf.gen.yaml" <<EOF
+    version: v2
+    plugins:
+      - remote: buf.build/protocolbuffers/python
+        out: $tmp/backend
+      - remote: buf.build/protocolbuffers/pyi
+        out: $tmp/backend
+      - remote: buf.build/grpc/python
+        out: $tmp/backend
+      - remote: buf.build/protocolbuffers/python
+        out: $tmp/worker
+      - remote: buf.build/protocolbuffers/pyi
+        out: $tmp/worker
+      - remote: buf.build/grpc/python
+        out: $tmp/worker
+      - remote: buf.build/protocolbuffers/python
+        out: $tmp/scheduler
+      - remote: buf.build/protocolbuffers/pyi
+        out: $tmp/scheduler
+      - remote: buf.build/grpc/python
+        out: $tmp/scheduler
+    inputs:
+      - directory: proto
+    EOF
+    cd packages/protocol
+    {{buf}} generate --template "$tmp/buf.gen.yaml"
+    diff -ru --exclude='__pycache__' "$tmp/backend/dataforge_protocol" ../backend/dataforge_protocol
+    diff -ru --exclude='__pycache__' "$tmp/worker/dataforge_protocol" ../worker/dataforge_protocol
+    diff -ru --exclude='__pycache__' "$tmp/scheduler/dataforge_protocol" ../scheduler/dataforge_protocol
 
 verify:
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py -- just format
