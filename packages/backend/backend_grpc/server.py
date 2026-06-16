@@ -806,7 +806,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 total_tabs=run.total_tabs,
             )
             if isinstance(run.current_kind, str):
-                payload.current_kind = _proto_value('COMPUTE_REQUEST_KIND', run.current_kind)
+                payload.current_kind = _proto_value('ENGINE_RUN_KIND', run.current_kind)
             payload.started_at.CopyFrom(datetime_to_timestamp(run.started_at))
             if isinstance(run.resource_config_json, dict):
                 payload.resource_config_json.CopyFrom(dict_to_struct(dict(run.resource_config_json)))

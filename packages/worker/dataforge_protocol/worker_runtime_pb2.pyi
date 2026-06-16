@@ -441,7 +441,7 @@ class WorkerBuildRunPayload(_message.Message):
     request_json: _common_pb2.JsonPayload
     starter_json: _common_pb2.JsonPayload
     resource_config_json: _common_pb2.JsonPayload
-    current_kind: _enums_pb2.ComputeRequestKind
+    current_kind: _enums_pb2.EngineRunKind
     current_datasource_id: str
     current_tab_id: str
     current_tab_name: str
@@ -449,7 +449,7 @@ class WorkerBuildRunPayload(_message.Message):
     current_output_name: str
     started_at: _timestamp_pb2.Timestamp
     total_tabs: int
-    def __init__(self, id: _Optional[str] = ..., namespace: _Optional[str] = ..., analysis_id: _Optional[str] = ..., analysis_name: _Optional[str] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., starter_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., resource_config_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., current_kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., current_datasource_id: _Optional[str] = ..., current_tab_id: _Optional[str] = ..., current_tab_name: _Optional[str] = ..., current_output_id: _Optional[str] = ..., current_output_name: _Optional[str] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., total_tabs: _Optional[int] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., namespace: _Optional[str] = ..., analysis_id: _Optional[str] = ..., analysis_name: _Optional[str] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., starter_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., resource_config_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., current_kind: _Optional[_Union[_enums_pb2.EngineRunKind, str]] = ..., current_datasource_id: _Optional[str] = ..., current_tab_id: _Optional[str] = ..., current_tab_name: _Optional[str] = ..., current_output_id: _Optional[str] = ..., current_output_name: _Optional[str] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., total_tabs: _Optional[int] = ...) -> None: ...
 
 class WorkerStartBuildRunRequest(_message.Message):
     __slots__ = ("namespace", "build_id")

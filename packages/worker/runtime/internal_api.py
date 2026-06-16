@@ -516,7 +516,7 @@ class WorkerInternalApiClient:
             request_json=struct_to_dict(run.request_json),
             starter_json=struct_to_dict(run.starter_json),
             resource_config_json=optional_struct_to_dict(run, "resource_config_json"),
-            current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.ComputeRequestKind, "COMPUTE_REQUEST_KIND"),
+            current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.EngineRunKind, "ENGINE_RUN_KIND"),
             current_datasource_id=_optional_str(run, "current_datasource_id"),
             current_tab_id=_optional_str(run, "current_tab_id"),
             current_tab_name=_optional_str(run, "current_tab_name"),

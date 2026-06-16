@@ -301,7 +301,7 @@ message WorkerBuildRunPayload {
   JsonPayload request_json = 5;
   JsonPayload starter_json = 6;
   optional JsonPayload resource_config_json = 7;
-  optional ComputeRequestKind current_kind = 8 [(buf.validate.field).enum.defined_only = true];
+  optional EngineRunKind current_kind = 8 [(buf.validate.field).enum.defined_only = true];
   optional string current_datasource_id = 9 [(buf.validate.field).string.min_len = 1];
   optional string current_tab_id = 10 [(buf.validate.field).string.min_len = 1];
   optional string current_tab_name = 11 [(buf.validate.field).string.min_len = 1];

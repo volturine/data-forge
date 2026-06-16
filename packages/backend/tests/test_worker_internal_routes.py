@@ -13,6 +13,7 @@ from backend_core.contracts.build_runs.models import BuildRunStatus
 from backend_core.contracts.compute import schemas as compute_schemas
 from backend_core.contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
 from backend_core.contracts.datasource.source_types import DataSourceType
+from backend_core.contracts.engine_runs.schemas import EngineRunKind
 from backend_core.database import run_settings_db
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
@@ -269,6 +270,7 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
         request_json={'analysis_pipeline': {'analysis_id': analysis_id, 'tabs': []}, 'tab_id': 'tab-1'},
         starter_json={'triggered_by': 'test'},
         status=BuildRunStatus.QUEUED,
+        current_kind=EngineRunKind.BUILD.value,
         created_at=datetime.now(UTC),
     )
 
@@ -280,9 +282,11 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
     assert response.HasField('run')
     assert response.run.id == build_id
     assert response.run.analysis_id == analysis_id
+    assert response.run.current_kind == enums_pb2.ENGINE_RUN_KIND_BUILD
     run = build_runs_service.get_build_run(test_db_session, build_id)
     assert run is not None
     assert run.status == BuildRunStatus.RUNNING
+    assert run.current_kind == EngineRunKind.BUILD.value
 
 
 @pytest.mark.asyncio
