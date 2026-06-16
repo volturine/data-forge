@@ -1,5 +1,9 @@
+import datetime
+
 from buf.validate import validate_pb2 as _validate_pb2
 from dataforge_protocol import common_pb2 as _common_pb2
+from dataforge_protocol import enums_pb2 as _enums_pb2
+from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -17,12 +21,12 @@ class RuntimeWorkerRegisterRequest(_message.Message):
     CAPACITY_FIELD_NUMBER: _ClassVar[int]
     ACTIVE_JOBS_FIELD_NUMBER: _ClassVar[int]
     worker_id: str
-    kind: str
+    kind: _enums_pb2.RuntimeWorkerKind
     hostname: str
     pid: int
     capacity: int
     active_jobs: int
-    def __init__(self, worker_id: _Optional[str] = ..., kind: _Optional[str] = ..., hostname: _Optional[str] = ..., pid: _Optional[int] = ..., capacity: _Optional[int] = ..., active_jobs: _Optional[int] = ...) -> None: ...
+    def __init__(self, worker_id: _Optional[str] = ..., kind: _Optional[_Union[_enums_pb2.RuntimeWorkerKind, str]] = ..., hostname: _Optional[str] = ..., pid: _Optional[int] = ..., capacity: _Optional[int] = ..., active_jobs: _Optional[int] = ...) -> None: ...
 
 class RuntimeWorkerHeartbeatRequest(_message.Message):
     __slots__ = ("worker_id", "active_jobs")
@@ -56,9 +60,9 @@ class WorkerClaimedComputeRequest(_message.Message):
     REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
     id: str
     namespace: str
-    kind: str
+    kind: _enums_pb2.ComputeRequestKind
     request_json: _common_pb2.JsonPayload
-    def __init__(self, id: _Optional[str] = ..., namespace: _Optional[str] = ..., kind: _Optional[str] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., namespace: _Optional[str] = ..., kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
 
 class WorkerClaimComputeRequestResponse(_message.Message):
     __slots__ = ("request",)
@@ -100,9 +104,9 @@ class WorkerExecuteDatasourceRequest(_message.Message):
     KIND_FIELD_NUMBER: _ClassVar[int]
     REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
     namespace: str
-    kind: str
+    kind: _enums_pb2.ComputeRequestKind
     request_json: _common_pb2.JsonPayload
-    def __init__(self, namespace: _Optional[str] = ..., kind: _Optional[str] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    def __init__(self, namespace: _Optional[str] = ..., kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
 
 class WorkerScheduleIngestDatasourceRequest(_message.Message):
     __slots__ = ("namespace", "datasource_id")
@@ -138,11 +142,11 @@ class WorkerDatasourceMetadataResponse(_message.Message):
     found: bool
     id: str
     name: str
-    source_type: str
+    source_type: _enums_pb2.DataSourceType
     config: _common_pb2.JsonPayload
     schema_cache: _common_pb2.JsonPayload
     is_hidden: bool
-    def __init__(self, found: _Optional[bool] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., source_type: _Optional[str] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., schema_cache: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., is_hidden: _Optional[bool] = ...) -> None: ...
+    def __init__(self, found: _Optional[bool] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., source_type: _Optional[_Union[_enums_pb2.DataSourceType, str]] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., schema_cache: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., is_hidden: _Optional[bool] = ...) -> None: ...
 
 class WorkerUdfCodesRequest(_message.Message):
     __slots__ = ("namespace", "udf_ids")
@@ -195,9 +199,9 @@ class WorkerBuildCancelStatusResponse(_message.Message):
     CANCELLED_AT_FIELD_NUMBER: _ClassVar[int]
     CANCELLED_BY_FIELD_NUMBER: _ClassVar[int]
     cancelled: bool
-    cancelled_at: str
+    cancelled_at: _timestamp_pb2.Timestamp
     cancelled_by: str
-    def __init__(self, cancelled: _Optional[bool] = ..., cancelled_at: _Optional[str] = ..., cancelled_by: _Optional[str] = ...) -> None: ...
+    def __init__(self, cancelled: _Optional[bool] = ..., cancelled_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., cancelled_by: _Optional[str] = ...) -> None: ...
 
 class WorkerUpdateBuildResultRequest(_message.Message):
     __slots__ = ("namespace", "build_id", "result_json")
@@ -223,13 +227,13 @@ class WorkerUpsertOutputDatasourceRequest(_message.Message):
     namespace: str
     result_id: str
     name: str
-    source_type: str
+    source_type: _enums_pb2.DataSourceType
     config: _common_pb2.JsonPayload
     schema_cache: _common_pb2.JsonPayload
     analysis_id: str
     is_hidden: bool
     keep_schema_cache: bool
-    def __init__(self, namespace: _Optional[str] = ..., result_id: _Optional[str] = ..., name: _Optional[str] = ..., source_type: _Optional[str] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., schema_cache: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., analysis_id: _Optional[str] = ..., is_hidden: _Optional[bool] = ..., keep_schema_cache: _Optional[bool] = ...) -> None: ...
+    def __init__(self, namespace: _Optional[str] = ..., result_id: _Optional[str] = ..., name: _Optional[str] = ..., source_type: _Optional[_Union[_enums_pb2.DataSourceType, str]] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., schema_cache: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., analysis_id: _Optional[str] = ..., is_hidden: _Optional[bool] = ..., keep_schema_cache: _Optional[bool] = ...) -> None: ...
 
 class WorkerUpsertOutputDatasourceResponse(_message.Message):
     __slots__ = ("datasource_id", "datasource_name", "is_hidden")
@@ -250,10 +254,10 @@ class WorkerHealthCheckSpec(_message.Message):
     CRITICAL_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
-    check_type: str
+    check_type: _enums_pb2.HealthCheckType
     config: _common_pb2.JsonPayload
     critical: bool
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., check_type: _Optional[str] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., critical: _Optional[bool] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., check_type: _Optional[_Union[_enums_pb2.HealthCheckType, str]] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., critical: _Optional[bool] = ...) -> None: ...
 
 class WorkerListHealthChecksRequest(_message.Message):
     __slots__ = ("namespace", "datasource_id")
@@ -280,8 +284,8 @@ class WorkerHealthCheckResultPayload(_message.Message):
     passed: bool
     message: str
     details: _common_pb2.JsonPayload
-    checked_at: str
-    def __init__(self, healthcheck_id: _Optional[str] = ..., passed: _Optional[bool] = ..., message: _Optional[str] = ..., details: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., checked_at: _Optional[str] = ...) -> None: ...
+    checked_at: _timestamp_pb2.Timestamp
+    def __init__(self, healthcheck_id: _Optional[str] = ..., passed: _Optional[bool] = ..., message: _Optional[str] = ..., details: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., checked_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class WorkerRecordHealthCheckResultsRequest(_message.Message):
     __slots__ = ("namespace", "results")
@@ -313,13 +317,13 @@ class WorkerCreateEngineRunRequest(_message.Message):
     namespace: str
     analysis_id: str
     datasource_id: str
-    kind: str
-    status: str
+    kind: _enums_pb2.EngineRunKind
+    status: _enums_pb2.EngineRunStatus
     request_json: _common_pb2.JsonPayload
     result_json: _common_pb2.JsonPayload
     error_message: str
-    created_at: str
-    completed_at: str
+    created_at: _timestamp_pb2.Timestamp
+    completed_at: _timestamp_pb2.Timestamp
     duration_ms: int
     step_timings: _common_pb2.JsonPayload
     query_plan: str
@@ -327,7 +331,7 @@ class WorkerCreateEngineRunRequest(_message.Message):
     progress: float
     current_step: str
     triggered_by: str
-    def __init__(self, namespace: _Optional[str] = ..., analysis_id: _Optional[str] = ..., datasource_id: _Optional[str] = ..., kind: _Optional[str] = ..., status: _Optional[str] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., result_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., error_message: _Optional[str] = ..., created_at: _Optional[str] = ..., completed_at: _Optional[str] = ..., duration_ms: _Optional[int] = ..., step_timings: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., query_plan: _Optional[str] = ..., execution_entries: _Optional[_Iterable[_Union[_common_pb2.JsonPayload, _Mapping]]] = ..., progress: _Optional[float] = ..., current_step: _Optional[str] = ..., triggered_by: _Optional[str] = ...) -> None: ...
+    def __init__(self, namespace: _Optional[str] = ..., analysis_id: _Optional[str] = ..., datasource_id: _Optional[str] = ..., kind: _Optional[_Union[_enums_pb2.EngineRunKind, str]] = ..., status: _Optional[_Union[_enums_pb2.EngineRunStatus, str]] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., result_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., error_message: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., duration_ms: _Optional[int] = ..., step_timings: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., query_plan: _Optional[str] = ..., execution_entries: _Optional[_Iterable[_Union[_common_pb2.JsonPayload, _Mapping]]] = ..., progress: _Optional[float] = ..., current_step: _Optional[str] = ..., triggered_by: _Optional[str] = ...) -> None: ...
 
 class WorkerUpdateEngineRunRequest(_message.Message):
     __slots__ = ("namespace", "run_id", "fields", "merge_result_json")
@@ -357,11 +361,11 @@ class WorkerEngineRunStateResponse(_message.Message):
     CANCELLED_AT_FIELD_NUMBER: _ClassVar[int]
     CANCELLED_BY_FIELD_NUMBER: _ClassVar[int]
     found: bool
-    status: str
+    status: _enums_pb2.EngineRunStatus
     result_json: _common_pb2.JsonPayload
-    cancelled_at: str
+    cancelled_at: _timestamp_pb2.Timestamp
     cancelled_by: str
-    def __init__(self, found: _Optional[bool] = ..., status: _Optional[str] = ..., result_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., cancelled_at: _Optional[str] = ..., cancelled_by: _Optional[str] = ...) -> None: ...
+    def __init__(self, found: _Optional[bool] = ..., status: _Optional[_Union[_enums_pb2.EngineRunStatus, str]] = ..., result_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., cancelled_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., cancelled_by: _Optional[str] = ...) -> None: ...
 
 class WorkerFailBuildJobRequest(_message.Message):
     __slots__ = ("job_id", "namespace", "error")
@@ -437,15 +441,15 @@ class WorkerBuildRunPayload(_message.Message):
     request_json: _common_pb2.JsonPayload
     starter_json: _common_pb2.JsonPayload
     resource_config_json: _common_pb2.JsonPayload
-    current_kind: str
+    current_kind: _enums_pb2.ComputeRequestKind
     current_datasource_id: str
     current_tab_id: str
     current_tab_name: str
     current_output_id: str
     current_output_name: str
-    started_at: str
+    started_at: _timestamp_pb2.Timestamp
     total_tabs: int
-    def __init__(self, id: _Optional[str] = ..., namespace: _Optional[str] = ..., analysis_id: _Optional[str] = ..., analysis_name: _Optional[str] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., starter_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., resource_config_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., current_kind: _Optional[str] = ..., current_datasource_id: _Optional[str] = ..., current_tab_id: _Optional[str] = ..., current_tab_name: _Optional[str] = ..., current_output_id: _Optional[str] = ..., current_output_name: _Optional[str] = ..., started_at: _Optional[str] = ..., total_tabs: _Optional[int] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., namespace: _Optional[str] = ..., analysis_id: _Optional[str] = ..., analysis_name: _Optional[str] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., starter_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., resource_config_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., current_kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., current_datasource_id: _Optional[str] = ..., current_tab_id: _Optional[str] = ..., current_tab_name: _Optional[str] = ..., current_output_id: _Optional[str] = ..., current_output_name: _Optional[str] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., total_tabs: _Optional[int] = ...) -> None: ...
 
 class WorkerStartBuildRunRequest(_message.Message):
     __slots__ = ("namespace", "build_id")
@@ -537,13 +541,13 @@ class WorkerGenerateAIRequest(_message.Message):
     ENDPOINT_URL_FIELD_NUMBER: _ClassVar[int]
     API_KEY_FIELD_NUMBER: _ClassVar[int]
     OPTIONS_FIELD_NUMBER: _ClassVar[int]
-    provider: str
+    provider: _enums_pb2.AIProvider
     prompts: _containers.RepeatedScalarFieldContainer[str]
     model: str
     endpoint_url: str
     api_key: str
     options: _common_pb2.JsonPayload
-    def __init__(self, provider: _Optional[str] = ..., prompts: _Optional[_Iterable[str]] = ..., model: _Optional[str] = ..., endpoint_url: _Optional[str] = ..., api_key: _Optional[str] = ..., options: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    def __init__(self, provider: _Optional[_Union[_enums_pb2.AIProvider, str]] = ..., prompts: _Optional[_Iterable[str]] = ..., model: _Optional[str] = ..., endpoint_url: _Optional[str] = ..., api_key: _Optional[str] = ..., options: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
 
 class WorkerGenerateAIResponse(_message.Message):
     __slots__ = ("outputs",)

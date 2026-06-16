@@ -18,7 +18,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 from backend_grpc.codec import dict_to_struct, struct_to_dict
 from backend_grpc.server import WorkerRuntimeServicer
-from dataforge_protocol import common_pb2, worker_runtime_pb2
+from dataforge_protocol import common_pb2, enums_pb2, worker_runtime_pb2
 
 
 class FakeGrpcContext:
@@ -47,7 +47,7 @@ async def test_internal_worker_grpc_registers_heartbeats_and_stops(monkeypatch: 
     await servicer.RegisterWorker(
         worker_runtime_pb2.RuntimeWorkerRegisterRequest(
             worker_id=worker_id,
-            kind='build_worker',
+            kind=enums_pb2.RUNTIME_WORKER_KIND_BUILD_WORKER,
             hostname='worker-host',
             pid=123,
             capacity=1,
@@ -140,7 +140,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     assert response.HasField('request')
     assert response.request.id == request.id
     assert response.request.namespace == 'default'
-    assert response.request.kind == ComputeRequestKind.SHUTDOWN_ENGINE.value
+    assert response.request.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE
     assert struct_to_dict(response.request.request_json) == {'analysis_id': 'analysis-1'}
     test_db_session.refresh(request)
     assert request.status == ComputeRequestStatus.RUNNING
@@ -199,7 +199,7 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
     response = await WorkerRuntimeServicer().ExecuteDatasourceRequest(
         worker_runtime_pb2.WorkerExecuteDatasourceRequest(
             namespace='default',
-            kind=ComputeRequestKind.CREATE_DATABASE_DATASOURCE.value,
+            kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
             request_json=dict_to_struct(
                 {
                     'name': 'Created',

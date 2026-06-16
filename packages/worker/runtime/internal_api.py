@@ -10,8 +10,16 @@ from typing import Any, TypeVar, cast
 
 import grpc
 
-from dataforge_protocol import common_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
-from worker_grpc.codec import dict_to_struct, optional_struct_to_dict, struct_to_dict
+from dataforge_protocol import common_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
+from worker_grpc.codec import (
+    datetime_to_timestamp,
+    dict_to_struct,
+    enum_to_proto_value,
+    optional_struct_to_dict,
+    optional_timestamp_to_datetime,
+    proto_value_to_enum_name,
+    struct_to_dict,
+)
 
 _TOKEN_METADATA_KEY = "x-internal-token"
 _T = TypeVar("_T")
@@ -111,7 +119,7 @@ class WorkerInternalApiClient:
     def register_worker(self, *, worker_id: str, kind: str, hostname: str, pid: int, capacity: int, active_jobs: int = 0) -> None:
         request = worker_runtime_pb2.RuntimeWorkerRegisterRequest(
             worker_id=worker_id,
-            kind=kind,
+            kind=enum_to_proto_value("RUNTIME_WORKER_KIND", kind),
             hostname=hostname,
             pid=pid,
             capacity=capacity,
@@ -141,7 +149,7 @@ class WorkerInternalApiClient:
         return ClaimedComputeRequest(
             id=response.request.id,
             namespace=response.request.namespace,
-            kind=response.request.kind,
+            kind=proto_value_to_enum_name(enums_pb2.ComputeRequestKind, "COMPUTE_REQUEST_KIND", response.request.kind),
             request_json=struct_to_dict(response.request.request_json),
         )
 
@@ -193,7 +201,11 @@ class WorkerInternalApiClient:
     def execute_datasource_request(self, *, namespace: str, kind: str, request_json: dict[str, object]) -> dict[str, object]:
         response = self._call(
             lambda: self._stub.ExecuteDatasourceRequest(
-                worker_runtime_pb2.WorkerExecuteDatasourceRequest(namespace=namespace, kind=kind, request_json=dict_to_struct(request_json)),
+                worker_runtime_pb2.WorkerExecuteDatasourceRequest(
+                    namespace=namespace,
+                    kind=enum_to_proto_value("COMPUTE_REQUEST_KIND", kind),
+                    request_json=dict_to_struct(request_json),
+                ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
             )
@@ -222,7 +234,7 @@ class WorkerInternalApiClient:
             found=response.found,
             id=_optional_str(response, "id"),
             name=_optional_str(response, "name"),
-            source_type=_optional_str(response, "source_type"),
+            source_type=_optional_proto_enum_name(response, "source_type", enums_pb2.DataSourceType, "DATA_SOURCE_TYPE"),
             config=optional_struct_to_dict(response, "config"),
             schema_cache=optional_struct_to_dict(response, "schema_cache"),
             is_hidden=_optional_bool(response, "is_hidden"),
@@ -258,7 +270,7 @@ class WorkerInternalApiClient:
                 metadata=self._metadata(),
             )
         )
-        return (response.cancelled, _optional_str(response, "cancelled_at"), _optional_str(response, "cancelled_by"))
+        return (response.cancelled, _optional_timestamp_iso(response, "cancelled_at"), _optional_str(response, "cancelled_by"))
 
     def update_build_result(self, *, namespace: str, build_id: str, result_json: dict[str, object]) -> None:
         self._call(
@@ -286,7 +298,7 @@ class WorkerInternalApiClient:
             namespace=namespace,
             result_id=result_id,
             name=name,
-            source_type=source_type,
+            source_type=enum_to_proto_value("DATA_SOURCE_TYPE", source_type),
             config=dict_to_struct(config),
             schema_cache=dict_to_struct(schema_cache),
             keep_schema_cache=keep_schema_cache,
@@ -318,7 +330,7 @@ class WorkerInternalApiClient:
             HealthCheckSpec(
                 id=check.id,
                 name=check.name,
-                check_type=check.check_type,
+                check_type=proto_value_to_enum_name(enums_pb2.HealthCheckType, "HEALTH_CHECK_TYPE", check.check_type),
                 config=struct_to_dict(check.config),
                 critical=check.critical,
             )
@@ -334,7 +346,7 @@ class WorkerInternalApiClient:
                     passed=_required_mapping_bool(result, "passed"),
                     message=_required_mapping_str(result, "message"),
                     details=dict_to_struct(_required_mapping_dict(result, "details")),
-                    checked_at=_required_mapping_str(result, "checked_at"),
+                    checked_at=datetime_to_timestamp(datetime.fromisoformat(_required_mapping_str(result, "checked_at"))),
                 )
                 for result in results
             ],
@@ -365,8 +377,8 @@ class WorkerInternalApiClient:
         request = worker_runtime_pb2.WorkerCreateEngineRunRequest(
             namespace=namespace,
             datasource_id=datasource_id,
-            kind=kind,
-            status=status,
+            kind=enum_to_proto_value("ENGINE_RUN_KIND", kind),
+            status=enum_to_proto_value("ENGINE_RUN_STATUS", status),
             request_json=dict_to_struct(request_json),
             execution_entries=[dict_to_struct(entry) for entry in execution_entries or []],
             progress=progress,
@@ -378,9 +390,9 @@ class WorkerInternalApiClient:
         if error_message is not None:
             request.error_message = error_message
         if created_at is not None:
-            request.created_at = created_at.isoformat()
+            request.created_at.CopyFrom(datetime_to_timestamp(created_at))
         if completed_at is not None:
-            request.completed_at = completed_at.isoformat()
+            request.completed_at.CopyFrom(datetime_to_timestamp(completed_at))
         if duration_ms is not None:
             request.duration_ms = duration_ms
         if step_timings is not None:
@@ -426,9 +438,9 @@ class WorkerInternalApiClient:
         if not response.found:
             return None
         return {
-            "status": _optional_str(response, "status"),
+            "status": _optional_proto_enum_name(response, "status", enums_pb2.EngineRunStatus, "ENGINE_RUN_STATUS"),
             "result_json": optional_struct_to_dict(response, "result_json") or {},
-            "cancelled_at": _optional_str(response, "cancelled_at"),
+            "cancelled_at": _optional_timestamp_iso(response, "cancelled_at"),
             "cancelled_by": _optional_str(response, "cancelled_by"),
         }
 
@@ -504,13 +516,13 @@ class WorkerInternalApiClient:
             request_json=struct_to_dict(run.request_json),
             starter_json=struct_to_dict(run.starter_json),
             resource_config_json=optional_struct_to_dict(run, "resource_config_json"),
-            current_kind=_optional_str(run, "current_kind"),
+            current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.ComputeRequestKind, "COMPUTE_REQUEST_KIND"),
             current_datasource_id=_optional_str(run, "current_datasource_id"),
             current_tab_id=_optional_str(run, "current_tab_id"),
             current_tab_name=_optional_str(run, "current_tab_name"),
             current_output_id=_optional_str(run, "current_output_id"),
             current_output_name=_optional_str(run, "current_output_name"),
-            started_at=datetime.fromisoformat(run.started_at),
+            started_at=optional_timestamp_to_datetime(run, "started_at") or datetime.min,
             total_tabs=run.total_tabs,
         )
 
@@ -599,7 +611,7 @@ class WorkerInternalApiClient:
         options: dict[str, object],
     ) -> list[str]:
         request = worker_runtime_pb2.WorkerGenerateAIRequest(
-            provider=provider,
+            provider=enum_to_proto_value("AI_PROVIDER", provider),
             prompts=prompts,
             model=model,
             options=dict_to_struct(options),
@@ -669,6 +681,17 @@ def _optional_str(message: Any, field: str) -> str | None:
 
 def _optional_bool(message: Any, field: str) -> bool | None:
     return getattr(message, field) if message.HasField(field) else None
+
+
+def _optional_timestamp_iso(message: Any, field: str) -> str | None:
+    value = optional_timestamp_to_datetime(message, field)
+    return value.isoformat() if value is not None else None
+
+
+def _optional_proto_enum_name(message: Any, field: str, enum_type: Any, prefix: str) -> str | None:
+    if not message.HasField(field):
+        return None
+    return proto_value_to_enum_name(enum_type, prefix, getattr(message, field))
 
 
 def _serialize_attachments(attachments: list[Mapping[str, object]]) -> list[common_pb2.NotificationAttachment]:

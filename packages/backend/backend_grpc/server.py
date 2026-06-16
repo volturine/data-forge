@@ -45,9 +45,19 @@ from backend_core.persistence.telegram.models import TelegramListener, TelegramS
 from backend_core.persistence.udfs.models import Udf
 from backend_core.settings_projection import get_resolved_smtp, get_resolved_telegram_settings, get_resolved_telegram_token
 from backend_core.smtp import send_smtp_message
-from backend_grpc.codec import dict_to_struct, repeated_structs_to_dicts, struct_field_to_dict, struct_to_dict
+from backend_grpc.codec import (
+    datetime_to_timestamp,
+    dict_to_struct,
+    enum_to_proto_value,
+    optional_timestamp_to_datetime,
+    proto_value_to_enum_name,
+    repeated_structs_to_dicts,
+    struct_field_to_dict,
+    struct_to_dict,
+    timestamp_to_datetime,
+)
 from backend_grpc.validation import ProtovalidateAioInterceptor
-from dataforge_protocol import common_pb2, scheduler_runtime_pb2, scheduler_runtime_pb2_grpc, worker_runtime_pb2, worker_runtime_pb2_grpc
+from dataforge_protocol import common_pb2, enums_pb2, scheduler_runtime_pb2, scheduler_runtime_pb2_grpc, worker_runtime_pb2, worker_runtime_pb2_grpc
 from modules.datasource import runtime_service as datasource_runtime_service
 from modules.scheduler import service as scheduler_service
 
@@ -88,6 +98,18 @@ def _parse_worker_kind(value: str) -> RuntimeWorkerKind:
         raise ValueError(f'Unsupported runtime worker kind: {value}') from exc
 
 
+def _proto_runtime_worker_kind(value: int) -> RuntimeWorkerKind:
+    return _parse_worker_kind(proto_value_to_enum_name(enums_pb2.RuntimeWorkerKind, 'RUNTIME_WORKER_KIND', value))
+
+
+def _proto_compute_request_kind(value: int) -> ComputeRequestKind:
+    return ComputeRequestKind(proto_value_to_enum_name(enums_pb2.ComputeRequestKind, 'COMPUTE_REQUEST_KIND', value))
+
+
+def _proto_value(prefix: str, value: object) -> Any:
+    return enum_to_proto_value(prefix, str(value))
+
+
 def _read_optional_str(payload: dict[str, object], key: str) -> str | None:
     value = payload.get(key)
     return str(value) if value is not None else None
@@ -101,10 +123,6 @@ def _read_optional_int(payload: dict[str, object], key: str) -> int | None:
 def _read_optional_dict(payload: dict[str, object], key: str) -> dict[str, object] | None:
     value = payload.get(key)
     return dict(value) if isinstance(value, dict) else None
-
-
-def _parse_optional_datetime(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value) if value is not None else None
 
 
 def _optional_str(message: Any, field: str) -> str | None:
@@ -145,7 +163,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             runtime_worker_service.register_worker(
                 session,
                 worker_id=request.worker_id,
-                kind=_parse_worker_kind(request.kind),
+                kind=_proto_runtime_worker_kind(request.kind),
                 hostname=request.hostname,
                 pid=request.pid,
                 capacity=request.capacity,
@@ -213,7 +231,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     request=worker_runtime_pb2.WorkerClaimedComputeRequest(
                         id=compute_request.id,
                         namespace=compute_request.namespace,
-                        kind=compute_request.kind.value,
+                        kind=_proto_value('COMPUTE_REQUEST_KIND', compute_request.kind.value),
                         request_json=dict_to_struct(compute_requests_service.command_payload(compute_request)),
                     )
                 )
@@ -274,7 +292,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session_gen = get_db()
         session = next(session_gen)
         try:
-            kind = ComputeRequestKind(request.kind)
+            kind = _proto_compute_request_kind(request.kind)
             request_json = struct_to_dict(request.request_json)
             response: Any
             if kind == ComputeRequestKind.CREATE_FILE_DATASOURCE:
@@ -388,7 +406,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 found=True,
                 id=datasource.id,
                 name=datasource.name,
-                source_type=datasource.source_type,
+                source_type=_proto_value('DATA_SOURCE_TYPE', datasource.source_type),
                 config=dict_to_struct(dict(datasource.config)),
                 is_hidden=datasource.is_hidden,
             )
@@ -445,9 +463,11 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             run = run_db(build_run_service.get_build_run, request.build_id)
             if run is None or run.status != BuildRunStatus.CANCELLED:
                 return worker_runtime_pb2.WorkerBuildCancelStatusResponse(cancelled=False)
-            cancelled_at = run.cancelled_at.isoformat() if isinstance(run.cancelled_at, datetime) else None
             cancelled_by = run.cancelled_by if isinstance(run.cancelled_by, str) else None
-            return worker_runtime_pb2.WorkerBuildCancelStatusResponse(cancelled=True, cancelled_at=cancelled_at, cancelled_by=cancelled_by)
+            response = worker_runtime_pb2.WorkerBuildCancelStatusResponse(cancelled=True, cancelled_by=cancelled_by)
+            if isinstance(run.cancelled_at, datetime):
+                response.cancelled_at.CopyFrom(datetime_to_timestamp(run.cancelled_at))
+            return response
         finally:
             reset_namespace(token)
 
@@ -475,7 +495,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             existing = session.get(DataSource, request.result_id)
             if existing is not None:
                 existing.name = request.name
-                existing.source_type = request.source_type
+                existing.source_type = proto_value_to_enum_name(enums_pb2.DataSourceType, 'DATA_SOURCE_TYPE', request.source_type)
                 existing.config = config
                 if not request.keep_schema_cache:
                     existing.schema_cache = schema_cache
@@ -494,7 +514,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             datasource = DataSource(
                 id=request.result_id,
                 name=request.name,
-                source_type=request.source_type,
+                source_type=proto_value_to_enum_name(enums_pb2.DataSourceType, 'DATA_SOURCE_TYPE', request.source_type),
                 config=config,
                 schema_cache=schema_cache,
                 created_by_analysis_id=_optional_str(request, 'analysis_id'),
@@ -530,7 +550,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     worker_runtime_pb2.WorkerHealthCheckSpec(
                         id=check.id,
                         name=check.name,
-                        check_type=check.check_type,
+                        check_type=_proto_value('HEALTH_CHECK_TYPE', check.check_type),
                         config=dict_to_struct(dict(check.config)),
                         critical=check.critical,
                     )
@@ -558,7 +578,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                         passed=result.passed,
                         message=result.message,
                         details=struct_to_dict(result.details),
-                        checked_at=datetime.fromisoformat(result.checked_at),
+                        checked_at=timestamp_to_datetime(result.checked_at),
                     )
                 )
             session.commit()
@@ -579,13 +599,13 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 engine_run_service.create_engine_run_payload(
                     analysis_id=_optional_str(request, 'analysis_id'),
                     datasource_id=request.datasource_id,
-                    kind=request.kind,
-                    status=request.status,
+                    kind=proto_value_to_enum_name(enums_pb2.EngineRunKind, 'ENGINE_RUN_KIND', request.kind),
+                    status=proto_value_to_enum_name(enums_pb2.EngineRunStatus, 'ENGINE_RUN_STATUS', request.status),
                     request_json=struct_to_dict(request.request_json),
                     result_json=struct_field_to_dict(request, 'result_json'),
                     error_message=_optional_str(request, 'error_message'),
-                    created_at=_parse_optional_datetime(_optional_str(request, 'created_at')),
-                    completed_at=_parse_optional_datetime(_optional_str(request, 'completed_at')),
+                    created_at=optional_timestamp_to_datetime(request, 'created_at'),
+                    completed_at=optional_timestamp_to_datetime(request, 'completed_at'),
                     duration_ms=_optional_int(request, 'duration_ms'),
                     step_timings=cast(dict[str, float] | None, struct_field_to_dict(request, 'step_timings')),
                     query_plan=_optional_str(request, 'query_plan'),
@@ -645,13 +665,15 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             result_json = dict(run.result_json) if isinstance(run.result_json, dict) else {}
             cancelled_at = result_json.get('cancelled_at')
             cancelled_by = result_json.get('cancelled_by')
-            return worker_runtime_pb2.WorkerEngineRunStateResponse(
+            response = worker_runtime_pb2.WorkerEngineRunStateResponse(
                 found=True,
-                status=run.status,
+                status=_proto_value('ENGINE_RUN_STATUS', run.status),
                 result_json=dict_to_struct(result_json),
-                cancelled_at=cancelled_at if isinstance(cancelled_at, str) else None,
                 cancelled_by=cancelled_by if isinstance(cancelled_by, str) else None,
             )
+            if isinstance(cancelled_at, str):
+                response.cancelled_at.CopyFrom(datetime_to_timestamp(datetime.fromisoformat(cancelled_at)))
+            return response
         finally:
             reset_namespace(token)
 
@@ -776,15 +798,16 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 analysis_name=run.analysis_name,
                 request_json=dict_to_struct(dict(run.request_json)),
                 starter_json=dict_to_struct(dict(run.starter_json)),
-                current_kind=run.current_kind,
                 current_datasource_id=run.current_datasource_id,
                 current_tab_id=run.current_tab_id,
                 current_tab_name=run.current_tab_name,
                 current_output_id=run.current_output_id,
                 current_output_name=run.current_output_name,
-                started_at=run.started_at.isoformat(),
                 total_tabs=run.total_tabs,
             )
+            if isinstance(run.current_kind, str):
+                payload.current_kind = _proto_value('COMPUTE_REQUEST_KIND', run.current_kind)
+            payload.started_at.CopyFrom(datetime_to_timestamp(run.started_at))
             if isinstance(run.resource_config_json, dict):
                 payload.resource_config_json.CopyFrom(dict_to_struct(dict(run.resource_config_json)))
             return worker_runtime_pb2.WorkerStartBuildRunResponse(run=payload)
@@ -925,7 +948,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         self, request: worker_runtime_pb2.WorkerGenerateAIRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerGenerateAIResponse:
         client = get_ai_client(
-            AIProvider(request.provider),
+            AIProvider(proto_value_to_enum_name(enums_pb2.AIProvider, 'AI_PROVIDER', request.provider)),
             endpoint_url=_optional_str(request, 'endpoint_url'),
             api_key=_optional_str(request, 'api_key'),
         )
