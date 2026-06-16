@@ -278,7 +278,7 @@
 				triggerClass
 			]}
 			onclick={openMenu}
-			aria-expanded={menuOpen}
+			aria-expanded={menuOpen ? 'true' : 'false'}
 			use:setTriggerRef={undefined}
 			{disabled}
 		>
