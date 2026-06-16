@@ -106,7 +106,7 @@ class TestExceptions:
     def test_unknown_error_code_is_rejected(self):
         """Test unknown error code rejection."""
         with pytest.raises(ValueError, match='Enum ErrorCode has no value defined'):
-            AppError(message='Test', error_code='TEST')
+            raise AppError(message='Test', error_code='TEST')
 
     def test_exception_inheritance(self):
         """Test that all custom exceptions inherit from AppError."""
