@@ -30,6 +30,7 @@
         "xlsxwriter>=3.2.9",
         "grpcio>=1.81.0",
         "protobuf>=7.35.1",
+        "protovalidate>=1.2.0",
 ]
 
 [build-system]
@@ -40,7 +41,7 @@
     target-version = "py314"
     line-length    = 160
     indent-width   = 4
-    extend-exclude = ["dataforge_protocol"]
+    extend-exclude = ["buf", "dataforge_protocol"]
 
     [tool.ruff.lint]
         select = [
@@ -76,7 +77,7 @@
 
         [tool.ruff.lint.isort]
             combine-as-imports = true
-            known-first-party = ["api", "backend_contracts", "backend_core", "backend_grpc", "modules"]
+            known-first-party = ["api", "backend_core", "backend_grpc", "modules"]
 
         [tool.ruff.lint.pydocstyle]
             convention = "google"
@@ -96,7 +97,7 @@
         ".",
         "../..",
     ]
-    exclude = ["(^|/)conftest\\.py$", "dataforge_protocol"]
+    exclude = ["(^|/)conftest\\.py$", "buf", "dataforge_protocol"]
 
 [tool.pytest.ini_options]
     asyncio_mode = "auto"
@@ -130,5 +131,5 @@
 ]
 
 [tool.hatch.build.targets.wheel]
-    packages = ["api", "backend_contracts", "backend_core", "backend_grpc", "dataforge_protocol", "modules"]
+    packages = ["api", "backend_core", "backend_grpc", "buf", "dataforge_protocol", "modules"]
     include  = ["main.py", "database/**"]

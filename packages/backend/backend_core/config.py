@@ -11,6 +11,7 @@ from pydantic_settings.sources import DotEnvSettingsSource
 _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('port', 1, 65535),
     ('internal_grpc_port', 1, 65535),
+    ('worker_data_plane_grpc_port', 1, 65535),
     ('scheduler_check_interval', 1, None),
     ('lock_ttl_seconds', 1, None),
     ('lock_heartbeat_interval_seconds', 1, None),
@@ -95,6 +96,8 @@ class Settings(BaseSettings):
     internal_api_token: str = Field(default='', alias='INTERNAL_API_TOKEN')
     internal_grpc_host: str = Field(default='127.0.0.1', alias='INTERNAL_GRPC_HOST')
     internal_grpc_port: int = Field(default=50051, alias='INTERNAL_GRPC_PORT')
+    worker_data_plane_grpc_target: str = Field(default='127.0.0.1:50052', alias='WORKER_DATA_PLANE_GRPC_TARGET')
+    worker_data_plane_grpc_port: int = Field(default=50052, alias='WORKER_DATA_PLANE_GRPC_PORT')
     database_pool_size: int = Field(default=10, alias='DATABASE_POOL_SIZE')
     database_max_overflow: int = Field(default=20, alias='DATABASE_MAX_OVERFLOW')
     database_pool_timeout: int = Field(default=30, alias='DATABASE_POOL_TIMEOUT')

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
-from worker_models.compute.base import OperationHandler, OperationParams
-from worker_models.step_config_enums import GroupByAggregationFunction
+from runtime.models.compute.base import OperationHandler, OperationParams
+from runtime.models.step_config_enums import GroupByAggregationFunction
 
 
 class AggregationSpec(BaseModel):

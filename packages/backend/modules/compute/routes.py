@@ -13,10 +13,6 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from sqlmodel import Session
 
-from backend_contracts.build_runs.live import BuildNotification, hub as build_hub
-from backend_contracts.compute import schemas
-from backend_contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
-from backend_contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core import (
     build_event_service,
     build_jobs_service as build_job_service,
@@ -26,6 +22,10 @@ from backend_core import (
 )
 from backend_core.auth_config import settings as auth_settings
 from backend_core.config import settings
+from backend_core.contracts.build_runs.live import BuildNotification, hub as build_hub
+from backend_core.contracts.compute import schemas
+from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.database import get_db, get_settings_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
@@ -36,7 +36,7 @@ from backend_core.engine_live import load_engine_snapshot, registry as engine_re
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import EngineNotFoundError
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
-from backend_core.object_store import object_store_url
+from backend_core.object_store_paths import object_store_url
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.validation import (
     ComputeAnalysisId,
@@ -720,7 +720,7 @@ async def start_active_build(
     if detail is None:
         raise HTTPException(status_code=500, detail='Failed to create build')
     await build_hub.publish(BuildNotification(namespace=namespace, build_id=build_id, latest_sequence=0))
-    from backend_contracts.build_jobs.live import hub as build_job_hub
+    from backend_core.contracts.build_jobs.live import hub as build_job_hub
 
     build_job_hub.publish()
     runtime_outbox_service.dispatch_pending_events(session)

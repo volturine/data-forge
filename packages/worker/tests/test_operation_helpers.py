@@ -16,8 +16,8 @@ from runtime.iceberg_metadata import (
     resolve_iceberg_branch_metadata_path,
     resolve_iceberg_metadata_path,
 )
+from runtime.models.step_config_enums import TimeComponent
 from runtime.namespace import namespace_paths
-from worker_models.step_config_enums import TimeComponent
 
 
 def test_filter_operator_definition():

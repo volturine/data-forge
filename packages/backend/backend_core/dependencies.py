@@ -5,9 +5,9 @@ from typing import Any, Protocol
 from fastapi import Depends, HTTPException, Request
 from sqlmodel import Session
 
-from backend_contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core import runtime_workers_service
 from backend_core.auth_config import settings as auth_settings
+from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.database import get_settings_db
 from modules.auth.dependencies import _resolve_session_token
 from modules.auth.service import ensure_default_user, validate_session

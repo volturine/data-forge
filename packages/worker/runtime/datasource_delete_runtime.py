@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from runtime.compute_manager import ProcessManager
-from runtime.engine_identity import datasource_preview_engine_key
+from runtime.engine_identity import datasource_preview_engine_identity
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
 
 logger = logging.getLogger(__name__)
@@ -52,12 +52,12 @@ def _process_pending_datasource_delete(
     manager: ProcessManager,
     client: WorkerInternalApiClient,
 ) -> bool:
-    engine_key = datasource_preview_engine_key(datasource_id)
-    engine = manager.get_engine(engine_key, namespace=namespace)
+    identity = datasource_preview_engine_identity(datasource_id)
+    engine = manager.get_engine(identity, namespace=namespace)
     if engine is not None and engine.current_job_id and engine.is_process_alive():
         return False
     if engine is not None:
-        manager.shutdown_engine(engine_key, namespace=namespace)
+        manager.shutdown_engine(identity, namespace=namespace)
 
     deleted = client.finalize_datasource_delete(namespace=namespace, datasource_id=datasource_id)
     if deleted:

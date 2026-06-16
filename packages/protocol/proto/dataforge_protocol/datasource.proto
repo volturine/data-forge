@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/common.proto";
+import "dataforge_protocol/enums.proto";
+
+message DatasourceRef {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message DatasourceMetadata {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+  DataSourceType source_type = 3 [(buf.validate.field).enum.defined_only = true];
+  DataSourceCreatedBy created_by = 4 [(buf.validate.field).enum.defined_only = true];
+  DataSourceTargetKind target_kind = 5 [(buf.validate.field).enum.defined_only = true];
+  JsonPayload config = 6;
+  JsonPayload schema_cache = 7;
+  bool is_hidden = 8;
+}

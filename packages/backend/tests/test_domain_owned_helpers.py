@@ -1,16 +1,16 @@
 from datetime import UTC, datetime
 
-from backend_contracts.analysis.step_types import STEP_TYPES
-from backend_contracts.build_jobs.models import BuildJobStatus
-from backend_contracts.build_runs.models import BuildRunStatus
-from backend_contracts.compute import schemas as compute_schemas
-from backend_contracts.datasource.models import DataSourceCreatedBy, DataSourceTargetKind
-from backend_contracts.datasource.source_types import DataSourceFileType, DataSourceType
-from backend_contracts.engine_instances.models import EngineInstanceStatus
-from backend_contracts.engine_runs.schemas import EngineRunExecutionCategory, EngineRunStatus
-from backend_contracts.healthcheck_models import HealthCheckType
-from backend_contracts.runtime.events import RuntimePayloadKind
-from backend_contracts.step_config_enums import (
+from backend_core.contracts.analysis.step_types import STEP_TYPES
+from backend_core.contracts.build_jobs.models import BuildJobStatus
+from backend_core.contracts.build_runs.models import BuildRunStatus
+from backend_core.contracts.compute import schemas as compute_schemas
+from backend_core.contracts.datasource.models import DataSourceCreatedBy, DataSourceTargetKind
+from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
+from backend_core.contracts.engine_instances.models import EngineInstanceStatus
+from backend_core.contracts.engine_runs.schemas import EngineRunExecutionCategory, EngineRunStatus
+from backend_core.contracts.healthcheck_models import HealthCheckType
+from backend_core.contracts.runtime.events import RuntimePayloadKind
+from backend_core.contracts.step_config_enums import (
     AIProvider,
     ChartAggregation,
     FillNullStrategy,

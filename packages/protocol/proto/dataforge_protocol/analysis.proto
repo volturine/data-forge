@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/common.proto";
+import "dataforge_protocol/enums.proto";
+
+message AnalysisPipelineDatasource {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string analysis_tab_id = 2;
+  optional DataSourceType source_type = 3 [(buf.validate.field).enum.defined_only = true];
+  JsonPayload config = 4;
+}
+
+message AnalysisPipelineStep {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string type = 2 [(buf.validate.field).string.min_len = 1];
+  JsonPayload config = 3;
+  repeated string depends_on = 4;
+  optional bool is_applied = 5;
+}
+
+message AnalysisPipelineOutput {
+  string result_id = 1 [(buf.validate.field).string.min_len = 1];
+  string filename = 2 [(buf.validate.field).string.min_len = 1];
+  ExportFormat format = 3 [(buf.validate.field).enum.defined_only = true];
+  JsonPayload options = 4;
+}
+
+message AnalysisPipelineTab {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string name = 2;
+  AnalysisPipelineDatasource datasource = 3 [(buf.validate.field).required = true];
+  AnalysisPipelineOutput output = 4 [(buf.validate.field).required = true];
+  repeated AnalysisPipelineStep steps = 5;
+}
+
+message AnalysisPipelinePayload {
+  string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated AnalysisPipelineTab tabs = 2 [(buf.validate.field).repeated.min_items = 1];
+}

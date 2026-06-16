@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend_contracts.enums import DataForgeStrEnum
+from backend_core.contracts.enums import DataForgeStrEnum
 
 
 class CodeExportFormat(DataForgeStrEnum):

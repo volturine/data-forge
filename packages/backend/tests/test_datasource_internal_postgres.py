@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from backend_contracts.datasource.source_types import DataSourceType
+from backend_core.contracts.datasource.source_types import DataSourceType
 from backend_core.persistence.datasource.models import DataSource
 from modules.datasource import service
 

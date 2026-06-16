@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package dataforge.runtime;
 
+import "buf/validate/validate.proto";
 import "dataforge_protocol/common.proto";
 
 service WorkerRuntimeService {
@@ -52,23 +53,23 @@ service WorkerRuntimeService {
 }
 
 message RuntimeWorkerRegisterRequest {
-  string worker_id = 1;
-  string kind = 2;
-  string hostname = 3;
-  int32 pid = 4;
-  int32 capacity = 5;
-  int32 active_jobs = 6;
+  string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+  string kind = 2 [(buf.validate.field).string.min_len = 1];
+  string hostname = 3 [(buf.validate.field).string.min_len = 1];
+  int32 pid = 4 [(buf.validate.field).int32.gt = 0];
+  int32 capacity = 5 [(buf.validate.field).int32.gte = 1];
+  int32 active_jobs = 6 [(buf.validate.field).int32.gte = 0];
 }
 
 message RuntimeWorkerHeartbeatRequest {
-  string worker_id = 1;
-  optional int32 active_jobs = 2;
+  string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional int32 active_jobs = 2 [(buf.validate.field).int32.gte = 0];
 }
 
 message WorkerClaimedBuildJob {
-  string job_id = 1;
-  string build_id = 2;
-  string namespace = 3;
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
+  string namespace = 3 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
 }
 
 message WorkerClaimBuildJobResponse {
@@ -76,9 +77,9 @@ message WorkerClaimBuildJobResponse {
 }
 
 message WorkerClaimedComputeRequest {
-  string id = 1;
-  string namespace = 2;
-  string kind = 3;
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string kind = 3 [(buf.validate.field).string.min_len = 1];
   JsonPayload request_json = 4;
 }
 
@@ -87,30 +88,30 @@ message WorkerClaimComputeRequestResponse {
 }
 
 message WorkerCompleteComputeRequestRequest {
-  string namespace = 1;
-  string request_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string request_id = 2 [(buf.validate.field).string.min_len = 1];
   optional JsonPayload response_json = 3;
-  optional string artifact_path = 4;
-  optional string artifact_name = 5;
-  optional string artifact_content_type = 6;
+  optional string artifact_path = 4 [(buf.validate.field).string.min_len = 1];
+  optional string artifact_name = 5 [(buf.validate.field).string.min_len = 1];
+  optional string artifact_content_type = 6 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerFailComputeRequestRequest {
-  string namespace = 1;
-  string request_id = 2;
-  string error_message = 3;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string request_id = 2 [(buf.validate.field).string.min_len = 1];
+  string error_message = 3 [(buf.validate.field).string.min_len = 1];
   JsonPayload response_json = 4;
 }
 
 message WorkerExecuteDatasourceRequest {
-  string namespace = 1;
-  string kind = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string kind = 2 [(buf.validate.field).string.min_len = 1];
   JsonPayload request_json = 3;
 }
 
 message WorkerScheduleIngestDatasourceRequest {
-  string namespace = 1;
-  string datasource_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message JsonResponse {
@@ -118,8 +119,8 @@ message JsonResponse {
 }
 
 message WorkerDatasourceMetadataRequest {
-  string namespace = 1;
-  string datasource_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerDatasourceMetadataResponse {
@@ -133,8 +134,8 @@ message WorkerDatasourceMetadataResponse {
 }
 
 message WorkerUdfCodesRequest {
-  string namespace = 1;
-  repeated string udf_ids = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  repeated string udf_ids = 2 [(buf.validate.field).repeated.min_items = 1];
 }
 
 message WorkerUdfCodesResponse {
@@ -142,8 +143,8 @@ message WorkerUdfCodesResponse {
 }
 
 message WorkerAnalysisMetadataRequest {
-  string namespace = 1;
-  string analysis_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerAnalysisMetadataResponse {
@@ -152,8 +153,8 @@ message WorkerAnalysisMetadataResponse {
 }
 
 message WorkerBuildCancelStatusRequest {
-  string namespace = 1;
-  string build_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerBuildCancelStatusResponse {
@@ -163,40 +164,40 @@ message WorkerBuildCancelStatusResponse {
 }
 
 message WorkerUpdateBuildResultRequest {
-  string namespace = 1;
-  string build_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
   JsonPayload result_json = 3;
 }
 
 message WorkerUpsertOutputDatasourceRequest {
-  string namespace = 1;
-  string result_id = 2;
-  string name = 3;
-  string source_type = 4;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string result_id = 2 [(buf.validate.field).string.min_len = 1];
+  string name = 3 [(buf.validate.field).string.min_len = 1];
+  string source_type = 4 [(buf.validate.field).string.min_len = 1];
   JsonPayload config = 5;
   JsonPayload schema_cache = 6;
-  optional string analysis_id = 7;
+  optional string analysis_id = 7 [(buf.validate.field).string.min_len = 1];
   optional bool is_hidden = 8;
   bool keep_schema_cache = 9;
 }
 
 message WorkerUpsertOutputDatasourceResponse {
-  string datasource_id = 1;
-  string datasource_name = 2;
+  string datasource_id = 1 [(buf.validate.field).string.min_len = 1];
+  string datasource_name = 2 [(buf.validate.field).string.min_len = 1];
   bool is_hidden = 3;
 }
 
 message WorkerHealthCheckSpec {
-  string id = 1;
-  string name = 2;
-  string check_type = 3;
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+  string check_type = 3 [(buf.validate.field).string.min_len = 1];
   JsonPayload config = 4;
   bool critical = 5;
 }
 
 message WorkerListHealthChecksRequest {
-  string namespace = 1;
-  string datasource_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerListHealthChecksResponse {
@@ -204,48 +205,51 @@ message WorkerListHealthChecksResponse {
 }
 
 message WorkerHealthCheckResultPayload {
-  string healthcheck_id = 1;
+  string healthcheck_id = 1 [(buf.validate.field).string.min_len = 1];
   bool passed = 2;
   string message = 3;
   JsonPayload details = 4;
-  string checked_at = 5;
+  string checked_at = 5 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerRecordHealthCheckResultsRequest {
-  string namespace = 1;
-  repeated WorkerHealthCheckResultPayload results = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  repeated WorkerHealthCheckResultPayload results = 2 [(buf.validate.field).repeated.min_items = 1];
 }
 
 message WorkerCreateEngineRunRequest {
-  string namespace = 1;
-  optional string analysis_id = 2;
-  string datasource_id = 3;
-  string kind = 4;
-  string status = 5;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  optional string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
+  string datasource_id = 3 [(buf.validate.field).string.min_len = 1];
+  string kind = 4 [(buf.validate.field).string.min_len = 1];
+  string status = 5 [(buf.validate.field).string.min_len = 1];
   JsonPayload request_json = 6;
   optional JsonPayload result_json = 7;
-  optional string error_message = 8;
-  optional string created_at = 9;
-  optional string completed_at = 10;
-  optional int64 duration_ms = 11;
+  optional string error_message = 8 [(buf.validate.field).string.min_len = 1];
+  optional string created_at = 9 [(buf.validate.field).string.min_len = 1];
+  optional string completed_at = 10 [(buf.validate.field).string.min_len = 1];
+  optional int64 duration_ms = 11 [(buf.validate.field).int64.gte = 0];
   optional JsonPayload step_timings = 12;
-  optional string query_plan = 13;
+  optional string query_plan = 13 [(buf.validate.field).string.min_len = 1];
   repeated JsonPayload execution_entries = 14;
-  double progress = 15;
-  optional string current_step = 16;
-  optional string triggered_by = 17;
+  double progress = 15 [(buf.validate.field).double = {
+    gte: 0
+    lte: 1
+  }];
+  optional string current_step = 16 [(buf.validate.field).string.min_len = 1];
+  optional string triggered_by = 17 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerUpdateEngineRunRequest {
-  string namespace = 1;
-  string run_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
   JsonPayload fields = 3;
   bool merge_result_json = 4;
 }
 
 message WorkerEngineRunStateRequest {
-  string namespace = 1;
-  string run_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerEngineRunStateResponse {
@@ -257,15 +261,15 @@ message WorkerEngineRunStateResponse {
 }
 
 message WorkerFailBuildJobRequest {
-  string job_id = 1;
-  string namespace = 2;
-  string error = 3;
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string error = 3 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerFinalizeBuildJobRequest {
-  string job_id = 1;
-  string build_id = 2;
-  string namespace = 3;
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
+  string namespace = 3 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
 }
 
 message WorkerIdlePidsResponse {
@@ -273,12 +277,12 @@ message WorkerIdlePidsResponse {
 }
 
 message WorkerNamespacesResponse {
-  repeated string namespaces = 1;
+  repeated string namespaces = 1 [(buf.validate.field).repeated.items.string.pattern = "^[a-zA-Z0-9_-]+$"];
 }
 
 message WorkerPersistBuildEventRequest {
-  string namespace = 1;
-  string build_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
   JsonPayload event = 3;
   optional JsonPayload resource_config_json = 4;
 }
@@ -288,26 +292,26 @@ message WorkerPersistBuildEventResponse {
 }
 
 message WorkerBuildRunPayload {
-  string id = 1;
-  string namespace = 2;
-  string analysis_id = 3;
-  string analysis_name = 4;
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string analysis_id = 3 [(buf.validate.field).string.min_len = 1];
+  string analysis_name = 4 [(buf.validate.field).string.min_len = 1];
   JsonPayload request_json = 5;
   JsonPayload starter_json = 6;
   optional JsonPayload resource_config_json = 7;
-  optional string current_kind = 8;
-  optional string current_datasource_id = 9;
-  optional string current_tab_id = 10;
-  optional string current_tab_name = 11;
-  optional string current_output_id = 12;
-  optional string current_output_name = 13;
-  string started_at = 14;
-  int32 total_tabs = 15;
+  optional string current_kind = 8 [(buf.validate.field).string.min_len = 1];
+  optional string current_datasource_id = 9 [(buf.validate.field).string.min_len = 1];
+  optional string current_tab_id = 10 [(buf.validate.field).string.min_len = 1];
+  optional string current_tab_name = 11 [(buf.validate.field).string.min_len = 1];
+  optional string current_output_id = 12 [(buf.validate.field).string.min_len = 1];
+  optional string current_output_name = 13 [(buf.validate.field).string.min_len = 1];
+  string started_at = 14 [(buf.validate.field).string.min_len = 1];
+  int32 total_tabs = 15 [(buf.validate.field).int32.gte = 1];
 }
 
 message WorkerStartBuildRunRequest {
-  string namespace = 1;
-  string build_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerStartBuildRunResponse {
@@ -315,14 +319,14 @@ message WorkerStartBuildRunResponse {
 }
 
 message WorkerPersistEngineSnapshotRequest {
-  string worker_id = 1;
-  string namespace = 2;
+  string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   repeated JsonPayload statuses = 3;
 }
 
 message WorkerPendingDatasourceDelete {
-  string namespace = 1;
-  string datasource_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerPendingDatasourceDeletesResponse {
@@ -330,8 +334,8 @@ message WorkerPendingDatasourceDeletesResponse {
 }
 
 message WorkerFinalizeDatasourceDeleteRequest {
-  string namespace = 1;
-  string datasource_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerFinalizeDatasourceDeleteResponse {
@@ -343,25 +347,25 @@ message WorkerTelegramSettingsResponse {
 }
 
 message WorkerSendEmailRequest {
-  string to = 1;
-  string subject = 2;
+  string to = 1 [(buf.validate.field).string.email = true];
+  string subject = 2 [(buf.validate.field).string.min_len = 1];
   string body = 3;
   repeated NotificationAttachment attachments = 4;
 }
 
 message WorkerSendTelegramRequest {
-  string chat_id = 1;
-  string message = 2;
-  optional string bot_token = 3;
+  string chat_id = 1 [(buf.validate.field).string.min_len = 1];
+  string message = 2 [(buf.validate.field).string.min_len = 1];
+  optional string bot_token = 3 [(buf.validate.field).string.min_len = 1];
   repeated NotificationAttachment attachments = 4;
 }
 
 message WorkerGenerateAIRequest {
-  string provider = 1;
-  repeated string prompts = 2;
-  string model = 3;
-  optional string endpoint_url = 4;
-  optional string api_key = 5;
+  string provider = 1 [(buf.validate.field).string.min_len = 1];
+  repeated string prompts = 2 [(buf.validate.field).repeated.min_items = 1];
+  string model = 3 [(buf.validate.field).string.min_len = 1];
+  optional string endpoint_url = 4 [(buf.validate.field).string.uri = true];
+  optional string api_key = 5 [(buf.validate.field).string.min_len = 1];
   JsonPayload options = 6;
 }
 
@@ -370,14 +374,14 @@ message WorkerGenerateAIResponse {
 }
 
 message WorkerTelegramTargetsRequest {
-  string namespace = 1;
-  optional string datasource_id = 2;
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  optional string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
   bool active_subscribers = 3;
 }
 
 message WorkerTelegramTarget {
-  string chat_id = 1;
-  string bot_token = 2;
+  string chat_id = 1 [(buf.validate.field).string.min_len = 1];
+  string bot_token = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerTelegramTargetsResponse {
@@ -385,7 +389,7 @@ message WorkerTelegramTargetsResponse {
 }
 
 message CountResponse {
-  int64 count = 1;
+  int64 count = 1 [(buf.validate.field).int64.gte = 0];
 }
 
 message BoolResponse {
@@ -393,5 +397,5 @@ message BoolResponse {
 }
 
 message IdResponse {
-  string id = 1;
+  string id = 1 [(buf.validate.field).string.min_len = 1];
 }

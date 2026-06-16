@@ -3,7 +3,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from backend_contracts.enums import DataForgeStrEnum
+from backend_core.contracts.enums import DataForgeStrEnum
 
 LockText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 

@@ -130,6 +130,16 @@
 		deleteConfirmId = id;
 	}
 
+	function removeAnalysesFromCaches(ids: Iterable<string>) {
+		const idSet = new Set(ids);
+		queryClient.setQueryData<AnalysisGalleryItem[]>(['analyses', ns.value], (current) =>
+			current?.filter((analysis) => !idSet.has(analysis.id))
+		);
+		queryClient.setQueryData<AnalysisGalleryItem[]>(['favorite-analyses', ns.value], (current) =>
+			current?.filter((analysis) => !idSet.has(analysis.id))
+		);
+	}
+
 	async function toggleFavorite(id: string) {
 		const next = !favoriteStore.isFavorite(id);
 		const result = next ? await favoriteAnalysis(id) : await unfavoriteAnalysis(id);
@@ -158,7 +168,9 @@
 
 		const result = await deleteAnalysis(id);
 		if (result.isOk()) {
+			removeAnalysesFromCaches([id]);
 			queryClient.invalidateQueries({ queryKey: ['analyses', ns.value] });
+			queryClient.invalidateQueries({ queryKey: ['favorite-analyses', ns.value] });
 			selectedIds.delete(id);
 			deleteConfirmId = null;
 		} else {
@@ -185,7 +197,9 @@
 			if (result.isErr()) failed++;
 		}
 
+		removeAnalysesFromCaches(idsToDelete);
 		queryClient.invalidateQueries({ queryKey: ['analyses', ns.value] });
+		queryClient.invalidateQueries({ queryKey: ['favorite-analyses', ns.value] });
 		selectedIds.clear();
 		bulkDeleteConfirm = false;
 

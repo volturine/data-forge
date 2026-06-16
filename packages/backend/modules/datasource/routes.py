@@ -9,9 +9,18 @@ from pathlib import Path
 from fastapi import Depends, Form, HTTPException, UploadFile
 from sqlmodel import Session
 
-from backend_contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core import datasource_delete_service
 from backend_core.config import settings
+from backend_core.contracts.datasource.models import DataSourceCreatedBy
+from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
+from backend_core.data_plane_object_store import (
+    delete_object,
+    download_file,
+    list_metadata_files,
+    list_prefixes,
+    object_exists,
+    upload_file as upload_object_file,
+)
 from backend_core.database import get_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
@@ -20,16 +29,7 @@ from backend_core.dependencies import (
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import AppError
 from backend_core.namespace import get_namespace
-from backend_core.object_store import (
-    delete_object,
-    download_file,
-    is_object_store_url,
-    list_metadata_files,
-    list_prefixes,
-    object_exists,
-    object_store_url,
-    upload_file as upload_object_file,
-)
+from backend_core.object_store_paths import is_object_store_url, object_store_url
 from backend_core.validation import (
     DataSourceId,
     PreflightId,
@@ -774,7 +774,7 @@ def get_datasource(
 ):
     """Get a single datasource by ID with full config and metadata. Use GET /datasource to find IDs."""
     response = service.get_datasource(session, parse_datasource_id(datasource_id))
-    if response.source_type == DataSourceType.ICEBERG:
+    if response.source_type == DataSourceType.ICEBERG and response.created_by == DataSourceCreatedBy.ANALYSIS.value:
         metadata_path = response.config.get('metadata_path')
         branch_name = response.config.get('branch') if isinstance(response.config.get('branch'), str) else None
         if isinstance(metadata_path, str):

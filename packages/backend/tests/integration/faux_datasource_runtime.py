@@ -12,7 +12,7 @@ import polars as pl
 import pytest
 from sqlmodel import Session
 
-from backend_contracts.datasource.source_types import DataSourceType
+from backend_core.contracts.datasource.source_types import DataSourceType
 from backend_core.persistence.datasource.models import DataSource
 
 
@@ -40,8 +40,9 @@ class FauxDatasourceRuntime:
         owner_id: str | None = None,
         **kwargs: Any,
     ):
+        from backend_core.data_plane_object_store import upload_bytes
         from backend_core.namespace import get_namespace
-        from backend_core.object_store import join_object_store_url, object_store_url, upload_bytes
+        from backend_core.object_store_paths import join_object_store_url, object_store_url
 
         metadata_root = object_store_url('namespaces', get_namespace(), 'clean', uuid.uuid4().hex, 'master')
         upload_bytes(b'{"metadata":"placeholder"}', join_object_store_url(metadata_root, 'metadata', '00000-placeholder.metadata.json'))
@@ -209,7 +210,8 @@ class FauxDatasourceRuntime:
 
     @contextlib.contextmanager
     def _materialized_source_path(self, file_path: str):
-        from backend_core.object_store import download_file, is_object_store_url
+        from backend_core.data_plane_object_store import download_file
+        from backend_core.object_store_paths import is_object_store_url
 
         if not is_object_store_url(file_path):
             yield file_path

@@ -9,11 +9,11 @@ import polars as pl
 import psycopg
 from openpyxl import load_workbook
 
-from backend_contracts.datasource.source_types import DataSourceFileType
-from backend_contracts.enums import DataForgeStrEnum
-from backend_core.iceberg_metadata import resolve_iceberg_branch_metadata_path
-from backend_core.iceberg_snapshot_reader import scan_iceberg_snapshot
-from backend_core.object_store import download_file, is_object_store_url, object_store_storage_options
+from backend_core.contracts.datasource.source_types import DataSourceFileType
+from backend_core.contracts.enums import DataForgeStrEnum
+from backend_core.data_plane_iceberg import resolve_iceberg_branch_metadata_path, scan_iceberg_snapshot
+from backend_core.data_plane_object_store import download_file, object_store_storage_options
+from backend_core.object_store_paths import is_object_store_url
 
 
 class DatasourceSourceType(DataForgeStrEnum):
@@ -237,7 +237,6 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
             return scan_iceberg_snapshot(
                 resolved_metadata_path,
                 snapshot_value,
-                resolved_storage_options,
             )
         reader = config.get('reader')
         reader_override = IcebergReader.NATIVE if reader == IcebergReader.NATIVE.value else IcebergReader.PYICEBERG

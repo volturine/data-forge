@@ -3,8 +3,8 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from backend_contracts.step_config_enums import AIProvider
 from backend_core.ai_clients import get_ai_client, resolve_ai_provider
+from backend_core.contracts.step_config_enums import AIProvider
 from backend_core.error_handlers import handle_errors
 from modules.mcp.router import MCPRouter
 

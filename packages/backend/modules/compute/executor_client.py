@@ -7,15 +7,16 @@ from pathlib import Path
 from fastapi import HTTPException
 from sqlmodel import Session
 
-from backend_contracts.compute import schemas as compute_schemas
-from backend_contracts.compute_requests.live import response_hub
-from backend_contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
-from backend_contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core import compute_requests_service, runtime_outbox_service
+from backend_core.contracts.compute import schemas as compute_schemas
+from backend_core.contracts.compute_requests.live import response_hub
+from backend_core.contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
+from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
+from backend_core.data_plane_object_store import delete_object, download_bytes
 from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.exceptions import PipelineExecutionError
 from backend_core.namespace import get_namespace
-from backend_core.object_store import delete_object, download_bytes, is_object_store_url
+from backend_core.object_store_paths import is_object_store_url
 from modules.datasource import schemas as datasource_schemas
 
 

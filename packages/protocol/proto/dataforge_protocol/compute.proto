@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/common.proto";
+import "dataforge_protocol/enums.proto";
+import "google/protobuf/timestamp.proto";
+
+message EngineIdentity {
+  EngineScope scope = 1 [(buf.validate.field).enum.defined_only = true];
+  EngineReusePolicy reuse_policy = 2 [(buf.validate.field).enum.defined_only = true];
+  optional string analysis_id = 3 [(buf.validate.field).string.min_len = 1];
+  optional string datasource_id = 4 [(buf.validate.field).string.min_len = 1];
+  optional string build_id = 5 [(buf.validate.field).string.min_len = 1];
+}
+
+message EngineResourceConfig {
+  optional int32 max_threads = 1 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 64
+  }];
+  optional int32 max_memory_mb = 2 [(buf.validate.field).int32.gte = 0];
+  optional int32 streaming_chunk_size = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ComputeCommandEnvelope {
+  ComputeRequestKind kind = 1 [(buf.validate.field).enum.defined_only = true];
+  int32 version = 2 [(buf.validate.field).int32.gte = 1];
+  string idempotency_key = 3 [(buf.validate.field).string.min_len = 1];
+  string correlation_id = 4 [(buf.validate.field).string.min_len = 1];
+  JsonPayload payload = 5;
+}
+
+message ComputeResponseEnvelope {
+  ComputeRequestKind kind = 1 [(buf.validate.field).enum.defined_only = true];
+  int32 version = 2 [(buf.validate.field).int32.gte = 1];
+  string correlation_id = 3 [(buf.validate.field).string.min_len = 1];
+  ComputeRequestStatus status = 4 [(buf.validate.field).enum.defined_only = true];
+  JsonPayload payload = 5;
+  optional string error_message = 6;
+}
+
+message BuildEvent {
+  string build_id = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  google.protobuf.Timestamp occurred_at = 3;
+  oneof event {
+    JsonPayload plan = 4;
+    JsonPayload step_started = 5;
+    JsonPayload step_completed = 6;
+    JsonPayload step_failed = 7;
+    JsonPayload progress = 8;
+    JsonPayload resources = 9;
+    JsonPayload log = 10;
+    JsonPayload completed = 11;
+    JsonPayload failed = 12;
+    JsonPayload cancelled = 13;
+  }
+}

@@ -10,17 +10,17 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlmodel import Session, col
 
-from backend_contracts.build_jobs.live import hub as build_job_hub
-from backend_contracts.build_runs.models import BuildRunStatus
-from backend_contracts.compute import schemas as compute_schemas
-from backend_contracts.datasource.models import DataSourceTargetKind
-from backend_contracts.engine_runs.schemas import EngineRunKind
-from backend_contracts.scheduler.schemas import ScheduleCreate, ScheduleResponse, ScheduleUpdate
 from backend_core import (
     build_jobs_service as build_job_service,
     build_runs_service as build_run_service,
     runtime_outbox_service,
 )
+from backend_core.contracts.build_jobs.live import hub as build_job_hub
+from backend_core.contracts.build_runs.models import BuildRunStatus
+from backend_core.contracts.compute import schemas as compute_schemas
+from backend_core.contracts.datasource.models import DataSourceTargetKind
+from backend_core.contracts.engine_runs.schemas import EngineRunKind
+from backend_core.contracts.scheduler.schemas import ScheduleCreate, ScheduleResponse, ScheduleUpdate
 from backend_core.exceptions import (
     DataSourceNotFoundError,
     ScheduleNotFoundError,

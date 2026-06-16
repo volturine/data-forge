@@ -6,13 +6,13 @@ from datetime import UTC, datetime
 import pytest
 from sqlmodel import Session
 
-from backend_contracts.build_jobs.models import BuildJobStatus
-from backend_contracts.build_runs.models import BuildRunStatus
-from backend_contracts.compute import schemas as compute_schemas
-from backend_contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
-from backend_contracts.datasource.source_types import DataSourceType
 from backend_core import build_jobs_service, build_runs_service, compute_requests_service
 from backend_core.config import settings
+from backend_core.contracts.build_jobs.models import BuildJobStatus
+from backend_core.contracts.build_runs.models import BuildRunStatus
+from backend_core.contracts.compute import schemas as compute_schemas
+from backend_core.contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
+from backend_core.contracts.datasource.source_types import DataSourceType
 from backend_core.database import run_settings_db
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker

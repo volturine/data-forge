@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
-from worker_models.compute.base import EngineStatusInfo
+from runtime.models.compute.base import EngineStatusInfo
 
 
 def worker_internal_api_client() -> WorkerInternalApiClient:

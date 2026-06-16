@@ -19,6 +19,7 @@ from runtime.datasource_delete_runtime import datasource_delete_loop
 from runtime.engine_notifications import create_snapshot_notifier
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
 from runtime.logging import configure_logging
+from runtime.models.runtime_workers.models import RuntimeWorkerKind
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
 from runtime.worker_runtime import (
     build_worker_loop,
@@ -26,7 +27,7 @@ from runtime.worker_runtime import (
 from runtime.worker_runtime import (
     worker_id as build_worker_id,
 )
-from worker_models.runtime_workers.models import RuntimeWorkerKind
+from worker_grpc.data_plane_server import start_data_plane_grpc_server_in_thread
 
 logger = logging.getLogger(__name__)
 _SPAWN = multiprocessing.get_context("spawn")
@@ -234,6 +235,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
     heartbeat_thread.start()
     request_tasks = [asyncio.create_task(compute_request_loop(local_stop, worker_id=worker_id, manager=manager)) for _ in range(compute_request_worker_count())]
     datasource_delete_task = asyncio.create_task(datasource_delete_loop(local_stop, manager=manager))
+    data_plane_server = start_data_plane_grpc_server_in_thread()
     children: dict[int, ManagedWorkerProcess] = {}
     try:
         while not local_stop.is_set():
@@ -272,6 +274,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
         local_stop.set()
         heartbeat_stop.set()
         heartbeat_thread.join()
+        await data_plane_server.stop(grace=1.0)
         for child in children.values():
             _stop_worker_process(child)
         manager.shutdown_all()

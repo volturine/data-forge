@@ -4,8 +4,8 @@ from fastapi import Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session
 
-from backend_contracts.analysis.step_types import is_step_type
-from backend_contracts.compute import schemas as compute_schemas
+from backend_core.contracts.analysis.step_types import is_step_type
+from backend_core.contracts.compute import schemas as compute_schemas
 from backend_core.database import get_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,

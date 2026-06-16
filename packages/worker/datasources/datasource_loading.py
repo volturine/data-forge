@@ -11,9 +11,9 @@ from openpyxl import load_workbook
 
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path
 from runtime.iceberg_snapshot_reader import scan_iceberg_snapshot
+from runtime.models.datasource.source_types import DataSourceFileType
+from runtime.models.enums import DataForgeStrEnum
 from runtime.object_store import download_file, is_object_store_url, object_store_storage_options
-from worker_models.datasource.source_types import DataSourceFileType
-from worker_models.enums import DataForgeStrEnum
 
 
 class DatasourceSourceType(DataForgeStrEnum):

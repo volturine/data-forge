@@ -10,8 +10,8 @@ import polars as pl
 from pydantic import BaseModel, ConfigDict, Field
 
 from operations.validation import validate_no_reflection_escape
-from worker_models.compute.base import OperationHandler, OperationParams
-from worker_models.step_config_enums import WithColumnsExprType
+from runtime.models.compute.base import OperationHandler, OperationParams
+from runtime.models.step_config_enums import WithColumnsExprType
 
 # Builtins allowed inside UDF code.
 # Keep this as a narrow allowlist so aliased introspection helpers cannot escape the sandbox.

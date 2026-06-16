@@ -3,7 +3,7 @@ import datetime as dt
 from sqlalchemy import Column, DateTime, Enum as SAEnum, Integer, String
 from sqlmodel import Field, SQLModel
 
-from backend_contracts.build_jobs.models import BuildJobStatus
+from backend_core.contracts.build_jobs.models import BuildJobStatus
 
 
 class BuildJob(SQLModel, table=True):  # type: ignore[call-arg, assignment]

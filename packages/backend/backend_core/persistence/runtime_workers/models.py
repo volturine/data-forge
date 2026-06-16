@@ -3,7 +3,7 @@ import datetime as dt
 from sqlalchemy import Column, DateTime, Enum as SAEnum, Integer, String
 from sqlmodel import Field, SQLModel
 
-from backend_contracts.runtime_workers.models import RuntimeWorkerKind
+from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 
 
 class RuntimeWorker(SQLModel, table=True):  # type: ignore[call-arg, assignment]

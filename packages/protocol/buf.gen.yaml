@@ -2,20 +2,26 @@ version: v2
 plugins:
   - remote: buf.build/protocolbuffers/python
     out: ../backend
+    include_imports: true
   - remote: buf.build/protocolbuffers/pyi
     out: ../backend
+    include_imports: true
   - remote: buf.build/grpc/python
     out: ../backend
   - remote: buf.build/protocolbuffers/python
     out: ../worker
+    include_imports: true
   - remote: buf.build/protocolbuffers/pyi
     out: ../worker
+    include_imports: true
   - remote: buf.build/grpc/python
     out: ../worker
   - remote: buf.build/protocolbuffers/python
     out: ../scheduler
+    include_imports: true
   - remote: buf.build/protocolbuffers/pyi
     out: ../scheduler
+    include_imports: true
   - remote: buf.build/grpc/python
     out: ../scheduler
 inputs:

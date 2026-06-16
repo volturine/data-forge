@@ -2,7 +2,7 @@
 
 import polars as pl
 
-from worker_models.compute.base import OperationHandler, OperationParams
+from runtime.models.compute.base import OperationHandler, OperationParams
 
 
 class UnpivotParams(OperationParams):

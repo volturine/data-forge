@@ -2,9 +2,9 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from backend_contracts.datasource.source_types import DataSourceFileType, DataSourceType
-from backend_contracts.enums import DataForgeStrEnum
-from backend_core.object_store import is_object_store_url
+from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
+from backend_core.contracts.enums import DataForgeStrEnum
+from backend_core.object_store_paths import is_object_store_url
 
 
 class ColumnSchema(BaseModel):

@@ -7,7 +7,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import boto3  # type: ignore[import-untyped]
 import pytest
+from botocore.config import Config as BotoConfig  # type: ignore[import-untyped]
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, create_engine
@@ -213,6 +216,205 @@ def isolate_data_dir(tmp_path: Path, monkeypatch, postgres_container: PostgresCo
     monkeypatch.setattr(settings, 'object_store_prefix', 'dataforge-tests', raising=False)
 
 
+class _TestWorkerDataPlaneClient:
+    def __init__(self) -> None:
+        self._client = None
+
+    def _settings(self):
+        return _settings()
+
+    def _s3(self):
+        if self._client is None:
+            settings = self._settings()
+            self._client = boto3.client(
+                's3',
+                endpoint_url=settings.object_store_endpoint,
+                region_name=settings.object_store_region,
+                aws_access_key_id=settings.object_store_access_key,
+                aws_secret_access_key=settings.object_store_secret_key,
+                config=BotoConfig(s3={'addressing_style': 'path'}),
+            )
+        return self._client
+
+    def _ensure_bucket_exists(self) -> None:
+        settings = self._settings()
+        try:
+            self._s3().head_bucket(Bucket=settings.object_store_bucket)
+        except ClientError as exc:
+            error = exc.response.get('Error', {}) if isinstance(exc.response, dict) else {}
+            code = str(error.get('Code') or '')
+            if code not in {'404', 'NoSuchBucket', 'NotFound'}:
+                raise
+            self._s3().create_bucket(Bucket=settings.object_store_bucket)
+
+    def object_store_storage_options(self) -> dict[str, object]:
+        settings = self._settings()
+        return {
+            's3.endpoint': settings.object_store_endpoint,
+            's3.access-key-id': settings.object_store_access_key,
+            's3.secret-access-key': settings.object_store_secret_key,
+            's3.region': settings.object_store_region,
+            's3.force-virtual-addressing': False,
+            'py-io-impl': 'pyiceberg.io.pyarrow.PyArrowFileIO',
+        }
+
+    def upload_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
+        from backend_core.object_store_paths import parse_object_store_url
+
+        self._ensure_bucket_exists()
+        bucket, key = parse_object_store_url(target_url)
+        kwargs: dict[str, object] = {'Bucket': bucket, 'Key': key, 'Body': data}
+        if content_type is not None:
+            kwargs['ContentType'] = content_type
+        self._s3().put_object(**kwargs)
+        return target_url
+
+    def download_bytes(self, source_url: str) -> bytes:
+        from backend_core.object_store_paths import parse_object_store_url
+
+        bucket, key = parse_object_store_url(source_url)
+        response = self._s3().get_object(Bucket=bucket, Key=key)
+        return response['Body'].read()
+
+    def delete_object(self, source_url: str) -> None:
+        from backend_core.object_store_paths import parse_object_store_url
+
+        bucket, key = parse_object_store_url(source_url)
+        self._s3().delete_object(Bucket=bucket, Key=key)
+
+    def object_exists(self, source_url: str) -> bool:
+        from backend_core.object_store_paths import parse_object_store_url
+
+        bucket, key = parse_object_store_url(source_url)
+        try:
+            self._s3().head_object(Bucket=bucket, Key=key)
+        except ClientError as exc:
+            error = exc.response.get('Error', {}) if isinstance(exc.response, dict) else {}
+            code = str(error.get('Code') or '')
+            if code in {'404', 'NoSuchKey', 'NotFound'}:
+                return False
+            raise
+        return True
+
+    def list_prefixes(self, prefix_url: str) -> list[str]:
+        from backend_core.object_store_paths import parse_object_store_url
+
+        bucket, key = parse_object_store_url(prefix_url)
+        prefix = key.rstrip('/')
+        if prefix:
+            prefix = prefix + '/'
+        response = self._s3().list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter='/')
+        names: list[str] = []
+        for item in response.get('CommonPrefixes') or []:
+            value = item.get('Prefix') if isinstance(item, dict) else None
+            if not isinstance(value, str):
+                continue
+            suffix = value[len(prefix) :].strip('/')
+            if suffix:
+                names.append(suffix)
+        return sorted(names)
+
+    def list_metadata_files(self, base_url: str) -> list[str]:
+        from backend_core.object_store_paths import parse_object_store_url
+
+        bucket, key = parse_object_store_url(base_url)
+        prefix = key.rstrip('/')
+        if prefix and not prefix.endswith('/metadata') and '/metadata/' not in prefix:
+            prefix = prefix + '/metadata'
+        prefix = prefix.rstrip('/') + '/'
+        paginator = self._s3().get_paginator('list_objects_v2')
+        results: list[str] = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for item in page.get('Contents') or []:
+                object_key = item.get('Key') if isinstance(item, dict) else None
+                if isinstance(object_key, str) and object_key.endswith('.metadata.json'):
+                    results.append(f's3://{bucket}/{object_key}')
+        return sorted(results)
+
+    def delete_prefix(self, prefix_url: str) -> None:
+        from backend_core.object_store_paths import parse_object_store_url
+
+        bucket, key = parse_object_store_url(prefix_url)
+        prefix = key.rstrip('/')
+        if prefix:
+            prefix = prefix + '/'
+        paginator = self._s3().get_paginator('list_objects_v2')
+        batch: list[dict[str, str]] = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for item in page.get('Contents') or []:
+                object_key = item.get('Key') if isinstance(item, dict) else None
+                if not isinstance(object_key, str):
+                    continue
+                batch.append({'Key': object_key})
+                if len(batch) == 1000:
+                    self._s3().delete_objects(Bucket=bucket, Delete={'Objects': batch})
+                    batch = []
+        if batch:
+            self._s3().delete_objects(Bucket=bucket, Delete={'Objects': batch})
+
+    def resolve_iceberg_metadata_path(self, *, namespace: str, metadata_path: str, datasource_id: str | None = None) -> str:
+        del namespace, datasource_id
+        if metadata_path.endswith('.metadata.json'):
+            if not self.object_exists(metadata_path):
+                raise ValueError(f'Iceberg metadata_path not found: {metadata_path}')
+            return metadata_path
+        files = self.list_metadata_files(metadata_path)
+        if not files:
+            raise ValueError(f'Iceberg metadata_path not found: {metadata_path}')
+        return files[-1]
+
+    def resolve_iceberg_branch_metadata_path(
+        self,
+        *,
+        namespace: str,
+        metadata_path: str,
+        datasource_id: str | None = None,
+        branch: str | None = None,
+    ) -> str:
+        from backend_core.object_store_paths import join_object_store_url
+
+        del namespace, datasource_id
+        if metadata_path.endswith('.metadata.json'):
+            return self.resolve_iceberg_metadata_path(metadata_path=metadata_path, namespace='test')
+        if branch:
+            branch_url = join_object_store_url(metadata_path, branch)
+            if self.list_metadata_files(branch_url):
+                return self.resolve_iceberg_metadata_path(metadata_path=branch_url, namespace='test')
+        return self.resolve_iceberg_metadata_path(metadata_path=metadata_path, namespace='test')
+
+    def scan_iceberg_snapshot(self, *, metadata_path: str, snapshot_id: str, limit: int | None = None) -> list[dict[str, object]]:
+        import polars as pl
+        from pyiceberg.table import StaticTable
+
+        table = StaticTable.from_metadata(metadata_path, properties=self.object_store_storage_options())
+        frame = pl.from_arrow(table.scan(snapshot_id=int(snapshot_id)).to_arrow())
+        if isinstance(frame, pl.Series):
+            frame = frame.to_frame()
+        if limit is not None:
+            frame = frame.head(limit)
+        return frame.to_dicts()
+
+    def list_iceberg_snapshots(self, *, namespace: str, datasource_id: str, branch: str | None = None):
+        from backend_core.data_plane_client import IcebergSnapshots
+
+        del namespace, branch
+        return IcebergSnapshots(datasource_id=datasource_id, table_path='', snapshots=[])
+
+    def delete_iceberg_snapshot(self, *, namespace: str, datasource_id: str, snapshot_id: str) -> str:
+        del namespace, datasource_id
+        return snapshot_id
+
+
+@pytest.fixture(autouse=True, scope='function')
+def use_test_worker_data_plane(monkeypatch, isolate_data_dir) -> Generator[None]:
+    client = _TestWorkerDataPlaneClient()
+    from backend_core import data_plane_iceberg, data_plane_object_store
+
+    monkeypatch.setattr(data_plane_object_store, 'client_from_settings', lambda: client)
+    monkeypatch.setattr(data_plane_iceberg, 'client_from_settings', lambda: client)
+    yield
+
+
 @pytest.fixture(autouse=True, scope='function')
 def isolate_settings_engine(
     request: pytest.FixtureRequest, tmp_path: Path, isolate_data_dir, postgres_container: PostgresContainer
@@ -244,11 +446,9 @@ def isolate_settings_engine(
 @pytest.fixture(autouse=True, scope='function')
 def cleanup_namespace_engines():
     from backend_core import database
-    from backend_core.object_store import reset_object_store_client_cache
 
     yield
     database.clear_namespace_init_cache()
-    reset_object_store_client_cache()
     if database.tenant_engine is not None:
         database.tenant_engine.dispose()
         database.tenant_engine = None
@@ -304,7 +504,8 @@ def sample_json_file(temp_upload_dir: Path) -> Path:
 
 
 def _upload_test_object(local_path: Path) -> str:
-    from backend_core.object_store import object_store_url, upload_file
+    from backend_core.data_plane_object_store import upload_file
+    from backend_core.object_store_paths import object_store_url
 
     target_url = object_store_url('tests', uuid.uuid4().hex, local_path.name)
     upload_file(local_path, target_url)
@@ -374,7 +575,7 @@ def sample_datasources(test_db_session: Session, sample_csv_object_url: str, sam
 
 @pytest.fixture(scope='function')
 def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
-    from backend_contracts.analysis.models import AnalysisStatus
+    from backend_core.contracts.analysis.models import AnalysisStatus
     from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 
     analysis_id = str(uuid.uuid4())
@@ -414,7 +615,7 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
 
 @pytest.fixture(scope='function')
 def sample_analyses(test_db_session: Session, sample_datasources: list[DataSource]) -> list[Analysis]:
-    from backend_contracts.analysis.models import AnalysisStatus
+    from backend_core.contracts.analysis.models import AnalysisStatus
     from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 
     analyses = []

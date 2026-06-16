@@ -7,10 +7,10 @@ from typing import Any, Final
 from sqlalchemy import desc, or_, select
 from sqlmodel import Session, col
 
-from backend_contracts.analysis.step_types import get_step_timing_key
-from backend_contracts.compute import schemas as compute_schemas
-from backend_contracts.compute.schemas import BuildLogLevel, BuildStepState
-from backend_contracts.engine_runs.schemas import (
+from backend_core.contracts.analysis.step_types import get_step_timing_key
+from backend_core.contracts.compute import schemas as compute_schemas
+from backend_core.contracts.compute.schemas import BuildLogLevel, BuildStepState
+from backend_core.contracts.engine_runs.schemas import (
     BuildComparisonResponse,
     ColumnDiff,
     EngineRunExecutionCategory,

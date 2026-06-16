@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from backend_contracts.datasource.source_types import DataSourceFileType, DataSourceType
+from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.persistence.datasource.models import DataSource
 from modules.export.generators import _scan_expression
 

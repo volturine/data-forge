@@ -11,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 
-from backend_contracts.analysis.step_types import is_step_type
+from backend_core.contracts.analysis.step_types import is_step_type
 from modules.export.models import CodeExportFormat
 
 

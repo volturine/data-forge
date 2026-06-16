@@ -12,9 +12,9 @@ from sqlalchemy import inspect, select
 from sqlalchemy.orm import defer
 from sqlmodel import Session, col
 
-from backend_contracts.datasource.models import DataSourceCreatedBy
-from backend_contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core import datasource_delete_service
+from backend_core.contracts.datasource.models import DataSourceCreatedBy
+from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.exceptions import DataSourceNotFoundError, DataSourceValidationError
 from backend_core.persistence.analysis.models import Analysis

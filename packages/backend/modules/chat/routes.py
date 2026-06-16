@@ -17,8 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from backend_contracts.step_config_enums import AIProvider
 from backend_core.ai_clients import AIError, get_ai_client, resolve_ai_provider
+from backend_core.contracts.step_config_enums import AIProvider
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace
 from modules.auth.dependencies import get_current_user

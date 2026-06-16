@@ -90,11 +90,15 @@ cleanup() {
     docker volume rm -f "${PG_VOLUME}" >/dev/null 2>&1 || true
     lsof -ti "tcp:${PORT}" | xargs -r kill >/dev/null 2>&1 || true
     lsof -ti "tcp:${FRONTEND_PORT}" | xargs -r kill >/dev/null 2>&1 || true
+    lsof -ti "tcp:${INTERNAL_GRPC_PORT}" | xargs -r kill >/dev/null 2>&1 || true
+    lsof -ti "tcp:${WORKER_DATA_PLANE_GRPC_PORT}" | xargs -r kill >/dev/null 2>&1 || true
     exit "$status"
 }
 trap cleanup EXIT
 lsof -ti "tcp:${PORT}" | xargs -r kill >/dev/null 2>&1 || true
 lsof -ti "tcp:${FRONTEND_PORT}" | xargs -r kill >/dev/null 2>&1 || true
+lsof -ti "tcp:${INTERNAL_GRPC_PORT}" | xargs -r kill >/dev/null 2>&1 || true
+lsof -ti "tcp:${WORKER_DATA_PLANE_GRPC_PORT}" | xargs -r kill >/dev/null 2>&1 || true
 if [ -n "$LOG_DIR" ]; then
     mkdir -p "$LOG_DIR"
 fi

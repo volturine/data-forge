@@ -7,7 +7,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from backend_core.object_store import delete_object, is_object_store_url
+from backend_core.data_plane_object_store import delete_object
+from backend_core.object_store_paths import is_object_store_url
 
 
 @dataclass

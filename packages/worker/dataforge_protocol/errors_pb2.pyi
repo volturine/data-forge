@@ -1,0 +1,111 @@
+from google.protobuf import struct_pb2 as _struct_pb2
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
+from google.protobuf import descriptor as _descriptor
+from google.protobuf import message as _message
+from collections.abc import Mapping as _Mapping
+from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
+
+DESCRIPTOR: _descriptor.FileDescriptor
+
+class ErrorCode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    ERROR_CODE_UNSPECIFIED: _ClassVar[ErrorCode]
+    ERROR_CODE_INVALID_ID: _ClassVar[ErrorCode]
+    ERROR_CODE_DATASOURCE_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_ANALYSIS_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_ANALYSIS_VERSION_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_STEP_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_ENGINE_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_ENGINE_BUSY: _ClassVar[ErrorCode]
+    ERROR_CODE_ENGINE_RUN_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_JOB_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_JOB_CANCELLED: _ClassVar[ErrorCode]
+    ERROR_CODE_SCHEDULE_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_UDF_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_HEALTHCHECK_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_VALIDATION: _ClassVar[ErrorCode]
+    ERROR_CODE_SNAPSHOT: _ClassVar[ErrorCode]
+    ERROR_CODE_CONNECTION: _ClassVar[ErrorCode]
+    ERROR_CODE_UNSUPPORTED_EXPORT_FORMAT: _ClassVar[ErrorCode]
+    ERROR_CODE_AUTH: _ClassVar[ErrorCode]
+    ERROR_CODE_DATASOURCE_VALIDATION_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_DATASOURCE_SNAPSHOT_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_DATASOURCE_CONNECTION_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_PIPELINE_VALIDATION_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_PIPELINE_EXECUTION_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_ENGINE_START_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_ENGINE_RUN_COMPARISON_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_ANALYSIS_VALIDATION_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_ANALYSIS_CYCLE_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_FILE_NOT_FOUND: _ClassVar[ErrorCode]
+    ERROR_CODE_FILE_VALIDATION_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_FILE_SIZE_EXCEEDED: _ClassVar[ErrorCode]
+    ERROR_CODE_FILE_DELETE_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_SCHEDULE_VALIDATION_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_UDF_VALIDATION_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_HEALTHCHECK_VALIDATION_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_SETTINGS_CONFIGURATION_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_INVALID_CREDENTIALS: _ClassVar[ErrorCode]
+    ERROR_CODE_EMAIL_ALREADY_EXISTS: _ClassVar[ErrorCode]
+    ERROR_CODE_SESSION_EXPIRED: _ClassVar[ErrorCode]
+    ERROR_CODE_ACCOUNT_DISABLED: _ClassVar[ErrorCode]
+    ERROR_CODE_DEFAULT_USER_DELETION_FORBIDDEN: _ClassVar[ErrorCode]
+    ERROR_CODE_PROVIDER_UNLINK_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_OAUTH_ERROR: _ClassVar[ErrorCode]
+    ERROR_CODE_TOKEN_EXPIRED: _ClassVar[ErrorCode]
+    ERROR_CODE_TOKEN_INVALID: _ClassVar[ErrorCode]
+ERROR_CODE_UNSPECIFIED: ErrorCode
+ERROR_CODE_INVALID_ID: ErrorCode
+ERROR_CODE_DATASOURCE_NOT_FOUND: ErrorCode
+ERROR_CODE_ANALYSIS_NOT_FOUND: ErrorCode
+ERROR_CODE_ANALYSIS_VERSION_NOT_FOUND: ErrorCode
+ERROR_CODE_STEP_NOT_FOUND: ErrorCode
+ERROR_CODE_ENGINE_NOT_FOUND: ErrorCode
+ERROR_CODE_ENGINE_BUSY: ErrorCode
+ERROR_CODE_ENGINE_RUN_NOT_FOUND: ErrorCode
+ERROR_CODE_JOB_NOT_FOUND: ErrorCode
+ERROR_CODE_JOB_CANCELLED: ErrorCode
+ERROR_CODE_SCHEDULE_NOT_FOUND: ErrorCode
+ERROR_CODE_UDF_NOT_FOUND: ErrorCode
+ERROR_CODE_HEALTHCHECK_NOT_FOUND: ErrorCode
+ERROR_CODE_VALIDATION: ErrorCode
+ERROR_CODE_SNAPSHOT: ErrorCode
+ERROR_CODE_CONNECTION: ErrorCode
+ERROR_CODE_UNSUPPORTED_EXPORT_FORMAT: ErrorCode
+ERROR_CODE_AUTH: ErrorCode
+ERROR_CODE_DATASOURCE_VALIDATION_ERROR: ErrorCode
+ERROR_CODE_DATASOURCE_SNAPSHOT_ERROR: ErrorCode
+ERROR_CODE_DATASOURCE_CONNECTION_ERROR: ErrorCode
+ERROR_CODE_PIPELINE_VALIDATION_ERROR: ErrorCode
+ERROR_CODE_PIPELINE_EXECUTION_ERROR: ErrorCode
+ERROR_CODE_ENGINE_START_ERROR: ErrorCode
+ERROR_CODE_ENGINE_RUN_COMPARISON_ERROR: ErrorCode
+ERROR_CODE_ANALYSIS_VALIDATION_ERROR: ErrorCode
+ERROR_CODE_ANALYSIS_CYCLE_ERROR: ErrorCode
+ERROR_CODE_FILE_NOT_FOUND: ErrorCode
+ERROR_CODE_FILE_VALIDATION_ERROR: ErrorCode
+ERROR_CODE_FILE_SIZE_EXCEEDED: ErrorCode
+ERROR_CODE_FILE_DELETE_ERROR: ErrorCode
+ERROR_CODE_SCHEDULE_VALIDATION_ERROR: ErrorCode
+ERROR_CODE_UDF_VALIDATION_ERROR: ErrorCode
+ERROR_CODE_HEALTHCHECK_VALIDATION_ERROR: ErrorCode
+ERROR_CODE_SETTINGS_CONFIGURATION_ERROR: ErrorCode
+ERROR_CODE_INVALID_CREDENTIALS: ErrorCode
+ERROR_CODE_EMAIL_ALREADY_EXISTS: ErrorCode
+ERROR_CODE_SESSION_EXPIRED: ErrorCode
+ERROR_CODE_ACCOUNT_DISABLED: ErrorCode
+ERROR_CODE_DEFAULT_USER_DELETION_FORBIDDEN: ErrorCode
+ERROR_CODE_PROVIDER_UNLINK_ERROR: ErrorCode
+ERROR_CODE_OAUTH_ERROR: ErrorCode
+ERROR_CODE_TOKEN_EXPIRED: ErrorCode
+ERROR_CODE_TOKEN_INVALID: ErrorCode
+
+class ErrorInfo(_message.Message):
+    __slots__ = ("code", "message", "details")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    DETAILS_FIELD_NUMBER: _ClassVar[int]
+    code: ErrorCode
+    message: str
+    details: _struct_pb2.Struct
+    def __init__(self, code: _Optional[_Union[ErrorCode, str]] = ..., message: _Optional[str] = ..., details: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...

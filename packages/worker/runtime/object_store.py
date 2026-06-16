@@ -112,11 +112,23 @@ def upload_bytes(data: bytes, target_url: str, *, content_type: str | None = Non
     return target_url
 
 
+def download_bytes(source_url: str) -> bytes:
+    bucket, key = parse_object_store_url(source_url)
+    response = _client().get_object(Bucket=bucket, Key=key)
+    body = response["Body"]
+    return body.read()
+
+
 def download_file(source_url: str, target_path: Path) -> Path:
     bucket, key = parse_object_store_url(source_url)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     _client().download_file(bucket, key, str(target_path))
     return target_path
+
+
+def delete_object(source_url: str) -> None:
+    bucket, key = parse_object_store_url(source_url)
+    _client().delete_object(Bucket=bucket, Key=key)
 
 
 def object_exists(source_url: str) -> bool:
@@ -130,6 +142,24 @@ def object_exists(source_url: str) -> bool:
             return False
         raise
     return True
+
+
+def list_prefixes(prefix_url: str) -> list[str]:
+    bucket, key = parse_object_store_url(prefix_url)
+    prefix = key.rstrip("/")
+    if prefix:
+        prefix = prefix + "/"
+    response = _client().list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
+    prefixes = response.get("CommonPrefixes") or []
+    names: list[str] = []
+    for item in prefixes:
+        value = item.get("Prefix") if isinstance(item, dict) else None
+        if not isinstance(value, str):
+            continue
+        suffix = value[len(prefix) :].strip("/")
+        if suffix:
+            names.append(suffix)
+    return sorted(names)
 
 
 def list_metadata_files(base_url: str) -> list[str]:
@@ -147,3 +177,23 @@ def list_metadata_files(base_url: str) -> list[str]:
                 continue
             results.append(f"s3://{bucket}/{object_key}")
     return sorted(results)
+
+
+def delete_prefix(prefix_url: str) -> None:
+    bucket, key = parse_object_store_url(prefix_url)
+    prefix = key.rstrip("/")
+    if prefix:
+        prefix = prefix + "/"
+    paginator = _client().get_paginator("list_objects_v2")
+    delete_batch: list[dict[str, str]] = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Contents") or []:
+            object_key = item.get("Key") if isinstance(item, dict) else None
+            if not isinstance(object_key, str):
+                continue
+            delete_batch.append({"Key": object_key})
+            if len(delete_batch) == 1000:
+                _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
+                delete_batch = []
+    if delete_batch:
+        _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})

@@ -16,8 +16,8 @@ from pydantic import BaseModel, TypeAdapter
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'packages' / 'backend'))
 
-from backend_contracts.compute import schemas as compute_schemas  # noqa: E402
-from backend_contracts.compute.schemas import (  # noqa: E402
+from backend_core.contracts.compute import schemas as compute_schemas  # noqa: E402
+from backend_core.contracts.compute.schemas import (  # noqa: E402
     ActiveBuildDetail,
     ActiveBuildSummary,
     BuildEvent,

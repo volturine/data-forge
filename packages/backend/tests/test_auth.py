@@ -10,7 +10,6 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from backend_contracts.analysis.models import AnalysisStatus
 from backend_core.auth_exceptions import (
     DefaultUserDeletionError,
     EmailAlreadyExistsError,
@@ -19,6 +18,7 @@ from backend_core.auth_exceptions import (
     TokenExpiredError,
     TokenInvalidError,
 )
+from backend_core.contracts.analysis.models import AnalysisStatus
 from backend_core.database import (
     clear_settings_engine_override,
     get_settings_db,

@@ -3,7 +3,7 @@ import datetime as dt
 from sqlalchemy import JSON, Column, DateTime, Float, Integer, String
 from sqlmodel import Field, SQLModel
 
-from backend_contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 
 
 class EngineRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]

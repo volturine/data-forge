@@ -3,10 +3,10 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel import select
 
-from backend_contracts.build_runs.models import BuildRunStatus
-from backend_contracts.compute import schemas as compute_schemas
-from backend_contracts.engine_runs.schemas import EngineRunKind
 from backend_core import build_runs_service as build_run_service
+from backend_core.contracts.build_runs.models import BuildRunStatus
+from backend_core.contracts.compute import schemas as compute_schemas
+from backend_core.contracts.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.build_runs.models import BuildEvent
 
 

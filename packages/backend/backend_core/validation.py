@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import Path
 
-from backend_core.engine_identity import PREVIEW_PREFIX, datasource_preview_engine_key, is_datasource_preview_engine_key
+from backend_core.engine_identity import PREVIEW_PREFIX, datasource_preview_engine_key
 from backend_core.exceptions import InvalidIdError
 
 
@@ -91,7 +91,7 @@ def parse_datasource_id(value: str) -> str:
 def parse_compute_analysis_id(value: str) -> str:
     if value.startswith(PREVIEW_PREFIX):
         datasource_id = parse_datasource_id(value[len(PREVIEW_PREFIX) :])
-        if is_datasource_preview_engine_key(value) and datasource_id:
+        if datasource_id:
             return datasource_preview_engine_key(datasource_id)
         raise InvalidIdError(message=f'Invalid preview analysis ID: {value}', details={'value': value})
     return parse_analysis_id(value)

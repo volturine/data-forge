@@ -13,17 +13,17 @@ from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, col
 
-from backend_contracts.analysis.models import AnalysisStatus
-from backend_contracts.analysis.pipeline_types import (
+from backend_core.ai_clients import AIError, get_ai_client
+from backend_core.analysis_cycles import assert_no_analysis_cycle
+from backend_core.contracts.analysis.models import AnalysisStatus
+from backend_core.contracts.analysis.pipeline_types import (
     PipelineDefinition,
     PipelineStep,
     PipelineTab,
     TabDatasource,
     TabOutput,
 )
-from backend_contracts.step_config_enums import AIProvider
-from backend_core.ai_clients import AIError, get_ai_client
-from backend_core.analysis_cycles import assert_no_analysis_cycle
+from backend_core.contracts.step_config_enums import AIProvider
 from backend_core.exceptions import (
     AnalysisNotFoundError,
     AnalysisValidationError,

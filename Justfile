@@ -8,7 +8,6 @@ buf := 'bunx @bufbuild/buf@1.70.0'
 
 install:
     cd packages/backend && uv sync
-    cd packages/protocol && uv sync
     cd packages/scheduler && uv sync
     cd packages/worker && uv sync
     cd packages/frontend && bun install
@@ -19,8 +18,6 @@ install:
 update-deps:
     @echo "Updating backend dependencies to latest allowed releases..."
     cd packages/backend && uv lock --upgrade --resolution highest && uv sync
-    @echo "Updating protocol dependencies to latest allowed releases..."
-    cd packages/protocol && uv lock --upgrade --resolution highest && uv sync
     @echo "Updating frontend dependencies to latest releases (including majors)..."
     cd packages/frontend && bun update --latest
     @echo "Updating scheduler dependencies to latest allowed releases..."
@@ -119,20 +116,26 @@ check-protocol-generated:
     plugins:
       - remote: buf.build/protocolbuffers/python
         out: $tmp/backend
+        include_imports: true
       - remote: buf.build/protocolbuffers/pyi
         out: $tmp/backend
+        include_imports: true
       - remote: buf.build/grpc/python
         out: $tmp/backend
       - remote: buf.build/protocolbuffers/python
         out: $tmp/worker
+        include_imports: true
       - remote: buf.build/protocolbuffers/pyi
         out: $tmp/worker
+        include_imports: true
       - remote: buf.build/grpc/python
         out: $tmp/worker
       - remote: buf.build/protocolbuffers/python
         out: $tmp/scheduler
+        include_imports: true
       - remote: buf.build/protocolbuffers/pyi
         out: $tmp/scheduler
+        include_imports: true
       - remote: buf.build/grpc/python
         out: $tmp/scheduler
     inputs:
@@ -140,8 +143,11 @@ check-protocol-generated:
     EOF
     cd packages/protocol
     {{buf}} generate --template "$tmp/buf.gen.yaml"
+    diff -ru --exclude='__pycache__' "$tmp/backend/buf" ../backend/buf
     diff -ru --exclude='__pycache__' "$tmp/backend/dataforge_protocol" ../backend/dataforge_protocol
+    diff -ru --exclude='__pycache__' "$tmp/worker/buf" ../worker/buf
     diff -ru --exclude='__pycache__' "$tmp/worker/dataforge_protocol" ../worker/dataforge_protocol
+    diff -ru --exclude='__pycache__' "$tmp/scheduler/buf" ../scheduler/buf
     diff -ru --exclude='__pycache__' "$tmp/scheduler/dataforge_protocol" ../scheduler/dataforge_protocol
 
 verify:

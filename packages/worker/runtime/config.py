@@ -31,6 +31,9 @@ class WorkerSettings:
     object_store_secret_key: str
     object_store_bucket: str
     object_store_prefix: str
+    internal_api_token: str
+    data_plane_grpc_host: str
+    data_plane_grpc_port: int
 
 
 def _read_int(name: str, default: int, *, min_value: int | None = None, max_value: int | None = None) -> int:
@@ -79,4 +82,7 @@ settings = WorkerSettings(
     object_store_secret_key=os.environ.get("OBJECT_STORE_SECRET_KEY", "rustfsadmin"),
     object_store_bucket=os.environ.get("OBJECT_STORE_BUCKET", "dataforge"),
     object_store_prefix=os.environ.get("OBJECT_STORE_PREFIX", "dataforge"),
+    internal_api_token=os.environ.get("INTERNAL_API_TOKEN", ""),
+    data_plane_grpc_host=os.environ.get("WORKER_DATA_PLANE_GRPC_HOST", "127.0.0.1").strip() or "127.0.0.1",
+    data_plane_grpc_port=_read_int("WORKER_DATA_PLANE_GRPC_PORT", 50052, min_value=1, max_value=65535),
 )

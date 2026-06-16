@@ -7,7 +7,7 @@ import polars as pl
 from sqlmodel import select
 
 from backend_core.exceptions import DataSourceValidationError
-from backend_core.object_store import is_object_store_url
+from backend_core.object_store_paths import is_object_store_url
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from main import app
 from modules.auth.dependencies import get_optional_user
@@ -639,7 +639,7 @@ class TestColumnStats:
 
 class TestDataSourceDelete:
     def test_delete_datasource_marks_datasource_pending_delete(self, client, sample_datasource: DataSource, test_db_session):
-        from backend_core.object_store import object_exists
+        from backend_core.data_plane_object_store import object_exists
 
         datasource_id = sample_datasource.id
         file_path = sample_datasource.config['file_path']

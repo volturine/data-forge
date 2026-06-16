@@ -11,13 +11,6 @@ from typing import Any, cast
 import grpc
 from sqlalchemy import select
 
-from backend_contracts.build_runs.models import BuildRunStatus
-from backend_contracts.compute import schemas as compute_schemas
-from backend_contracts.compute.base import EngineStatusInfo
-from backend_contracts.compute_requests.models import ComputeRequestKind
-from backend_contracts.datasource.models import DataSourceCreatedBy
-from backend_contracts.runtime_workers.models import RuntimeWorkerKind
-from backend_contracts.step_config_enums import AIProvider
 from backend_core import (
     build_event_service,
     build_jobs_service as build_job_service,
@@ -33,6 +26,13 @@ from backend_core import (
 )
 from backend_core.ai_clients import get_ai_client
 from backend_core.config import settings
+from backend_core.contracts.build_runs.models import BuildRunStatus
+from backend_core.contracts.compute import schemas as compute_schemas
+from backend_core.contracts.compute.base import EngineStatusInfo
+from backend_core.contracts.compute_requests.models import ComputeRequestKind
+from backend_core.contracts.datasource.models import DataSourceCreatedBy
+from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
+from backend_core.contracts.step_config_enums import AIProvider
 from backend_core.database import get_db, run_db, run_settings_db
 from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.exceptions import DataSourceNotFoundError
@@ -46,6 +46,7 @@ from backend_core.persistence.udfs.models import Udf
 from backend_core.settings_projection import get_resolved_smtp, get_resolved_telegram_settings, get_resolved_telegram_token
 from backend_core.smtp import send_smtp_message
 from backend_grpc.codec import dict_to_struct, repeated_structs_to_dicts, struct_field_to_dict, struct_to_dict
+from backend_grpc.validation import ProtovalidateAioInterceptor
 from dataforge_protocol import common_pb2, scheduler_runtime_pb2, scheduler_runtime_pb2_grpc, worker_runtime_pb2, worker_runtime_pb2_grpc
 from modules.datasource import runtime_service as datasource_runtime_service
 from modules.scheduler import service as scheduler_service
@@ -1080,7 +1081,7 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
 
 
 async def start_runtime_grpc_server() -> grpc.aio.Server:
-    server = grpc.aio.server()
+    server = grpc.aio.server(interceptors=(ProtovalidateAioInterceptor(),))
     worker_runtime_pb2_grpc.add_WorkerRuntimeServiceServicer_to_server(WorkerRuntimeServicer(), server)
     scheduler_runtime_pb2_grpc.add_SchedulerRuntimeServiceServicer_to_server(SchedulerRuntimeServicer(), server)
     server.add_insecure_port(f'{settings.internal_grpc_host}:{settings.internal_grpc_port}')

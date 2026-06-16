@@ -6,10 +6,15 @@ from datetime import UTC, datetime
 
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.config import settings
-from runtime.engine_identity import parse_engine_identity
+from runtime.engine_identity import (
+    EngineIdentity,
+    analysis_interactive_engine_identity,
+    engine_reuse_policy_value,
+    engine_scope_value,
+)
+from runtime.models.compute.base import ComputeEngine, EngineStatusInfo
+from runtime.models.compute.schemas import EngineStatus
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
-from worker_models.compute.base import ComputeEngine, EngineStatusInfo
-from worker_models.compute.schemas import EngineStatus
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +22,7 @@ _RESOURCE_KEYS = frozenset({"max_threads", "max_memory_mb", "streaming_chunk_siz
 
 EngineFactory = Callable[[str, dict | None], ComputeEngine]
 EngineSnapshotListener = Callable[[list[EngineStatusInfo]], None]
+EngineIdentityInput = EngineIdentity | str
 
 
 def _default_engine_factory(engine_key: str, resource_config: dict | None = None) -> ComputeEngine:
@@ -43,6 +49,7 @@ class ProcessManager:
         on_snapshot: EngineSnapshotListener | None = None,
     ) -> None:
         self._engines: dict[str, EngineInfo] = {}
+        self._engine_identities: dict[str, EngineIdentity] = {}
         self._engines_lock = threading.Lock()
         self._engine_events: dict[str, threading.Event] = {}
         self._engine_factory = engine_factory
@@ -55,17 +62,24 @@ class ProcessManager:
             self._reaper_thread = threading.Thread(target=self._reap_idle_engines_loop, name="engine-idle-reaper", daemon=True)
             self._reaper_thread.start()
 
-    def _key(self, engine_key: str, namespace: str | None = None) -> str:
-        return f"{namespace or get_namespace()}:{engine_key}"
+    def _resolve_identity(self, identity: EngineIdentityInput) -> EngineIdentity:
+        if isinstance(identity, EngineIdentity):
+            return identity
+        return analysis_interactive_engine_identity(identity)
+
+    def _key(self, identity: EngineIdentityInput, namespace: str | None = None) -> str:
+        return f"{namespace or get_namespace()}:{self._resolve_identity(identity).storage_key}"
 
     def _split_key(self, key: str) -> tuple[str, str]:
         namespace, _, engine_key = key.partition(":")
         return namespace, engine_key
 
-    def spawn_engine(self, engine_key: str, resource_config: dict | None = None) -> EngineInfo:
+    def spawn_engine(self, identity: EngineIdentityInput, resource_config: dict | None = None) -> EngineInfo:
         """Spawn a new compute engine or reuse an existing one for the same engine key."""
+        engine_identity = self._resolve_identity(identity)
+        engine_key = engine_identity.storage_key
         normalized_config = self._normalize_config(resource_config)
-        qualified_key = self._key(engine_key)
+        qualified_key = self._key(engine_identity)
         namespace, _ = self._split_key(qualified_key)
         wait_event: threading.Event | None = None
         reused_info: EngineInfo | None = None
@@ -95,6 +109,7 @@ class ProcessManager:
                         info.current_build_id = None
                         info.current_engine_run_id = None
                         del self._engines[qualified_key]
+                        self._engine_identities.pop(qualified_key, None)
                     break
 
             if wait_event is not None:
@@ -164,6 +179,7 @@ class ProcessManager:
                     raise RuntimeError(f"Failed to start engine for {engine_key}")
                 info = EngineInfo(engine)
                 self._engines[qualified_key] = info
+                self._engine_identities[qualified_key] = engine_identity
                 spawned_info = info
                 logger.info("Engine spawned successfully for key %s", engine_key)
         finally:
@@ -186,28 +202,29 @@ class ProcessManager:
         defaults = self._get_defaults()
         return {k: v for k in _RESOURCE_KEYS if (v := config.get(k)) is not None and v != defaults.get(k)}
 
-    def get_or_create_engine(self, engine_key: str, resource_config: dict | None = None) -> ComputeEngine:
-        info = self.spawn_engine(engine_key, resource_config=resource_config)
+    def get_or_create_engine(self, identity: EngineIdentityInput, resource_config: dict | None = None) -> ComputeEngine:
+        info = self.spawn_engine(identity, resource_config=resource_config)
         return info.engine
 
-    def restart_engine_with_config(self, engine_key: str, resource_config: dict) -> EngineInfo:
+    def restart_engine_with_config(self, identity: EngineIdentityInput, resource_config: dict) -> EngineInfo:
+        engine_key = self._resolve_identity(identity).storage_key
         logger.info("Restarting engine for key %s with new config: %s", engine_key, resource_config)
-        self.shutdown_engine(engine_key, emit_snapshot=False)
-        return self.spawn_engine(engine_key, resource_config=resource_config)
+        self.shutdown_engine(identity, emit_snapshot=False)
+        return self.spawn_engine(identity, resource_config=resource_config)
 
-    def get_engine(self, engine_key: str, *, namespace: str | None = None) -> ComputeEngine | None:
-        qualified_key = self._key(engine_key, namespace=namespace)
+    def get_engine(self, identity: EngineIdentityInput, *, namespace: str | None = None) -> ComputeEngine | None:
+        qualified_key = self._key(identity, namespace=namespace)
         with self._engines_lock:
             info = self._engines.get(qualified_key)
             return info.engine if info else None
 
-    def get_engine_info(self, engine_key: str, *, namespace: str | None = None) -> EngineInfo | None:
-        qualified_key = self._key(engine_key, namespace=namespace)
+    def get_engine_info(self, identity: EngineIdentityInput, *, namespace: str | None = None) -> EngineInfo | None:
+        qualified_key = self._key(identity, namespace=namespace)
         with self._engines_lock:
             return self._engines.get(qualified_key)
 
-    def set_engine_runtime_context(self, engine_key: str, *, current_build_id: str | None, current_engine_run_id: str | None) -> None:
-        qualified_key = self._key(engine_key)
+    def set_engine_runtime_context(self, identity: EngineIdentityInput, *, current_build_id: str | None, current_engine_run_id: str | None) -> None:
+        qualified_key = self._key(identity)
         namespace, _ = self._split_key(qualified_key)
         changed = False
         with self._engines_lock:
@@ -229,14 +246,16 @@ class ProcessManager:
             "streaming_chunk_size": settings.polars_streaming_chunk_size,
         }
 
-    def get_engine_status(self, engine_key: str, *, defaults: dict | None = None) -> EngineStatusInfo:
+    def get_engine_status(self, identity: EngineIdentityInput, *, defaults: dict | None = None) -> EngineStatusInfo:
         if defaults is None:
             defaults = self._get_defaults()
 
-        identity = parse_engine_identity(engine_key)
-        qualified_key = self._key(engine_key)
+        engine_identity = self._resolve_identity(identity)
+        engine_key = engine_identity.storage_key
+        qualified_key = self._key(engine_identity)
         with self._engines_lock:
             info = self._engines.get(qualified_key)
+            persisted_identity = self._engine_identities.get(qualified_key, engine_identity)
             if info is None:
                 return EngineStatusInfo(
                     analysis_id=engine_key,
@@ -247,11 +266,11 @@ class ProcessManager:
                     resource_config=None,
                     effective_resources=None,
                     defaults=defaults,
-                    scope=identity.scope.value,
-                    reuse_policy=identity.reuse_policy.value,
-                    datasource_id=identity.datasource_id,
-                    build_id=identity.build_id,
-                    current_build_id=identity.build_id,
+                    scope=engine_scope_value(persisted_identity),
+                    reuse_policy=engine_reuse_policy_value(persisted_identity),
+                    datasource_id=persisted_identity.datasource_id,
+                    build_id=persisted_identity.build_id,
+                    current_build_id=persisted_identity.build_id,
                     current_engine_run_id=None,
                 )
 
@@ -270,20 +289,22 @@ class ProcessManager:
                 resource_config=resource_config,
                 effective_resources=effective_resources,
                 defaults=defaults,
-                scope=identity.scope.value,
-                reuse_policy=identity.reuse_policy.value,
-                datasource_id=identity.datasource_id,
-                build_id=identity.build_id,
-                current_build_id=info.current_build_id or identity.build_id,
+                scope=engine_scope_value(persisted_identity),
+                reuse_policy=engine_reuse_policy_value(persisted_identity),
+                datasource_id=persisted_identity.datasource_id,
+                build_id=persisted_identity.build_id,
+                current_build_id=info.current_build_id or persisted_identity.build_id,
                 current_engine_run_id=info.current_engine_run_id,
             )
 
-    def shutdown_engine(self, engine_key: str, *, namespace: str | None = None, emit_snapshot: bool = True) -> None:
-        qualified_key = self._key(engine_key, namespace=namespace)
+    def shutdown_engine(self, identity: EngineIdentityInput, *, namespace: str | None = None, emit_snapshot: bool = True) -> None:
+        engine_key = self._resolve_identity(identity).storage_key
+        qualified_key = self._key(identity, namespace=namespace)
         namespace, _ = self._split_key(qualified_key)
         info: EngineInfo | None = None
         with self._engines_lock:
             info = self._engines.pop(qualified_key, None)
+            self._engine_identities.pop(qualified_key, None)
         if info is None:
             logger.debug("No engine found to shutdown for key %s", engine_key)
             return
@@ -300,6 +321,7 @@ class ProcessManager:
         with self._engines_lock:
             shutdown_targets = list(self._engines.items())
             self._engines.clear()
+            self._engine_identities.clear()
         changed_namespaces = {self._split_key(key)[0] for key, _ in shutdown_targets}
         for key, info in shutdown_targets:
             _namespace, engine_key = self._split_key(key)

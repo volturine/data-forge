@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 
-from backend_contracts.runtime_workers.models import RuntimeWorkerKind
+from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 
 

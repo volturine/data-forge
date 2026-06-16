@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from backend_contracts.datasource.source_types import DataSourceType
+from backend_core.contracts.datasource.source_types import DataSourceType
+from backend_core.data_plane_object_store import delete_object, delete_prefix, object_store_storage_options
 from backend_core.exceptions import FileError
 from backend_core.iceberg_catalog import load_runtime_catalog
-from backend_core.object_store import delete_object, delete_prefix, is_managed_object_store_url, object_store_storage_options
+from backend_core.object_store_paths import is_managed_object_store_url
 from backend_core.persistence.datasource.models import DataSource
 
 logger = logging.getLogger(__name__)

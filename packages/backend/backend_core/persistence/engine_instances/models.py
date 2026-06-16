@@ -3,7 +3,7 @@ import datetime as dt
 from sqlalchemy import BIGINT, JSON, Column, DateTime, Enum as SAEnum, String
 from sqlmodel import Field, SQLModel
 
-from backend_contracts.engine_instances.models import EngineInstanceStatus
+from backend_core.contracts.engine_instances.models import EngineInstanceStatus
 
 
 class EngineInstance(SQLModel, table=True):  # type: ignore[call-arg, assignment]
@@ -13,6 +13,10 @@ class EngineInstance(SQLModel, table=True):  # type: ignore[call-arg, assignment
     worker_id: str = Field(sa_column=Column(String, nullable=False, index=True))
     namespace: str = Field(sa_column=Column(String, nullable=False, index=True))
     analysis_id: str = Field(sa_column=Column(String, nullable=False, index=True))
+    engine_scope: str = Field(sa_column=Column(String, nullable=False, index=True))
+    engine_reuse_policy: str = Field(sa_column=Column(String, nullable=False))
+    datasource_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
+    build_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     process_id: int | None = Field(default=None, sa_column=Column(BIGINT, nullable=True))
     status: EngineInstanceStatus = Field(
         sa_column=Column(SAEnum(EngineInstanceStatus, native_enum=False, values_callable=lambda enum_cls: enum_cls.values()), nullable=False, index=True)

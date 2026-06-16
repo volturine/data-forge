@@ -31,6 +31,7 @@ from tests.harness.base_fixtures import (
     sample_parquet_object_url,
     temp_upload_dir,
     test_db_session,
+    use_test_worker_data_plane,
 )
 from tests.http_client import TestClient
 
@@ -64,6 +65,7 @@ __all__ = [
     'test_db_session',
     'test_engine',
     'test_user',
+    'use_test_worker_data_plane',
 ]
 
 if TYPE_CHECKING:
@@ -256,7 +258,7 @@ def clear_lock_watchers():
 
 @pytest.fixture(autouse=True, scope='function')
 def clear_build_notification_hub():
-    from backend_contracts.build_runs.live import hub
+    from backend_core.contracts.build_runs.live import hub
 
     asyncio.run(hub.clear())
     yield
@@ -265,7 +267,7 @@ def clear_build_notification_hub():
 
 @pytest.fixture(autouse=True, scope='function')
 def clear_build_job_hub():
-    from backend_contracts.build_jobs.live import hub
+    from backend_core.contracts.build_jobs.live import hub
 
     asyncio.run(hub.clear())
     yield
@@ -274,7 +276,7 @@ def clear_build_job_hub():
 
 @pytest.fixture(autouse=True, scope='function')
 def clear_compute_request_hubs():
-    from backend_contracts.compute_requests.live import request_hub, response_hub
+    from backend_core.contracts.compute_requests.live import request_hub, response_hub
 
     asyncio.run(request_hub.clear())
     asyncio.run(response_hub.clear())

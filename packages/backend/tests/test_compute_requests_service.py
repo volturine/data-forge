@@ -4,9 +4,9 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from backend_contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
-from backend_contracts.runtime.events import RuntimePayloadKind
 from backend_core import compute_requests_service
+from backend_core.contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
+from backend_core.contracts.runtime.events import RuntimePayloadKind
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
 

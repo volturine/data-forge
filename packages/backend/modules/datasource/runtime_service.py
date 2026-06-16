@@ -19,22 +19,19 @@ from pyiceberg.table import Table
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from backend_contracts.datasource.source_types import DataSourceFileType, DataSourceType
-from backend_contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core import engine_runs_service
 from backend_core.config import settings
-from backend_core.exceptions import DataSourceConnectionError, DataSourceNotFoundError, DataSourceValidationError
-from backend_core.iceberg_catalog import load_runtime_catalog
-from backend_core.iceberg_metadata import sync_iceberg_schema
-from backend_core.namespace import get_namespace, namespace_paths
-from backend_core.object_store import (
+from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
+from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.data_plane_object_store import (
     download_file,
-    ensure_bucket_exists,
-    is_object_store_url,
     object_exists,
     object_store_storage_options,
-    object_store_url,
 )
+from backend_core.exceptions import DataSourceConnectionError, DataSourceNotFoundError, DataSourceValidationError
+from backend_core.iceberg_catalog import load_runtime_catalog
+from backend_core.namespace import get_namespace, namespace_paths
+from backend_core.object_store_paths import is_object_store_url, object_store_url
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from modules.datasource.runtime_loading import load_datasource_frame as load_datasource
 from modules.datasource.schemas import (
@@ -154,7 +151,6 @@ def _validated_file_source_config(source: Mapping[str, object]) -> dict[str, obj
 
 
 def _write_iceberg_table(lazy: pl.LazyFrame, table_path: str, build_mode: str) -> Table:
-    ensure_bucket_exists()
     table_location = table_path.rstrip('/')
     location_parts = table_location.split('/')
     if len(location_parts) < 2:
@@ -213,7 +209,22 @@ def _build_iceberg_config(
 
 
 def _sync_iceberg_schema(table: Table, new_schema: Any) -> None:
-    sync_iceberg_schema(table, new_schema)
+    current = table.schema()
+    current_names = {field.name for field in current.fields}
+    new_names = set(new_schema.names)
+
+    to_delete = current_names - new_names
+    has_additions = bool(new_names - current_names)
+
+    if not to_delete and not has_additions:
+        return
+
+    update = table.update_schema()
+    for name in sorted(to_delete):
+        update.delete_column(name)
+    if has_additions:
+        update.union_by_name(new_schema)
+    update.commit()
 
 
 def _set_snapshot_metadata(config: dict[str, object], snapshot: Any | None) -> None:

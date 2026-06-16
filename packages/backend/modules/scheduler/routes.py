@@ -1,8 +1,8 @@
 from fastapi import Depends
 from sqlmodel import Session
 
-from backend_contracts.scheduler import schemas
 from backend_core import runtime_ipc
+from backend_core.contracts.scheduler import schemas
 from backend_core.database import get_db
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import (

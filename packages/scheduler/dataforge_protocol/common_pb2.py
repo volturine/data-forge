@@ -22,26 +22,37 @@ _runtime_version.ValidateProtobufRuntimeVersion(
 _sym_db = _symbol_database.Default()
 
 
+from buf.validate import validate_pb2 as buf_dot_validate_dot_validate__pb2
 from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1f\x64\x61taforge_protocol/common.proto\x12\x11\x64\x61taforge.runtime\x1a\x1cgoogle/protobuf/struct.proto\"\x0e\n\x0c\x45mptyRequest\"3\n\x14RuntimeWorkerRequest\x12\x1b\n\tworker_id\x18\x01 \x01(\tR\x08workerId\"4\n\x15RuntimeWorkerResponse\x12\x1b\n\tworker_id\x18\x01 \x01(\tR\x08workerId\"<\n\x0bJsonPayload\x12-\n\x05value\x18\x01 \x01(\x0b\x32\x17.google.protobuf.StructR\x05value\"I\n\x0fJsonPayloadList\x12\x36\n\x06values\x18\x01 \x03(\x0b\x32\x1e.dataforge.runtime.JsonPayloadR\x06values\"~\n\x16NotificationAttachment\x12\x1a\n\x08\x66ilename\x18\x01 \x01(\tR\x08\x66ilename\x12%\n\x0e\x63ontent_base64\x18\x02 \x01(\tR\rcontentBase64\x12!\n\x0c\x63ontent_type\x18\x03 \x01(\tR\x0b\x63ontentTypeb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1f\x64\x61taforge_protocol/common.proto\x12\x11\x64\x61taforge.runtime\x1a\x1b\x62uf/validate/validate.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x0e\n\x0c\x45mptyRequest\"<\n\x14RuntimeWorkerRequest\x12$\n\tworker_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x08workerId\"=\n\x15RuntimeWorkerResponse\x12$\n\tworker_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x08workerId\"<\n\x0bJsonPayload\x12-\n\x05value\x18\x01 \x01(\x0b\x32\x17.google.protobuf.StructR\x05value\"I\n\x0fJsonPayloadList\x12\x36\n\x06values\x18\x01 \x03(\x0b\x32\x1e.dataforge.runtime.JsonPayloadR\x06values\"\x99\x01\n\x16NotificationAttachment\x12#\n\x08\x66ilename\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x08\x66ilename\x12.\n\x0e\x63ontent_base64\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\rcontentBase64\x12*\n\x0c\x63ontent_type\x18\x03 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x0b\x63ontentTypeb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'dataforge_protocol.common_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_EMPTYREQUEST']._serialized_start=84
-  _globals['_EMPTYREQUEST']._serialized_end=98
-  _globals['_RUNTIMEWORKERREQUEST']._serialized_start=100
-  _globals['_RUNTIMEWORKERREQUEST']._serialized_end=151
-  _globals['_RUNTIMEWORKERRESPONSE']._serialized_start=153
-  _globals['_RUNTIMEWORKERRESPONSE']._serialized_end=205
-  _globals['_JSONPAYLOAD']._serialized_start=207
-  _globals['_JSONPAYLOAD']._serialized_end=267
-  _globals['_JSONPAYLOADLIST']._serialized_start=269
-  _globals['_JSONPAYLOADLIST']._serialized_end=342
-  _globals['_NOTIFICATIONATTACHMENT']._serialized_start=344
-  _globals['_NOTIFICATIONATTACHMENT']._serialized_end=470
+  _globals['_RUNTIMEWORKERREQUEST'].fields_by_name['worker_id']._loaded_options = None
+  _globals['_RUNTIMEWORKERREQUEST'].fields_by_name['worker_id']._serialized_options = b'\272H\004r\002\020\001'
+  _globals['_RUNTIMEWORKERRESPONSE'].fields_by_name['worker_id']._loaded_options = None
+  _globals['_RUNTIMEWORKERRESPONSE'].fields_by_name['worker_id']._serialized_options = b'\272H\004r\002\020\001'
+  _globals['_NOTIFICATIONATTACHMENT'].fields_by_name['filename']._loaded_options = None
+  _globals['_NOTIFICATIONATTACHMENT'].fields_by_name['filename']._serialized_options = b'\272H\004r\002\020\001'
+  _globals['_NOTIFICATIONATTACHMENT'].fields_by_name['content_base64']._loaded_options = None
+  _globals['_NOTIFICATIONATTACHMENT'].fields_by_name['content_base64']._serialized_options = b'\272H\004r\002\020\001'
+  _globals['_NOTIFICATIONATTACHMENT'].fields_by_name['content_type']._loaded_options = None
+  _globals['_NOTIFICATIONATTACHMENT'].fields_by_name['content_type']._serialized_options = b'\272H\004r\002\020\001'
+  _globals['_EMPTYREQUEST']._serialized_start=113
+  _globals['_EMPTYREQUEST']._serialized_end=127
+  _globals['_RUNTIMEWORKERREQUEST']._serialized_start=129
+  _globals['_RUNTIMEWORKERREQUEST']._serialized_end=189
+  _globals['_RUNTIMEWORKERRESPONSE']._serialized_start=191
+  _globals['_RUNTIMEWORKERRESPONSE']._serialized_end=252
+  _globals['_JSONPAYLOAD']._serialized_start=254
+  _globals['_JSONPAYLOAD']._serialized_end=314
+  _globals['_JSONPAYLOADLIST']._serialized_start=316
+  _globals['_JSONPAYLOADLIST']._serialized_end=389
+  _globals['_NOTIFICATIONATTACHMENT']._serialized_start=392
+  _globals['_NOTIFICATIONATTACHMENT']._serialized_end=545
 # @@protoc_insertion_point(module_scope)

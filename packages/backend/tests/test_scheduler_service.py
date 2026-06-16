@@ -7,14 +7,14 @@ from typing import Any
 import pytest
 from sqlmodel import Session
 
-from backend_contracts.analysis.models import AnalysisStatus
-from backend_contracts.build_runs.models import BuildRunStatus
-from backend_contracts.engine_runs.schemas import EngineRunKind
-from backend_contracts.scheduler.schemas import ScheduleCreate, ScheduleUpdate
 from backend_core import (
     build_jobs_service as build_job_service,
     build_runs_service as build_run_service,
 )
+from backend_core.contracts.analysis.models import AnalysisStatus
+from backend_core.contracts.build_runs.models import BuildRunStatus
+from backend_core.contracts.engine_runs.schemas import EngineRunKind
+from backend_core.contracts.scheduler.schemas import ScheduleCreate, ScheduleUpdate
 from backend_core.exceptions import DataSourceNotFoundError, ScheduleNotFoundError
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource

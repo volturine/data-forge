@@ -3,7 +3,7 @@ import datetime as dt
 from sqlalchemy import JSON, Column, DateTime, Enum as SAEnum, Integer, String
 from sqlmodel import Field, SQLModel
 
-from backend_contracts.enums import DataForgeStrEnum
+from backend_core.contracts.enums import DataForgeStrEnum
 
 
 class RuntimeOutboxStatus(DataForgeStrEnum):

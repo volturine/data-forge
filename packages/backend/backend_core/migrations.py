@@ -10,7 +10,8 @@ from sqlalchemy import create_engine, text
 from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
-_PUBLIC_REVISION = '0001_runtime_public'
+_PUBLIC_BASE_REVISION = '0001_runtime_public'
+_PUBLIC_REVISION = '0003_engine_identity_public'
 _TENANT_REVISION = '0002_runtime_tenant'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
@@ -110,9 +111,9 @@ def _upgrade_schema(*, scope: str, schema: str, revision: str) -> None:
 def migrate_runtime(namespaces: list[str]) -> None:
     ensure_database_exists()
     public_revision = _current_revision('public')
-    if public_revision is not None and public_revision != _PUBLIC_REVISION:
-        raise RuntimeError(f'Unsupported existing public schema revision: {public_revision}. Expected {_PUBLIC_REVISION}.')
-    if public_revision is None:
+    if public_revision is not None and public_revision not in {_PUBLIC_BASE_REVISION, _PUBLIC_REVISION}:
+        raise RuntimeError(f'Unsupported existing public schema revision: {public_revision}. Expected {_PUBLIC_BASE_REVISION} or {_PUBLIC_REVISION}.')
+    if public_revision != _PUBLIC_REVISION:
         _upgrade_schema(scope='public', schema='public', revision=_PUBLIC_REVISION)
     for namespace in namespaces:
         tenant_schema = namespace_database_schema(namespace)

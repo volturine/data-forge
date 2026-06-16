@@ -1,5 +1,7 @@
 """Tests for core exception handling."""
 
+import pytest
+
 from backend_core.exceptions import (
     AnalysisError,
     AnalysisNotFoundError,
@@ -22,19 +24,19 @@ class TestExceptions:
 
     def test_app_error_base(self):
         """Test base AppError."""
-        exc = AppError(message='Test error', error_code='TEST_ERROR', details={'field': 'value'})
+        exc = AppError(message='Test error', error_code='VALIDATION', details={'field': 'value'})
 
         assert str(exc) == 'Test error'
         assert exc.message == 'Test error'
-        assert exc.error_code == 'TEST_ERROR'
+        assert exc.error_code == 'VALIDATION'
         assert exc.details == {'field': 'value'}
 
     def test_datasource_error(self):
         """Test DataSourceError."""
-        exc = DataSourceError(message='DataSource error', error_code='DATASOURCE_ERROR')
+        exc = DataSourceError(message='DataSource error', error_code='DATASOURCE_VALIDATION_ERROR')
 
         assert str(exc) == 'DataSource error'
-        assert exc.error_code == 'DATASOURCE_ERROR'
+        assert exc.error_code == 'DATASOURCE_VALIDATION_ERROR'
 
     def test_datasource_not_found_error(self):
         """Test DataSourceNotFoundError."""
@@ -54,10 +56,10 @@ class TestExceptions:
 
     def test_analysis_error(self):
         """Test AnalysisError."""
-        exc = AnalysisError(message='Analysis failed', error_code='ANALYSIS_FAILED')
+        exc = AnalysisError(message='Analysis failed', error_code='ANALYSIS_VALIDATION_ERROR')
 
         assert str(exc) == 'Analysis failed'
-        assert exc.error_code == 'ANALYSIS_FAILED'
+        assert exc.error_code == 'ANALYSIS_VALIDATION_ERROR'
 
     def test_analysis_not_found_error(self):
         """Test AnalysisNotFoundError."""
@@ -68,18 +70,18 @@ class TestExceptions:
 
     def test_compute_error(self):
         """Test ComputeError."""
-        exc = ComputeError(message='Compute job failed', error_code='COMPUTE_FAILED', details={'job_id': '123'})
+        exc = ComputeError(message='Compute job failed', error_code='ENGINE_START_ERROR', details={'job_id': '123'})
 
         assert str(exc) == 'Compute job failed'
-        assert exc.error_code == 'COMPUTE_FAILED'
+        assert exc.error_code == 'ENGINE_START_ERROR'
         assert exc.details == {'job_id': '123'}
 
     def test_pipeline_error(self):
         """Test PipelineError."""
-        exc = PipelineError(message='Pipeline failed', error_code='PIPELINE_FAILED')
+        exc = PipelineError(message='Pipeline failed', error_code='PIPELINE_EXECUTION_ERROR')
 
         assert str(exc) == 'Pipeline failed'
-        assert exc.error_code == 'PIPELINE_FAILED'
+        assert exc.error_code == 'PIPELINE_EXECUTION_ERROR'
 
     def test_job_not_found_error(self):
         """Test JobNotFoundError."""
@@ -91,15 +93,20 @@ class TestExceptions:
 
     def test_exception_with_none_details(self):
         """Test exception with None details."""
-        exc = AppError(message='Test', error_code='TEST', details=None)
+        exc = AppError(message='Test', error_code='VALIDATION', details=None)
 
         assert exc.details == {}
 
     def test_exception_with_empty_details(self):
         """Test exception with empty details."""
-        exc = AppError(message='Test', error_code='TEST', details={})
+        exc = AppError(message='Test', error_code='VALIDATION', details={})
 
         assert exc.details == {}
+
+    def test_unknown_error_code_is_rejected(self):
+        """Test unknown error code rejection."""
+        with pytest.raises(ValueError, match='Enum ErrorCode has no value defined'):
+            AppError(message='Test', error_code='TEST')
 
     def test_exception_inheritance(self):
         """Test that all custom exceptions inherit from AppError."""
@@ -113,7 +120,7 @@ class TestExceptions:
     def test_exception_with_long_message(self):
         """Test exception with very long message."""
         long_message = 'A' * 1000
-        exc = AppError(message=long_message, error_code='LONG_ERROR')
+        exc = AppError(message=long_message, error_code='VALIDATION')
 
         assert len(str(exc)) == 1000
 

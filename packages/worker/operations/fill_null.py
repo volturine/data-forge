@@ -3,8 +3,8 @@ from collections.abc import Callable
 import polars as pl
 
 from operations.type_casting import cast_value, get_polars_type
-from worker_models.compute.base import OperationHandler, OperationParams
-from worker_models.step_config_enums import FillNullStrategy
+from runtime.models.compute.base import OperationHandler, OperationParams
+from runtime.models.step_config_enums import FillNullStrategy
 
 
 class FillNullParams(OperationParams):

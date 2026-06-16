@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+from dataforge_protocol import errors_pb2
+
+ErrorCodeInput = int | str | None
+
+
+def _coerce_error_code(error_code: ErrorCodeInput) -> int:
+    if error_code is None:
+        return errors_pb2.ERROR_CODE_UNSPECIFIED
+    if isinstance(error_code, int):
+        errors_pb2.ErrorCode.Name(error_code)
+        return error_code
+    return errors_pb2.ErrorCode.Value(f"ERROR_CODE_{error_code}")
+
+
+def _error_code_label(error_code: int) -> str:
+    return errors_pb2.ErrorCode.Name(error_code).removeprefix("ERROR_CODE_")
+
 
 class AppError(Exception):
-    def __init__(self, message: str, error_code: str | None = None, details: dict | None = None):
+    def __init__(self, message: str, error_code: ErrorCodeInput = None, details: dict | None = None):
         self.message = message
-        self.error_code = error_code
+        self.error_code_value = _coerce_error_code(error_code)
+        self.error_code = _error_code_label(self.error_code_value)
         self.details = details or {}
         super().__init__(message)
 

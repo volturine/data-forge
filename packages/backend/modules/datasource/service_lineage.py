@@ -4,7 +4,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlmodel import Session
 
-from backend_contracts.enums import DataForgeStrEnum
+from backend_core.contracts.enums import DataForgeStrEnum
 from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource

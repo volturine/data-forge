@@ -1,7 +1,7 @@
 import pytest
 
-from backend_contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core import runtime_workers_service as runtime_worker_service
+from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.database import run_settings_db
 from main import (
     _guard_runtime_workers,

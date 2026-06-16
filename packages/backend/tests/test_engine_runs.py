@@ -1,8 +1,8 @@
 import uuid
 from datetime import UTC, datetime
 
-from backend_contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core import engine_runs_service as engine_run_service
+from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.engine_runs.models import EngineRun
 

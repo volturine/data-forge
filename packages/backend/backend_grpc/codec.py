@@ -1,32 +1,53 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
+from datetime import date, datetime, time
+from decimal import Decimal
 from typing import Any, cast
+from uuid import UUID
 
 from google.protobuf import json_format, struct_pb2
 
 from dataforge_protocol import common_pb2
 
 
-def _normalize_struct_value(value: object) -> object:
+def _normalize_struct_decode_value(value: object) -> object:
     if isinstance(value, dict):
-        return {key: _normalize_struct_value(item) for key, item in value.items()}
+        return {key: _normalize_struct_decode_value(item) for key, item in value.items()}
     if isinstance(value, list):
-        return [_normalize_struct_value(item) for item in value]
+        return [_normalize_struct_decode_value(item) for item in value]
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def _normalize_struct_encode_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _normalize_struct_encode_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return [_normalize_struct_encode_value(item) for item in value]
+    if isinstance(value, datetime | date | time):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, float) and value.is_integer():
         return int(value)
     return value
 
 
 def dict_to_struct(payload: dict[str, object] | None) -> common_pb2.JsonPayload:
-    encoded = json.loads(json.dumps(payload or {}, allow_nan=False, separators=(',', ':'), sort_keys=True))
+    normalized = _normalize_struct_encode_value(payload or {})
+    encoded = json.loads(json.dumps(normalized, allow_nan=False, separators=(',', ':'), sort_keys=True))
     value = struct_pb2.Struct()
     value.update(encoded)
     return common_pb2.JsonPayload(value=value)
 
 
 def struct_to_dict(payload: common_pb2.JsonPayload) -> dict[str, object]:
-    decoded = _normalize_struct_value(json_format.MessageToDict(payload.value, preserving_proto_field_name=True))
+    decoded = _normalize_struct_decode_value(json_format.MessageToDict(payload.value, preserving_proto_field_name=True))
     if not isinstance(decoded, dict):
         raise ValueError('gRPC JSON payload must decode to an object')
     return cast(dict[str, object], decoded)

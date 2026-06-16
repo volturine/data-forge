@@ -16,6 +16,7 @@ EXCLUDED_DIRS = {
     '.venv',
     'node_modules',
     '__pycache__',
+    'buf',
     'tests-e2e',
     'test-results',
     'playwright-report',
@@ -44,10 +45,12 @@ FORBIDDEN_OWNER_DUPLICATES = [
 ]
 
 PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
-    'backend': {'builds', 'datasources', 'operations', 'runtime', 'scheduler_service', 'worker_models'},
+    'backend': {'backend_contracts', 'builds', 'datasources', 'operations', 'runtime', 'scheduler_service', 'worker_models'},
     'scheduler': {'api', 'backend_contracts', 'backend_core', 'builds', 'datasources', 'modules', 'operations', 'runtime', 'shared', 'worker_models'},
-    'worker': {'api', 'backend_contracts', 'backend_core', 'modules', 'scheduler_service', 'shared', 'sqlmodel'},
+    'worker': {'api', 'backend_contracts', 'backend_core', 'modules', 'scheduler_service', 'shared', 'sqlmodel', 'worker_models'},
 }
+
+LEGACY_IMPORT_ROOTS = {'backend_contracts', 'worker_models'}
 
 
 def is_excluded(path: Path) -> bool:
@@ -103,6 +106,10 @@ def main() -> int:
             if violations:
                 rel = path.relative_to(ROOT)
                 errors.append(f'{rel} imports cross-owner private modules: {", ".join(violations)}')
+            legacy = sorted(roots & LEGACY_IMPORT_ROOTS)
+            if legacy:
+                rel = path.relative_to(ROOT)
+                errors.append(f'{rel} imports deleted legacy contract roots: {", ".join(legacy)}')
 
     if errors:
         print('Package boundary violations:')

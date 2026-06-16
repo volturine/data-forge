@@ -5,9 +5,9 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from backend_contracts.compute.schemas import EngineReusePolicy, EngineScope
-from backend_contracts.engine_instances.models import EngineInstanceStatus
-from backend_contracts.runtime_workers.models import RuntimeWorkerKind
+from backend_core.contracts.compute.schemas import EngineReusePolicy, EngineScope
+from backend_core.contracts.engine_instances.models import EngineInstanceStatus
+from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 
 RuntimeMode = Literal['single_process', 'durable_single_node', 'distributed']
 

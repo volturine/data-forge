@@ -224,7 +224,8 @@ class TestDataSourceValidation:
         assert response.status_code == 400
 
     def test_preflight_excel_path_rejects_non_xlsx(self, client, temp_upload_dir: Path):
-        from backend_core.object_store import object_store_url, upload_file
+        from backend_core.data_plane_object_store import upload_file
+        from backend_core.object_store_paths import object_store_url
 
         csv_path = temp_upload_dir / 'invalid.csv'
         csv_path.write_text('a,b\n1,2')
@@ -237,7 +238,8 @@ class TestDataSourceValidation:
         assert response.status_code == 400
 
     def test_preflight_excel_path_returns_preview(self, client, temp_upload_dir: Path):
-        from backend_core.object_store import object_store_url, upload_file
+        from backend_core.data_plane_object_store import upload_file
+        from backend_core.object_store_paths import object_store_url
 
         excel_path = temp_upload_dir / 'path.xlsx'
         workbook = Workbook()
@@ -607,7 +609,8 @@ class TestDataSourceDeletion:
         create = client.post('/api/v1/datasource/upload', files=files, data=data)
 
         assert create.status_code == 200
-        from backend_core.object_store import is_object_store_url, list_metadata_files, object_exists
+        from backend_core.data_plane_object_store import list_metadata_files, object_exists
+        from backend_core.object_store_paths import is_object_store_url
 
         body = create.json()
         datasource_id = body['id']

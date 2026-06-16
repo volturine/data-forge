@@ -3,7 +3,7 @@ import datetime as dt
 from sqlalchemy import JSON, Column, DateTime, Enum as SAEnum, String
 from sqlmodel import Field, SQLModel
 
-from backend_contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
+from backend_core.contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
 
 
 class ComputeRequest(SQLModel, table=True):  # type: ignore[call-arg, assignment]

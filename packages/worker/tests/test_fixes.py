@@ -17,10 +17,10 @@ from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_service import ExportDatasourceResult
-from runtime.engine_identity import datasource_preview_engine_key
+from runtime.engine_identity import datasource_preview_engine_identity
 from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
-from worker_models.compute import schemas as compute_schemas
-from worker_models.engine_runs.schemas import EngineRunResponseSchema
+from runtime.models.compute import schemas as compute_schemas
+from runtime.models.engine_runs.schemas import EngineRunResponseSchema
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -134,9 +134,10 @@ async def test_pending_datasource_delete_waits_for_busy_preview_engine(monkeypat
     finalized: list[tuple[str, str]] = []
     shutdown_calls: list[str] = []
     busy_engine = SimpleNamespace(current_job_id="job-1", is_process_alive=lambda: True)
+    expected_identity = datasource_preview_engine_identity(datasource_id)
     manager = SimpleNamespace(
-        get_engine=lambda engine_key, *, namespace=None: busy_engine if engine_key == datasource_preview_engine_key(datasource_id) else None,
-        shutdown_engine=lambda engine_key, *, namespace=None: shutdown_calls.append(engine_key),
+        get_engine=lambda identity, *, namespace=None: busy_engine if identity.storage_key == expected_identity.storage_key else None,
+        shutdown_engine=lambda identity, *, namespace=None: shutdown_calls.append(identity.storage_key),
     )
     client = SimpleNamespace(
         pending_datasource_deletes=lambda: [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)],
@@ -161,9 +162,10 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(m
     finalized: list[tuple[str, str]] = []
     shutdown_calls: list[str] = []
     idle_engine = SimpleNamespace(current_job_id=None, is_process_alive=lambda: True)
+    expected_identity = datasource_preview_engine_identity(datasource_id)
     manager = SimpleNamespace(
-        get_engine=lambda engine_key, *, namespace=None: idle_engine if engine_key == datasource_preview_engine_key(datasource_id) else None,
-        shutdown_engine=lambda engine_key, *, namespace=None: shutdown_calls.append(engine_key),
+        get_engine=lambda identity, *, namespace=None: idle_engine if identity.storage_key == expected_identity.storage_key else None,
+        shutdown_engine=lambda identity, *, namespace=None: shutdown_calls.append(identity.storage_key),
     )
     client = SimpleNamespace(
         pending_datasource_deletes=lambda: [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)],
@@ -177,7 +179,7 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(m
     assert handled is True
     assert cleanup_calls == []
     assert finalized == [("default", datasource_id)]
-    assert shutdown_calls == [datasource_preview_engine_key(datasource_id)]
+    assert shutdown_calls == [expected_identity.storage_key]
 
 
 @pytest.mark.asyncio
@@ -239,8 +241,8 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     manager = cast(
         Any,
         SimpleNamespace(
-            spawn_engine=lambda engine_id: spawn_calls.append(engine_id),
-            shutdown_engine=lambda engine_id: shutdown_calls.append(engine_id),
+            spawn_engine=lambda identity: spawn_calls.append(identity.storage_key),
+            shutdown_engine=lambda identity: shutdown_calls.append(identity.storage_key),
             set_engine_runtime_context=lambda engine_id, current_build_id, current_engine_run_id: None,
         ),
     )

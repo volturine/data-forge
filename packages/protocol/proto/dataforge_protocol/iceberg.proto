@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/common.proto";
+import "dataforge_protocol/object_store.proto";
+import "google/protobuf/timestamp.proto";
+
+message IcebergTableRef {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  optional string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+  optional string metadata_path = 3 [(buf.validate.field).string.min_len = 1];
+  optional string branch = 4 [(buf.validate.field).string.min_len = 1];
+}
+
+message IcebergSchemaSyncRequest {
+  string metadata_path = 1 [(buf.validate.field).string.min_len = 1];
+  JsonPayload schema = 2;
+}
+
+message IcebergMetadataPathResponse {
+  string metadata_path = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message IcebergSnapshotInfo {
+  string snapshot_id = 1 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Timestamp timestamp = 2;
+  optional string parent_snapshot_id = 3;
+  optional string operation = 4;
+  optional bool is_current = 5;
+}
+
+message IcebergSnapshotsResponse {
+  string datasource_id = 1 [(buf.validate.field).string.min_len = 1];
+  string table_path = 2 [(buf.validate.field).string.min_len = 1];
+  repeated IcebergSnapshotInfo snapshots = 3;
+}
+
+message IcebergSnapshotDeleteRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+  string snapshot_id = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+message IcebergSnapshotDeleteResponse {
+  string datasource_id = 1 [(buf.validate.field).string.min_len = 1];
+  string snapshot_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message IcebergSnapshotScanRequest {
+  string metadata_path = 1 [(buf.validate.field).string.min_len = 1];
+  string snapshot_id = 2 [(buf.validate.field).string.min_len = 1];
+  optional int32 limit = 3 [(buf.validate.field).int32.gt = 0];
+}
+
+message IcebergSnapshotScanResponse {
+  JsonPayload rows = 1;
+}
+
+service IcebergService {
+  rpc ResolveMetadataPath(IcebergTableRef) returns (IcebergMetadataPathResponse);
+  rpc ResolveBranchMetadataPath(IcebergTableRef) returns (IcebergMetadataPathResponse);
+  rpc SyncSchema(IcebergSchemaSyncRequest) returns (EmptyRequest);
+  rpc ListSnapshots(IcebergTableRef) returns (IcebergSnapshotsResponse);
+  rpc ScanSnapshot(IcebergSnapshotScanRequest) returns (IcebergSnapshotScanResponse);
+  rpc DeleteSnapshot(IcebergSnapshotDeleteRequest) returns (IcebergSnapshotDeleteResponse);
+}

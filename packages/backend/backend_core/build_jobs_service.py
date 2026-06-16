@@ -6,8 +6,8 @@ from sqlalchemy import and_, desc, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
 
-from backend_contracts.build_jobs.models import BuildJobStatus
 from backend_core.config import settings
+from backend_core.contracts.build_jobs.models import BuildJobStatus
 from backend_core.persistence.build_jobs.models import BuildJob
 
 

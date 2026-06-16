@@ -100,7 +100,7 @@ class BackendWorkerRpcError(RuntimeError):
 
 
 class WorkerInternalApiClient:
-    def __init__(self, *, target: str, token: str, timeout_seconds: float = 30.0, registration_retry_seconds: float = 90.0) -> None:
+    def __init__(self, *, target: str, token: str, timeout_seconds: float = 120.0, registration_retry_seconds: float = 90.0) -> None:
         self._target = target
         self._token = token
         self._timeout_seconds = timeout_seconds

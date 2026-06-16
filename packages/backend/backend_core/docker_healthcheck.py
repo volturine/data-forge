@@ -3,8 +3,8 @@ from __future__ import annotations
 import socket
 from datetime import UTC, datetime, timedelta
 
-from backend_contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core import runtime_workers_service as runtime_worker_service
+from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.database import run_settings_db
 
 

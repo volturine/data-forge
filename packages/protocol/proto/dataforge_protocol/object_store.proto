@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/common.proto";
+
+message ObjectStoreUrl {
+  string url = 1 [(buf.validate.field).string.pattern = "^s3://[^/]+/.+$"];
+}
+
+message ObjectStorePathParts {
+  repeated string parts = 1 [(buf.validate.field).repeated.min_items = 1];
+  optional string bucket = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message ObjectStoreJoinRequest {
+  ObjectStoreUrl base = 1 [(buf.validate.field).required = true];
+  repeated string parts = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message ObjectStoreStorageOptionsResponse {
+  JsonPayload options = 1;
+}
+
+message ObjectStoreBytes {
+  ObjectStoreUrl target = 1 [(buf.validate.field).required = true];
+  bytes data = 2;
+  optional string content_type = 3;
+}
+
+message ObjectStoreExistsResponse {
+  bool exists = 1;
+}
+
+message ObjectStorePrefixesResponse {
+  repeated string prefixes = 1;
+}
+
+message ObjectStoreMetadataFilesResponse {
+  repeated ObjectStoreUrl files = 1;
+}
+
+service ObjectStoreService {
+  rpc BuildUrl(ObjectStorePathParts) returns (ObjectStoreUrl);
+  rpc JoinUrl(ObjectStoreJoinRequest) returns (ObjectStoreUrl);
+  rpc StorageOptions(EmptyRequest) returns (ObjectStoreStorageOptionsResponse);
+  rpc UploadBytes(ObjectStoreBytes) returns (ObjectStoreUrl);
+  rpc DownloadBytes(ObjectStoreUrl) returns (ObjectStoreBytes);
+  rpc DeleteObject(ObjectStoreUrl) returns (EmptyRequest);
+  rpc Exists(ObjectStoreUrl) returns (ObjectStoreExistsResponse);
+  rpc ListPrefixes(ObjectStoreUrl) returns (ObjectStorePrefixesResponse);
+  rpc ListMetadataFiles(ObjectStoreUrl) returns (ObjectStoreMetadataFilesResponse);
+  rpc DeletePrefix(ObjectStoreUrl) returns (EmptyRequest);
+}

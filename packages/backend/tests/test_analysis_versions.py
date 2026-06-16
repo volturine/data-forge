@@ -2,8 +2,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from backend_contracts.analysis.models import AnalysisStatus
-from backend_contracts.datasource.source_types import DataSourceType
+from backend_core.contracts.analysis.models import AnalysisStatus
+from backend_core.contracts.datasource.source_types import DataSourceType
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.analysis_versions.models import AnalysisVersion
 from backend_core.persistence.datasource.models import DataSource

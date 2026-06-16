@@ -4,9 +4,8 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from backend_contracts.compute.base import EngineStatusInfo
-from backend_contracts.engine_instances.models import EngineInstanceStatus
-from backend_core.engine_identity import parse_engine_identity
+from backend_core.contracts.compute.base import EngineStatusInfo
+from backend_core.contracts.engine_instances.models import EngineInstanceStatus
 from backend_core.persistence.engine_instances.models import EngineInstance
 
 
@@ -18,9 +17,19 @@ def _copy_json(value: dict[str, object] | None) -> dict[str, object] | None:
     return dict(value) if isinstance(value, dict) else None
 
 
+def _required_identity_value(value: str | None, field_name: str) -> str:
+    if value is None or not value.strip():
+        raise ValueError(f'engine status is missing {field_name}')
+    return value
+
+
 def _apply_engine_status(row: EngineInstance, *, status: EngineStatusInfo, stamp: datetime) -> None:
     row.process_id = status.process_id
     row.status = EngineInstanceStatus.from_engine_status(status.status, status.current_job_id)
+    row.engine_scope = _required_identity_value(status.scope, 'scope')
+    row.engine_reuse_policy = _required_identity_value(status.reuse_policy, 'reuse_policy')
+    row.datasource_id = status.datasource_id
+    row.build_id = status.build_id
     row.current_job_id = status.current_job_id
     row.current_build_id = status.current_build_id
     row.current_engine_run_id = status.current_engine_run_id
@@ -41,6 +50,10 @@ def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, st
             worker_id=worker_id,
             namespace=namespace,
             analysis_id=status.analysis_id,
+            engine_scope=_required_identity_value(status.scope, 'scope'),
+            engine_reuse_policy=_required_identity_value(status.reuse_policy, 'reuse_policy'),
+            datasource_id=status.datasource_id,
+            build_id=status.build_id,
             process_id=status.process_id,
             status=EngineInstanceStatus.from_engine_status(status.status, status.current_job_id),
             current_job_id=status.current_job_id,
@@ -144,7 +157,6 @@ def latest_namespace_update(session: Session, *, namespace: str) -> datetime | N
 
 
 def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object]) -> dict[str, object]:
-    identity = parse_engine_identity(row.analysis_id)
     return {
         'analysis_id': row.analysis_id,
         'status': row.status.overview_status,
@@ -154,11 +166,11 @@ def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object
         'resource_config': _copy_json(row.resource_config_json),
         'effective_resources': _copy_json(row.effective_resources_json),
         'defaults': defaults,
-        'scope': identity.scope.value,
-        'reuse_policy': identity.reuse_policy.value,
-        'datasource_id': identity.datasource_id,
-        'build_id': identity.build_id,
-        'current_build_id': row.current_build_id or identity.build_id,
+        'scope': row.engine_scope,
+        'reuse_policy': row.engine_reuse_policy,
+        'datasource_id': row.datasource_id,
+        'build_id': row.build_id,
+        'current_build_id': row.current_build_id or row.build_id,
         'current_engine_run_id': row.current_engine_run_id,
     }
 

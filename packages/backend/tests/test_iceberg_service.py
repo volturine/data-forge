@@ -1,53 +1,22 @@
 from datetime import UTC, datetime
-from types import SimpleNamespace
 
-from backend_contracts.build_runs.models import BuildRunStatus
-from backend_contracts.datasource.models import DataSourceCreatedBy
-from backend_contracts.datasource.source_types import DataSourceType
-from backend_contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core import build_runs_service, engine_runs_service
+from backend_core.contracts.build_runs.models import BuildRunStatus
+from backend_core.contracts.datasource.models import DataSourceCreatedBy
+from backend_core.contracts.datasource.source_types import DataSourceType
+from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.data_plane_client import IcebergSnapshotInfo, IcebergSnapshots
 from backend_core.persistence.datasource.models import DataSource
 from modules.compute import iceberg_service
 
 
-class _FakeSnapshot:
-    def __init__(
-        self,
-        snapshot_id: str,
-        timestamp_ms: int,
-        *,
-        operation: str | None = None,
-        parent_snapshot_id: str | None = None,
-    ) -> None:
-        self.snapshot_id = snapshot_id
-        self.timestamp_ms = timestamp_ms
-        self.parent_snapshot_id = parent_snapshot_id
-        self.summary = SimpleNamespace(operation=operation) if operation is not None else None
-
-
-class _FakeTable:
-    def __init__(self, snapshots: list[_FakeSnapshot], current_snapshot_id: str | None) -> None:
+class _FakeWorkerDataPlaneClient:
+    def __init__(self, snapshots: list[IcebergSnapshotInfo]) -> None:
         self._snapshots = snapshots
-        self._current_snapshot_id = current_snapshot_id
-        self.metadata_location = '/tmp/warehouse/outputs/table1/metadata/v1.metadata.json'
 
-    def snapshots(self) -> list[_FakeSnapshot]:
-        return self._snapshots
-
-    def current_snapshot(self):
-        if self._current_snapshot_id is None:
-            return None
-        return SimpleNamespace(snapshot_id=self._current_snapshot_id)
-
-
-class _FakeCatalog:
-    def __init__(self, table: _FakeTable, *, expected_identifier: str) -> None:
-        self._table = table
-        self._expected_identifier = expected_identifier
-
-    def load_table(self, identifier: str) -> _FakeTable:
-        assert identifier == self._expected_identifier
-        return self._table
+    def list_iceberg_snapshots(self, *, namespace: str, datasource_id: str, branch: str | None = None) -> IcebergSnapshots:
+        del namespace, branch
+        return IcebergSnapshots(datasource_id=datasource_id, table_path='/tmp/warehouse/outputs/table1', snapshots=self._snapshots)
 
 
 def test_list_iceberg_snapshots_can_filter_to_completed_build_results(test_db_session, monkeypatch) -> None:
@@ -100,24 +69,12 @@ def test_list_iceberg_snapshots_can_filter_to_completed_build_results(test_db_se
         current_output_id='ds-1',
     )
 
-    fake_table = _FakeTable(
-        [
-            _FakeSnapshot('snap-delete', 3000, operation='delete'),
-            _FakeSnapshot('snap-build-2', 2000, operation='append'),
-            _FakeSnapshot('snap-build-1', 1000, operation='append'),
-        ],
-        current_snapshot_id='snap-delete',
-    )
-    monkeypatch.setattr(
-        iceberg_service,
-        'load_runtime_catalog',
-        lambda *_args, **_kwargs: _FakeCatalog(fake_table, expected_identifier='outputs.table1'),
-    )
-    monkeypatch.setattr(
-        iceberg_service,
-        'resolve_iceberg_metadata_path',
-        lambda path: path,
-    )
+    snapshots = [
+        IcebergSnapshotInfo('snap-delete', 3000, None, 'delete', True),
+        IcebergSnapshotInfo('snap-build-2', 2000, None, 'append', False),
+        IcebergSnapshotInfo('snap-build-1', 1000, None, 'append', False),
+    ]
+    monkeypatch.setattr(iceberg_service, 'client_from_settings', lambda: _FakeWorkerDataPlaneClient(snapshots))
 
     response = iceberg_service.list_iceberg_snapshots(
         test_db_session,
@@ -172,26 +129,14 @@ def test_list_iceberg_snapshots_can_collapse_ingest_churn_to_logical_results(tes
             ),
         )
 
-    fake_table = _FakeTable(
-        [
-            _FakeSnapshot('snap-initial', 1779491921000, operation='append'),
-            _FakeSnapshot('snap-delete-1', 1779491930000, operation='delete'),
-            _FakeSnapshot('snap-refresh-1', 1779491930000, operation='append'),
-            _FakeSnapshot('snap-delete-2', 1779491936000, operation='delete'),
-            _FakeSnapshot('snap-refresh-2', 1779491936000, operation='append'),
-        ],
-        current_snapshot_id='snap-refresh-2',
-    )
-    monkeypatch.setattr(
-        iceberg_service,
-        'load_runtime_catalog',
-        lambda *_args, **_kwargs: _FakeCatalog(fake_table, expected_identifier='clean.table1'),
-    )
-    monkeypatch.setattr(
-        iceberg_service,
-        'resolve_iceberg_metadata_path',
-        lambda path: path,
-    )
+    snapshots = [
+        IcebergSnapshotInfo('snap-initial', 1779491921000, None, 'append', False),
+        IcebergSnapshotInfo('snap-delete-1', 1779491930000, None, 'delete', False),
+        IcebergSnapshotInfo('snap-refresh-1', 1779491930000, None, 'append', False),
+        IcebergSnapshotInfo('snap-delete-2', 1779491936000, None, 'delete', False),
+        IcebergSnapshotInfo('snap-refresh-2', 1779491936000, None, 'append', True),
+    ]
+    monkeypatch.setattr(iceberg_service, 'client_from_settings', lambda: _FakeWorkerDataPlaneClient(snapshots))
 
     response = iceberg_service.list_iceberg_snapshots(
         test_db_session,

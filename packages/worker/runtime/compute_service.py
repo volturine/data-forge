@@ -21,7 +21,7 @@ from pyiceberg.table import Table as IcebergTable
 from sqlalchemy.exc import IntegrityError
 
 from builds.build_live import ActiveBuild
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import EngineIdentityInput, ProcessManager
 from runtime.compute_monitor import monitor_engine_resources
 from runtime.compute_utils import (
     apply_steps,
@@ -30,7 +30,7 @@ from runtime.compute_utils import (
     resolve_applied_target,
 )
 from runtime.config import settings
-from runtime.engine_identity import build_engine_key
+from runtime.engine_identity import build_engine_identity, build_engine_key
 from runtime.exceptions import (
     DataSourceNotFoundError,
     DataSourceSnapshotError,
@@ -40,15 +40,15 @@ from runtime.exceptions import (
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
 from runtime.internal_api import HealthCheckSpec, client_from_env
+from runtime.models.analysis.step_types import get_step_timing_key
+from runtime.models.compute import schemas as compute_schemas
+from runtime.models.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
+from runtime.models.datasource.source_types import DataSourceType
+from runtime.models.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
+from runtime.models.healthcheck_models import HealthCheckType
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import notification_service, render_template
 from runtime.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
-from worker_models.analysis.step_types import get_step_timing_key
-from worker_models.compute import schemas as compute_schemas
-from worker_models.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
-from worker_models.datasource.source_types import DataSourceType
-from worker_models.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
-from worker_models.healthcheck_models import HealthCheckType
 
 logger = logging.getLogger(__name__)
 
@@ -1698,8 +1698,8 @@ def _resolve_pipeline_request(
     }
 
 
-def _acquire_engine(manager: ProcessManager, engine_key: str, resource_config: dict | None = None):
-    return manager.get_or_create_engine(engine_key, resource_config=resource_config)
+def _acquire_engine(manager: ProcessManager, identity: EngineIdentityInput, resource_config: dict | None = None):
+    return manager.get_or_create_engine(identity, resource_config=resource_config)
 
 
 def _resolve_export_engine_key(*, engine_key: str | None, analysis_id: str | None) -> str:
@@ -1708,6 +1708,12 @@ def _resolve_export_engine_key(*, engine_key: str | None, analysis_id: str | Non
     if analysis_id:
         return analysis_id
     raise ValueError("Export requires analysis_id or engine_key")
+
+
+def _resolve_export_engine_identity(*, engine_key: str | None, analysis_id: str | None, build_id: str | None) -> EngineIdentityInput:
+    if build_id is not None:
+        return build_engine_identity(build_id)
+    return _resolve_export_engine_key(engine_key=engine_key, analysis_id=analysis_id)
 
 
 def preview_step(
@@ -1724,7 +1730,7 @@ def preview_step(
     triggered_by: str | None = None,
 ):
     """Preview the result of executing pipeline up to a specific step with pagination."""
-    from worker_models.compute.schemas import StepPreviewResponse
+    from runtime.models.compute.schemas import StepPreviewResponse
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
@@ -1915,7 +1921,7 @@ def get_step_schema(
     tab_id: str | None = None,
 ):
     """Get the output schema of a pipeline step without returning data."""
-    from worker_models.compute.schemas import StepSchemaResponse
+    from runtime.models.compute.schemas import StepSchemaResponse
 
     resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
@@ -1984,7 +1990,7 @@ def get_step_row_count(
     triggered_by: str | None = None,
 ):
     """Get the row count of a pipeline step without collecting full data."""
-    from worker_models.compute.schemas import StepRowCountResponse
+    from runtime.models.compute.schemas import StepRowCountResponse
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
@@ -2200,8 +2206,8 @@ def export_data(
         export_steps = steps[: step_index + 1]
     export_steps = _hydrate_udfs(session, export_steps)
 
-    resolved_engine_key = _resolve_export_engine_key(engine_key=engine_key, analysis_id=analysis_id_value)
-    engine = _acquire_engine(manager, resolved_engine_key)
+    resolved_engine_identity = _resolve_export_engine_identity(engine_key=engine_key, analysis_id=analysis_id_value, build_id=build_id)
+    engine = _acquire_engine(manager, resolved_engine_identity)
 
     additional_datasources = _get_additional_datasources(session, export_steps, analysis_pipeline)
     source_datasource_name = _datasource_name(session, datasource_id)
@@ -3133,9 +3139,10 @@ def _build_engine_id(build_id: str) -> str:
 
 
 async def _prewarm_build_engine(manager: ProcessManager, engine_id: str, *, build_id: str) -> None:
+    identity = build_engine_identity(build_id)
     try:
-        await asyncio.to_thread(manager.spawn_engine, engine_id)
-        await asyncio.to_thread(manager.set_engine_runtime_context, engine_id, current_build_id=build_id, current_engine_run_id=None)
+        await asyncio.to_thread(manager.spawn_engine, identity)
+        await asyncio.to_thread(manager.set_engine_runtime_context, identity, current_build_id=build_id, current_engine_run_id=None)
     except Exception:
         logger.debug("Build engine prewarm failed for %s", engine_id, exc_info=True)
 
@@ -3369,7 +3376,7 @@ async def run_analysis_build_stream(
                 if isinstance(run_id, str):
                     build.current_engine_run_id = run_id
                     manager.set_engine_runtime_context(
-                        build_engine_id,
+                        build_engine_identity(build.build_id),
                         current_build_id=build.build_id,
                         current_engine_run_id=run_id,
                     )
@@ -3815,7 +3822,7 @@ async def run_analysis_build_stream(
     if isinstance(prewarm_result, BaseException) and not isinstance(prewarm_result, asyncio.CancelledError):
         raise prewarm_result
     with contextlib.suppress(Exception):
-        await asyncio.to_thread(manager.shutdown_engine, build_engine_id)
+        await asyncio.to_thread(manager.shutdown_engine, build_engine_identity(build.build_id))
     return {
         "analysis_id": analysis_id_value,
         "tabs_built": tabs_built,
@@ -3824,7 +3831,7 @@ async def run_analysis_build_stream(
 
 
 def list_iceberg_snapshots(session: object, datasource_id: str, branch: str | None = None):
-    from worker_models.compute.schemas import IcebergSnapshotInfo, IcebergSnapshotsResponse
+    from runtime.models.compute.schemas import IcebergSnapshotInfo, IcebergSnapshotsResponse
 
     del session
     datasource = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
@@ -3890,7 +3897,7 @@ def list_iceberg_snapshots(session: object, datasource_id: str, branch: str | No
 
 
 def delete_iceberg_snapshot(session: object, datasource_id: str, snapshot_id: str):
-    from worker_models.compute.schemas import IcebergSnapshotDeleteResponse
+    from runtime.models.compute.schemas import IcebergSnapshotDeleteResponse
 
     del session
     datasource = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)

@@ -6,6 +6,7 @@
     dependencies    = [
     "grpcio>=1.81.0",
     "protobuf>=7.35.0",
+    "protovalidate>=1.2.0",
 ]
 
 [build-system]
@@ -16,14 +17,14 @@
     target-version = "py314"
     line-length    = 160
     indent-width   = 4
-    extend-exclude = ["dataforge_protocol"]
+    extend-exclude = ["buf", "dataforge_protocol"]
 
 [tool.mypy]
     mypy_path = [
         ".",
         "../..",
     ]
-    exclude = ["(^|/)conftest\\.py$", "dataforge_protocol"]
+    exclude = ["(^|/)conftest\\.py$", "buf", "dataforge_protocol"]
 
 [tool.pytest.ini_options]
     cache_dir = "tests/.artifacts/pytest-cache"
@@ -41,4 +42,4 @@
 ]
 
 [tool.hatch.build.targets.wheel]
-    only-include = ["main.py", "dataforge_protocol", "scheduler_grpc"]
+    only-include = ["main.py", "buf", "dataforge_protocol", "scheduler_grpc"]

@@ -7,7 +7,7 @@ from typing import Any, cast
 from sqlalchemy import JSON, Column, DateTime, String
 from sqlmodel import Field, SQLModel
 
-from backend_contracts.healthcheck_models import HealthCheckType
+from backend_core.contracts.healthcheck_models import HealthCheckType
 
 
 class HealthCheck(SQLModel, table=True):  # type: ignore[call-arg]
