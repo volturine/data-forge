@@ -29,6 +29,7 @@ export async function switchNamespace(page: Page, name: string): Promise<void> {
 
 	await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 	await expect(page.locator(SIDEBAR).getByText(name)).toBeVisible({ timeout: 5_000 });
+	await waitForAppShell(page);
 }
 
 /**

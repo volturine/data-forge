@@ -324,7 +324,7 @@
 			>
 				<Sidebar
 					collapsed={sidebarCollapsed}
-					interactive={shellInteractive}
+					interactive={shellInteractive && !namespaceState.switching}
 					onToggle={toggleSidebar}
 					{theme}
 					onToggleTheme={toggleTheme}
