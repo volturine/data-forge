@@ -11,6 +11,9 @@ RUN bun run panda:codegen && bun run build
 
 FROM oven/bun:${BUN_VERSION} AS protocol-builder
 WORKDIR /app
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 COPY packages/protocol/ /app/packages/protocol/
 COPY packages/backend/ /app/packages/backend/
 COPY packages/scheduler/ /app/packages/scheduler/
