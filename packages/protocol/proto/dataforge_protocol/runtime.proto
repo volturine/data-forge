@@ -3,7 +3,6 @@ syntax = "proto3";
 package dataforge.runtime;
 
 import "buf/validate/validate.proto";
-import "dataforge_protocol/common.proto";
 import "dataforge_protocol/compute.proto";
 import "dataforge_protocol/errors.proto";
 import "google/protobuf/struct.proto";

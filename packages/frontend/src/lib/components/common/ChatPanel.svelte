@@ -36,6 +36,7 @@
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 	import type { MCPTool } from '$lib/api/mcp';
+	import { stopGeneration as stopChatGeneration } from '$lib/api/chat';
 	import type { ChatUiPatchEvent } from '$lib/api/chat';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { renderMarkdown, timeAgo } from '$lib/utils/markdown';
@@ -69,8 +70,7 @@
 
 	async function stopGeneration() {
 		if (chatStore.sessionId) {
-			const { stopGeneration: stopGen } = await import('$lib/api/chat');
-			await stopGen(chatStore.sessionId);
+			await stopChatGeneration(chatStore.sessionId);
 		}
 		chatStore.loading = false;
 	}

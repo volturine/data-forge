@@ -4,7 +4,7 @@ default: dev
 
 pytest := 'env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q'
 python := 'env -u VIRTUAL_ENV uv run python'
-buf := 'bunx @bufbuild/buf@1.70.0'
+buf := './node_modules/.bin/buf'
 
 install:
     just generate-protocol
@@ -97,6 +97,7 @@ check:
     cd packages/protocol && {{buf}} format --diff --exit-code
     cd packages/protocol && {{buf}} lint
     if git cat-file -e HEAD:packages/protocol/buf.yaml 2>/dev/null; then cd packages/protocol && {{buf}} breaking --against '../../.git#branch=HEAD,subdir=packages/protocol'; else echo 'Skipping Buf breaking check: no protocol Buf module exists in HEAD yet.'; fi
+    if rg -n 'remote: buf\.build/(protocolbuffers|grpc)' packages/protocol Justfile; then echo 'Protocol generation must use the local packages/protocol toolchain, not Buf remote plugins.'; exit 1; fi
     just check-protocol-generated
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_package_boundaries.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_env_contracts.py
@@ -106,46 +107,59 @@ check:
     cd packages/frontend && bun run panda:codegen && bun run check && bun run lint
 
 generate-protocol:
-    cd packages/protocol && {{buf}} generate
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd packages/protocol
+    bun install --frozen-lockfile
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    exported="$tmp/exported"
+    {{buf}} export --output "$exported"
+    protos=()
+    while IFS= read -r proto; do
+        protos+=("$proto")
+    done < <(find "$exported" -name '*.proto' | sort)
+    generate_into() {
+        local out="$1"
+        rm -rf "$out/buf" "$out/dataforge_protocol"
+        mkdir -p "$out"
+        env -u VIRTUAL_ENV uv run --locked python -m grpc_tools.protoc \
+            -I "$exported" \
+            --python_out="$out" \
+            --pyi_out="$out" \
+            --grpc_python_out="$out" \
+            "${protos[@]}"
+    }
+    generate_into ../backend
+    generate_into ../worker
+    generate_into ../scheduler
 
 check-protocol-generated:
     #!/usr/bin/env bash
     set -euo pipefail
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
-    mkdir -p "$tmp/backend" "$tmp/worker" "$tmp/scheduler"
-    cat > "$tmp/buf.gen.yaml" <<EOF
-    version: v2
-    plugins:
-      - remote: buf.build/protocolbuffers/python
-        out: $tmp/backend
-        include_imports: true
-      - remote: buf.build/protocolbuffers/pyi
-        out: $tmp/backend
-        include_imports: true
-      - remote: buf.build/grpc/python
-        out: $tmp/backend
-      - remote: buf.build/protocolbuffers/python
-        out: $tmp/worker
-        include_imports: true
-      - remote: buf.build/protocolbuffers/pyi
-        out: $tmp/worker
-        include_imports: true
-      - remote: buf.build/grpc/python
-        out: $tmp/worker
-      - remote: buf.build/protocolbuffers/python
-        out: $tmp/scheduler
-        include_imports: true
-      - remote: buf.build/protocolbuffers/pyi
-        out: $tmp/scheduler
-        include_imports: true
-      - remote: buf.build/grpc/python
-        out: $tmp/scheduler
-    inputs:
-      - directory: proto
-    EOF
     cd packages/protocol
-    {{buf}} generate --template "$tmp/buf.gen.yaml"
+    bun install --frozen-lockfile
+    exported="$tmp/exported"
+    {{buf}} export --output "$exported"
+    protos=()
+    while IFS= read -r proto; do
+        protos+=("$proto")
+    done < <(find "$exported" -name '*.proto' | sort)
+    generate_into() {
+        local out="$1"
+        mkdir -p "$out"
+        env -u VIRTUAL_ENV uv run --locked python -m grpc_tools.protoc \
+            -I "$exported" \
+            --python_out="$out" \
+            --pyi_out="$out" \
+            --grpc_python_out="$out" \
+            "${protos[@]}"
+    }
+    generate_into "$tmp/backend"
+    generate_into "$tmp/worker"
+    generate_into "$tmp/scheduler"
     diff -ru --exclude='__pycache__' "$tmp/backend/buf" ../backend/buf
     diff -ru --exclude='__pycache__' "$tmp/backend/dataforge_protocol" ../backend/dataforge_protocol
     diff -ru --exclude='__pycache__' "$tmp/worker/buf" ../worker/buf

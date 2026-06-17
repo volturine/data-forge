@@ -1,0 +1,7 @@
+{
+  "name": "dataforge-protocol-codegen",
+  "private": true,
+  "devDependencies": {
+    "@bufbuild/buf": "1.70.0"
+  }
+}
