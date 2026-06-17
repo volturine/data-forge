@@ -366,6 +366,16 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
     monkeypatch.setattr(runtime_process, "_spawn_worker_process", fake_spawn_worker_process)
     monkeypatch.setattr(runtime_process, "configure_logging", lambda: None)
 
+    class FakeDataPlaneServer:
+        async def stop(self, *, grace: float | None = None) -> None:
+            calls.append(("data_plane_stop", grace))
+
+    monkeypatch.setattr(
+        runtime_process,
+        "start_data_plane_grpc_server_in_thread",
+        lambda: FakeDataPlaneServer(),
+    )
+
     async def fake_compute_request_loop(*args, **kwargs) -> None:
         calls.append(("compute_request_loop", None))
 
