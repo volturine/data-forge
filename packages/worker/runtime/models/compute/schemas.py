@@ -163,6 +163,7 @@ class EngineStatusSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     analysis_id: str
+    resource_id: str
     status: EngineStatus
     process_id: int | None = None
     last_activity: str | None = None
@@ -202,10 +203,22 @@ class SpawnEngineRequest(BaseModel):
     resource_config: EngineResourceConfig | None = None
 
 
+class EngineIdentityPayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    scope: EngineScope
+    reuse_policy: EngineReusePolicy
+    resource_id: str
+    analysis_id: str | None = None
+    datasource_id: str | None = None
+    build_id: str | None = None
+
+
 class StepPreviewRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     analysis_id: str | None = None
+    engine_identity: EngineIdentityPayload | None = None
     target_step_id: str
     analysis_pipeline: AnalysisPipelinePayload
     tab_id: str | None = None

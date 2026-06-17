@@ -3,6 +3,7 @@ import datetime
 from buf.validate import validate_pb2 as _validate_pb2
 from dataforge_protocol import common_pb2 as _common_pb2
 from dataforge_protocol import enums_pb2 as _enums_pb2
+from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
@@ -53,16 +54,16 @@ class WorkerClaimBuildJobResponse(_message.Message):
     def __init__(self, job: _Optional[_Union[WorkerClaimedBuildJob, _Mapping]] = ...) -> None: ...
 
 class WorkerClaimedComputeRequest(_message.Message):
-    __slots__ = ("id", "namespace", "kind", "request_json")
+    __slots__ = ("id", "namespace", "kind", "request")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAMESPACE_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
-    REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_FIELD_NUMBER: _ClassVar[int]
     id: str
     namespace: str
     kind: _enums_pb2.ComputeRequestKind
-    request_json: _common_pb2.JsonPayload
-    def __init__(self, id: _Optional[str] = ..., namespace: _Optional[str] = ..., kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    request: _struct_pb2.Struct
+    def __init__(self, id: _Optional[str] = ..., namespace: _Optional[str] = ..., kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., request: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class WorkerClaimComputeRequestResponse(_message.Message):
     __slots__ = ("request",)
@@ -71,42 +72,42 @@ class WorkerClaimComputeRequestResponse(_message.Message):
     def __init__(self, request: _Optional[_Union[WorkerClaimedComputeRequest, _Mapping]] = ...) -> None: ...
 
 class WorkerCompleteComputeRequestRequest(_message.Message):
-    __slots__ = ("namespace", "request_id", "response_json", "artifact_path", "artifact_name", "artifact_content_type")
+    __slots__ = ("namespace", "request_id", "response", "artifact_path", "artifact_name", "artifact_content_type")
     NAMESPACE_FIELD_NUMBER: _ClassVar[int]
     REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
-    RESPONSE_JSON_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_FIELD_NUMBER: _ClassVar[int]
     ARTIFACT_PATH_FIELD_NUMBER: _ClassVar[int]
     ARTIFACT_NAME_FIELD_NUMBER: _ClassVar[int]
     ARTIFACT_CONTENT_TYPE_FIELD_NUMBER: _ClassVar[int]
     namespace: str
     request_id: str
-    response_json: _common_pb2.JsonPayload
+    response: _struct_pb2.Struct
     artifact_path: str
     artifact_name: str
     artifact_content_type: str
-    def __init__(self, namespace: _Optional[str] = ..., request_id: _Optional[str] = ..., response_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., artifact_path: _Optional[str] = ..., artifact_name: _Optional[str] = ..., artifact_content_type: _Optional[str] = ...) -> None: ...
+    def __init__(self, namespace: _Optional[str] = ..., request_id: _Optional[str] = ..., response: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., artifact_path: _Optional[str] = ..., artifact_name: _Optional[str] = ..., artifact_content_type: _Optional[str] = ...) -> None: ...
 
 class WorkerFailComputeRequestRequest(_message.Message):
-    __slots__ = ("namespace", "request_id", "error_message", "response_json")
+    __slots__ = ("namespace", "request_id", "error_message", "response")
     NAMESPACE_FIELD_NUMBER: _ClassVar[int]
     REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    RESPONSE_JSON_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_FIELD_NUMBER: _ClassVar[int]
     namespace: str
     request_id: str
     error_message: str
-    response_json: _common_pb2.JsonPayload
-    def __init__(self, namespace: _Optional[str] = ..., request_id: _Optional[str] = ..., error_message: _Optional[str] = ..., response_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    response: _struct_pb2.Struct
+    def __init__(self, namespace: _Optional[str] = ..., request_id: _Optional[str] = ..., error_message: _Optional[str] = ..., response: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class WorkerExecuteDatasourceRequest(_message.Message):
-    __slots__ = ("namespace", "kind", "request_json")
+    __slots__ = ("namespace", "kind", "request")
     NAMESPACE_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
-    REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_FIELD_NUMBER: _ClassVar[int]
     namespace: str
     kind: _enums_pb2.ComputeRequestKind
-    request_json: _common_pb2.JsonPayload
-    def __init__(self, namespace: _Optional[str] = ..., kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    request: _struct_pb2.Struct
+    def __init__(self, namespace: _Optional[str] = ..., kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., request: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class WorkerScheduleIngestDatasourceRequest(_message.Message):
     __slots__ = ("namespace", "datasource_id")
@@ -117,10 +118,10 @@ class WorkerScheduleIngestDatasourceRequest(_message.Message):
     def __init__(self, namespace: _Optional[str] = ..., datasource_id: _Optional[str] = ...) -> None: ...
 
 class JsonResponse(_message.Message):
-    __slots__ = ("response_json",)
-    RESPONSE_JSON_FIELD_NUMBER: _ClassVar[int]
-    response_json: _common_pb2.JsonPayload
-    def __init__(self, response_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    __slots__ = ("response",)
+    RESPONSE_FIELD_NUMBER: _ClassVar[int]
+    response: _struct_pb2.Struct
+    def __init__(self, response: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class WorkerDatasourceMetadataRequest(_message.Message):
     __slots__ = ("namespace", "datasource_id")
@@ -143,10 +144,10 @@ class WorkerDatasourceMetadataResponse(_message.Message):
     id: str
     name: str
     source_type: _enums_pb2.DataSourceType
-    config: _common_pb2.JsonPayload
-    schema_cache: _common_pb2.JsonPayload
+    config: _struct_pb2.Struct
+    schema_cache: _struct_pb2.Struct
     is_hidden: bool
-    def __init__(self, found: _Optional[bool] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., source_type: _Optional[_Union[_enums_pb2.DataSourceType, str]] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., schema_cache: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., is_hidden: _Optional[bool] = ...) -> None: ...
+    def __init__(self, found: _Optional[bool] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., source_type: _Optional[_Union[_enums_pb2.DataSourceType, str]] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., schema_cache: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., is_hidden: _Optional[bool] = ...) -> None: ...
 
 class WorkerUdfCodesRequest(_message.Message):
     __slots__ = ("namespace", "udf_ids")
@@ -204,14 +205,14 @@ class WorkerBuildCancelStatusResponse(_message.Message):
     def __init__(self, cancelled: _Optional[bool] = ..., cancelled_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., cancelled_by: _Optional[str] = ...) -> None: ...
 
 class WorkerUpdateBuildResultRequest(_message.Message):
-    __slots__ = ("namespace", "build_id", "result_json")
+    __slots__ = ("namespace", "build_id", "result")
     NAMESPACE_FIELD_NUMBER: _ClassVar[int]
     BUILD_ID_FIELD_NUMBER: _ClassVar[int]
-    RESULT_JSON_FIELD_NUMBER: _ClassVar[int]
+    RESULT_FIELD_NUMBER: _ClassVar[int]
     namespace: str
     build_id: str
-    result_json: _common_pb2.JsonPayload
-    def __init__(self, namespace: _Optional[str] = ..., build_id: _Optional[str] = ..., result_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    result: _struct_pb2.Struct
+    def __init__(self, namespace: _Optional[str] = ..., build_id: _Optional[str] = ..., result: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class WorkerUpsertOutputDatasourceRequest(_message.Message):
     __slots__ = ("namespace", "result_id", "name", "source_type", "config", "schema_cache", "analysis_id", "is_hidden", "keep_schema_cache")
@@ -228,12 +229,12 @@ class WorkerUpsertOutputDatasourceRequest(_message.Message):
     result_id: str
     name: str
     source_type: _enums_pb2.DataSourceType
-    config: _common_pb2.JsonPayload
-    schema_cache: _common_pb2.JsonPayload
+    config: _struct_pb2.Struct
+    schema_cache: _struct_pb2.Struct
     analysis_id: str
     is_hidden: bool
     keep_schema_cache: bool
-    def __init__(self, namespace: _Optional[str] = ..., result_id: _Optional[str] = ..., name: _Optional[str] = ..., source_type: _Optional[_Union[_enums_pb2.DataSourceType, str]] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., schema_cache: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., analysis_id: _Optional[str] = ..., is_hidden: _Optional[bool] = ..., keep_schema_cache: _Optional[bool] = ...) -> None: ...
+    def __init__(self, namespace: _Optional[str] = ..., result_id: _Optional[str] = ..., name: _Optional[str] = ..., source_type: _Optional[_Union[_enums_pb2.DataSourceType, str]] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., schema_cache: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., analysis_id: _Optional[str] = ..., is_hidden: _Optional[bool] = ..., keep_schema_cache: _Optional[bool] = ...) -> None: ...
 
 class WorkerUpsertOutputDatasourceResponse(_message.Message):
     __slots__ = ("datasource_id", "datasource_name", "is_hidden")
@@ -255,9 +256,9 @@ class WorkerHealthCheckSpec(_message.Message):
     id: str
     name: str
     check_type: _enums_pb2.HealthCheckType
-    config: _common_pb2.JsonPayload
+    config: _struct_pb2.Struct
     critical: bool
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., check_type: _Optional[_Union[_enums_pb2.HealthCheckType, str]] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., critical: _Optional[bool] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., check_type: _Optional[_Union[_enums_pb2.HealthCheckType, str]] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., critical: _Optional[bool] = ...) -> None: ...
 
 class WorkerListHealthChecksRequest(_message.Message):
     __slots__ = ("namespace", "datasource_id")
@@ -283,9 +284,9 @@ class WorkerHealthCheckResultPayload(_message.Message):
     healthcheck_id: str
     passed: bool
     message: str
-    details: _common_pb2.JsonPayload
+    details: _struct_pb2.Struct
     checked_at: _timestamp_pb2.Timestamp
-    def __init__(self, healthcheck_id: _Optional[str] = ..., passed: _Optional[bool] = ..., message: _Optional[str] = ..., details: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., checked_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    def __init__(self, healthcheck_id: _Optional[str] = ..., passed: _Optional[bool] = ..., message: _Optional[str] = ..., details: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., checked_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class WorkerRecordHealthCheckResultsRequest(_message.Message):
     __slots__ = ("namespace", "results")
@@ -296,14 +297,14 @@ class WorkerRecordHealthCheckResultsRequest(_message.Message):
     def __init__(self, namespace: _Optional[str] = ..., results: _Optional[_Iterable[_Union[WorkerHealthCheckResultPayload, _Mapping]]] = ...) -> None: ...
 
 class WorkerCreateEngineRunRequest(_message.Message):
-    __slots__ = ("namespace", "analysis_id", "datasource_id", "kind", "status", "request_json", "result_json", "error_message", "created_at", "completed_at", "duration_ms", "step_timings", "query_plan", "execution_entries", "progress", "current_step", "triggered_by")
+    __slots__ = ("namespace", "analysis_id", "datasource_id", "kind", "status", "request", "result", "error_message", "created_at", "completed_at", "duration_ms", "step_timings", "query_plan", "execution_entries", "progress", "current_step", "triggered_by")
     NAMESPACE_FIELD_NUMBER: _ClassVar[int]
     ANALYSIS_ID_FIELD_NUMBER: _ClassVar[int]
     DATASOURCE_ID_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
-    REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
-    RESULT_JSON_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_FIELD_NUMBER: _ClassVar[int]
+    RESULT_FIELD_NUMBER: _ClassVar[int]
     ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
@@ -319,31 +320,31 @@ class WorkerCreateEngineRunRequest(_message.Message):
     datasource_id: str
     kind: _enums_pb2.EngineRunKind
     status: _enums_pb2.EngineRunStatus
-    request_json: _common_pb2.JsonPayload
-    result_json: _common_pb2.JsonPayload
+    request: _struct_pb2.Struct
+    result: _struct_pb2.Struct
     error_message: str
     created_at: _timestamp_pb2.Timestamp
     completed_at: _timestamp_pb2.Timestamp
     duration_ms: int
-    step_timings: _common_pb2.JsonPayload
+    step_timings: _struct_pb2.Struct
     query_plan: str
-    execution_entries: _containers.RepeatedCompositeFieldContainer[_common_pb2.JsonPayload]
+    execution_entries: _containers.RepeatedCompositeFieldContainer[_struct_pb2.Struct]
     progress: float
     current_step: str
     triggered_by: str
-    def __init__(self, namespace: _Optional[str] = ..., analysis_id: _Optional[str] = ..., datasource_id: _Optional[str] = ..., kind: _Optional[_Union[_enums_pb2.EngineRunKind, str]] = ..., status: _Optional[_Union[_enums_pb2.EngineRunStatus, str]] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., result_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., error_message: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., duration_ms: _Optional[int] = ..., step_timings: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., query_plan: _Optional[str] = ..., execution_entries: _Optional[_Iterable[_Union[_common_pb2.JsonPayload, _Mapping]]] = ..., progress: _Optional[float] = ..., current_step: _Optional[str] = ..., triggered_by: _Optional[str] = ...) -> None: ...
+    def __init__(self, namespace: _Optional[str] = ..., analysis_id: _Optional[str] = ..., datasource_id: _Optional[str] = ..., kind: _Optional[_Union[_enums_pb2.EngineRunKind, str]] = ..., status: _Optional[_Union[_enums_pb2.EngineRunStatus, str]] = ..., request: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., result: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., error_message: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., duration_ms: _Optional[int] = ..., step_timings: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., query_plan: _Optional[str] = ..., execution_entries: _Optional[_Iterable[_Union[_struct_pb2.Struct, _Mapping]]] = ..., progress: _Optional[float] = ..., current_step: _Optional[str] = ..., triggered_by: _Optional[str] = ...) -> None: ...
 
 class WorkerUpdateEngineRunRequest(_message.Message):
-    __slots__ = ("namespace", "run_id", "fields", "merge_result_json")
+    __slots__ = ("namespace", "run_id", "fields", "merge_result")
     NAMESPACE_FIELD_NUMBER: _ClassVar[int]
     RUN_ID_FIELD_NUMBER: _ClassVar[int]
     FIELDS_FIELD_NUMBER: _ClassVar[int]
-    MERGE_RESULT_JSON_FIELD_NUMBER: _ClassVar[int]
+    MERGE_RESULT_FIELD_NUMBER: _ClassVar[int]
     namespace: str
     run_id: str
-    fields: _common_pb2.JsonPayload
-    merge_result_json: bool
-    def __init__(self, namespace: _Optional[str] = ..., run_id: _Optional[str] = ..., fields: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., merge_result_json: _Optional[bool] = ...) -> None: ...
+    fields: _struct_pb2.Struct
+    merge_result: bool
+    def __init__(self, namespace: _Optional[str] = ..., run_id: _Optional[str] = ..., fields: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., merge_result: _Optional[bool] = ...) -> None: ...
 
 class WorkerEngineRunStateRequest(_message.Message):
     __slots__ = ("namespace", "run_id")
@@ -354,18 +355,18 @@ class WorkerEngineRunStateRequest(_message.Message):
     def __init__(self, namespace: _Optional[str] = ..., run_id: _Optional[str] = ...) -> None: ...
 
 class WorkerEngineRunStateResponse(_message.Message):
-    __slots__ = ("found", "status", "result_json", "cancelled_at", "cancelled_by")
+    __slots__ = ("found", "status", "result", "cancelled_at", "cancelled_by")
     FOUND_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
-    RESULT_JSON_FIELD_NUMBER: _ClassVar[int]
+    RESULT_FIELD_NUMBER: _ClassVar[int]
     CANCELLED_AT_FIELD_NUMBER: _ClassVar[int]
     CANCELLED_BY_FIELD_NUMBER: _ClassVar[int]
     found: bool
     status: _enums_pb2.EngineRunStatus
-    result_json: _common_pb2.JsonPayload
+    result: _struct_pb2.Struct
     cancelled_at: _timestamp_pb2.Timestamp
     cancelled_by: str
-    def __init__(self, found: _Optional[bool] = ..., status: _Optional[_Union[_enums_pb2.EngineRunStatus, str]] = ..., result_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., cancelled_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., cancelled_by: _Optional[str] = ...) -> None: ...
+    def __init__(self, found: _Optional[bool] = ..., status: _Optional[_Union[_enums_pb2.EngineRunStatus, str]] = ..., result: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., cancelled_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., cancelled_by: _Optional[str] = ...) -> None: ...
 
 class WorkerFailBuildJobRequest(_message.Message):
     __slots__ = ("job_id", "namespace", "error")
@@ -400,16 +401,16 @@ class WorkerNamespacesResponse(_message.Message):
     def __init__(self, namespaces: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class WorkerPersistBuildEventRequest(_message.Message):
-    __slots__ = ("namespace", "build_id", "event", "resource_config_json")
+    __slots__ = ("namespace", "build_id", "event", "resource_config")
     NAMESPACE_FIELD_NUMBER: _ClassVar[int]
     BUILD_ID_FIELD_NUMBER: _ClassVar[int]
     EVENT_FIELD_NUMBER: _ClassVar[int]
-    RESOURCE_CONFIG_JSON_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_CONFIG_FIELD_NUMBER: _ClassVar[int]
     namespace: str
     build_id: str
-    event: _common_pb2.JsonPayload
-    resource_config_json: _common_pb2.JsonPayload
-    def __init__(self, namespace: _Optional[str] = ..., build_id: _Optional[str] = ..., event: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., resource_config_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    event: _struct_pb2.Struct
+    resource_config: _struct_pb2.Struct
+    def __init__(self, namespace: _Optional[str] = ..., build_id: _Optional[str] = ..., event: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., resource_config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class WorkerPersistBuildEventResponse(_message.Message):
     __slots__ = ("sequence",)
@@ -418,14 +419,14 @@ class WorkerPersistBuildEventResponse(_message.Message):
     def __init__(self, sequence: _Optional[int] = ...) -> None: ...
 
 class WorkerBuildRunPayload(_message.Message):
-    __slots__ = ("id", "namespace", "analysis_id", "analysis_name", "request_json", "starter_json", "resource_config_json", "current_kind", "current_datasource_id", "current_tab_id", "current_tab_name", "current_output_id", "current_output_name", "started_at", "total_tabs")
+    __slots__ = ("id", "namespace", "analysis_id", "analysis_name", "request", "starter", "resource_config", "current_kind", "current_datasource_id", "current_tab_id", "current_tab_name", "current_output_id", "current_output_name", "started_at", "total_tabs")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAMESPACE_FIELD_NUMBER: _ClassVar[int]
     ANALYSIS_ID_FIELD_NUMBER: _ClassVar[int]
     ANALYSIS_NAME_FIELD_NUMBER: _ClassVar[int]
-    REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
-    STARTER_JSON_FIELD_NUMBER: _ClassVar[int]
-    RESOURCE_CONFIG_JSON_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_FIELD_NUMBER: _ClassVar[int]
+    STARTER_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_CONFIG_FIELD_NUMBER: _ClassVar[int]
     CURRENT_KIND_FIELD_NUMBER: _ClassVar[int]
     CURRENT_DATASOURCE_ID_FIELD_NUMBER: _ClassVar[int]
     CURRENT_TAB_ID_FIELD_NUMBER: _ClassVar[int]
@@ -438,9 +439,9 @@ class WorkerBuildRunPayload(_message.Message):
     namespace: str
     analysis_id: str
     analysis_name: str
-    request_json: _common_pb2.JsonPayload
-    starter_json: _common_pb2.JsonPayload
-    resource_config_json: _common_pb2.JsonPayload
+    request: _struct_pb2.Struct
+    starter: _struct_pb2.Struct
+    resource_config: _struct_pb2.Struct
     current_kind: _enums_pb2.EngineRunKind
     current_datasource_id: str
     current_tab_id: str
@@ -449,7 +450,7 @@ class WorkerBuildRunPayload(_message.Message):
     current_output_name: str
     started_at: _timestamp_pb2.Timestamp
     total_tabs: int
-    def __init__(self, id: _Optional[str] = ..., namespace: _Optional[str] = ..., analysis_id: _Optional[str] = ..., analysis_name: _Optional[str] = ..., request_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., starter_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., resource_config_json: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., current_kind: _Optional[_Union[_enums_pb2.EngineRunKind, str]] = ..., current_datasource_id: _Optional[str] = ..., current_tab_id: _Optional[str] = ..., current_tab_name: _Optional[str] = ..., current_output_id: _Optional[str] = ..., current_output_name: _Optional[str] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., total_tabs: _Optional[int] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., namespace: _Optional[str] = ..., analysis_id: _Optional[str] = ..., analysis_name: _Optional[str] = ..., request: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., starter: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., resource_config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., current_kind: _Optional[_Union[_enums_pb2.EngineRunKind, str]] = ..., current_datasource_id: _Optional[str] = ..., current_tab_id: _Optional[str] = ..., current_tab_name: _Optional[str] = ..., current_output_id: _Optional[str] = ..., current_output_name: _Optional[str] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., total_tabs: _Optional[int] = ...) -> None: ...
 
 class WorkerStartBuildRunRequest(_message.Message):
     __slots__ = ("namespace", "build_id")
@@ -472,8 +473,8 @@ class WorkerPersistEngineSnapshotRequest(_message.Message):
     STATUSES_FIELD_NUMBER: _ClassVar[int]
     worker_id: str
     namespace: str
-    statuses: _containers.RepeatedCompositeFieldContainer[_common_pb2.JsonPayload]
-    def __init__(self, worker_id: _Optional[str] = ..., namespace: _Optional[str] = ..., statuses: _Optional[_Iterable[_Union[_common_pb2.JsonPayload, _Mapping]]] = ...) -> None: ...
+    statuses: _containers.RepeatedCompositeFieldContainer[_struct_pb2.Struct]
+    def __init__(self, worker_id: _Optional[str] = ..., namespace: _Optional[str] = ..., statuses: _Optional[_Iterable[_Union[_struct_pb2.Struct, _Mapping]]] = ...) -> None: ...
 
 class WorkerPendingDatasourceDelete(_message.Message):
     __slots__ = ("namespace", "datasource_id")
@@ -546,8 +547,8 @@ class WorkerGenerateAIRequest(_message.Message):
     model: str
     endpoint_url: str
     api_key: str
-    options: _common_pb2.JsonPayload
-    def __init__(self, provider: _Optional[_Union[_enums_pb2.AIProvider, str]] = ..., prompts: _Optional[_Iterable[str]] = ..., model: _Optional[str] = ..., endpoint_url: _Optional[str] = ..., api_key: _Optional[str] = ..., options: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    options: _struct_pb2.Struct
+    def __init__(self, provider: _Optional[_Union[_enums_pb2.AIProvider, str]] = ..., prompts: _Optional[_Iterable[str]] = ..., model: _Optional[str] = ..., endpoint_url: _Optional[str] = ..., api_key: _Optional[str] = ..., options: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class WorkerGenerateAIResponse(_message.Message):
     __slots__ = ("outputs",)

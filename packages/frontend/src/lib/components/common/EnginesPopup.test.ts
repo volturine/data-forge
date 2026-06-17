@@ -9,7 +9,7 @@ const mockShutdownEngine = vi.fn();
 
 vi.mock('$lib/api/compute', () => ({
 	connectEnginesStream: (...args: unknown[]) => mockConnectEnginesStream(...args),
-	shutdownEngine: (...args: unknown[]) => mockShutdownEngine(...args)
+	shutdownEngineByIdentity: (...args: unknown[]) => mockShutdownEngine(...args)
 }));
 
 const { enginesStore } = await import('$lib/stores/engines.svelte');
@@ -18,6 +18,7 @@ const { default: EnginesPopup } = await import('./EnginesPopup.svelte');
 function makeEngine(overrides: Partial<EngineStatusResponse> = {}): EngineStatusResponse {
 	return {
 		analysis_id: 'analysis-1',
+		resource_id: 'analysis-1',
 		status: 'healthy',
 		process_id: 1234,
 		last_activity: Temporal.Now.instant().toString(),

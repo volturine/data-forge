@@ -28,7 +28,7 @@ Those belong to the later Docker-native runtime swap.
 
 ### Datasource preview
 
-- Engine key: `__preview__{datasource_id}`
+- Engine identity: `scope=datasource_preview`, `reuse_policy=shared`, `datasource_id={datasource_id}`
 - Reuse policy: `shared`
 - Maximum live preview engines: one per datasource key per namespace
 - Time travel, branch changes, and preview revisits reuse the same engine key
@@ -36,7 +36,7 @@ Those belong to the later Docker-native runtime swap.
 
 ### Analysis interaction
 
-- Engine key: `{analysis_id}`
+- Engine identity: `scope=analysis_interactive`, `reuse_policy=shared`, `analysis_id={analysis_id}`
 - Reuse policy: `shared`
 - Shared by analysis preview, schema, row-count, and download flows
 - Shared across simultaneous viewers of the same analysis
@@ -45,7 +45,7 @@ Those belong to the later Docker-native runtime swap.
 
 ### Build execution
 
-- Engine key: `build:{build_id}`
+- Engine identity: `scope=build`, `reuse_policy=exclusive`, `build_id={build_id}`
 - Reuse policy: `exclusive`
 - One engine per build trigger
 - Reused within a single build across that build's tabs/steps only
@@ -56,8 +56,8 @@ Those belong to the later Docker-native runtime swap.
 ### Phase 1 — freeze the contract in docs and helpers
 
 - [x] Add a dedicated lifecycle tracking doc
-- [x] Add central engine identity helpers for preview / analysis / build keys
-- [x] Parse engine scope and reuse policy from engine keys
+- [x] Add central engine identity helpers for datasource preview / analysis / build identities
+- [x] Carry engine scope, reuse policy, and resource IDs explicitly across runtime requests
 
 ### Phase 2 — align runtime lifecycle behavior
 
@@ -114,7 +114,7 @@ Implemented in this pass:
 - central engine identity helper module
 - shared/exclusive lifecycle metadata on engine status payloads
 - shared interactive engine retention after leaving analysis pages
-- unique build-engine keys per build trigger
+- unique build engine identity per build trigger
 - build engine shutdown after normal build completion path
 - idle shared-engine reaper in `ProcessManager`
 - removal of temporary export-engine fallback

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from sqlmodel import Session
 
-from backend_core.exceptions import AnalysisNotFoundError
+from backend_core.exceptions import analysis_not_found
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 from modules.export.generators import generate_code, select_tabs
@@ -30,7 +30,7 @@ def export_analysis_code(
 ) -> CodeExportResult:
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     export_format = CodeExportFormat.require(format_name)
     selection = select_tabs(analysis.pipeline, tab_id)

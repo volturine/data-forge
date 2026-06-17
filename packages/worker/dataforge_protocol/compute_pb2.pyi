@@ -3,6 +3,7 @@ import datetime
 from buf.validate import validate_pb2 as _validate_pb2
 from dataforge_protocol import common_pb2 as _common_pb2
 from dataforge_protocol import enums_pb2 as _enums_pb2
+from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -46,8 +47,8 @@ class ComputeCommandEnvelope(_message.Message):
     version: int
     idempotency_key: str
     correlation_id: str
-    payload: _common_pb2.JsonPayload
-    def __init__(self, kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., version: _Optional[int] = ..., idempotency_key: _Optional[str] = ..., correlation_id: _Optional[str] = ..., payload: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    payload: _struct_pb2.Struct
+    def __init__(self, kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., version: _Optional[int] = ..., idempotency_key: _Optional[str] = ..., correlation_id: _Optional[str] = ..., payload: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class ComputeResponseEnvelope(_message.Message):
     __slots__ = ("kind", "version", "correlation_id", "status", "payload", "error_message")
@@ -61,9 +62,9 @@ class ComputeResponseEnvelope(_message.Message):
     version: int
     correlation_id: str
     status: _enums_pb2.ComputeRequestStatus
-    payload: _common_pb2.JsonPayload
+    payload: _struct_pb2.Struct
     error_message: str
-    def __init__(self, kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., version: _Optional[int] = ..., correlation_id: _Optional[str] = ..., status: _Optional[_Union[_enums_pb2.ComputeRequestStatus, str]] = ..., payload: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., error_message: _Optional[str] = ...) -> None: ...
+    def __init__(self, kind: _Optional[_Union[_enums_pb2.ComputeRequestKind, str]] = ..., version: _Optional[int] = ..., correlation_id: _Optional[str] = ..., status: _Optional[_Union[_enums_pb2.ComputeRequestStatus, str]] = ..., payload: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., error_message: _Optional[str] = ...) -> None: ...
 
 class BuildEvent(_message.Message):
     __slots__ = ("build_id", "namespace", "occurred_at", "plan", "step_started", "step_completed", "step_failed", "progress", "resources", "log", "completed", "failed", "cancelled")
@@ -83,14 +84,14 @@ class BuildEvent(_message.Message):
     build_id: str
     namespace: str
     occurred_at: _timestamp_pb2.Timestamp
-    plan: _common_pb2.JsonPayload
-    step_started: _common_pb2.JsonPayload
-    step_completed: _common_pb2.JsonPayload
-    step_failed: _common_pb2.JsonPayload
-    progress: _common_pb2.JsonPayload
-    resources: _common_pb2.JsonPayload
-    log: _common_pb2.JsonPayload
-    completed: _common_pb2.JsonPayload
-    failed: _common_pb2.JsonPayload
-    cancelled: _common_pb2.JsonPayload
-    def __init__(self, build_id: _Optional[str] = ..., namespace: _Optional[str] = ..., occurred_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., plan: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., step_started: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., step_completed: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., step_failed: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., progress: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., resources: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., log: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., completed: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., failed: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., cancelled: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    plan: _struct_pb2.Struct
+    step_started: _struct_pb2.Struct
+    step_completed: _struct_pb2.Struct
+    step_failed: _struct_pb2.Struct
+    progress: _struct_pb2.Struct
+    resources: _struct_pb2.Struct
+    log: _struct_pb2.Struct
+    completed: _struct_pb2.Struct
+    failed: _struct_pb2.Struct
+    cancelled: _struct_pb2.Struct
+    def __init__(self, build_id: _Optional[str] = ..., namespace: _Optional[str] = ..., occurred_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., plan: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., step_started: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., step_completed: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., step_failed: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., progress: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., resources: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., log: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., completed: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., failed: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., cancelled: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...

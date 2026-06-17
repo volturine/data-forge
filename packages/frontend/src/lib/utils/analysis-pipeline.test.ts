@@ -494,7 +494,7 @@ describe('buildDatasourcePipelinePayload', () => {
 			datasource: ds,
 			datasourceConfig: { branch: 'main' }
 		});
-		expect(result.analysis_id).toBe('__preview__ds-1');
+		expect(result.analysis_id).toBe('ds-1');
 		expect(result.tabs).toHaveLength(1);
 		expect(result.tabs[0].id).toBe('datasource-ds-1');
 		expect(result.tabs[0].name).toBe('Test DS');
@@ -632,7 +632,7 @@ describe('buildDatasourcePipelinePayload', () => {
 			}),
 			datasourceConfig: { branch: 'main', snapshot_id: 'snap-1' }
 		});
-		expect(result.analysis_id).toBe('__preview__out-1');
+		expect(result.analysis_id).toBe('out-1');
 		expect(result.tabs[0].datasource).toEqual({
 			id: 'out-1',
 			analysis_tab_id: null,

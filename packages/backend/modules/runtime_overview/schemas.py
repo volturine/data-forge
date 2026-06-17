@@ -37,6 +37,7 @@ class EngineInstanceSummary(BaseModel):
     worker_id: str
     namespace: str
     analysis_id: str
+    resource_id: str
     process_id: int | None
     status: EngineInstanceStatus
     current_job_id: str | None

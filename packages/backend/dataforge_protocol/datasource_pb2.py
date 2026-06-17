@@ -25,9 +25,10 @@ _sym_db = _symbol_database.Default()
 from buf.validate import validate_pb2 as buf_dot_validate_dot_validate__pb2
 from dataforge_protocol import common_pb2 as dataforge__protocol_dot_common__pb2
 from dataforge_protocol import enums_pb2 as dataforge__protocol_dot_enums__pb2
+from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#dataforge_protocol/datasource.proto\x12\x11\x64\x61taforge.runtime\x1a\x1b\x62uf/validate/validate.proto\x1a\x1f\x64\x61taforge_protocol/common.proto\x1a\x1e\x64\x61taforge_protocol/enums.proto\"t\n\rDatasourceRef\x12\x35\n\tnamespace\x18\x01 \x01(\tB\x17\xbaH\x14r\x12\x32\x10^[a-zA-Z0-9_-]+$R\tnamespace\x12,\n\rdatasource_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x0c\x64\x61tasourceId\"\xd5\x03\n\x12\x44\x61tasourceMetadata\x12\x17\n\x02id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x02id\x12\x1b\n\x04name\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x04name\x12L\n\x0bsource_type\x18\x03 \x01(\x0e\x32!.dataforge.runtime.DataSourceTypeB\x08\xbaH\x05\x82\x01\x02\x10\x01R\nsourceType\x12O\n\ncreated_by\x18\x04 \x01(\x0e\x32&.dataforge.runtime.DataSourceCreatedByB\x08\xbaH\x05\x82\x01\x02\x10\x01R\tcreatedBy\x12R\n\x0btarget_kind\x18\x05 \x01(\x0e\x32\'.dataforge.runtime.DataSourceTargetKindB\x08\xbaH\x05\x82\x01\x02\x10\x01R\ntargetKind\x12\x36\n\x06\x63onfig\x18\x06 \x01(\x0b\x32\x1e.dataforge.runtime.JsonPayloadR\x06\x63onfig\x12\x41\n\x0cschema_cache\x18\x07 \x01(\x0b\x32\x1e.dataforge.runtime.JsonPayloadR\x0bschemaCache\x12\x1b\n\tis_hidden\x18\x08 \x01(\x08R\x08isHiddenb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#dataforge_protocol/datasource.proto\x12\x11\x64\x61taforge.runtime\x1a\x1b\x62uf/validate/validate.proto\x1a\x1f\x64\x61taforge_protocol/common.proto\x1a\x1e\x64\x61taforge_protocol/enums.proto\x1a\x1cgoogle/protobuf/struct.proto\"t\n\rDatasourceRef\x12\x35\n\tnamespace\x18\x01 \x01(\tB\x17\xbaH\x14r\x12\x32\x10^[a-zA-Z0-9_-]+$R\tnamespace\x12,\n\rdatasource_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x0c\x64\x61tasourceId\"\xc7\x03\n\x12\x44\x61tasourceMetadata\x12\x17\n\x02id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x02id\x12\x1b\n\x04name\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x04name\x12L\n\x0bsource_type\x18\x03 \x01(\x0e\x32!.dataforge.runtime.DataSourceTypeB\x08\xbaH\x05\x82\x01\x02\x10\x01R\nsourceType\x12O\n\ncreated_by\x18\x04 \x01(\x0e\x32&.dataforge.runtime.DataSourceCreatedByB\x08\xbaH\x05\x82\x01\x02\x10\x01R\tcreatedBy\x12R\n\x0btarget_kind\x18\x05 \x01(\x0e\x32\'.dataforge.runtime.DataSourceTargetKindB\x08\xbaH\x05\x82\x01\x02\x10\x01R\ntargetKind\x12/\n\x06\x63onfig\x18\x06 \x01(\x0b\x32\x17.google.protobuf.StructR\x06\x63onfig\x12:\n\x0cschema_cache\x18\x07 \x01(\x0b\x32\x17.google.protobuf.StructR\x0bschemaCache\x12\x1b\n\tis_hidden\x18\x08 \x01(\x08R\x08isHiddenb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -48,8 +49,8 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_DATASOURCEMETADATA'].fields_by_name['created_by']._serialized_options = b'\272H\005\202\001\002\020\001'
   _globals['_DATASOURCEMETADATA'].fields_by_name['target_kind']._loaded_options = None
   _globals['_DATASOURCEMETADATA'].fields_by_name['target_kind']._serialized_options = b'\272H\005\202\001\002\020\001'
-  _globals['_DATASOURCEREF']._serialized_start=152
-  _globals['_DATASOURCEREF']._serialized_end=268
-  _globals['_DATASOURCEMETADATA']._serialized_start=271
-  _globals['_DATASOURCEMETADATA']._serialized_end=740
+  _globals['_DATASOURCEREF']._serialized_start=182
+  _globals['_DATASOURCEREF']._serialized_end=298
+  _globals['_DATASOURCEMETADATA']._serialized_start=301
+  _globals['_DATASOURCEMETADATA']._serialized_end=756
 # @@protoc_insertion_point(module_scope)

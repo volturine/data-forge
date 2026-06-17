@@ -42,7 +42,7 @@ class MCPHttpMethod(DataForgeStrEnum):
         return self.safety == MCPToolSafety.MUTATING
 
     def requires_confirmation_for_path(self, path: str) -> bool:
-        return any(self is method and re.match(pattern, path) for method, pattern in CONFIRM_REQUIRED_PATTERNS)
+        return any(self == method and re.match(pattern, path) for method, pattern in CONFIRM_REQUIRED_PATTERNS)
 
 
 class MCPToolDefinition(BaseModel):

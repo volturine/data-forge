@@ -15,7 +15,7 @@ from backend_core.contracts.analysis.models import AnalysisStatus
 from backend_core.contracts.build_runs.models import BuildRunStatus
 from backend_core.contracts.engine_runs.schemas import EngineRunKind
 from backend_core.contracts.scheduler.schemas import ScheduleCreate, ScheduleUpdate
-from backend_core.exceptions import DataSourceNotFoundError, ScheduleNotFoundError
+from backend_core.exceptions import AppError
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
@@ -313,8 +313,9 @@ class TestScheduleCrud:
         assert updated.enabled is False
 
     def test_update_nonexistent_raises(self, test_db_session: Session):
-        with pytest.raises(ScheduleNotFoundError):
+        with pytest.raises(AppError, match='Schedule nonexistent not found') as exc_info:
             update_schedule(test_db_session, 'nonexistent', ScheduleUpdate(enabled=False))
+        assert exc_info.value.error_code == 'SCHEDULE_NOT_FOUND'
 
     def test_delete_schedule(self, test_db_session: Session, output_datasource: DataSource):
         created = create_schedule(
@@ -326,8 +327,9 @@ class TestScheduleCrud:
         assert len(result) == 0
 
     def test_delete_nonexistent_raises(self, test_db_session: Session):
-        with pytest.raises(ScheduleNotFoundError):
+        with pytest.raises(AppError, match='Schedule nonexistent not found') as exc_info:
             delete_schedule(test_db_session, 'nonexistent')
+        assert exc_info.value.error_code == 'SCHEDULE_NOT_FOUND'
 
     def test_create_schedule_without_datasource_id(self, test_db_session: Session):
         """ScheduleCreate requires datasource_id - should raise validation error."""
@@ -415,8 +417,9 @@ class TestScheduleEligibility:
             datasource_id=str(uuid.uuid4()),
             cron_expression='0 * * * *',
         )
-        with pytest.raises(DataSourceNotFoundError):
+        with pytest.raises(AppError) as exc_info:
             create_schedule(test_db_session, payload)
+        assert exc_info.value.error_code == 'DATASOURCE_NOT_FOUND'
 
     def test_create_schedule_rejected_for_multiple_triggers(self, test_db_session: Session, output_datasource: DataSource):
         """Schedules cannot define multiple trigger fields."""

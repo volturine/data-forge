@@ -7,7 +7,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from backend_core.data_plane_object_store import delete_object
+from backend_core.data_plane_client import client_from_settings
 from backend_core.object_store_paths import is_object_store_url
 
 
@@ -80,7 +80,7 @@ async def _delete_source(path: str, *, delete_source: bool) -> None:
     if not delete_source:
         return
     if is_object_store_url(path):
-        await asyncio.to_thread(delete_object, path)
+        await asyncio.to_thread(client_from_settings().delete_object, path)
         return
     local_path = Path(path)
     if not local_path.exists():

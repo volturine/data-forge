@@ -6,18 +6,18 @@ I analyzed the **605 source files** across the four main packages (`backend` 223
 
 ## Consolidated Cleanup Task List
 
-### 🔴 **P0 — Duplicate Types & Cross-Package Duplication**
+### ✅ **P0 — Protocol-First Contract Unification**
 
-These are the highest-impact items because every schema change requires manual sync across packages.
+Status: resolved in the protocol-first rewrite. `packages/protocol` is now the single source of truth for wire contracts; backend, worker, and scheduler use committed package-local generated `dataforge_protocol.*` code. The deleted `backend_contracts` and `worker_models` roots are not shimmed, and `just check` enforces package-boundary failures for the old import roots, deleted generated gRPC compatibility paths, generic protocol JSON payloads, engine-key prefix fossils, and removed backend data-plane facades.
 
 | #   | Task                                     | Files Affected                                                                                                                         | Notes                                                                                                                                                                           |
 | --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Extract shared contracts package**     | `backend_contracts/*` ↔ `worker_models/*`                                                                                              | 17+ file pairs are byte-for-byte identical except import paths and quote style. Create `packages/common` or `packages/contracts` and have both backend and worker depend on it. |
-| 2   | **Deduplicate `namespace` module**       | `backend_core/namespace.py` ↔ `worker/runtime/namespace.py`                                                                            | Nearly identical. Only diff is a `namespace_database_schema()` helper missing in worker.                                                                                        |
-| 3   | **Deduplicate `engine_identity` module** | `backend_core/engine_identity.py` ↔ `worker/runtime/engine_identity.py`                                                                | Same pattern: identical logic, only imports and quotes differ.                                                                                                                  |
-| 4   | **Deduplicate Iceberg utilities**        | `backend_core/iceberg_metadata.py`, `iceberg_snapshot_reader.py` ↔ `worker/runtime/iceberg_metadata.py`, `iceberg_snapshot_reader.py`  | Same files duplicated.                                                                                                                                                          |
-| 5   | **Deduplicate `object_store`**           | `backend_core/object_store.py` ↔ `worker/runtime/object_store.py`                                                                      | Check if these are identical; if so, move to shared package.                                                                                                                    |
-| 6   | **Consolidate exception hierarchies**    | `backend_core/exceptions.py` (11 NotFoundError classes), `worker/runtime/exceptions.py` (4 classes), `backend_core/auth_exceptions.py` | Every `*NotFoundError` follows identical boilerplate. Create a `NotFoundError` base/mixin that auto-generates `error_code` and `details`.                                       |
+| 1   | **Protocol-owned generated contracts**   | `packages/protocol/proto/*`, generated `dataforge_protocol/*` in backend/worker/scheduler | Replaced mirrored `backend_contracts`/`worker_models` packages with Buf-generated protobuf, pyi, and gRPC modules committed into each runtime package. |
+| 2   | **Explicit namespace contract**          | `namespace` protocol fields plus package-local runtime helpers | Namespace validation is protocol annotated; package-local runtime helpers remain only where they own runtime behavior. |
+| 3   | **Explicit engine identity**             | `EngineIdentity` protobuf plus package-local helpers | Removed prefixed engine-key string semantics. Runtime carries `scope`, `reuse_policy`, and resource IDs explicitly. |
+| 4   | **Worker-owned Iceberg operations**      | `IcebergService` RPC and `WorkerDataPlaneClient` | Backend data-plane facades were removed; backend callers use typed worker RPC client operations. |
+| 5   | **Worker-owned object-store operations** | `ObjectStoreService` RPC and `WorkerDataPlaneClient` | Backend object-store upload/download/delete/list/existence/URL construction now routes through the worker data-plane client. |
+| 6   | **Protocol-coded errors**                | `ErrorCode`, `ErrorInfo`, package-local `AppError` | Boilerplate `*NotFoundError` subclasses were replaced by protocol-code factories and status mapping by generated `ErrorCode`. |
 
 ---
 

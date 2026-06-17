@@ -26,22 +26,27 @@ from backend_core.contracts.build_runs.live import BuildNotification, hub as bui
 from backend_core.contracts.compute import schemas
 from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
+from backend_core.data_plane_client import client_from_settings
 from backend_core.database import get_db, get_settings_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
     get_manager,
     get_runtime_availability_probe,
 )
+from backend_core.engine_identity import (
+    analysis_interactive_engine_identity,
+    build_engine_identity,
+    datasource_preview_engine_identity,
+    engine_identity_from_payload,
+)
 from backend_core.engine_live import load_engine_snapshot, registry as engine_registry
 from backend_core.error_handlers import handle_errors
-from backend_core.exceptions import EngineNotFoundError
+from backend_core.exceptions import engine_not_found
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
-from backend_core.object_store_paths import object_store_url
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.validation import (
-    ComputeAnalysisId,
+    AnalysisId,
     DataSourceId,
-    parse_compute_analysis_id,
     parse_datasource_id,
 )
 from backend_core.websocket import (
@@ -473,6 +478,11 @@ async def preview_step(
     """
     analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
     normalized = request.model_copy(update={'analysis_id': analysis_id})
+    engine_identity = (
+        engine_identity_from_payload(normalized.engine_identity.model_dump(mode='json'))
+        if normalized.engine_identity is not None
+        else analysis_interactive_engine_identity(analysis_id)
+    )
     manager = _override_manager(http_request)
     if manager is not None:
         executor = _override_compute_executor(http_request)
@@ -487,6 +497,7 @@ async def preview_step(
             row_limit=normalized.row_limit,
             page=normalized.page,
             analysis_id=analysis_id,
+            engine_identity=engine_identity,
             resource_config=normalized.resource_config.model_dump() if normalized.resource_config else None,
             tab_id=normalized.tab_id,
             request_json=normalized.model_dump(mode='json'),
@@ -661,7 +672,8 @@ async def start_active_build(
             if isinstance(branch_name, str) and branch_name.strip():
                 safe_branch = re.sub(r'[^a-zA-Z0-9_]+', '_', branch_name).strip('_')
                 table_name = f'{result_id}_{safe_branch}'
-                warehouse_path = object_store_url('namespaces', get_namespace(), 'exports')
+                data_plane = client_from_settings()
+                warehouse_path = data_plane.build_object_url('namespaces', get_namespace(), 'exports')
                 placeholder_source_type = datasource_service.DataSourceType.ICEBERG
                 placeholder_config = {
                     'catalog_type': 'sql',
@@ -670,7 +682,7 @@ async def start_active_build(
                     'namespace': namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else 'outputs',
                     'table': table_name,
                     'table_name': output_name if isinstance(output_name, str) and output_name.strip() else table_name,
-                    'metadata_path': object_store_url('namespaces', get_namespace(), 'exports', str(result_id)),
+                    'metadata_path': data_plane.build_object_url('namespaces', get_namespace(), 'exports', str(result_id)),
                     'branch': branch_name,
                     'namespace_name': get_namespace(),
                     'reader': 'native',
@@ -886,85 +898,145 @@ async def get_active_build(
 # Engine lifecycle endpoints
 
 
-@router.post('/engine/spawn/{analysis_id}', response_model=schemas.EngineStatusSchema, mcp=True)
-@handle_errors(operation='spawn engine')
-async def spawn_engine(
-    analysis_id: ComputeAnalysisId,
+async def _spawn_engine_identity(
+    identity,
+    http_request: Request,
+    request: schemas.SpawnEngineRequest | None,
+    session: Session,
+    runtime_probe: RuntimeAvailabilityProbe,
+):
+    resource_config = request.resource_config.model_dump() if request and request.resource_config else None
+    manager = _override_manager(http_request)
+    if manager is not None:
+        manager.spawn_engine(identity, resource_config=resource_config)
+        return manager.get_engine_status(identity)
+    return await executor_client.spawn_engine(
+        session,
+        identity=identity,
+        resource_config=resource_config,
+        runtime_probe=runtime_probe,
+    )
+
+
+async def _configure_engine_identity(
+    identity,
+    request: schemas.EngineResourceConfig,
+    http_request: Request,
+    session: Session,
+    runtime_probe: RuntimeAvailabilityProbe,
+):
+    resource_config = request.model_dump()
+    manager = _override_manager(http_request)
+    if manager is not None:
+        manager.restart_engine_with_config(identity, resource_config)
+        return manager.get_engine_status(identity)
+    return await executor_client.configure_engine(
+        session,
+        identity=identity,
+        resource_config=resource_config,
+        runtime_probe=runtime_probe,
+    )
+
+
+async def _shutdown_engine_identity(
+    identity,
+    http_request: Request,
+    session: Session,
+    runtime_probe: RuntimeAvailabilityProbe,
+) -> None:
+    manager = _override_manager(http_request)
+    if manager is not None:
+        engine = manager.get_engine(identity)
+        if not engine:
+            raise engine_not_found(identity.resource_id)
+        if engine.current_job_id and engine.is_process_alive():
+            raise HTTPException(status_code=409, detail='Engine has an active job')
+        manager.shutdown_engine(identity)
+        return
+    await executor_client.shutdown_engine(session, identity=identity, runtime_probe=runtime_probe)
+
+
+@router.post('/engine/spawn/analysis/{analysis_id}', response_model=schemas.EngineStatusSchema, mcp=True)
+@handle_errors(operation='spawn analysis engine')
+async def spawn_analysis_engine(
+    analysis_id: AnalysisId,
     http_request: Request,
     request: schemas.SpawnEngineRequest | None = None,
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    """Spawn a compute engine for an analysis (called when analysis page opens).
-
-    Optionally accepts resource configuration overrides.
-    """
-    resource_config = request.resource_config.model_dump() if request and request.resource_config else None
-    analysis_id_value = parse_compute_analysis_id(analysis_id)
-    manager = _override_manager(http_request)
-    if manager is not None:
-        manager.spawn_engine(analysis_id_value, resource_config=resource_config)
-        return manager.get_engine_status(analysis_id_value)
-    return await executor_client.spawn_engine(
-        session,
-        analysis_id=analysis_id_value,
-        resource_config=resource_config,
-        runtime_probe=runtime_probe,
-    )
+    return await _spawn_engine_identity(analysis_interactive_engine_identity(analysis_id), http_request, request, session, runtime_probe)
 
 
-@router.post(
-    '/engine/configure/{analysis_id}',
-    response_model=schemas.EngineStatusSchema,
-    mcp=True,
-)
-@handle_errors(operation='configure engine')
-async def configure_engine(
-    analysis_id: ComputeAnalysisId,
+@router.post('/engine/spawn/datasource-preview/{datasource_id}', response_model=schemas.EngineStatusSchema, mcp=True)
+@handle_errors(operation='spawn datasource preview engine')
+async def spawn_datasource_preview_engine(
+    datasource_id: DataSourceId,
+    http_request: Request,
+    request: schemas.SpawnEngineRequest | None = None,
+    session: Session = Depends(get_db),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
+):
+    return await _spawn_engine_identity(datasource_preview_engine_identity(parse_datasource_id(datasource_id)), http_request, request, session, runtime_probe)
+
+
+@router.post('/engine/configure/analysis/{analysis_id}', response_model=schemas.EngineStatusSchema, mcp=True)
+@handle_errors(operation='configure analysis engine')
+async def configure_analysis_engine(
+    analysis_id: AnalysisId,
     request: schemas.EngineResourceConfig,
     http_request: Request,
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    """Update engine resource configuration (restarts the engine).
-
-    This will terminate any running jobs and restart the engine with the new
-    resource configuration. Values set to null will use the default from settings.
-    """
-    resource_config = request.model_dump()
-    analysis_id_value = parse_compute_analysis_id(analysis_id)
-    manager = _override_manager(http_request)
-    if manager is not None:
-        manager.restart_engine_with_config(analysis_id_value, resource_config)
-        return manager.get_engine_status(analysis_id_value)
-    return await executor_client.configure_engine(
-        session,
-        analysis_id=analysis_id_value,
-        resource_config=resource_config,
-        runtime_probe=runtime_probe,
-    )
+    return await _configure_engine_identity(analysis_interactive_engine_identity(analysis_id), request, http_request, session, runtime_probe)
 
 
-@router.delete('/engine/{analysis_id}', status_code=204, mcp=True)
-@handle_errors(operation='shutdown engine')
-async def shutdown_engine(
-    analysis_id: str,
+@router.post('/engine/configure/datasource-preview/{datasource_id}', response_model=schemas.EngineStatusSchema, mcp=True)
+@handle_errors(operation='configure datasource preview engine')
+async def configure_datasource_preview_engine(
+    datasource_id: DataSourceId,
+    request: schemas.EngineResourceConfig,
     http_request: Request,
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    """Shutdown an engine by runtime engine key."""
-    analysis_id_value = analysis_id
-    manager = _override_manager(http_request)
-    if manager is not None:
-        engine = manager.get_engine(analysis_id_value)
-        if not engine:
-            raise EngineNotFoundError(analysis_id_value)
-        if engine.current_job_id and engine.is_process_alive():
-            raise HTTPException(status_code=409, detail='Engine has an active job')
-        manager.shutdown_engine(analysis_id_value)
-        return
-    await executor_client.shutdown_engine(session, analysis_id=analysis_id_value, runtime_probe=runtime_probe)
+    return await _configure_engine_identity(
+        datasource_preview_engine_identity(parse_datasource_id(datasource_id)), request, http_request, session, runtime_probe
+    )
+
+
+@router.delete('/engine/analysis/{analysis_id}', status_code=204, mcp=True, mcp_confirm_required=True)
+@handle_errors(operation='shutdown analysis engine')
+async def shutdown_analysis_engine(
+    analysis_id: AnalysisId,
+    http_request: Request,
+    session: Session = Depends(get_db),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
+):
+    await _shutdown_engine_identity(analysis_interactive_engine_identity(analysis_id), http_request, session, runtime_probe)
+
+
+@router.delete('/engine/datasource-preview/{datasource_id}', status_code=204, mcp=True, mcp_confirm_required=True)
+@handle_errors(operation='shutdown datasource preview engine')
+async def shutdown_datasource_preview_engine(
+    datasource_id: DataSourceId,
+    http_request: Request,
+    session: Session = Depends(get_db),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
+):
+    await _shutdown_engine_identity(datasource_preview_engine_identity(parse_datasource_id(datasource_id)), http_request, session, runtime_probe)
+
+
+@router.delete('/engine/build/{build_id}', status_code=204, mcp=True, mcp_confirm_required=True)
+@handle_errors(operation='shutdown build engine')
+async def shutdown_build_engine(
+    build_id: str,
+    http_request: Request,
+    session: Session = Depends(get_db),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
+):
+    await _shutdown_engine_identity(build_engine_identity(build_id), http_request, session, runtime_probe)
 
 
 @router.websocket('/ws/engines')

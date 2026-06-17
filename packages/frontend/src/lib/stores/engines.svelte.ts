@@ -1,10 +1,18 @@
 import type { EngineStatusResponse } from '$lib/types/compute';
-import { connectEnginesStream, shutdownEngine as shutdownEngineApi } from '$lib/api/compute';
+import {
+	connectEnginesStream,
+	shutdownAnalysisEngine as shutdownAnalysisEngineApi,
+	shutdownEngineByIdentity
+} from '$lib/api/compute';
 import { SvelteSet } from 'svelte/reactivity';
 
 const RECONNECT_DELAY_MS = 1_000;
 
 export type EnginesConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+function engineIdentityKey(engine: EngineStatusResponse): string {
+	return `${engine.scope ?? 'analysis_interactive'}:${engine.resource_id}`;
+}
 
 export class EnginesStore {
 	engines = $state.raw<EngineStatusResponse[]>([]);
@@ -47,13 +55,31 @@ export class EnginesStore {
 		this.status = 'disconnected';
 	}
 
-	async shutdownEngine(analysisId: string): Promise<void> {
-		this.shuttingDown.add(analysisId);
-		this.engines = this.engines.filter((engine) => engine.analysis_id !== analysisId);
-		await shutdownEngineApi(analysisId).match(
+	async shutdownEngine(engine: EngineStatusResponse): Promise<void> {
+		const key = engineIdentityKey(engine);
+		this.shuttingDown.add(key);
+		this.engines = this.engines.filter((item) => engineIdentityKey(item) !== key);
+		await shutdownEngineByIdentity(
+			engine.scope ?? 'analysis_interactive',
+			engine.resource_id
+		).match(
 			() => {},
 			(err) => {
-				this.shuttingDown.delete(analysisId);
+				this.shuttingDown.delete(key);
+				if (err.status === 404 || err.status === 409) {
+					this.error = null;
+					return;
+				}
+				this.error = err.message;
+				throw new Error(err.message);
+			}
+		);
+	}
+
+	async shutdownAnalysisEngine(analysisId: string): Promise<void> {
+		await shutdownAnalysisEngineApi(analysisId).match(
+			() => {},
+			(err) => {
 				if (err.status === 404 || err.status === 409) {
 					this.error = null;
 					return;
@@ -94,11 +120,13 @@ export class EnginesStore {
 
 		this.connection = connectEnginesStream({
 			onSnapshot: (engines) => {
-				for (const analysisId of this.shuttingDown) {
-					if (engines.some((engine) => engine.analysis_id === analysisId)) continue;
-					this.shuttingDown.delete(analysisId);
+				for (const key of this.shuttingDown) {
+					if (engines.some((engine) => engineIdentityKey(engine) === key)) continue;
+					this.shuttingDown.delete(key);
 				}
-				this.engines = engines.filter((engine) => !this.shuttingDown.has(engine.analysis_id));
+				this.engines = engines.filter(
+					(engine) => !this.shuttingDown.has(engineIdentityKey(engine))
+				);
 				this.loading = false;
 				this.error = null;
 				this.status = 'connected';

@@ -22,9 +22,9 @@ from backend_core.contracts.datasource.models import DataSourceTargetKind
 from backend_core.contracts.engine_runs.schemas import EngineRunKind
 from backend_core.contracts.scheduler.schemas import ScheduleCreate, ScheduleResponse, ScheduleUpdate
 from backend_core.exceptions import (
-    DataSourceNotFoundError,
-    ScheduleNotFoundError,
     ScheduleValidationError,
+    datasource_not_found,
+    schedule_not_found,
 )
 from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
@@ -321,7 +321,7 @@ def _resolve_schedule_target(session: Session, datasource_id: str) -> tuple[Data
     """Resolve schedule execution path and optional analysis provenance."""
     datasource = session.get(DataSource, datasource_id)
     if not datasource:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
 
     analysis_id = datasource.created_by_analysis_id
     if datasource.target_kind() == DataSourceTargetKind.ANALYSIS and analysis_id:
@@ -449,7 +449,7 @@ def create_schedule(session: Session, payload: ScheduleCreate) -> ScheduleRespon
     # Validate datasource exists
     datasource = session.get(DataSource, payload.datasource_id)
     if not datasource:
-        raise DataSourceNotFoundError(payload.datasource_id)
+        raise datasource_not_found(payload.datasource_id)
     if datasource.is_analysis_output and not datasource.created_by_analysis_id:
         raise ScheduleValidationError(
             'Datasource has no analysis provenance',
@@ -469,7 +469,7 @@ def create_schedule(session: Session, payload: ScheduleCreate) -> ScheduleRespon
     if payload.trigger_on_datasource_id:
         trigger_ds = session.get(DataSource, payload.trigger_on_datasource_id)
         if not trigger_ds:
-            raise DataSourceNotFoundError(payload.trigger_on_datasource_id)
+            raise datasource_not_found(payload.trigger_on_datasource_id)
 
     next_run = Schedule.compute_next_run(payload.cron_expression)
     record = Schedule(
@@ -492,13 +492,13 @@ def create_schedule(session: Session, payload: ScheduleCreate) -> ScheduleRespon
 def update_schedule(session: Session, schedule_id: str, payload: ScheduleUpdate) -> ScheduleResponse:
     schedule = session.get(Schedule, schedule_id)
     if not schedule:
-        raise ScheduleNotFoundError(schedule_id)
+        raise schedule_not_found(schedule_id)
 
     # Validate new datasource if provided
     if payload.datasource_id:
         datasource = session.get(DataSource, payload.datasource_id)
         if not datasource:
-            raise DataSourceNotFoundError(payload.datasource_id)
+            raise datasource_not_found(payload.datasource_id)
 
     # Validate dependency if provided
     if payload.depends_on:
@@ -513,7 +513,7 @@ def update_schedule(session: Session, schedule_id: str, payload: ScheduleUpdate)
     if payload.trigger_on_datasource_id:
         trigger_ds = session.get(DataSource, payload.trigger_on_datasource_id)
         if not trigger_ds:
-            raise DataSourceNotFoundError(payload.trigger_on_datasource_id)
+            raise datasource_not_found(payload.trigger_on_datasource_id)
 
     update_data = payload.model_dump(exclude_unset=True)
     for key, value in update_data.items():
@@ -531,7 +531,7 @@ def update_schedule(session: Session, schedule_id: str, payload: ScheduleUpdate)
 def delete_schedule(session: Session, schedule_id: str) -> None:
     schedule = session.get(Schedule, schedule_id)
     if not schedule:
-        raise ScheduleNotFoundError(schedule_id)
+        raise schedule_not_found(schedule_id)
     session.delete(schedule)
     session.commit()
 

@@ -204,12 +204,12 @@ echo "Starting e2e worker, scheduler, and frontend"
 if [ -n "$LOG_DIR" ]; then
     (cd packages/worker && exec uv run --no-env-file main.py) >"$LOG_DIR/worker.log" 2>&1 & WORKER_PID=$!
     (cd packages/scheduler && exec uv run --no-env-file main.py) >"$LOG_DIR/scheduler.log" 2>&1 & SCHEDULER_PID=$!
-    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 DATAFORGE_DISABLE_VITE_HMR=true node ./node_modules/vite/bin/vite.js dev) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
+    (cd packages/frontend && bun run panda:codegen && bun run build && exec env NODE_NO_WARNINGS=1 node ./node_modules/vite/bin/vite.js preview) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
 fi
 if [ -z "$LOG_DIR" ]; then
     (cd packages/worker && exec uv run --no-env-file main.py) & WORKER_PID=$!
     (cd packages/scheduler && exec uv run --no-env-file main.py) & SCHEDULER_PID=$!
-    (cd packages/frontend && bun run predev && exec env NODE_NO_WARNINGS=1 DATAFORGE_DISABLE_VITE_HMR=true node ./node_modules/vite/bin/vite.js dev) & FRONTEND_PID=$!
+    (cd packages/frontend && bun run panda:codegen && bun run build && exec env NODE_NO_WARNINGS=1 node ./node_modules/vite/bin/vite.js preview) & FRONTEND_PID=$!
 fi
 echo "Waiting for runtime worker registrations"
 wait_for_runtime_worker "build_manager" 1 "worker build manager"
@@ -267,34 +267,9 @@ start_playwright_shard() {
     SHARD_LABELS+=("$shard_label")
 }
 
-start_playwright_shard "1/4" \
-    tests/analysis-editor.test.ts \
-    tests/analysis-crud.test.ts \
-    tests/analysis-locking.test.ts \
-    tests/analysis-error-states.test.ts \
-    tests/lineage.test.ts
-
-start_playwright_shard "2/4" \
-    --grep "Monitoring –|Navigation –|Profile –|Analyses – SQL/Polars snippet export|Datasources – detail view|Datasources – preview pagination|Datasources – column stats panel|Datasources – config tab interactions|Auth –" \
-    tests/monitoring.test.ts \
-    tests/navigation.test.ts \
-    tests/profile.test.ts \
-    tests/sql-polars-snippet-export.test.ts \
-    tests/datasources.test.ts \
-    tests/auth.test.ts
-
-start_playwright_shard "3/4" \
-    --grep "Analyses –|Datasources – list & management|Datasources – upload page|Datasources – Runs tab|Datasources – Health Checks tab|Datasources – CSV config|Datasources – schema refresh|Datasources – error states|Datasources – preview table interactions|Datasources – build comparison|Namespace –|Build Preview –|Cancel Build –" \
-    tests/analysis-operations.test.ts \
-    tests/datasources.test.ts \
-    tests/namespace-isolation.test.ts \
-    tests/build-preview.test.ts \
-    tests/cancel-build.test.ts
-
-start_playwright_shard "4/4" \
-    tests/analysis-pipeline.test.ts \
-    tests/analysis-output.test.ts \
-    tests/udfs.test.ts
+for shard_index in 1 2 3 4; do
+    start_playwright_shard "${shard_index}/4" --shard "${shard_index}/4"
+done
 
 shard_failures=0
 for shard_position in "${!SHARD_PIDS[@]}"; do

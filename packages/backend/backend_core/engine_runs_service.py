@@ -24,7 +24,7 @@ from backend_core.contracts.engine_runs.schemas import (
     TimingDiff,
 )
 from backend_core.engine_runs_utils import normalize_step_timings
-from backend_core.exceptions import EngineRunComparisonError, EngineRunNotFoundError
+from backend_core.exceptions import EngineRunComparisonError, engine_run_not_found
 from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
@@ -290,7 +290,7 @@ def update_engine_run(
 ) -> EngineRunResponseSchema:
     run = session.get(EngineRun, run_id)
     if run is None or run.namespace != get_namespace():
-        raise EngineRunNotFoundError(run_id)
+        raise engine_run_not_found(run_id)
     session.refresh(run)
 
     if not isinstance(analysis_id, _UnsetType):
@@ -446,7 +446,7 @@ def compare_engine_runs(session: Session, run_a_id: str, run_b_id: str, datasour
         run_b = None
     if not run_a or not run_b:
         missing = run_a_id if not run_a else run_b_id
-        raise EngineRunNotFoundError(missing)
+        raise engine_run_not_found(missing)
     if run_a.datasource_id != run_b.datasource_id:
         raise EngineRunComparisonError('Engine runs must belong to the same datasource', run_a_id=run_a_id, run_b_id=run_b_id)
     if datasource_id and (run_a.datasource_id != datasource_id or run_b.datasource_id != datasource_id):

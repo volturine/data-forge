@@ -11,8 +11,8 @@ from openpyxl import load_workbook
 
 from backend_core.contracts.datasource.source_types import DataSourceFileType
 from backend_core.contracts.enums import DataForgeStrEnum
-from backend_core.data_plane_iceberg import resolve_iceberg_branch_metadata_path, scan_iceberg_snapshot
-from backend_core.data_plane_object_store import download_file, object_store_storage_options
+from backend_core.data_plane_client import client_from_settings
+from backend_core.namespace import get_namespace
 from backend_core.object_store_paths import is_object_store_url
 
 
@@ -139,7 +139,7 @@ def _download_object_store_file(path: str) -> Path:
     fd, temp_name = tempfile.mkstemp(suffix=suffix)
     os.close(fd)
     temp_path = Path(temp_name)
-    download_file(path, temp_path)
+    temp_path.write_bytes(client_from_settings().download_object_bytes(path))
     return temp_path
 
 
@@ -219,10 +219,11 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         metadata_path = config.get('metadata_path')
         if not isinstance(metadata_path, str):
             raise ValueError('Datasource Iceberg loading requires metadata_path')
-        resolved_metadata_path = resolve_iceberg_branch_metadata_path(
-            metadata_path,
-            config.get('branch') if isinstance(config.get('branch'), str) else None,
-            namespace_name=config.get('namespace_name') if isinstance(config.get('namespace_name'), str) else None,
+        namespace_name = config.get('namespace_name')
+        resolved_metadata_path = client_from_settings().resolve_branch_metadata_path(
+            namespace=namespace_name if isinstance(namespace_name, str) else get_namespace(),
+            metadata_path=metadata_path,
+            branch=config.get('branch') if isinstance(config.get('branch'), str) else None,
         )
         snapshot_id = config.get('snapshot_id')
         snapshot_value: int | None = None
@@ -232,12 +233,12 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
             except (TypeError, ValueError) as exc:
                 raise ValueError(f'Iceberg snapshot ID must be an integer: {snapshot_id}') from exc
         storage_options = config.get('storage_options')
-        resolved_storage_options = storage_options if isinstance(storage_options, dict) and storage_options else object_store_storage_options()
+        resolved_storage_options = (
+            storage_options if isinstance(storage_options, dict) and storage_options else client_from_settings().read_object_store_storage_options()
+        )
         if snapshot_value is not None:
-            return scan_iceberg_snapshot(
-                resolved_metadata_path,
-                snapshot_value,
-            )
+            rows = client_from_settings().scan_snapshot(metadata_path=resolved_metadata_path, snapshot_id=str(snapshot_value))
+            return pl.DataFrame(rows).lazy()
         reader = config.get('reader')
         reader_override = IcebergReader.NATIVE if reader == IcebergReader.NATIVE.value else IcebergReader.PYICEBERG
         return pl.scan_iceberg(

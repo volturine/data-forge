@@ -7,8 +7,8 @@ from runtime.compute_manager import ProcessManager
 
 
 class _FakeEngine:
-    def __init__(self, engine_key: str, resource_config: dict | None = None) -> None:
-        self.analysis_id = engine_key
+    def __init__(self, resource_id: str, resource_config: dict | None = None) -> None:
+        self.analysis_id = resource_id
         self.resource_config = resource_config or {}
         self.effective_resources: dict[str, object] = {}
         self.current_job_id: str | None = None
@@ -55,8 +55,8 @@ def test_process_manager_reaps_idle_shared_engines(monkeypatch) -> None:
     monkeypatch.setattr(settings, "engine_idle_ttl_seconds", 1)
     monkeypatch.setattr(settings, "engine_idle_reap_interval_seconds", 1)
 
-    def fake_engine_factory(engine_key: str, resource_config: dict | None = None):
-        return cast(Any, _FakeEngine(engine_key, resource_config))
+    def fake_engine_factory(resource_id: str, resource_config: dict | None = None):
+        return cast(Any, _FakeEngine(resource_id, resource_config))
 
     manager = ProcessManager(engine_factory=fake_engine_factory)
     try:

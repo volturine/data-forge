@@ -23,15 +23,11 @@ from backend_core import engine_runs_service
 from backend_core.config import settings
 from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
-from backend_core.data_plane_object_store import (
-    download_file,
-    object_exists,
-    object_store_storage_options,
-)
-from backend_core.exceptions import DataSourceConnectionError, DataSourceNotFoundError, DataSourceValidationError
+from backend_core.data_plane_client import client_from_settings
+from backend_core.exceptions import DataSourceConnectionError, DataSourceValidationError, datasource_not_found
 from backend_core.iceberg_catalog import load_runtime_catalog
 from backend_core.namespace import get_namespace, namespace_paths
-from backend_core.object_store_paths import is_object_store_url, object_store_url
+from backend_core.object_store_paths import is_object_store_url
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from modules.datasource.runtime_loading import load_datasource_frame as load_datasource
 from modules.datasource.schemas import (
@@ -62,7 +58,7 @@ def _ensure_catalog_namespace(catalog, namespace: str) -> None:
 
 
 def _prepare_clean_target(_clean_dir: Path, datasource_id: str, branch: str) -> str:
-    return object_store_url('namespaces', get_namespace(), 'clean', datasource_id, branch)
+    return client_from_settings().build_object_url('namespaces', get_namespace(), 'clean', datasource_id, branch)
 
 
 def _coerce_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.LazyFrame:
@@ -120,7 +116,7 @@ def _materialized_file_source(source_config: dict[str, Any]):
     os.close(fd)
     temp_path = Path(temp_name)
     try:
-        download_file(file_path, temp_path)
+        temp_path.write_bytes(client_from_settings().download_object_bytes(file_path))
         yield {**source_config, 'file_path': str(temp_path)}
     finally:
         with contextlib.suppress(FileNotFoundError):
@@ -131,7 +127,7 @@ def _validate_source_file_path(file_path: str, file_type: DataSourceFileType) ->
     normalized = file_path.strip()
     if not is_object_store_url(normalized):
         raise ValueError('file_path must be an s3:// URL')
-    if not object_exists(normalized):
+    if not client_from_settings().object_exists(normalized):
         raise ValueError(f'Object not found: {normalized}')
     return normalized
 
@@ -160,8 +156,8 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: str, build_mode: str) -
         'local',
         type='sql',
         uri=settings.database_url,
-        warehouse=object_store_url('namespaces', get_namespace(), 'clean'),
-        **object_store_storage_options(),
+        warehouse=client_from_settings().build_object_url('namespaces', get_namespace(), 'clean'),
+        **client_from_settings().read_object_store_storage_options(),
     )
     namespace = 'clean'
     _ensure_catalog_namespace(catalog, namespace)
@@ -196,7 +192,7 @@ def _build_iceberg_config(
     return {
         'catalog_type': 'sql',
         'catalog_uri': settings.database_url,
-        'warehouse': object_store_url('namespaces', get_namespace(), 'clean'),
+        'warehouse': client_from_settings().build_object_url('namespaces', get_namespace(), 'clean'),
         'namespace': 'clean',
         'table': parts[-2],
         'metadata_path': cleaned,
@@ -729,7 +725,7 @@ def ingest_external_datasource(
 ) -> DataSourceResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
     if not datasource.is_iceberg:
         raise DataSourceValidationError(
             'Ingest is only available for Iceberg datasources',
@@ -847,7 +843,7 @@ def is_reingestable_raw_datasource(datasource: DataSource) -> bool:
 def ingest_datasource_for_schedule(session: Session, datasource_id: str) -> DataSourceResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
     if is_reingestable_raw_datasource(datasource):
         return ingest_external_datasource(
             session,
@@ -890,7 +886,7 @@ def get_datasource_schema(
 ) -> SchemaInfo:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
     if datasource.schema_cache and sheet_name is None and not refresh:
         try:
             cached = SchemaInfo.model_validate(datasource.schema_cache)
@@ -1040,7 +1036,7 @@ def compare_iceberg_snapshots(
 ) -> SnapshotCompareResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
     if not datasource.is_iceberg:
         raise DataSourceValidationError(
             'Snapshot comparison is only available for Iceberg datasources',
@@ -1105,7 +1101,7 @@ def get_column_stats(
 ) -> ColumnStatsResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
     config = {'source_type': datasource.source_type, **datasource.config}
     if datasource_config:
         config = {**config, **datasource_config}

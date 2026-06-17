@@ -4,18 +4,18 @@ import pytest
 
 from backend_core.exceptions import (
     AnalysisError,
-    AnalysisNotFoundError,
     AnalysisValidationError,
     AppError,
     ComputeError,
     DataSourceError,
-    DataSourceNotFoundError,
     DataSourceValidationError,
     FileError,
     FileSizeExceededError,
     JobError,
-    JobNotFoundError,
     PipelineError,
+    analysis_not_found,
+    datasource_not_found,
+    job_not_found,
 )
 
 
@@ -39,8 +39,8 @@ class TestExceptions:
         assert exc.error_code == 'DATASOURCE_VALIDATION_ERROR'
 
     def test_datasource_not_found_error(self):
-        """Test DataSourceNotFoundError."""
-        exc = DataSourceNotFoundError(datasource_id='ds-123')
+        """Test datasource_not_found."""
+        exc = datasource_not_found(datasource_id='ds-123')
 
         assert 'ds-123' in str(exc)
         assert exc.error_code == 'DATASOURCE_NOT_FOUND'
@@ -62,8 +62,8 @@ class TestExceptions:
         assert exc.error_code == 'ANALYSIS_VALIDATION_ERROR'
 
     def test_analysis_not_found_error(self):
-        """Test AnalysisNotFoundError."""
-        exc = AnalysisNotFoundError(analysis_id='analysis-123')
+        """Test analysis_not_found."""
+        exc = analysis_not_found(analysis_id='analysis-123')
 
         assert 'analysis-123' in str(exc)
         assert exc.error_code == 'ANALYSIS_NOT_FOUND'
@@ -84,8 +84,8 @@ class TestExceptions:
         assert exc.error_code == 'PIPELINE_EXECUTION_ERROR'
 
     def test_job_not_found_error(self):
-        """Test JobNotFoundError."""
-        exc = JobNotFoundError(job_id='job-123')
+        """Test job_not_found."""
+        exc = job_not_found(job_id='job-123')
 
         assert 'job-123' in str(exc)
         assert exc.error_code == 'JOB_NOT_FOUND'

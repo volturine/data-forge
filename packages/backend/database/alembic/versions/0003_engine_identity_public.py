@@ -34,29 +34,6 @@ def upgrade() -> None:
     op.add_column('engine_instances', sa.Column('engine_reuse_policy', sa.String(), nullable=False, server_default='shared'))
     op.add_column('engine_instances', sa.Column('datasource_id', sa.String(), nullable=True))
     op.add_column('engine_instances', sa.Column('build_id', sa.String(), nullable=True))
-    op.execute(
-        """
-        UPDATE engine_instances
-        SET
-            engine_scope = CASE
-                WHEN analysis_id LIKE '__preview__%' THEN 'datasource_preview'
-                WHEN analysis_id LIKE 'build:%' THEN 'build'
-                ELSE 'analysis_interactive'
-            END,
-            engine_reuse_policy = CASE
-                WHEN analysis_id LIKE 'build:%' THEN 'exclusive'
-                ELSE 'shared'
-            END,
-            datasource_id = CASE
-                WHEN analysis_id LIKE '__preview__%' THEN substring(analysis_id from 12)
-                ELSE NULL
-            END,
-            build_id = CASE
-                WHEN analysis_id LIKE 'build:%' THEN substring(analysis_id from 7)
-                ELSE NULL
-            END
-        """
-    )
     op.create_index('ix_engine_instances_engine_scope', 'engine_instances', ['engine_scope'])
 
 

@@ -1,6 +1,8 @@
 import type {
 	EngineDefaults,
+	EngineIdentityPayload,
 	EngineResourceConfig,
+	EngineScope,
 	EngineStatusResponse
 } from '$lib/types/compute';
 import type { AnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
@@ -15,6 +17,7 @@ import { shareInFlight } from './in-flight';
 
 export interface StepPreviewRequest {
 	analysis_id?: string;
+	engine_identity?: EngineIdentityPayload | null;
 	target_step_id: string;
 	analysis_pipeline: AnalysisPipelinePayload;
 	tab_id?: string | null;
@@ -68,12 +71,12 @@ export function previewStepData(
 
 // Engine lifecycle functions
 
-export function spawnEngine(
+export function spawnAnalysisEngine(
 	analysisId: string,
 	resourceConfig?: EngineResourceConfig
 ): ResultAsync<EngineStatusResponse, ApiError> {
 	const body = resourceConfig ? JSON.stringify({ resource_config: resourceConfig }) : undefined;
-	const endpoint = `/v1/compute/engine/spawn/${analysisId}`;
+	const endpoint = `/v1/compute/engine/spawn/analysis/${analysisId}`;
 	return shareInFlight(spawnInFlight, requestKey(endpoint, body), () =>
 		computeActivityStore.track(
 			apiRequest<EngineStatusResponse>(endpoint, {
@@ -84,12 +87,12 @@ export function spawnEngine(
 	);
 }
 
-export function configureEngine(
+export function configureAnalysisEngine(
 	analysisId: string,
 	resourceConfig: EngineResourceConfig
 ): ResultAsync<EngineStatusResponse, ApiError> {
 	const body = JSON.stringify(resourceConfig);
-	const endpoint = `/v1/compute/engine/configure/${analysisId}`;
+	const endpoint = `/v1/compute/engine/configure/analysis/${analysisId}`;
 	return shareInFlight(configureInFlight, requestKey(endpoint, body), () =>
 		computeActivityStore.track(
 			apiRequest<EngineStatusResponse>(endpoint, {
@@ -100,8 +103,28 @@ export function configureEngine(
 	);
 }
 
-export function shutdownEngine(analysisId: string): ResultAsync<void, ApiError> {
-	const endpoint = `/v1/compute/engine/${analysisId}`;
+export function shutdownAnalysisEngine(analysisId: string): ResultAsync<void, ApiError> {
+	const endpoint = `/v1/compute/engine/analysis/${analysisId}`;
+	return shareInFlight(shutdownInFlight, requestKey(endpoint), () =>
+		computeActivityStore.track(
+			apiRequest<void>(endpoint, {
+				method: 'DELETE'
+			})
+		)
+	);
+}
+
+export function shutdownEngineByIdentity(
+	scope: EngineScope,
+	resourceId: string
+): ResultAsync<void, ApiError> {
+	const segment =
+		scope === 'datasource_preview'
+			? 'datasource-preview'
+			: scope === 'build'
+				? 'build'
+				: 'analysis';
+	const endpoint = `/v1/compute/engine/${segment}/${resourceId}`;
 	return shareInFlight(shutdownInFlight, requestKey(endpoint), () =>
 		computeActivityStore.track(
 			apiRequest<void>(endpoint, {
@@ -112,7 +135,7 @@ export function shutdownEngine(analysisId: string): ResultAsync<void, ApiError> 
 }
 
 export function shutdownEngineBestEffort(analysisId: string): void {
-	shutdownEngine(analysisId).match(
+	shutdownAnalysisEngine(analysisId).match(
 		() => {},
 		(error) => {
 			if (error.status === 404 || error.status === 409) return;

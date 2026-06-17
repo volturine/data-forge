@@ -7,10 +7,10 @@ from sqlmodel import Session, col
 
 from backend_core.analysis_cycles import assert_no_analysis_cycle
 from backend_core.exceptions import (
-    AnalysisNotFoundError,
     AnalysisValidationError,
-    AnalysisVersionNotFoundError,
-    DataSourceNotFoundError,
+    analysis_not_found,
+    analysis_version_not_found,
+    datasource_not_found,
 )
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.analysis_versions.models import AnalysisVersion
@@ -65,7 +65,7 @@ def get_version(session: Session, analysis_id: str, version: int) -> AnalysisVer
 def delete_version(session: Session, analysis_id: str, version: int) -> None:
     target = get_version(session, analysis_id, version)
     if not target:
-        raise AnalysisVersionNotFoundError(analysis_id, version)
+        raise analysis_version_not_found(analysis_id, version)
     session.delete(target)
     session.commit()
 
@@ -73,7 +73,7 @@ def delete_version(session: Session, analysis_id: str, version: int) -> None:
 def rename_version(session: Session, analysis_id: str, version: int, name: str) -> AnalysisVersion:
     target = get_version(session, analysis_id, version)
     if not target:
-        raise AnalysisVersionNotFoundError(analysis_id, version)
+        raise analysis_version_not_found(analysis_id, version)
     target.name = name
     session.commit()
     session.refresh(target)
@@ -83,11 +83,11 @@ def rename_version(session: Session, analysis_id: str, version: int, name: str) 
 def restore_version(session: Session, analysis_id: str, version: int) -> Analysis:
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     target = get_version(session, analysis_id, version)
     if not target:
-        raise AnalysisVersionNotFoundError(analysis_id, version)
+        raise analysis_version_not_found(analysis_id, version)
 
     create_version(session, analysis, commit=False)
 
@@ -117,7 +117,7 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
     for datasource_id in set(datasource_ids):
         ds: DataSource | None = session.get(DataSource, datasource_id)
         if not ds:
-            raise DataSourceNotFoundError(datasource_id)
+            raise datasource_not_found(datasource_id)
         if ds.is_analysis_source:
             source_id = ds.analysis_source_id()
             assert_no_analysis_cycle(session, analysis_id, source_id)

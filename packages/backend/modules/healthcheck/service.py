@@ -5,7 +5,7 @@ from sqlalchemy import desc, or_, select
 from sqlmodel import Session, col
 
 from backend_core.contracts.healthcheck_models import HealthCheckType
-from backend_core.exceptions import HealthcheckNotFoundError, HealthcheckValidationError
+from backend_core.exceptions import HealthcheckValidationError, healthcheck_not_found
 from backend_core.healthcheck_schemas import (
     HealthCheckCreate,
     HealthCheckResponse,
@@ -89,7 +89,7 @@ def update_healthcheck(
 ) -> HealthCheckResponse:
     check = session.get(HealthCheck, healthcheck_id)
     if not check:
-        raise HealthcheckNotFoundError(healthcheck_id)
+        raise healthcheck_not_found(healthcheck_id)
     check_type = payload.check_type or check.check_type
     if HealthCheckType.require(check_type).requires_unique_per_datasource:
         _ensure_unique_row_count(session, check.datasource_id, check_type, exclude_id=healthcheck_id)
@@ -104,7 +104,7 @@ def update_healthcheck(
 def delete_healthcheck(session: Session, healthcheck_id: str) -> None:
     check = session.get(HealthCheck, healthcheck_id)
     if not check:
-        raise HealthcheckNotFoundError(healthcheck_id)
+        raise healthcheck_not_found(healthcheck_id)
     session.delete(check)
     session.commit()
 

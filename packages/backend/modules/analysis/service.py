@@ -25,9 +25,9 @@ from backend_core.contracts.analysis.pipeline_types import (
 )
 from backend_core.contracts.step_config_enums import AIProvider
 from backend_core.exceptions import (
-    AnalysisNotFoundError,
     AnalysisValidationError,
-    DataSourceNotFoundError,
+    analysis_not_found,
+    datasource_not_found,
 )
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
 from backend_core.persistence.datasource.models import DataSource
@@ -556,7 +556,7 @@ def _validate_analysis_payload(
                 source_id = datasource_row.analysis_source_id()
                 assert_no_analysis_cycle(session, analysis_id, source_id)
             continue
-        raise DataSourceNotFoundError(ds.id)
+        raise datasource_not_found(ds.id)
 
     tab_ids = {tab.id for tab in tabs_payload if tab.id}
 
@@ -658,7 +658,7 @@ def get_analysis(
     analysis = session.get(Analysis, analysis_id)
 
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     return _to_response(analysis)
 
@@ -740,7 +740,7 @@ def duplicate_analysis(
 ) -> AnalysisResponseSchema:
     original = session.get(Analysis, analysis_id)
     if not original:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     pipeline = deepcopy(original.pipeline_definition)
     tabs = pipeline.get('tabs')
@@ -860,7 +860,7 @@ def generate_analysis_pipeline(
     for item in data.datasources:
         datasource = session.get(DataSource, item.id)
         if not datasource:
-            raise DataSourceNotFoundError(item.id)
+            raise datasource_not_found(item.id)
         selected_datasources.append(datasource)
         schema_cache = datasource.schema_cache if isinstance(datasource.schema_cache, dict) else {}
         datasource_schemas.append(
@@ -1004,7 +1004,7 @@ def update_analysis(
     analysis = session.get(Analysis, analysis_id)
 
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     version_service.create_version(session, analysis, commit=False)
 
@@ -1042,7 +1042,7 @@ def set_favorite(
 ) -> dict[str, Any]:
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     stmt = select(AnalysisFavorite).where(
         col(AnalysisFavorite.user_id) == user_id,
@@ -1071,7 +1071,7 @@ def delete_analysis(
     analysis = session.get(Analysis, analysis_id)
 
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     created_datasources = (
         session.execute(
@@ -1103,7 +1103,7 @@ def add_step(
 ) -> PipelineStep:
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     version_service.create_version(session, analysis, commit=False)
 
@@ -1164,7 +1164,7 @@ def get_step(
     """Get a step by ID from an analysis tab."""
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
     pipeline = analysis.pipeline
     tab = pipeline.find_tab(tab_id)
     step = next((s for s in tab.steps if s.id == step_id), None)
@@ -1183,7 +1183,7 @@ def update_step(
 ) -> PipelineStep:
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     version_service.create_version(session, analysis, commit=False)
 
@@ -1215,7 +1215,7 @@ def remove_step(
 ) -> None:
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     version_service.create_version(session, analysis, commit=False)
 
@@ -1247,7 +1247,7 @@ def derive_tab(
     """Create a new tab whose datasource is the given tab's output result_id."""
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     pipeline = analysis.pipeline
     source = pipeline.find_tab(tab_id)
@@ -1322,7 +1322,7 @@ def duplicate_tab(
     """Duplicate an existing tab in-place with fresh tab/step/output identities."""
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     pipeline = analysis.pipeline
     source = pipeline.find_tab(tab_id)

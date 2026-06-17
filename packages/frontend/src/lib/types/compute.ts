@@ -15,6 +15,7 @@ export interface EngineResourceConfig {
 
 export interface EngineStatusResponse {
 	analysis_id: string;
+	resource_id: string;
 	status: EngineStatus;
 	process_id: number | null;
 	last_activity: string | null;
@@ -32,6 +33,15 @@ export interface EngineStatusResponse {
 
 export interface SpawnEngineRequest {
 	resource_config?: EngineResourceConfig | null;
+}
+
+export interface EngineIdentityPayload {
+	scope: EngineScope;
+	reuse_policy: EngineReusePolicy;
+	resource_id: string;
+	analysis_id?: string | null;
+	datasource_id?: string | null;
+	build_id?: string | null;
 }
 
 export interface EngineDefaults {

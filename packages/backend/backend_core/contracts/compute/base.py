@@ -109,6 +109,7 @@ class ShutdownAck:
 @dataclass(frozen=True, slots=True)
 class EngineStatusInfo:
     analysis_id: str
+    resource_id: str
     status: str
     process_id: int | None
     last_activity: str | None

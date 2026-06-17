@@ -30,16 +30,102 @@ class AppError(Exception):
         super().__init__(message)
 
 
+def not_found_error(message: str, *, error_code: ErrorCodeInput, details: dict[str, object]) -> AppError:
+    """Build a protocol-coded not-found application error."""
+    return AppError(message=message, error_code=error_code, details=details)
+
+
+def datasource_not_found(datasource_id: str) -> AppError:
+    return not_found_error(
+        f'DataSource {datasource_id} not found',
+        error_code='DATASOURCE_NOT_FOUND',
+        details={'datasource_id': datasource_id},
+    )
+
+
+def step_not_found(step_id: str) -> AppError:
+    return not_found_error(
+        f'Step with id {step_id} not found in pipeline',
+        error_code='STEP_NOT_FOUND',
+        details={'step_id': step_id},
+    )
+
+
+def engine_not_found(resource_id: str) -> AppError:
+    return not_found_error(
+        f'Engine for resource {resource_id} not found',
+        error_code='ENGINE_NOT_FOUND',
+        details={'resource_id': resource_id},
+    )
+
+
+def engine_run_not_found(run_id: str) -> AppError:
+    return not_found_error(
+        f'Engine run {run_id} not found',
+        error_code='ENGINE_RUN_NOT_FOUND',
+        details={'run_id': run_id},
+    )
+
+
+def job_not_found(job_id: str) -> AppError:
+    return not_found_error(
+        f'Job {job_id} not found',
+        error_code='JOB_NOT_FOUND',
+        details={'job_id': job_id},
+    )
+
+
+def analysis_not_found(analysis_id: str) -> AppError:
+    return not_found_error(
+        f'Analysis {analysis_id} not found',
+        error_code='ANALYSIS_NOT_FOUND',
+        details={'analysis_id': analysis_id},
+    )
+
+
+def analysis_version_not_found(analysis_id: str, version: int) -> AppError:
+    return not_found_error(
+        f'Analysis version {version} not found for analysis {analysis_id}',
+        error_code='ANALYSIS_VERSION_NOT_FOUND',
+        details={'analysis_id': analysis_id, 'version': version},
+    )
+
+
+def data_file_not_found(file_path: str) -> AppError:
+    return not_found_error(
+        f'File not found: {file_path}',
+        error_code='FILE_NOT_FOUND',
+        details={'file_path': file_path},
+    )
+
+
+def schedule_not_found(schedule_id: str) -> AppError:
+    return not_found_error(
+        f'Schedule {schedule_id} not found',
+        error_code='SCHEDULE_NOT_FOUND',
+        details={'schedule_id': schedule_id},
+    )
+
+
+def udf_not_found(udf_id: str) -> AppError:
+    return not_found_error(
+        f'UDF {udf_id} not found',
+        error_code='UDF_NOT_FOUND',
+        details={'udf_id': udf_id},
+    )
+
+
+def healthcheck_not_found(healthcheck_id: str) -> AppError:
+    return not_found_error(
+        f'Healthcheck {healthcheck_id} not found',
+        error_code='HEALTHCHECK_NOT_FOUND',
+        details={'healthcheck_id': healthcheck_id},
+    )
+
+
 # DataSource Exceptions
 class DataSourceError(AppError):
     """Base exception for datasource-related errors."""
-
-
-class DataSourceNotFoundError(DataSourceError):
-    """Raised when a datasource is not found."""
-
-    def __init__(self, datasource_id: str):
-        super().__init__(message=f'DataSource {datasource_id} not found', error_code='DATASOURCE_NOT_FOUND', details={'datasource_id': datasource_id})
 
 
 class DataSourceValidationError(DataSourceError):
@@ -88,23 +174,9 @@ class PipelineExecutionError(PipelineError):
         super().__init__(message=message, error_code='PIPELINE_EXECUTION_ERROR', details=details)
 
 
-class StepNotFoundError(PipelineError):
-    """Raised when a pipeline step is not found."""
-
-    def __init__(self, step_id: str):
-        super().__init__(message=f'Step with id {step_id} not found in pipeline', error_code='STEP_NOT_FOUND', details={'step_id': step_id})
-
-
 # Compute/Engine Exceptions
 class ComputeError(AppError):
     """Base exception for compute engine errors."""
-
-
-class EngineNotFoundError(ComputeError):
-    """Raised when an engine is not found."""
-
-    def __init__(self, analysis_id: str):
-        super().__init__(message=f'Engine for analysis {analysis_id} not found', error_code='ENGINE_NOT_FOUND', details={'analysis_id': analysis_id})
 
 
 class EngineStartError(ComputeError):
@@ -120,13 +192,6 @@ class EngineBusyError(ComputeError):
     def __init__(self, analysis_id: str | None = None):
         details = {'analysis_id': analysis_id} if analysis_id is not None else None
         super().__init__(message='Engine has an active job', error_code='ENGINE_BUSY', details=details)
-
-
-class EngineRunNotFoundError(ComputeError):
-    """Raised when an engine run is not found."""
-
-    def __init__(self, run_id: str):
-        super().__init__(message=f'Engine run {run_id} not found', error_code='ENGINE_RUN_NOT_FOUND', details={'run_id': run_id})
 
 
 class EngineRunComparisonError(ComputeError):
@@ -148,13 +213,6 @@ class JobError(AppError):
     """Base exception for job-related errors."""
 
 
-class JobNotFoundError(JobError):
-    """Raised when a job is not found."""
-
-    def __init__(self, job_id: str):
-        super().__init__(message=f'Job {job_id} not found', error_code='JOB_NOT_FOUND', details={'job_id': job_id})
-
-
 class JobCancelledError(JobError):
     """Raised when a job is cancelled."""
 
@@ -167,29 +225,11 @@ class AnalysisError(AppError):
     """Base exception for analysis-related errors."""
 
 
-class AnalysisNotFoundError(AnalysisError):
-    """Raised when an analysis is not found."""
-
-    def __init__(self, analysis_id: str):
-        super().__init__(message=f'Analysis {analysis_id} not found', error_code='ANALYSIS_NOT_FOUND', details={'analysis_id': analysis_id})
-
-
 class AnalysisValidationError(AnalysisError):
     """Raised when analysis validation fails."""
 
     def __init__(self, message: str, details: dict | None = None):
         super().__init__(message=message, error_code='ANALYSIS_VALIDATION_ERROR', details=details)
-
-
-class AnalysisVersionNotFoundError(AnalysisError):
-    """Raised when an analysis version is not found."""
-
-    def __init__(self, analysis_id: str, version: int):
-        super().__init__(
-            message=f'Analysis version {version} not found for analysis {analysis_id}',
-            error_code='ANALYSIS_VERSION_NOT_FOUND',
-            details={'analysis_id': analysis_id, 'version': version},
-        )
 
 
 class AnalysisCycleError(AnalysisError):
@@ -202,13 +242,6 @@ class AnalysisCycleError(AnalysisError):
 # File Exceptions
 class FileError(AppError):
     """Base exception for file-related errors."""
-
-
-class DataFileNotFoundError(FileError):
-    """Raised when a file is not found."""
-
-    def __init__(self, file_path: str):
-        super().__init__(message=f'File not found: {file_path}', error_code='FILE_NOT_FOUND', details={'file_path': file_path})
 
 
 class FileValidationError(FileError):
@@ -253,23 +286,9 @@ class ScheduleValidationError(ScheduleError):
         super().__init__(message=message, error_code='SCHEDULE_VALIDATION_ERROR', details=details)
 
 
-class ScheduleNotFoundError(ScheduleError):
-    """Raised when a schedule is not found."""
-
-    def __init__(self, schedule_id: str):
-        super().__init__(message=f'Schedule {schedule_id} not found', error_code='SCHEDULE_NOT_FOUND', details={'schedule_id': schedule_id})
-
-
 # UDF Exceptions
 class UdfError(AppError):
     """Base exception for UDF-related errors."""
-
-
-class UdfNotFoundError(UdfError):
-    """Raised when a UDF is not found."""
-
-    def __init__(self, udf_id: str):
-        super().__init__(message=f'UDF {udf_id} not found', error_code='UDF_NOT_FOUND', details={'udf_id': udf_id})
 
 
 class UdfValidationError(UdfError):
@@ -282,13 +301,6 @@ class UdfValidationError(UdfError):
 # Healthcheck Exceptions
 class HealthcheckError(AppError):
     """Base exception for healthcheck-related errors."""
-
-
-class HealthcheckNotFoundError(HealthcheckError):
-    """Raised when a healthcheck is not found."""
-
-    def __init__(self, healthcheck_id: str):
-        super().__init__(message=f'Healthcheck {healthcheck_id} not found', error_code='HEALTHCHECK_NOT_FOUND', details={'healthcheck_id': healthcheck_id})
 
 
 class HealthcheckValidationError(HealthcheckError):

@@ -14,7 +14,7 @@ class _FakeWorkerDataPlaneClient:
     def __init__(self, snapshots: list[IcebergSnapshotInfo]) -> None:
         self._snapshots = snapshots
 
-    def list_iceberg_snapshots(self, *, namespace: str, datasource_id: str, branch: str | None = None) -> IcebergSnapshots:
+    def list_snapshots(self, *, namespace: str, datasource_id: str, branch: str | None = None) -> IcebergSnapshots:
         del namespace, branch
         return IcebergSnapshots(datasource_id=datasource_id, table_path='/tmp/warehouse/outputs/table1', snapshots=self._snapshots)
 

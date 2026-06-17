@@ -9,7 +9,7 @@ from uuid import UUID
 
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
 
-from dataforge_protocol import common_pb2, enums_pb2
+from dataforge_protocol import enums_pb2
 
 
 def _normalize_struct_decode_value(value: object) -> object:
@@ -38,16 +38,16 @@ def _normalize_struct_encode_value(value: object) -> object:
     return value
 
 
-def dict_to_struct(payload: dict[str, object] | None) -> common_pb2.JsonPayload:
+def dict_to_struct(payload: dict[str, object] | None) -> struct_pb2.Struct:
     normalized = _normalize_struct_encode_value(payload or {})
     encoded = json.loads(json.dumps(normalized, allow_nan=False, separators=(",", ":"), sort_keys=True))
     value = struct_pb2.Struct()
     value.update(encoded)
-    return common_pb2.JsonPayload(value=value)
+    return value
 
 
-def struct_to_dict(payload: common_pb2.JsonPayload) -> dict[str, object]:
-    decoded = _normalize_struct_decode_value(json_format.MessageToDict(payload.value, preserving_proto_field_name=True))
+def struct_to_dict(payload: struct_pb2.Struct) -> dict[str, object]:
+    decoded = _normalize_struct_decode_value(json_format.MessageToDict(payload, preserving_proto_field_name=True))
     if not isinstance(decoded, dict):
         raise ValueError("gRPC JSON payload must decode to an object")
     return cast(dict[str, object], decoded)

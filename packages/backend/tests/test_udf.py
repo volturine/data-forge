@@ -2,7 +2,7 @@
 
 import pytest
 
-from backend_core.exceptions import UdfNotFoundError, UdfValidationError
+from backend_core.exceptions import AppError, UdfValidationError
 from backend_core.persistence.udfs.models import Udf
 from main import app
 from modules.auth.dependencies import get_optional_user
@@ -125,8 +125,9 @@ class TestUdfCRUD:
 
     def test_get_nonexistent_udf(self, test_db_session):
         """Test getting a non-existent UDF raises error."""
-        with pytest.raises(UdfNotFoundError, match='UDF .* not found'):
+        with pytest.raises(AppError, match='UDF .* not found') as exc_info:
             get_udf(test_db_session, 'nonexistent-id')
+        assert exc_info.value.error_code == 'UDF_NOT_FOUND'
 
     def test_update_udf(self, test_db_session):
         """Test updating a UDF."""
@@ -167,13 +168,15 @@ class TestUdfCRUD:
         delete_udf(test_db_session, created.id)
 
         # Verify it's deleted
-        with pytest.raises(UdfNotFoundError, match='UDF .* not found'):
+        with pytest.raises(AppError, match='UDF .* not found') as exc_info:
             get_udf(test_db_session, created.id)
+        assert exc_info.value.error_code == 'UDF_NOT_FOUND'
 
     def test_delete_nonexistent_udf(self, test_db_session):
         """Test deleting a non-existent UDF raises error."""
-        with pytest.raises(UdfNotFoundError, match='UDF .* not found'):
+        with pytest.raises(AppError, match='UDF .* not found') as exc_info:
             delete_udf(test_db_session, 'nonexistent-id')
+        assert exc_info.value.error_code == 'UDF_NOT_FOUND'
 
 
 class TestUdfListing:

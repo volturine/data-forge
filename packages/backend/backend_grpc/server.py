@@ -35,7 +35,7 @@ from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.contracts.step_config_enums import AIProvider
 from backend_core.database import get_db, run_db, run_settings_db
 from backend_core.datasource_storage import cleanup_datasource_storage
-from backend_core.exceptions import DataSourceNotFoundError
+from backend_core.exceptions import AppError
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.namespaces_service import list_runtime_namespaces
 from backend_core.persistence.analysis.models import Analysis
@@ -232,7 +232,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                         id=compute_request.id,
                         namespace=compute_request.namespace,
                         kind=_proto_value('COMPUTE_REQUEST_KIND', compute_request.kind.value),
-                        request_json=dict_to_struct(compute_requests_service.command_payload(compute_request)),
+                        request=dict_to_struct(compute_requests_service.command_payload(compute_request)),
                     )
                 )
             finally:
@@ -248,7 +248,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             run_db(
                 compute_requests_service.mark_request_completed,
                 request.request_id,
-                response_json=struct_field_to_dict(request, 'response_json'),
+                response_json=struct_field_to_dict(request, 'response'),
                 artifact_path=_optional_str(request, 'artifact_path'),
                 artifact_name=_optional_str(request, 'artifact_name'),
                 artifact_content_type=_optional_str(request, 'artifact_content_type'),
@@ -267,7 +267,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 compute_requests_service.mark_request_failed,
                 request.request_id,
                 error_message=request.error_message,
-                response_json=struct_to_dict(request.response_json),
+                response_json=struct_to_dict(request.response),
             )
             return _response(request.request_id)
         finally:
@@ -293,7 +293,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session = next(session_gen)
         try:
             kind = _proto_compute_request_kind(request.kind)
-            request_json = struct_to_dict(request.request_json)
+            request_json = struct_to_dict(request.request)
             response: Any
             if kind == ComputeRequestKind.CREATE_FILE_DATASOURCE:
                 raw_csv_options = request_json.get('csv_options')
@@ -367,10 +367,12 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 )
             else:
                 raise ValueError(f'Unsupported datasource request kind: {kind.value}')
-            return worker_runtime_pb2.JsonResponse(response_json=dict_to_struct(response.model_dump(mode='json')))
-        except DataSourceNotFoundError as exc:
+            return worker_runtime_pb2.JsonResponse(response=dict_to_struct(response.model_dump(mode='json')))
+        except AppError as exc:
+            if exc.error_code != 'DATASOURCE_NOT_FOUND':
+                raise
             logger.warning('Datasource not found for %s: %s', kind.value, exc)
-            return worker_runtime_pb2.JsonResponse(response_json=dict_to_struct({'error': 'datasource_not_found', 'message': str(exc)}))
+            return worker_runtime_pb2.JsonResponse(response=dict_to_struct({'error': 'datasource_not_found', 'message': str(exc)}))
         finally:
             session.close()
             session_gen.close()
@@ -385,7 +387,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session = next(session_gen)
         try:
             response = datasource_runtime_service.ingest_datasource_for_schedule(session, request.datasource_id)
-            return worker_runtime_pb2.JsonResponse(response_json=dict_to_struct(response.model_dump(mode='json')))
+            return worker_runtime_pb2.JsonResponse(response=dict_to_struct(response.model_dump(mode='json')))
         finally:
             session.close()
             session_gen.close()
@@ -477,7 +479,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     ) -> common_pb2.RuntimeWorkerResponse:
         token = set_namespace_context(request.namespace)
         try:
-            run_db(build_run_service.update_build_result_json, request.build_id, struct_to_dict(request.result_json))
+            run_db(build_run_service.update_build_result_json, request.build_id, struct_to_dict(request.result))
             return _response(request.build_id)
         finally:
             reset_namespace(token)
@@ -601,8 +603,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     datasource_id=request.datasource_id,
                     kind=proto_value_to_enum_name(enums_pb2.EngineRunKind, 'ENGINE_RUN_KIND', request.kind),
                     status=proto_value_to_enum_name(enums_pb2.EngineRunStatus, 'ENGINE_RUN_STATUS', request.status),
-                    request_json=struct_to_dict(request.request_json),
-                    result_json=struct_field_to_dict(request, 'result_json'),
+                    request_json=struct_to_dict(request.request),
+                    result_json=struct_field_to_dict(request, 'result'),
                     error_message=_optional_str(request, 'error_message'),
                     created_at=optional_timestamp_to_datetime(request, 'created_at'),
                     completed_at=optional_timestamp_to_datetime(request, 'completed_at'),
@@ -624,7 +626,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         self, request: worker_runtime_pb2.WorkerUpdateEngineRunRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.IdResponse:
         fields = struct_to_dict(request.fields)
-        kwargs: dict[str, Any] = {'merge_result_json': request.merge_result_json}
+        kwargs: dict[str, Any] = {'merge_result_json': request.merge_result}
         for key in (
             'analysis_id',
             'datasource_id',
@@ -668,7 +670,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             response = worker_runtime_pb2.WorkerEngineRunStateResponse(
                 found=True,
                 status=_proto_value('ENGINE_RUN_STATUS', run.status),
-                result_json=dict_to_struct(result_json),
+                result=dict_to_struct(result_json),
                 cancelled_by=cancelled_by if isinstance(cancelled_by, str) else None,
             )
             if isinstance(cancelled_at, str):
@@ -769,7 +771,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 namespace=request.namespace,
                 build_id=request.build_id,
                 event=event,
-                resource_config_json=struct_field_to_dict(request, 'resource_config_json'),
+                resource_config_json=struct_field_to_dict(request, 'resource_config'),
             )
         finally:
             session.close()
@@ -796,8 +798,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 namespace=run.namespace,
                 analysis_id=run.analysis_id,
                 analysis_name=run.analysis_name,
-                request_json=dict_to_struct(dict(run.request_json)),
-                starter_json=dict_to_struct(dict(run.starter_json)),
+                request=dict_to_struct(dict(run.request_json)),
+                starter=dict_to_struct(dict(run.starter_json)),
                 current_datasource_id=run.current_datasource_id,
                 current_tab_id=run.current_tab_id,
                 current_tab_name=run.current_tab_name,
@@ -809,7 +811,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 payload.current_kind = _proto_value('ENGINE_RUN_KIND', run.current_kind)
             payload.started_at.CopyFrom(datetime_to_timestamp(run.started_at))
             if isinstance(run.resource_config_json, dict):
-                payload.resource_config_json.CopyFrom(dict_to_struct(dict(run.resource_config_json)))
+                payload.resource_config.CopyFrom(dict_to_struct(dict(run.resource_config_json)))
             return worker_runtime_pb2.WorkerStartBuildRunResponse(run=payload)
         finally:
             session.close()

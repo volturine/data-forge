@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager
 from runtime.config import settings
-from runtime.exceptions import AppError, EngineBusyError, EngineNotFoundError, status_for_app_error
+from runtime.engine_identity import engine_identity_from_payload
+from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
 from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
 from runtime.models.compute import schemas as compute_schemas
 from runtime.models.compute_requests.live import request_hub
@@ -150,6 +151,9 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
 
         if claimed.kind == ComputeRequestKind.PREVIEW:
             preview_request = compute_schemas.StepPreviewRequest.model_validate(claimed.request_json)
+            preview_identity = (
+                engine_identity_from_payload(preview_request.engine_identity.model_dump(mode="json")) if preview_request.engine_identity is not None else None
+            )
             preview_response = service.preview_step(
                 session=None,
                 manager=manager,
@@ -158,6 +162,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 row_limit=preview_request.row_limit,
                 page=preview_request.page,
                 analysis_id=preview_request.analysis_id,
+                engine_identity=preview_identity,
                 resource_config=preview_request.resource_config.model_dump() if preview_request.resource_config else None,
                 tab_id=preview_request.tab_id,
                 request_json=preview_request.model_dump(mode="json"),
@@ -229,33 +234,33 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             )
             _complete_request(client, claimed, response_json=export_response.model_dump(mode="json"))
         elif claimed.kind == ComputeRequestKind.SPAWN_ENGINE:
-            analysis_id = str(claimed.request_json["analysis_id"])
+            identity = _engine_identity_from_request(claimed.request_json)
             resource_config = claimed.request_json.get("resource_config")
             manager.spawn_engine(
-                analysis_id,
+                identity,
                 resource_config=resource_config if isinstance(resource_config, dict) else None,
             )
-            response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(analysis_id))
+            response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(identity))
             _complete_request(client, claimed, response_json=response.model_dump(mode="json"))
         elif claimed.kind == ComputeRequestKind.CONFIGURE_ENGINE:
-            analysis_id = str(claimed.request_json["analysis_id"])
+            identity = _engine_identity_from_request(claimed.request_json)
             resource_config = claimed.request_json.get("resource_config")
             if not isinstance(resource_config, dict):
                 raise ValueError("resource_config is required")
-            manager.restart_engine_with_config(analysis_id, resource_config)
-            response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(analysis_id))
+            manager.restart_engine_with_config(identity, resource_config)
+            response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(identity))
             _complete_request(client, claimed, response_json=response.model_dump(mode="json"))
         elif claimed.kind == ComputeRequestKind.SHUTDOWN_ENGINE:
-            analysis_id = str(claimed.request_json["analysis_id"])
-            engine = manager.get_engine(analysis_id)
+            identity = _engine_identity_from_request(claimed.request_json)
+            engine = manager.get_engine(identity)
             if engine is None:
-                raise EngineNotFoundError(analysis_id)
+                raise engine_not_found(identity.resource_id)
             deadline = time.monotonic() + _ENGINE_SHUTDOWN_WAIT_SECONDS
             while engine.current_job_id and engine.is_process_alive() and time.monotonic() < deadline:
                 time.sleep(_ENGINE_SHUTDOWN_POLL_SECONDS)
             if engine.current_job_id and engine.is_process_alive():
-                raise EngineBusyError(analysis_id)
-            manager.shutdown_engine(analysis_id)
+                raise EngineBusyError(identity.resource_id)
+            manager.shutdown_engine(identity)
             _complete_request(client, claimed, response_json={"success": True})
         else:
             raise ValueError(f"Unsupported compute request kind: {claimed.kind.value}")
@@ -275,6 +280,13 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
         except Exception as exc:
             logger.warning("Compute response outbox fast-path dispatch failed for request %s: %s", claimed.id, exc)
         reset_namespace(token)
+
+
+def _engine_identity_from_request(payload: dict[str, object]):
+    identity_payload = payload.get("engine_identity")
+    if not isinstance(identity_payload, dict):
+        raise ValueError("engine_identity is required")
+    return engine_identity_from_payload(identity_payload)
 
 
 def _write_artifact(request_id: str, filename: str, content: bytes) -> str:

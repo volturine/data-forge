@@ -29,10 +29,6 @@ export type AnalysisPipelinePayload = {
 	tabs: PipelineTab[];
 };
 
-export function datasourcePreviewAnalysisId(datasourceId: string): string {
-	return `__preview__${datasourceId}`;
-}
-
 function toDatasourceConfig(config: Record<string, unknown>): AnalysisTabDatasourceConfig {
 	const branchRaw = config.branch;
 	if (typeof branchRaw !== 'string' || !branchRaw.trim()) {
@@ -227,7 +223,7 @@ export function buildDatasourcePipelinePayload(args: {
 		}
 	];
 	return {
-		analysis_id: datasourcePreviewAnalysisId(datasource.id),
+		analysis_id: datasource.id,
 		tabs
 	};
 }

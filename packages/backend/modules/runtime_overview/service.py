@@ -82,6 +82,7 @@ def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummar
                 worker_id=row.worker_id,
                 namespace=row.namespace,
                 analysis_id=row.analysis_id,
+                resource_id=_engine_resource_id(row),
                 process_id=row.process_id,
                 status=row.status,
                 current_job_id=row.current_job_id,
@@ -96,6 +97,14 @@ def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummar
             )
         )
     return items
+
+
+def _engine_resource_id(row: EngineInstance) -> str:
+    if row.engine_scope == 'datasource_preview' and row.datasource_id:
+        return row.datasource_id
+    if row.engine_scope == 'build' and row.build_id:
+        return row.build_id
+    return row.analysis_id
 
 
 def queue_summary() -> schemas.QueueSummary:

@@ -30,12 +30,12 @@ from runtime.compute_utils import (
     resolve_applied_target,
 )
 from runtime.config import settings
-from runtime.engine_identity import build_engine_identity, build_engine_key
+from runtime.engine_identity import build_engine_identity
 from runtime.exceptions import (
-    DataSourceNotFoundError,
     DataSourceSnapshotError,
     PipelineExecutionError,
     PipelineValidationError,
+    datasource_not_found,
 )
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
@@ -1702,18 +1702,14 @@ def _acquire_engine(manager: ProcessManager, identity: EngineIdentityInput, reso
     return manager.get_or_create_engine(identity, resource_config=resource_config)
 
 
-def _resolve_export_engine_key(*, engine_key: str | None, analysis_id: str | None) -> str:
-    if engine_key is not None:
-        return engine_key
-    if analysis_id:
-        return analysis_id
-    raise ValueError("Export requires analysis_id or engine_key")
-
-
-def _resolve_export_engine_identity(*, engine_key: str | None, analysis_id: str | None, build_id: str | None) -> EngineIdentityInput:
+def _resolve_export_engine_identity(*, engine_identity: EngineIdentityInput | None, analysis_id: str | None, build_id: str | None) -> EngineIdentityInput:
+    if engine_identity is not None:
+        return engine_identity
     if build_id is not None:
         return build_engine_identity(build_id)
-    return _resolve_export_engine_key(engine_key=engine_key, analysis_id=analysis_id)
+    if analysis_id:
+        return analysis_id
+    raise ValueError("Export requires analysis_id or engine identity")
 
 
 def preview_step(
@@ -1724,6 +1720,7 @@ def preview_step(
     row_limit: int = 1000,
     page: int = 1,
     analysis_id: str | None = None,
+    engine_identity: EngineIdentityInput | None = None,
     resource_config: dict | None = None,
     tab_id: str | None = None,
     request_json: dict | None = None,
@@ -1771,7 +1768,7 @@ def preview_step(
         preview_steps = steps[: step_index + 1]
         preview_steps = _hydrate_udfs(session, preview_steps)
 
-    engine = _acquire_engine(manager, analysis_id_value, resource_config=resource_config)
+    engine = _acquire_engine(manager, engine_identity or analysis_id_value, resource_config=resource_config)
     persist_preview_runs = settings.persist_preview_runs
     run_response = None
     if persist_preview_runs:
@@ -2166,7 +2163,7 @@ def export_data(
     build_stage_event: Callable[[dict[str, object]], None] | None = None,
     resources: list[dict[str, object]] | None = None,
     resources_fn: Callable[[], list[dict[str, object]]] | None = None,
-    engine_key: str | None = None,
+    engine_identity: EngineIdentityInput | None = None,
     build_id: str | None = None,
 ) -> ExportDatasourceResult:
     if result_id is None:
@@ -2206,7 +2203,7 @@ def export_data(
         export_steps = steps[: step_index + 1]
     export_steps = _hydrate_udfs(session, export_steps)
 
-    resolved_engine_identity = _resolve_export_engine_identity(engine_key=engine_key, analysis_id=analysis_id_value, build_id=build_id)
+    resolved_engine_identity = _resolve_export_engine_identity(engine_identity=engine_identity, analysis_id=analysis_id_value, build_id=build_id)
     engine = _acquire_engine(manager, resolved_engine_identity)
 
     additional_datasources = _get_additional_datasources(session, export_steps, analysis_pipeline)
@@ -3134,17 +3131,13 @@ async def _stop_stream_task(task: asyncio.Task | None) -> None:
         _ = await task
 
 
-def _build_engine_id(build_id: str) -> str:
-    return build_engine_key(build_id)
-
-
-async def _prewarm_build_engine(manager: ProcessManager, engine_id: str, *, build_id: str) -> None:
+async def _prewarm_build_engine(manager: ProcessManager, *, build_id: str) -> None:
     identity = build_engine_identity(build_id)
     try:
         await asyncio.to_thread(manager.spawn_engine, identity)
         await asyncio.to_thread(manager.set_engine_runtime_context, identity, current_build_id=build_id, current_engine_run_id=None)
     except Exception:
-        logger.debug("Build engine prewarm failed for %s", engine_id, exc_info=True)
+        logger.debug("Build engine prewarm failed for %s", build_id, exc_info=True)
 
 
 async def run_analysis_build_stream(
@@ -3196,8 +3189,8 @@ async def run_analysis_build_stream(
         engine_run_id=build.current_engine_run_id,
     )
 
-    build_engine_id = _build_engine_id(build.build_id)
-    build_engine_prewarm_task = asyncio.create_task(_prewarm_build_engine(manager, build_engine_id, build_id=build.build_id))
+    build_engine_identity_value = build_engine_identity(build.build_id)
+    build_engine_prewarm_task = asyncio.create_task(_prewarm_build_engine(manager, build_id=build.build_id))
     results: list[dict] = []
     tabs_built = 0
     build_step_base = 0
@@ -3605,7 +3598,7 @@ async def run_analysis_build_stream(
                     job_started=handle_job_started,
                     build_stage_event=handle_stage_event,
                     resources_fn=lambda: [item.model_dump(mode="json") for item in build.resources],
-                    engine_key=build_engine_id,
+                    engine_identity=build_engine_identity_value,
                     build_id=build.build_id,
                 )
                 build.current_engine_run_id = result.engine_run_id
@@ -3837,7 +3830,7 @@ def list_iceberg_snapshots(session: object, datasource_id: str, branch: str | No
     datasource = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
 
     if not datasource.found or datasource.config is None:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
     if DataSourceType.read(datasource.source_type, default=None) != DataSourceType.ICEBERG:
         raise ValueError("Snapshots are only available for Iceberg datasources")
 
@@ -3903,7 +3896,7 @@ def delete_iceberg_snapshot(session: object, datasource_id: str, snapshot_id: st
     datasource = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
 
     if not datasource.found or datasource.config is None:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
     if DataSourceType.read(datasource.source_type, default=None) != DataSourceType.ICEBERG:
         raise ValueError("Snapshots are only available for Iceberg datasources")
 

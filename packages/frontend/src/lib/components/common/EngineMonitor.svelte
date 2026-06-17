@@ -7,6 +7,7 @@
 	import { css, emptyText } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
+	import type { EngineStatusResponse } from '$lib/types/compute';
 
 	let expanded = $state(false);
 	let killing = $state<string | null>(null);
@@ -17,10 +18,15 @@
 		return () => enginesStore.stopStream();
 	});
 
-	async function handleKill(analysisId: string) {
-		killing = analysisId;
+	function engineKey(engine: EngineStatusResponse): string {
+		return `${engine.scope ?? 'analysis_interactive'}:${engine.resource_id}`;
+	}
+
+	async function handleKill(engine: EngineStatusResponse) {
+		const key = engineKey(engine);
+		killing = key;
 		try {
-			await enginesStore.shutdownEngine(analysisId);
+			await enginesStore.shutdownEngine(engine);
 		} finally {
 			killing = null;
 		}
@@ -183,7 +189,7 @@
 					{/if}
 				{:else}
 					<ul class={css({ margin: '0', listStyle: 'none', padding: '0' })}>
-						{#each enginesStore.engines as engine (engine.analysis_id)}
+						{#each enginesStore.engines as engine (engineKey(engine))}
 							<li
 								class={css({
 									display: 'flex',
@@ -200,9 +206,9 @@
 												fontFamily: 'mono',
 												fontSize: 'xs'
 											})}
-											title={engine.analysis_id}
+											title={engine.resource_id}
 										>
-											{engine.analysis_id.slice(0, 8)}...
+											{engine.resource_id.slice(0, 8)}...
 										</span>
 										<span
 											class={css({
@@ -252,11 +258,11 @@
 										},
 										_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 									})}
-									onclick={() => handleKill(engine.analysis_id)}
-									disabled={killing === engine.analysis_id}
+									onclick={() => handleKill(engine)}
+									disabled={killing === engineKey(engine)}
 									title="Shutdown engine"
 								>
-									{#if killing === engine.analysis_id}
+									{#if killing === engineKey(engine)}
 										<LoaderCircle size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 									{:else}
 										<X size={12} />

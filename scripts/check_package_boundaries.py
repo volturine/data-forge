@@ -45,12 +45,34 @@ FORBIDDEN_OWNER_DUPLICATES = [
 ]
 
 PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
-    'backend': {'backend_contracts', 'builds', 'datasources', 'operations', 'runtime', 'scheduler_service', 'worker_models'},
+    'backend': {
+        'backend_contracts',
+        'builds',
+        'data_plane_iceberg',
+        'data_plane_object_store',
+        'datasources',
+        'operations',
+        'runtime',
+        'scheduler_service',
+        'worker_models',
+    },
     'scheduler': {'api', 'backend_contracts', 'backend_core', 'builds', 'datasources', 'modules', 'operations', 'runtime', 'shared', 'worker_models'},
     'worker': {'api', 'backend_contracts', 'backend_core', 'modules', 'scheduler_service', 'shared', 'sqlmodel', 'worker_models'},
 }
 
 LEGACY_IMPORT_ROOTS = {'backend_contracts', 'worker_models'}
+FORBIDDEN_SOURCE_TOKENS = {
+    'backend_contracts': 'deleted legacy backend contract package',
+    'worker_models': 'deleted legacy worker model package',
+    '_grpc.generated': 'deleted generated gRPC compatibility import path',
+    'JsonPayload': 'generic JSON-string protocol payload',
+    '__preview__': 'engine identity prefix parsing',
+    'engine_key': 'engine-key string identity',
+    'storage_key': 'engine storage-key string identity',
+    'data_plane_object_store': 'deleted backend data-plane object-store facade',
+    'data_plane_iceberg': 'deleted backend data-plane Iceberg facade',
+}
+SOURCE_SUFFIXES = {'.py', '.ts', '.svelte', '.proto'}
 
 
 def is_excluded(path: Path) -> bool:
@@ -76,6 +98,19 @@ def imported_roots(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             roots.add(node.module.split('.')[0])
     return roots
+
+
+def iter_source_files():
+    for package_root in PACKAGES.iterdir():
+        if not package_root.is_dir() or package_root.name.startswith('.'):
+            continue
+        for path in package_root.rglob('*'):
+            if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
+                continue
+            rel = path.relative_to(package_root)
+            if is_excluded(rel):
+                continue
+            yield path
 
 
 def main() -> int:
@@ -110,6 +145,13 @@ def main() -> int:
             if legacy:
                 rel = path.relative_to(ROOT)
                 errors.append(f'{rel} imports deleted legacy contract roots: {", ".join(legacy)}')
+
+    for path in iter_source_files():
+        content = path.read_text()
+        for token, reason in FORBIDDEN_SOURCE_TOKENS.items():
+            if token in content:
+                rel = path.relative_to(ROOT)
+                errors.append(f'{rel} contains {reason}: {token}')
 
     if errors:
         print('Package boundary violations:')

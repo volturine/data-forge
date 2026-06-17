@@ -2,6 +2,7 @@ from buf.validate import validate_pb2 as _validate_pb2
 from dataforge_protocol import common_pb2 as _common_pb2
 from dataforge_protocol import compute_pb2 as _compute_pb2
 from dataforge_protocol import errors_pb2 as _errors_pb2
+from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Mapping as _Mapping
@@ -22,5 +23,5 @@ class RuntimeEvent(_message.Message):
     compute_command: _compute_pb2.ComputeCommandEnvelope
     compute_response: _compute_pb2.ComputeResponseEnvelope
     error: _errors_pb2.ErrorInfo
-    raw: _common_pb2.JsonPayload
-    def __init__(self, namespace: _Optional[str] = ..., build: _Optional[_Union[_compute_pb2.BuildEvent, _Mapping]] = ..., compute_command: _Optional[_Union[_compute_pb2.ComputeCommandEnvelope, _Mapping]] = ..., compute_response: _Optional[_Union[_compute_pb2.ComputeResponseEnvelope, _Mapping]] = ..., error: _Optional[_Union[_errors_pb2.ErrorInfo, _Mapping]] = ..., raw: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    raw: _struct_pb2.Struct
+    def __init__(self, namespace: _Optional[str] = ..., build: _Optional[_Union[_compute_pb2.BuildEvent, _Mapping]] = ..., compute_command: _Optional[_Union[_compute_pb2.ComputeCommandEnvelope, _Mapping]] = ..., compute_response: _Optional[_Union[_compute_pb2.ComputeResponseEnvelope, _Mapping]] = ..., error: _Optional[_Union[_errors_pb2.ErrorInfo, _Mapping]] = ..., raw: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...

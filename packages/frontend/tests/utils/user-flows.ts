@@ -273,8 +273,9 @@ export async function shutdownEngineViaUi(
 	const popup = page.locator('[data-engines-popup="true"]');
 	await expect(popup).toBeVisible({ timeout: timeoutMs });
 
-	const row = popup.locator(`[data-engine-row="${analysisId}"]`);
-	const shutdownButton = popup.locator(`[data-engine-shutdown="${analysisId}"]`);
+	const identityKey = `analysis_interactive:${analysisId}`;
+	const row = popup.locator(`[data-engine-row="${identityKey}"]`);
+	const shutdownButton = popup.locator(`[data-engine-shutdown="${identityKey}"]`);
 	const started = Date.now();
 	while (Date.now() - started < timeoutMs) {
 		if (await row.isVisible().catch(() => false)) {

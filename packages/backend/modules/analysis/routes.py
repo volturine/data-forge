@@ -12,6 +12,7 @@ from backend_core.dependencies import (
     get_optional_lock_owner_id,
     get_runtime_availability_probe,
 )
+from backend_core.engine_identity import analysis_interactive_engine_identity
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import AnalysisId, parse_analysis_id
 from modules.analysis import schemas, service
@@ -236,6 +237,7 @@ async def favorite_analysis(
     '/{analysis_id}/favorite',
     response_model=schemas.AnalysisFavoriteStatusSchema,
     mcp=True,
+    mcp_confirm_required=True,
 )
 @handle_errors(operation='unfavorite analysis', value_error_status=404)
 async def unfavorite_analysis(
@@ -247,7 +249,7 @@ async def unfavorite_analysis(
     return service.set_favorite(session, parse_analysis_id(analysis_id), user_id, False)
 
 
-@router.delete('/{analysis_id}', status_code=204, mcp=True)
+@router.delete('/{analysis_id}', status_code=204, mcp=True, mcp_confirm_required=True)
 @handle_errors(operation='delete analysis', value_error_status=404)
 async def delete_analysis(
     analysis_id: AnalysisId,
@@ -262,7 +264,7 @@ async def delete_analysis(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     with contextlib.suppress(HTTPException):
-        await executor_client.shutdown_engine(session, analysis_id=analysis_id_value, runtime_probe=runtime_probe)
+        await executor_client.shutdown_engine(session, identity=analysis_interactive_engine_identity(analysis_id_value), runtime_probe=runtime_probe)
 
 
 @router.post('/{analysis_id}/preview', mcp=True)
@@ -468,7 +470,7 @@ async def update_step(
     )
 
 
-@router.delete('/{analysis_id}/tabs/{tab_id}/steps/{step_id}', status_code=204, mcp=True)
+@router.delete('/{analysis_id}/tabs/{tab_id}/steps/{step_id}', status_code=204, mcp=True, mcp_confirm_required=True)
 @handle_errors(operation='remove step', value_error_status=400)
 async def remove_step(
     analysis_id: AnalysisId,

@@ -7,7 +7,7 @@ from backend_core.contracts.build_runs.models import BuildRunStatus
 from backend_core.contracts.compute import schemas
 from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.data_plane_client import client_from_settings
-from backend_core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError
+from backend_core.exceptions import DataSourceSnapshotError, datasource_not_found
 from backend_core.namespace import get_namespace
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
@@ -154,7 +154,7 @@ def list_iceberg_snapshots(
 ) -> schemas.IcebergSnapshotsResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
     if not datasource.is_iceberg:
         raise ValueError('Snapshots are only available for Iceberg datasources')
 
@@ -163,7 +163,7 @@ def list_iceberg_snapshots(
         raise ValueError('Iceberg datasource missing metadata_path')
     branch_name = branch or datasource.config.get('branch')
 
-    worker_response = client_from_settings().list_iceberg_snapshots(
+    worker_response = client_from_settings().list_snapshots(
         namespace=get_namespace(),
         datasource_id=datasource_id,
         branch=branch_name if isinstance(branch_name, str) else None,
@@ -197,7 +197,7 @@ def list_iceberg_snapshots(
 def delete_iceberg_snapshot(session: Session, datasource_id: str, snapshot_id: str) -> schemas.IcebergSnapshotDeleteResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
     if not datasource.is_iceberg:
         raise ValueError('Snapshots are only available for Iceberg datasources')
 
@@ -206,5 +206,5 @@ def delete_iceberg_snapshot(session: Session, datasource_id: str, snapshot_id: s
     except (TypeError, ValueError) as exc:
         raise DataSourceSnapshotError('Snapshot ID must be an integer', details={'snapshot_id': snapshot_id}) from exc
 
-    deleted_snapshot_id = client_from_settings().delete_iceberg_snapshot(namespace=get_namespace(), datasource_id=datasource_id, snapshot_id=snapshot_id)
+    deleted_snapshot_id = client_from_settings().delete_snapshot(namespace=get_namespace(), datasource_id=datasource_id, snapshot_id=snapshot_id)
     return schemas.IcebergSnapshotDeleteResponse(datasource_id=datasource_id, snapshot_id=deleted_snapshot_id)

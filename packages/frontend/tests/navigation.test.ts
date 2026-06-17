@@ -298,7 +298,9 @@ test.describe('Navigation – engines live monitor', () => {
 			}
 			expect(open).toBe(true);
 			await expect(page.getByTestId('engine-monitor-count')).toBeVisible({ timeout: 5_000 });
-			await expect(enginePopup.locator(`[data-engine-row="${analysisId}"]`)).toBeVisible({
+			await expect(
+				enginePopup.locator(`[data-engine-row="analysis_interactive:${analysisId}"]`)
+			).toBeVisible({
 				timeout: 5_000
 			});
 

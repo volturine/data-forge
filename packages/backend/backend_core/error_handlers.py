@@ -11,21 +11,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from backend_core.app_error_status import status_for_app_error
-from backend_core.auth_exceptions import (
-    AccountDisabledError,
-    DefaultUserDeletionError,
-    EmailAlreadyExistsError,
-    InvalidCredentialsError,
-    OAuthError,
-    ProviderUnlinkError,
-    SessionExpiredError,
-    TokenExpiredError,
-    TokenInvalidError,
-)
 from backend_core.exceptions import (
     AppError,
     DataSourceSnapshotError,
-    EngineNotFoundError,
     InvalidIdError,
     PipelineValidationError,
 )
@@ -43,23 +31,6 @@ def _error_body(message: str, error_code: str | None = None, details: dict | Non
     return body
 
 
-_BACKEND_EXCEPTION_STATUS_MAP: dict[type[AppError], int] = {
-    InvalidCredentialsError: 401,
-    SessionExpiredError: 401,
-    AccountDisabledError: 403,
-    DefaultUserDeletionError: 403,
-    EmailAlreadyExistsError: 409,
-    ProviderUnlinkError: 400,
-    OAuthError: 400,
-    TokenExpiredError: 400,
-    TokenInvalidError: 400,
-}
-
-
-def _status_for(exc: AppError) -> int:
-    return _BACKEND_EXCEPTION_STATUS_MAP.get(type(exc), status_for_app_error(exc))
-
-
 def _log_app_error(exc: AppError, status: int) -> None:
     msg = f'{type(exc).__name__}: {exc.message}'
     extra = {'error_code': exc.error_code, 'details': exc.details}
@@ -71,8 +42,6 @@ def _log_app_error(exc: AppError, status: int) -> None:
             InvalidIdError,
             DataSourceSnapshotError,
             PipelineValidationError,
-            EngineNotFoundError,
-            InvalidCredentialsError,
         ),
     ):
         logger.info(msg, extra=extra)
@@ -118,7 +87,7 @@ def handle_errors(operation: str = 'operation', value_error_status: int | None =
 
 async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
     """Global handler for AppError exceptions not caught by @handle_errors."""
-    status = _status_for(exc)
+    status = status_for_app_error(exc)
     _log_app_error(exc, status)
     return JSONResponse(
         status_code=status,

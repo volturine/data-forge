@@ -4,6 +4,7 @@ package dataforge.runtime;
 
 import "buf/validate/validate.proto";
 import "dataforge_protocol/common.proto";
+import "google/protobuf/struct.proto";
 
 message ObjectStoreUrl {
   string url = 1 [(buf.validate.field).string.pattern = "^s3://[^/]+/.+$"];
@@ -20,7 +21,7 @@ message ObjectStoreJoinRequest {
 }
 
 message ObjectStoreStorageOptionsResponse {
-  JsonPayload options = 1;
+  google.protobuf.Struct options = 1;
 }
 
 message ObjectStoreBytes {

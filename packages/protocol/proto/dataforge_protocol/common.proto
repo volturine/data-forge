@@ -3,7 +3,6 @@ syntax = "proto3";
 package dataforge.runtime;
 
 import "buf/validate/validate.proto";
-import "google/protobuf/struct.proto";
 
 message EmptyRequest {}
 
@@ -13,14 +12,6 @@ message RuntimeWorkerRequest {
 
 message RuntimeWorkerResponse {
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
-}
-
-message JsonPayload {
-  google.protobuf.Struct value = 1;
-}
-
-message JsonPayloadList {
-  repeated JsonPayload values = 1;
 }
 
 message NotificationAttachment {

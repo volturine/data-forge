@@ -247,7 +247,17 @@ class _TestWorkerDataPlaneClient:
                 raise
             self._s3().create_bucket(Bucket=settings.object_store_bucket)
 
-    def object_store_storage_options(self) -> dict[str, object]:
+    def build_object_url(self, *parts: str, bucket: str | None = None) -> str:
+        from backend_core.object_store_paths import object_store_url
+
+        return object_store_url(*parts, bucket=bucket)
+
+    def join_object_url(self, base_url: str, *parts: str) -> str:
+        from backend_core.object_store_paths import join_object_store_url
+
+        return join_object_store_url(base_url, *parts)
+
+    def read_object_store_storage_options(self) -> dict[str, object]:
         settings = self._settings()
         return {
             's3.endpoint': settings.object_store_endpoint,
@@ -258,7 +268,7 @@ class _TestWorkerDataPlaneClient:
             'py-io-impl': 'pyiceberg.io.pyarrow.PyArrowFileIO',
         }
 
-    def upload_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
+    def upload_object_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
         from backend_core.object_store_paths import parse_object_store_url
 
         self._ensure_bucket_exists()
@@ -269,7 +279,7 @@ class _TestWorkerDataPlaneClient:
         self._s3().put_object(**kwargs)
         return target_url
 
-    def download_bytes(self, source_url: str) -> bytes:
+    def download_object_bytes(self, source_url: str) -> bytes:
         from backend_core.object_store_paths import parse_object_store_url
 
         bucket, key = parse_object_store_url(source_url)
@@ -331,7 +341,7 @@ class _TestWorkerDataPlaneClient:
                     results.append(f's3://{bucket}/{object_key}')
         return sorted(results)
 
-    def delete_prefix(self, prefix_url: str) -> None:
+    def delete_managed_prefix(self, prefix_url: str) -> None:
         from backend_core.object_store_paths import parse_object_store_url
 
         bucket, key = parse_object_store_url(prefix_url)
@@ -352,7 +362,7 @@ class _TestWorkerDataPlaneClient:
         if batch:
             self._s3().delete_objects(Bucket=bucket, Delete={'Objects': batch})
 
-    def resolve_iceberg_metadata_path(self, *, namespace: str, metadata_path: str, datasource_id: str | None = None) -> str:
+    def resolve_metadata_path(self, *, namespace: str, metadata_path: str, datasource_id: str | None = None) -> str:
         del namespace, datasource_id
         if metadata_path.endswith('.metadata.json'):
             if not self.object_exists(metadata_path):
@@ -363,7 +373,7 @@ class _TestWorkerDataPlaneClient:
             raise ValueError(f'Iceberg metadata_path not found: {metadata_path}')
         return files[-1]
 
-    def resolve_iceberg_branch_metadata_path(
+    def resolve_branch_metadata_path(
         self,
         *,
         namespace: str,
@@ -371,22 +381,20 @@ class _TestWorkerDataPlaneClient:
         datasource_id: str | None = None,
         branch: str | None = None,
     ) -> str:
-        from backend_core.object_store_paths import join_object_store_url
-
         del namespace, datasource_id
         if metadata_path.endswith('.metadata.json'):
-            return self.resolve_iceberg_metadata_path(metadata_path=metadata_path, namespace='test')
+            return self.resolve_metadata_path(metadata_path=metadata_path, namespace='test')
         if branch:
-            branch_url = join_object_store_url(metadata_path, branch)
+            branch_url = self.join_object_url(metadata_path, branch)
             if self.list_metadata_files(branch_url):
-                return self.resolve_iceberg_metadata_path(metadata_path=branch_url, namespace='test')
-        return self.resolve_iceberg_metadata_path(metadata_path=metadata_path, namespace='test')
+                return self.resolve_metadata_path(metadata_path=branch_url, namespace='test')
+        return self.resolve_metadata_path(metadata_path=metadata_path, namespace='test')
 
-    def scan_iceberg_snapshot(self, *, metadata_path: str, snapshot_id: str, limit: int | None = None) -> list[dict[str, object]]:
+    def scan_snapshot(self, *, metadata_path: str, snapshot_id: str, limit: int | None = None) -> list[dict[str, object]]:
         import polars as pl
         from pyiceberg.table import StaticTable
 
-        table = StaticTable.from_metadata(metadata_path, properties=self.object_store_storage_options())
+        table = StaticTable.from_metadata(metadata_path, properties=self.read_object_store_storage_options())
         frame = pl.from_arrow(table.scan(snapshot_id=int(snapshot_id)).to_arrow())
         if isinstance(frame, pl.Series):
             frame = frame.to_frame()
@@ -394,13 +402,16 @@ class _TestWorkerDataPlaneClient:
             frame = frame.head(limit)
         return frame.to_dicts()
 
-    def list_iceberg_snapshots(self, *, namespace: str, datasource_id: str, branch: str | None = None):
+    def sync_table_schema(self, *, metadata_path: str, schema_payload: dict[str, object]) -> None:
+        del metadata_path, schema_payload
+
+    def list_snapshots(self, *, namespace: str, datasource_id: str, branch: str | None = None):
         from backend_core.data_plane_client import IcebergSnapshots
 
         del namespace, branch
         return IcebergSnapshots(datasource_id=datasource_id, table_path='', snapshots=[])
 
-    def delete_iceberg_snapshot(self, *, namespace: str, datasource_id: str, snapshot_id: str) -> str:
+    def delete_snapshot(self, *, namespace: str, datasource_id: str, snapshot_id: str) -> str:
         del namespace, datasource_id
         return snapshot_id
 
@@ -408,10 +419,9 @@ class _TestWorkerDataPlaneClient:
 @pytest.fixture(autouse=True, scope='function')
 def use_test_worker_data_plane(monkeypatch, isolate_data_dir) -> Generator[None]:
     client = _TestWorkerDataPlaneClient()
-    from backend_core import data_plane_iceberg, data_plane_object_store
+    from backend_core import data_plane_client
 
-    monkeypatch.setattr(data_plane_object_store, 'client_from_settings', lambda: client)
-    monkeypatch.setattr(data_plane_iceberg, 'client_from_settings', lambda: client)
+    monkeypatch.setattr(data_plane_client, 'WorkerDataPlaneClient', lambda: client)
     yield
 
 
@@ -504,11 +514,11 @@ def sample_json_file(temp_upload_dir: Path) -> Path:
 
 
 def _upload_test_object(local_path: Path) -> str:
-    from backend_core.data_plane_object_store import upload_file
+    from backend_core.data_plane_client import client_from_settings
     from backend_core.object_store_paths import object_store_url
 
     target_url = object_store_url('tests', uuid.uuid4().hex, local_path.name)
-    upload_file(local_path, target_url)
+    client_from_settings().upload_object_bytes(local_path.read_bytes(), target_url)
     return target_url
 
 

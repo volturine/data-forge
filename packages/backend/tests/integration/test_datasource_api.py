@@ -639,17 +639,17 @@ class TestColumnStats:
 
 class TestDataSourceDelete:
     def test_delete_datasource_marks_datasource_pending_delete(self, client, sample_datasource: DataSource, test_db_session):
-        from backend_core.data_plane_object_store import object_exists
+        from backend_core.data_plane_client import client_from_settings
 
         datasource_id = sample_datasource.id
         file_path = sample_datasource.config['file_path']
 
-        assert object_exists(file_path)
+        assert client_from_settings().object_exists(file_path)
 
         response = client.delete(f'/api/v1/datasource/{datasource_id}')
 
         assert response.status_code == 202
-        assert object_exists(file_path)
+        assert client_from_settings().object_exists(file_path)
 
         stored = test_db_session.get(DataSource, datasource_id)
         assert stored is not None

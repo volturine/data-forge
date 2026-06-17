@@ -13,14 +13,7 @@ from backend_core import datasource_delete_service
 from backend_core.config import settings
 from backend_core.contracts.datasource.models import DataSourceCreatedBy
 from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
-from backend_core.data_plane_object_store import (
-    delete_object,
-    download_file,
-    list_metadata_files,
-    list_prefixes,
-    object_exists,
-    upload_file as upload_object_file,
-)
+from backend_core.data_plane_client import client_from_settings
 from backend_core.database import get_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
@@ -29,7 +22,7 @@ from backend_core.dependencies import (
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import AppError
 from backend_core.namespace import get_namespace
-from backend_core.object_store_paths import is_object_store_url, object_store_url
+from backend_core.object_store_paths import is_object_store_url
 from backend_core.validation import (
     DataSourceId,
     PreflightId,
@@ -94,8 +87,9 @@ async def _stage_upload_to_object_store(file: UploadFile, target_name: str) -> s
     temp_path = _temporary_upload_path(Path(target_name).suffix.lower())
     try:
         await _save_upload_file(file, temp_path, settings.upload_max_file_size_bytes)
-        target_url = object_store_url('namespaces', get_namespace(), 'uploads', target_name)
-        await asyncio.to_thread(upload_object_file, temp_path, target_url)
+        data_plane = client_from_settings()
+        target_url = await asyncio.to_thread(data_plane.build_object_url, 'namespaces', get_namespace(), 'uploads', target_name)
+        await asyncio.to_thread(data_plane.upload_object_bytes, temp_path.read_bytes(), target_url)
         return target_url
     finally:
         with contextlib.suppress(FileNotFoundError):
@@ -107,7 +101,8 @@ def _local_excel_source(source_path: str):
     if is_object_store_url(source_path):
         temp_path = _temporary_upload_path(Path(source_path).suffix or '.xlsx')
         try:
-            download_file(source_path, temp_path)
+            temp_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path.write_bytes(client_from_settings().download_object_bytes(source_path))
             yield temp_path
         finally:
             with contextlib.suppress(FileNotFoundError):
@@ -118,10 +113,11 @@ def _local_excel_source(source_path: str):
 
 def _list_export_branches(metadata_path: str, current_branch: str | None = None) -> list[str]:
     if is_object_store_url(metadata_path):
-        entries = list_prefixes(metadata_path)
+        data_plane = client_from_settings()
+        entries = data_plane.list_prefixes(metadata_path)
         if entries:
             branches = sorted(entries)
-        elif list_metadata_files(metadata_path):
+        elif data_plane.list_metadata_files(metadata_path):
             branches = [current_branch or 'master']
         else:
             branches = []
@@ -216,12 +212,12 @@ async def upload_file(
         )
     except AppError, HTTPException, ValueError:
         if is_object_store_url(file_path):
-            delete_object(file_path)
+            client_from_settings().delete_object(file_path)
         raise
     except Exception as e:
         logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
         if is_object_store_url(file_path):
-            delete_object(file_path)
+            client_from_settings().delete_object(file_path)
         raise HTTPException(status_code=500, detail='Failed to create datasource') from e
 
 
@@ -320,19 +316,19 @@ async def upload_bulk(
             results.append(schemas.BulkUploadResult(name=file.filename, success=True, datasource=datasource))
         except AppError as exc:
             if is_object_store_url(file_path):
-                delete_object(file_path)
+                client_from_settings().delete_object(file_path)
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=exc.message))
         except HTTPException as exc:
             if is_object_store_url(file_path):
-                delete_object(file_path)
+                client_from_settings().delete_object(file_path)
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=str(exc.detail)))
         except ValueError as exc:
             if is_object_store_url(file_path):
-                delete_object(file_path)
+                client_from_settings().delete_object(file_path)
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=str(exc)))
         except Exception as e:
             if is_object_store_url(file_path):
-                delete_object(file_path)
+                client_from_settings().delete_object(file_path)
             results.append(
                 schemas.BulkUploadResult(
                     name=file.filename,
@@ -375,8 +371,9 @@ async def preflight_excel(
     temp_path = _temporary_upload_path(Path(file.filename).suffix.lower())
     try:
         await _save_upload_file(file, temp_path, settings.upload_max_file_size_bytes)
-        source_path = object_store_url('namespaces', get_namespace(), 'uploads', unique_filename)
-        await asyncio.to_thread(upload_object_file, temp_path, source_path)
+        data_plane = client_from_settings()
+        source_path = await asyncio.to_thread(data_plane.build_object_url, 'namespaces', get_namespace(), 'uploads', unique_filename)
+        await asyncio.to_thread(data_plane.upload_object_bytes, temp_path.read_bytes(), source_path)
     except HTTPException:
         with contextlib.suppress(FileNotFoundError):
             temp_path.unlink()
@@ -428,7 +425,7 @@ async def preflight_excel(
 @router.post('/preflight-path', response_model=schemas.ExcelPreflightResponse)
 @handle_errors(operation='preflight excel path', value_error_status=400)
 async def preflight_excel_path(payload: schemas.ExcelPreflightPathRequest):
-    if not object_exists(payload.file_path):
+    if not client_from_settings().object_exists(payload.file_path):
         raise HTTPException(status_code=400, detail='Excel file not found')
 
     with _local_excel_source(payload.file_path) as file_path:

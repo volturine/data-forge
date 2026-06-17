@@ -29,21 +29,31 @@ class _StubManager:
         self.restart_calls: list[tuple[str, dict]] = []
 
     @staticmethod
-    def get_engine(engine_id: str):
-        return _StubEngine() if engine_id == 'build:build-1' else None
+    def _identity_key(identity) -> str:
+        return f'{identity.scope}:{identity.resource_id}'
 
-    @staticmethod
-    def get_engine_status(engine_id: str) -> dict[str, object]:
-        return {'analysis_id': engine_id, 'status': 'healthy'}
+    def get_engine(self, identity):
+        return _StubEngine() if self._identity_key(identity).endswith(':build-1') else None
 
-    def spawn_engine(self, engine_id: str, resource_config: dict | None = None) -> None:
-        self.spawn_calls.append((engine_id, resource_config))
+    def get_engine_status(self, identity) -> dict[str, object]:
+        return {
+            'analysis_id': identity.analysis_id or '',
+            'resource_id': identity.resource_id,
+            'status': 'healthy',
+            'scope': 'datasource_preview' if identity.datasource_id else 'build' if identity.build_id else 'analysis_interactive',
+            'reuse_policy': 'exclusive' if identity.build_id else 'shared',
+            'datasource_id': identity.datasource_id,
+            'build_id': identity.build_id,
+        }
 
-    def restart_engine_with_config(self, engine_id: str, resource_config: dict) -> None:
-        self.restart_calls.append((engine_id, resource_config))
+    def spawn_engine(self, identity, resource_config: dict | None = None) -> None:
+        self.spawn_calls.append((self._identity_key(identity), resource_config))
 
-    def shutdown_engine(self, engine_id: str) -> None:
-        self.shutdown_calls.append(engine_id)
+    def restart_engine_with_config(self, identity, resource_config: dict) -> None:
+        self.restart_calls.append((self._identity_key(identity), resource_config))
+
+    def shutdown_engine(self, identity) -> None:
+        self.shutdown_calls.append(self._identity_key(identity))
 
 
 class _AvailableRuntimeProbe:
@@ -53,52 +63,53 @@ class _AvailableRuntimeProbe:
         return True
 
 
-def test_spawn_engine_accepts_datasource_preview_analysis_id(client) -> None:
+def test_spawn_engine_accepts_datasource_preview_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
-        response = client.post('/api/v1/compute/engine/spawn/__preview__datasource-1')
+        response = client.post('/api/v1/compute/engine/spawn/datasource-preview/datasource-1')
     finally:
         app.dependency_overrides.pop(get_manager, None)
 
     assert response.status_code == 200
-    assert response.json()['analysis_id'] == '__preview__datasource-1'
-    assert manager.spawn_calls == [('__preview__datasource-1', None)]
+    assert response.json()['resource_id'] == 'datasource-1'
+    assert response.json()['scope'] == 'datasource_preview'
+    assert manager.spawn_calls == [('1:datasource-1', None)]
 
 
-def test_configure_engine_accepts_datasource_preview_analysis_id(client) -> None:
+def test_configure_engine_accepts_datasource_preview_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
         response = client.post(
-            '/api/v1/compute/engine/configure/__preview__datasource-1',
+            '/api/v1/compute/engine/configure/datasource-preview/datasource-1',
             json={'max_threads': 4},
         )
     finally:
         app.dependency_overrides.pop(get_manager, None)
 
     assert response.status_code == 200
-    assert response.json()['analysis_id'] == '__preview__datasource-1'
-    assert manager.restart_calls == [('__preview__datasource-1', {'max_threads': 4, 'max_memory_mb': None, 'streaming_chunk_size': None})]
+    assert response.json()['resource_id'] == 'datasource-1'
+    assert manager.restart_calls == [('1:datasource-1', {'max_threads': 4, 'max_memory_mb': None, 'streaming_chunk_size': None})]
 
 
-def test_shutdown_engine_accepts_build_engine_key(client) -> None:
+def test_shutdown_engine_accepts_build_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
-        response = client.delete('/api/v1/compute/engine/build:build-1')
+        response = client.delete('/api/v1/compute/engine/build/build-1')
     finally:
         app.dependency_overrides.pop(get_manager, None)
 
     assert response.status_code == 204
-    assert manager.shutdown_calls == ['build:build-1']
+    assert manager.shutdown_calls == ['3:build-1']
 
 
-def test_shutdown_engine_returns_not_found_for_unknown_engine_key(client) -> None:
+def test_shutdown_engine_returns_not_found_for_unknown_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
-        response = client.delete('/api/v1/compute/engine/build:missing')
+        response = client.delete('/api/v1/compute/engine/build/missing')
     finally:
         app.dependency_overrides.pop(get_manager, None)
 
@@ -195,7 +206,7 @@ def test_list_builds_includes_preview_engine_runs(client, test_db_session) -> No
     created = engine_run_service.create_engine_run(
         test_db_session,
         engine_run_service.create_engine_run_payload(
-            analysis_id='__preview__datasource-1',
+            analysis_id=None,
             datasource_id='datasource-1',
             kind=EngineRunKind.PREVIEW,
             status=EngineRunStatus.SUCCESS,
@@ -222,7 +233,7 @@ def test_get_build_returns_preview_engine_run_detail(client, test_db_session) ->
     created = engine_run_service.create_engine_run(
         test_db_session,
         engine_run_service.create_engine_run_payload(
-            analysis_id='__preview__datasource-1',
+            analysis_id=None,
             datasource_id='datasource-1',
             kind=EngineRunKind.PREVIEW,
             status=EngineRunStatus.SUCCESS,
@@ -249,7 +260,7 @@ def test_list_builds_excludes_engine_runs_from_other_namespaces(client, test_db_
         engine_run_service.create_engine_run(
             test_db_session,
             engine_run_service.create_engine_run_payload(
-                analysis_id='__preview__datasource-1',
+                analysis_id=None,
                 datasource_id='datasource-1',
                 kind=EngineRunKind.PREVIEW,
                 status=EngineRunStatus.SUCCESS,

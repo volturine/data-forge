@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from backend_core.contracts.datasource.source_types import DataSourceType
-from backend_core.data_plane_object_store import delete_object, delete_prefix, object_store_storage_options
+from backend_core.data_plane_client import client_from_settings
 from backend_core.exceptions import FileError
 from backend_core.iceberg_catalog import load_runtime_catalog
 from backend_core.object_store_paths import is_managed_object_store_url
@@ -34,7 +34,7 @@ class DatasourceStorageCleanup:
         if not isinstance(prefix, str) or not is_managed_object_store_url(prefix):
             return
         try:
-            delete_prefix(prefix)
+            client_from_settings().delete_managed_prefix(prefix)
             logger.info('Deleted Iceberg object prefix: %s', prefix)
         except Exception as exc:
             logger.error('Object storage error when deleting Iceberg prefix %s: %s', prefix, exc)
@@ -49,7 +49,7 @@ class DatasourceStorageCleanup:
         if not isinstance(file_path, str) or not is_managed_object_store_url(file_path):
             return
         try:
-            delete_object(file_path)
+            client_from_settings().delete_object(file_path)
             logger.info('Deleted object: %s', file_path)
         except Exception as exc:
             logger.error('Object storage error when deleting file %s: %s', file_path, exc)
@@ -73,7 +73,7 @@ class DatasourceStorageCleanup:
             type=catalog_type,
             uri=catalog_uri,
             warehouse=warehouse,
-            **object_store_storage_options(),
+            **client_from_settings().read_object_store_storage_options(),
         )
         identifier = f'{namespace}.{table}'
         if catalog.table_exists(identifier):

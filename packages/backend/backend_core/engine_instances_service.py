@@ -42,7 +42,8 @@ def _apply_engine_status(row: EngineInstance, *, status: EngineStatusInfo, stamp
 
 def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, status: EngineStatusInfo, now: datetime | None = None) -> EngineInstance:
     stamp = now or _utcnow()
-    instance_id = f'{worker_id}:{namespace}:{status.analysis_id}'
+    scope = _required_identity_value(status.scope, 'scope')
+    instance_id = f'{worker_id}:{namespace}:{scope}:{status.resource_id}'
     row = session.get(EngineInstance, instance_id)
     if row is None:
         row = EngineInstance(
@@ -50,7 +51,7 @@ def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, st
             worker_id=worker_id,
             namespace=namespace,
             analysis_id=status.analysis_id,
-            engine_scope=_required_identity_value(status.scope, 'scope'),
+            engine_scope=scope,
             engine_reuse_policy=_required_identity_value(status.reuse_policy, 'reuse_policy'),
             datasource_id=status.datasource_id,
             build_id=status.build_id,
@@ -83,19 +84,19 @@ def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, st
 
 
 def persist_engine_snapshot(session: Session, *, worker_id: str, namespace: str, statuses: list[EngineStatusInfo], now: datetime | None = None) -> None:
-    active = {status.analysis_id for status in statuses}
+    active = {_engine_identity_key(status) for status in statuses}
     for status in statuses:
         upsert_engine_status(session, worker_id=worker_id, namespace=namespace, status=status, now=now)
-    _ = mark_namespace_engines_stopped(session, worker_id=worker_id, namespace=namespace, active_analysis_ids=active, now=now)
+    _ = mark_namespace_engines_stopped(session, worker_id=worker_id, namespace=namespace, active_engine_identities=active, now=now)
 
 
-def mark_namespace_engines_stopped(session: Session, *, worker_id: str, namespace: str, active_analysis_ids: set[str], now: datetime | None = None) -> int:
+def mark_namespace_engines_stopped(session: Session, *, worker_id: str, namespace: str, active_engine_identities: set[str], now: datetime | None = None) -> int:
     stamp = now or _utcnow()
     stmt = select(EngineInstance).where(EngineInstance.worker_id == worker_id).where(EngineInstance.namespace == namespace)  # type: ignore[arg-type]
     rows = list(session.execute(stmt).scalars().all())
     updated = 0
     for row in rows:
-        if row.analysis_id in active_analysis_ids:
+        if _row_identity_key(row) in active_engine_identities:
             continue
         if row.status == EngineInstanceStatus.STOPPED:
             continue
@@ -118,7 +119,7 @@ def list_engine_instances(session: Session, *, namespace: str) -> list[EngineIns
         select(EngineInstance)
         .where(EngineInstance.namespace == namespace)  # type: ignore[arg-type]
         .where(EngineInstance.status.in_(active))  # type: ignore[attr-defined]
-        .order_by(EngineInstance.analysis_id)  # type: ignore[arg-type]
+        .order_by(EngineInstance.engine_scope, EngineInstance.analysis_id, EngineInstance.datasource_id, EngineInstance.build_id)  # type: ignore[arg-type]
     )
     return list(session.execute(stmt).scalars().all())
 
@@ -127,9 +128,10 @@ def list_engine_projection(session: Session, *, namespace: str) -> list[EngineIn
     rows = list_engine_instances(session, namespace=namespace)
     latest: dict[str, EngineInstance] = {}
     for row in rows:
-        current = latest.get(row.analysis_id)
+        key = _row_identity_key(row)
+        current = latest.get(key)
         if current is None:
-            latest[row.analysis_id] = row
+            latest[key] = row
             continue
         current_seen = current.last_seen_at or current.updated_at
         row_seen = row.last_seen_at or row.updated_at
@@ -141,13 +143,13 @@ def list_engine_projection(session: Session, *, namespace: str) -> list[EngineIn
         current_activity = current.last_activity_at or current.updated_at
         row_activity = row.last_activity_at or row.updated_at
         if row_activity > current_activity:
-            latest[row.analysis_id] = row
+            latest[key] = row
             continue
         if row_activity < current_activity:
             continue
         if row.worker_id < current.worker_id:
-            latest[row.analysis_id] = row
-    return sorted(latest.values(), key=lambda row: row.analysis_id)
+            latest[key] = row
+    return sorted(latest.values(), key=_row_identity_key)
 
 
 def latest_namespace_update(session: Session, *, namespace: str) -> datetime | None:
@@ -159,6 +161,7 @@ def latest_namespace_update(session: Session, *, namespace: str) -> datetime | N
 def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object]) -> dict[str, object]:
     return {
         'analysis_id': row.analysis_id,
+        'resource_id': _row_resource_id(row),
         'status': row.status.overview_status,
         'process_id': row.process_id,
         'last_activity': row.last_activity_at.isoformat() if row.last_activity_at is not None else None,
@@ -173,6 +176,22 @@ def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object
         'current_build_id': row.current_build_id or row.build_id,
         'current_engine_run_id': row.current_engine_run_id,
     }
+
+
+def _engine_identity_key(status: EngineStatusInfo) -> str:
+    return f'{_required_identity_value(status.scope, "scope")}:{status.resource_id}'
+
+
+def _row_identity_key(row: EngineInstance) -> str:
+    return f'{row.engine_scope}:{_row_resource_id(row)}'
+
+
+def _row_resource_id(row: EngineInstance) -> str:
+    if row.engine_scope == 'datasource_preview' and row.datasource_id:
+        return row.datasource_id
+    if row.engine_scope == 'build' and row.build_id:
+        return row.build_id
+    return row.analysis_id
 
 
 def _read_dt(value: str | None) -> datetime | None:

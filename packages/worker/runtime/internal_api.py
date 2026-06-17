@@ -150,7 +150,7 @@ class WorkerInternalApiClient:
             id=response.request.id,
             namespace=response.request.namespace,
             kind=proto_value_to_enum_name(enums_pb2.ComputeRequestKind, "COMPUTE_REQUEST_KIND", response.request.kind),
-            request_json=struct_to_dict(response.request.request_json),
+            request_json=struct_to_dict(response.request.request),
         )
 
     def complete_compute_request(
@@ -165,7 +165,7 @@ class WorkerInternalApiClient:
     ) -> None:
         request = worker_runtime_pb2.WorkerCompleteComputeRequestRequest(namespace=namespace, request_id=request_id)
         if response_json is not None:
-            request.response_json.CopyFrom(dict_to_struct(response_json))
+            request.response.CopyFrom(dict_to_struct(response_json))
         if artifact_path is not None:
             request.artifact_path = artifact_path
         if artifact_name is not None:
@@ -188,7 +188,7 @@ class WorkerInternalApiClient:
                     namespace=namespace,
                     request_id=request_id,
                     error_message=error_message,
-                    response_json=dict_to_struct(response_json),
+                    response=dict_to_struct(response_json),
                 ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
@@ -204,13 +204,13 @@ class WorkerInternalApiClient:
                 worker_runtime_pb2.WorkerExecuteDatasourceRequest(
                     namespace=namespace,
                     kind=enum_to_proto_value("COMPUTE_REQUEST_KIND", kind),
-                    request_json=dict_to_struct(request_json),
+                    request=dict_to_struct(request_json),
                 ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
             )
         )
-        return struct_to_dict(response.response_json)
+        return struct_to_dict(response.response)
 
     def schedule_ingest_datasource(self, *, namespace: str, datasource_id: str) -> dict[str, object]:
         response = self._call(
@@ -220,7 +220,7 @@ class WorkerInternalApiClient:
                 metadata=self._metadata(),
             )
         )
-        return struct_to_dict(response.response_json)
+        return struct_to_dict(response.response)
 
     def datasource_metadata(self, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
         response = self._call(
@@ -275,7 +275,7 @@ class WorkerInternalApiClient:
     def update_build_result(self, *, namespace: str, build_id: str, result_json: dict[str, object]) -> None:
         self._call(
             lambda: self._stub.UpdateBuildResult(
-                worker_runtime_pb2.WorkerUpdateBuildResultRequest(namespace=namespace, build_id=build_id, result_json=dict_to_struct(result_json)),
+                worker_runtime_pb2.WorkerUpdateBuildResultRequest(namespace=namespace, build_id=build_id, result=dict_to_struct(result_json)),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
             )
@@ -379,14 +379,14 @@ class WorkerInternalApiClient:
             datasource_id=datasource_id,
             kind=enum_to_proto_value("ENGINE_RUN_KIND", kind),
             status=enum_to_proto_value("ENGINE_RUN_STATUS", status),
-            request_json=dict_to_struct(request_json),
+            request=dict_to_struct(request_json),
             execution_entries=[dict_to_struct(entry) for entry in execution_entries or []],
             progress=progress,
         )
         if analysis_id is not None:
             request.analysis_id = analysis_id
         if result_json is not None:
-            request.result_json.CopyFrom(dict_to_struct(result_json))
+            request.result.CopyFrom(dict_to_struct(result_json))
         if error_message is not None:
             request.error_message = error_message
         if created_at is not None:
@@ -419,7 +419,7 @@ class WorkerInternalApiClient:
                     namespace=namespace,
                     run_id=run_id,
                     fields=dict_to_struct(fields),
-                    merge_result_json=merge_result_json,
+                    merge_result=merge_result_json,
                 ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
@@ -439,7 +439,7 @@ class WorkerInternalApiClient:
             return None
         return {
             "status": _optional_proto_enum_name(response, "status", enums_pb2.EngineRunStatus, "ENGINE_RUN_STATUS"),
-            "result_json": optional_struct_to_dict(response, "result_json") or {},
+            "result_json": optional_struct_to_dict(response, "result") or {},
             "cancelled_at": _optional_timestamp_iso(response, "cancelled_at"),
             "cancelled_by": _optional_str(response, "cancelled_by"),
         }
@@ -493,7 +493,7 @@ class WorkerInternalApiClient:
     ) -> int | None:
         request = worker_runtime_pb2.WorkerPersistBuildEventRequest(namespace=namespace, build_id=build_id, event=dict_to_struct(event))
         if resource_config_json is not None:
-            request.resource_config_json.CopyFrom(dict_to_struct(resource_config_json))
+            request.resource_config.CopyFrom(dict_to_struct(resource_config_json))
         response = self._call(lambda: self._stub.PersistBuildEvent(request, timeout=self._timeout_seconds, metadata=self._metadata()))
         return int(response.sequence) if response.HasField("sequence") else None
 
@@ -513,9 +513,9 @@ class WorkerInternalApiClient:
             namespace=run.namespace,
             analysis_id=run.analysis_id,
             analysis_name=run.analysis_name,
-            request_json=struct_to_dict(run.request_json),
-            starter_json=struct_to_dict(run.starter_json),
-            resource_config_json=optional_struct_to_dict(run, "resource_config_json"),
+            request_json=struct_to_dict(run.request),
+            starter_json=struct_to_dict(run.starter),
+            resource_config_json=optional_struct_to_dict(run, "resource_config"),
             current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.EngineRunKind, "ENGINE_RUN_KIND"),
             current_datasource_id=_optional_str(run, "current_datasource_id"),
             current_tab_id=_optional_str(run, "current_tab_id"),

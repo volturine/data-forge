@@ -4,17 +4,14 @@ from dataclasses import dataclass
 
 from dataforge_protocol import compute_pb2, enums_pb2
 
-PREVIEW_PREFIX = "__preview__"
-BUILD_PREFIX = "build:"
-
 
 @dataclass(frozen=True, slots=True)
 class EngineIdentity:
     protocol: compute_pb2.EngineIdentity
 
     @property
-    def storage_key(self) -> str:
-        return engine_identity_storage_key(self)
+    def resource_id(self) -> str:
+        return engine_identity_resource_id(self)
 
     @property
     def scope(self) -> int:
@@ -74,14 +71,47 @@ def build_engine_identity(build_id: str) -> EngineIdentity:
     )
 
 
-def engine_identity_storage_key(identity: EngineIdentity) -> str:
+def engine_identity_resource_id(identity: EngineIdentity) -> str:
     if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.analysis_id:
         return identity.analysis_id
     if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.datasource_id:
-        return f"{PREVIEW_PREFIX}{identity.datasource_id}"
+        return identity.datasource_id
     if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD and identity.build_id:
-        return f"{BUILD_PREFIX}{identity.build_id}"
+        return identity.build_id
     raise ValueError("engine identity is missing the resource id required by its scope")
+
+
+def engine_identity_payload(identity: EngineIdentity) -> dict[str, str]:
+    payload = {
+        "scope": engine_scope_value(identity),
+        "reuse_policy": engine_reuse_policy_value(identity),
+        "resource_id": identity.resource_id,
+    }
+    if identity.analysis_id is not None:
+        payload["analysis_id"] = identity.analysis_id
+    if identity.datasource_id is not None:
+        payload["datasource_id"] = identity.datasource_id
+    if identity.build_id is not None:
+        payload["build_id"] = identity.build_id
+    return payload
+
+
+def engine_identity_from_payload(payload: dict[str, object]) -> EngineIdentity:
+    scope = payload.get("scope")
+    if scope == "analysis_interactive":
+        return analysis_interactive_engine_identity(_required_payload_id(payload, "analysis_id"))
+    if scope == "datasource_preview":
+        return datasource_preview_engine_identity(_required_payload_id(payload, "datasource_id"))
+    if scope == "build":
+        return build_engine_identity(_required_payload_id(payload, "build_id"))
+    raise ValueError("engine identity scope is invalid")
+
+
+def _required_payload_id(payload: dict[str, object], field_name: str) -> str:
+    value = payload.get(field_name)
+    if not isinstance(value, str):
+        raise ValueError(f"engine identity {field_name} is required")
+    return _required_id(value, field_name)
 
 
 def engine_scope_value(identity: EngineIdentity) -> str:
@@ -100,15 +130,3 @@ def engine_reuse_policy_value(identity: EngineIdentity) -> str:
     if identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE:
         return "exclusive"
     raise ValueError("engine identity reuse policy is unspecified")
-
-
-def analysis_interactive_engine_key(analysis_id: str) -> str:
-    return analysis_interactive_engine_identity(analysis_id).storage_key
-
-
-def datasource_preview_engine_key(datasource_id: str) -> str:
-    return datasource_preview_engine_identity(datasource_id).storage_key
-
-
-def build_engine_key(build_id: str) -> str:
-    return build_engine_identity(build_id).storage_key

@@ -27,13 +27,36 @@ class AppError(Exception):
         super().__init__(message)
 
 
+def not_found_error(message: str, *, error_code: ErrorCodeInput, details: dict[str, object]) -> AppError:
+    return AppError(message=message, error_code=error_code, details=details)
+
+
+def datasource_not_found(datasource_id: str) -> AppError:
+    return not_found_error(
+        f"DataSource {datasource_id} not found",
+        error_code="DATASOURCE_NOT_FOUND",
+        details={"datasource_id": datasource_id},
+    )
+
+
+def step_not_found(step_id: str) -> AppError:
+    return not_found_error(
+        f"Step with id {step_id} not found in pipeline",
+        error_code="STEP_NOT_FOUND",
+        details={"step_id": step_id},
+    )
+
+
+def engine_not_found(resource_id: str) -> AppError:
+    return not_found_error(
+        f"Engine for resource {resource_id} not found",
+        error_code="ENGINE_NOT_FOUND",
+        details={"resource_id": resource_id},
+    )
+
+
 class DataSourceError(AppError):
     pass
-
-
-class DataSourceNotFoundError(DataSourceError):
-    def __init__(self, datasource_id: str):
-        super().__init__(message=f"DataSource {datasource_id} not found", error_code="DATASOURCE_NOT_FOUND", details={"datasource_id": datasource_id})
 
 
 class DataSourceValidationError(DataSourceError):
@@ -71,18 +94,8 @@ class PipelineExecutionError(PipelineError):
         super().__init__(message=message, error_code="PIPELINE_EXECUTION_ERROR", details=next_details)
 
 
-class StepNotFoundError(PipelineError):
-    def __init__(self, step_id: str):
-        super().__init__(message=f"Step with id {step_id} not found in pipeline", error_code="STEP_NOT_FOUND", details={"step_id": step_id})
-
-
 class ComputeError(AppError):
     pass
-
-
-class EngineNotFoundError(ComputeError):
-    def __init__(self, analysis_id: str):
-        super().__init__(message=f"Engine for analysis {analysis_id} not found", error_code="ENGINE_NOT_FOUND", details={"analysis_id": analysis_id})
 
 
 class EngineBusyError(ComputeError):
@@ -97,18 +110,18 @@ class IcebergMetadataPathNotFoundError(ValueError):
         super().__init__(f"Iceberg metadata_path not found: {metadata_path}")
 
 
-EXCEPTION_STATUS_MAP: dict[type[AppError], int] = {
-    DataSourceNotFoundError: 404,
-    StepNotFoundError: 404,
-    PipelineValidationError: 400,
-    DataSourceValidationError: 400,
-    DataSourceConnectionError: 502,
-    DataSourceSnapshotError: 409,
-    EngineBusyError: 409,
-    PipelineExecutionError: 500,
-    EngineNotFoundError: 404,
+ERROR_CODE_STATUS_MAP: dict[int, int] = {
+    errors_pb2.ERROR_CODE_DATASOURCE_NOT_FOUND: 404,
+    errors_pb2.ERROR_CODE_STEP_NOT_FOUND: 404,
+    errors_pb2.ERROR_CODE_ENGINE_NOT_FOUND: 404,
+    errors_pb2.ERROR_CODE_PIPELINE_VALIDATION_ERROR: 400,
+    errors_pb2.ERROR_CODE_DATASOURCE_VALIDATION_ERROR: 400,
+    errors_pb2.ERROR_CODE_DATASOURCE_CONNECTION_ERROR: 502,
+    errors_pb2.ERROR_CODE_DATASOURCE_SNAPSHOT_ERROR: 409,
+    errors_pb2.ERROR_CODE_ENGINE_BUSY: 409,
+    errors_pb2.ERROR_CODE_PIPELINE_EXECUTION_ERROR: 500,
 }
 
 
 def status_for_app_error(exc: AppError) -> int:
-    return EXCEPTION_STATUS_MAP.get(type(exc), 500)
+    return ERROR_CODE_STATUS_MAP.get(exc.error_code_value, 500)

@@ -3,7 +3,7 @@ from typing import Any
 import polars as pl
 
 from runtime.config import settings
-from runtime.exceptions import StepNotFoundError
+from runtime.exceptions import step_not_found
 from runtime.models.compute.base import ComputeEngine, EngineResult
 
 
@@ -13,7 +13,7 @@ def find_step_index(steps: list[dict], target_step_id: str) -> int:
     for idx, step in enumerate(steps):
         if step.get("id") == target_step_id:
             return idx
-    raise StepNotFoundError(target_step_id)
+    raise step_not_found(target_step_id)
 
 
 def is_step_applied(step: dict) -> bool:

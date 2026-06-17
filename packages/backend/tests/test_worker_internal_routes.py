@@ -142,7 +142,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     assert response.request.id == request.id
     assert response.request.namespace == 'default'
     assert response.request.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE
-    assert struct_to_dict(response.request.request_json) == {'analysis_id': 'analysis-1'}
+    assert struct_to_dict(response.request.request) == {'analysis_id': 'analysis-1'}
     test_db_session.refresh(request)
     assert request.status == ComputeRequestStatus.RUNNING
     assert request.lease_owner == worker_id
@@ -151,7 +151,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
             namespace='default',
             request_id=request.id,
-            response_json=dict_to_struct({'success': True}),
+            response=dict_to_struct({'success': True}),
         ),
         context,  # type: ignore[arg-type]
     )
@@ -172,7 +172,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
             namespace='default',
             request_id=failed_request.id,
             error_message='boom',
-            response_json=dict_to_struct({'error': 'boom', 'status_code': 500}),
+            response=dict_to_struct({'error': 'boom', 'status_code': 500}),
         ),
         context,  # type: ignore[arg-type]
     )
@@ -201,7 +201,7 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
         worker_runtime_pb2.WorkerExecuteDatasourceRequest(
             namespace='default',
             kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
-            request_json=dict_to_struct(
+            request=dict_to_struct(
                 {
                     'name': 'Created',
                     'description': None,
@@ -215,7 +215,7 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
         context,  # type: ignore[arg-type]
     )
 
-    assert struct_to_dict(response.response_json) == {'id': 'ds-1', 'name': 'Created'}
+    assert struct_to_dict(response.response) == {'id': 'ds-1', 'name': 'Created'}
 
 
 @pytest.mark.asyncio

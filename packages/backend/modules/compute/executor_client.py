@@ -12,8 +12,9 @@ from backend_core.contracts.compute import schemas as compute_schemas
 from backend_core.contracts.compute_requests.live import response_hub
 from backend_core.contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
 from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
-from backend_core.data_plane_object_store import delete_object, download_bytes
+from backend_core.data_plane_client import client_from_settings
 from backend_core.dependencies import RuntimeAvailabilityProbe
+from backend_core.engine_identity import EngineIdentity, engine_identity_payload
 from backend_core.exceptions import PipelineExecutionError
 from backend_core.namespace import get_namespace
 from backend_core.object_store_paths import is_object_store_url
@@ -134,8 +135,9 @@ async def download_step(
     if not completed.artifact_path or not completed.artifact_name or not completed.artifact_content_type:
         raise PipelineExecutionError('Download artifact missing from compute response')
     if is_object_store_url(completed.artifact_path):
-        data = download_bytes(completed.artifact_path)
-        delete_object(completed.artifact_path)
+        data_plane = client_from_settings()
+        data = data_plane.download_object_bytes(completed.artifact_path)
+        data_plane.delete_object(completed.artifact_path)
         return data, completed.artifact_name, completed.artifact_content_type
     path = Path(completed.artifact_path)
     data = path.read_bytes()
@@ -344,7 +346,7 @@ async def compare_iceberg_snapshots(
 async def spawn_engine(
     session: Session,
     *,
-    analysis_id: str,
+    identity: EngineIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
     resource_config: dict[str, object] | None,
 ) -> compute_schemas.EngineStatusSchema:
@@ -352,7 +354,7 @@ async def spawn_engine(
         session,
         kind=ComputeRequestKind.SPAWN_ENGINE,
         request_json={
-            'analysis_id': analysis_id,
+            'engine_identity': engine_identity_payload(identity),
             'resource_config': resource_config or {},
         },
         runtime_probe=runtime_probe,
@@ -363,14 +365,14 @@ async def spawn_engine(
 async def configure_engine(
     session: Session,
     *,
-    analysis_id: str,
+    identity: EngineIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
     resource_config: dict[str, object],
 ) -> compute_schemas.EngineStatusSchema:
     completed = await _submit_and_wait(
         session,
         kind=ComputeRequestKind.CONFIGURE_ENGINE,
-        request_json={'analysis_id': analysis_id, 'resource_config': resource_config},
+        request_json={'engine_identity': engine_identity_payload(identity), 'resource_config': resource_config},
         runtime_probe=runtime_probe,
     )
     return compute_schemas.EngineStatusSchema.model_validate(compute_requests_service.response_payload(completed))
@@ -379,12 +381,12 @@ async def configure_engine(
 async def shutdown_engine(
     session: Session,
     *,
-    analysis_id: str,
+    identity: EngineIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
     await _submit_and_wait(
         session,
         kind=ComputeRequestKind.SHUTDOWN_ENGINE,
-        request_json={'analysis_id': analysis_id},
+        request_json={'engine_identity': engine_identity_payload(identity)},
         runtime_probe=runtime_probe,
     )

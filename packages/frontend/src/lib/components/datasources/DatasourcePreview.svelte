@@ -70,6 +70,12 @@
 			const pipeline = analysisPipeline!;
 			const request = {
 				target_step_id: 'source',
+				engine_identity: {
+					scope: 'datasource_preview',
+					reuse_policy: 'shared',
+					resource_id: datasourceId,
+					datasource_id: datasourceId
+				},
 				analysis_pipeline: pipeline,
 				row_limit: rowLimit,
 				page

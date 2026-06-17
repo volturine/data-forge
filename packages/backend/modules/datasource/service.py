@@ -16,7 +16,7 @@ from backend_core import datasource_delete_service
 from backend_core.contracts.datasource.models import DataSourceCreatedBy
 from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.datasource_storage import cleanup_datasource_storage
-from backend_core.exceptions import DataSourceNotFoundError, DataSourceValidationError
+from backend_core.exceptions import DataSourceValidationError, datasource_not_found
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from modules.datasource.schemas import (
@@ -697,7 +697,7 @@ def update_column_descriptions(
 ) -> SchemaInfo:
     datasource = session.get(DataSource, datasource_id)
     if not datasource:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
 
     active_columns = {column.name for column in schema_info.columns}
 
@@ -924,7 +924,7 @@ def update_datasource(
 def delete_datasource(session: Session, datasource_id: str) -> None:
     datasource = datasource_delete_service.get_datasource(session, datasource_id)
     if not datasource:
-        raise DataSourceNotFoundError(datasource_id)
+        raise datasource_not_found(datasource_id)
     cleanup_datasource_storage(datasource)
     session.delete(datasource)
     session.commit()

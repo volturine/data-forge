@@ -7,7 +7,7 @@ import pytest
 from sqlmodel import Session
 
 from backend_core.engine_runs_service import _compute_schema_diff, _compute_timing_diff, _safe_int, compare_engine_runs
-from backend_core.exceptions import EngineRunComparisonError, EngineRunNotFoundError
+from backend_core.exceptions import AppError, EngineRunComparisonError
 from backend_core.persistence.engine_runs.models import EngineRun
 
 
@@ -186,8 +186,9 @@ class TestCompareEngineRuns:
     def test_compare_run_not_found(self, test_db_session: Session) -> None:
         run_a = _create_run(test_db_session, result_json={})
         missing_id = str(uuid.uuid4())
-        with pytest.raises(EngineRunNotFoundError, match='not found'):
+        with pytest.raises(AppError, match='not found') as exc_info:
             compare_engine_runs(test_db_session, run_a.id, missing_id)
+        assert exc_info.value.error_code == 'ENGINE_RUN_NOT_FOUND'
 
     def test_compare_requires_same_datasource(self, test_db_session: Session) -> None:
         run_a = _create_run(test_db_session, result_json={'row_count': 1})

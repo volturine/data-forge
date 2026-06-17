@@ -40,12 +40,15 @@ class FauxDatasourceRuntime:
         owner_id: str | None = None,
         **kwargs: Any,
     ):
-        from backend_core.data_plane_object_store import upload_bytes
+        from backend_core.data_plane_client import client_from_settings
         from backend_core.namespace import get_namespace
         from backend_core.object_store_paths import join_object_store_url, object_store_url
 
         metadata_root = object_store_url('namespaces', get_namespace(), 'clean', uuid.uuid4().hex, 'master')
-        upload_bytes(b'{"metadata":"placeholder"}', join_object_store_url(metadata_root, 'metadata', '00000-placeholder.metadata.json'))
+        client_from_settings().upload_object_bytes(
+            b'{"metadata":"placeholder"}',
+            join_object_store_url(metadata_root, 'metadata', '00000-placeholder.metadata.json'),
+        )
 
         datasource = DataSource(
             id=str(uuid.uuid4()),
@@ -179,9 +182,9 @@ class FauxDatasourceRuntime:
     def _get_datasource(self, session: Session, datasource_id: str) -> DataSource:
         datasource = session.get(DataSource, datasource_id)
         if datasource is None:
-            from backend_core.exceptions import DataSourceNotFoundError
+            from backend_core.exceptions import datasource_not_found
 
-            raise DataSourceNotFoundError(datasource_id)
+            raise datasource_not_found(datasource_id)
         return datasource
 
     def _schema_for(self, datasource: DataSource):
@@ -210,7 +213,7 @@ class FauxDatasourceRuntime:
 
     @contextlib.contextmanager
     def _materialized_source_path(self, file_path: str):
-        from backend_core.data_plane_object_store import download_file
+        from backend_core.data_plane_client import client_from_settings
         from backend_core.object_store_paths import is_object_store_url
 
         if not is_object_store_url(file_path):
@@ -221,7 +224,7 @@ class FauxDatasourceRuntime:
         os.close(fd)
         temp_path = Path(temp_name)
         try:
-            download_file(file_path, temp_path)
+            temp_path.write_bytes(client_from_settings().download_object_bytes(file_path))
             yield str(temp_path)
         finally:
             with contextlib.suppress(FileNotFoundError):

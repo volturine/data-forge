@@ -1,5 +1,6 @@
 from buf.validate import validate_pb2 as _validate_pb2
 from dataforge_protocol import common_pb2 as _common_pb2
+from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -33,8 +34,8 @@ class ObjectStoreJoinRequest(_message.Message):
 class ObjectStoreStorageOptionsResponse(_message.Message):
     __slots__ = ("options",)
     OPTIONS_FIELD_NUMBER: _ClassVar[int]
-    options: _common_pb2.JsonPayload
-    def __init__(self, options: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    options: _struct_pb2.Struct
+    def __init__(self, options: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class ObjectStoreBytes(_message.Message):
     __slots__ = ("target", "data", "content_type")

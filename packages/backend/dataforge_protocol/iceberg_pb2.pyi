@@ -3,6 +3,7 @@ import datetime
 from buf.validate import validate_pb2 as _validate_pb2
 from dataforge_protocol import common_pb2 as _common_pb2
 from dataforge_protocol import object_store_pb2 as _object_store_pb2
+from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
@@ -29,8 +30,8 @@ class IcebergSchemaSyncRequest(_message.Message):
     METADATA_PATH_FIELD_NUMBER: _ClassVar[int]
     SCHEMA_FIELD_NUMBER: _ClassVar[int]
     metadata_path: str
-    schema: _common_pb2.JsonPayload
-    def __init__(self, metadata_path: _Optional[str] = ..., schema: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    schema: _struct_pb2.Struct
+    def __init__(self, metadata_path: _Optional[str] = ..., schema: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class IcebergMetadataPathResponse(_message.Message):
     __slots__ = ("metadata_path",)
@@ -93,5 +94,5 @@ class IcebergSnapshotScanRequest(_message.Message):
 class IcebergSnapshotScanResponse(_message.Message):
     __slots__ = ("rows",)
     ROWS_FIELD_NUMBER: _ClassVar[int]
-    rows: _common_pb2.JsonPayload
-    def __init__(self, rows: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    rows: _struct_pb2.Struct
+    def __init__(self, rows: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...

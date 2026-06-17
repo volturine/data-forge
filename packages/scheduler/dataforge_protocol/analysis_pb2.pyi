@@ -1,6 +1,7 @@
 from buf.validate import validate_pb2 as _validate_pb2
 from dataforge_protocol import common_pb2 as _common_pb2
 from dataforge_protocol import enums_pb2 as _enums_pb2
+from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -18,8 +19,8 @@ class AnalysisPipelineDatasource(_message.Message):
     id: str
     analysis_tab_id: str
     source_type: _enums_pb2.DataSourceType
-    config: _common_pb2.JsonPayload
-    def __init__(self, id: _Optional[str] = ..., analysis_tab_id: _Optional[str] = ..., source_type: _Optional[_Union[_enums_pb2.DataSourceType, str]] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    config: _struct_pb2.Struct
+    def __init__(self, id: _Optional[str] = ..., analysis_tab_id: _Optional[str] = ..., source_type: _Optional[_Union[_enums_pb2.DataSourceType, str]] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class AnalysisPipelineStep(_message.Message):
     __slots__ = ("id", "type", "config", "depends_on", "is_applied")
@@ -30,10 +31,10 @@ class AnalysisPipelineStep(_message.Message):
     IS_APPLIED_FIELD_NUMBER: _ClassVar[int]
     id: str
     type: str
-    config: _common_pb2.JsonPayload
+    config: _struct_pb2.Struct
     depends_on: _containers.RepeatedScalarFieldContainer[str]
     is_applied: bool
-    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., config: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ..., depends_on: _Optional[_Iterable[str]] = ..., is_applied: _Optional[bool] = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., depends_on: _Optional[_Iterable[str]] = ..., is_applied: _Optional[bool] = ...) -> None: ...
 
 class AnalysisPipelineOutput(_message.Message):
     __slots__ = ("result_id", "filename", "format", "options")
@@ -44,8 +45,8 @@ class AnalysisPipelineOutput(_message.Message):
     result_id: str
     filename: str
     format: _enums_pb2.ExportFormat
-    options: _common_pb2.JsonPayload
-    def __init__(self, result_id: _Optional[str] = ..., filename: _Optional[str] = ..., format: _Optional[_Union[_enums_pb2.ExportFormat, str]] = ..., options: _Optional[_Union[_common_pb2.JsonPayload, _Mapping]] = ...) -> None: ...
+    options: _struct_pb2.Struct
+    def __init__(self, result_id: _Optional[str] = ..., filename: _Optional[str] = ..., format: _Optional[_Union[_enums_pb2.ExportFormat, str]] = ..., options: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class AnalysisPipelineTab(_message.Message):
     __slots__ = ("id", "name", "datasource", "output", "steps")

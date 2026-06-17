@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import or_, select
 from sqlmodel import Session
 
-from backend_core.exceptions import UdfNotFoundError, UdfValidationError
+from backend_core.exceptions import UdfValidationError, udf_not_found
 from backend_core.persistence.udfs.models import Udf
 from modules.udf.schemas import (
     UdfCloneSchema,
@@ -60,7 +60,7 @@ def get_udf(session: Session, udf_id: str) -> UdfResponseSchema:
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise UdfNotFoundError(udf_id)
+        raise udf_not_found(udf_id)
     return UdfResponseSchema.model_validate(udf)
 
 
@@ -87,7 +87,7 @@ def update_udf(session: Session, udf_id: str, data: UdfUpdateSchema) -> UdfRespo
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise UdfNotFoundError(udf_id)
+        raise udf_not_found(udf_id)
 
     if data.name is not None:
         udf.name = data.name
@@ -113,7 +113,7 @@ def delete_udf(session: Session, udf_id: str) -> None:
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise UdfNotFoundError(udf_id)
+        raise udf_not_found(udf_id)
     session.delete(udf)
     session.commit()
 
@@ -122,7 +122,7 @@ def clone_udf(session: Session, udf_id: str, data: UdfCloneSchema) -> UdfRespons
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise UdfNotFoundError(udf_id)
+        raise udf_not_found(udf_id)
 
     now = datetime.now(UTC)
     cloned = Udf(

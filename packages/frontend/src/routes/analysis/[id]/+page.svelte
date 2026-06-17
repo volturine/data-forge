@@ -31,7 +31,12 @@
 		unfavoriteAnalysis
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
-	import { downloadBlob, getEngineDefaults, getStepSchema, spawnEngine } from '$lib/api/compute';
+	import {
+		downloadBlob,
+		getEngineDefaults,
+		getStepSchema,
+		spawnAnalysisEngine
+	} from '$lib/api/compute';
 	import { openLockSession, type LockSessionError } from '$lib/api/locks';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
@@ -122,7 +127,7 @@
 	const draftLoadGate = createAsyncGate();
 	const inferredSchemaGate = createAsyncGate();
 	let pendingSourceSchemaKeys = new SvelteSet<string>();
-	let warmedEngineKey = $state<string | null>(null);
+	let warmedEngineIdentityCache = $state<string | null>(null);
 
 	let lockMode = $state<EditorLockMode>('pending');
 	let lockIntent = $state<'editing' | 'released'>('editing');
@@ -513,20 +518,20 @@
 	$effect(() => {
 		if (!validAnalysisId) {
 			analysisStore.setPreviewPaused(false);
-			warmedEngineKey = null;
+			warmedEngineIdentityCache = null;
 			return;
 		}
 		const nextKey = `${validAnalysisId}:${JSON.stringify(analysisStore.resourceConfig ?? {})}`;
-		if (warmedEngineKey === nextKey) {
+		if (warmedEngineIdentityCache === nextKey) {
 			analysisStore.setPreviewPaused(false);
 			return;
 		}
-		warmedEngineKey = nextKey;
+		warmedEngineIdentityCache = nextKey;
 		analysisStore.setPreviewPaused(true);
 		let alive = true;
 		const timer = window.setTimeout(() => {
 			if (!alive) return;
-			spawnEngine(validAnalysisId, analysisStore.resourceConfig ?? undefined).match(
+			spawnAnalysisEngine(validAnalysisId, analysisStore.resourceConfig ?? undefined).match(
 				() => {
 					if (!alive) return;
 					analysisStore.setPreviewPaused(false);

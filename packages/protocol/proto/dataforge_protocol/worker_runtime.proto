@@ -5,6 +5,7 @@ package dataforge.runtime;
 import "buf/validate/validate.proto";
 import "dataforge_protocol/common.proto";
 import "dataforge_protocol/enums.proto";
+import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
 service WorkerRuntimeService {
@@ -82,7 +83,7 @@ message WorkerClaimedComputeRequest {
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   ComputeRequestKind kind = 3 [(buf.validate.field).enum.defined_only = true];
-  JsonPayload request_json = 4;
+  google.protobuf.Struct request = 4;
 }
 
 message WorkerClaimComputeRequestResponse {
@@ -92,7 +93,7 @@ message WorkerClaimComputeRequestResponse {
 message WorkerCompleteComputeRequestRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string request_id = 2 [(buf.validate.field).string.min_len = 1];
-  optional JsonPayload response_json = 3;
+  optional google.protobuf.Struct response = 3;
   optional string artifact_path = 4 [(buf.validate.field).string.min_len = 1];
   optional string artifact_name = 5 [(buf.validate.field).string.min_len = 1];
   optional string artifact_content_type = 6 [(buf.validate.field).string.min_len = 1];
@@ -102,13 +103,13 @@ message WorkerFailComputeRequestRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string request_id = 2 [(buf.validate.field).string.min_len = 1];
   string error_message = 3 [(buf.validate.field).string.min_len = 1];
-  JsonPayload response_json = 4;
+  google.protobuf.Struct response = 4;
 }
 
 message WorkerExecuteDatasourceRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   ComputeRequestKind kind = 2 [(buf.validate.field).enum.defined_only = true];
-  JsonPayload request_json = 3;
+  google.protobuf.Struct request = 3;
 }
 
 message WorkerScheduleIngestDatasourceRequest {
@@ -117,7 +118,7 @@ message WorkerScheduleIngestDatasourceRequest {
 }
 
 message JsonResponse {
-  JsonPayload response_json = 1;
+  google.protobuf.Struct response = 1;
 }
 
 message WorkerDatasourceMetadataRequest {
@@ -130,8 +131,8 @@ message WorkerDatasourceMetadataResponse {
   optional string id = 2;
   optional string name = 3;
   optional DataSourceType source_type = 4 [(buf.validate.field).enum.defined_only = true];
-  optional JsonPayload config = 5;
-  optional JsonPayload schema_cache = 6;
+  optional google.protobuf.Struct config = 5;
+  optional google.protobuf.Struct schema_cache = 6;
   optional bool is_hidden = 7;
 }
 
@@ -168,7 +169,7 @@ message WorkerBuildCancelStatusResponse {
 message WorkerUpdateBuildResultRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string build_id = 2 [(buf.validate.field).string.min_len = 1];
-  JsonPayload result_json = 3;
+  google.protobuf.Struct result = 3;
 }
 
 message WorkerUpsertOutputDatasourceRequest {
@@ -176,8 +177,8 @@ message WorkerUpsertOutputDatasourceRequest {
   string result_id = 2 [(buf.validate.field).string.min_len = 1];
   string name = 3 [(buf.validate.field).string.min_len = 1];
   DataSourceType source_type = 4 [(buf.validate.field).enum.defined_only = true];
-  JsonPayload config = 5;
-  JsonPayload schema_cache = 6;
+  google.protobuf.Struct config = 5;
+  google.protobuf.Struct schema_cache = 6;
   optional string analysis_id = 7 [(buf.validate.field).string.min_len = 1];
   optional bool is_hidden = 8;
   bool keep_schema_cache = 9;
@@ -193,7 +194,7 @@ message WorkerHealthCheckSpec {
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string name = 2 [(buf.validate.field).string.min_len = 1];
   HealthCheckType check_type = 3 [(buf.validate.field).enum.defined_only = true];
-  JsonPayload config = 4;
+  google.protobuf.Struct config = 4;
   bool critical = 5;
 }
 
@@ -210,7 +211,7 @@ message WorkerHealthCheckResultPayload {
   string healthcheck_id = 1 [(buf.validate.field).string.min_len = 1];
   bool passed = 2;
   string message = 3;
-  JsonPayload details = 4;
+  google.protobuf.Struct details = 4;
   google.protobuf.Timestamp checked_at = 5;
 }
 
@@ -225,15 +226,15 @@ message WorkerCreateEngineRunRequest {
   string datasource_id = 3 [(buf.validate.field).string.min_len = 1];
   EngineRunKind kind = 4 [(buf.validate.field).enum.defined_only = true];
   EngineRunStatus status = 5 [(buf.validate.field).enum.defined_only = true];
-  JsonPayload request_json = 6;
-  optional JsonPayload result_json = 7;
+  google.protobuf.Struct request = 6;
+  optional google.protobuf.Struct result = 7;
   optional string error_message = 8 [(buf.validate.field).string.min_len = 1];
   optional google.protobuf.Timestamp created_at = 9;
   optional google.protobuf.Timestamp completed_at = 10;
   optional int64 duration_ms = 11 [(buf.validate.field).int64.gte = 0];
-  optional JsonPayload step_timings = 12;
+  optional google.protobuf.Struct step_timings = 12;
   optional string query_plan = 13 [(buf.validate.field).string.min_len = 1];
-  repeated JsonPayload execution_entries = 14;
+  repeated google.protobuf.Struct execution_entries = 14;
   double progress = 15 [(buf.validate.field).double = {
     gte: 0
     lte: 1
@@ -245,8 +246,8 @@ message WorkerCreateEngineRunRequest {
 message WorkerUpdateEngineRunRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string run_id = 2 [(buf.validate.field).string.min_len = 1];
-  JsonPayload fields = 3;
-  bool merge_result_json = 4;
+  google.protobuf.Struct fields = 3;
+  bool merge_result = 4;
 }
 
 message WorkerEngineRunStateRequest {
@@ -257,7 +258,7 @@ message WorkerEngineRunStateRequest {
 message WorkerEngineRunStateResponse {
   bool found = 1;
   optional EngineRunStatus status = 2 [(buf.validate.field).enum.defined_only = true];
-  optional JsonPayload result_json = 3;
+  optional google.protobuf.Struct result = 3;
   optional google.protobuf.Timestamp cancelled_at = 4;
   optional string cancelled_by = 5;
 }
@@ -285,8 +286,8 @@ message WorkerNamespacesResponse {
 message WorkerPersistBuildEventRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string build_id = 2 [(buf.validate.field).string.min_len = 1];
-  JsonPayload event = 3;
-  optional JsonPayload resource_config_json = 4;
+  google.protobuf.Struct event = 3;
+  optional google.protobuf.Struct resource_config = 4;
 }
 
 message WorkerPersistBuildEventResponse {
@@ -298,9 +299,9 @@ message WorkerBuildRunPayload {
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string analysis_id = 3 [(buf.validate.field).string.min_len = 1];
   string analysis_name = 4 [(buf.validate.field).string.min_len = 1];
-  JsonPayload request_json = 5;
-  JsonPayload starter_json = 6;
-  optional JsonPayload resource_config_json = 7;
+  google.protobuf.Struct request = 5;
+  google.protobuf.Struct starter = 6;
+  optional google.protobuf.Struct resource_config = 7;
   optional EngineRunKind current_kind = 8 [(buf.validate.field).enum.defined_only = true];
   optional string current_datasource_id = 9 [(buf.validate.field).string.min_len = 1];
   optional string current_tab_id = 10 [(buf.validate.field).string.min_len = 1];
@@ -323,7 +324,7 @@ message WorkerStartBuildRunResponse {
 message WorkerPersistEngineSnapshotRequest {
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  repeated JsonPayload statuses = 3;
+  repeated google.protobuf.Struct statuses = 3;
 }
 
 message WorkerPendingDatasourceDelete {
@@ -368,7 +369,7 @@ message WorkerGenerateAIRequest {
   string model = 3 [(buf.validate.field).string.min_len = 1];
   optional string endpoint_url = 4 [(buf.validate.field).string.uri = true];
   optional string api_key = 5 [(buf.validate.field).string.min_len = 1];
-  JsonPayload options = 6;
+  google.protobuf.Struct options = 6;
 }
 
 message WorkerGenerateAIResponse {

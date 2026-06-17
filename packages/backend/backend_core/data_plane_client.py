@@ -54,27 +54,27 @@ class WorkerDataPlaneClient:
         self._object_store = object_store_pb2_grpc.ObjectStoreServiceStub(self._channel)
         self._iceberg = iceberg_pb2_grpc.IcebergServiceStub(self._channel)
 
-    def object_store_url(self, *parts: str, bucket: str | None = None) -> str:
+    def build_object_url(self, *parts: str, bucket: str | None = None) -> str:
         request = object_store_pb2.ObjectStorePathParts(parts=parts)
         if bucket is not None:
             request.bucket = bucket
         return self._call(lambda: self._object_store.BuildUrl(request, timeout=self._timeout_seconds, metadata=self._metadata())).url
 
-    def join_object_store_url(self, base_url: str, *parts: str) -> str:
+    def join_object_url(self, base_url: str, *parts: str) -> str:
         request = object_store_pb2.ObjectStoreJoinRequest(base=object_store_pb2.ObjectStoreUrl(url=base_url), parts=parts)
         return self._call(lambda: self._object_store.JoinUrl(request, timeout=self._timeout_seconds, metadata=self._metadata())).url
 
-    def object_store_storage_options(self) -> dict[str, object]:
+    def read_object_store_storage_options(self) -> dict[str, object]:
         response = self._call(lambda: self._object_store.StorageOptions(common_pb2.EmptyRequest(), timeout=self._timeout_seconds, metadata=self._metadata()))
         return struct_to_dict(response.options)
 
-    def upload_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
+    def upload_object_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
         request = object_store_pb2.ObjectStoreBytes(target=object_store_pb2.ObjectStoreUrl(url=target_url), data=data)
         if content_type is not None:
             request.content_type = content_type
         return self._call(lambda: self._object_store.UploadBytes(request, timeout=self._timeout_seconds, metadata=self._metadata())).url
 
-    def download_bytes(self, source_url: str) -> bytes:
+    def download_object_bytes(self, source_url: str) -> bytes:
         response = self._call(
             lambda: self._object_store.DownloadBytes(object_store_pb2.ObjectStoreUrl(url=source_url), timeout=self._timeout_seconds, metadata=self._metadata())
         )
@@ -115,7 +115,7 @@ class WorkerDataPlaneClient:
         )
         return [item.url for item in response.files]
 
-    def delete_prefix(self, prefix_url: str) -> None:
+    def delete_managed_prefix(self, prefix_url: str) -> None:
         self._call(
             lambda: self._object_store.DeletePrefix(
                 object_store_pb2.ObjectStoreUrl(url=prefix_url),
@@ -124,7 +124,7 @@ class WorkerDataPlaneClient:
             )
         )
 
-    def resolve_iceberg_metadata_path(self, *, namespace: str, metadata_path: str, datasource_id: str | None = None) -> str:
+    def resolve_metadata_path(self, *, namespace: str, metadata_path: str, datasource_id: str | None = None) -> str:
         request = iceberg_pb2.IcebergTableRef(namespace=namespace, metadata_path=metadata_path)
         if datasource_id is not None:
             request.datasource_id = datasource_id
@@ -137,7 +137,7 @@ class WorkerDataPlaneClient:
         )
         return response.metadata_path
 
-    def resolve_iceberg_branch_metadata_path(
+    def resolve_branch_metadata_path(
         self,
         *,
         namespace: str,
@@ -153,7 +153,7 @@ class WorkerDataPlaneClient:
         response = self._call(lambda: self._iceberg.ResolveBranchMetadataPath(request, timeout=self._timeout_seconds, metadata=self._metadata()))
         return response.metadata_path
 
-    def scan_iceberg_snapshot(self, *, metadata_path: str, snapshot_id: str, limit: int | None = None) -> list[dict[str, object]]:
+    def scan_snapshot(self, *, metadata_path: str, snapshot_id: str, limit: int | None = None) -> list[dict[str, object]]:
         request = iceberg_pb2.IcebergSnapshotScanRequest(metadata_path=metadata_path, snapshot_id=snapshot_id)
         if limit is not None:
             request.limit = limit
@@ -161,11 +161,11 @@ class WorkerDataPlaneClient:
         rows = struct_to_dict(response.rows).get('rows')
         return cast(list[dict[str, object]], rows) if isinstance(rows, list) else []
 
-    def sync_iceberg_schema(self, *, metadata_path: str, schema_payload: dict[str, object]) -> None:
+    def sync_table_schema(self, *, metadata_path: str, schema_payload: dict[str, object]) -> None:
         request = iceberg_pb2.IcebergSchemaSyncRequest(metadata_path=metadata_path, schema=dict_to_struct(schema_payload))
         self._call(lambda: self._iceberg.SyncSchema(request, timeout=self._timeout_seconds, metadata=self._metadata()))
 
-    def list_iceberg_snapshots(self, *, namespace: str, datasource_id: str, branch: str | None = None) -> IcebergSnapshots:
+    def list_snapshots(self, *, namespace: str, datasource_id: str, branch: str | None = None) -> IcebergSnapshots:
         request = iceberg_pb2.IcebergTableRef(namespace=namespace, datasource_id=datasource_id)
         if branch is not None:
             request.branch = branch
@@ -185,7 +185,7 @@ class WorkerDataPlaneClient:
             ],
         )
 
-    def delete_iceberg_snapshot(self, *, namespace: str, datasource_id: str, snapshot_id: str) -> str:
+    def delete_snapshot(self, *, namespace: str, datasource_id: str, snapshot_id: str) -> str:
         response = self._call(
             lambda: self._iceberg.DeleteSnapshot(
                 iceberg_pb2.IcebergSnapshotDeleteRequest(namespace=namespace, datasource_id=datasource_id, snapshot_id=snapshot_id),
