@@ -7,7 +7,6 @@ unset NO_COLOR
 unset VIRTUAL_ENV
 export UV_PYTHON="${E2E_PYTHON_VERSION}"
 ROOT_DIR="$(pwd)"
-just generate-protocol
 DATA_DIR="${DATA_DIR}-run-$$"
 export DATA_DIR
 LOG_DIR="${E2E_LOG_DIR:-}"

@@ -156,6 +156,7 @@ jobs:
           set -o pipefail
           mkdir -p .artifacts/ci/e2e
           export E2E_LOG_DIR="$PWD/.artifacts/ci/e2e/services"
+          export DATAFORGE_SKIP_PROTOCOL_GENERATE=1
           just test-e2e 2>&1 | tee .artifacts/ci/e2e/e2e.log
           status=${PIPESTATUS[0]}
           if [ "$status" -eq 124 ]; then

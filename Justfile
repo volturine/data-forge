@@ -178,6 +178,11 @@ test-frontend-raw:
     cd packages/frontend && bun run test:unit
 
 test-e2e:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
+        just generate-protocol
+    fi
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py --cwd . -- scripts/test_e2e.sh
 
 generate-step-types:
