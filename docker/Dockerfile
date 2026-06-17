@@ -9,16 +9,20 @@ RUN bun install --frozen-lockfile
 COPY packages/frontend/ ./
 RUN bun run panda:codegen && bun run build
 
-FROM oven/bun:${BUN_VERSION} AS protocol-builder
+FROM python:3.14.3-slim AS protocol-builder
 WORKDIR /app
+COPY --from=frontend-builder /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates && \
+    apt-get install -y --no-install-recommends ca-certificates just && \
+    ln -s /usr/local/bin/bun /usr/local/bin/node && \
     rm -rf /var/lib/apt/lists/*
+COPY Justfile /app/Justfile
 COPY packages/protocol/ /app/packages/protocol/
 COPY packages/backend/ /app/packages/backend/
 COPY packages/scheduler/ /app/packages/scheduler/
 COPY packages/worker/ /app/packages/worker/
-RUN cd packages/protocol && bunx @bufbuild/buf@1.70.0 generate
+RUN just generate-protocol
 
 FROM python:3.14.3-slim AS backend-base
 WORKDIR /app/packages/backend

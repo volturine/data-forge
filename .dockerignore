@@ -29,6 +29,8 @@ backend/.pytest_cache/
 backend/.ruff_cache/
 backend/.venv/
 packages/frontend/node_modules/
+packages/protocol/.venv/
+packages/protocol/node_modules/
 venv/
 ENV/
 env/
