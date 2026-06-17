@@ -7,6 +7,7 @@ python := 'env -u VIRTUAL_ENV uv run python'
 buf := 'bunx @bufbuild/buf@1.70.0'
 
 install:
+    just generate-protocol
     cd packages/backend && uv sync
     cd packages/scheduler && uv sync
     cd packages/worker && uv sync
@@ -28,6 +29,7 @@ update-deps:
 dev:
     #!/usr/bin/env bash
     set -euo pipefail
+    just generate-protocol
     set -a; source config/env/dev.env; set +a
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_postgres.py
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_rustfs.py
@@ -80,6 +82,7 @@ format:
     cd packages/frontend && bun run format
 
 check:
+    just generate-protocol
     cd packages/backend && env -u VIRTUAL_ENV uv run ruff format --check .
     cd packages/scheduler && env -u VIRTUAL_ENV uv run ruff format --check .
     cd packages/worker && env -u VIRTUAL_ENV uv run ruff format --check .
@@ -162,6 +165,7 @@ test:
 test-backend-raw:
     #!/usr/bin/env bash
     set -euo pipefail
+    just generate-protocol
     cd packages/backend
     {{pytest}} tests --ignore=tests/integration
     {{pytest}} tests/integration
@@ -183,6 +187,7 @@ generate-build-stream-types:
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_build_stream_types.py
 
 docker-dev:
+    just generate-protocol
     docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build
 
 docker-dev-down:

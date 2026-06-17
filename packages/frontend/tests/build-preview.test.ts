@@ -1,14 +1,9 @@
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
-import { createDatasource, createAnalysis, shutdownEngine } from './utils/api.js';
+import { createDatasource, createAnalysis } from './utils/api.js';
 import { readyTimeoutMs } from './utils/readiness.js';
-import {
-	createCleanupPage,
-	deleteAnalysisViaUI,
-	deleteDatasourceViaUI
-} from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -27,12 +22,34 @@ async function expectVisibleEventually(locator: Locator) {
 	throw lastError;
 }
 
+async function deleteBestEffort(
+	page: Page,
+	endpoint: string,
+	expectedStatuses: Set<number>
+): Promise<void> {
+	const response = await page.request.delete(endpoint, { timeout: 5_000 }).catch(() => null);
+	if (!response || expectedStatuses.has(response.status())) return;
+	throw new Error(`Cleanup DELETE ${endpoint} returned HTTP ${response.status()}`);
+}
+
+async function cleanupBuildPreviewResources(
+	page: Page,
+	analysisId: string,
+	datasourceId: string
+): Promise<void> {
+	await deleteBestEffort(
+		page,
+		`/api/v1/compute/engine/analysis/${analysisId}`,
+		new Set([204, 404, 409])
+	);
+	await deleteBestEffort(page, `/api/v1/analysis/${analysisId}`, new Set([204, 404]));
+	await deleteBestEffort(page, `/api/v1/datasource/${datasourceId}`, new Set([202, 204, 404]));
+}
+
 test.describe('Build Preview – real build lifecycle', () => {
 	test('clicking Build queues the run and the preview opens only from the engine status control', async ({
 		page,
-		request,
-		browser,
-		workerAuth
+		request
 	}) => {
 		const dsName = `e2e-bprev-real-ds-${uid()}`;
 		const aName = `E2E BPrev Real ${uid()}`;
@@ -62,27 +79,11 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-terminal');
 		} finally {
-			const { page: cleanupPage, context } = await createCleanupPage(
-				browser,
-				workerAuth.workerIndex
-			);
-			try {
-				await shutdownEngine(request, aId);
-				await deleteAnalysisViaUI(cleanupPage, aName);
-				await deleteDatasourceViaUI(cleanupPage, dsName);
-			} finally {
-				await cleanupPage.close();
-				await context.close();
-			}
+			await cleanupBuildPreviewResources(page, aId, dsId);
 		}
 	});
 
-	test('close button dismisses the Build Preview modal', async ({
-		page,
-		request,
-		browser,
-		workerAuth
-	}) => {
+	test('close button dismisses the Build Preview modal', async ({ page, request }) => {
 		const dsName = `e2e-bprev-close-ds-${uid()}`;
 		const aName = `E2E BPrev Close ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -109,18 +110,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-modal-closed');
 		} finally {
-			const { page: cleanupPage, context } = await createCleanupPage(
-				browser,
-				workerAuth.workerIndex
-			);
-			try {
-				await shutdownEngine(request, aId);
-				await deleteAnalysisViaUI(cleanupPage, aName);
-				await deleteDatasourceViaUI(cleanupPage, dsName);
-			} finally {
-				await cleanupPage.close();
-				await context.close();
-			}
+			await cleanupBuildPreviewResources(page, aId, dsId);
 		}
 	});
 });

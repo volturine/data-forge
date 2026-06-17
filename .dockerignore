@@ -42,6 +42,12 @@ yarn-error.log*
 packages/frontend/build/
 packages/frontend/.svelte-kit/
 packages/frontend/dist/
+packages/backend/buf/
+packages/backend/dataforge_protocol/
+packages/scheduler/buf/
+packages/scheduler/dataforge_protocol/
+packages/worker/buf/
+packages/worker/dataforge_protocol/
 
 # IDE
 .vscode/

@@ -7,6 +7,7 @@ unset NO_COLOR
 unset VIRTUAL_ENV
 export UV_PYTHON="${E2E_PYTHON_VERSION}"
 ROOT_DIR="$(pwd)"
+just generate-protocol
 DATA_DIR="${DATA_DIR}-run-$$"
 export DATA_DIR
 LOG_DIR="${E2E_LOG_DIR:-}"
@@ -223,25 +224,17 @@ if [ -z "${PLAYWRIGHT_WORKERS}" ]; then
     echo "PW_E2E_WORKERS must be set before running e2e tests" >&2
     exit 1
 fi
-echo "Starting Playwright e2e tests across 4 deterministic shards"
-echo "Using ${PLAYWRIGHT_WORKERS} worker(s) per shard"
+echo "Starting Playwright e2e tests"
+echo "Using ${PLAYWRIGHT_WORKERS} worker(s)"
 rm -rf "${PLAYWRIGHT_ARTIFACTS_DIR}"
 mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}"
-for shard_index in 1 2 3 4; do
-    mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/shard-${shard_index}-of-4/test-results"
-    mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/shard-${shard_index}-of-4/playwright-report"
-done
+mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/test-results"
+mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/playwright-report"
 
-run_playwright_shard() {
-    local shard_label="$1"
-    shift
-    local shard_index="${shard_label%%/*}"
-    local shard_total="${shard_label##*/}"
-    echo "Starting Playwright shard ${shard_label}"
+run_playwright() {
     cd "${ROOT_DIR}/packages/frontend"
-    local artifact_suffix="shard-${shard_index}-of-${shard_total}"
-    local output_dir="$PWD/tests/.artifacts/playwright/${artifact_suffix}/test-results"
-    local report_dir="$PWD/tests/.artifacts/playwright/${artifact_suffix}/playwright-report"
+    local output_dir="$PWD/tests/.artifacts/playwright/test-results"
+    local report_dir="$PWD/tests/.artifacts/playwright/playwright-report"
     mkdir -p "$output_dir" "$report_dir"
     # Suppress Node.js runtime deprecation warnings (e.g. DEP0205 module.register)
     # that come from Playwright/Vite internals on Node v26+; these are third-party
@@ -253,36 +246,7 @@ run_playwright_shard() {
     python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        -- ./node_modules/.bin/playwright test --config=playwright.config.ts "$@"
+        -- ./node_modules/.bin/playwright test --config=playwright.config.ts
 }
 
-SHARD_PIDS=()
-SHARD_LABELS=()
-
-start_playwright_shard() {
-    local shard_label="$1"
-    shift
-    (run_playwright_shard "$shard_label" "$@") &
-    SHARD_PIDS+=("$!")
-    SHARD_LABELS+=("$shard_label")
-}
-
-for shard_index in 1 2 3 4; do
-    start_playwright_shard "${shard_index}/4" --shard "${shard_index}/4"
-done
-
-shard_failures=0
-for shard_position in "${!SHARD_PIDS[@]}"; do
-    shard_pid="${SHARD_PIDS[$shard_position]}"
-    shard_label="${SHARD_LABELS[$shard_position]}"
-    if wait "$shard_pid"; then
-        echo "Playwright shard ${shard_label} passed"
-    else
-        echo "Playwright shard ${shard_label} failed" >&2
-        shard_failures=1
-    fi
-done
-
-if [ "$shard_failures" -ne 0 ]; then
-    exit 1
-fi
+run_playwright

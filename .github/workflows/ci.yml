@@ -25,6 +25,15 @@ jobs:
         with:
           python-version: "3.14"
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: taiki-e/install-action@just
+
+      - name: Generate protocol code
+        run: just generate-protocol
+
       - name: Install backend dependencies
         working-directory: packages/backend
         run: uv sync
@@ -106,7 +115,6 @@ jobs:
     env:
       PORT: "8001"
       FRONTEND_PORT: "3001"
-      PW_E2E_WORKERS: "1"
     steps:
       - uses: actions/checkout@v6
 
@@ -127,6 +135,9 @@ jobs:
           bun-version: latest
 
       - uses: taiki-e/install-action@just
+
+      - name: Generate protocol code
+        run: just generate-protocol
 
       - name: Install backend dependencies
         working-directory: packages/backend

@@ -10,6 +10,14 @@
 packages/*/tests/.artifacts/
 .artifacts/
 
+# Protocol code generated from packages/protocol.
+packages/backend/buf/
+packages/backend/dataforge_protocol/
+packages/scheduler/buf/
+packages/scheduler/dataforge_protocol/
+packages/worker/buf/
+packages/worker/dataforge_protocol/
+
 # Node/tool caches
 node_modules/
 .vite/

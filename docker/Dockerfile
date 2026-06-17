@@ -9,6 +9,14 @@ RUN bun install --frozen-lockfile
 COPY packages/frontend/ ./
 RUN bun run panda:codegen && bun run build
 
+FROM oven/bun:${BUN_VERSION} AS protocol-builder
+WORKDIR /app
+COPY packages/protocol/ /app/packages/protocol/
+COPY packages/backend/ /app/packages/backend/
+COPY packages/scheduler/ /app/packages/scheduler/
+COPY packages/worker/ /app/packages/worker/
+RUN cd packages/protocol && bunx @bufbuild/buf@1.70.0 generate
+
 FROM python:3.14.3-slim AS backend-base
 WORKDIR /app/packages/backend
 
@@ -33,6 +41,12 @@ RUN addgroup --gid 1000 appgroup && adduser --uid 1000 --gid 1000 --disabled-pas
 COPY packages/backend/ /app/packages/backend/
 COPY packages/scheduler/ /app/packages/scheduler/
 COPY packages/worker/ /app/packages/worker/
+COPY --from=protocol-builder /app/packages/backend/buf /app/packages/backend/buf
+COPY --from=protocol-builder /app/packages/backend/dataforge_protocol /app/packages/backend/dataforge_protocol
+COPY --from=protocol-builder /app/packages/scheduler/buf /app/packages/scheduler/buf
+COPY --from=protocol-builder /app/packages/scheduler/dataforge_protocol /app/packages/scheduler/dataforge_protocol
+COPY --from=protocol-builder /app/packages/worker/buf /app/packages/worker/buf
+COPY --from=protocol-builder /app/packages/worker/dataforge_protocol /app/packages/worker/dataforge_protocol
 COPY Justfile /app/Justfile
 COPY scripts/ /app/scripts/
 
