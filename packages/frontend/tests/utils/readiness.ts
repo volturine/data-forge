@@ -76,6 +76,22 @@ export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs())
 	await waitForAnyVisible(page.locator('main'), timeout);
 }
 
+async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		try {
+			await page.goto(path, { waitUntil: 'domcontentloaded' });
+			await waitForLayoutReady(page, timeout);
+			return;
+		} catch (error) {
+			lastError = error;
+			if (attempt === 1) break;
+			await page.waitForTimeout(250);
+		}
+	}
+	throw lastError;
+}
+
 /**
  * Navigate to an authenticated route reliably on a fresh Playwright page.
  *
@@ -93,13 +109,11 @@ export async function gotoAuthedRoute(
 	const routeTimeout = shellReady ? timeout : coldStartTimeoutMs(timeout);
 
 	if (!shellReady) {
-		await page.goto('/', { waitUntil: 'domcontentloaded' });
-		await waitForLayoutReady(page, routeTimeout);
+		await gotoAndWaitForLayout(page, '/', routeTimeout);
 		if (path === '/') return;
 	}
 
-	await page.goto(path, { waitUntil: 'domcontentloaded' });
-	await waitForLayoutReady(page, routeTimeout);
+	await gotoAndWaitForLayout(page, path, routeTimeout);
 }
 
 /**

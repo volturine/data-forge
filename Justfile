@@ -165,7 +165,9 @@ test:
 test-backend-raw:
     #!/usr/bin/env bash
     set -euo pipefail
-    just generate-protocol
+    if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
+        just generate-protocol
+    fi
     cd packages/backend
     {{pytest}} tests --ignore=tests/integration
     {{pytest}} tests/integration

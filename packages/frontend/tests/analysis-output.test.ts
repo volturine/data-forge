@@ -1,12 +1,8 @@
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures.js';
-import { createDatasource, createAnalysis, shutdownEngine } from './utils/api.js';
-import {
-	createCleanupPage,
-	deleteAnalysisViaUI,
-	deleteDatasourceViaUI
-} from './utils/ui-cleanup.js';
+import { createDatasource, createAnalysis } from './utils/api.js';
+import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
@@ -41,6 +37,25 @@ async function expectCompletedEventually(locator: Locator) {
 	throw lastError;
 }
 
+async function deleteBestEffort(
+	page: Page,
+	endpoint: string,
+	expectedStatuses: Set<number>
+): Promise<void> {
+	const response = await page.request.delete(endpoint, { timeout: 5_000 }).catch(() => null);
+	if (!response || expectedStatuses.has(response.status())) return;
+	throw new Error(`Cleanup DELETE ${endpoint} returned HTTP ${response.status()}`);
+}
+
+async function cleanupAnalysis(page: Page, analysisId: string): Promise<void> {
+	await deleteBestEffort(
+		page,
+		`/api/v1/compute/engine/analysis/${analysisId}`,
+		new Set([204, 404, 409])
+	);
+	await deleteBestEffort(page, `/api/v1/analysis/${analysisId}`, new Set([204, 404]));
+}
+
 test.describe('Analyses – output visibility toggle', () => {
 	test('OutputNode: visibility toggle button shows initial state', async ({ page, request }) => {
 		const aName = `E2E Vis Toggle ${uid()}`;
@@ -58,8 +73,7 @@ test.describe('Analyses – output visibility toggle', () => {
 
 			await screenshot(page, 'analysis/output', 'output-visibility-toggle');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
@@ -89,8 +103,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			await toggleBtn.click();
 			await expect(toggleBtn).toContainText('hidden', { timeout: 5_000 });
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
@@ -135,8 +148,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			await rebuiltToggleBtn.click();
 			await expect(rebuiltToggleBtn).toContainText('hidden', { timeout: 5_000 });
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
@@ -172,8 +184,7 @@ test.describe('Analyses – output node interactions', () => {
 
 			await screenshot(page, 'analysis/output', 'output-node-mode-dropdown');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
@@ -213,8 +224,7 @@ test.describe('Analyses – output node interactions', () => {
 
 			await screenshot(page, 'analysis/output', 'output-mode-recreate');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
@@ -262,8 +272,7 @@ test.describe('Analyses – output node interactions', () => {
 			await healthToggle.click();
 			await expect(healthEmptyState).not.toBeVisible({ timeout: 3_000 });
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
@@ -294,8 +303,7 @@ test.describe('Analyses – output node interactions', () => {
 			// Chip should disappear
 			await expect(notifyToggle).not.toContainText('/', { timeout: 3_000 });
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
@@ -333,8 +341,7 @@ test.describe('Analyses – output node interactions', () => {
 				timeout: 3_000
 			});
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
@@ -365,8 +372,7 @@ test.describe('Analyses – output node interactions', () => {
 
 			await screenshot(page, 'analysis/output', 'output-table-renamed');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
@@ -398,8 +404,7 @@ test.describe('Analyses – output node table name edit', () => {
 
 			await screenshot(page, 'analysis/output', 'output-name-edited');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
@@ -440,8 +445,7 @@ test.describe('Analyses – output node persistence', () => {
 
 			await screenshot(page, 'analysis/output', 'output-mode-persisted');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
@@ -487,8 +491,7 @@ test.describe('Analyses – output node persistence', () => {
 
 			await screenshot(page, 'analysis/output', 'output-tablename-persisted');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
@@ -516,8 +519,7 @@ test.describe('Analyses – row count action', () => {
 
 			await screenshot(page, 'analysis/output', 'row-count-success');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
@@ -556,8 +558,7 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			await screenshot(page, 'analysis/output', 'row-count-filter-step');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
@@ -590,8 +591,7 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			await screenshot(page, 'analysis/output', 'row-count-limit-step');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
