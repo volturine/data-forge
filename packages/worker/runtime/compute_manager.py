@@ -5,14 +5,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.config import settings
-from runtime.engine_identity import (
-    EngineIdentity,
-    analysis_interactive_engine_identity,
-    engine_reuse_policy_value,
-    engine_scope_value,
-)
 from runtime.models.compute.base import ComputeEngine, EngineStatusInfo
 from runtime.models.compute.schemas import EngineStatus
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
@@ -23,6 +18,7 @@ _RESOURCE_KEYS = frozenset({"max_threads", "max_memory_mb", "streaming_chunk_siz
 
 EngineFactory = Callable[[str, dict | None], ComputeEngine]
 EngineSnapshotListener = Callable[[list[EngineStatusInfo]], None]
+EngineIdentity = compute_pb2.EngineIdentity
 EngineIdentityInput = EngineIdentity | str
 
 
@@ -36,6 +32,77 @@ class EngineIdentityKey:
 
 def _default_engine_factory(resource_id: str, resource_config: dict | None = None) -> ComputeEngine:
     return PolarsComputeEngine(resource_id, resource_config=resource_config)
+
+
+def _required_identity_id(value: str, field_name: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field_name} is required")
+    return normalized
+
+
+def analysis_interactive_engine_identity(analysis_id: str) -> EngineIdentity:
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id=_required_identity_id(analysis_id, "analysis_id"),
+    )
+
+
+def datasource_preview_engine_identity(datasource_id: str) -> EngineIdentity:
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        datasource_id=_required_identity_id(datasource_id, "datasource_id"),
+    )
+
+
+def build_engine_identity(build_id: str) -> EngineIdentity:
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_BUILD,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        build_id=_required_identity_id(build_id, "build_id"),
+    )
+
+
+def engine_identity_resource_id(identity: EngineIdentity) -> str:
+    if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField("analysis_id"):
+        return identity.analysis_id
+    if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.HasField("datasource_id"):
+        return identity.datasource_id
+    if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD and identity.HasField("build_id"):
+        return identity.build_id
+    raise ValueError("engine identity is missing the resource id required by its scope")
+
+
+def _engine_identity_analysis_id(identity: EngineIdentity) -> str | None:
+    return identity.analysis_id if identity.HasField("analysis_id") else None
+
+
+def _engine_identity_datasource_id(identity: EngineIdentity) -> str | None:
+    return identity.datasource_id if identity.HasField("datasource_id") else None
+
+
+def _engine_identity_build_id(identity: EngineIdentity) -> str | None:
+    return identity.build_id if identity.HasField("build_id") else None
+
+
+def _engine_scope_value(identity: EngineIdentity) -> str:
+    if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW:
+        return "datasource_preview"
+    if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE:
+        return "analysis_interactive"
+    if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD:
+        return "build"
+    raise ValueError("engine identity scope is unspecified")
+
+
+def _engine_reuse_policy_value(identity: EngineIdentity) -> str:
+    if identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED:
+        return "shared"
+    if identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE:
+        return "exclusive"
+    raise ValueError("engine identity reuse policy is unspecified")
 
 
 class EngineInfo:
@@ -82,13 +149,13 @@ class ProcessManager:
             namespace=namespace or get_namespace(),
             scope=resolved.scope,
             reuse_policy=resolved.reuse_policy,
-            resource_id=resolved.resource_id,
+            resource_id=engine_identity_resource_id(resolved),
         )
 
     def spawn_engine(self, identity: EngineIdentityInput, resource_config: dict | None = None) -> EngineInfo:
         """Spawn a new compute engine or reuse an existing one for the same identity."""
         engine_identity = self._resolve_identity(identity)
-        resource_id = engine_identity.resource_id
+        resource_id = engine_identity_resource_id(engine_identity)
         normalized_config = self._normalize_config(resource_config)
         qualified_key = self._key(engine_identity)
         namespace = qualified_key.namespace
@@ -268,8 +335,8 @@ class ProcessManager:
             persisted_identity = self._engine_identities.get(qualified_key, engine_identity)
             if info is None:
                 return EngineStatusInfo(
-                    analysis_id=persisted_identity.analysis_id or "",
-                    resource_id=persisted_identity.resource_id,
+                    analysis_id=_engine_identity_analysis_id(persisted_identity) or "",
+                    resource_id=engine_identity_resource_id(persisted_identity),
                     status=EngineStatus.TERMINATED,
                     process_id=None,
                     last_activity=None,
@@ -277,11 +344,11 @@ class ProcessManager:
                     resource_config=None,
                     effective_resources=None,
                     defaults=defaults,
-                    scope=engine_scope_value(persisted_identity),
-                    reuse_policy=engine_reuse_policy_value(persisted_identity),
-                    datasource_id=persisted_identity.datasource_id,
-                    build_id=persisted_identity.build_id,
-                    current_build_id=persisted_identity.build_id,
+                    scope=_engine_scope_value(persisted_identity),
+                    reuse_policy=_engine_reuse_policy_value(persisted_identity),
+                    datasource_id=_engine_identity_datasource_id(persisted_identity),
+                    build_id=_engine_identity_build_id(persisted_identity),
+                    current_build_id=_engine_identity_build_id(persisted_identity),
                     current_engine_run_id=None,
                 )
 
@@ -292,8 +359,8 @@ class ProcessManager:
             effective_resources = engine.effective_resources or None
 
             return EngineStatusInfo(
-                analysis_id=persisted_identity.analysis_id or "",
-                resource_id=persisted_identity.resource_id,
+                analysis_id=_engine_identity_analysis_id(persisted_identity) or "",
+                resource_id=engine_identity_resource_id(persisted_identity),
                 status=EngineStatus.HEALTHY if is_alive else EngineStatus.TERMINATED,
                 process_id=engine.process_id,
                 last_activity=info.last_activity.isoformat(),
@@ -301,11 +368,11 @@ class ProcessManager:
                 resource_config=resource_config,
                 effective_resources=effective_resources,
                 defaults=defaults,
-                scope=engine_scope_value(persisted_identity),
-                reuse_policy=engine_reuse_policy_value(persisted_identity),
-                datasource_id=persisted_identity.datasource_id,
-                build_id=persisted_identity.build_id,
-                current_build_id=info.current_build_id or persisted_identity.build_id,
+                scope=_engine_scope_value(persisted_identity),
+                reuse_policy=_engine_reuse_policy_value(persisted_identity),
+                datasource_id=_engine_identity_datasource_id(persisted_identity),
+                build_id=_engine_identity_build_id(persisted_identity),
+                current_build_id=info.current_build_id or _engine_identity_build_id(persisted_identity),
                 current_engine_run_id=info.current_engine_run_id,
             )
 

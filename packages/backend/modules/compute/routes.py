@@ -33,12 +33,6 @@ from backend_core.dependencies import (
     get_manager,
     get_runtime_availability_probe,
 )
-from backend_core.engine_identity import (
-    analysis_interactive_engine_identity,
-    build_engine_identity,
-    datasource_preview_engine_identity,
-    engine_identity_from_payload,
-)
 from backend_core.engine_live import load_engine_snapshot, registry as engine_registry
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import engine_not_found
@@ -56,6 +50,7 @@ from backend_core.websocket import (
     safe_send_json,
     websocket_disconnected,
 )
+from dataforge_protocol import compute_pb2, enums_pb2
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.compute import executor_client
@@ -69,6 +64,65 @@ from modules.mcp.router import MCPRouter
 logger = logging.getLogger(__name__)
 
 router = MCPRouter(prefix='/compute', tags=['compute'])
+
+
+def _required_identity_id(value: str, field_name: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f'{field_name} is required')
+    return normalized
+
+
+def _analysis_interactive_engine_identity(analysis_id: str) -> compute_pb2.EngineIdentity:
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id=_required_identity_id(analysis_id, 'analysis_id'),
+    )
+
+
+def _datasource_preview_engine_identity(datasource_id: str) -> compute_pb2.EngineIdentity:
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        datasource_id=_required_identity_id(datasource_id, 'datasource_id'),
+    )
+
+
+def _build_engine_identity(build_id: str) -> compute_pb2.EngineIdentity:
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_BUILD,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        build_id=_required_identity_id(build_id, 'build_id'),
+    )
+
+
+def _required_payload_identity_id(payload: dict[str, object], field_name: str) -> str:
+    value = payload.get(field_name)
+    if not isinstance(value, str):
+        raise ValueError(f'engine identity {field_name} is required')
+    return _required_identity_id(value, field_name)
+
+
+def _engine_identity_from_payload(payload: dict[str, object]) -> compute_pb2.EngineIdentity:
+    scope = payload.get('scope')
+    if scope == 'analysis_interactive':
+        return _analysis_interactive_engine_identity(_required_payload_identity_id(payload, 'analysis_id'))
+    if scope == 'datasource_preview':
+        return _datasource_preview_engine_identity(_required_payload_identity_id(payload, 'datasource_id'))
+    if scope == 'build':
+        return _build_engine_identity(_required_payload_identity_id(payload, 'build_id'))
+    raise ValueError('engine identity scope is invalid')
+
+
+def _engine_identity_resource_id(identity: compute_pb2.EngineIdentity) -> str:
+    if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField('analysis_id'):
+        return identity.analysis_id
+    if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.HasField('datasource_id'):
+        return identity.datasource_id
+    if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD and identity.HasField('build_id'):
+        return identity.build_id
+    raise ValueError('engine identity is missing the resource id required by its scope')
 
 
 def _engine_run_active_status(status: EngineRunStatus) -> schemas.ActiveBuildStatus:
@@ -479,9 +533,9 @@ async def preview_step(
     analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
     normalized = request.model_copy(update={'analysis_id': analysis_id})
     engine_identity = (
-        engine_identity_from_payload(normalized.engine_identity.model_dump(mode='json'))
+        _engine_identity_from_payload(normalized.engine_identity.model_dump(mode='json'))
         if normalized.engine_identity is not None
-        else analysis_interactive_engine_identity(analysis_id)
+        else _analysis_interactive_engine_identity(analysis_id)
     )
     manager = _override_manager(http_request)
     if manager is not None:
@@ -948,7 +1002,7 @@ async def _shutdown_engine_identity(
     if manager is not None:
         engine = manager.get_engine(identity)
         if not engine:
-            raise engine_not_found(identity.resource_id)
+            raise engine_not_found(_engine_identity_resource_id(identity))
         if engine.current_job_id and engine.is_process_alive():
             raise HTTPException(status_code=409, detail='Engine has an active job')
         manager.shutdown_engine(identity)
@@ -965,7 +1019,7 @@ async def spawn_analysis_engine(
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    return await _spawn_engine_identity(analysis_interactive_engine_identity(analysis_id), http_request, request, session, runtime_probe)
+    return await _spawn_engine_identity(_analysis_interactive_engine_identity(analysis_id), http_request, request, session, runtime_probe)
 
 
 @router.post('/engine/spawn/datasource-preview/{datasource_id}', response_model=schemas.EngineStatusSchema, mcp=True)
@@ -977,7 +1031,7 @@ async def spawn_datasource_preview_engine(
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    return await _spawn_engine_identity(datasource_preview_engine_identity(parse_datasource_id(datasource_id)), http_request, request, session, runtime_probe)
+    return await _spawn_engine_identity(_datasource_preview_engine_identity(parse_datasource_id(datasource_id)), http_request, request, session, runtime_probe)
 
 
 @router.post('/engine/configure/analysis/{analysis_id}', response_model=schemas.EngineStatusSchema, mcp=True)
@@ -989,7 +1043,7 @@ async def configure_analysis_engine(
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    return await _configure_engine_identity(analysis_interactive_engine_identity(analysis_id), request, http_request, session, runtime_probe)
+    return await _configure_engine_identity(_analysis_interactive_engine_identity(analysis_id), request, http_request, session, runtime_probe)
 
 
 @router.post('/engine/configure/datasource-preview/{datasource_id}', response_model=schemas.EngineStatusSchema, mcp=True)
@@ -1002,7 +1056,7 @@ async def configure_datasource_preview_engine(
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     return await _configure_engine_identity(
-        datasource_preview_engine_identity(parse_datasource_id(datasource_id)), request, http_request, session, runtime_probe
+        _datasource_preview_engine_identity(parse_datasource_id(datasource_id)), request, http_request, session, runtime_probe
     )
 
 
@@ -1014,7 +1068,7 @@ async def shutdown_analysis_engine(
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    await _shutdown_engine_identity(analysis_interactive_engine_identity(analysis_id), http_request, session, runtime_probe)
+    await _shutdown_engine_identity(_analysis_interactive_engine_identity(analysis_id), http_request, session, runtime_probe)
 
 
 @router.delete('/engine/datasource-preview/{datasource_id}', status_code=204, mcp=True, mcp_confirm_required=True)
@@ -1025,7 +1079,7 @@ async def shutdown_datasource_preview_engine(
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    await _shutdown_engine_identity(datasource_preview_engine_identity(parse_datasource_id(datasource_id)), http_request, session, runtime_probe)
+    await _shutdown_engine_identity(_datasource_preview_engine_identity(parse_datasource_id(datasource_id)), http_request, session, runtime_probe)
 
 
 @router.delete('/engine/build/{build_id}', status_code=204, mcp=True, mcp_confirm_required=True)
@@ -1036,7 +1090,7 @@ async def shutdown_build_engine(
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    await _shutdown_engine_identity(build_engine_identity(build_id), http_request, session, runtime_probe)
+    await _shutdown_engine_identity(_build_engine_identity(build_id), http_request, session, runtime_probe)
 
 
 @router.websocket('/ws/engines')

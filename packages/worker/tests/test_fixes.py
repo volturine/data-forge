@@ -16,8 +16,12 @@ from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime
 from runtime.compute_engine import PolarsComputeEngine
+from runtime.compute_manager import (
+    analysis_interactive_engine_identity,
+    datasource_preview_engine_identity,
+    engine_identity_resource_id,
+)
 from runtime.compute_service import ExportDatasourceResult
-from runtime.engine_identity import analysis_interactive_engine_identity, datasource_preview_engine_identity, engine_identity_payload
 from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
 from runtime.models.compute import schemas as compute_schemas
 from runtime.models.engine_runs.schemas import EngineRunResponseSchema
@@ -25,6 +29,21 @@ from runtime.models.engine_runs.schemas import EngineRunResponseSchema
 # ---------------------------------------------------------------------------
 # Build runtime regressions
 # ---------------------------------------------------------------------------
+
+
+def _engine_identity_payload(identity) -> dict[str, str]:
+    payload: dict[str, str] = {
+        "scope": "datasource_preview" if identity.HasField("datasource_id") else "build" if identity.HasField("build_id") else "analysis_interactive",
+        "reuse_policy": "exclusive" if identity.HasField("build_id") else "shared",
+        "resource_id": engine_identity_resource_id(identity),
+    }
+    if identity.HasField("analysis_id"):
+        payload["analysis_id"] = identity.analysis_id
+    if identity.HasField("datasource_id"):
+        payload["datasource_id"] = identity.datasource_id
+    if identity.HasField("build_id"):
+        payload["build_id"] = identity.build_id
+    return payload
 
 
 def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) -> None:
@@ -63,7 +82,7 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
         id="req-1",
         namespace="default",
         kind=compute_request_runtime.ComputeRequestKind.SHUTDOWN_ENGINE,
-        request_json={"engine_identity": engine_identity_payload(identity)},
+        request_json={"engine_identity": _engine_identity_payload(identity)},
     )
 
     compute_request_runtime._execute_request_sync(claimed, cast(Any, manager))
@@ -132,8 +151,10 @@ async def test_pending_datasource_delete_waits_for_busy_preview_engine(monkeypat
     busy_engine = SimpleNamespace(current_job_id="job-1", is_process_alive=lambda: True)
     expected_identity = datasource_preview_engine_identity(datasource_id)
     manager = SimpleNamespace(
-        get_engine=lambda identity, *, namespace=None: busy_engine if identity.resource_id == expected_identity.resource_id else None,
-        shutdown_engine=lambda identity, *, namespace=None: shutdown_calls.append(identity.resource_id),
+        get_engine=lambda identity, *, namespace=None: (
+            busy_engine if engine_identity_resource_id(identity) == engine_identity_resource_id(expected_identity) else None
+        ),
+        shutdown_engine=lambda identity, *, namespace=None: shutdown_calls.append(engine_identity_resource_id(identity)),
     )
     client = SimpleNamespace(
         pending_datasource_deletes=lambda: [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)],
@@ -160,8 +181,10 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(m
     idle_engine = SimpleNamespace(current_job_id=None, is_process_alive=lambda: True)
     expected_identity = datasource_preview_engine_identity(datasource_id)
     manager = SimpleNamespace(
-        get_engine=lambda identity, *, namespace=None: idle_engine if identity.resource_id == expected_identity.resource_id else None,
-        shutdown_engine=lambda identity, *, namespace=None: shutdown_calls.append(identity.resource_id),
+        get_engine=lambda identity, *, namespace=None: (
+            idle_engine if engine_identity_resource_id(identity) == engine_identity_resource_id(expected_identity) else None
+        ),
+        shutdown_engine=lambda identity, *, namespace=None: shutdown_calls.append(engine_identity_resource_id(identity)),
     )
     client = SimpleNamespace(
         pending_datasource_deletes=lambda: [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)],
@@ -175,7 +198,7 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(m
     assert handled is True
     assert cleanup_calls == []
     assert finalized == [("default", datasource_id)]
-    assert shutdown_calls == [expected_identity.resource_id]
+    assert shutdown_calls == [engine_identity_resource_id(expected_identity)]
 
 
 @pytest.mark.asyncio
@@ -223,7 +246,7 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     seen_engine_identities: list[str] = []
 
     def fake_export_data(*, engine_identity, **_kwargs) -> ExportDatasourceResult:
-        seen_engine_identities.append(engine_identity.resource_id)
+        seen_engine_identities.append(engine_identity_resource_id(engine_identity))
         return ExportDatasourceResult(
             datasource_id="out-1",
             datasource_name="output_table",
@@ -237,8 +260,8 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     manager = cast(
         Any,
         SimpleNamespace(
-            spawn_engine=lambda identity: spawn_calls.append(identity.resource_id),
-            shutdown_engine=lambda identity: shutdown_calls.append(identity.resource_id),
+            spawn_engine=lambda identity: spawn_calls.append(engine_identity_resource_id(identity)),
+            shutdown_engine=lambda identity: shutdown_calls.append(engine_identity_resource_id(identity)),
             set_engine_runtime_context=lambda identity, current_build_id, current_engine_run_id: None,
         ),
     )

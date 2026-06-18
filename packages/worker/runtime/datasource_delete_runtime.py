@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from runtime.compute_manager import ProcessManager
-from runtime.engine_identity import datasource_preview_engine_identity
+from runtime.compute_manager import ProcessManager, datasource_preview_engine_identity
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
 
 logger = logging.getLogger(__name__)

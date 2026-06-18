@@ -21,7 +21,7 @@ from pyiceberg.table import Table as IcebergTable
 from sqlalchemy.exc import IntegrityError
 
 from builds.build_live import ActiveBuild
-from runtime.compute_manager import EngineIdentityInput, ProcessManager
+from runtime.compute_manager import EngineIdentityInput, ProcessManager, build_engine_identity
 from runtime.compute_monitor import monitor_engine_resources
 from runtime.compute_utils import (
     apply_steps,
@@ -30,7 +30,6 @@ from runtime.compute_utils import (
     resolve_applied_target,
 )
 from runtime.config import settings
-from runtime.engine_identity import build_engine_identity
 from runtime.exceptions import (
     DataSourceSnapshotError,
     PipelineExecutionError,

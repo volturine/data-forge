@@ -30,20 +30,20 @@ class _StubManager:
 
     @staticmethod
     def _identity_key(identity) -> str:
-        return f'{identity.scope}:{identity.resource_id}'
+        return f'{identity.scope}:{compute_routes._engine_identity_resource_id(identity)}'
 
     def get_engine(self, identity):
         return _StubEngine() if self._identity_key(identity).endswith(':build-1') else None
 
     def get_engine_status(self, identity) -> dict[str, object]:
         return {
-            'analysis_id': identity.analysis_id or '',
-            'resource_id': identity.resource_id,
+            'analysis_id': identity.analysis_id if identity.HasField('analysis_id') else '',
+            'resource_id': compute_routes._engine_identity_resource_id(identity),
             'status': 'healthy',
-            'scope': 'datasource_preview' if identity.datasource_id else 'build' if identity.build_id else 'analysis_interactive',
-            'reuse_policy': 'exclusive' if identity.build_id else 'shared',
-            'datasource_id': identity.datasource_id,
-            'build_id': identity.build_id,
+            'scope': 'datasource_preview' if identity.HasField('datasource_id') else 'build' if identity.HasField('build_id') else 'analysis_interactive',
+            'reuse_policy': 'exclusive' if identity.HasField('build_id') else 'shared',
+            'datasource_id': identity.datasource_id if identity.HasField('datasource_id') else None,
+            'build_id': identity.build_id if identity.HasField('build_id') else None,
         }
 
     def spawn_engine(self, identity, resource_config: dict | None = None) -> None:

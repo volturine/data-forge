@@ -14,11 +14,54 @@ from backend_core.contracts.compute_requests.models import ComputeRequestKind, C
 from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.data_plane_client import client_from_settings
 from backend_core.dependencies import RuntimeAvailabilityProbe
-from backend_core.engine_identity import EngineIdentity, engine_identity_payload
 from backend_core.exceptions import PipelineExecutionError
 from backend_core.namespace import get_namespace
 from backend_core.object_store_paths import is_object_store_url
+from dataforge_protocol import compute_pb2, enums_pb2
 from modules.datasource import schemas as datasource_schemas
+
+EngineIdentity = compute_pb2.EngineIdentity
+
+
+def _engine_identity_resource_id(identity: EngineIdentity) -> str:
+    if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField('analysis_id'):
+        return identity.analysis_id
+    if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.HasField('datasource_id'):
+        return identity.datasource_id
+    if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD and identity.HasField('build_id'):
+        return identity.build_id
+    raise ValueError('engine identity is missing the resource id required by its scope')
+
+
+def _engine_identity_payload(identity: EngineIdentity) -> dict[str, str]:
+    if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW:
+        scope = 'datasource_preview'
+    elif identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE:
+        scope = 'analysis_interactive'
+    elif identity.scope == enums_pb2.ENGINE_SCOPE_BUILD:
+        scope = 'build'
+    else:
+        raise ValueError('engine identity scope is unspecified')
+
+    if identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED:
+        reuse_policy = 'shared'
+    elif identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE:
+        reuse_policy = 'exclusive'
+    else:
+        raise ValueError('engine identity reuse policy is unspecified')
+
+    payload = {
+        'scope': scope,
+        'reuse_policy': reuse_policy,
+        'resource_id': _engine_identity_resource_id(identity),
+    }
+    if identity.HasField('analysis_id'):
+        payload['analysis_id'] = identity.analysis_id
+    if identity.HasField('datasource_id'):
+        payload['datasource_id'] = identity.datasource_id
+    if identity.HasField('build_id'):
+        payload['build_id'] = identity.build_id
+    return payload
 
 
 def _ensure_runtime_available(runtime_probe: RuntimeAvailabilityProbe) -> None:
@@ -354,7 +397,7 @@ async def spawn_engine(
         session,
         kind=ComputeRequestKind.SPAWN_ENGINE,
         request_json={
-            'engine_identity': engine_identity_payload(identity),
+            'engine_identity': _engine_identity_payload(identity),
             'resource_config': resource_config or {},
         },
         runtime_probe=runtime_probe,
@@ -372,7 +415,7 @@ async def configure_engine(
     completed = await _submit_and_wait(
         session,
         kind=ComputeRequestKind.CONFIGURE_ENGINE,
-        request_json={'engine_identity': engine_identity_payload(identity), 'resource_config': resource_config},
+        request_json={'engine_identity': _engine_identity_payload(identity), 'resource_config': resource_config},
         runtime_probe=runtime_probe,
     )
     return compute_schemas.EngineStatusSchema.model_validate(compute_requests_service.response_payload(completed))
@@ -387,6 +430,6 @@ async def shutdown_engine(
     await _submit_and_wait(
         session,
         kind=ComputeRequestKind.SHUTDOWN_ENGINE,
-        request_json={'engine_identity': engine_identity_payload(identity)},
+        request_json={'engine_identity': _engine_identity_payload(identity)},
         runtime_probe=runtime_probe,
     )

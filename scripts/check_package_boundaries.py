@@ -35,6 +35,7 @@ ROOT_TEST_RESIDUE = [
 ROOT_TEST_ARTIFACT_PREFIXES = ('test-results', 'playwright-report')
 
 FORBIDDEN_OWNER_DUPLICATES = [
+    Path('packages/backend/backend_core/engine_identity.py'),
     Path('packages/backend/modules/analysis/models.py'),
     Path('packages/backend/modules/datasource/models.py'),
     Path('packages/backend/modules/health/models.py'),
@@ -42,6 +43,7 @@ FORBIDDEN_OWNER_DUPLICATES = [
     Path('packages/backend/modules/settings/models.py'),
     Path('packages/backend/modules/telegram/models.py'),
     Path('packages/backend/modules/udf/models.py'),
+    Path('packages/worker/runtime/engine_identity.py'),
 ]
 
 PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
