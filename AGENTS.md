@@ -61,10 +61,3 @@ just dev             # start API, worker, scheduler, and frontend
 ## Code Style
 
 See [`STYLE_GUIDE.md`](STYLE_GUIDE.md)
-
-## Git
-
-- NEVER push to remote unless explicitly asked
-- Local commits only
-- Create PRs for sharing changes
-
