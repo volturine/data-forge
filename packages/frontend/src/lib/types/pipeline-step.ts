@@ -1,6 +1,6 @@
-import type { ChartConfig } from '$lib/types/step-schemas.generated';
+import type { ChartType } from '$lib/types/protocol-enum-tokens';
 
-export type ChartType = NonNullable<ChartConfig['chart_type']>;
+export type { ChartType };
 
 export type CanonicalStepType =
 	| 'select'

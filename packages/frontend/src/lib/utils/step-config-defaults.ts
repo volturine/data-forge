@@ -4,27 +4,31 @@
  */
 
 import type {
+	AIConfigData,
+	DeduplicateConfigData,
+	DownloadConfigData,
+	DropConfigData,
+	ExplodeConfigData,
+	ExportConfigData,
+	ExpressionConfigData,
+	FillNullConfigData,
+	FilterConfigData,
+	GroupByConfigData,
+	JoinConfigData,
+	LimitConfigData,
+	NotificationConfigData,
 	PlotConfigData,
-	TopKConfigData,
+	PivotConfigData,
 	SampleConfigData,
-	PivotConfigData
+	SelectConfigData,
+	StringMethodsConfigData,
+	TimeSeriesConfigData,
+	TopKConfigData,
+	UnionByNameConfigData,
+	UnpivotConfigData,
+	ViewConfigData,
+	WithColumnsConfigData
 } from '$lib/types/operation-config';
-import type {
-	SelectConfig,
-	DropConfig,
-	FilterConfig,
-	GroupByConfig,
-	JoinConfig,
-	UnionByNameConfig,
-	UnpivotConfig,
-	ExplodeConfig,
-	LimitConfig,
-	ViewConfig,
-	ExportConfig,
-	DownloadConfig,
-	NotificationConfig,
-	AIConfig
-} from '$lib/types/step-schemas.generated';
 import {
 	chartTypeForStep,
 	isChartStepType,
@@ -36,40 +40,46 @@ import { cloneJson } from '$lib/utils/json';
 export type ChartConfigData = PlotConfigData;
 
 export type StepConfig =
-	| SelectConfig
-	| DropConfig
-	| FilterConfig
-	| GroupByConfig
-	| JoinConfig
-	| UnionByNameConfig
-	| UnpivotConfig
-	| ExplodeConfig
+	| SelectConfigData
+	| DropConfigData
+	| FilterConfigData
+	| GroupByConfigData
+	| JoinConfigData
+	| UnionByNameConfigData
+	| UnpivotConfigData
+	| ExplodeConfigData
 	| PivotConfigData
 	| SampleConfigData
-	| LimitConfig
+	| LimitConfigData
 	| TopKConfigData
-	| ViewConfig
-	| ExportConfig
-	| DownloadConfig
+	| ViewConfigData
+	| ExportConfigData
+	| DownloadConfigData
 	| PlotConfigData
-	| NotificationConfig
-	| AIConfig
+	| NotificationConfigData
+	| AIConfigData
+	| ExpressionConfigData
+	| WithColumnsConfigData
+	| FillNullConfigData
+	| DeduplicateConfigData
+	| TimeSeriesConfigData
+	| StringMethodsConfigData
 	| Record<string, unknown>;
 
 const defaultConfigs: Record<string, StepConfig> = {
-	select: { columns: [], cast_map: {} } satisfies SelectConfig,
+	select: { columns: [], cast_map: {} } satisfies SelectConfigData,
 
-	drop: { columns: [] } satisfies DropConfig,
+	drop: { columns: [] } satisfies DropConfigData,
 
 	filter: {
 		conditions: [{ column: '', operator: '=', value: '', value_type: 'string' }],
 		logic: 'AND'
-	} satisfies FilterConfig,
+	} satisfies FilterConfigData,
 
 	groupby: {
 		group_by: [],
 		aggregations: []
-	} satisfies GroupByConfig,
+	} satisfies GroupByConfigData,
 
 	join: {
 		how: 'inner',
@@ -77,23 +87,23 @@ const defaultConfigs: Record<string, StepConfig> = {
 		join_columns: [],
 		right_columns: [],
 		suffix: '_right'
-	} satisfies JoinConfig,
+	} satisfies JoinConfigData,
 
 	union_by_name: {
 		sources: [],
 		allow_missing: true
-	} satisfies UnionByNameConfig,
+	} satisfies UnionByNameConfigData,
 
 	unpivot: {
 		id_vars: [],
 		value_vars: [],
 		variable_name: 'variable',
 		value_name: 'value'
-	} satisfies UnpivotConfig,
+	} satisfies UnpivotConfigData,
 
 	explode: {
 		columns: []
-	} satisfies ExplodeConfig,
+	} satisfies ExplodeConfigData,
 
 	pivot: {
 		index: [],
@@ -109,7 +119,7 @@ const defaultConfigs: Record<string, StepConfig> = {
 
 	limit: {
 		n: 100
-	} satisfies LimitConfig,
+	} satisfies LimitConfigData,
 
 	topk: {
 		column: '',
@@ -119,18 +129,18 @@ const defaultConfigs: Record<string, StepConfig> = {
 
 	view: {
 		rowLimit: 100
-	} satisfies ViewConfig,
+	} satisfies ViewConfigData,
 
 	export: {
 		format: 'csv',
 		filename: 'export',
 		destination: 'download'
-	} satisfies ExportConfig,
+	} satisfies ExportConfigData,
 
 	download: {
 		format: 'csv',
 		filename: 'download'
-	} satisfies DownloadConfig,
+	} satisfies DownloadConfigData,
 
 	chart: {
 		chart_type: 'bar',
@@ -179,7 +189,7 @@ const defaultConfigs: Record<string, StepConfig> = {
 		message_template: '{{message}}',
 		subject_template: 'Notification',
 		batch_size: 10
-	} satisfies NotificationConfig,
+	} satisfies NotificationConfigData,
 
 	ai: {
 		provider: 'ollama',
@@ -196,16 +206,16 @@ const defaultConfigs: Record<string, StepConfig> = {
 		temperature: 0.7,
 		max_tokens: null,
 		request_options: null
-	} satisfies AIConfig,
+	} satisfies AIConfigData,
 
 	// Operations that don't need config
 	datasource: {},
 	sort: {},
 	rename: {},
-	expression: { expression: '', column_name: '' },
-	with_columns: { expressions: [] },
+	expression: { expression: '', column_name: '' } satisfies ExpressionConfigData,
+	with_columns: { expressions: [] } satisfies WithColumnsConfigData,
 	fill_null: {},
-	deduplicate: { subset: null, keep: 'first' },
+	deduplicate: { subset: null, keep: 'first' } satisfies DeduplicateConfigData,
 	string_transform: {},
 	timeseries: {}
 };

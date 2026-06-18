@@ -1,9 +1,8 @@
 // Type definitions for operation configuration objects
 
 import type {
-	AIProvider as StepAIProvider,
+	AIProvider,
 	AxisScale,
-	CastMapType,
 	ChartAggregation,
 	ChartHeight,
 	ChartType,
@@ -33,7 +32,9 @@ import type {
 	TimeseriesOperationType,
 	WithColumnsExprType,
 	YAxisPosition
-} from '$lib/types/step-schemas.generated';
+} from '$lib/types/protocol-enum-tokens';
+
+export type CastMapType = 'Int64' | 'Float64' | 'Boolean' | 'String' | 'Utf8' | 'Date' | 'Datetime';
 
 export type FilterValueType = StepFilterValueType;
 
@@ -180,6 +181,8 @@ export interface TopKConfigData {
 export interface UnpivotConfigData {
 	index?: string[];
 	on?: string[];
+	id_vars?: string[];
+	value_vars?: string[];
 	variable_name?: string;
 	value_name?: string;
 }
@@ -187,6 +190,17 @@ export interface UnpivotConfigData {
 export interface UnionByNameConfigData {
 	sources: string[];
 	allow_missing: boolean;
+}
+
+export interface ExportConfigData {
+	format: string;
+	filename: string;
+	destination: string;
+}
+
+export interface DownloadConfigData {
+	format: string;
+	filename: string;
 }
 
 export interface PlotConfigData {
@@ -253,7 +267,7 @@ export interface NotificationConfigData {
 }
 
 export interface AIConfigData {
-	provider: StepAIProvider;
+	provider: AIProvider;
 	model: string;
 	input_columns: string[];
 	output_column: string;
@@ -292,6 +306,8 @@ export type OperationConfig =
 	| TopKConfigData
 	| UnpivotConfigData
 	| UnionByNameConfigData
+	| ExportConfigData
+	| DownloadConfigData
 	| PlotConfigData
 	| NotificationConfigData
 	| AIConfigData;

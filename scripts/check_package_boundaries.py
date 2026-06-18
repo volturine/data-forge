@@ -82,6 +82,8 @@ FORBIDDEN_SOURCE_TOKENS = {
     'data_plane_iceberg': 'deleted backend data-plane Iceberg facade',
     'generate_ts_step_types.py': 'deleted backend-derived frontend type generator',
     'generate_ts_build_stream_types.py': 'deleted backend-derived frontend type generator',
+    'step-schemas.generated': 'deleted backend-derived frontend step schema import',
+    'build-stream.generated': 'deleted backend-derived frontend build stream import',
     'Generated from backend/': 'backend-derived generated frontend contract banner',
     'class AIProvider(DataForgeStrEnum)': 'hand-written AI provider enum; use dataforge_protocol.enums_pb2',
     'class ComputeRequestKind(': 'hand-written compute request kind enum; use dataforge_protocol.enums_pb2',
