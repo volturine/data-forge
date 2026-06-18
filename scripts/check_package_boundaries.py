@@ -45,6 +45,7 @@ FORBIDDEN_OWNER_DUPLICATES = [
     Path('packages/backend/modules/telegram/models.py'),
     Path('packages/backend/modules/udf/models.py'),
     Path('packages/worker/runtime/engine_identity.py'),
+    Path('packages/worker/runtime/domain/compute_requests/models.py'),
     Path('packages/worker/runtime/models'),
 ]
 

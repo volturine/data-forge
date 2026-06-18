@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
-from dataforge_protocol import compute_pb2
+from dataforge_protocol import compute_pb2, enums_pb2
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime
@@ -26,7 +26,7 @@ from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
 from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
-from worker_grpc.codec import dict_to_struct, enum_to_proto_value
+from worker_grpc.codec import dict_to_struct
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -50,13 +50,13 @@ def _engine_identity_payload(identity) -> dict[str, str]:
 
 def _command_envelope(
     *,
-    kind: str,
+    kind: int,
     request_id: str,
     payload: dict[str, object],
     shutdown_identity=None,
 ) -> compute_pb2.ComputeCommandEnvelope:
     envelope = compute_pb2.ComputeCommandEnvelope(
-        kind=enum_to_proto_value("COMPUTE_REQUEST_KIND", kind),
+        kind=kind,
         version=1,
         idempotency_key=request_id,
         correlation_id=request_id,
@@ -104,10 +104,10 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-1",
         namespace="default",
-        kind=compute_request_runtime.ComputeRequestKind.SHUTDOWN_ENGINE,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
         request_json={"engine_identity": _engine_identity_payload(identity)},
         command_envelope=_command_envelope(
-            kind=compute_request_runtime.ComputeRequestKind.SHUTDOWN_ENGINE.value,
+            kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
             request_id="req-1",
             payload={"engine_identity": _engine_identity_payload(identity)},
             shutdown_identity=identity,
@@ -149,10 +149,10 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-404",
         namespace="default",
-        kind=compute_request_runtime.ComputeRequestKind.DATASOURCE_SCHEMA,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
         request_json={"datasource_id": "datasource-1"},
         command_envelope=_command_envelope(
-            kind=compute_request_runtime.ComputeRequestKind.DATASOURCE_SCHEMA.value,
+            kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
             request_id="req-404",
             payload={"datasource_id": "datasource-1"},
         ),

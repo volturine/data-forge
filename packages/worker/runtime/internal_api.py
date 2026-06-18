@@ -87,7 +87,7 @@ class HealthCheckSpec:
 class ClaimedComputeRequest:
     id: str
     namespace: str
-    kind: str
+    kind: enums_pb2.ComputeRequestKind
     request_json: dict[str, object]
     command_envelope: compute_pb2.ComputeCommandEnvelope
 
@@ -151,7 +151,7 @@ class WorkerInternalApiClient:
         return ClaimedComputeRequest(
             id=response.request.id,
             namespace=response.request.namespace,
-            kind=proto_value_to_enum_name(enums_pb2.ComputeRequestKind, "COMPUTE_REQUEST_KIND", command.kind),
+            kind=command.kind,
             request_json=struct_to_dict(command.payload),
             command_envelope=command,
         )
@@ -161,7 +161,7 @@ class WorkerInternalApiClient:
         *,
         namespace: str,
         request_id: str,
-        kind: str,
+        kind: enums_pb2.ComputeRequestKind,
         response_json: dict[str, object] | None = None,
         artifact_path: str | None = None,
         artifact_name: str | None = None,
@@ -173,7 +173,7 @@ class WorkerInternalApiClient:
             response_envelope=_compute_response_envelope(
                 kind=kind,
                 request_id=request_id,
-                status="completed",
+                status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
                 response_json=response_json or {},
             ),
         )
@@ -190,7 +190,7 @@ class WorkerInternalApiClient:
         *,
         namespace: str,
         request_id: str,
-        kind: str,
+        kind: enums_pb2.ComputeRequestKind,
         error_message: str,
         response_json: dict[str, object],
     ) -> None:
@@ -203,7 +203,7 @@ class WorkerInternalApiClient:
                     response_envelope=_compute_response_envelope(
                         kind=kind,
                         request_id=request_id,
-                        status="failed",
+                        status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
                         response_json=response_json,
                         error_message=error_message,
                     ),
@@ -216,12 +216,12 @@ class WorkerInternalApiClient:
     def release_compute_requests(self, *, worker_id: str) -> int:
         return int(self._call(lambda: self._stub.ReleaseComputeRequests(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata())).count)
 
-    def execute_datasource_request(self, *, namespace: str, kind: str, request_json: dict[str, object]) -> dict[str, object]:
+    def execute_datasource_request(self, *, namespace: str, kind: enums_pb2.ComputeRequestKind, request_json: dict[str, object]) -> dict[str, object]:
         response = self._call(
             lambda: self._stub.ExecuteDatasourceRequest(
                 worker_runtime_pb2.WorkerExecuteDatasourceRequest(
                     namespace=namespace,
-                    kind=enum_to_proto_value("COMPUTE_REQUEST_KIND", kind),
+                    kind=kind,
                     request=dict_to_struct(request_json),
                 ),
                 timeout=self._timeout_seconds,
@@ -751,17 +751,17 @@ def _required_mapping_dict(payload: Mapping[str, object], key: str) -> dict[str,
 
 def _compute_response_envelope(
     *,
-    kind: str,
+    kind: enums_pb2.ComputeRequestKind,
     request_id: str,
-    status: str,
+    status: enums_pb2.ComputeRequestStatus,
     response_json: dict[str, object],
     error_message: str | None = None,
 ) -> compute_pb2.ComputeResponseEnvelope:
     envelope = compute_pb2.ComputeResponseEnvelope(
-        kind=enum_to_proto_value("COMPUTE_REQUEST_KIND", kind),
+        kind=kind,
         version=1,
         correlation_id=request_id,
-        status=enum_to_proto_value("COMPUTE_REQUEST_STATUS", status),
+        status=status,
     )
     envelope.payload.CopyFrom(dict_to_struct(response_json))
     envelope.response.dynamic_response.CopyFrom(dict_to_struct(response_json))

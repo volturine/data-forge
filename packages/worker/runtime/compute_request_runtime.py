@@ -13,7 +13,6 @@ from runtime.compute_manager import ProcessManager, engine_identity_resource_id
 from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
-from runtime.domain.compute_requests.models import ComputeRequestKind
 from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
 from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
 from runtime.namespace import reset_namespace, set_namespace_context
@@ -33,13 +32,13 @@ _COMPUTE_REQUEST_EXECUTOR = ThreadPoolExecutor(
     thread_name_prefix="compute-request",
 )
 _DATASOURCE_REQUEST_KINDS = {
-    ComputeRequestKind.CREATE_FILE_DATASOURCE,
-    ComputeRequestKind.CREATE_DATABASE_DATASOURCE,
-    ComputeRequestKind.CREATE_ICEBERG_DATASOURCE,
-    ComputeRequestKind.INGEST_DATASOURCE,
-    ComputeRequestKind.DATASOURCE_SCHEMA,
-    ComputeRequestKind.DATASOURCE_COLUMN_STATS,
-    ComputeRequestKind.COMPARE_ICEBERG_SNAPSHOTS,
+    enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+    enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
+    enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
+    enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
+    enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+    enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
+    enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
 }
 
 
@@ -88,11 +87,16 @@ def compute_request_worker_count() -> int:
     return _COMPUTE_REQUEST_MAX_WORKERS
 
 
+def _compute_request_kind_name(kind: enums_pb2.ComputeRequestKind) -> str:
+    enum_name = enums_pb2.ComputeRequestKind.Name(kind)
+    return enum_name.removeprefix("COMPUTE_REQUEST_KIND_").lower()
+
+
 @dataclass(frozen=True)
 class ClaimedComputeRequest:
     id: str
     namespace: str
-    kind: ComputeRequestKind
+    kind: enums_pb2.ComputeRequestKind
     request_json: dict[str, object]
     command_envelope: compute_pb2.ComputeCommandEnvelope
 
@@ -116,7 +120,7 @@ def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:
     return ClaimedComputeRequest(
         id=claimed.id,
         namespace=claimed.namespace,
-        kind=ComputeRequestKind(claimed.kind),
+        kind=claimed.kind,
         request_json=claimed.request_json,
         command_envelope=claimed.command_envelope,
     )
@@ -184,11 +188,11 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
     token = set_namespace_context(claimed.namespace)
     try:
         if claimed.kind in _DATASOURCE_REQUEST_KINDS:
-            response_json = client.execute_datasource_request(namespace=claimed.namespace, kind=claimed.kind.value, request_json=claimed.request_json)
+            response_json = client.execute_datasource_request(namespace=claimed.namespace, kind=claimed.kind, request_json=claimed.request_json)
             _complete_request(client, claimed, response_json=response_json)
             return
 
-        if claimed.kind == ComputeRequestKind.PREVIEW:
+        if claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
             preview_request = compute_schemas.StepPreviewRequest.model_validate(claimed.request_json)
             preview_identity = (
                 _engine_identity_from_payload(preview_request.engine_identity.model_dump(mode="json")) if preview_request.engine_identity is not None else None
@@ -207,7 +211,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 request_json=preview_request.model_dump(mode="json"),
             )
             _complete_request(client, claimed, response_json=preview_response.model_dump(mode="json"))
-        elif claimed.kind == ComputeRequestKind.SCHEMA:
+        elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
             schema_request = compute_schemas.StepSchemaRequest.model_validate(claimed.request_json)
             if schema_request.analysis_id is None:
                 raise ValueError("analysis_id is required")
@@ -220,7 +224,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 tab_id=schema_request.tab_id,
             )
             _complete_request(client, claimed, response_json=schema_response.model_dump(mode="json"))
-        elif claimed.kind == ComputeRequestKind.ROW_COUNT:
+        elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
             row_count_request = compute_schemas.StepRowCountRequest.model_validate(claimed.request_json)
             if row_count_request.analysis_id is None:
                 raise ValueError("analysis_id is required")
@@ -234,7 +238,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 request_json=row_count_request.model_dump(mode="json"),
             )
             _complete_request(client, claimed, response_json=row_count_response.model_dump(mode="json"))
-        elif claimed.kind == ComputeRequestKind.DOWNLOAD:
+        elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
             download_request = compute_schemas.DownloadRequest.model_validate(claimed.request_json)
             file_bytes, filename, content_type = service.download_step(
                 session=None,
@@ -248,7 +252,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             )
             artifact_path = _write_artifact(claimed.id, filename, file_bytes)
             _complete_request(client, claimed, artifact_path=artifact_path, artifact_name=filename, artifact_content_type=content_type)
-        elif claimed.kind == ComputeRequestKind.EXPORT:
+        elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
             export_request = compute_schemas.ExportRequest.model_validate(claimed.request_json)
             result = service.export_data(
                 session=None,
@@ -272,7 +276,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 datasource_name=result.result_meta.get("datasource_name") if isinstance(result.result_meta, dict) else None,
             )
             _complete_request(client, claimed, response_json=export_response.model_dump(mode="json"))
-        elif claimed.kind == ComputeRequestKind.SPAWN_ENGINE:
+        elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "spawn_engine")
             identity = command.engine_identity
             resource_config = _resource_config_from_lifecycle_command(command)
@@ -282,7 +286,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             )
             response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(identity))
             _complete_request(client, claimed, response_json=response.model_dump(mode="json"))
-        elif claimed.kind == ComputeRequestKind.CONFIGURE_ENGINE:
+        elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "configure_engine")
             identity = command.engine_identity
             resource_config = _resource_config_from_lifecycle_command(command)
@@ -291,7 +295,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             manager.restart_engine_with_config(identity, resource_config)
             response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(identity))
             _complete_request(client, claimed, response_json=response.model_dump(mode="json"))
-        elif claimed.kind == ComputeRequestKind.SHUTDOWN_ENGINE:
+        elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "shutdown_engine")
             identity = command.engine_identity
             engine = manager.get_engine(identity)
@@ -305,7 +309,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             manager.shutdown_engine(identity)
             _complete_request(client, claimed, response_json={"success": True})
         else:
-            raise ValueError(f"Unsupported compute request kind: {claimed.kind.value}")
+            raise ValueError(f"Unsupported compute request kind: {_compute_request_kind_name(claimed.kind)}")
     except Exception as exc:
         payload = _error_payload(exc)
         status_code = payload.get("status_code")
@@ -316,7 +320,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
         else:
             logger.warning("Compute request %s failed: %s", claimed.id, exc)
         client.fail_compute_request(
-            namespace=claimed.namespace, request_id=claimed.id, kind=claimed.kind.value, error_message=_error_message(exc), response_json=payload
+            namespace=claimed.namespace, request_id=claimed.id, kind=claimed.kind, error_message=_error_message(exc), response_json=payload
         )
     finally:
         try:
@@ -365,7 +369,7 @@ def _complete_request(
     client.complete_compute_request(
         namespace=claimed.namespace,
         request_id=claimed.id,
-        kind=claimed.kind.value,
+        kind=claimed.kind,
         response_json=response_json,
         artifact_path=artifact_path,
         artifact_name=artifact_name,
