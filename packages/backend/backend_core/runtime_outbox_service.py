@@ -6,7 +6,7 @@ from sqlmodel import Session
 
 from backend_core import runtime_ipc
 from backend_core.config import settings
-from backend_core.contracts.runtime.events import RuntimePayloadKind
+from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
 
 

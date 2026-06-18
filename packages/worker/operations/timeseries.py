@@ -1,8 +1,8 @@
 import polars as pl
 
-from runtime.models.compute.base import OperationHandler, OperationParams
-from runtime.models.enums import DataForgeStrEnum
-from runtime.models.step_config_enums import (
+from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.enums import DataForgeStrEnum
+from runtime.domain.step_config_enums import (
     DurationUnit,
     TimeComponent,
     TimeDirection,

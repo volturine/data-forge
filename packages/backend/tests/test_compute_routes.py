@@ -1,10 +1,10 @@
 from sqlalchemy import select
 
 from backend_core import engine_runs_service as engine_run_service
-from backend_core.contracts.datasource.models import DataSourceCreatedBy
-from backend_core.contracts.datasource.source_types import DataSourceType
-from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.dependencies import get_manager, get_runtime_availability_probe
+from backend_core.domain.datasource.models import DataSourceCreatedBy
+from backend_core.domain.datasource.source_types import DataSourceType
+from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun

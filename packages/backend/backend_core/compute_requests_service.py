@@ -8,7 +8,7 @@ from sqlmodel import Session
 
 from backend_core import runtime_outbox_service
 from backend_core.config import settings
-from backend_core.contracts.compute_requests.models import ComputeCommandEnvelope, ComputeRequestKind, ComputeRequestStatus, ComputeResponseEnvelope
+from backend_core.domain.compute_requests.models import ComputeCommandEnvelope, ComputeRequestKind, ComputeRequestStatus, ComputeResponseEnvelope
 from backend_core.persistence.compute_requests.models import ComputeRequest
 
 _BLOCKING_REQUEST_KINDS = frozenset(

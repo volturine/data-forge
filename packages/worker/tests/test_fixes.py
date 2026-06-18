@@ -22,9 +22,9 @@ from runtime.compute_manager import (
     engine_identity_resource_id,
 )
 from runtime.compute_service import ExportDatasourceResult
+from runtime.domain.compute import schemas as compute_schemas
+from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
 from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
-from runtime.models.compute import schemas as compute_schemas
-from runtime.models.engine_runs.schemas import EngineRunResponseSchema
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions

@@ -22,10 +22,6 @@ from backend_core import (
 )
 from backend_core.auth_config import settings as auth_settings
 from backend_core.config import settings
-from backend_core.contracts.build_runs.live import BuildNotification, hub as build_hub
-from backend_core.contracts.compute import schemas
-from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
-from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.data_plane_client import client_from_settings
 from backend_core.database import get_db, get_settings_db
 from backend_core.dependencies import (
@@ -33,6 +29,10 @@ from backend_core.dependencies import (
     get_manager,
     get_runtime_availability_probe,
 )
+from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
+from backend_core.domain.compute import schemas
+from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.engine_live import load_engine_snapshot, registry as engine_registry
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import engine_not_found
@@ -786,7 +786,7 @@ async def start_active_build(
     if detail is None:
         raise HTTPException(status_code=500, detail='Failed to create build')
     await build_hub.publish(BuildNotification(namespace=namespace, build_id=build_id, latest_sequence=0))
-    from backend_core.contracts.build_jobs.live import hub as build_job_hub
+    from backend_core.domain.build_jobs.live import hub as build_job_hub
 
     build_job_hub.publish()
     runtime_outbox_service.dispatch_pending_events(session)

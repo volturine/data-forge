@@ -4,8 +4,8 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import asdict
 
+from runtime.domain.compute.base import EngineStatusInfo
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
-from runtime.models.compute.base import EngineStatusInfo
 
 
 def worker_internal_api_client() -> WorkerInternalApiClient:

@@ -14,6 +14,6 @@ message RuntimeEvent {
     ComputeCommandEnvelope compute_command = 3;
     ComputeResponseEnvelope compute_response = 4;
     ErrorInfo error = 5;
-    google.protobuf.Struct raw = 6;
+    google.protobuf.Struct raw = 6 [deprecated = true];
   }
 }

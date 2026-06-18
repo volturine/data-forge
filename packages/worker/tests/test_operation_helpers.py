@@ -10,13 +10,13 @@ from operations.plot import ChartAggregationDefinition
 from operations.template_placeholders import render_template_placeholders
 from operations.timeseries import TimeseriesParams
 from runtime.config import settings
+from runtime.domain.step_config_enums import TimeComponent
 from runtime.export_formats import get_export_format
 from runtime.iceberg_metadata import (
     IcebergMetadataPathNotFoundError,
     resolve_iceberg_branch_metadata_path,
     resolve_iceberg_metadata_path,
 )
-from runtime.models.step_config_enums import TimeComponent
 from runtime.namespace import namespace_paths
 
 

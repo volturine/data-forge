@@ -15,9 +15,9 @@ import polars as pl
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from operations.template_placeholders import render_template_placeholders
+from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.step_config_enums import AIProvider
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
-from runtime.models.compute.base import OperationHandler, OperationParams
-from runtime.models.step_config_enums import AIProvider
 
 logger = logging.getLogger(__name__)
 

@@ -515,7 +515,7 @@ async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path
 
     from backend_core import runtime_ipc
     from backend_core.config import settings
-    from backend_core.contracts.runtime.events import RuntimePayloadKind
+    from backend_core.domain.runtime.events import RuntimePayloadKind
 
     with PostgresContainer() as container:
         monkeypatch.setattr(settings, 'database_url', container.url, raising=False)

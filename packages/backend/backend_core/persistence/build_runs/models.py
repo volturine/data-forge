@@ -4,8 +4,8 @@ from typing import Any
 from sqlalchemy import JSON, Column, DateTime, Enum as SAEnum, Float, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
-from backend_core.contracts.build_runs.models import BuildRunStatus
-from backend_core.contracts.compute import schemas as compute_schemas
+from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.domain.compute import schemas as compute_schemas
 
 
 class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]

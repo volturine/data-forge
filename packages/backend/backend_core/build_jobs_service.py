@@ -7,7 +7,7 @@ from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
 
 from backend_core.config import settings
-from backend_core.contracts.build_jobs.models import BuildJobStatus
+from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.persistence.build_jobs.models import BuildJob
 
 

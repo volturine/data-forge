@@ -6,8 +6,8 @@ from typing import Any
 from sqlmodel import Session
 
 from backend_core import build_runs_service as build_run_service, runtime_ipc
-from backend_core.contracts.build_runs.live import BuildNotification, hub as build_hub
-from backend_core.contracts.compute import schemas as compute_schemas
+from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
+from backend_core.domain.compute import schemas as compute_schemas
 
 
 async def publish_build_notification(namespace: str, build_id: str, latest_sequence: int) -> None:

@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from backend_core import runtime_workers_service as runtime_worker_service
-from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.database import run_settings_db
 from backend_core.docker_healthcheck import worker_healthy
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 
 
 def test_worker_healthy_accepts_recent_scheduler_heartbeat(monkeypatch) -> None:

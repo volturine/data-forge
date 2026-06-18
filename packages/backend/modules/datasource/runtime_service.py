@@ -21,9 +21,9 @@ from sqlmodel import Session, select
 
 from backend_core import engine_runs_service
 from backend_core.config import settings
-from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
-from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.data_plane_client import client_from_settings
+from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
+from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.exceptions import DataSourceConnectionError, DataSourceValidationError, datasource_not_found
 from backend_core.iceberg_catalog import load_runtime_catalog
 from backend_core.namespace import get_namespace, namespace_paths

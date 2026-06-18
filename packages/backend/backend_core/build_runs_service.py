@@ -5,9 +5,9 @@ from typing import Any
 from sqlalchemy import desc, func, or_, select, update
 from sqlmodel import Session, col
 
-from backend_core.contracts.build_runs.models import BuildRunStatus
-from backend_core.contracts.compute import schemas as compute_schemas
-from backend_core.contracts.engine_runs.schemas import EngineRunKind
+from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.domain.compute import schemas as compute_schemas
+from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.datasource.models import DataSource
 

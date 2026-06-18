@@ -585,7 +585,7 @@ def sample_datasources(test_db_session: Session, sample_csv_object_url: str, sam
 
 @pytest.fixture(scope='function')
 def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
-    from backend_core.contracts.analysis.models import AnalysisStatus
+    from backend_core.domain.analysis.models import AnalysisStatus
     from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 
     analysis_id = str(uuid.uuid4())
@@ -625,7 +625,7 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
 
 @pytest.fixture(scope='function')
 def sample_analyses(test_db_session: Session, sample_datasources: list[DataSource]) -> list[Analysis]:
-    from backend_core.contracts.analysis.models import AnalysisStatus
+    from backend_core.domain.analysis.models import AnalysisStatus
     from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 
     analyses = []

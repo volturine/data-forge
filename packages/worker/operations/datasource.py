@@ -11,10 +11,10 @@ from pydantic import ConfigDict
 
 from datasources.datasource_loading import load_datasource_frame
 from operations.step_converter import convert_step_format
+from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.datasource.source_types import DataSourceType
+from runtime.domain.enums import DataForgeStrEnum
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path
-from runtime.models.compute.base import OperationHandler, OperationParams
-from runtime.models.datasource.source_types import DataSourceType
-from runtime.models.enums import DataForgeStrEnum
 from runtime.object_store import object_store_storage_options
 
 

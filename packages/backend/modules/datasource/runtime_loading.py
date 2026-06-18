@@ -9,9 +9,9 @@ import polars as pl
 import psycopg
 from openpyxl import load_workbook
 
-from backend_core.contracts.datasource.source_types import DataSourceFileType
-from backend_core.contracts.enums import DataForgeStrEnum
 from backend_core.data_plane_client import client_from_settings
+from backend_core.domain.datasource.source_types import DataSourceFileType
+from backend_core.domain.enums import DataForgeStrEnum
 from backend_core.namespace import get_namespace
 from backend_core.object_store_paths import is_object_store_url
 

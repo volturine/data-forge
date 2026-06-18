@@ -19,7 +19,7 @@ import psycopg
 from fastapi import Request
 
 from backend_core.config import settings
-from backend_core.contracts.enums import DataForgeStrEnum
+from backend_core.domain.enums import DataForgeStrEnum
 
 _writer: DatabaseLogWriter | None = None
 _listener: logging.handlers.QueueListener | None = None

@@ -1,4 +1,4 @@
-from backend_core.contracts.analysis.step_types import (
+from backend_core.domain.analysis.step_types import (
     chart_type_for_step,
     get_step_timing_key,
     is_chart_step_type,

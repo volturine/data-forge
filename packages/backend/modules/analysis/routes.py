@@ -4,14 +4,14 @@ from fastapi import Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session
 
-from backend_core.contracts.analysis.step_types import is_step_type
-from backend_core.contracts.compute import schemas as compute_schemas
 from backend_core.database import get_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
     get_optional_lock_owner_id,
     get_runtime_availability_probe,
 )
+from backend_core.domain.analysis.step_types import is_step_type
+from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import AnalysisId, parse_analysis_id
 from dataforge_protocol import compute_pb2, enums_pb2

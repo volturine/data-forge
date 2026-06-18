@@ -8,13 +8,13 @@ from sqlmodel import Session
 
 from backend_core import build_jobs_service, build_runs_service, compute_requests_service
 from backend_core.config import settings
-from backend_core.contracts.build_jobs.models import BuildJobStatus
-from backend_core.contracts.build_runs.models import BuildRunStatus
-from backend_core.contracts.compute import schemas as compute_schemas
-from backend_core.contracts.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
-from backend_core.contracts.datasource.source_types import DataSourceType
-from backend_core.contracts.engine_runs.schemas import EngineRunKind
 from backend_core.database import run_settings_db
+from backend_core.domain.build_jobs.models import BuildJobStatus
+from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.domain.compute import schemas as compute_schemas
+from backend_core.domain.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
+from backend_core.domain.datasource.source_types import DataSourceType
+from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 from backend_grpc.codec import dict_to_struct, struct_to_dict

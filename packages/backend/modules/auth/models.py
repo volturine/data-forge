@@ -13,7 +13,7 @@ from sqlalchemy import (
 )
 from sqlmodel import Field, SQLModel
 
-from backend_core.contracts.enums import DataForgeStrEnum
+from backend_core.domain.enums import DataForgeStrEnum
 
 
 def _utcnow() -> datetime:

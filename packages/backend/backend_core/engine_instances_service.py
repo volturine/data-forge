@@ -4,8 +4,8 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from backend_core.contracts.compute.base import EngineStatusInfo
-from backend_core.contracts.engine_instances.models import EngineInstanceStatus
+from backend_core.domain.compute.base import EngineStatusInfo
+from backend_core.domain.engine_instances.models import EngineInstanceStatus
 from backend_core.persistence.engine_instances.models import EngineInstance
 
 

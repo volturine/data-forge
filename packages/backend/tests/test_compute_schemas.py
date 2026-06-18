@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from backend_core.contracts.compute.schemas import (
+from backend_core.domain.compute.schemas import (
     ActiveBuildStatus,
     BuildCancelledEvent,
     BuildCompleteEvent,

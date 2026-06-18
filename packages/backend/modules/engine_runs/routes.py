@@ -2,9 +2,9 @@ from fastapi import Depends, HTTPException
 from sqlmodel import Session
 
 from backend_core import engine_runs_service as service
-from backend_core.contracts.engine_runs import schemas
-from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.database import get_db
+from backend_core.domain.engine_runs import schemas
+from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import (
     EngineRunId,

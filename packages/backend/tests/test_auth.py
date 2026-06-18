@@ -18,12 +18,12 @@ from backend_core.auth_exceptions import (
     TokenExpiredError,
     TokenInvalidError,
 )
-from backend_core.contracts.analysis.models import AnalysisStatus
 from backend_core.database import (
     clear_settings_engine_override,
     get_settings_db,
     set_settings_engine_override,
 )
+from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.namespace import namespace_paths
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource

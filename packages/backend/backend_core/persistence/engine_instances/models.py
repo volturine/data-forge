@@ -3,7 +3,7 @@ import datetime as dt
 from sqlalchemy import BIGINT, JSON, Column, DateTime, Enum as SAEnum, String
 from sqlmodel import Field, SQLModel
 
-from backend_core.contracts.engine_instances.models import EngineInstanceStatus
+from backend_core.domain.engine_instances.models import EngineInstanceStatus
 
 
 class EngineInstance(SQLModel, table=True):  # type: ignore[call-arg, assignment]

@@ -3,8 +3,8 @@ from typing import Any
 import polars as pl
 
 from runtime.config import settings
+from runtime.domain.compute.base import ComputeEngine, EngineResult
 from runtime.exceptions import step_not_found
-from runtime.models.compute.base import ComputeEngine, EngineResult
 
 
 def find_step_index(steps: list[dict], target_step_id: str) -> int:

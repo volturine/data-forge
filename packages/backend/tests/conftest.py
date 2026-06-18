@@ -258,7 +258,7 @@ def clear_lock_watchers():
 
 @pytest.fixture(autouse=True, scope='function')
 def clear_build_notification_hub():
-    from backend_core.contracts.build_runs.live import hub
+    from backend_core.domain.build_runs.live import hub
 
     asyncio.run(hub.clear())
     yield
@@ -267,7 +267,7 @@ def clear_build_notification_hub():
 
 @pytest.fixture(autouse=True, scope='function')
 def clear_build_job_hub():
-    from backend_core.contracts.build_jobs.live import hub
+    from backend_core.domain.build_jobs.live import hub
 
     asyncio.run(hub.clear())
     yield
@@ -276,7 +276,7 @@ def clear_build_job_hub():
 
 @pytest.fixture(autouse=True, scope='function')
 def clear_compute_request_hubs():
-    from backend_core.contracts.compute_requests.live import request_hub, response_hub
+    from backend_core.domain.compute_requests.live import request_hub, response_hub
 
     asyncio.run(request_hub.clear())
     asyncio.run(response_hub.clear())

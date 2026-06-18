@@ -15,15 +15,15 @@ from sqlmodel import Session, col
 
 from backend_core.ai_clients import AIError, get_ai_client
 from backend_core.analysis_cycles import assert_no_analysis_cycle
-from backend_core.contracts.analysis.models import AnalysisStatus
-from backend_core.contracts.analysis.pipeline_types import (
+from backend_core.domain.analysis.models import AnalysisStatus
+from backend_core.domain.analysis.pipeline_types import (
     PipelineDefinition,
     PipelineStep,
     PipelineTab,
     TabDatasource,
     TabOutput,
 )
-from backend_core.contracts.step_config_enums import AIProvider
+from backend_core.domain.step_config_enums import AIProvider
 from backend_core.exceptions import (
     AnalysisValidationError,
     analysis_not_found,

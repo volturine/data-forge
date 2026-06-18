@@ -21,7 +21,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
-from runtime.models.analysis.step_types import (
+from runtime.domain.analysis.step_types import (
     STEP_TYPES,
     ChartType,
     chart_type_for_step,
@@ -29,7 +29,7 @@ from runtime.models.analysis.step_types import (
     is_step_type,
     normalize_step_type,
 )
-from runtime.models.step_config_enums import (
+from runtime.domain.step_config_enums import (
     AIProvider,
     ChartAggregation,
     DeduplicateKeep,

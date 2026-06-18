@@ -8,7 +8,7 @@ import httpx
 
 from backend_core import http as http_client
 from backend_core.config import settings
-from backend_core.contracts.step_config_enums import AIProvider
+from backend_core.domain.step_config_enums import AIProvider
 
 logger = logging.getLogger(__name__)
 

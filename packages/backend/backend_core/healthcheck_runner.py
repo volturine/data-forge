@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import polars as pl
 from sqlmodel import Session
 
-from backend_core.contracts.healthcheck_models import HealthCheckType
+from backend_core.domain.healthcheck_models import HealthCheckType
 from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
 
 

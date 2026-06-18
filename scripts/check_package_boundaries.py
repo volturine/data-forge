@@ -35,6 +35,7 @@ ROOT_TEST_RESIDUE = [
 ROOT_TEST_ARTIFACT_PREFIXES = ('test-results', 'playwright-report')
 
 FORBIDDEN_OWNER_DUPLICATES = [
+    Path('packages/backend/backend_core/contracts'),
     Path('packages/backend/backend_core/engine_identity.py'),
     Path('packages/backend/modules/analysis/models.py'),
     Path('packages/backend/modules/datasource/models.py'),
@@ -44,6 +45,7 @@ FORBIDDEN_OWNER_DUPLICATES = [
     Path('packages/backend/modules/telegram/models.py'),
     Path('packages/backend/modules/udf/models.py'),
     Path('packages/worker/runtime/engine_identity.py'),
+    Path('packages/worker/runtime/models'),
 ]
 
 PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
@@ -65,6 +67,8 @@ PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
 LEGACY_IMPORT_ROOTS = {'backend_contracts', 'worker_models'}
 FORBIDDEN_SOURCE_TOKENS = {
     'backend_contracts': 'deleted legacy backend contract package',
+    'backend_core.contracts': 'renamed backend-owned domain package',
+    'runtime.models': 'renamed worker-owned domain package',
     'worker_models': 'deleted legacy worker model package',
     '_grpc.generated': 'deleted generated gRPC compatibility import path',
     'JsonPayload': 'generic JSON-string protocol payload',

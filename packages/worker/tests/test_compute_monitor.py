@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import cast
 
 from runtime.compute_monitor import monitor_engine_resources
-from runtime.models.compute.base import ComputeEngine
+from runtime.domain.compute.base import ComputeEngine
 
 
 class _StubProcess:

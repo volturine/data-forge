@@ -7,10 +7,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from backend_core.contracts.analysis.pipeline_types import PipelineDefinition, PipelineTab
-from backend_core.contracts.analysis.step_types import STEP_TYPES, get_step_dependency_values
-from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
-from backend_core.contracts.step_config_enums import (
+from backend_core.domain.analysis.pipeline_types import PipelineDefinition, PipelineTab
+from backend_core.domain.analysis.step_types import STEP_TYPES, get_step_dependency_values
+from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
+from backend_core.domain.step_config_enums import (
     DeduplicateKeep,
     FilterLogic,
     FilterOperator,

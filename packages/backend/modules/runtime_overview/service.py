@@ -7,9 +7,9 @@ from sqlmodel import Session, select
 
 from backend_core import runtime_workers_service
 from backend_core.config import settings
-from backend_core.contracts.build_jobs.models import BuildJobStatus
-from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.database import run_db, run_settings_db, supports_distributed_runtime
+from backend_core.domain.build_jobs.models import BuildJobStatus
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.namespace import list_namespaces, reset_namespace, set_namespace_context
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.engine_instances.models import EngineInstance

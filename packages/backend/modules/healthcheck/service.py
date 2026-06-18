@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from sqlalchemy import desc, or_, select
 from sqlmodel import Session, col
 
-from backend_core.contracts.healthcheck_models import HealthCheckType
+from backend_core.domain.healthcheck_models import HealthCheckType
 from backend_core.exceptions import HealthcheckValidationError, healthcheck_not_found
 from backend_core.healthcheck_schemas import (
     HealthCheckCreate,

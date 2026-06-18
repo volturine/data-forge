@@ -3,7 +3,7 @@
 import polars as pl
 
 from operations.validation import validate_no_reflection_escape
-from runtime.models.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationHandler, OperationParams
 
 
 class ExpressionParams(OperationParams):

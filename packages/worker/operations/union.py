@@ -1,6 +1,6 @@
 import polars as pl
 
-from runtime.models.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationHandler, OperationParams
 
 
 class UnionParams(OperationParams):

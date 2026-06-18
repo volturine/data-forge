@@ -1,11 +1,11 @@
 from datetime import UTC, datetime
 
 from backend_core import build_runs_service, engine_runs_service
-from backend_core.contracts.build_runs.models import BuildRunStatus
-from backend_core.contracts.datasource.models import DataSourceCreatedBy
-from backend_core.contracts.datasource.source_types import DataSourceType
-from backend_core.contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.data_plane_client import IcebergSnapshotInfo, IcebergSnapshots
+from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.domain.datasource.models import DataSourceCreatedBy
+from backend_core.domain.datasource.source_types import DataSourceType
+from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.persistence.datasource.models import DataSource
 from modules.compute import iceberg_service
 

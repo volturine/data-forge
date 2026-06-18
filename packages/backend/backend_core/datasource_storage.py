@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from backend_core.contracts.datasource.source_types import DataSourceType
 from backend_core.data_plane_client import client_from_settings
+from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.exceptions import FileError
 from backend_core.iceberg_catalog import load_runtime_catalog
 from backend_core.object_store_paths import is_managed_object_store_url

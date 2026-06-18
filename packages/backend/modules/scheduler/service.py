@@ -15,12 +15,12 @@ from backend_core import (
     build_runs_service as build_run_service,
     runtime_outbox_service,
 )
-from backend_core.contracts.build_jobs.live import hub as build_job_hub
-from backend_core.contracts.build_runs.models import BuildRunStatus
-from backend_core.contracts.compute import schemas as compute_schemas
-from backend_core.contracts.datasource.models import DataSourceTargetKind
-from backend_core.contracts.engine_runs.schemas import EngineRunKind
-from backend_core.contracts.scheduler.schemas import ScheduleCreate, ScheduleResponse, ScheduleUpdate
+from backend_core.domain.build_jobs.live import hub as build_job_hub
+from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.domain.compute import schemas as compute_schemas
+from backend_core.domain.datasource.models import DataSourceTargetKind
+from backend_core.domain.engine_runs.schemas import EngineRunKind
+from backend_core.domain.scheduler.schemas import ScheduleCreate, ScheduleResponse, ScheduleUpdate
 from backend_core.exceptions import (
     ScheduleValidationError,
     datasource_not_found,

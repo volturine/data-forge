@@ -32,10 +32,8 @@ from operations.step_converter import (
 )
 from runtime.compute_utils import apply_steps, normalize_timezones
 from runtime.config import settings
-from runtime.exceptions import IcebergMetadataPathNotFoundError, PipelineValidationError
-from runtime.export_formats import get_export_format
-from runtime.models.analysis.step_types import is_chart_step_type
-from runtime.models.compute.base import (
+from runtime.domain.analysis.step_types import is_chart_step_type
+from runtime.domain.compute.base import (
     EngineProgressEvent,
     EngineResult,
     ExportCommand,
@@ -45,6 +43,8 @@ from runtime.models.compute.base import (
     ShutdownAck,
     ShutdownCommand,
 )
+from runtime.exceptions import IcebergMetadataPathNotFoundError, PipelineValidationError
+from runtime.export_formats import get_export_format
 
 logger = logging.getLogger(__name__)
 

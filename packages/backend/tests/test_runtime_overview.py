@@ -8,10 +8,10 @@ from backend_core import (
     engine_instances_service as engine_instance_service,
     runtime_workers_service as runtime_worker_service,
 )
-from backend_core.contracts.build_jobs.models import BuildJobStatus
-from backend_core.contracts.compute.base import EngineStatusInfo
-from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.database import run_db, run_settings_db
+from backend_core.domain.build_jobs.models import BuildJobStatus
+from backend_core.domain.compute.base import EngineStatusInfo
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.namespace import namespace_paths
 
 

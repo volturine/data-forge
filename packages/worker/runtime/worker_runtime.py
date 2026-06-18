@@ -8,8 +8,8 @@ import threading
 import uuid
 from collections.abc import Awaitable, Callable
 
+from runtime.domain.runtime_workers.models import RuntimeWorkerKind
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
-from runtime.models.runtime_workers.models import RuntimeWorkerKind
 
 logger = logging.getLogger(__name__)
 

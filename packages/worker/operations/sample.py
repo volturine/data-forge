@@ -4,7 +4,7 @@ import math
 
 import polars as pl
 
-from runtime.models.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationHandler, OperationParams
 
 _MAX_HASH = (1 << 64) - 1
 

@@ -11,14 +11,14 @@ from sqlmodel import Session
 
 from backend_core import datasource_delete_service
 from backend_core.config import settings
-from backend_core.contracts.datasource.models import DataSourceCreatedBy
-from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.data_plane_client import client_from_settings
 from backend_core.database import get_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
     get_runtime_availability_probe,
 )
+from backend_core.domain.datasource.models import DataSourceCreatedBy
+from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import AppError
 from backend_core.namespace import get_namespace

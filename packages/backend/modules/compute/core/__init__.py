@@ -1,4 +1,4 @@
-from backend_core.contracts.compute.base import ComputeEngine, OperationHandler, OperationParams
+from backend_core.domain.compute.base import ComputeEngine, OperationHandler, OperationParams
 from backend_core.export_formats import ExportFormat, get_export_format
 
 __all__ = [

@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.config import settings
-from runtime.models.compute.base import ComputeEngine, EngineStatusInfo
-from runtime.models.compute.schemas import EngineStatus
+from runtime.domain.compute.base import ComputeEngine, EngineStatusInfo
+from runtime.domain.compute.schemas import EngineStatus
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
 
 logger = logging.getLogger(__name__)

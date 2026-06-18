@@ -4,14 +4,14 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from backend_core.contracts.analysis.step_types import (
+from backend_core.domain.analysis.step_types import (
     STEP_TYPES,
     ChartType,
     is_step_type,
     iter_step_types,
 )
-from backend_core.contracts.enums import DataForgeStrEnum
-from backend_core.contracts.step_config_enums import (
+from backend_core.domain.enums import DataForgeStrEnum
+from backend_core.domain.step_config_enums import (
     AIProvider,
     AxisScale,
     ChartAggregation,

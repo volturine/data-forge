@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from backend_core.contracts.build_runs.live import BuildNotification, hub as build_hub
-from backend_core.contracts.compute_requests.live import response_hub
-from backend_core.contracts.runtime.events import RuntimePayloadKind
+from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
+from backend_core.domain.compute_requests.live import response_hub
+from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.engine_live import registry as engine_registry
 
 

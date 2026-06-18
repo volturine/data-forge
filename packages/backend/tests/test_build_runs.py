@@ -4,9 +4,9 @@ from datetime import UTC, datetime, timedelta
 from sqlmodel import select
 
 from backend_core import build_runs_service as build_run_service
-from backend_core.contracts.build_runs.models import BuildRunStatus
-from backend_core.contracts.compute import schemas as compute_schemas
-from backend_core.contracts.engine_runs.schemas import EngineRunKind
+from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.domain.compute import schemas as compute_schemas
+from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.build_runs.models import BuildEvent
 
 

@@ -30,6 +30,12 @@ from runtime.compute_utils import (
     resolve_applied_target,
 )
 from runtime.config import settings
+from runtime.domain.analysis.step_types import get_step_timing_key
+from runtime.domain.compute import schemas as compute_schemas
+from runtime.domain.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
+from runtime.domain.datasource.source_types import DataSourceType
+from runtime.domain.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
+from runtime.domain.healthcheck_models import HealthCheckType
 from runtime.exceptions import (
     DataSourceSnapshotError,
     PipelineExecutionError,
@@ -39,12 +45,6 @@ from runtime.exceptions import (
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
 from runtime.internal_api import HealthCheckSpec, client_from_env
-from runtime.models.analysis.step_types import get_step_timing_key
-from runtime.models.compute import schemas as compute_schemas
-from runtime.models.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
-from runtime.models.datasource.source_types import DataSourceType
-from runtime.models.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
-from runtime.models.healthcheck_models import HealthCheckType
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import notification_service, render_template
 from runtime.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
@@ -1726,7 +1726,7 @@ def preview_step(
     triggered_by: str | None = None,
 ):
     """Preview the result of executing pipeline up to a specific step with pagination."""
-    from runtime.models.compute.schemas import StepPreviewResponse
+    from runtime.domain.compute.schemas import StepPreviewResponse
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
@@ -1917,7 +1917,7 @@ def get_step_schema(
     tab_id: str | None = None,
 ):
     """Get the output schema of a pipeline step without returning data."""
-    from runtime.models.compute.schemas import StepSchemaResponse
+    from runtime.domain.compute.schemas import StepSchemaResponse
 
     resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
@@ -1986,7 +1986,7 @@ def get_step_row_count(
     triggered_by: str | None = None,
 ):
     """Get the row count of a pipeline step without collecting full data."""
-    from runtime.models.compute.schemas import StepRowCountResponse
+    from runtime.domain.compute.schemas import StepRowCountResponse
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
@@ -3823,7 +3823,7 @@ async def run_analysis_build_stream(
 
 
 def list_iceberg_snapshots(session: object, datasource_id: str, branch: str | None = None):
-    from runtime.models.compute.schemas import IcebergSnapshotInfo, IcebergSnapshotsResponse
+    from runtime.domain.compute.schemas import IcebergSnapshotInfo, IcebergSnapshotsResponse
 
     del session
     datasource = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
@@ -3889,7 +3889,7 @@ def list_iceberg_snapshots(session: object, datasource_id: str, branch: str | No
 
 
 def delete_iceberg_snapshot(session: object, datasource_id: str, snapshot_id: str):
-    from runtime.models.compute.schemas import IcebergSnapshotDeleteResponse
+    from runtime.domain.compute.schemas import IcebergSnapshotDeleteResponse
 
     del session
     datasource = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)

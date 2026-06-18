@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 
 import psutil  # type: ignore[import-untyped]  # psutil does not ship type hints in this environment.
 
-from runtime.models.compute.base import ComputeEngine
+from runtime.domain.compute.base import ComputeEngine
 
 
 async def monitor_engine_resources(engine: ComputeEngine, interval: float = 1.0) -> AsyncIterator[dict[str, float | int | None]]:

@@ -7,7 +7,7 @@ from pyiceberg.schema import Schema as IcebergSchema
 from pyiceberg.types import NestedField, StringType
 
 from runtime.compute_service import _sync_iceberg_schema, export_data
-from runtime.models.compute.base import EngineResult
+from runtime.domain.compute.base import EngineResult
 from runtime.namespace import namespace_paths
 
 

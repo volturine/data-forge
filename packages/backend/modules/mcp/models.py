@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, Field, computed_field
 
-from backend_core.contracts.enums import DataForgeStrEnum
+from backend_core.domain.enums import DataForgeStrEnum
 
 
 class MCPToolSafety(DataForgeStrEnum):

@@ -3,8 +3,8 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
-from backend_core.contracts.datasource.models import DataSourceCreatedBy, DataSourceTargetKind
-from backend_core.contracts.datasource.source_types import DataSourceType
+from backend_core.domain.datasource.models import DataSourceCreatedBy, DataSourceTargetKind
+from backend_core.domain.datasource.source_types import DataSourceType
 
 
 class DataSource(SQLModel, table=True):  # type: ignore[call-arg]

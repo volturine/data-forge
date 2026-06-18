@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from backend_core import runtime_outbox_service
-from backend_core.contracts.runtime.events import RuntimePayloadKind
+from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.runtime_events.models import RuntimeOutboxStatus
 
 

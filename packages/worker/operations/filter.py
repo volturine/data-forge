@@ -7,8 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from operations.validation import validate_regex_pattern
 from runtime.config import settings
-from runtime.models.compute.base import OperationHandler, OperationParams
-from runtime.models.step_config_enums import FilterLogic, FilterOperator, FilterValueType
+from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.step_config_enums import FilterLogic, FilterOperator, FilterValueType
 
 FilterExpr = Callable[[pl.Expr, Any], pl.Expr]
 ColumnFilterExpr = Callable[[pl.Expr, pl.Expr], pl.Expr]

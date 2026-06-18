@@ -26,15 +26,15 @@ from backend_core import (
 )
 from backend_core.ai_clients import get_ai_client
 from backend_core.config import settings
-from backend_core.contracts.build_runs.models import BuildRunStatus
-from backend_core.contracts.compute import schemas as compute_schemas
-from backend_core.contracts.compute.base import EngineStatusInfo
-from backend_core.contracts.compute_requests.models import ComputeRequestKind
-from backend_core.contracts.datasource.models import DataSourceCreatedBy
-from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
-from backend_core.contracts.step_config_enums import AIProvider
 from backend_core.database import get_db, run_db, run_settings_db
 from backend_core.datasource_storage import cleanup_datasource_storage
+from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.domain.compute import schemas as compute_schemas
+from backend_core.domain.compute.base import EngineStatusInfo
+from backend_core.domain.compute_requests.models import ComputeRequestKind
+from backend_core.domain.datasource.models import DataSourceCreatedBy
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
+from backend_core.domain.step_config_enums import AIProvider
 from backend_core.exceptions import AppError
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.namespaces_service import list_runtime_namespaces

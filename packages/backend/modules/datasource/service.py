@@ -13,9 +13,9 @@ from sqlalchemy.orm import defer
 from sqlmodel import Session, col
 
 from backend_core import datasource_delete_service
-from backend_core.contracts.datasource.models import DataSourceCreatedBy
-from backend_core.contracts.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.datasource_storage import cleanup_datasource_storage
+from backend_core.domain.datasource.models import DataSourceCreatedBy
+from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.exceptions import DataSourceValidationError, datasource_not_found
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata

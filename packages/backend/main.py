@@ -15,7 +15,6 @@ from sqlmodel import Session, text
 from api import router
 from backend_core import build_runs_service as build_run_service, runtime_ipc, runtime_workers_service as runtime_worker_service
 from backend_core.config import settings
-from backend_core.contracts.runtime_workers.models import RuntimeWorkerKind
 from backend_core.database import (
     get_settings_db,
     init_db,
@@ -25,6 +24,7 @@ from backend_core.database import (
     run_settings_db,
     supports_distributed_runtime,
 )
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.error_handlers import (
     app_error_handler,
     generic_error_handler,

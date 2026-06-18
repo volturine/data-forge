@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from runtime.models.build_jobs.live import hub as build_job_hub
-from runtime.models.compute_requests.live import request_hub
-from runtime.models.runtime.events import RuntimePayloadKind
+from runtime.domain.build_jobs.live import hub as build_job_hub
+from runtime.domain.compute_requests.live import request_hub
+from runtime.domain.runtime.events import RuntimePayloadKind
 
 
 async def handle_runtime_payload(payload: dict[str, object]) -> None:

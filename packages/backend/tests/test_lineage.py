@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from backend_core.contracts.analysis.models import AnalysisStatus
+from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource
 

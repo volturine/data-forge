@@ -10,8 +10,8 @@ from collections.abc import Awaitable, Callable
 import psycopg
 from psycopg import Notify
 
-from backend_core.contracts.enums import DataForgeStrEnum
-from backend_core.contracts.runtime.events import RuntimePayloadKind
+from backend_core.domain.enums import DataForgeStrEnum
+from backend_core.domain.runtime.events import RuntimePayloadKind
 
 logger = logging.getLogger(__name__)
 

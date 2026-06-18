@@ -11,11 +11,11 @@ from dataforge_protocol import compute_pb2, enums_pb2
 from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager, engine_identity_resource_id
 from runtime.config import settings
+from runtime.domain.compute import schemas as compute_schemas
+from runtime.domain.compute_requests.live import request_hub
+from runtime.domain.compute_requests.models import ComputeRequestKind
 from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
 from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
-from runtime.models.compute import schemas as compute_schemas
-from runtime.models.compute_requests.live import request_hub
-from runtime.models.compute_requests.models import ComputeRequestKind
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
 
