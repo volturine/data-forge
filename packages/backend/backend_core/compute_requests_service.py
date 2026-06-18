@@ -9,11 +9,11 @@ from sqlmodel import Session
 from backend_core import runtime_outbox_service
 from backend_core.config import settings
 from backend_core.domain.compute_requests.models import (
-    ComputeRequestKind,
-    ComputeRequestStatus,
     command_envelope,
     command_envelope_from_json,
     command_payload as proto_command_payload,
+    compute_request_kind_name,
+    compute_request_status_name,
     envelope_to_json,
     kind_from_proto,
     response_envelope,
@@ -22,28 +22,29 @@ from backend_core.domain.compute_requests.models import (
     status_from_proto,
 )
 from backend_core.persistence.compute_requests.models import ComputeRequest
+from dataforge_protocol import enums_pb2
 
 _BLOCKING_REQUEST_KINDS = frozenset(
     {
-        ComputeRequestKind.SPAWN_ENGINE,
-        ComputeRequestKind.CONFIGURE_ENGINE,
-        ComputeRequestKind.SHUTDOWN_ENGINE,
-        ComputeRequestKind.CREATE_FILE_DATASOURCE,
-        ComputeRequestKind.CREATE_DATABASE_DATASOURCE,
-        ComputeRequestKind.CREATE_ICEBERG_DATASOURCE,
-        ComputeRequestKind.DATASOURCE_SCHEMA,
-        ComputeRequestKind.DATASOURCE_COLUMN_STATS,
-        ComputeRequestKind.DOWNLOAD,
-        ComputeRequestKind.EXPORT,
+        enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
+        enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+        enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
+        enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
+        enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
     }
 )
 
 _INTERACTIVE_REQUEST_KINDS = frozenset(
     {
-        ComputeRequestKind.PREVIEW,
-        ComputeRequestKind.SCHEMA,
-        ComputeRequestKind.ROW_COUNT,
-        ComputeRequestKind.COMPARE_ICEBERG_SNAPSHOTS,
+        enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
+        enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
+        enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
     }
 )
 
@@ -64,23 +65,22 @@ def create_request(
     session: Session,
     *,
     namespace: str,
-    kind: ComputeRequestKind | str,
+    kind: enums_pb2.ComputeRequestKind,
     request_json: dict[str, object],
     commit: bool = True,
 ) -> ComputeRequest:
     now = _utcnow()
     request_id = str(uuid.uuid4())
-    request_kind = kind if isinstance(kind, ComputeRequestKind) else ComputeRequestKind(kind)
     envelope = command_envelope(
-        kind=request_kind,
+        kind=kind,
         payload=request_json,
         request_id=request_id,
     )
     request = ComputeRequest(
         id=request_id,
         namespace=namespace,
-        kind=request_kind,
-        status=ComputeRequestStatus.QUEUED,
+        kind=kind,
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
         request_json=envelope_to_json(envelope),
         created_at=now,
         updated_at=now,
@@ -96,8 +96,12 @@ def create_request(
 
 def command_payload(request: ComputeRequest) -> dict[str, object]:
     envelope = command_envelope_from_json(request.request_json)
-    if kind_from_proto(envelope.kind) != request.kind:
-        raise ValueError(f'Compute request {request.id} envelope kind {kind_from_proto(envelope.kind).value!r} does not match row kind {request.kind.value!r}')
+    row_kind = kind_from_proto(request.kind)
+    if kind_from_proto(envelope.kind) != row_kind:
+        raise ValueError(
+            f'Compute request {request.id} envelope kind {compute_request_kind_name(kind_from_proto(envelope.kind))!r} '
+            f'does not match row kind {compute_request_kind_name(row_kind)!r}'
+        )
     if envelope.correlation_id != request.id:
         raise ValueError(f'Compute request {request.id} envelope correlation id {envelope.correlation_id!r} does not match request id')
     return proto_command_payload(envelope)
@@ -105,8 +109,12 @@ def command_payload(request: ComputeRequest) -> dict[str, object]:
 
 def command_envelope_for_request(request: ComputeRequest):
     envelope = command_envelope_from_json(request.request_json)
-    if kind_from_proto(envelope.kind) != request.kind:
-        raise ValueError(f'Compute request {request.id} envelope kind {kind_from_proto(envelope.kind).value!r} does not match row kind {request.kind.value!r}')
+    row_kind = kind_from_proto(request.kind)
+    if kind_from_proto(envelope.kind) != row_kind:
+        raise ValueError(
+            f'Compute request {request.id} envelope kind {compute_request_kind_name(kind_from_proto(envelope.kind))!r} '
+            f'does not match row kind {compute_request_kind_name(row_kind)!r}'
+        )
     if envelope.correlation_id != request.id:
         raise ValueError(f'Compute request {request.id} envelope correlation id {envelope.correlation_id!r} does not match request id')
     return envelope
@@ -116,11 +124,17 @@ def response_payload(request: ComputeRequest) -> dict[str, object]:
     if request.response_json is None:
         raise ValueError(f'Compute request {request.id} has no response envelope')
     envelope = response_envelope_from_json(request.response_json)
-    if kind_from_proto(envelope.kind) != request.kind:
-        raise ValueError(f'Compute request {request.id} response kind {kind_from_proto(envelope.kind).value!r} does not match row kind {request.kind.value!r}')
-    if status_from_proto(envelope.status) != request.status:
+    row_kind = kind_from_proto(request.kind)
+    if kind_from_proto(envelope.kind) != row_kind:
         raise ValueError(
-            f'Compute request {request.id} response status {status_from_proto(envelope.status).value!r} does not match row status {request.status.value!r}'
+            f'Compute request {request.id} response kind {compute_request_kind_name(kind_from_proto(envelope.kind))!r} '
+            f'does not match row kind {compute_request_kind_name(row_kind)!r}'
+        )
+    row_status = status_from_proto(request.status)
+    if status_from_proto(envelope.status) != row_status:
+        raise ValueError(
+            f'Compute request {request.id} response status {compute_request_status_name(status_from_proto(envelope.status))!r} '
+            f'does not match row status {compute_request_status_name(row_status)!r}'
         )
     if envelope.correlation_id != request.id:
         raise ValueError(f'Compute request {request.id} response correlation id {envelope.correlation_id!r} does not match request id')
@@ -135,9 +149,9 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
     now = _utcnow()
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
-    queued_clause = table.c.status == ComputeRequestStatus.QUEUED
+    queued_clause = table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
     reclaimable_clause = and_(
-        table.c.status == ComputeRequestStatus.RUNNING,
+        table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
         or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable), table.c.lease_expires_at <= now),
     )
     base = select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).order_by(_request_priority_clause(table), table.c.created_at).limit(1)
@@ -156,7 +170,7 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
         CursorResult[Any],
         session.execute(
             claim.values(
-                status=ComputeRequestStatus.RUNNING,
+                status=enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
                 lease_owner=worker_id,
                 lease_expires_at=now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
                 updated_at=now,
@@ -183,11 +197,11 @@ def mark_request_completed(
     request = session.get(ComputeRequest, request_id)
     if request is None:
         raise ValueError(f'Compute request {request_id} not found')
-    request.status = ComputeRequestStatus.COMPLETED
+    request.status = enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
     request.response_json = envelope_to_json(
         response_envelope(
-            kind=request.kind,
-            status=ComputeRequestStatus.COMPLETED,
+            kind=kind_from_proto(request.kind),
+            status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
             payload=response_json or {},
             request_id=request.id,
         )
@@ -212,12 +226,12 @@ def mark_request_failed(session: Session, request_id: str, *, error_message: str
     request = session.get(ComputeRequest, request_id)
     if request is None:
         raise ValueError(f'Compute request {request_id} not found')
-    request.status = ComputeRequestStatus.FAILED
+    request.status = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
     request.error_message = error_message
     request.response_json = envelope_to_json(
         response_envelope(
-            kind=request.kind,
-            status=ComputeRequestStatus.FAILED,
+            kind=kind_from_proto(request.kind),
+            status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
             payload=response_json or {},
             request_id=request.id,
             error_message=error_message,
@@ -235,7 +249,7 @@ def mark_request_failed(session: Session, request_id: str, *, error_message: str
 
 
 def queued_request_count(session: Session) -> int:
-    stmt = select(ComputeRequest).where(ComputeRequest.status == ComputeRequestStatus.QUEUED)  # type: ignore[arg-type]
+    stmt = select(ComputeRequest).where(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED)  # type: ignore[arg-type]
     return len(session.execute(stmt).scalars().all())
 
 
@@ -243,12 +257,12 @@ def release_worker_requests(session: Session, *, worker_id: str) -> list[Compute
     now = _utcnow()
     stmt = (
         select(ComputeRequest)
-        .where(ComputeRequest.status == ComputeRequestStatus.RUNNING)  # type: ignore[arg-type]
+        .where(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)  # type: ignore[arg-type]
         .where(ComputeRequest.lease_owner == worker_id)  # type: ignore[arg-type]
     )
     rows = list(session.execute(stmt).scalars().all())
     for row in rows:
-        row.status = ComputeRequestStatus.QUEUED
+        row.status = enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
         row.lease_owner = None
         row.lease_expires_at = None
         row.updated_at = now

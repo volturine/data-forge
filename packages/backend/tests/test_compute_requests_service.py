@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from backend_core import compute_requests_service
-from backend_core.domain.compute_requests.models import ComputeRequestKind, ComputeRequestStatus, command_envelope_from_json
+from backend_core.domain.compute_requests.models import command_envelope_from_json
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
@@ -16,13 +16,13 @@ def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_
     create_request = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
-        kind=ComputeRequestKind.CREATE_FILE_DATASOURCE,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
         request_json={'name': 'upload'},
     )
     preview = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
-        kind=ComputeRequestKind.PREVIEW,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         request_json={'name': 'preview'},
     )
 
@@ -30,25 +30,25 @@ def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_
 
     assert claimed is not None
     assert claimed.id == create_request.id
-    assert claimed.status == ComputeRequestStatus.RUNNING
+    assert claimed.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     assert claimed.lease_expires_at is not None
 
     remaining = compute_requests_service.get_request(test_db_session, preview.id)
     assert remaining is not None
-    assert remaining.status == ComputeRequestStatus.QUEUED
+    assert remaining.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
 
 
 def test_claim_next_request_prioritizes_user_create_requests_over_background_ingest(test_db_session) -> None:
     background = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
-        kind=ComputeRequestKind.INGEST_DATASOURCE,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
         request_json={'name': 'background'},
     )
     create_request = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
-        kind=ComputeRequestKind.CREATE_FILE_DATASOURCE,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
         request_json={'name': 'upload'},
     )
 
@@ -56,15 +56,17 @@ def test_claim_next_request_prioritizes_user_create_requests_over_background_ing
 
     assert claimed is not None
     assert claimed.id == create_request.id
-    assert claimed.status == ComputeRequestStatus.RUNNING
+    assert claimed.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
 
     remaining = compute_requests_service.get_request(test_db_session, background.id)
     assert remaining is not None
-    assert remaining.status == ComputeRequestStatus.QUEUED
+    assert remaining.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
 
 
 def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> None:
-    request = compute_requests_service.create_request(test_db_session, namespace='default', kind=ComputeRequestKind.PREVIEW, request_json={'example': True})
+    request = compute_requests_service.create_request(
+        test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, request_json={'example': True}
+    )
     request_id = request.id
 
     duplicate = (
@@ -73,8 +75,8 @@ def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> 
         .values(
             id=request_id,
             namespace='default',
-            kind=ComputeRequestKind.PREVIEW,
-            status=ComputeRequestStatus.QUEUED,
+            kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+            status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
             request_json={'duplicate': True},
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
@@ -88,7 +90,7 @@ def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> 
         test_db_session, request_id, error_message='boom', response_json={'error': 'boom', 'status_code': 500}
     )
 
-    assert failed.status == ComputeRequestStatus.FAILED
+    assert failed.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
     assert failed.error_message == 'boom'
     assert failed.response_json is not None
     assert failed.response_json['kind'] == 'COMPUTE_REQUEST_KIND_PREVIEW'
@@ -108,7 +110,7 @@ def test_create_request_stores_typed_command_envelope(test_db_session) -> None:
     request = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
-        kind=ComputeRequestKind.SPAWN_ENGINE,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
         request_json={
             'engine_identity': {
                 'scope': 'analysis_interactive',
@@ -140,13 +142,13 @@ def test_mark_request_completed_stores_typed_response_envelope(test_db_session) 
     request = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
-        kind=ComputeRequestKind.PREVIEW,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         request_json={'example': True},
     )
 
     completed = compute_requests_service.mark_request_completed(test_db_session, request.id, response_json={'rows': [{'id': 1}]})
 
-    assert completed.status == ComputeRequestStatus.COMPLETED
+    assert completed.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
     assert completed.response_json is not None
     assert completed.response_json['kind'] == 'COMPUTE_REQUEST_KIND_PREVIEW'
     assert completed.response_json['version'] == 1
@@ -164,10 +166,10 @@ def test_claim_next_request_reclaims_expired_lease(test_db_session) -> None:
     request = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
-        kind=ComputeRequestKind.PREVIEW,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         request_json={'example': True},
     )
-    request.status = ComputeRequestStatus.RUNNING
+    request.status = enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     request.lease_owner = 'live-worker'
     request.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     test_db_session.add(request)

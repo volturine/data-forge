@@ -9,33 +9,7 @@ from uuid import UUID
 
 from google.protobuf import json_format, struct_pb2
 
-from backend_core.domain.enums import DataForgeStrEnum
 from dataforge_protocol import compute_pb2, enums_pb2
-
-
-class ComputeRequestKind(DataForgeStrEnum):
-    PREVIEW = 'preview'
-    SCHEMA = 'schema'
-    ROW_COUNT = 'row_count'
-    DOWNLOAD = 'download'
-    EXPORT = 'export'
-    CREATE_FILE_DATASOURCE = 'create_file_datasource'
-    CREATE_DATABASE_DATASOURCE = 'create_database_datasource'
-    CREATE_ICEBERG_DATASOURCE = 'create_iceberg_datasource'
-    INGEST_DATASOURCE = 'ingest_datasource'
-    DATASOURCE_SCHEMA = 'datasource_schema'
-    DATASOURCE_COLUMN_STATS = 'datasource_column_stats'
-    COMPARE_ICEBERG_SNAPSHOTS = 'compare_iceberg_snapshots'
-    SPAWN_ENGINE = 'spawn_engine'
-    CONFIGURE_ENGINE = 'configure_engine'
-    SHUTDOWN_ENGINE = 'shutdown_engine'
-
-
-class ComputeRequestStatus(DataForgeStrEnum):
-    QUEUED = 'queued'
-    RUNNING = 'running'
-    COMPLETED = 'completed'
-    FAILED = 'failed'
 
 
 def _normalize_struct_decode_value(value: object) -> object:
@@ -79,34 +53,41 @@ def struct_to_dict(payload: struct_pb2.Struct) -> dict[str, object]:
     return cast(dict[str, object], decoded)
 
 
-def _proto_enum_name(enum_type: Any, prefix: str, value: int) -> str:
+def _proto_enum_suffix(enum_type: Any, prefix: str, value: int) -> str:
     enum_name = enum_type.Name(value)
     suffix = enum_name.removeprefix(f'{prefix}_')
     if suffix == 'UNSPECIFIED' or suffix == enum_name:
         raise ValueError(f'Unsupported {prefix} enum value: {enum_name}')
-    return suffix.lower()
+    return suffix
 
 
-def _proto_value(prefix: str, value: str) -> Any:
-    return getattr(enums_pb2, f'{prefix}_{value.upper()}')
+def _validate_proto_enum(enum_type: Any, prefix: str, value: int) -> Any:
+    _proto_enum_suffix(enum_type, prefix, value)
+    return value
 
 
-def kind_to_proto(kind: ComputeRequestKind | str) -> Any:
-    request_kind = kind if isinstance(kind, ComputeRequestKind) else ComputeRequestKind(kind)
-    return _proto_value('COMPUTE_REQUEST_KIND', request_kind.value)
+def compute_request_kind_name(kind: enums_pb2.ComputeRequestKind) -> str:
+    return _proto_enum_suffix(enums_pb2.ComputeRequestKind, 'COMPUTE_REQUEST_KIND', kind).lower()
 
 
-def status_to_proto(status: ComputeRequestStatus | str) -> Any:
-    request_status = status if isinstance(status, ComputeRequestStatus) else ComputeRequestStatus(status)
-    return _proto_value('COMPUTE_REQUEST_STATUS', request_status.value)
+def compute_request_status_name(status: enums_pb2.ComputeRequestStatus) -> str:
+    return _proto_enum_suffix(enums_pb2.ComputeRequestStatus, 'COMPUTE_REQUEST_STATUS', status).lower()
 
 
-def kind_from_proto(value: int) -> ComputeRequestKind:
-    return ComputeRequestKind(_proto_enum_name(enums_pb2.ComputeRequestKind, 'COMPUTE_REQUEST_KIND', value))
+def kind_to_proto(kind: enums_pb2.ComputeRequestKind) -> Any:
+    return _validate_proto_enum(enums_pb2.ComputeRequestKind, 'COMPUTE_REQUEST_KIND', kind)
 
 
-def status_from_proto(value: int) -> ComputeRequestStatus:
-    return ComputeRequestStatus(_proto_enum_name(enums_pb2.ComputeRequestStatus, 'COMPUTE_REQUEST_STATUS', value))
+def status_to_proto(status: enums_pb2.ComputeRequestStatus) -> Any:
+    return _validate_proto_enum(enums_pb2.ComputeRequestStatus, 'COMPUTE_REQUEST_STATUS', status)
+
+
+def kind_from_proto(value: int) -> enums_pb2.ComputeRequestKind:
+    return _validate_proto_enum(enums_pb2.ComputeRequestKind, 'COMPUTE_REQUEST_KIND', value)
+
+
+def status_from_proto(value: int) -> enums_pb2.ComputeRequestStatus:
+    return _validate_proto_enum(enums_pb2.ComputeRequestStatus, 'COMPUTE_REQUEST_STATUS', value)
 
 
 def _required_payload_str(payload: dict[str, object], key: str) -> str:
@@ -171,22 +152,22 @@ def _required_payload_dict(payload: dict[str, object], key: str) -> dict[str, ob
     return cast(dict[str, object], value)
 
 
-def _command_from_payload(kind: ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeCommand:
+def _command_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeCommand:
     command = compute_pb2.ComputeCommand()
-    if kind == ComputeRequestKind.SPAWN_ENGINE:
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE:
         command.spawn_engine.CopyFrom(_lifecycle_command(payload))
-    elif kind == ComputeRequestKind.CONFIGURE_ENGINE:
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE:
         command.configure_engine.CopyFrom(_lifecycle_command(payload))
-    elif kind == ComputeRequestKind.SHUTDOWN_ENGINE:
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
         command.shutdown_engine.CopyFrom(_lifecycle_command(payload))
     elif kind in {
-        ComputeRequestKind.CREATE_FILE_DATASOURCE,
-        ComputeRequestKind.CREATE_DATABASE_DATASOURCE,
-        ComputeRequestKind.CREATE_ICEBERG_DATASOURCE,
-        ComputeRequestKind.INGEST_DATASOURCE,
-        ComputeRequestKind.DATASOURCE_SCHEMA,
-        ComputeRequestKind.DATASOURCE_COLUMN_STATS,
-        ComputeRequestKind.COMPARE_ICEBERG_SNAPSHOTS,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+        enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
+        enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
     }:
         command.datasource_request.CopyFrom(dict_to_struct(payload))
     return command
@@ -194,7 +175,7 @@ def _command_from_payload(kind: ComputeRequestKind, payload: dict[str, object]) 
 
 def command_envelope(
     *,
-    kind: ComputeRequestKind,
+    kind: enums_pb2.ComputeRequestKind,
     request_id: str,
     payload: dict[str, object],
 ) -> compute_pb2.ComputeCommandEnvelope:
@@ -211,9 +192,9 @@ def command_envelope(
 
 def response_envelope(
     *,
-    kind: ComputeRequestKind,
+    kind: enums_pb2.ComputeRequestKind,
     request_id: str,
-    status: ComputeRequestStatus,
+    status: enums_pb2.ComputeRequestStatus,
     payload: dict[str, object] | None,
     error_message: str | None = None,
 ) -> compute_pb2.ComputeResponseEnvelope:

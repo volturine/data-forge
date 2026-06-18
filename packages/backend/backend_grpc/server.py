@@ -31,7 +31,7 @@ from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute.base import EngineStatusInfo
-from backend_core.domain.compute_requests.models import ComputeRequestKind
+from backend_core.domain.compute_requests.models import compute_request_kind_name, kind_from_proto
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.domain.step_config_enums import AIProvider
@@ -102,8 +102,8 @@ def _proto_runtime_worker_kind(value: int) -> RuntimeWorkerKind:
     return _parse_worker_kind(proto_value_to_enum_name(enums_pb2.RuntimeWorkerKind, 'RUNTIME_WORKER_KIND', value))
 
 
-def _proto_compute_request_kind(value: int) -> ComputeRequestKind:
-    return ComputeRequestKind(proto_value_to_enum_name(enums_pb2.ComputeRequestKind, 'COMPUTE_REQUEST_KIND', value))
+def _proto_compute_request_kind(value: int) -> enums_pb2.ComputeRequestKind:
+    return kind_from_proto(value)
 
 
 def _proto_value(prefix: str, value: object) -> Any:
@@ -231,7 +231,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     request=worker_runtime_pb2.WorkerClaimedComputeRequest(
                         id=compute_request.id,
                         namespace=compute_request.namespace,
-                        kind=_proto_value('COMPUTE_REQUEST_KIND', compute_request.kind.value),
+                        kind=kind_from_proto(compute_request.kind),
                         command=compute_requests_service.command_envelope_for_request(compute_request),
                     )
                 )
@@ -295,7 +295,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             kind = _proto_compute_request_kind(request.kind)
             request_json = struct_to_dict(request.request)
             response: Any
-            if kind == ComputeRequestKind.CREATE_FILE_DATASOURCE:
+            if kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE:
                 raw_csv_options = request_json.get('csv_options')
                 csv_options = datasource_runtime_service.CSVOptions.model_validate(raw_csv_options) if isinstance(raw_csv_options, dict) else None
                 response = datasource_runtime_service.create_file_datasource(
@@ -317,7 +317,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     cell_range=_read_optional_str(request_json, 'cell_range'),
                     owner_id=_read_optional_str(request_json, 'owner_id'),
                 )
-            elif kind == ComputeRequestKind.CREATE_DATABASE_DATASOURCE:
+            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE:
                 response = datasource_runtime_service.create_database_datasource(
                     session=session,
                     name=str(request_json['name']),
@@ -327,7 +327,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     branch=str(request_json['branch']),
                     owner_id=str(request_json['owner_id']) if request_json.get('owner_id') is not None else None,
                 )
-            elif kind == ComputeRequestKind.CREATE_ICEBERG_DATASOURCE:
+            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE:
                 raw_source = request_json.get('source')
                 if not isinstance(raw_source, dict):
                     raise ValueError('source is required')
@@ -339,16 +339,16 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     branch=str(request_json['branch']),
                     owner_id=str(request_json['owner_id']) if request_json.get('owner_id') is not None else None,
                 )
-            elif kind == ComputeRequestKind.INGEST_DATASOURCE:
+            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE:
                 response = datasource_runtime_service.ingest_external_datasource(session, str(request_json['datasource_id']))
-            elif kind == ComputeRequestKind.DATASOURCE_SCHEMA:
+            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
                 response = datasource_runtime_service.get_datasource_schema(
                     session,
                     str(request_json['datasource_id']),
                     sheet_name=_read_optional_str(request_json, 'sheet_name'),
                     refresh=bool(request_json.get('refresh', False)),
                 )
-            elif kind == ComputeRequestKind.DATASOURCE_COLUMN_STATS:
+            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
                 response = datasource_runtime_service.get_column_stats(
                     session=session,
                     datasource_id=str(request_json['datasource_id']),
@@ -357,7 +357,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     sample_size=_read_optional_int(request_json, 'sample_size') or 10000,
                     datasource_config=_read_optional_dict(request_json, 'datasource_config'),
                 )
-            elif kind == ComputeRequestKind.COMPARE_ICEBERG_SNAPSHOTS:
+            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS:
                 response = datasource_runtime_service.compare_iceberg_snapshots(
                     session,
                     str(request_json['datasource_id']),
@@ -366,12 +366,12 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     _read_optional_int(request_json, 'row_limit') or 10,
                 )
             else:
-                raise ValueError(f'Unsupported datasource request kind: {kind.value}')
+                raise ValueError(f'Unsupported datasource request kind: {compute_request_kind_name(kind)}')
             return worker_runtime_pb2.JsonResponse(response=dict_to_struct(response.model_dump(mode='json')))
         except AppError as exc:
             if exc.error_code != 'DATASOURCE_NOT_FOUND':
                 raise
-            logger.warning('Datasource not found for %s: %s', kind.value, exc)
+            logger.warning('Datasource not found for %s: %s', compute_request_kind_name(kind), exc)
             return worker_runtime_pb2.JsonResponse(response=dict_to_struct({'error': 'datasource_not_found', 'message': str(exc)}))
         finally:
             session.close()

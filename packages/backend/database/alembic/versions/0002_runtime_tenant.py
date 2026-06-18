@@ -18,26 +18,6 @@ depends_on: str | Sequence[str] | None = None
 
 __all__ = ['revision', 'down_revision', 'branch_labels', 'depends_on', 'upgrade', 'downgrade']
 
-COMPUTE_REQUEST_KIND = sa.Enum(
-    'preview',
-    'schema',
-    'row_count',
-    'download',
-    'export',
-    'create_file_datasource',
-    'create_database_datasource',
-    'create_iceberg_datasource',
-    'ingest_datasource',
-    'spawn_engine',
-    'keepalive_engine',
-    'configure_engine',
-    'shutdown_engine',
-    name='computerequestkind',
-    native_enum=False,
-)
-
-COMPUTE_REQUEST_STATUS = sa.Enum('queued', 'running', 'completed', 'failed', name='computerequeststatus', native_enum=False)
-
 
 def _scope() -> str:
     migration_context = op.get_context()
@@ -232,8 +212,8 @@ def upgrade() -> None:
         'compute_requests',
         sa.Column('id', sa.String(), nullable=False),
         sa.Column('namespace', sa.String(), nullable=False),
-        sa.Column('kind', COMPUTE_REQUEST_KIND, nullable=False),
-        sa.Column('status', COMPUTE_REQUEST_STATUS, nullable=False),
+        sa.Column('kind', sa.Integer(), nullable=False),
+        sa.Column('status', sa.Integer(), nullable=False),
         sa.Column('request_json', sa.JSON(), nullable=False),
         sa.Column('response_json', sa.JSON(), nullable=True),
         sa.Column('error_message', sa.String(), nullable=True),

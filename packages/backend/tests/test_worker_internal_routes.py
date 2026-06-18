@@ -12,7 +12,7 @@ from backend_core.database import run_settings_db
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
-from backend_core.domain.compute_requests.models import ComputeRequestKind, ComputeRequestStatus, response_envelope
+from backend_core.domain.compute_requests.models import response_envelope
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
@@ -131,7 +131,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     request = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
-        kind=ComputeRequestKind.SHUTDOWN_ENGINE,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
         request_json={
             'engine_identity': {
                 'scope': 'analysis_interactive',
@@ -157,7 +157,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         'scope': 'analysis_interactive',
     }
     test_db_session.refresh(request)
-    assert request.status == ComputeRequestStatus.RUNNING
+    assert request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     assert request.lease_owner == worker_id
 
     await servicer.CompleteComputeRequest(
@@ -165,21 +165,21 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
             namespace='default',
             request_id=request.id,
             response_envelope=response_envelope(
-                kind=ComputeRequestKind.SHUTDOWN_ENGINE,
+                kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
                 request_id=request.id,
-                status=ComputeRequestStatus.COMPLETED,
+                status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
                 payload={'success': True},
             ),
         ),
         context,  # type: ignore[arg-type]
     )
     test_db_session.refresh(request)
-    assert request.status == ComputeRequestStatus.COMPLETED
+    assert request.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
 
     failed_request = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
-        kind=ComputeRequestKind.SCHEMA,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
         request_json={'analysis_id': 'analysis-2'},
     )
     response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)  # type: ignore[arg-type]
@@ -191,9 +191,9 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
             request_id=failed_request.id,
             error_message='boom',
             response_envelope=response_envelope(
-                kind=ComputeRequestKind.SCHEMA,
+                kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
                 request_id=failed_request.id,
-                status=ComputeRequestStatus.FAILED,
+                status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
                 payload={'error': 'boom', 'status_code': 500},
                 error_message='boom',
             ),
@@ -201,7 +201,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         context,  # type: ignore[arg-type]
     )
     test_db_session.refresh(failed_request)
-    assert failed_request.status == ComputeRequestStatus.FAILED
+    assert failed_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
 
 
 @pytest.mark.asyncio
