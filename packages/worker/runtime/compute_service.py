@@ -21,7 +21,7 @@ from pyiceberg.table import Table as IcebergTable
 from sqlalchemy.exc import IntegrityError
 
 from builds.build_live import ActiveBuild
-from runtime.compute_manager import EngineIdentityInput, ProcessManager, build_engine_identity
+from runtime.compute_manager import EngineIdentityInput, ProcessManager, analysis_interactive_engine_identity, build_engine_identity
 from runtime.compute_monitor import monitor_engine_resources
 from runtime.compute_utils import (
     apply_steps,
@@ -1707,7 +1707,7 @@ def _resolve_export_engine_identity(*, engine_identity: EngineIdentityInput | No
     if build_id is not None:
         return build_engine_identity(build_id)
     if analysis_id:
-        return analysis_id
+        return analysis_interactive_engine_identity(analysis_id)
     raise ValueError("Export requires analysis_id or engine identity")
 
 
@@ -1767,7 +1767,8 @@ def preview_step(
         preview_steps = steps[: step_index + 1]
         preview_steps = _hydrate_udfs(session, preview_steps)
 
-    engine = _acquire_engine(manager, engine_identity or analysis_id_value, resource_config=resource_config)
+    resolved_engine_identity = engine_identity or analysis_interactive_engine_identity(analysis_id_value)
+    engine = _acquire_engine(manager, resolved_engine_identity, resource_config=resource_config)
     persist_preview_runs = settings.persist_preview_runs
     run_response = None
     if persist_preview_runs:
@@ -1947,7 +1948,7 @@ def get_step_schema(
         schema_steps = steps[: step_index + 1]
         schema_steps = _hydrate_udfs(session, schema_steps)
 
-    engine = _acquire_engine(manager, analysis_id_value)
+    engine = _acquire_engine(manager, analysis_interactive_engine_identity(analysis_id_value))
 
     additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
 
@@ -2025,7 +2026,7 @@ def get_step_row_count(
         count_steps = steps[: step_index + 1]
         count_steps = _hydrate_udfs(session, count_steps)
 
-    engine = _acquire_engine(manager, analysis_id_value)
+    engine = _acquire_engine(manager, analysis_interactive_engine_identity(analysis_id_value))
 
     additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
 
@@ -2565,7 +2566,7 @@ def download_step(
         download_steps = steps[: step_index + 1]
         download_steps = _hydrate_udfs(session, download_steps)
 
-    engine = _acquire_engine(manager, analysis_id_value)
+    engine = _acquire_engine(manager, analysis_interactive_engine_identity(analysis_id_value))
     branch = _resolve_branch_value(datasource_config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
     request_payload = _ensure_request_branch(

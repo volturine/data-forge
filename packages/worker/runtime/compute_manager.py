@@ -19,7 +19,7 @@ _RESOURCE_KEYS = frozenset({"max_threads", "max_memory_mb", "streaming_chunk_siz
 EngineFactory = Callable[[str, dict | None], ComputeEngine]
 EngineSnapshotListener = Callable[[list[EngineStatusInfo]], None]
 EngineIdentity = compute_pb2.EngineIdentity
-EngineIdentityInput = EngineIdentity | str
+EngineIdentityInput = EngineIdentity
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,26 +138,19 @@ class ProcessManager:
             self._reaper_thread = threading.Thread(target=self._reap_idle_engines_loop, name="engine-idle-reaper", daemon=True)
             self._reaper_thread.start()
 
-    def _resolve_identity(self, identity: EngineIdentityInput) -> EngineIdentity:
-        if isinstance(identity, EngineIdentity):
-            return identity
-        return analysis_interactive_engine_identity(identity)
-
     def _key(self, identity: EngineIdentityInput, namespace: str | None = None) -> EngineIdentityKey:
-        resolved = self._resolve_identity(identity)
         return EngineIdentityKey(
             namespace=namespace or get_namespace(),
-            scope=resolved.scope,
-            reuse_policy=resolved.reuse_policy,
-            resource_id=engine_identity_resource_id(resolved),
+            scope=identity.scope,
+            reuse_policy=identity.reuse_policy,
+            resource_id=engine_identity_resource_id(identity),
         )
 
     def spawn_engine(self, identity: EngineIdentityInput, resource_config: dict | None = None) -> EngineInfo:
         """Spawn a new compute engine or reuse an existing one for the same identity."""
-        engine_identity = self._resolve_identity(identity)
-        resource_id = engine_identity_resource_id(engine_identity)
+        resource_id = engine_identity_resource_id(identity)
         normalized_config = self._normalize_config(resource_config)
-        qualified_key = self._key(engine_identity)
+        qualified_key = self._key(identity)
         namespace = qualified_key.namespace
         wait_event: threading.Event | None = None
         reused_info: EngineInfo | None = None
@@ -257,7 +250,7 @@ class ProcessManager:
                     raise RuntimeError(f"Failed to start engine for {qualified_key}")
                 info = EngineInfo(engine)
                 self._engines[qualified_key] = info
-                self._engine_identities[qualified_key] = engine_identity
+                self._engine_identities[qualified_key] = identity
                 spawned_info = info
                 logger.info("Engine spawned successfully for %s", qualified_key)
         finally:
@@ -328,11 +321,10 @@ class ProcessManager:
         if defaults is None:
             defaults = self._get_defaults()
 
-        engine_identity = self._resolve_identity(identity)
-        qualified_key = self._key(engine_identity)
+        qualified_key = self._key(identity)
         with self._engines_lock:
             info = self._engines.get(qualified_key)
-            persisted_identity = self._engine_identities.get(qualified_key, engine_identity)
+            persisted_identity = self._engine_identities.get(qualified_key, identity)
             if info is None:
                 return EngineStatusInfo(
                     analysis_id=_engine_identity_analysis_id(persisted_identity) or "",

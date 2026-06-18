@@ -4,7 +4,7 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 from runtime import compute_service
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import ProcessManager, analysis_interactive_engine_identity
 
 
 def _measure(func, *args, **kwargs):
@@ -38,6 +38,7 @@ def test_performance_baseline(sample_datasource):
     }
 
     manager = ProcessManager()
+    identity = analysis_interactive_engine_identity(analysis_id)
     internal_client = MagicMock()
     internal_client.create_engine_run.return_value = "run-1"
     internal_client.engine_run_state.return_value = {"result_json": {}}
@@ -78,8 +79,8 @@ def test_performance_baseline(sample_datasource):
                 analysis_id=analysis_id,
             )
     finally:
-        if manager.get_engine(analysis_id):
-            manager.shutdown_engine(analysis_id)
+        if manager.get_engine(identity):
+            manager.shutdown_engine(identity)
 
     file_bytes, _name, _content_type = export_result
 

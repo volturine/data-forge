@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, cast
 
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import ProcessManager, analysis_interactive_engine_identity
 
 
 class _FakeEngine:
@@ -59,14 +59,15 @@ def test_process_manager_reaps_idle_shared_engines(monkeypatch) -> None:
         return cast(Any, _FakeEngine(resource_id, resource_config))
 
     manager = ProcessManager(engine_factory=fake_engine_factory)
+    identity = analysis_interactive_engine_identity("analysis-1")
     try:
-        manager.spawn_engine("analysis-1")
-        assert manager.get_engine("analysis-1") is not None
+        manager.spawn_engine(identity)
+        assert manager.get_engine(identity) is not None
 
         deadline = time.monotonic() + 3.0
-        while time.monotonic() < deadline and manager.get_engine("analysis-1") is not None:
+        while time.monotonic() < deadline and manager.get_engine(identity) is not None:
             time.sleep(0.05)
 
-        assert manager.get_engine("analysis-1") is None
+        assert manager.get_engine(identity) is None
     finally:
         manager.shutdown_all()

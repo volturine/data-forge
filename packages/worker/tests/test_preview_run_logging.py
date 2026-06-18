@@ -2,7 +2,7 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 from runtime import compute_service
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import ProcessManager, analysis_interactive_engine_identity
 
 
 def _pipeline(sample_datasource, analysis_id: str) -> dict[str, object]:
@@ -48,6 +48,7 @@ def test_preview_step_persists_engine_run_by_default(sample_datasource, monkeypa
     analysis_id = f"preview-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
     manager = ProcessManager()
+    identity = analysis_interactive_engine_identity(analysis_id)
     internal_client = _internal_client_mock()
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
@@ -62,8 +63,8 @@ def test_preview_step_persists_engine_run_by_default(sample_datasource, monkeypa
                 request_json=_preview_request(analysis_id, pipeline),
             )
     finally:
-        if manager.get_engine(analysis_id):
-            manager.shutdown_engine(analysis_id)
+        if manager.get_engine(identity):
+            manager.shutdown_engine(identity)
 
     assert result.total_rows == 5
     internal_client.create_engine_run.assert_called_once()
@@ -82,6 +83,7 @@ def test_preview_step_skips_engine_run_persistence_when_disabled(sample_datasour
     analysis_id = f"preview-no-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
     manager = ProcessManager()
+    identity = analysis_interactive_engine_identity(analysis_id)
     internal_client = _internal_client_mock()
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
@@ -96,8 +98,8 @@ def test_preview_step_skips_engine_run_persistence_when_disabled(sample_datasour
                 request_json=_preview_request(analysis_id, pipeline),
             )
     finally:
-        if manager.get_engine(analysis_id):
-            manager.shutdown_engine(analysis_id)
+        if manager.get_engine(identity):
+            manager.shutdown_engine(identity)
 
     assert result.total_rows == 5
     internal_client.create_engine_run.assert_not_called()

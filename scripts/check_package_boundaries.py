@@ -76,6 +76,8 @@ FORBIDDEN_SOURCE_TOKENS = {
     '__preview__': 'engine identity prefix parsing',
     'engine_key': 'engine-key string identity',
     'storage_key': 'engine storage-key string identity',
+    'EngineIdentityInput = EngineIdentity | str': 'string-derived engine identity input; use dataforge_protocol.compute_pb2.EngineIdentity',
+    'def _resolve_identity(self, identity': 'string-derived engine identity resolver; use dataforge_protocol.compute_pb2.EngineIdentity',
     'data_plane_object_store': 'deleted backend data-plane object-store facade',
     'data_plane_iceberg': 'deleted backend data-plane Iceberg facade',
     'generate_ts_step_types.py': 'deleted backend-derived frontend type generator',
