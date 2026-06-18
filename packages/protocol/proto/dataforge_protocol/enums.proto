@@ -2,6 +2,12 @@ syntax = "proto3";
 
 package dataforge.runtime;
 
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.EnumValueOptions {
+  string dataforge_token = 51001;
+}
+
 enum AnalysisStatus {
   ANALYSIS_STATUS_UNSPECIFIED = 0;
   ANALYSIS_STATUS_DRAFT = 1;
@@ -272,256 +278,256 @@ enum RuntimeWorkerKind {
 
 enum FilterValueType {
   FILTER_VALUE_TYPE_UNSPECIFIED = 0;
-  FILTER_VALUE_TYPE_STRING = 1;
-  FILTER_VALUE_TYPE_NUMBER = 2;
-  FILTER_VALUE_TYPE_DATE = 3;
-  FILTER_VALUE_TYPE_DATETIME = 4;
-  FILTER_VALUE_TYPE_COLUMN = 5;
-  FILTER_VALUE_TYPE_BOOLEAN = 6;
+  FILTER_VALUE_TYPE_STRING = 1 [(dataforge_token) = "string"];
+  FILTER_VALUE_TYPE_NUMBER = 2 [(dataforge_token) = "number"];
+  FILTER_VALUE_TYPE_DATE = 3 [(dataforge_token) = "date"];
+  FILTER_VALUE_TYPE_DATETIME = 4 [(dataforge_token) = "datetime"];
+  FILTER_VALUE_TYPE_COLUMN = 5 [(dataforge_token) = "column"];
+  FILTER_VALUE_TYPE_BOOLEAN = 6 [(dataforge_token) = "boolean"];
 }
 
 enum FilterLogic {
   FILTER_LOGIC_UNSPECIFIED = 0;
-  FILTER_LOGIC_AND = 1;
-  FILTER_LOGIC_OR = 2;
+  FILTER_LOGIC_AND = 1 [(dataforge_token) = "AND"];
+  FILTER_LOGIC_OR = 2 [(dataforge_token) = "OR"];
 }
 
 enum FilterOperator {
   FILTER_OPERATOR_UNSPECIFIED = 0;
-  FILTER_OPERATOR_EQUAL = 1;
-  FILTER_OPERATOR_DOUBLE_EQUAL = 2;
-  FILTER_OPERATOR_NOT_EQUAL = 3;
-  FILTER_OPERATOR_GREATER_THAN = 4;
-  FILTER_OPERATOR_LESS_THAN = 5;
-  FILTER_OPERATOR_GREATER_EQUAL = 6;
-  FILTER_OPERATOR_LESS_EQUAL = 7;
-  FILTER_OPERATOR_CONTAINS = 8;
-  FILTER_OPERATOR_NOT_CONTAINS = 9;
-  FILTER_OPERATOR_STARTS_WITH = 10;
-  FILTER_OPERATOR_ENDS_WITH = 11;
-  FILTER_OPERATOR_REGEX = 12;
-  FILTER_OPERATOR_IS_NULL = 13;
-  FILTER_OPERATOR_IS_NOT_NULL = 14;
-  FILTER_OPERATOR_IN = 15;
-  FILTER_OPERATOR_NOT_IN = 16;
+  FILTER_OPERATOR_EQUAL = 1 [(dataforge_token) = "="];
+  FILTER_OPERATOR_DOUBLE_EQUAL = 2 [(dataforge_token) = "=="];
+  FILTER_OPERATOR_NOT_EQUAL = 3 [(dataforge_token) = "!="];
+  FILTER_OPERATOR_GREATER_THAN = 4 [(dataforge_token) = ">"];
+  FILTER_OPERATOR_LESS_THAN = 5 [(dataforge_token) = "<"];
+  FILTER_OPERATOR_GREATER_EQUAL = 6 [(dataforge_token) = ">="];
+  FILTER_OPERATOR_LESS_EQUAL = 7 [(dataforge_token) = "<="];
+  FILTER_OPERATOR_CONTAINS = 8 [(dataforge_token) = "contains"];
+  FILTER_OPERATOR_NOT_CONTAINS = 9 [(dataforge_token) = "not_contains"];
+  FILTER_OPERATOR_STARTS_WITH = 10 [(dataforge_token) = "starts_with"];
+  FILTER_OPERATOR_ENDS_WITH = 11 [(dataforge_token) = "ends_with"];
+  FILTER_OPERATOR_REGEX = 12 [(dataforge_token) = "regex"];
+  FILTER_OPERATOR_IS_NULL = 13 [(dataforge_token) = "is_null"];
+  FILTER_OPERATOR_IS_NOT_NULL = 14 [(dataforge_token) = "is_not_null"];
+  FILTER_OPERATOR_IN = 15 [(dataforge_token) = "in"];
+  FILTER_OPERATOR_NOT_IN = 16 [(dataforge_token) = "not_in"];
 }
 
 enum StringTransformMethod {
   STRING_TRANSFORM_METHOD_UNSPECIFIED = 0;
-  STRING_TRANSFORM_METHOD_UPPERCASE = 1;
-  STRING_TRANSFORM_METHOD_LOWERCASE = 2;
-  STRING_TRANSFORM_METHOD_TITLE = 3;
-  STRING_TRANSFORM_METHOD_STRIP = 4;
-  STRING_TRANSFORM_METHOD_LSTRIP = 5;
-  STRING_TRANSFORM_METHOD_RSTRIP = 6;
-  STRING_TRANSFORM_METHOD_LENGTH = 7;
-  STRING_TRANSFORM_METHOD_SLICE = 8;
-  STRING_TRANSFORM_METHOD_REPLACE = 9;
-  STRING_TRANSFORM_METHOD_EXTRACT = 10;
-  STRING_TRANSFORM_METHOD_SPLIT = 11;
-  STRING_TRANSFORM_METHOD_SPLIT_TAKE = 12;
+  STRING_TRANSFORM_METHOD_UPPERCASE = 1 [(dataforge_token) = "uppercase"];
+  STRING_TRANSFORM_METHOD_LOWERCASE = 2 [(dataforge_token) = "lowercase"];
+  STRING_TRANSFORM_METHOD_TITLE = 3 [(dataforge_token) = "title"];
+  STRING_TRANSFORM_METHOD_STRIP = 4 [(dataforge_token) = "strip"];
+  STRING_TRANSFORM_METHOD_LSTRIP = 5 [(dataforge_token) = "lstrip"];
+  STRING_TRANSFORM_METHOD_RSTRIP = 6 [(dataforge_token) = "rstrip"];
+  STRING_TRANSFORM_METHOD_LENGTH = 7 [(dataforge_token) = "length"];
+  STRING_TRANSFORM_METHOD_SLICE = 8 [(dataforge_token) = "slice"];
+  STRING_TRANSFORM_METHOD_REPLACE = 9 [(dataforge_token) = "replace"];
+  STRING_TRANSFORM_METHOD_EXTRACT = 10 [(dataforge_token) = "extract"];
+  STRING_TRANSFORM_METHOD_SPLIT = 11 [(dataforge_token) = "split"];
+  STRING_TRANSFORM_METHOD_SPLIT_TAKE = 12 [(dataforge_token) = "split_take"];
 }
 
 enum TimeseriesOperationType {
   TIMESERIES_OPERATION_TYPE_UNSPECIFIED = 0;
-  TIMESERIES_OPERATION_TYPE_EXTRACT = 1;
-  TIMESERIES_OPERATION_TYPE_TIMESTAMP = 2;
-  TIMESERIES_OPERATION_TYPE_ADD = 3;
-  TIMESERIES_OPERATION_TYPE_SUBTRACT = 4;
-  TIMESERIES_OPERATION_TYPE_OFFSET = 5;
-  TIMESERIES_OPERATION_TYPE_DIFF = 6;
-  TIMESERIES_OPERATION_TYPE_TRUNCATE = 7;
-  TIMESERIES_OPERATION_TYPE_ROUND = 8;
+  TIMESERIES_OPERATION_TYPE_EXTRACT = 1 [(dataforge_token) = "extract"];
+  TIMESERIES_OPERATION_TYPE_TIMESTAMP = 2 [(dataforge_token) = "timestamp"];
+  TIMESERIES_OPERATION_TYPE_ADD = 3 [(dataforge_token) = "add"];
+  TIMESERIES_OPERATION_TYPE_SUBTRACT = 4 [(dataforge_token) = "subtract"];
+  TIMESERIES_OPERATION_TYPE_OFFSET = 5 [(dataforge_token) = "offset"];
+  TIMESERIES_OPERATION_TYPE_DIFF = 6 [(dataforge_token) = "diff"];
+  TIMESERIES_OPERATION_TYPE_TRUNCATE = 7 [(dataforge_token) = "truncate"];
+  TIMESERIES_OPERATION_TYPE_ROUND = 8 [(dataforge_token) = "round"];
 }
 
 enum TimeComponent {
   TIME_COMPONENT_UNSPECIFIED = 0;
-  TIME_COMPONENT_YEAR = 1;
-  TIME_COMPONENT_MONTH = 2;
-  TIME_COMPONENT_DAY = 3;
-  TIME_COMPONENT_HOUR = 4;
-  TIME_COMPONENT_MINUTE = 5;
-  TIME_COMPONENT_SECOND = 6;
-  TIME_COMPONENT_QUARTER = 7;
-  TIME_COMPONENT_WEEK = 8;
-  TIME_COMPONENT_DAYOFWEEK = 9;
+  TIME_COMPONENT_YEAR = 1 [(dataforge_token) = "year"];
+  TIME_COMPONENT_MONTH = 2 [(dataforge_token) = "month"];
+  TIME_COMPONENT_DAY = 3 [(dataforge_token) = "day"];
+  TIME_COMPONENT_HOUR = 4 [(dataforge_token) = "hour"];
+  TIME_COMPONENT_MINUTE = 5 [(dataforge_token) = "minute"];
+  TIME_COMPONENT_SECOND = 6 [(dataforge_token) = "second"];
+  TIME_COMPONENT_QUARTER = 7 [(dataforge_token) = "quarter"];
+  TIME_COMPONENT_WEEK = 8 [(dataforge_token) = "week"];
+  TIME_COMPONENT_DAYOFWEEK = 9 [(dataforge_token) = "dayofweek"];
 }
 
 enum DurationUnit {
   DURATION_UNIT_UNSPECIFIED = 0;
-  DURATION_UNIT_SECONDS = 1;
-  DURATION_UNIT_MINUTES = 2;
-  DURATION_UNIT_HOURS = 3;
-  DURATION_UNIT_DAYS = 4;
-  DURATION_UNIT_WEEKS = 5;
-  DURATION_UNIT_MONTHS = 6;
+  DURATION_UNIT_SECONDS = 1 [(dataforge_token) = "seconds"];
+  DURATION_UNIT_MINUTES = 2 [(dataforge_token) = "minutes"];
+  DURATION_UNIT_HOURS = 3 [(dataforge_token) = "hours"];
+  DURATION_UNIT_DAYS = 4 [(dataforge_token) = "days"];
+  DURATION_UNIT_WEEKS = 5 [(dataforge_token) = "weeks"];
+  DURATION_UNIT_MONTHS = 6 [(dataforge_token) = "months"];
 }
 
 enum TimeDirection {
   TIME_DIRECTION_UNSPECIFIED = 0;
-  TIME_DIRECTION_ADD = 1;
-  TIME_DIRECTION_SUBTRACT = 2;
+  TIME_DIRECTION_ADD = 1 [(dataforge_token) = "add"];
+  TIME_DIRECTION_SUBTRACT = 2 [(dataforge_token) = "subtract"];
 }
 
 enum WithColumnsExprType {
   WITH_COLUMNS_EXPR_TYPE_UNSPECIFIED = 0;
-  WITH_COLUMNS_EXPR_TYPE_LITERAL = 1;
-  WITH_COLUMNS_EXPR_TYPE_COLUMN = 2;
-  WITH_COLUMNS_EXPR_TYPE_UDF = 3;
+  WITH_COLUMNS_EXPR_TYPE_LITERAL = 1 [(dataforge_token) = "literal"];
+  WITH_COLUMNS_EXPR_TYPE_COLUMN = 2 [(dataforge_token) = "column"];
+  WITH_COLUMNS_EXPR_TYPE_UDF = 3 [(dataforge_token) = "udf"];
 }
 
 enum NotificationMethod {
   NOTIFICATION_METHOD_UNSPECIFIED = 0;
-  NOTIFICATION_METHOD_EMAIL = 1;
-  NOTIFICATION_METHOD_TELEGRAM = 2;
+  NOTIFICATION_METHOD_EMAIL = 1 [(dataforge_token) = "email"];
+  NOTIFICATION_METHOD_TELEGRAM = 2 [(dataforge_token) = "telegram"];
 }
 
 enum JoinHow {
   JOIN_HOW_UNSPECIFIED = 0;
-  JOIN_HOW_INNER = 1;
-  JOIN_HOW_LEFT = 2;
-  JOIN_HOW_RIGHT = 3;
-  JOIN_HOW_OUTER = 4;
-  JOIN_HOW_CROSS = 5;
+  JOIN_HOW_INNER = 1 [(dataforge_token) = "inner"];
+  JOIN_HOW_LEFT = 2 [(dataforge_token) = "left"];
+  JOIN_HOW_RIGHT = 3 [(dataforge_token) = "right"];
+  JOIN_HOW_OUTER = 4 [(dataforge_token) = "outer"];
+  JOIN_HOW_CROSS = 5 [(dataforge_token) = "cross"];
 }
 
 enum GroupByAggregationFunction {
   GROUP_BY_AGGREGATION_FUNCTION_UNSPECIFIED = 0;
-  GROUP_BY_AGGREGATION_FUNCTION_SUM = 1;
-  GROUP_BY_AGGREGATION_FUNCTION_MEAN = 2;
-  GROUP_BY_AGGREGATION_FUNCTION_COUNT = 3;
-  GROUP_BY_AGGREGATION_FUNCTION_MIN = 4;
-  GROUP_BY_AGGREGATION_FUNCTION_MAX = 5;
-  GROUP_BY_AGGREGATION_FUNCTION_FIRST = 6;
-  GROUP_BY_AGGREGATION_FUNCTION_LAST = 7;
-  GROUP_BY_AGGREGATION_FUNCTION_MEDIAN = 8;
-  GROUP_BY_AGGREGATION_FUNCTION_STD = 9;
-  GROUP_BY_AGGREGATION_FUNCTION_N_UNIQUE = 10;
-  GROUP_BY_AGGREGATION_FUNCTION_COLLECT_LIST = 11;
-  GROUP_BY_AGGREGATION_FUNCTION_COLLECT_SET = 12;
+  GROUP_BY_AGGREGATION_FUNCTION_SUM = 1 [(dataforge_token) = "sum"];
+  GROUP_BY_AGGREGATION_FUNCTION_MEAN = 2 [(dataforge_token) = "mean"];
+  GROUP_BY_AGGREGATION_FUNCTION_COUNT = 3 [(dataforge_token) = "count"];
+  GROUP_BY_AGGREGATION_FUNCTION_MIN = 4 [(dataforge_token) = "min"];
+  GROUP_BY_AGGREGATION_FUNCTION_MAX = 5 [(dataforge_token) = "max"];
+  GROUP_BY_AGGREGATION_FUNCTION_FIRST = 6 [(dataforge_token) = "first"];
+  GROUP_BY_AGGREGATION_FUNCTION_LAST = 7 [(dataforge_token) = "last"];
+  GROUP_BY_AGGREGATION_FUNCTION_MEDIAN = 8 [(dataforge_token) = "median"];
+  GROUP_BY_AGGREGATION_FUNCTION_STD = 9 [(dataforge_token) = "std"];
+  GROUP_BY_AGGREGATION_FUNCTION_N_UNIQUE = 10 [(dataforge_token) = "n_unique"];
+  GROUP_BY_AGGREGATION_FUNCTION_COLLECT_LIST = 11 [(dataforge_token) = "collect_list"];
+  GROUP_BY_AGGREGATION_FUNCTION_COLLECT_SET = 12 [(dataforge_token) = "collect_set"];
 }
 
 enum ChartAggregation {
   CHART_AGGREGATION_UNSPECIFIED = 0;
-  CHART_AGGREGATION_SUM = 1;
-  CHART_AGGREGATION_MEAN = 2;
-  CHART_AGGREGATION_COUNT = 3;
-  CHART_AGGREGATION_MIN = 4;
-  CHART_AGGREGATION_MAX = 5;
-  CHART_AGGREGATION_MEDIAN = 6;
-  CHART_AGGREGATION_STD = 7;
-  CHART_AGGREGATION_VARIANCE = 8;
-  CHART_AGGREGATION_UNIQUE_COUNT = 9;
+  CHART_AGGREGATION_SUM = 1 [(dataforge_token) = "sum"];
+  CHART_AGGREGATION_MEAN = 2 [(dataforge_token) = "mean"];
+  CHART_AGGREGATION_COUNT = 3 [(dataforge_token) = "count"];
+  CHART_AGGREGATION_MIN = 4 [(dataforge_token) = "min"];
+  CHART_AGGREGATION_MAX = 5 [(dataforge_token) = "max"];
+  CHART_AGGREGATION_MEDIAN = 6 [(dataforge_token) = "median"];
+  CHART_AGGREGATION_STD = 7 [(dataforge_token) = "std"];
+  CHART_AGGREGATION_VARIANCE = 8 [(dataforge_token) = "variance"];
+  CHART_AGGREGATION_UNIQUE_COUNT = 9 [(dataforge_token) = "unique_count"];
 }
 
 enum OverlayChartType {
   OVERLAY_CHART_TYPE_UNSPECIFIED = 0;
-  OVERLAY_CHART_TYPE_LINE = 1;
-  OVERLAY_CHART_TYPE_AREA = 2;
-  OVERLAY_CHART_TYPE_BAR = 3;
-  OVERLAY_CHART_TYPE_SCATTER = 4;
+  OVERLAY_CHART_TYPE_LINE = 1 [(dataforge_token) = "line"];
+  OVERLAY_CHART_TYPE_AREA = 2 [(dataforge_token) = "area"];
+  OVERLAY_CHART_TYPE_BAR = 3 [(dataforge_token) = "bar"];
+  OVERLAY_CHART_TYPE_SCATTER = 4 [(dataforge_token) = "scatter"];
 }
 
 enum YAxisPosition {
   Y_AXIS_POSITION_UNSPECIFIED = 0;
-  Y_AXIS_POSITION_LEFT = 1;
-  Y_AXIS_POSITION_RIGHT = 2;
+  Y_AXIS_POSITION_LEFT = 1 [(dataforge_token) = "left"];
+  Y_AXIS_POSITION_RIGHT = 2 [(dataforge_token) = "right"];
 }
 
 enum ReferenceAxis {
   REFERENCE_AXIS_UNSPECIFIED = 0;
-  REFERENCE_AXIS_X = 1;
-  REFERENCE_AXIS_Y = 2;
+  REFERENCE_AXIS_X = 1 [(dataforge_token) = "x"];
+  REFERENCE_AXIS_Y = 2 [(dataforge_token) = "y"];
 }
 
 enum SortDirection {
   SORT_DIRECTION_UNSPECIFIED = 0;
-  SORT_DIRECTION_ASC = 1;
-  SORT_DIRECTION_DESC = 2;
+  SORT_DIRECTION_ASC = 1 [(dataforge_token) = "asc"];
+  SORT_DIRECTION_DESC = 2 [(dataforge_token) = "desc"];
 }
 
 enum GroupSortBy {
   GROUP_SORT_BY_UNSPECIFIED = 0;
-  GROUP_SORT_BY_NAME = 1;
-  GROUP_SORT_BY_VALUE = 2;
-  GROUP_SORT_BY_CUSTOM = 3;
+  GROUP_SORT_BY_NAME = 1 [(dataforge_token) = "name"];
+  GROUP_SORT_BY_VALUE = 2 [(dataforge_token) = "value"];
+  GROUP_SORT_BY_CUSTOM = 3 [(dataforge_token) = "custom"];
 }
 
 enum SortBy {
   SORT_BY_UNSPECIFIED = 0;
-  SORT_BY_X = 1;
-  SORT_BY_Y = 2;
-  SORT_BY_CUSTOM = 3;
+  SORT_BY_X = 1 [(dataforge_token) = "x"];
+  SORT_BY_Y = 2 [(dataforge_token) = "y"];
+  SORT_BY_CUSTOM = 3 [(dataforge_token) = "custom"];
 }
 
 enum StackMode {
   STACK_MODE_UNSPECIFIED = 0;
-  STACK_MODE_GROUPED = 1;
-  STACK_MODE_STACKED = 2;
-  STACK_MODE_STACKED_100 = 3;
+  STACK_MODE_GROUPED = 1 [(dataforge_token) = "grouped"];
+  STACK_MODE_STACKED = 2 [(dataforge_token) = "stacked"];
+  STACK_MODE_STACKED_100 = 3 [(dataforge_token) = "100%"];
 }
 
 enum DateBucket {
   DATE_BUCKET_UNSPECIFIED = 0;
-  DATE_BUCKET_EXACT = 1;
-  DATE_BUCKET_YEAR = 2;
-  DATE_BUCKET_QUARTER = 3;
-  DATE_BUCKET_MONTH = 4;
-  DATE_BUCKET_WEEK = 5;
-  DATE_BUCKET_DAY = 6;
-  DATE_BUCKET_HOUR = 7;
+  DATE_BUCKET_EXACT = 1 [(dataforge_token) = "exact"];
+  DATE_BUCKET_YEAR = 2 [(dataforge_token) = "year"];
+  DATE_BUCKET_QUARTER = 3 [(dataforge_token) = "quarter"];
+  DATE_BUCKET_MONTH = 4 [(dataforge_token) = "month"];
+  DATE_BUCKET_WEEK = 5 [(dataforge_token) = "week"];
+  DATE_BUCKET_DAY = 6 [(dataforge_token) = "day"];
+  DATE_BUCKET_HOUR = 7 [(dataforge_token) = "hour"];
 }
 
 enum DateOrdinal {
   DATE_ORDINAL_UNSPECIFIED = 0;
-  DATE_ORDINAL_DAY_OF_WEEK = 1;
-  DATE_ORDINAL_MONTH_OF_YEAR = 2;
-  DATE_ORDINAL_QUARTER_OF_YEAR = 3;
+  DATE_ORDINAL_DAY_OF_WEEK = 1 [(dataforge_token) = "day_of_week"];
+  DATE_ORDINAL_MONTH_OF_YEAR = 2 [(dataforge_token) = "month_of_year"];
+  DATE_ORDINAL_QUARTER_OF_YEAR = 3 [(dataforge_token) = "quarter_of_year"];
 }
 
 enum AxisScale {
   AXIS_SCALE_UNSPECIFIED = 0;
-  AXIS_SCALE_LINEAR = 1;
-  AXIS_SCALE_LOG = 2;
+  AXIS_SCALE_LINEAR = 1 [(dataforge_token) = "linear"];
+  AXIS_SCALE_LOG = 2 [(dataforge_token) = "log"];
 }
 
 enum DisplayUnits {
   DISPLAY_UNITS_UNSPECIFIED = 0;
-  DISPLAY_UNITS_NONE = 1;
-  DISPLAY_UNITS_THOUSANDS = 2;
-  DISPLAY_UNITS_MILLIONS = 3;
-  DISPLAY_UNITS_BILLIONS = 4;
-  DISPLAY_UNITS_PERCENT = 5;
+  DISPLAY_UNITS_NONE = 1 [(dataforge_token) = ""];
+  DISPLAY_UNITS_THOUSANDS = 2 [(dataforge_token) = "K"];
+  DISPLAY_UNITS_MILLIONS = 3 [(dataforge_token) = "M"];
+  DISPLAY_UNITS_BILLIONS = 4 [(dataforge_token) = "B"];
+  DISPLAY_UNITS_PERCENT = 5 [(dataforge_token) = "%"];
 }
 
 enum LegendPosition {
   LEGEND_POSITION_UNSPECIFIED = 0;
-  LEGEND_POSITION_TOP = 1;
-  LEGEND_POSITION_BOTTOM = 2;
-  LEGEND_POSITION_LEFT = 3;
-  LEGEND_POSITION_RIGHT = 4;
-  LEGEND_POSITION_NONE = 5;
+  LEGEND_POSITION_TOP = 1 [(dataforge_token) = "top"];
+  LEGEND_POSITION_BOTTOM = 2 [(dataforge_token) = "bottom"];
+  LEGEND_POSITION_LEFT = 3 [(dataforge_token) = "left"];
+  LEGEND_POSITION_RIGHT = 4 [(dataforge_token) = "right"];
+  LEGEND_POSITION_NONE = 5 [(dataforge_token) = "none"];
 }
 
 enum ChartHeight {
   CHART_HEIGHT_UNSPECIFIED = 0;
-  CHART_HEIGHT_SMALL = 1;
-  CHART_HEIGHT_MEDIUM = 2;
-  CHART_HEIGHT_LARGE = 3;
-  CHART_HEIGHT_XLARGE = 4;
+  CHART_HEIGHT_SMALL = 1 [(dataforge_token) = "small"];
+  CHART_HEIGHT_MEDIUM = 2 [(dataforge_token) = "medium"];
+  CHART_HEIGHT_LARGE = 3 [(dataforge_token) = "large"];
+  CHART_HEIGHT_XLARGE = 4 [(dataforge_token) = "xlarge"];
 }
 
 enum ChartWidth {
   CHART_WIDTH_UNSPECIFIED = 0;
-  CHART_WIDTH_NORMAL = 1;
-  CHART_WIDTH_WIDE = 2;
-  CHART_WIDTH_FULL = 3;
+  CHART_WIDTH_NORMAL = 1 [(dataforge_token) = "normal"];
+  CHART_WIDTH_WIDE = 2 [(dataforge_token) = "wide"];
+  CHART_WIDTH_FULL = 3 [(dataforge_token) = "full"];
 }
 
 enum RecipientSource {
   RECIPIENT_SOURCE_UNSPECIFIED = 0;
-  RECIPIENT_SOURCE_MANUAL = 1;
-  RECIPIENT_SOURCE_COLUMN = 2;
+  RECIPIENT_SOURCE_MANUAL = 1 [(dataforge_token) = "manual"];
+  RECIPIENT_SOURCE_COLUMN = 2 [(dataforge_token) = "column"];
 }
 
 enum AIProvider {
@@ -534,31 +540,31 @@ enum AIProvider {
 
 enum DeduplicateKeep {
   DEDUPLICATE_KEEP_UNSPECIFIED = 0;
-  DEDUPLICATE_KEEP_FIRST = 1;
-  DEDUPLICATE_KEEP_LAST = 2;
-  DEDUPLICATE_KEEP_ANY = 3;
-  DEDUPLICATE_KEEP_NONE = 4;
+  DEDUPLICATE_KEEP_FIRST = 1 [(dataforge_token) = "first"];
+  DEDUPLICATE_KEEP_LAST = 2 [(dataforge_token) = "last"];
+  DEDUPLICATE_KEEP_ANY = 3 [(dataforge_token) = "any"];
+  DEDUPLICATE_KEEP_NONE = 4 [(dataforge_token) = "none"];
 }
 
 enum PivotAggregateFunction {
   PIVOT_AGGREGATE_FUNCTION_UNSPECIFIED = 0;
-  PIVOT_AGGREGATE_FUNCTION_FIRST = 1;
-  PIVOT_AGGREGATE_FUNCTION_LAST = 2;
-  PIVOT_AGGREGATE_FUNCTION_SUM = 3;
-  PIVOT_AGGREGATE_FUNCTION_MEAN = 4;
-  PIVOT_AGGREGATE_FUNCTION_MEDIAN = 5;
-  PIVOT_AGGREGATE_FUNCTION_MIN = 6;
-  PIVOT_AGGREGATE_FUNCTION_MAX = 7;
-  PIVOT_AGGREGATE_FUNCTION_COUNT = 8;
+  PIVOT_AGGREGATE_FUNCTION_FIRST = 1 [(dataforge_token) = "first"];
+  PIVOT_AGGREGATE_FUNCTION_LAST = 2 [(dataforge_token) = "last"];
+  PIVOT_AGGREGATE_FUNCTION_SUM = 3 [(dataforge_token) = "sum"];
+  PIVOT_AGGREGATE_FUNCTION_MEAN = 4 [(dataforge_token) = "mean"];
+  PIVOT_AGGREGATE_FUNCTION_MEDIAN = 5 [(dataforge_token) = "median"];
+  PIVOT_AGGREGATE_FUNCTION_MIN = 6 [(dataforge_token) = "min"];
+  PIVOT_AGGREGATE_FUNCTION_MAX = 7 [(dataforge_token) = "max"];
+  PIVOT_AGGREGATE_FUNCTION_COUNT = 8 [(dataforge_token) = "count"];
 }
 
 enum FillNullStrategy {
   FILL_NULL_STRATEGY_UNSPECIFIED = 0;
-  FILL_NULL_STRATEGY_FORWARD = 1;
-  FILL_NULL_STRATEGY_BACKWARD = 2;
-  FILL_NULL_STRATEGY_MEAN = 3;
-  FILL_NULL_STRATEGY_MEDIAN = 4;
-  FILL_NULL_STRATEGY_ZERO = 5;
-  FILL_NULL_STRATEGY_LITERAL = 6;
-  FILL_NULL_STRATEGY_DROP_ROWS = 7;
+  FILL_NULL_STRATEGY_FORWARD = 1 [(dataforge_token) = "forward"];
+  FILL_NULL_STRATEGY_BACKWARD = 2 [(dataforge_token) = "backward"];
+  FILL_NULL_STRATEGY_MEAN = 3 [(dataforge_token) = "mean"];
+  FILL_NULL_STRATEGY_MEDIAN = 4 [(dataforge_token) = "median"];
+  FILL_NULL_STRATEGY_ZERO = 5 [(dataforge_token) = "zero"];
+  FILL_NULL_STRATEGY_LITERAL = 6 [(dataforge_token) = "literal"];
+  FILL_NULL_STRATEGY_DROP_ROWS = 7 [(dataforge_token) = "drop_rows"];
 }

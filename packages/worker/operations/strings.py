@@ -32,9 +32,10 @@ _STRING_METHODS: dict[StringTransformMethod, Callable[[pl.Expr], pl.Expr]] = {
 
 
 def get_string_method(
-    name: StringTransformMethod,
+    name: StringTransformMethod | str,
 ) -> Callable[[pl.Expr], pl.Expr] | None:
-    return _STRING_METHODS.get(name)
+    method = StringTransformMethod.read(name)
+    return _STRING_METHODS.get(method) if method is not None else None
 
 
 class StringTransformHandler(OperationHandler):

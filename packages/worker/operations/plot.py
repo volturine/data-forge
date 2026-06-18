@@ -87,7 +87,7 @@ class ChartParams(OperationParams):
         if not isinstance(v, str):
             return None
         try:
-            return SortBy(v)
+            return SortBy.require(v)
         except ValueError:
             return None
 
@@ -99,7 +99,7 @@ class ChartParams(OperationParams):
         if not isinstance(v, str):
             return None
         try:
-            return GroupSortBy(v)
+            return GroupSortBy.require(v)
         except ValueError:
             return None
 
@@ -143,7 +143,7 @@ def compute_overlay_datasets(
 
     for overlay in params.overlays:
         overlay_params: dict[str, object] = {
-            "chart_type": overlay.chart_type,
+            "chart_type": overlay.chart_type.value,
             "x_column": params.x_column,
             "y_column": overlay.y_column,
             "aggregation": overlay.aggregation.value,

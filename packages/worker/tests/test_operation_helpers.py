@@ -1,8 +1,10 @@
 from pathlib import Path
+from pickle import dumps, loads
 
 import polars as pl
 import pytest
 
+from dataforge_protocol import enums_pb2
 from operations.fill_null import cast_value, get_fill_strategy, get_polars_type
 from operations.filter import FilterOperatorDefinition
 from operations.groupby import GroupByAggregationDefinition
@@ -10,7 +12,7 @@ from operations.plot import ChartAggregationDefinition
 from operations.template_placeholders import render_template_placeholders
 from operations.timeseries import TimeseriesParams
 from runtime.config import settings
-from runtime.domain.step_config_enums import TimeComponent
+from runtime.domain.step_config_enums import FilterOperator, TimeComponent
 from runtime.export_formats import get_export_format
 from runtime.iceberg_metadata import (
     IcebergMetadataPathNotFoundError,
@@ -24,6 +26,20 @@ def test_filter_operator_definition():
     definition = FilterOperatorDefinition.require("==")
     expr = definition.apply(pl.col("a"), 1)
     assert isinstance(expr, pl.Expr)
+
+
+def test_filter_operator_uses_generated_protocol_enum_value():
+    operator = FilterOperator.require("==")
+
+    assert operator == enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL
+    assert operator.value == "=="
+
+
+def test_filter_operator_round_trips_through_pickle():
+    operator = loads(dumps(FilterOperator.DOUBLE_EQUAL))
+
+    assert operator is FilterOperator.DOUBLE_EQUAL
+    assert operator == enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL
 
 
 def test_filter_operator_definition_invalid():

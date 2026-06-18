@@ -50,8 +50,9 @@ def _zero_fill(col: pl.Expr) -> pl.Expr:
     return col.fill_null(0)
 
 
-def get_fill_strategy(name: FillNullStrategy) -> Callable[[pl.Expr], pl.Expr] | None:
-    return _FILL_STRATEGIES.get(name)
+def get_fill_strategy(name: FillNullStrategy | str) -> Callable[[pl.Expr], pl.Expr] | None:
+    strategy = FillNullStrategy.read(name)
+    return _FILL_STRATEGIES.get(strategy) if strategy is not None else None
 
 
 def _resolve_statistical_columns(

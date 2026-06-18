@@ -24,6 +24,7 @@ from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.healthchecks.models import HealthCheck
+from dataforge_protocol import enums_pb2
 
 
 def test_datasource_type_owns_ingestion_classification() -> None:
@@ -284,6 +285,13 @@ def test_pivot_aggregate_function_owns_polars_mapping() -> None:
 def test_chart_aggregation_is_contract_owned() -> None:
     assert ChartAggregation.require('sum') == ChartAggregation.SUM
     assert ChartAggregation.require('unique_count') == ChartAggregation.UNIQUE_COUNT
+
+
+def test_filter_operator_uses_generated_protocol_enum_value() -> None:
+    operator = FilterOperator.require('==')
+
+    assert operator == enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL
+    assert operator.value == '=='
 
 
 def test_shared_step_config_enums_cover_notification_contracts() -> None:

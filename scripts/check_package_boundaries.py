@@ -90,6 +90,14 @@ FORBIDDEN_SOURCE_TOKENS = {
     'class ComputeRequestStatus(': 'hand-written compute request status enum; use dataforge_protocol.enums_pb2',
 }
 SOURCE_SUFFIXES = {'.py', '.ts', '.svelte', '.proto'}
+WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
+    'from runtime.domain.enums import DataForgeStrEnum': 'worker operation config enums must be generated-protocol-backed',
+    '(DataForgeStrEnum)': 'worker operation config enums must not reintroduce copied StrEnum contracts',
+}
+BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
+    'from backend_core.domain.enums import DataForgeStrEnum': 'backend operation config enums must be generated-protocol-backed',
+    '(DataForgeStrEnum)': 'backend operation config enums must not reintroduce copied StrEnum contracts',
+}
 
 
 def is_excluded(path: Path) -> bool:
@@ -150,6 +158,20 @@ def main() -> int:
         path = ROOT / rel_path
         if path.exists():
             errors.append(f'neutral shared model duplicated in backend owner package: {rel_path}')
+
+    worker_step_config_enums = ROOT / 'packages/worker/runtime/domain/step_config_enums.py'
+    if worker_step_config_enums.exists():
+        content = worker_step_config_enums.read_text()
+        for token, reason in WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS.items():
+            if token in content:
+                errors.append(f'{worker_step_config_enums.relative_to(ROOT)} contains {reason}: {token}')
+
+    backend_step_config_enums = ROOT / 'packages/backend/backend_core/domain/step_config_enums.py'
+    if backend_step_config_enums.exists():
+        content = backend_step_config_enums.read_text()
+        for token, reason in BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS.items():
+            if token in content:
+                errors.append(f'{backend_step_config_enums.relative_to(ROOT)} contains {reason}: {token}')
 
     for package, forbidden_roots in PACKAGE_FORBIDDEN_IMPORT_ROOTS.items():
         for path in iter_python_files(package):
