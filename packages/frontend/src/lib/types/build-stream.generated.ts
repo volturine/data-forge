@@ -1,5 +1,5 @@
-// This file is auto-generated. Do not edit manually. Run 'just generate-build-stream-types' to regenerate.
-// Generated from backend/modules/compute/schemas.py
+// HTTP/UI build stream shapes for existing JSON websocket endpoints.
+// Canonical protobuf messages are generated from packages/protocol into $lib/protocol.
 
 export type EngineRunKind = 'build' | 'preview' | 'row_count' | 'download' | 'ingest';
 

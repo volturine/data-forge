@@ -1,5 +1,5 @@
-// This file is auto-generated. Do not edit manually. Run 'just generate-step-types' to regenerate.
-// Generated from backend/modules/analysis/step_schemas.py
+// HTTP/UI step config shapes for existing JSON endpoints.
+// Canonical protobuf messages are generated from packages/protocol into $lib/protocol.
 
 export type CastMapType = 'Int64' | 'Float64' | 'Boolean' | 'String' | 'Utf8' | 'Date' | 'Datetime';
 

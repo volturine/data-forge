@@ -71,6 +71,9 @@ FORBIDDEN_SOURCE_TOKENS = {
     'storage_key': 'engine storage-key string identity',
     'data_plane_object_store': 'deleted backend data-plane object-store facade',
     'data_plane_iceberg': 'deleted backend data-plane Iceberg facade',
+    'generate_ts_step_types.py': 'deleted backend-derived frontend type generator',
+    'generate_ts_build_stream_types.py': 'deleted backend-derived frontend type generator',
+    'Generated from backend/': 'backend-derived generated frontend contract banner',
 }
 SOURCE_SUFFIXES = {'.py', '.ts', '.svelte', '.proto'}
 

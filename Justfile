@@ -92,8 +92,6 @@ check:
     cd packages/backend && env -u VIRTUAL_ENV uv run python -m mypy .
     cd packages/scheduler && env -u VIRTUAL_ENV uv run python -m mypy .
     cd packages/worker && env -u VIRTUAL_ENV uv run python -m mypy .
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_build_stream_types.py --check
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_step_types.py --check
     cd packages/protocol && {{buf}} format --diff --exit-code
     cd packages/protocol && {{buf}} lint
     if git cat-file -e HEAD:packages/protocol/buf.yaml 2>/dev/null; then cd packages/protocol && {{buf}} breaking --against '../../.git#branch=HEAD,subdir=packages/protocol'; else echo 'Skipping Buf breaking check: no protocol Buf module exists in HEAD yet.'; fi
@@ -133,6 +131,8 @@ generate-protocol:
     generate_into ../backend
     generate_into ../worker
     generate_into ../scheduler
+    rm -rf ../frontend/src/lib/protocol
+    PATH="$PWD/node_modules/.bin:$PATH" {{buf}} generate --template buf.gen.yaml
 
 check-protocol-generated:
     #!/usr/bin/env bash
@@ -160,12 +160,23 @@ check-protocol-generated:
     generate_into "$tmp/backend"
     generate_into "$tmp/worker"
     generate_into "$tmp/scheduler"
+    ts_template="$tmp/buf.gen.yaml"
+    cat > "$ts_template" <<YAML
+    version: v2
+    plugins:
+      - local: protoc-gen-es
+        out: $tmp/frontend_protocol
+        opt: target=ts
+        include_imports: true
+    YAML
+    PATH="$PWD/node_modules/.bin:$PATH" {{buf}} generate --template "$ts_template"
     diff -ru --exclude='__pycache__' "$tmp/backend/buf" ../backend/buf
     diff -ru --exclude='__pycache__' "$tmp/backend/dataforge_protocol" ../backend/dataforge_protocol
     diff -ru --exclude='__pycache__' "$tmp/worker/buf" ../worker/buf
     diff -ru --exclude='__pycache__' "$tmp/worker/dataforge_protocol" ../worker/dataforge_protocol
     diff -ru --exclude='__pycache__' "$tmp/scheduler/buf" ../scheduler/buf
     diff -ru --exclude='__pycache__' "$tmp/scheduler/dataforge_protocol" ../scheduler/dataforge_protocol
+    diff -ru "$tmp/frontend_protocol" ../frontend/src/lib/protocol
 
 verify:
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py -- just format
@@ -200,12 +211,6 @@ test-e2e:
         just generate-protocol
     fi
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py --cwd . -- scripts/test_e2e.sh
-
-generate-step-types:
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_step_types.py
-
-generate-build-stream-types:
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/generate_ts_build_stream_types.py
 
 docker-dev:
     just generate-protocol

@@ -17,6 +17,7 @@ packages/scheduler/buf/
 packages/scheduler/dataforge_protocol/
 packages/worker/buf/
 packages/worker/dataforge_protocol/
+packages/frontend/src/lib/protocol/
 
 # Node/tool caches
 node_modules/

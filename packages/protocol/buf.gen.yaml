@@ -1,0 +1,6 @@
+version: v2
+plugins:
+  - local: protoc-gen-es
+    out: ../frontend/src/lib/protocol
+    opt: target=ts
+    include_imports: true

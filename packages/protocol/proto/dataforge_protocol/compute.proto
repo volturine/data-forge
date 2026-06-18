@@ -41,20 +41,119 @@ message ComputeResponseEnvelope {
   optional string error_message = 6;
 }
 
-message BuildEvent {
+message BuildEventContext {
   string build_id = 1 [(buf.validate.field).string.min_len = 1];
+  string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Timestamp emitted_at = 3;
+  optional int32 sequence = 4 [(buf.validate.field).int32.gte = 0];
+  optional EngineRunKind current_kind = 5 [(buf.validate.field).enum.defined_only = true];
+  optional string current_datasource_id = 6;
+  optional string tab_id = 7;
+  optional string tab_name = 8;
+  optional string current_output_id = 9;
+  optional string current_output_name = 10;
+  optional string engine_run_id = 11;
+}
+
+message BuildTabResult {
+  string tab_id = 1 [(buf.validate.field).string.min_len = 1];
+  string tab_name = 2;
+  BuildTabStatus status = 3 [(buf.validate.field).enum.defined_only = true];
+  optional string output_id = 4;
+  optional string output_name = 5;
+  optional string error = 6;
+}
+
+message BuildPlanEvent {
+  string optimized_plan = 1;
+  string unoptimized_plan = 2;
+}
+
+message BuildStepStartedEvent {
+  int32 build_step_index = 1 [(buf.validate.field).int32.gte = 0];
+  int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
+  string step_id = 3 [(buf.validate.field).string.min_len = 1];
+  string step_name = 4;
+  string step_type = 5 [(buf.validate.field).string.min_len = 1];
+  int32 total_steps = 6 [(buf.validate.field).int32.gte = 0];
+}
+
+message BuildStepCompletedEvent {
+  int32 build_step_index = 1 [(buf.validate.field).int32.gte = 0];
+  int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
+  string step_id = 3 [(buf.validate.field).string.min_len = 1];
+  string step_name = 4;
+  string step_type = 5 [(buf.validate.field).string.min_len = 1];
+  int32 duration_ms = 6 [(buf.validate.field).int32.gte = 0];
+  optional int64 row_count = 7 [(buf.validate.field).int64.gte = 0];
+  int32 total_steps = 8 [(buf.validate.field).int32.gte = 0];
+}
+
+message BuildStepFailedEvent {
+  int32 build_step_index = 1 [(buf.validate.field).int32.gte = 0];
+  int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
+  string step_id = 3 [(buf.validate.field).string.min_len = 1];
+  string step_name = 4;
+  string step_type = 5 [(buf.validate.field).string.min_len = 1];
+  string error = 6 [(buf.validate.field).string.min_len = 1];
+  int32 total_steps = 7 [(buf.validate.field).int32.gte = 0];
+}
+
+message BuildProgressEvent {
+  double progress = 1 [(buf.validate.field).double = {
+    gte: 0
+    lte: 1
+  }];
+  int32 elapsed_ms = 2 [(buf.validate.field).int32.gte = 0];
+  optional int32 estimated_remaining_ms = 3 [(buf.validate.field).int32.gte = 0];
+  optional string current_step = 4;
+  optional int32 current_step_index = 5 [(buf.validate.field).int32.gte = 0];
+  int32 total_steps = 6 [(buf.validate.field).int32.gte = 0];
+}
+
+message BuildResourceEvent {
+  double cpu_percent = 1 [(buf.validate.field).double.gte = 0];
+  double memory_mb = 2 [(buf.validate.field).double.gte = 0];
+  optional double memory_limit_mb = 3 [(buf.validate.field).double.gte = 0];
+  int32 active_threads = 4 [(buf.validate.field).int32.gte = 0];
+  optional int32 max_threads = 5 [(buf.validate.field).int32.gte = 0];
+}
+
+message BuildLogEvent {
+  BuildLogLevel level = 1 [(buf.validate.field).enum.defined_only = true];
+  string message = 2 [(buf.validate.field).string.min_len = 1];
+  optional string step_name = 3;
+  optional string step_id = 4;
+}
+
+message BuildTerminalEvent {
+  double progress = 1 [(buf.validate.field).double = {
+    gte: 0
+    lte: 1
+  }];
+  int32 elapsed_ms = 2 [(buf.validate.field).int32.gte = 0];
+  int32 total_steps = 3 [(buf.validate.field).int32.gte = 0];
+  int32 tabs_built = 4 [(buf.validate.field).int32.gte = 0];
+  repeated BuildTabResult results = 5;
+  int32 duration_ms = 6 [(buf.validate.field).int32.gte = 0];
+  optional string error = 7;
+  optional google.protobuf.Timestamp cancelled_at = 8;
+  optional string cancelled_by = 9;
+}
+
+message BuildEvent {
+  BuildEventContext context = 1 [(buf.validate.field).required = true];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  google.protobuf.Timestamp occurred_at = 3;
   oneof event {
-    google.protobuf.Struct plan = 4;
-    google.protobuf.Struct step_started = 5;
-    google.protobuf.Struct step_completed = 6;
-    google.protobuf.Struct step_failed = 7;
-    google.protobuf.Struct progress = 8;
-    google.protobuf.Struct resources = 9;
-    google.protobuf.Struct log = 10;
-    google.protobuf.Struct completed = 11;
-    google.protobuf.Struct failed = 12;
-    google.protobuf.Struct cancelled = 13;
+    BuildPlanEvent plan = 3;
+    BuildStepStartedEvent step_started = 4;
+    BuildStepCompletedEvent step_completed = 5;
+    BuildStepFailedEvent step_failed = 6;
+    BuildProgressEvent progress = 7;
+    BuildResourceEvent resources = 8;
+    BuildLogEvent log = 9;
+    BuildTerminalEvent completed = 10;
+    BuildTerminalEvent failed = 11;
+    BuildTerminalEvent cancelled = 12;
   }
 }

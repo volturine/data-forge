@@ -15,8 +15,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
-		"generate:build-stream-types": "cd ../.. && just generate-build-stream-types",
-		"generate:step-types": "cd ../.. && just generate-step-types",
+		"generate:protocol": "cd ../.. && just generate-protocol",
 		"test:e2e": "playwright test --config=playwright.config.ts",
 		"test:e2e:ui": "playwright test --config=playwright.config.ts --ui",
 		"test:e2e:report": "playwright show-report tests/.artifacts/playwright/playwright-report",
@@ -48,6 +47,7 @@
 		"vitest": "^4.1.8"
 	},
 	"dependencies": {
+		"@bufbuild/protobuf": "^2.12.0",
 		"@codemirror/lang-python": "^6.2.1",
 		"@lucide/svelte": "^1.17.0",
 		"@tanstack/svelte-query": "^6.1.34",
