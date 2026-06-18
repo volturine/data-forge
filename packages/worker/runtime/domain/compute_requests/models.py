@@ -1,6 +1,3 @@
-from pydantic import BaseModel, ConfigDict
-from pydantic import Field as PydanticField
-
 from runtime.domain.enums import DataForgeStrEnum
 
 
@@ -27,24 +24,3 @@ class ComputeRequestStatus(DataForgeStrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-
-
-class ComputeCommandEnvelope(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    kind: ComputeRequestKind
-    version: int = PydanticField(default=1, ge=1)
-    idempotency_key: str
-    correlation_id: str
-    payload: dict[str, object]
-
-
-class ComputeResponseEnvelope(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    kind: ComputeRequestKind
-    version: int = PydanticField(default=1, ge=1)
-    correlation_id: str
-    status: ComputeRequestStatus
-    payload: dict[str, object]
-    error_message: str | None = None

@@ -10,7 +10,7 @@ from typing import Any, TypeVar, cast
 
 import grpc
 
-from dataforge_protocol import common_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
+from dataforge_protocol import common_pb2, compute_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
 from worker_grpc.codec import (
     datetime_to_timestamp,
     dict_to_struct,
@@ -89,6 +89,7 @@ class ClaimedComputeRequest:
     namespace: str
     kind: str
     request_json: dict[str, object]
+    command_envelope: compute_pb2.ComputeCommandEnvelope
 
 
 class BackendWorkerRpcError(RuntimeError):
@@ -146,11 +147,13 @@ class WorkerInternalApiClient:
         response = self._call(lambda: self._stub.ClaimComputeRequest(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
         if not response.HasField("request"):
             return None
+        command = response.request.command
         return ClaimedComputeRequest(
             id=response.request.id,
             namespace=response.request.namespace,
-            kind=proto_value_to_enum_name(enums_pb2.ComputeRequestKind, "COMPUTE_REQUEST_KIND", response.request.kind),
-            request_json=struct_to_dict(response.request.request),
+            kind=proto_value_to_enum_name(enums_pb2.ComputeRequestKind, "COMPUTE_REQUEST_KIND", command.kind),
+            request_json=struct_to_dict(command.payload),
+            command_envelope=command,
         )
 
     def complete_compute_request(
@@ -158,14 +161,22 @@ class WorkerInternalApiClient:
         *,
         namespace: str,
         request_id: str,
+        kind: str,
         response_json: dict[str, object] | None = None,
         artifact_path: str | None = None,
         artifact_name: str | None = None,
         artifact_content_type: str | None = None,
     ) -> None:
-        request = worker_runtime_pb2.WorkerCompleteComputeRequestRequest(namespace=namespace, request_id=request_id)
-        if response_json is not None:
-            request.response.CopyFrom(dict_to_struct(response_json))
+        request = worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
+            namespace=namespace,
+            request_id=request_id,
+            response_envelope=_compute_response_envelope(
+                kind=kind,
+                request_id=request_id,
+                status="completed",
+                response_json=response_json or {},
+            ),
+        )
         if artifact_path is not None:
             request.artifact_path = artifact_path
         if artifact_name is not None:
@@ -179,6 +190,7 @@ class WorkerInternalApiClient:
         *,
         namespace: str,
         request_id: str,
+        kind: str,
         error_message: str,
         response_json: dict[str, object],
     ) -> None:
@@ -188,7 +200,13 @@ class WorkerInternalApiClient:
                     namespace=namespace,
                     request_id=request_id,
                     error_message=error_message,
-                    response=dict_to_struct(response_json),
+                    response_envelope=_compute_response_envelope(
+                        kind=kind,
+                        request_id=request_id,
+                        status="failed",
+                        response_json=response_json,
+                        error_message=error_message,
+                    ),
                 ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
@@ -729,6 +747,27 @@ def _required_mapping_dict(payload: Mapping[str, object], key: str) -> dict[str,
     if not isinstance(value, dict):
         raise RuntimeError(f"Payload missing object {key}: {payload!r}")
     return value
+
+
+def _compute_response_envelope(
+    *,
+    kind: str,
+    request_id: str,
+    status: str,
+    response_json: dict[str, object],
+    error_message: str | None = None,
+) -> compute_pb2.ComputeResponseEnvelope:
+    envelope = compute_pb2.ComputeResponseEnvelope(
+        kind=enum_to_proto_value("COMPUTE_REQUEST_KIND", kind),
+        version=1,
+        correlation_id=request_id,
+        status=enum_to_proto_value("COMPUTE_REQUEST_STATUS", status),
+    )
+    envelope.payload.CopyFrom(dict_to_struct(response_json))
+    envelope.response.dynamic_response.CopyFrom(dict_to_struct(response_json))
+    if error_message is not None:
+        envelope.error_message = error_message
+    return envelope
 
 
 def client_from_env() -> WorkerInternalApiClient:

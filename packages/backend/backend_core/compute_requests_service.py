@@ -8,7 +8,19 @@ from sqlmodel import Session
 
 from backend_core import runtime_outbox_service
 from backend_core.config import settings
-from backend_core.domain.compute_requests.models import ComputeCommandEnvelope, ComputeRequestKind, ComputeRequestStatus, ComputeResponseEnvelope
+from backend_core.domain.compute_requests.models import (
+    ComputeRequestKind,
+    ComputeRequestStatus,
+    command_envelope,
+    command_envelope_from_json,
+    command_payload as proto_command_payload,
+    envelope_to_json,
+    kind_from_proto,
+    response_envelope,
+    response_envelope_from_json,
+    response_payload as proto_response_payload,
+    status_from_proto,
+)
 from backend_core.persistence.compute_requests.models import ComputeRequest
 
 _BLOCKING_REQUEST_KINDS = frozenset(
@@ -59,19 +71,17 @@ def create_request(
     now = _utcnow()
     request_id = str(uuid.uuid4())
     request_kind = kind if isinstance(kind, ComputeRequestKind) else ComputeRequestKind(kind)
-    envelope = ComputeCommandEnvelope(
+    envelope = command_envelope(
         kind=request_kind,
-        version=1,
-        idempotency_key=request_id,
-        correlation_id=request_id,
         payload=request_json,
+        request_id=request_id,
     )
     request = ComputeRequest(
         id=request_id,
         namespace=namespace,
         kind=request_kind,
         status=ComputeRequestStatus.QUEUED,
-        request_json=envelope.model_dump(mode='json'),
+        request_json=envelope_to_json(envelope),
         created_at=now,
         updated_at=now,
     )
@@ -85,23 +95,36 @@ def create_request(
 
 
 def command_payload(request: ComputeRequest) -> dict[str, object]:
-    envelope = ComputeCommandEnvelope.model_validate(request.request_json)
-    if envelope.kind != request.kind:
-        raise ValueError(f'Compute request {request.id} envelope kind {envelope.kind.value!r} does not match row kind {request.kind.value!r}')
-    return dict(envelope.payload)
+    envelope = command_envelope_from_json(request.request_json)
+    if kind_from_proto(envelope.kind) != request.kind:
+        raise ValueError(f'Compute request {request.id} envelope kind {kind_from_proto(envelope.kind).value!r} does not match row kind {request.kind.value!r}')
+    if envelope.correlation_id != request.id:
+        raise ValueError(f'Compute request {request.id} envelope correlation id {envelope.correlation_id!r} does not match request id')
+    return proto_command_payload(envelope)
+
+
+def command_envelope_for_request(request: ComputeRequest):
+    envelope = command_envelope_from_json(request.request_json)
+    if kind_from_proto(envelope.kind) != request.kind:
+        raise ValueError(f'Compute request {request.id} envelope kind {kind_from_proto(envelope.kind).value!r} does not match row kind {request.kind.value!r}')
+    if envelope.correlation_id != request.id:
+        raise ValueError(f'Compute request {request.id} envelope correlation id {envelope.correlation_id!r} does not match request id')
+    return envelope
 
 
 def response_payload(request: ComputeRequest) -> dict[str, object]:
     if request.response_json is None:
         raise ValueError(f'Compute request {request.id} has no response envelope')
-    envelope = ComputeResponseEnvelope.model_validate(request.response_json)
-    if envelope.kind != request.kind:
-        raise ValueError(f'Compute request {request.id} response kind {envelope.kind.value!r} does not match row kind {request.kind.value!r}')
-    if envelope.status != request.status:
-        raise ValueError(f'Compute request {request.id} response status {envelope.status.value!r} does not match row status {request.status.value!r}')
+    envelope = response_envelope_from_json(request.response_json)
+    if kind_from_proto(envelope.kind) != request.kind:
+        raise ValueError(f'Compute request {request.id} response kind {kind_from_proto(envelope.kind).value!r} does not match row kind {request.kind.value!r}')
+    if status_from_proto(envelope.status) != request.status:
+        raise ValueError(
+            f'Compute request {request.id} response status {status_from_proto(envelope.status).value!r} does not match row status {request.status.value!r}'
+        )
     if envelope.correlation_id != request.id:
         raise ValueError(f'Compute request {request.id} response correlation id {envelope.correlation_id!r} does not match request id')
-    return dict(envelope.payload)
+    return proto_response_payload(envelope)
 
 
 def get_request(session: Session, request_id: str) -> ComputeRequest | None:
@@ -161,13 +184,14 @@ def mark_request_completed(
     if request is None:
         raise ValueError(f'Compute request {request_id} not found')
     request.status = ComputeRequestStatus.COMPLETED
-    request.response_json = ComputeResponseEnvelope(
-        kind=request.kind,
-        version=1,
-        correlation_id=request.id,
-        status=ComputeRequestStatus.COMPLETED,
-        payload=response_json or {},
-    ).model_dump(mode='json')
+    request.response_json = envelope_to_json(
+        response_envelope(
+            kind=request.kind,
+            status=ComputeRequestStatus.COMPLETED,
+            payload=response_json or {},
+            request_id=request.id,
+        )
+    )
     request.error_message = None
     request.artifact_path = artifact_path
     request.artifact_name = artifact_name
@@ -190,14 +214,15 @@ def mark_request_failed(session: Session, request_id: str, *, error_message: str
         raise ValueError(f'Compute request {request_id} not found')
     request.status = ComputeRequestStatus.FAILED
     request.error_message = error_message
-    request.response_json = ComputeResponseEnvelope(
-        kind=request.kind,
-        version=1,
-        correlation_id=request.id,
-        status=ComputeRequestStatus.FAILED,
-        payload=response_json or {},
-        error_message=error_message,
-    ).model_dump(mode='json')
+    request.response_json = envelope_to_json(
+        response_envelope(
+            kind=request.kind,
+            status=ComputeRequestStatus.FAILED,
+            payload=response_json or {},
+            request_id=request.id,
+            error_message=error_message,
+        )
+    )
     request.completed_at = _utcnow()
     request.updated_at = request.completed_at
     request.lease_owner = None

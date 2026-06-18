@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
+from dataforge_protocol import compute_pb2
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime
@@ -25,6 +26,7 @@ from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
 from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
+from worker_grpc.codec import dict_to_struct, enum_to_proto_value
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -44,6 +46,27 @@ def _engine_identity_payload(identity) -> dict[str, str]:
     if identity.HasField("build_id"):
         payload["build_id"] = identity.build_id
     return payload
+
+
+def _command_envelope(
+    *,
+    kind: str,
+    request_id: str,
+    payload: dict[str, object],
+    shutdown_identity=None,
+) -> compute_pb2.ComputeCommandEnvelope:
+    envelope = compute_pb2.ComputeCommandEnvelope(
+        kind=enum_to_proto_value("COMPUTE_REQUEST_KIND", kind),
+        version=1,
+        idempotency_key=request_id,
+        correlation_id=request_id,
+    )
+    envelope.payload.CopyFrom(dict_to_struct(payload))
+    if shutdown_identity is not None:
+        envelope.command.shutdown_engine.engine_identity.CopyFrom(shutdown_identity)
+    else:
+        envelope.command.datasource_request.CopyFrom(dict_to_struct(payload))
+    return envelope
 
 
 def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) -> None:
@@ -83,6 +106,12 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
         namespace="default",
         kind=compute_request_runtime.ComputeRequestKind.SHUTDOWN_ENGINE,
         request_json={"engine_identity": _engine_identity_payload(identity)},
+        command_envelope=_command_envelope(
+            kind=compute_request_runtime.ComputeRequestKind.SHUTDOWN_ENGINE.value,
+            request_id="req-1",
+            payload={"engine_identity": _engine_identity_payload(identity)},
+            shutdown_identity=identity,
+        ),
     )
 
     compute_request_runtime._execute_request_sync(claimed, cast(Any, manager))
@@ -122,6 +151,11 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
         namespace="default",
         kind=compute_request_runtime.ComputeRequestKind.DATASOURCE_SCHEMA,
         request_json={"datasource_id": "datasource-1"},
+        command_envelope=_command_envelope(
+            kind=compute_request_runtime.ComputeRequestKind.DATASOURCE_SCHEMA.value,
+            request_id="req-404",
+            payload={"datasource_id": "datasource-1"},
+        ),
     )
 
     with caplog.at_level("INFO"):

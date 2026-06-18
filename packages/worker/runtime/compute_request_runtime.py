@@ -94,6 +94,7 @@ class ClaimedComputeRequest:
     namespace: str
     kind: ComputeRequestKind
     request_json: dict[str, object]
+    command_envelope: compute_pb2.ComputeCommandEnvelope
 
     def read_int(self, key: str) -> int | None:
         value = self.request_json.get(key)
@@ -117,6 +118,7 @@ def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:
         namespace=claimed.namespace,
         kind=ComputeRequestKind(claimed.kind),
         request_json=claimed.request_json,
+        command_envelope=claimed.command_envelope,
     )
 
 
@@ -271,24 +273,27 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             )
             _complete_request(client, claimed, response_json=export_response.model_dump(mode="json"))
         elif claimed.kind == ComputeRequestKind.SPAWN_ENGINE:
-            identity = _engine_identity_from_request(claimed.request_json)
-            resource_config = claimed.request_json.get("resource_config")
+            command = _lifecycle_command_from_claimed(claimed, "spawn_engine")
+            identity = command.engine_identity
+            resource_config = _resource_config_from_lifecycle_command(command)
             manager.spawn_engine(
                 identity,
-                resource_config=resource_config if isinstance(resource_config, dict) else None,
+                resource_config=resource_config,
             )
             response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(identity))
             _complete_request(client, claimed, response_json=response.model_dump(mode="json"))
         elif claimed.kind == ComputeRequestKind.CONFIGURE_ENGINE:
-            identity = _engine_identity_from_request(claimed.request_json)
-            resource_config = claimed.request_json.get("resource_config")
-            if not isinstance(resource_config, dict):
+            command = _lifecycle_command_from_claimed(claimed, "configure_engine")
+            identity = command.engine_identity
+            resource_config = _resource_config_from_lifecycle_command(command)
+            if resource_config is None:
                 raise ValueError("resource_config is required")
             manager.restart_engine_with_config(identity, resource_config)
             response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(identity))
             _complete_request(client, claimed, response_json=response.model_dump(mode="json"))
         elif claimed.kind == ComputeRequestKind.SHUTDOWN_ENGINE:
-            identity = _engine_identity_from_request(claimed.request_json)
+            command = _lifecycle_command_from_claimed(claimed, "shutdown_engine")
+            identity = command.engine_identity
             engine = manager.get_engine(identity)
             if engine is None:
                 raise engine_not_found(engine_identity_resource_id(identity))
@@ -310,7 +315,9 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             logger.info("Compute request %s rejected: %s", claimed.id, exc)
         else:
             logger.warning("Compute request %s failed: %s", claimed.id, exc)
-        client.fail_compute_request(namespace=claimed.namespace, request_id=claimed.id, error_message=_error_message(exc), response_json=payload)
+        client.fail_compute_request(
+            namespace=claimed.namespace, request_id=claimed.id, kind=claimed.kind.value, error_message=_error_message(exc), response_json=payload
+        )
     finally:
         try:
             client.dispatch_runtime_outbox()
@@ -319,11 +326,25 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
         reset_namespace(token)
 
 
-def _engine_identity_from_request(payload: dict[str, object]):
-    identity_payload = payload.get("engine_identity")
-    if not isinstance(identity_payload, dict):
-        raise ValueError("engine_identity is required")
-    return _engine_identity_from_payload(identity_payload)
+def _lifecycle_command_from_claimed(claimed: ClaimedComputeRequest, field_name: str) -> compute_pb2.EngineLifecycleCommand:
+    command = claimed.command_envelope.command
+    if command.WhichOneof("command") != field_name:
+        raise ValueError(f"compute command envelope must contain {field_name}")
+    return getattr(command, field_name)
+
+
+def _resource_config_from_lifecycle_command(command: compute_pb2.EngineLifecycleCommand) -> dict[str, object] | None:
+    if not command.HasField("resource_config"):
+        return None
+    config = command.resource_config
+    result: dict[str, object] = {}
+    if config.HasField("max_threads"):
+        result["max_threads"] = config.max_threads
+    if config.HasField("max_memory_mb"):
+        result["max_memory_mb"] = config.max_memory_mb
+    if config.HasField("streaming_chunk_size"):
+        result["streaming_chunk_size"] = config.streaming_chunk_size
+    return result
 
 
 def _write_artifact(request_id: str, filename: str, content: bytes) -> str:
@@ -344,6 +365,7 @@ def _complete_request(
     client.complete_compute_request(
         namespace=claimed.namespace,
         request_id=claimed.id,
+        kind=claimed.kind.value,
         response_json=response_json,
         artifact_path=artifact_path,
         artifact_name=artifact_name,

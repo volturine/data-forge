@@ -12,7 +12,7 @@ from backend_core.database import run_settings_db
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
-from backend_core.domain.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
+from backend_core.domain.compute_requests.models import ComputeRequestKind, ComputeRequestStatus, response_envelope
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
@@ -132,7 +132,14 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         test_db_session,
         namespace='default',
         kind=ComputeRequestKind.SHUTDOWN_ENGINE,
-        request_json={'analysis_id': 'analysis-1'},
+        request_json={
+            'engine_identity': {
+                'scope': 'analysis_interactive',
+                'reuse_policy': 'shared',
+                'resource_id': 'analysis-1',
+                'analysis_id': 'analysis-1',
+            }
+        },
     )
     servicer = WorkerRuntimeServicer()
 
@@ -142,7 +149,13 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     assert response.request.id == request.id
     assert response.request.namespace == 'default'
     assert response.request.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE
-    assert struct_to_dict(response.request.request) == {'analysis_id': 'analysis-1'}
+    assert response.request.command.command.WhichOneof('command') == 'shutdown_engine'
+    assert struct_to_dict(response.request.command.payload)['engine_identity'] == {
+        'analysis_id': 'analysis-1',
+        'resource_id': 'analysis-1',
+        'reuse_policy': 'shared',
+        'scope': 'analysis_interactive',
+    }
     test_db_session.refresh(request)
     assert request.status == ComputeRequestStatus.RUNNING
     assert request.lease_owner == worker_id
@@ -151,7 +164,12 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
             namespace='default',
             request_id=request.id,
-            response=dict_to_struct({'success': True}),
+            response_envelope=response_envelope(
+                kind=ComputeRequestKind.SHUTDOWN_ENGINE,
+                request_id=request.id,
+                status=ComputeRequestStatus.COMPLETED,
+                payload={'success': True},
+            ),
         ),
         context,  # type: ignore[arg-type]
     )
@@ -172,7 +190,13 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
             namespace='default',
             request_id=failed_request.id,
             error_message='boom',
-            response=dict_to_struct({'error': 'boom', 'status_code': 500}),
+            response_envelope=response_envelope(
+                kind=ComputeRequestKind.SCHEMA,
+                request_id=failed_request.id,
+                status=ComputeRequestStatus.FAILED,
+                payload={'error': 'boom', 'status_code': 500},
+                error_message='boom',
+            ),
         ),
         context,  # type: ignore[arg-type]
     )

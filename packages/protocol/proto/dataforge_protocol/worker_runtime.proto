@@ -4,6 +4,7 @@ package dataforge.runtime;
 
 import "buf/validate/validate.proto";
 import "dataforge_protocol/common.proto";
+import "dataforge_protocol/compute.proto";
 import "dataforge_protocol/enums.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
@@ -83,7 +84,8 @@ message WorkerClaimedComputeRequest {
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   ComputeRequestKind kind = 3 [(buf.validate.field).enum.defined_only = true];
-  google.protobuf.Struct request = 4;
+  google.protobuf.Struct request = 4 [deprecated = true];
+  ComputeCommandEnvelope command = 5 [(buf.validate.field).required = true];
 }
 
 message WorkerClaimComputeRequestResponse {
@@ -93,17 +95,19 @@ message WorkerClaimComputeRequestResponse {
 message WorkerCompleteComputeRequestRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string request_id = 2 [(buf.validate.field).string.min_len = 1];
-  optional google.protobuf.Struct response = 3;
+  optional google.protobuf.Struct response = 3 [deprecated = true];
   optional string artifact_path = 4 [(buf.validate.field).string.min_len = 1];
   optional string artifact_name = 5 [(buf.validate.field).string.min_len = 1];
   optional string artifact_content_type = 6 [(buf.validate.field).string.min_len = 1];
+  ComputeResponseEnvelope response_envelope = 7 [(buf.validate.field).required = true];
 }
 
 message WorkerFailComputeRequestRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string request_id = 2 [(buf.validate.field).string.min_len = 1];
   string error_message = 3 [(buf.validate.field).string.min_len = 1];
-  google.protobuf.Struct response = 4;
+  google.protobuf.Struct response = 4 [deprecated = true];
+  ComputeResponseEnvelope response_envelope = 5 [(buf.validate.field).required = true];
 }
 
 message WorkerExecuteDatasourceRequest {

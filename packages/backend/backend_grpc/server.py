@@ -232,7 +232,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                         id=compute_request.id,
                         namespace=compute_request.namespace,
                         kind=_proto_value('COMPUTE_REQUEST_KIND', compute_request.kind.value),
-                        request=dict_to_struct(compute_requests_service.command_payload(compute_request)),
+                        command=compute_requests_service.command_envelope_for_request(compute_request),
                     )
                 )
             finally:
@@ -248,7 +248,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             run_db(
                 compute_requests_service.mark_request_completed,
                 request.request_id,
-                response_json=struct_field_to_dict(request, 'response'),
+                response_json=compute_requests_service.proto_response_payload(request.response_envelope),
                 artifact_path=_optional_str(request, 'artifact_path'),
                 artifact_name=_optional_str(request, 'artifact_name'),
                 artifact_content_type=_optional_str(request, 'artifact_content_type'),
@@ -267,7 +267,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 compute_requests_service.mark_request_failed,
                 request.request_id,
                 error_message=request.error_message,
-                response_json=struct_to_dict(request.response),
+                response_json=compute_requests_service.proto_response_payload(request.response_envelope),
             )
             return _response(request.request_id)
         finally:

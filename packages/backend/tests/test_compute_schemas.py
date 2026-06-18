@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from protovalidate import ValidationError as ProtoValidationError, Validator
 from pydantic import ValidationError
 
 from backend_core.domain.compute.schemas import (
@@ -19,6 +20,7 @@ from backend_core.domain.compute.schemas import (
     ComputeRunStatus,
     StepPreviewRequest,
 )
+from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
 
 
 def test_build_tab_result_status_is_enum_backed() -> None:
@@ -40,6 +42,75 @@ def test_build_tab_result_status_is_enum_backed() -> None:
 def test_compute_run_status_enum_values_are_explicit() -> None:
     assert ComputeRunStatus.SUCCESS.value == 'success'
     assert ComputeRunStatus.FAILED.value == 'failed'
+
+
+def test_proto_engine_resource_config_matches_memory_bounds() -> None:
+    validator = Validator()
+
+    validator.validate(compute_pb2.EngineResourceConfig(max_memory_mb=0))
+    validator.validate(compute_pb2.EngineResourceConfig(max_memory_mb=256))
+
+    with pytest.raises(ProtoValidationError) as exc_info:
+        validator.validate(compute_pb2.EngineResourceConfig(max_memory_mb=255))
+    violations = list(exc_info.value.to_proto().violations)
+    assert len(violations) == 1
+    assert violations[0].rule_id == 'engine_resource_config.max_memory_mb.minimum_when_set'
+    assert violations[0].message == 'max_memory_mb must be 0 or at least 256 MB'
+
+
+def _proto_pipeline_payload() -> analysis_pb2.AnalysisPipelinePayload:
+    return analysis_pb2.AnalysisPipelinePayload(
+        analysis_id='analysis-1',
+        tabs=[
+            analysis_pb2.AnalysisPipelineTab(
+                id='tab-1',
+                datasource=analysis_pb2.AnalysisPipelineDatasource(id='datasource-1', analysis_tab_id='tab-1'),
+                output=analysis_pb2.AnalysisPipelineOutput(result_id='result-1', filename='result', format=enums_pb2.EXPORT_FORMAT_CSV),
+            )
+        ],
+    )
+
+
+def test_proto_compute_command_envelope_uses_typed_preview_oneof() -> None:
+    envelope = compute_pb2.ComputeCommandEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        version=1,
+        idempotency_key='request-1',
+        correlation_id='request-1',
+        command=compute_pb2.ComputeCommand(
+            preview=compute_pb2.StepPreviewCommand(
+                target_step_id='step-1',
+                analysis_pipeline=_proto_pipeline_payload(),
+                row_limit=1000,
+                page=1,
+            )
+        ),
+    )
+
+    Validator().validate(envelope)
+
+    assert envelope.command.WhichOneof('command') == 'preview'
+    assert envelope.command.preview.analysis_pipeline.analysis_id == 'analysis-1'
+
+
+def test_proto_compute_preview_command_rejects_invalid_pagination() -> None:
+    envelope = compute_pb2.ComputeCommandEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        version=1,
+        idempotency_key='request-1',
+        correlation_id='request-1',
+        command=compute_pb2.ComputeCommand(
+            preview=compute_pb2.StepPreviewCommand(
+                target_step_id='step-1',
+                analysis_pipeline=_proto_pipeline_payload(),
+                row_limit=0,
+                page=1,
+            )
+        ),
+    )
+
+    with pytest.raises(ProtoValidationError):
+        Validator().validate(envelope)
 
 
 def test_build_event_type_enum_values_are_explicit() -> None:

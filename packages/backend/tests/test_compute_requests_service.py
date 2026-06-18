@@ -5,10 +5,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from backend_core import compute_requests_service
-from backend_core.domain.compute_requests.models import ComputeRequestKind, ComputeRequestStatus
+from backend_core.domain.compute_requests.models import ComputeRequestKind, ComputeRequestStatus, command_envelope_from_json
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
+from dataforge_protocol import enums_pb2
 
 
 def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_db_session) -> None:
@@ -90,10 +91,10 @@ def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> 
     assert failed.status == ComputeRequestStatus.FAILED
     assert failed.error_message == 'boom'
     assert failed.response_json is not None
-    assert failed.response_json['kind'] == ComputeRequestKind.PREVIEW.value
+    assert failed.response_json['kind'] == 'COMPUTE_REQUEST_KIND_PREVIEW'
     assert failed.response_json['version'] == 1
     assert failed.response_json['correlation_id'] == request_id
-    assert failed.response_json['status'] == ComputeRequestStatus.FAILED.value
+    assert failed.response_json['status'] == 'COMPUTE_REQUEST_STATUS_FAILED'
     assert failed.response_json['error_message'] == 'boom'
     assert compute_requests_service.response_payload(failed) == {'error': 'boom', 'status_code': 500}
     outbox_event = test_db_session.execute(select(RuntimeOutboxEvent)).scalars().one()
@@ -107,15 +108,32 @@ def test_create_request_stores_typed_command_envelope(test_db_session) -> None:
     request = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
-        kind=ComputeRequestKind.PREVIEW,
-        request_json={'example': True},
+        kind=ComputeRequestKind.SPAWN_ENGINE,
+        request_json={
+            'engine_identity': {
+                'scope': 'analysis_interactive',
+                'reuse_policy': 'shared',
+                'resource_id': 'analysis-1',
+                'analysis_id': 'analysis-1',
+            },
+            'resource_config': {'max_threads': 4, 'max_memory_mb': 512},
+        },
     )
 
-    assert request.request_json['kind'] == ComputeRequestKind.PREVIEW.value
+    assert request.request_json['kind'] == 'COMPUTE_REQUEST_KIND_SPAWN_ENGINE'
     assert request.request_json['version'] == 1
     assert request.request_json['idempotency_key'] == request.id
     assert request.request_json['correlation_id'] == request.id
-    assert compute_requests_service.command_payload(request) == {'example': True}
+    assert compute_requests_service.command_payload(request)['engine_identity'] == {
+        'analysis_id': 'analysis-1',
+        'resource_id': 'analysis-1',
+        'reuse_policy': 'shared',
+        'scope': 'analysis_interactive',
+    }
+    envelope = command_envelope_from_json(request.request_json)
+    assert envelope.command.WhichOneof('command') == 'spawn_engine'
+    assert envelope.command.spawn_engine.engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
+    assert envelope.command.spawn_engine.resource_config.max_memory_mb == 512
 
 
 def test_mark_request_completed_stores_typed_response_envelope(test_db_session) -> None:
@@ -130,11 +148,11 @@ def test_mark_request_completed_stores_typed_response_envelope(test_db_session) 
 
     assert completed.status == ComputeRequestStatus.COMPLETED
     assert completed.response_json is not None
-    assert completed.response_json['kind'] == ComputeRequestKind.PREVIEW.value
+    assert completed.response_json['kind'] == 'COMPUTE_REQUEST_KIND_PREVIEW'
     assert completed.response_json['version'] == 1
     assert completed.response_json['correlation_id'] == request.id
-    assert completed.response_json['status'] == ComputeRequestStatus.COMPLETED.value
-    assert completed.response_json['error_message'] is None
+    assert completed.response_json['status'] == 'COMPUTE_REQUEST_STATUS_COMPLETED'
+    assert 'error_message' not in completed.response_json
     assert compute_requests_service.response_payload(completed) == {'rows': [{'id': 1}]}
     outbox_event = test_db_session.execute(select(RuntimeOutboxEvent)).scalars().one()
     assert outbox_event.kind == RuntimePayloadKind.COMPUTE_RESPONSE.value

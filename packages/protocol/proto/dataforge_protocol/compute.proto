@@ -3,6 +3,7 @@ syntax = "proto3";
 package dataforge.runtime;
 
 import "buf/validate/validate.proto";
+import "dataforge_protocol/analysis.proto";
 import "dataforge_protocol/enums.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
@@ -20,8 +21,131 @@ message EngineResourceConfig {
     gte: 0
     lte: 64
   }];
-  optional int32 max_memory_mb = 2 [(buf.validate.field).int32.gte = 0];
+  optional int32 max_memory_mb = 2 [
+    (buf.validate.field).int32.gte = 0,
+    (buf.validate.field).cel = {
+      id: "engine_resource_config.max_memory_mb.minimum_when_set"
+      message: "max_memory_mb must be 0 or at least 256 MB"
+      expression: "this == 0 || this >= 256"
+    }
+  ];
   optional int32 streaming_chunk_size = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message StepPreviewCommand {
+  optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional EngineIdentity engine_identity = 2;
+  string target_step_id = 3 [(buf.validate.field).string.min_len = 1];
+  AnalysisPipelinePayload analysis_pipeline = 4 [(buf.validate.field).required = true];
+  optional string tab_id = 5;
+  int32 row_limit = 6 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 5000
+  }];
+  int32 page = 7 [(buf.validate.field).int32.gte = 1];
+  optional EngineResourceConfig resource_config = 8;
+}
+
+message StepSchemaCommand {
+  optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  string target_step_id = 2 [(buf.validate.field).string.min_len = 1];
+  AnalysisPipelinePayload analysis_pipeline = 3 [(buf.validate.field).required = true];
+  optional string tab_id = 4;
+}
+
+message StepRowCountCommand {
+  optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  string target_step_id = 2 [(buf.validate.field).string.min_len = 1];
+  AnalysisPipelinePayload analysis_pipeline = 3 [(buf.validate.field).required = true];
+  optional string tab_id = 4;
+}
+
+message DownloadCommand {
+  optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  string target_step_id = 2 [(buf.validate.field).string.min_len = 1];
+  AnalysisPipelinePayload analysis_pipeline = 3 [(buf.validate.field).required = true];
+  optional string tab_id = 4;
+  ExportFormat format = 5 [(buf.validate.field).enum.defined_only = true];
+  string filename = 6 [(buf.validate.field).string.min_len = 1];
+}
+
+message IcebergExportOptions {
+  string table_name = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.min_len = 1];
+  string branch = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+message ExportCommand {
+  optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  string target_step_id = 2 [(buf.validate.field).string.min_len = 1];
+  AnalysisPipelinePayload analysis_pipeline = 3 [(buf.validate.field).required = true];
+  optional string tab_id = 4;
+  ExportFormat format = 5 [(buf.validate.field).enum.defined_only = true];
+  string filename = 6 [(buf.validate.field).string.min_len = 1];
+  ExportDestination destination = 7 [(buf.validate.field).enum.defined_only = true];
+  optional IcebergExportOptions iceberg_options = 8;
+  optional string result_id = 9 [(buf.validate.field).string.min_len = 1];
+}
+
+message EngineLifecycleCommand {
+  EngineIdentity engine_identity = 1 [(buf.validate.field).required = true];
+  optional EngineResourceConfig resource_config = 2;
+}
+
+message ComputeCommand {
+  oneof command {
+    StepPreviewCommand preview = 1;
+    StepSchemaCommand schema = 2;
+    StepRowCountCommand row_count = 3;
+    DownloadCommand download = 4;
+    ExportCommand export = 5;
+    EngineLifecycleCommand spawn_engine = 6;
+    EngineLifecycleCommand configure_engine = 7;
+    EngineLifecycleCommand shutdown_engine = 8;
+    google.protobuf.Struct datasource_request = 9;
+  }
+}
+
+message StepPreviewResult {
+  string step_id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated string columns = 2;
+  map<string, string> column_types = 3;
+  repeated google.protobuf.Struct rows = 4;
+  int32 total_rows = 5 [(buf.validate.field).int32.gte = 0];
+  int32 page = 6 [(buf.validate.field).int32.gte = 1];
+  int32 page_size = 7 [(buf.validate.field).int32.gte = 1];
+  optional google.protobuf.Struct metadata = 8;
+}
+
+message StepSchemaResult {
+  string step_id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated string columns = 2;
+  map<string, string> column_types = 3;
+}
+
+message StepRowCountResult {
+  string step_id = 1 [(buf.validate.field).string.min_len = 1];
+  int64 row_count = 2 [(buf.validate.field).int64.gte = 0];
+}
+
+message ExportResult {
+  bool success = 1;
+  string filename = 2 [(buf.validate.field).string.min_len = 1];
+  ExportFormat format = 3 [(buf.validate.field).enum.defined_only = true];
+  ExportDestination destination = 4 [(buf.validate.field).enum.defined_only = true];
+  optional string message = 5;
+  optional string datasource_id = 6 [(buf.validate.field).string.min_len = 1];
+  optional string datasource_name = 7 [(buf.validate.field).string.min_len = 1];
+}
+
+message ComputeResponse {
+  oneof response {
+    StepPreviewResult preview = 1;
+    StepSchemaResult schema = 2;
+    StepRowCountResult row_count = 3;
+    ExportResult export = 4;
+    google.protobuf.Struct dynamic_response = 5;
+  }
 }
 
 message ComputeCommandEnvelope {
@@ -29,7 +153,8 @@ message ComputeCommandEnvelope {
   int32 version = 2 [(buf.validate.field).int32.gte = 1];
   string idempotency_key = 3 [(buf.validate.field).string.min_len = 1];
   string correlation_id = 4 [(buf.validate.field).string.min_len = 1];
-  google.protobuf.Struct payload = 5;
+  google.protobuf.Struct payload = 5 [deprecated = true];
+  ComputeCommand command = 7;
 }
 
 message ComputeResponseEnvelope {
@@ -37,8 +162,9 @@ message ComputeResponseEnvelope {
   int32 version = 2 [(buf.validate.field).int32.gte = 1];
   string correlation_id = 3 [(buf.validate.field).string.min_len = 1];
   ComputeRequestStatus status = 4 [(buf.validate.field).enum.defined_only = true];
-  google.protobuf.Struct payload = 5;
+  google.protobuf.Struct payload = 5 [deprecated = true];
   optional string error_message = 6;
+  ComputeResponse response = 7;
 }
 
 message BuildEventContext {
