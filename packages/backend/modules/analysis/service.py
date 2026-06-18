@@ -13,7 +13,7 @@ from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, col
 
-from backend_core.ai_clients import AIError, get_ai_client
+from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, require_ai_provider
 from backend_core.analysis_cycles import assert_no_analysis_cycle
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.analysis.pipeline_types import (
@@ -23,7 +23,6 @@ from backend_core.domain.analysis.pipeline_types import (
     TabDatasource,
     TabOutput,
 )
-from backend_core.domain.step_config_enums import AIProvider
 from backend_core.exceptions import (
     AnalysisValidationError,
     analysis_not_found,
@@ -37,6 +36,7 @@ from backend_core.settings_store import (
     get_resolved_openai_settings,
     get_resolved_openrouter_key,
 )
+from dataforge_protocol import enums_pb2
 from modules.analysis.pipeline_compiler import compile_step
 from modules.analysis.schemas import (
     AnalysisCreateSchema,
@@ -324,12 +324,12 @@ def _collect_missing_import_datasources(session: Session, pipeline: dict[str, An
 
 @dataclass(frozen=True, slots=True)
 class GenerationProviderResolution:
-    provider: AIProvider
+    provider: enums_pb2.AIProvider
     model: str
     client_kwargs: dict[str, str]
 
     def as_tuple(self) -> tuple[str, str, dict[str, str]]:
-        return self.provider.value, self.model, self.client_kwargs
+        return ai_provider_name(self.provider), self.model, self.client_kwargs
 
 
 GenerationProviderResolver = Callable[[], GenerationProviderResolution | None]
@@ -338,14 +338,14 @@ GenerationProviderRequiredResolver = Callable[[], GenerationProviderResolution]
 
 @dataclass(frozen=True, slots=True)
 class AnalysisGenerationProviderDefinition:
-    provider: AIProvider
+    provider: enums_pb2.AIProvider
     resolve_requested: GenerationProviderRequiredResolver
     resolve_default: GenerationProviderResolver
 
     @classmethod
-    def require(cls, provider: str | AIProvider) -> AnalysisGenerationProviderDefinition:
+    def require(cls, provider: str | enums_pb2.AIProvider) -> AnalysisGenerationProviderDefinition:
         try:
-            normalized = AIProvider.require(provider)
+            normalized = require_ai_provider(provider)
         except ValueError as exc:
             raise ValueError(f'Unknown AI provider: {provider}') from exc
         return ANALYSIS_GENERATION_PROVIDER_DEFINITIONS[normalized]
@@ -356,7 +356,7 @@ def resolve_requested_openrouter_generation_provider() -> GenerationProviderReso
     if not api_key:
         raise ValueError('OpenRouter is not configured')
     return GenerationProviderResolution(
-        provider=AIProvider.OPENROUTER,
+        provider=enums_pb2.AI_PROVIDER_OPENROUTER,
         model='',
         client_kwargs={'api_key': api_key},
     )
@@ -367,7 +367,7 @@ def resolve_default_openrouter_generation_provider() -> GenerationProviderResolu
     if not api_key:
         return None
     return GenerationProviderResolution(
-        provider=AIProvider.OPENROUTER,
+        provider=enums_pb2.AI_PROVIDER_OPENROUTER,
         model='',
         client_kwargs={'api_key': api_key},
     )
@@ -378,7 +378,7 @@ def resolve_requested_openai_generation_provider() -> GenerationProviderResoluti
     if not resolved['api_key']:
         raise ValueError('OpenAI is not configured')
     return GenerationProviderResolution(
-        provider=AIProvider.OPENAI,
+        provider=enums_pb2.AI_PROVIDER_OPENAI,
         model=str(resolved['default_model']),
         client_kwargs={
             'api_key': str(resolved['api_key']),
@@ -393,7 +393,7 @@ def resolve_default_openai_generation_provider() -> GenerationProviderResolution
     if not resolved['api_key']:
         return None
     return GenerationProviderResolution(
-        provider=AIProvider.OPENAI,
+        provider=enums_pb2.AI_PROVIDER_OPENAI,
         model=str(resolved['default_model']),
         client_kwargs={
             'api_key': str(resolved['api_key']),
@@ -406,7 +406,7 @@ def resolve_default_openai_generation_provider() -> GenerationProviderResolution
 def resolve_requested_ollama_generation_provider() -> GenerationProviderResolution:
     resolved = get_resolved_ollama_settings()
     return GenerationProviderResolution(
-        provider=AIProvider.OLLAMA,
+        provider=enums_pb2.AI_PROVIDER_OLLAMA,
         model=str(resolved['default_model']),
         client_kwargs={'endpoint_url': str(resolved['endpoint_url'])},
     )
@@ -417,7 +417,7 @@ def resolve_default_ollama_generation_provider() -> GenerationProviderResolution
     if not resolved['endpoint_url']:
         return None
     return GenerationProviderResolution(
-        provider=AIProvider.OLLAMA,
+        provider=enums_pb2.AI_PROVIDER_OLLAMA,
         model=str(resolved['default_model']),
         client_kwargs={'endpoint_url': str(resolved['endpoint_url'])},
     )
@@ -428,7 +428,7 @@ def resolve_requested_huggingface_generation_provider() -> GenerationProviderRes
     if not resolved['api_token']:
         raise ValueError('Hugging Face is not configured')
     return GenerationProviderResolution(
-        provider=AIProvider.HUGGINGFACE,
+        provider=enums_pb2.AI_PROVIDER_HUGGINGFACE,
         model=str(resolved['default_model']),
         client_kwargs={'api_key': str(resolved['api_token'])},
     )
@@ -439,40 +439,40 @@ def resolve_default_huggingface_generation_provider() -> GenerationProviderResol
     if not resolved['api_token']:
         return None
     return GenerationProviderResolution(
-        provider=AIProvider.HUGGINGFACE,
+        provider=enums_pb2.AI_PROVIDER_HUGGINGFACE,
         model=str(resolved['default_model']),
         client_kwargs={'api_key': str(resolved['api_token'])},
     )
 
 
-ANALYSIS_GENERATION_PROVIDER_DEFINITIONS: dict[AIProvider, AnalysisGenerationProviderDefinition] = {
-    AIProvider.OPENROUTER: AnalysisGenerationProviderDefinition(
-        provider=AIProvider.OPENROUTER,
+ANALYSIS_GENERATION_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AnalysisGenerationProviderDefinition] = {
+    enums_pb2.AI_PROVIDER_OPENROUTER: AnalysisGenerationProviderDefinition(
+        provider=enums_pb2.AI_PROVIDER_OPENROUTER,
         resolve_requested=resolve_requested_openrouter_generation_provider,
         resolve_default=resolve_default_openrouter_generation_provider,
     ),
-    AIProvider.OPENAI: AnalysisGenerationProviderDefinition(
-        provider=AIProvider.OPENAI,
+    enums_pb2.AI_PROVIDER_OPENAI: AnalysisGenerationProviderDefinition(
+        provider=enums_pb2.AI_PROVIDER_OPENAI,
         resolve_requested=resolve_requested_openai_generation_provider,
         resolve_default=resolve_default_openai_generation_provider,
     ),
-    AIProvider.OLLAMA: AnalysisGenerationProviderDefinition(
-        provider=AIProvider.OLLAMA,
+    enums_pb2.AI_PROVIDER_OLLAMA: AnalysisGenerationProviderDefinition(
+        provider=enums_pb2.AI_PROVIDER_OLLAMA,
         resolve_requested=resolve_requested_ollama_generation_provider,
         resolve_default=resolve_default_ollama_generation_provider,
     ),
-    AIProvider.HUGGINGFACE: AnalysisGenerationProviderDefinition(
-        provider=AIProvider.HUGGINGFACE,
+    enums_pb2.AI_PROVIDER_HUGGINGFACE: AnalysisGenerationProviderDefinition(
+        provider=enums_pb2.AI_PROVIDER_HUGGINGFACE,
         resolve_requested=resolve_requested_huggingface_generation_provider,
         resolve_default=resolve_default_huggingface_generation_provider,
     ),
 }
 
-ANALYSIS_GENERATION_PROVIDER_PRIORITY: tuple[AIProvider, ...] = (
-    AIProvider.OPENROUTER,
-    AIProvider.OPENAI,
-    AIProvider.OLLAMA,
-    AIProvider.HUGGINGFACE,
+ANALYSIS_GENERATION_PROVIDER_PRIORITY: tuple[enums_pb2.AIProvider, ...] = (
+    enums_pb2.AI_PROVIDER_OPENROUTER,
+    enums_pb2.AI_PROVIDER_OPENAI,
+    enums_pb2.AI_PROVIDER_OLLAMA,
+    enums_pb2.AI_PROVIDER_HUGGINGFACE,
 )
 
 

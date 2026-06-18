@@ -1,5 +1,18 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from backend_core.ai_clients import ai_provider_name, require_ai_provider, resolve_ai_provider
+from dataforge_protocol import enums_pb2
+
+
+def test_ai_provider_resolver_uses_protocol_enum_values() -> None:
+    assert resolve_ai_provider('openrouter') == enums_pb2.AI_PROVIDER_OPENROUTER
+    assert require_ai_provider('huggingface-api') == enums_pb2.AI_PROVIDER_HUGGINGFACE
+    assert ai_provider_name(enums_pb2.AI_PROVIDER_OPENAI) == 'openai'
+    with pytest.raises(ValueError, match='Unknown AI provider'):
+        require_ai_provider('anthropic')
+
 
 class TestAIRoutes:
     def test_list_models_ollama(self, client):

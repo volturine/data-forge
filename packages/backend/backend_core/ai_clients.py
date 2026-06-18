@@ -8,12 +8,39 @@ import httpx
 
 from backend_core import http as http_client
 from backend_core.config import settings
-from backend_core.domain.step_config_enums import AIProvider
+from dataforge_protocol import enums_pb2
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(connect=10, read=120, write=10, pool=10)
 _MAX_RETRIES = 2
+_AI_PROVIDER_NAMES: dict[enums_pb2.AIProvider, str] = {
+    enums_pb2.AI_PROVIDER_OLLAMA: 'ollama',
+    enums_pb2.AI_PROVIDER_OPENAI: 'openai',
+    enums_pb2.AI_PROVIDER_OPENROUTER: 'openrouter',
+    enums_pb2.AI_PROVIDER_HUGGINGFACE: 'huggingface',
+}
+_AI_PROVIDER_BY_NAME = {name: provider for provider, name in _AI_PROVIDER_NAMES.items()} | {
+    'huggingface-api': enums_pb2.AI_PROVIDER_HUGGINGFACE,
+}
+
+
+def ai_provider_name(provider: enums_pb2.AIProvider) -> str:
+    try:
+        return _AI_PROVIDER_NAMES[provider]
+    except KeyError as exc:
+        raise ValueError(f'Unknown AI provider: {provider}') from exc
+
+
+def require_ai_provider(provider: str | enums_pb2.AIProvider) -> enums_pb2.AIProvider:
+    if isinstance(provider, int):
+        ai_provider_name(provider)
+        return provider
+    normalized = provider.strip().lower()
+    try:
+        return _AI_PROVIDER_BY_NAME[normalized]
+    except KeyError as exc:
+        raise ValueError(f'Unknown AI provider: {provider}') from exc
 
 
 class AIError(Exception):
@@ -250,16 +277,21 @@ class AIClientBuilder(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class AIClientProviderDefinition:
-    provider: AIProvider
+    provider: enums_pb2.AIProvider
     aliases: tuple[str, ...]
     build: AIClientBuilder
 
     @classmethod
-    def require(cls, provider: str | AIProvider) -> AIClientProviderDefinition:
-        normalized = str(provider).strip().lower()
+    def require(cls, provider: str | enums_pb2.AIProvider) -> AIClientProviderDefinition:
+        normalized = require_ai_provider(provider)
         for definition in AI_CLIENT_PROVIDER_DEFINITIONS.values():
-            if normalized == definition.provider.value or normalized in definition.aliases:
+            if normalized == definition.provider:
                 return definition
+        if isinstance(provider, str):
+            alias = provider.strip().lower()
+            for definition in AI_CLIENT_PROVIDER_DEFINITIONS.values():
+                if alias in definition.aliases:
+                    return definition
         raise ValueError(f'Unknown AI provider: {provider}')
 
 
@@ -306,36 +338,36 @@ def build_huggingface_client(*, endpoint_url: str | None, api_key: str | None, o
     )
 
 
-AI_CLIENT_PROVIDER_DEFINITIONS: dict[AIProvider, AIClientProviderDefinition] = {
-    AIProvider.OLLAMA: AIClientProviderDefinition(
-        provider=AIProvider.OLLAMA,
+AI_CLIENT_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AIClientProviderDefinition] = {
+    enums_pb2.AI_PROVIDER_OLLAMA: AIClientProviderDefinition(
+        provider=enums_pb2.AI_PROVIDER_OLLAMA,
         aliases=(),
         build=build_ollama_client,
     ),
-    AIProvider.OPENAI: AIClientProviderDefinition(
-        provider=AIProvider.OPENAI,
+    enums_pb2.AI_PROVIDER_OPENAI: AIClientProviderDefinition(
+        provider=enums_pb2.AI_PROVIDER_OPENAI,
         aliases=(),
         build=build_openai_client,
     ),
-    AIProvider.OPENROUTER: AIClientProviderDefinition(
-        provider=AIProvider.OPENROUTER,
+    enums_pb2.AI_PROVIDER_OPENROUTER: AIClientProviderDefinition(
+        provider=enums_pb2.AI_PROVIDER_OPENROUTER,
         aliases=(),
         build=build_openrouter_client,
     ),
-    AIProvider.HUGGINGFACE: AIClientProviderDefinition(
-        provider=AIProvider.HUGGINGFACE,
+    enums_pb2.AI_PROVIDER_HUGGINGFACE: AIClientProviderDefinition(
+        provider=enums_pb2.AI_PROVIDER_HUGGINGFACE,
         aliases=('huggingface-api',),
         build=build_huggingface_client,
     ),
 }
 
 
-def resolve_ai_provider(provider: str | AIProvider) -> AIProvider:
+def resolve_ai_provider(provider: str | enums_pb2.AIProvider) -> enums_pb2.AIProvider:
     return AIClientProviderDefinition.require(provider).provider
 
 
 def get_ai_client(
-    provider: str | AIProvider,
+    provider: str | enums_pb2.AIProvider,
     *,
     endpoint_url: str | None = None,
     api_key: str | None = None,

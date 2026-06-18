@@ -21,6 +21,8 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
+from dataforge_protocol import enums_pb2
+from operations.ai import ai_provider_name
 from runtime.domain.analysis.step_types import (
     STEP_TYPES,
     ChartType,
@@ -30,7 +32,6 @@ from runtime.domain.analysis.step_types import (
     normalize_step_type,
 )
 from runtime.domain.step_config_enums import (
-    AIProvider,
     ChartAggregation,
     DeduplicateKeep,
     DisplayUnits,
@@ -370,7 +371,7 @@ def convert_ai_config(config: dict) -> dict:
     input_columns: list[str] = config.get("input_columns") or []
 
     result: dict[str, object] = {
-        "provider": config.get("provider", AIProvider.OLLAMA.value),
+        "provider": config.get("provider", ai_provider_name(enums_pb2.AI_PROVIDER_OLLAMA)),
         "model": config.get("model", "llama2"),
         "input_columns": input_columns,
         "output_column": config.get("output_column", "ai_result"),

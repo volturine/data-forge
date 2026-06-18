@@ -6,9 +6,9 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from operations.ai import AIError, AIHandler, AIParams, InternalAIClient, get_ai_client, parse_request_options
+from dataforge_protocol import enums_pb2
+from operations.ai import AIError, AIHandler, AIParams, InternalAIClient, get_ai_client, parse_ai_provider, parse_request_options
 from operations.step_converter import convert_ai_config
-from runtime.domain.step_config_enums import AIProvider
 
 # ---------------------------------------------------------------------------
 # parse_request_options
@@ -158,7 +158,7 @@ class TestGetAIClient:
         api_client = MagicMock()
         api_client.generate_ai.return_value = ["one", "two"]
         client = InternalAIClient(
-            provider=AIProvider.OPENAI,
+            provider=enums_pb2.AI_PROVIDER_OPENAI,
             endpoint_url="https://custom.api.com",
             api_key="sk-test",
             client=api_client,
@@ -195,6 +195,9 @@ class TestGetAIClient:
     def test_unknown_provider_raises(self):
         with pytest.raises(ValueError, match="Unknown AI provider"):
             get_ai_client("anthropic")
+
+    def test_proto_provider_values_are_supported(self):
+        assert parse_ai_provider(enums_pb2.AI_PROVIDER_OPENROUTER) == enums_pb2.AI_PROVIDER_OPENROUTER
 
 
 # ---------------------------------------------------------------------------

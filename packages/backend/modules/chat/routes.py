@@ -17,10 +17,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from backend_core.ai_clients import AIError, get_ai_client, resolve_ai_provider
-from backend_core.domain.step_config_enums import AIProvider
+from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, resolve_ai_provider
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace
+from dataforge_protocol import enums_pb2
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.chat.openrouter import OpenRouterError, chat_with_tools, list_models
@@ -38,43 +38,41 @@ HEARTBEAT_INTERVAL = 15
 
 @dataclass(frozen=True, slots=True)
 class ChatProviderDefinition:
-    provider: AIProvider
+    provider: enums_pb2.AIProvider
     requires_session_api_key: bool = False
     requires_model_list_api_key: bool = False
     supports_mcp_tool_calls: bool = False
 
     @classmethod
-    def require(cls, provider: str | AIProvider) -> ChatProviderDefinition:
+    def require(cls, provider: str | enums_pb2.AIProvider) -> ChatProviderDefinition:
         normalized = resolve_ai_provider(provider)
         return CHAT_PROVIDER_DEFINITIONS[normalized]
 
     async def list_models(self, body: ChatModelsRequest) -> list[dict]:
-        match self.provider:
-            case AIProvider.OPENROUTER:
-                if not body.api_key:
-                    raise HTTPException(status_code=400, detail='API key is required')
-                return await list_models(body.api_key)
-            case _:
-                client = get_ai_client(
-                    self.provider,
-                    endpoint_url=body.endpoint_url,
-                    api_key=body.api_key or None,
-                    organization_id=body.organization_id,
-                )
-                return await asyncio.to_thread(client.list_models)
+        if self.provider == enums_pb2.AI_PROVIDER_OPENROUTER:
+            if not body.api_key:
+                raise HTTPException(status_code=400, detail='API key is required')
+            return await list_models(body.api_key)
+        client = get_ai_client(
+            self.provider,
+            endpoint_url=body.endpoint_url,
+            api_key=body.api_key or None,
+            organization_id=body.organization_id,
+        )
+        return await asyncio.to_thread(client.list_models)
 
 
-CHAT_PROVIDER_DEFINITIONS: dict[AIProvider, ChatProviderDefinition] = {
-    AIProvider.OPENROUTER: ChatProviderDefinition(
-        provider=AIProvider.OPENROUTER,
+CHAT_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, ChatProviderDefinition] = {
+    enums_pb2.AI_PROVIDER_OPENROUTER: ChatProviderDefinition(
+        provider=enums_pb2.AI_PROVIDER_OPENROUTER,
         requires_session_api_key=True,
         requires_model_list_api_key=True,
         supports_mcp_tool_calls=True,
     ),
-    AIProvider.OPENAI: ChatProviderDefinition(provider=AIProvider.OPENAI),
-    AIProvider.OLLAMA: ChatProviderDefinition(provider=AIProvider.OLLAMA),
-    AIProvider.HUGGINGFACE: ChatProviderDefinition(
-        provider=AIProvider.HUGGINGFACE,
+    enums_pb2.AI_PROVIDER_OPENAI: ChatProviderDefinition(provider=enums_pb2.AI_PROVIDER_OPENAI),
+    enums_pb2.AI_PROVIDER_OLLAMA: ChatProviderDefinition(provider=enums_pb2.AI_PROVIDER_OLLAMA),
+    enums_pb2.AI_PROVIDER_HUGGINGFACE: ChatProviderDefinition(
+        provider=enums_pb2.AI_PROVIDER_HUGGINGFACE,
         requires_session_api_key=True,
         requires_model_list_api_key=True,
     ),
@@ -612,7 +610,7 @@ def create_session(body: CreateSessionRequest, user: User = Depends(get_current_
     """Create a new chat session with the given provider/model/key."""
     del user
     provider = ChatProviderDefinition.require(body.provider).provider
-    session = session_store.create(provider.value, body.model, body.api_key or '', body.system_prompt or '')
+    session = session_store.create(ai_provider_name(provider), body.model, body.api_key or '', body.system_prompt or '')
     return {
         'session_id': session.id,
         'model': session.model,
@@ -629,7 +627,7 @@ def update_session(session_id: str, body: UpdateSessionRequest, user: User = Dep
     if session is None:
         raise HTTPException(status_code=404, detail='Session not found')
     if body.provider is not None:
-        session.provider = ChatProviderDefinition.require(body.provider).provider.value
+        session.provider = ai_provider_name(ChatProviderDefinition.require(body.provider).provider)
     if body.model is not None:
         session.model = body.model
     if body.api_key is not None:

@@ -436,13 +436,6 @@ class RecipientSource(DataForgeStrEnum):
     COLUMN = "column"
 
 
-class AIProvider(DataForgeStrEnum):
-    OLLAMA = "ollama"
-    OPENAI = "openai"
-    OPENROUTER = "openrouter"
-    HUGGINGFACE = "huggingface"
-
-
 class DeduplicateKeep(DataForgeStrEnum):
     FIRST = "first"
     LAST = "last"

@@ -14,9 +14,9 @@ from collections.abc import Sequence
 import polars as pl
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from dataforge_protocol import enums_pb2
 from operations.template_placeholders import render_template_placeholders
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.step_config_enums import AIProvider
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,35 @@ logger = logging.getLogger(__name__)
 
 class AIError(Exception):
     """Raised when an AI provider response is invalid for the requested batch."""
+
+
+_AI_PROVIDER_NAMES: dict[enums_pb2.AIProvider, str] = {
+    enums_pb2.AI_PROVIDER_OLLAMA: "ollama",
+    enums_pb2.AI_PROVIDER_OPENAI: "openai",
+    enums_pb2.AI_PROVIDER_OPENROUTER: "openrouter",
+    enums_pb2.AI_PROVIDER_HUGGINGFACE: "huggingface",
+}
+_AI_PROVIDER_BY_NAME = {name: provider for provider, name in _AI_PROVIDER_NAMES.items()} | {
+    "huggingface-api": enums_pb2.AI_PROVIDER_HUGGINGFACE,
+}
+
+
+def ai_provider_name(provider: enums_pb2.AIProvider) -> str:
+    try:
+        return _AI_PROVIDER_NAMES[provider]
+    except KeyError as exc:
+        raise ValueError(f"Unknown AI provider: {provider}") from exc
+
+
+def parse_ai_provider(provider: str | enums_pb2.AIProvider) -> enums_pb2.AIProvider:
+    if isinstance(provider, int):
+        ai_provider_name(provider)
+        return provider
+    normalized = provider.strip().lower()
+    try:
+        return _AI_PROVIDER_BY_NAME[normalized]
+    except KeyError as exc:
+        raise ValueError(f"Unknown AI provider: {provider}") from exc
 
 
 def parse_request_options(value: str | dict[str, object] | None) -> dict[str, object] | None:
@@ -43,7 +72,7 @@ class InternalAIClient:
     def __init__(
         self,
         *,
-        provider: AIProvider,
+        provider: enums_pb2.AIProvider,
         endpoint_url: str | None,
         api_key: str | None,
         client: WorkerInternalApiClient | None = None,
@@ -60,7 +89,7 @@ class InternalAIClient:
 
     def generate_batch(self, prompts: Sequence[str], *, model: str, options: dict | None = None) -> list[str]:
         return self._api_client().generate_ai(
-            provider=self._provider.value,
+            provider=ai_provider_name(self._provider),
             prompts=list(prompts),
             model=model,
             endpoint_url=self._endpoint_url,
@@ -69,19 +98,9 @@ class InternalAIClient:
         )
 
 
-def _parse_provider(provider: str | AIProvider) -> AIProvider:
-    normalized = str(provider).strip().lower()
-    if normalized == "huggingface-api":
-        normalized = AIProvider.HUGGINGFACE.value
-    try:
-        return AIProvider(normalized)
-    except ValueError as exc:
-        raise ValueError(f"Unknown AI provider: {provider}") from exc
-
-
-def get_ai_client(provider: str | AIProvider, *, endpoint_url: str | None = None, api_key: str | None = None) -> InternalAIClient:
+def get_ai_client(provider: str | enums_pb2.AIProvider, *, endpoint_url: str | None = None, api_key: str | None = None) -> InternalAIClient:
     return InternalAIClient(
-        provider=_parse_provider(provider),
+        provider=parse_ai_provider(provider),
         endpoint_url=endpoint_url,
         api_key=api_key,
     )
@@ -92,7 +111,7 @@ class AIParams(OperationParams):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: AIProvider = AIProvider.OLLAMA
+    provider: str = ai_provider_name(enums_pb2.AI_PROVIDER_OLLAMA)
     model: str = "llama2"
     input_columns: list[str] = Field(default_factory=list)
     output_column: str = "ai_result"
@@ -111,6 +130,11 @@ class AIParams(OperationParams):
     @classmethod
     def _parse_options(cls, v: str | dict[str, object] | None) -> dict[str, object] | None:
         return parse_request_options(v)
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider(cls, v: str) -> str:
+        return ai_provider_name(parse_ai_provider(v))
 
     @model_validator(mode="after")
     def _validate_input_columns(self) -> "AIParams":

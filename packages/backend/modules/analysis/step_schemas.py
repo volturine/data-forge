@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import cast
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from backend_core.ai_clients import ai_provider_name, require_ai_provider
 from backend_core.domain.analysis.step_types import (
     STEP_TYPES,
     ChartType,
@@ -12,7 +13,6 @@ from backend_core.domain.analysis.step_types import (
 )
 from backend_core.domain.enums import DataForgeStrEnum
 from backend_core.domain.step_config_enums import (
-    AIProvider,
     AxisScale,
     ChartAggregation,
     ChartHeight,
@@ -45,6 +45,7 @@ from backend_core.domain.step_config_enums import (
     WithColumnsExprType,
     YAxisPosition,
 )
+from dataforge_protocol import enums_pb2
 
 __all__ = [
     'get_config_model',
@@ -407,7 +408,7 @@ class NotificationConfig(BaseModel):
 class AIConfig(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    provider: AIProvider = AIProvider.OLLAMA
+    provider: str = ai_provider_name(enums_pb2.AI_PROVIDER_OLLAMA)
     model: str = 'llama2'
     input_columns: list[str] = Field(
         default_factory=list,
@@ -424,6 +425,11 @@ class AIConfig(BaseModel):
     temperature: float = 0.7
     max_tokens: int | None = None
     request_options: dict | None = None
+
+    @field_validator('provider')
+    @classmethod
+    def _validate_provider(cls, value: str) -> str:
+        return ai_provider_name(require_ai_provider(value))
 
 
 class DatasourceConfig(BaseModel):

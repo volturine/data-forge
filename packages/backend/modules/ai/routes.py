@@ -3,9 +3,9 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from backend_core.ai_clients import get_ai_client, resolve_ai_provider
-from backend_core.domain.step_config_enums import AIProvider
+from backend_core.ai_clients import ai_provider_name, get_ai_client, resolve_ai_provider
 from backend_core.error_handlers import handle_errors
+from dataforge_protocol import enums_pb2
 from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/ai', tags=['ai'])
@@ -13,7 +13,7 @@ router = MCPRouter(prefix='/ai', tags=['ai'])
 
 @dataclass(frozen=True, slots=True)
 class AIProviderStatusDefinition:
-    provider: AIProvider
+    provider: enums_pb2.AIProvider
     resolve_status: Callable[[], AIProviderStatus]
 
 
@@ -46,7 +46,7 @@ def resolve_openrouter_status() -> AIProviderStatus:
 
     openrouter_key = get_resolved_openrouter_key()
     return AIProviderStatus(
-        provider=AIProvider.OPENROUTER.value,
+        provider=ai_provider_name(enums_pb2.AI_PROVIDER_OPENROUTER),
         configured=bool(openrouter_key),
         endpoint_url='https://openrouter.ai/api/v1',
         default_model='',
@@ -58,7 +58,7 @@ def resolve_openai_status() -> AIProviderStatus:
 
     openai = get_resolved_openai_settings()
     return AIProviderStatus(
-        provider=AIProvider.OPENAI.value,
+        provider=ai_provider_name(enums_pb2.AI_PROVIDER_OPENAI),
         configured=bool(openai['endpoint_url']),
         endpoint_url=openai['endpoint_url'],
         default_model=openai['default_model'],
@@ -70,7 +70,7 @@ def resolve_ollama_status() -> AIProviderStatus:
 
     ollama = get_resolved_ollama_settings()
     return AIProviderStatus(
-        provider=AIProvider.OLLAMA.value,
+        provider=ai_provider_name(enums_pb2.AI_PROVIDER_OLLAMA),
         configured=bool(ollama['endpoint_url']),
         endpoint_url=ollama['endpoint_url'],
         default_model=ollama['default_model'],
@@ -82,7 +82,7 @@ def resolve_huggingface_status() -> AIProviderStatus:
 
     huggingface = get_resolved_huggingface_settings()
     return AIProviderStatus(
-        provider=AIProvider.HUGGINGFACE.value,
+        provider=ai_provider_name(enums_pb2.AI_PROVIDER_HUGGINGFACE),
         configured=bool(huggingface['api_token']),
         endpoint_url='https://api-inference.huggingface.co',
         default_model=huggingface['default_model'],
@@ -90,10 +90,10 @@ def resolve_huggingface_status() -> AIProviderStatus:
 
 
 AI_PROVIDER_STATUS_DEFINITIONS: tuple[AIProviderStatusDefinition, ...] = (
-    AIProviderStatusDefinition(AIProvider.OPENROUTER, resolve_openrouter_status),
-    AIProviderStatusDefinition(AIProvider.OPENAI, resolve_openai_status),
-    AIProviderStatusDefinition(AIProvider.OLLAMA, resolve_ollama_status),
-    AIProviderStatusDefinition(AIProvider.HUGGINGFACE, resolve_huggingface_status),
+    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OPENROUTER, resolve_openrouter_status),
+    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OPENAI, resolve_openai_status),
+    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OLLAMA, resolve_ollama_status),
+    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_HUGGINGFACE, resolve_huggingface_status),
 )
 
 

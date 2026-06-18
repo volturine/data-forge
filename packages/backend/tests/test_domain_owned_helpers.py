@@ -11,7 +11,6 @@ from backend_core.domain.engine_runs.schemas import EngineRunExecutionCategory, 
 from backend_core.domain.healthcheck_models import HealthCheckType
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.domain.step_config_enums import (
-    AIProvider,
     ChartAggregation,
     FillNullStrategy,
     FilterOperator,
@@ -287,7 +286,6 @@ def test_chart_aggregation_is_contract_owned() -> None:
     assert ChartAggregation.require('unique_count') == ChartAggregation.UNIQUE_COUNT
 
 
-def test_shared_step_config_enums_cover_ai_and_notification_contracts() -> None:
-    assert AIProvider.require('openrouter') == AIProvider.OPENROUTER
+def test_shared_step_config_enums_cover_notification_contracts() -> None:
     assert RecipientSource.require('column') == RecipientSource.COLUMN
     assert SortBy.require('custom') == SortBy.CUSTOM

@@ -34,7 +34,6 @@ from backend_core.domain.compute.base import EngineStatusInfo
 from backend_core.domain.compute_requests.models import compute_request_kind_name, kind_from_proto
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
-from backend_core.domain.step_config_enums import AIProvider
 from backend_core.exceptions import AppError
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.namespaces_service import list_runtime_namespaces
@@ -950,7 +949,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         self, request: worker_runtime_pb2.WorkerGenerateAIRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerGenerateAIResponse:
         client = get_ai_client(
-            AIProvider(proto_value_to_enum_name(enums_pb2.AIProvider, 'AI_PROVIDER', request.provider)),
+            request.provider,
             endpoint_url=_optional_str(request, 'endpoint_url'),
             api_key=_optional_str(request, 'api_key'),
         )
