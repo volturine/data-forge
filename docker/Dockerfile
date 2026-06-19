@@ -2,16 +2,11 @@
 # Builds fixed-role release images from one codebase.
 
 ARG BUN_VERSION=1.3.11
-FROM oven/bun:${BUN_VERSION} AS frontend-builder
-WORKDIR /app/packages/frontend
-COPY packages/frontend/package.json packages/frontend/bun.lock* ./
-RUN bun install --frozen-lockfile
-COPY packages/frontend/ ./
-RUN bun run panda:codegen && bun run build
+FROM oven/bun:${BUN_VERSION} AS bun-runtime
 
 FROM python:3.14.3-slim AS protocol-builder
 WORKDIR /app
-COPY --from=frontend-builder /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates just && \
@@ -22,7 +17,16 @@ COPY packages/protocol/ /app/packages/protocol/
 COPY packages/backend/ /app/packages/backend/
 COPY packages/scheduler/ /app/packages/scheduler/
 COPY packages/worker/ /app/packages/worker/
+RUN mkdir -p /app/packages/frontend/src/lib
 RUN just generate-protocol
+
+FROM bun-runtime AS frontend-builder
+WORKDIR /app/packages/frontend
+COPY packages/frontend/package.json packages/frontend/bun.lock* ./
+RUN bun install --frozen-lockfile
+COPY packages/frontend/ ./
+COPY --from=protocol-builder /app/packages/frontend/src/lib/protocol /app/packages/frontend/src/lib/protocol
+RUN bun run panda:codegen && bun run build
 
 FROM python:3.14.3-slim AS backend-base
 WORKDIR /app/packages/backend
