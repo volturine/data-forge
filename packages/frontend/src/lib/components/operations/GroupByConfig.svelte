@@ -1,22 +1,12 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { Aggregation, GroupByConfigData } from '$lib/types/operation-config';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import { css, stepConfig, label } from '$lib/styles/panda';
 
 	const uid = $props.id();
-
-	interface Aggregation {
-		column: string;
-		function: string;
-		alias: string;
-	}
-
-	interface GroupByConfigData {
-		group_by: string[];
-		aggregations: Aggregation[];
-	}
 
 	interface Props {
 		schema: Schema;

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { UnionByNameConfigData } from '$lib/types/operation-config';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
@@ -8,11 +9,6 @@
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, stepConfig, label } from '$lib/styles/panda';
 	import { SvelteSet } from 'svelte/reactivity';
-
-	interface UnionByNameConfigData {
-		sources: string[];
-		allow_missing: boolean;
-	}
 
 	const defaultConfig: UnionByNameConfigData = {
 		sources: [],

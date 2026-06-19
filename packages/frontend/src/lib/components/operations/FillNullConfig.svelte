@@ -1,17 +1,11 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { FillNullConfigData } from '$lib/types/operation-config';
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, stepConfig, label } from '$lib/styles/panda';
-
-	interface FillNullConfigData {
-		strategy: string;
-		columns: string[];
-		value?: string | number;
-		value_type?: string;
-	}
 
 	interface Props {
 		schema: Schema;

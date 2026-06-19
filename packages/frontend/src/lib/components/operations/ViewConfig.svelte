@@ -1,10 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { ViewConfigData } from '$lib/types/operation-config';
 	import { css, input, stepConfig } from '$lib/styles/panda';
-
-	interface ViewConfigData {
-		rowLimit: number;
-	}
 
 	interface Props {
 		schema: Schema;

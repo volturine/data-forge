@@ -1,14 +1,10 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { DeduplicateConfigData } from '$lib/types/operation-config';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, stepConfig } from '$lib/styles/panda';
-
-	interface DeduplicateConfigData {
-		subset: string[];
-		keep: string;
-	}
 
 	interface Props {
 		schema: Schema;

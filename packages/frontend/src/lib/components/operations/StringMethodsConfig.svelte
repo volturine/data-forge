@@ -1,20 +1,8 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { StringMethodsConfigData } from '$lib/types/operation-config';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import { css, label, stepConfig, input } from '$lib/styles/panda';
-
-	interface StringMethodsConfigData {
-		column: string;
-		method: string;
-		new_column: string;
-		start?: number;
-		end?: number | null;
-		pattern?: string;
-		replacement?: string;
-		group_index?: number;
-		delimiter?: string;
-		index?: number;
-	}
 
 	interface Props {
 		schema: Schema;

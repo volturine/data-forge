@@ -1,13 +1,10 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { RenameConfigData } from '$lib/types/operation-config';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import { ArrowRight, X } from '@lucide/svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import { css, emptyText, label, stepConfig } from '$lib/styles/panda';
-
-	interface RenameConfigData {
-		column_mapping: { [oldName: string]: string };
-	}
 
 	interface Props {
 		schema: Schema;

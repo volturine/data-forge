@@ -1,17 +1,8 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { TimeSeriesConfigData } from '$lib/types/operation-config';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import { css, label, stepConfig, input } from '$lib/styles/panda';
-
-	interface TimeSeriesConfigData {
-		column: string;
-		operation_type: string;
-		new_column: string;
-		component?: string;
-		value?: number;
-		unit?: string;
-		column2?: string;
-	}
 
 	interface Props {
 		schema: Schema;

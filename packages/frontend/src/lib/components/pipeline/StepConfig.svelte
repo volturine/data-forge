@@ -22,7 +22,9 @@
 		TopKConfigData,
 		PlotConfigData,
 		UnpivotConfigData,
-		UnionByNameConfigData
+		UnionByNameConfigData,
+		WithColumnsConfigData,
+		DownloadConfigData
 	} from '$lib/types/operation-config';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -68,22 +70,6 @@
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { Settings2, X } from '@lucide/svelte';
 	import { css, spinner, button } from '$lib/styles/panda';
-
-	type WithColumnsConfigShape = {
-		expressions: Array<{
-			name: string;
-			type: 'literal' | 'column' | 'udf';
-			value?: string | number | null;
-			column?: string | null;
-			args?: string[] | null;
-			code?: string | null;
-		}>;
-	};
-
-	type DownloadConfigData = {
-		format: string;
-		filename: string;
-	};
 
 	function bindDraftConfig<T extends object>() {
 		return {
@@ -144,7 +130,7 @@
 	const dropConfigBinding = bindDraftConfig<DropConfigData>();
 	const joinConfigBinding = bindDraftConfig<JoinConfigData>();
 	const expressionConfigBinding = bindDraftConfig<ExpressionConfigData>();
-	const withColumnsConfigBinding = bindDraftConfig<WithColumnsConfigShape>();
+	const withColumnsConfigBinding = bindDraftConfig<WithColumnsConfigData>();
 	const deduplicateConfigBinding = bindDraftConfig<DeduplicateConfigData>();
 	const fillNullConfigBinding = bindDraftConfig<FillNullConfigData>();
 	const explodeConfigBinding = bindDraftConfig<ExplodeConfigData>();

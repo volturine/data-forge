@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -96,6 +97,12 @@ WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
 }
 FRONTEND_OPERATION_CONFIG_FORBIDDEN_TOKENS = {
     "export type CastMapType = 'Int64'": 'frontend cast-map type must be generated-protocol-backed',
+}
+FRONTEND_OPERATION_COMPONENT_FORBIDDEN_PATTERNS = {
+    re.compile(r'\binterface\s+\w+ConfigData\b'): 'operation components must import protocol-anchored config types from $lib/types/operation-config',
+    re.compile(r'\btype\s+WithColumnsConfigShape\b'): 'pipeline config binding must use protocol-anchored WithColumnsConfigData',
+    re.compile(r'\btype\s+DownloadConfigData\b'): 'pipeline config binding must use protocol-anchored DownloadConfigData',
+    re.compile(r'\bconst\s+CAST_TYPES\s*=\s*\['): 'select cast options must come from generated protocol enum tokens',
 }
 WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
@@ -223,6 +230,18 @@ def main() -> int:
         for token, reason in FRONTEND_OPERATION_CONFIG_FORBIDDEN_TOKENS.items():
             if token in content:
                 errors.append(f'{frontend_operation_config.relative_to(ROOT)} contains {reason}: {token}')
+
+    frontend_operation_components = ROOT / 'packages/frontend/src/lib/components/operations'
+    if frontend_operation_components.exists():
+        component_paths = list(frontend_operation_components.glob('*.svelte'))
+        component_paths.append(ROOT / 'packages/frontend/src/lib/components/pipeline/StepConfig.svelte')
+        for component_path in component_paths:
+            if not component_path.exists():
+                continue
+            content = component_path.read_text()
+            for pattern, reason in FRONTEND_OPERATION_COMPONENT_FORBIDDEN_PATTERNS.items():
+                if pattern.search(content):
+                    errors.append(f'{component_path.relative_to(ROOT)} contains {reason}: {pattern.pattern}')
 
     worker_compute_schemas = ROOT / 'packages/worker/runtime/domain/compute/schemas.py'
     if worker_compute_schemas.exists():

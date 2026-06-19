@@ -1,5 +1,8 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { SelectConfigData } from '$lib/types/operation-config';
+	import type { CastMapType } from '$lib/types/protocol-enum-tokens';
+	import { CAST_MAP_TYPE_TOKENS } from '$lib/types/protocol-enum-tokens';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
@@ -8,17 +11,12 @@
 	import { css, stepConfig } from '$lib/styles/panda';
 	import { ArrowRight } from '@lucide/svelte';
 
-	interface SelectConfigData {
-		columns: string[];
-		cast_map?: Record<string, string>;
-	}
-
 	interface Props {
 		schema: Schema;
 		config?: SelectConfigData;
 	}
 
-	const CAST_TYPES = ['Int64', 'Float64', 'Boolean', 'String', 'Utf8', 'Date', 'Datetime'];
+	const CAST_TYPES = Object.values(CAST_MAP_TYPE_TOKENS);
 
 	let { schema, config = $bindable({ columns: [], cast_map: {} }) }: Props = $props();
 
@@ -32,7 +30,7 @@
 	);
 
 	function onColumnsChange(next: string[]): void {
-		const nextCasts: Record<string, string> = {};
+		const nextCasts: Record<string, CastMapType> = {};
 		for (const name of next) {
 			if (safeCasts[name]) {
 				nextCasts[name] = safeCasts[name];
@@ -45,7 +43,7 @@
 	function setCast(column: string, dtype: string): void {
 		const next = { ...safeCasts };
 		if (dtype) {
-			next[column] = dtype;
+			next[column] = dtype as CastMapType;
 		} else {
 			delete next[column];
 		}

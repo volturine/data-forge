@@ -1,8 +1,5 @@
 <script lang="ts">
-	interface DownloadConfigData {
-		format: string;
-		filename: string;
-	}
+	import type { DownloadConfigData } from '$lib/types/operation-config';
 
 	interface Props {
 		config?: DownloadConfigData;
