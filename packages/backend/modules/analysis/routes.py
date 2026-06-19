@@ -28,17 +28,6 @@ from modules.mcp.router import MCPRouter
 router = MCPRouter(prefix='/analysis', tags=['analysis'])
 
 
-def _analysis_interactive_engine_identity(analysis_id: str) -> compute_pb2.EngineIdentity:
-    normalized = analysis_id.strip()
-    if not normalized:
-        raise ValueError('analysis_id is required')
-    return compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-        analysis_id=normalized,
-    )
-
-
 def _analysis_etag(analysis: schemas.AnalysisResponseSchema) -> str:
     return f'"analysis-{analysis.id}-{analysis.updated_at.isoformat()}"'
 
@@ -275,7 +264,15 @@ async def delete_analysis(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     with contextlib.suppress(HTTPException):
-        await executor_client.shutdown_engine(session, identity=_analysis_interactive_engine_identity(analysis_id_value), runtime_probe=runtime_probe)
+        await executor_client.shutdown_engine(
+            session,
+            identity=compute_pb2.EngineIdentity(
+                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                analysis_id=analysis_id_value,
+            ),
+            runtime_probe=runtime_probe,
+        )
 
 
 @router.post('/{analysis_id}/preview', mcp=True)

@@ -166,7 +166,7 @@ check-protocol-generated:
     plugins:
       - local: protoc-gen-es
         out: $tmp/frontend_protocol
-        opt: target=ts
+        opt: target=ts,json_types=true
         include_imports: true
     YAML
     PATH="$PWD/node_modules/.bin:$PATH" {{buf}} generate --template "$ts_template"

@@ -3,29 +3,16 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 import psycopg
 from openpyxl import load_workbook
 
 from backend_core.data_plane_client import client_from_settings
-from backend_core.domain.datasource.source_types import DataSourceFileType
-from backend_core.domain.enums import DataForgeStrEnum
+from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceLoadType, IcebergReader
 from backend_core.namespace import get_namespace
 from backend_core.object_store_paths import is_object_store_url
-
-
-class DatasourceSourceType(DataForgeStrEnum):
-    FILE = 'file'
-    DATABASE = 'database'
-    DUCKDB = 'duckdb'
-    ICEBERG = 'iceberg'
-
-
-class IcebergReader(DataForgeStrEnum):
-    NATIVE = 'native'
-    PYICEBERG = 'pyiceberg'
 
 
 def _csv_opts(opts: dict[str, Any] | None) -> dict[str, Any]:
@@ -145,7 +132,7 @@ def _download_object_store_file(path: str) -> Path:
 
 def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
     source_type = str(config.get('source_type') or '')
-    if source_type == DatasourceSourceType.FILE.value:
+    if source_type == DataSourceLoadType.FILE.value:
         file_path = config.get('file_path')
         file_type = DataSourceFileType.read(config.get('file_type'), default=None)
         if not file_path or file_type is None:
@@ -189,7 +176,7 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
                 return _read_excel(file_path, opts)
         raise ValueError(f'Unsupported file type: {file_type.value}')
 
-    if source_type == DatasourceSourceType.DATABASE.value:
+    if source_type == DataSourceLoadType.DATABASE.value:
         connection_string = config.get('connection_string')
         query = config.get('query')
         if not isinstance(connection_string, str) or not isinstance(query, str):
@@ -200,7 +187,7 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         with psycopg.connect(connection_string, autocommit=True) as connection:
             return pl.read_database(query, connection).lazy()
 
-    if source_type == DatasourceSourceType.DUCKDB.value:
+    if source_type == DataSourceLoadType.DUCKDB.value:
         import duckdb
 
         query = config.get('query')
@@ -215,7 +202,7 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         finally:
             conn.close()
 
-    if source_type == DatasourceSourceType.ICEBERG.value:
+    if source_type == DataSourceLoadType.ICEBERG.value:
         metadata_path = config.get('metadata_path')
         if not isinstance(metadata_path, str):
             raise ValueError('Datasource Iceberg loading requires metadata_path')
@@ -240,12 +227,12 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
             rows = client_from_settings().scan_snapshot(metadata_path=resolved_metadata_path, snapshot_id=str(snapshot_value))
             return pl.DataFrame(rows).lazy()
         reader = config.get('reader')
-        reader_override = IcebergReader.NATIVE if reader == IcebergReader.NATIVE.value else IcebergReader.PYICEBERG
+        reader_override: Literal['native', 'pyiceberg'] = 'native' if reader == IcebergReader.NATIVE.value else 'pyiceberg'
         return pl.scan_iceberg(
             resolved_metadata_path,
             snapshot_id=snapshot_value,
             storage_options=resolved_storage_options,
-            reader_override=reader_override.value,
+            reader_override=reader_override,
         )
 
     raise ValueError(f'Unsupported source type: {source_type}')

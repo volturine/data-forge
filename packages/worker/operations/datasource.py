@@ -12,25 +12,15 @@ from pydantic import ConfigDict
 from datasources.datasource_loading import load_datasource_frame
 from operations.step_converter import convert_step_format
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.datasource.source_types import DataSourceType
-from runtime.domain.enums import DataForgeStrEnum
+from runtime.domain.datasource.source_types import DataSourceLoadType, DataSourceType, IcebergReader
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path
 from runtime.object_store import object_store_storage_options
-
-
-class DatasourceLoadType(DataForgeStrEnum):
-    DUCKDB = "duckdb"
-
-
-class IcebergReader(DataForgeStrEnum):
-    NATIVE = "native"
-    PYICEBERG = "pyiceberg"
 
 
 class DatasourceParams(OperationParams):
     model_config = ConfigDict(extra="allow")
 
-    source_type: DataSourceType | DatasourceLoadType = DataSourceType.FILE
+    source_type: DataSourceType | DataSourceLoadType = DataSourceType.FILE
     analysis_tab_id: str | None = None
     analysis_pipeline: dict | None = None
     file_path: str | None = None
@@ -406,7 +396,7 @@ def _collect_analysis_sources(
 DatasourceHandler.SOURCE_LOADERS = {
     DataSourceType.FILE.value: DatasourceHandler._load_file,
     DataSourceType.DATABASE.value: DatasourceHandler._load_database,
-    DatasourceLoadType.DUCKDB.value: DatasourceHandler._load_duckdb,
+    DataSourceLoadType.DUCKDB.value: DatasourceHandler._load_duckdb,
     DataSourceType.ICEBERG.value: DatasourceHandler._load_iceberg,
     DataSourceType.ANALYSIS.value: DatasourceHandler._load_analysis,
 }

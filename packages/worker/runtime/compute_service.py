@@ -21,7 +21,8 @@ from pyiceberg.table import Table as IcebergTable
 from sqlalchemy.exc import IntegrityError
 
 from builds.build_live import ActiveBuild
-from runtime.compute_manager import EngineIdentityInput, ProcessManager, analysis_interactive_engine_identity, build_engine_identity
+from dataforge_protocol import compute_pb2
+from runtime.compute_manager import ProcessManager, analysis_interactive_engine_identity, build_engine_identity
 from runtime.compute_monitor import monitor_engine_resources
 from runtime.compute_utils import (
     apply_steps,
@@ -1698,11 +1699,13 @@ def _resolve_pipeline_request(
     }
 
 
-def _acquire_engine(manager: ProcessManager, identity: EngineIdentityInput, resource_config: dict | None = None):
+def _acquire_engine(manager: ProcessManager, identity: compute_pb2.EngineIdentity, resource_config: dict | None = None):
     return manager.get_or_create_engine(identity, resource_config=resource_config)
 
 
-def _resolve_export_engine_identity(*, engine_identity: EngineIdentityInput | None, analysis_id: str | None, build_id: str | None) -> EngineIdentityInput:
+def _resolve_export_engine_identity(
+    *, engine_identity: compute_pb2.EngineIdentity | None, analysis_id: str | None, build_id: str | None
+) -> compute_pb2.EngineIdentity:
     if engine_identity is not None:
         return engine_identity
     if build_id is not None:
@@ -1720,7 +1723,7 @@ def preview_step(
     row_limit: int = 1000,
     page: int = 1,
     analysis_id: str | None = None,
-    engine_identity: EngineIdentityInput | None = None,
+    engine_identity: compute_pb2.EngineIdentity | None = None,
     resource_config: dict | None = None,
     tab_id: str | None = None,
     request_json: dict | None = None,
@@ -2164,7 +2167,7 @@ def export_data(
     build_stage_event: Callable[[dict[str, object]], None] | None = None,
     resources: list[dict[str, object]] | None = None,
     resources_fn: Callable[[], list[dict[str, object]]] | None = None,
-    engine_identity: EngineIdentityInput | None = None,
+    engine_identity: compute_pb2.EngineIdentity | None = None,
     build_id: str | None = None,
 ) -> ExportDatasourceResult:
     if result_id is None:

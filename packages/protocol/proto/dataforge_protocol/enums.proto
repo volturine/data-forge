@@ -205,6 +205,20 @@ enum DataSourceType {
   DATA_SOURCE_TYPE_ANALYSIS = 4 [(dataforge_token) = "analysis"];
 }
 
+enum DataSourceLoadType {
+  DATA_SOURCE_LOAD_TYPE_UNSPECIFIED = 0;
+  DATA_SOURCE_LOAD_TYPE_FILE = 1 [(dataforge_token) = "file"];
+  DATA_SOURCE_LOAD_TYPE_DATABASE = 2 [(dataforge_token) = "database"];
+  DATA_SOURCE_LOAD_TYPE_DUCKDB = 3 [(dataforge_token) = "duckdb"];
+  DATA_SOURCE_LOAD_TYPE_ICEBERG = 4 [(dataforge_token) = "iceberg"];
+}
+
+enum IcebergReader {
+  ICEBERG_READER_UNSPECIFIED = 0;
+  ICEBERG_READER_NATIVE = 1 [(dataforge_token) = "native"];
+  ICEBERG_READER_PYICEBERG = 2 [(dataforge_token) = "pyiceberg"];
+}
+
 enum EngineInstanceStatus {
   ENGINE_INSTANCE_STATUS_UNSPECIFIED = 0;
   ENGINE_INSTANCE_STATUS_STARTING = 1 [(dataforge_token) = "starting"];

@@ -142,3 +142,31 @@ DataSourceType.FILE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_FILE, protocol_t
 DataSourceType.DATABASE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_DATABASE, protocol_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_DATABASE))
 DataSourceType.ICEBERG = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ICEBERG, protocol_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_ICEBERG))
 DataSourceType.ANALYSIS = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ANALYSIS, protocol_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_ANALYSIS))
+
+
+class DataSourceLoadType(ProtocolEnumValue):
+    FILE: ClassVar[Self]
+    DATABASE: ClassVar[Self]
+    DUCKDB: ClassVar[Self]
+    ICEBERG: ClassVar[Self]
+
+
+DataSourceLoadType.FILE = DataSourceLoadType(enums_pb2.DATA_SOURCE_LOAD_TYPE_FILE, protocol_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_FILE))
+DataSourceLoadType.DATABASE = DataSourceLoadType(
+    enums_pb2.DATA_SOURCE_LOAD_TYPE_DATABASE, protocol_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_DATABASE)
+)
+DataSourceLoadType.DUCKDB = DataSourceLoadType(
+    enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB, protocol_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB)
+)
+DataSourceLoadType.ICEBERG = DataSourceLoadType(
+    enums_pb2.DATA_SOURCE_LOAD_TYPE_ICEBERG, protocol_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_ICEBERG)
+)
+
+
+class IcebergReader(ProtocolEnumValue):
+    NATIVE: ClassVar[Self]
+    PYICEBERG: ClassVar[Self]
+
+
+IcebergReader.NATIVE = IcebergReader(enums_pb2.ICEBERG_READER_NATIVE, protocol_token("IcebergReader", enums_pb2.ICEBERG_READER_NATIVE))
+IcebergReader.PYICEBERG = IcebergReader(enums_pb2.ICEBERG_READER_PYICEBERG, protocol_token("IcebergReader", enums_pb2.ICEBERG_READER_PYICEBERG))

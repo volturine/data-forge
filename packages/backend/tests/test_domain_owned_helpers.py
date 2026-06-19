@@ -5,7 +5,7 @@ from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.datasource.models import DataSourceCreatedBy, DataSourceTargetKind
-from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
+from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceLoadType, DataSourceType, IcebergReader
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
 from backend_core.domain.engine_runs.schemas import EngineRunExecutionCategory, EngineRunStatus
 from backend_core.domain.healthcheck_models import HealthCheckType
@@ -51,6 +51,15 @@ def test_datasource_file_type_owns_upload_and_path_rules(tmp_path) -> None:
     assert DataSourceFileType.EXCEL.matches_magic_number(b'PK\x03\x04rest') is True
     DataSourceFileType.CSV.validate_local_path(csv_file)
     DataSourceFileType.PARQUET.validate_local_path(parquet_dir)
+
+
+def test_datasource_loading_enums_are_protocol_descriptor_backed() -> None:
+    assert DataSourceLoadType.DUCKDB.number == enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB
+    assert DataSourceLoadType.require(enums_pb2.DATA_SOURCE_LOAD_TYPE_FILE) is DataSourceLoadType.FILE
+    assert DataSourceLoadType.require('iceberg') is DataSourceLoadType.ICEBERG
+    assert [item.value for item in DataSourceLoadType.members()] == ['file', 'database', 'duckdb', 'iceberg']
+    assert IcebergReader.NATIVE.number == enums_pb2.ICEBERG_READER_NATIVE
+    assert IcebergReader.require('pyiceberg') is IcebergReader.PYICEBERG
 
 
 def test_datasource_target_kind_is_model_owned() -> None:
