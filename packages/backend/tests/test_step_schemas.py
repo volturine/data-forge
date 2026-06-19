@@ -102,8 +102,24 @@ def test_with_columns_and_temporal_configs_use_shared_enums() -> None:
         'days',
         'weeks',
         'months',
+        'ns',
+        'us',
+        'ms',
     ]
     assert _enum_values(timeseries_schema, 'direction') == ['add', 'subtract']
+
+
+def test_timeseries_timestamp_units_validate_from_protocol_enum() -> None:
+    for unit in ('ns', 'us', 'ms'):
+        config = TimeSeriesConfig.model_validate(
+            {
+                'column': 'created_at',
+                'operation_type': 'timestamp',
+                'new_column': 'created_at_epoch',
+                'unit': unit,
+            }
+        )
+        assert config.unit == unit
 
 
 def test_step_catalog_excludes_removed_counts_steps() -> None:

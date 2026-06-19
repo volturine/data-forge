@@ -127,6 +127,9 @@
 			? (schemaStore.getInput(step.id) ?? { columns: [], row_count: null })
 			: { columns: [], row_count: null }
 	);
+	const waitingForSelectedStepSchema = $derived(
+		isLoadingSchema && inputSchema.columns.length === 0
+	);
 
 	const configFlags = $derived({
 		smtpEnabled: configStore.smtpEnabled,
@@ -401,7 +404,7 @@
 						type="button">Close</button
 					>
 				</Callout>
-			{:else if isLoadingSchema}
+			{:else if waitingForSelectedStepSchema}
 				<div
 					class={css({
 						display: 'flex',

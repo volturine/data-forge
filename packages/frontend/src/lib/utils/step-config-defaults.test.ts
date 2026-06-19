@@ -44,6 +44,20 @@ describe('getDefaultConfig', () => {
 		expect(config).toHaveProperty('chart_type', 'bar');
 		expect(config).toHaveProperty('x_column', '');
 		expect(config).toHaveProperty('y_column', '');
+		expect(config).toHaveProperty('chart_width', 'normal');
+	});
+
+	test('returns proto-shaped deduplicate defaults', () => {
+		expect(getDefaultConfig('deduplicate')).toEqual({ subset: [], keep: 'first' });
+	});
+
+	test('returns proto-shaped fill null defaults', () => {
+		expect(getDefaultConfig('fill_null')).toEqual({
+			strategy: 'literal',
+			columns: [],
+			value: '',
+			value_type: 'Utf8'
+		});
 	});
 
 	test('returns a fresh copy each time', () => {

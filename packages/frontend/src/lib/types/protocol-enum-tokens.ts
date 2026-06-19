@@ -15,6 +15,8 @@ import {
 	DisplayUnits as ProtocolDisplayUnits,
 	DurationUnit as ProtocolDurationUnit,
 	EngineRunKind as ProtocolEngineRunKind,
+	ExportDestination as ProtocolExportDestination,
+	ExportFormat as ProtocolExportFormat,
 	FillNullStrategy as ProtocolFillNullStrategy,
 	FilterLogic as ProtocolFilterLogic,
 	FilterOperator as ProtocolFilterOperator,
@@ -245,6 +247,20 @@ export const CHART_WIDTH_TOKENS = {
 	[ProtocolChartWidth.FULL]: 'full'
 } as const satisfies Partial<Record<ProtocolChartWidth, string>>;
 
+export const EXPORT_FORMAT_TOKENS = {
+	[ProtocolExportFormat.CSV]: 'csv',
+	[ProtocolExportFormat.PARQUET]: 'parquet',
+	[ProtocolExportFormat.JSON]: 'json',
+	[ProtocolExportFormat.NDJSON]: 'ndjson',
+	[ProtocolExportFormat.DUCKDB]: 'duckdb',
+	[ProtocolExportFormat.EXCEL]: 'excel'
+} as const satisfies Partial<Record<ProtocolExportFormat, string>>;
+
+export const EXPORT_DESTINATION_TOKENS = {
+	[ProtocolExportDestination.DOWNLOAD]: 'download',
+	[ProtocolExportDestination.DATASOURCE]: 'datasource'
+} as const satisfies Partial<Record<ProtocolExportDestination, string>>;
+
 export const NOTIFICATION_METHOD_TOKENS = {
 	[ProtocolNotificationMethod.EMAIL]: 'email',
 	[ProtocolNotificationMethod.TELEGRAM]: 'telegram'
@@ -291,7 +307,10 @@ export const DURATION_UNIT_TOKENS = {
 	[ProtocolDurationUnit.HOURS]: 'hours',
 	[ProtocolDurationUnit.DAYS]: 'days',
 	[ProtocolDurationUnit.WEEKS]: 'weeks',
-	[ProtocolDurationUnit.MONTHS]: 'months'
+	[ProtocolDurationUnit.MONTHS]: 'months',
+	[ProtocolDurationUnit.NANOSECONDS]: 'ns',
+	[ProtocolDurationUnit.MICROSECONDS]: 'us',
+	[ProtocolDurationUnit.MILLISECONDS]: 'ms'
 } as const satisfies Partial<Record<ProtocolDurationUnit, string>>;
 
 export const TIME_DIRECTION_TOKENS = {
@@ -374,6 +393,8 @@ export type DisplayUnits = EnumToken<typeof DISPLAY_UNITS_TOKENS>;
 export type LegendPosition = EnumToken<typeof LEGEND_POSITION_TOKENS>;
 export type ChartHeight = EnumToken<typeof CHART_HEIGHT_TOKENS>;
 export type ChartWidth = EnumToken<typeof CHART_WIDTH_TOKENS>;
+export type ExportFormat = EnumToken<typeof EXPORT_FORMAT_TOKENS>;
+export type ExportDestination = EnumToken<typeof EXPORT_DESTINATION_TOKENS>;
 export type NotificationMethod = EnumToken<typeof NOTIFICATION_METHOD_TOKENS>;
 export type RecipientSource = EnumToken<typeof RECIPIENT_SOURCE_TOKENS>;
 export type AIProvider = EnumToken<typeof AI_PROVIDER_TOKENS>;

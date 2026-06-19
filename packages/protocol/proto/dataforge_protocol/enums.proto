@@ -375,6 +375,9 @@ enum DurationUnit {
   DURATION_UNIT_DAYS = 4 [(dataforge_token) = "days"];
   DURATION_UNIT_WEEKS = 5 [(dataforge_token) = "weeks"];
   DURATION_UNIT_MONTHS = 6 [(dataforge_token) = "months"];
+  DURATION_UNIT_NANOSECONDS = 7 [(dataforge_token) = "ns"];
+  DURATION_UNIT_MICROSECONDS = 8 [(dataforge_token) = "us"];
+  DURATION_UNIT_MILLISECONDS = 9 [(dataforge_token) = "ms"];
 }
 
 enum TimeDirection {

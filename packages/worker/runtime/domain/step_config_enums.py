@@ -319,6 +319,9 @@ class DurationUnit(ProtocolEnumValue):
     DAYS: ClassVar[Self]
     WEEKS: ClassVar[Self]
     MONTHS: ClassVar[Self]
+    NANOSECONDS: ClassVar[Self]
+    MICROSECONDS: ClassVar[Self]
+    MILLISECONDS: ClassVar[Self]
 
     @property
     def every_token(self) -> str:
@@ -344,6 +347,9 @@ DurationUnit.HOURS = DurationUnit(enums_pb2.DURATION_UNIT_HOURS, protocol_token(
 DurationUnit.DAYS = DurationUnit(enums_pb2.DURATION_UNIT_DAYS, protocol_token("DurationUnit", enums_pb2.DURATION_UNIT_DAYS))
 DurationUnit.WEEKS = DurationUnit(enums_pb2.DURATION_UNIT_WEEKS, protocol_token("DurationUnit", enums_pb2.DURATION_UNIT_WEEKS))
 DurationUnit.MONTHS = DurationUnit(enums_pb2.DURATION_UNIT_MONTHS, protocol_token("DurationUnit", enums_pb2.DURATION_UNIT_MONTHS))
+DurationUnit.NANOSECONDS = DurationUnit(enums_pb2.DURATION_UNIT_NANOSECONDS, protocol_token("DurationUnit", enums_pb2.DURATION_UNIT_NANOSECONDS))
+DurationUnit.MICROSECONDS = DurationUnit(enums_pb2.DURATION_UNIT_MICROSECONDS, protocol_token("DurationUnit", enums_pb2.DURATION_UNIT_MICROSECONDS))
+DurationUnit.MILLISECONDS = DurationUnit(enums_pb2.DURATION_UNIT_MILLISECONDS, protocol_token("DurationUnit", enums_pb2.DURATION_UNIT_MILLISECONDS))
 
 
 class TimeDirection(ProtocolEnumValue):

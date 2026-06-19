@@ -6,7 +6,7 @@
 	import { css, stepConfig } from '$lib/styles/panda';
 
 	interface DeduplicateConfigData {
-		subset: string[] | null;
+		subset: string[];
 		keep: string;
 	}
 
@@ -15,7 +15,7 @@
 		config?: DeduplicateConfigData;
 	}
 
-	let { schema, config = $bindable({ subset: null, keep: 'first' }) }: Props = $props();
+	let { schema, config = $bindable({ subset: [], keep: 'first' }) }: Props = $props();
 
 	const keepStrategies = [
 		{ value: 'first', label: 'Keep First' },
@@ -98,12 +98,12 @@
 		</div>
 		<MultiSelectColumnDropdown
 			{schema}
-			value={config.subset ?? []}
-			onChange={(val) => (config.subset = val.length > 0 ? val : null)}
+			value={config.subset}
+			onChange={(val) => (config.subset = val)}
 			placeholder="Select columns..."
 		/>
 
-		{#if config.subset && config.subset.length > 0}
+		{#if config.subset.length > 0}
 			<Callout>
 				Checking {config.subset.length} column{config.subset.length !== 1 ? 's' : ''} for duplicates
 			</Callout>

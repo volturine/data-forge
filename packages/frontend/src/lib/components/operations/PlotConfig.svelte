@@ -68,6 +68,8 @@
 		series_colors: string[];
 		overlays: OverlayConfig[];
 		reference_lines: ReferenceLineConfig[];
+		chart_height: 'small' | 'medium' | 'large' | 'xlarge';
+		chart_width: 'normal' | 'wide' | 'full';
 	};
 
 	const uid = `plot-${Math.random().toString(36).slice(2, 9)}`;
@@ -109,7 +111,8 @@
 		series_colors: [],
 		overlays: [],
 		reference_lines: [],
-		chart_height: 'medium' as const
+		chart_height: 'medium' as const,
+		chart_width: 'normal' as const
 	} satisfies PlotConfigData;
 
 	const configDefaults = defaultConfig satisfies Record<string, unknown>;

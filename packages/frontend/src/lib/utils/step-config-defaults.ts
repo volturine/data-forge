@@ -174,7 +174,8 @@ const defaultConfigs: Record<string, StepConfig> = {
 		series_colors: [],
 		overlays: [],
 		reference_lines: [],
-		chart_height: 'medium'
+		chart_height: 'medium',
+		chart_width: 'normal'
 	} satisfies PlotConfigData,
 
 	notification: {
@@ -214,8 +215,13 @@ const defaultConfigs: Record<string, StepConfig> = {
 	rename: {},
 	expression: { expression: '', column_name: '' } satisfies ExpressionConfigData,
 	with_columns: { expressions: [] } satisfies WithColumnsConfigData,
-	fill_null: {},
-	deduplicate: { subset: null, keep: 'first' } satisfies DeduplicateConfigData,
+	fill_null: {
+		strategy: 'literal',
+		columns: [],
+		value: '',
+		value_type: 'Utf8'
+	} satisfies FillNullConfigData,
+	deduplicate: { subset: [], keep: 'first' } satisfies DeduplicateConfigData,
 	string_transform: {},
 	timeseries: {}
 };
