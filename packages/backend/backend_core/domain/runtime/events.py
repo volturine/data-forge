@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from backend_core.domain.enums import DataForgeStrEnum
+from typing import ClassVar, Self
+
+from backend_core.domain.protocol_enums import ProtocolEnumValue, protocol_token
+from dataforge_protocol import enums_pb2
 
 
-class RuntimePayloadKind(DataForgeStrEnum):
-    BUILD = 'build'
-    ENGINE = 'engine'
-    JOB = 'job'
-    COMPUTE_REQUEST = 'compute_request'
-    COMPUTE_RESPONSE = 'compute_response'
+class RuntimePayloadKind(ProtocolEnumValue):
+    BUILD: ClassVar[Self]
+    ENGINE: ClassVar[Self]
+    JOB: ClassVar[Self]
+    COMPUTE_REQUEST: ClassVar[Self]
+    COMPUTE_RESPONSE: ClassVar[Self]
 
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> RuntimePayloadKind | None:
@@ -16,6 +19,19 @@ class RuntimePayloadKind(DataForgeStrEnum):
         if not isinstance(kind, str):
             return None
         try:
-            return cls(kind)
+            return cls.require(kind)
         except ValueError:
             return None
+
+
+RuntimePayloadKind.BUILD = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_BUILD, protocol_token('RuntimePayloadKind', enums_pb2.RUNTIME_PAYLOAD_KIND_BUILD))
+RuntimePayloadKind.ENGINE = RuntimePayloadKind(
+    enums_pb2.RUNTIME_PAYLOAD_KIND_ENGINE, protocol_token('RuntimePayloadKind', enums_pb2.RUNTIME_PAYLOAD_KIND_ENGINE)
+)
+RuntimePayloadKind.JOB = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_JOB, protocol_token('RuntimePayloadKind', enums_pb2.RUNTIME_PAYLOAD_KIND_JOB))
+RuntimePayloadKind.COMPUTE_REQUEST = RuntimePayloadKind(
+    enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_REQUEST, protocol_token('RuntimePayloadKind', enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_REQUEST)
+)
+RuntimePayloadKind.COMPUTE_RESPONSE = RuntimePayloadKind(
+    enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_RESPONSE, protocol_token('RuntimePayloadKind', enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_RESPONSE)
+)

@@ -1,6 +1,6 @@
 import datetime as dt
 
-from sqlalchemy import BIGINT, JSON, Column, DateTime, Enum as SAEnum, String
+from sqlalchemy import BIGINT, JSON, Column, DateTime, String
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
@@ -18,9 +18,7 @@ class EngineInstance(SQLModel, table=True):  # type: ignore[call-arg, assignment
     datasource_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     build_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     process_id: int | None = Field(default=None, sa_column=Column(BIGINT, nullable=True))
-    status: EngineInstanceStatus = Field(
-        sa_column=Column(SAEnum(EngineInstanceStatus, native_enum=False, values_callable=lambda enum_cls: enum_cls.values()), nullable=False, index=True)
-    )
+    status: EngineInstanceStatus = Field(sa_column=Column(String, nullable=False, index=True))
     current_job_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     current_build_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     current_engine_run_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
@@ -29,3 +27,6 @@ class EngineInstance(SQLModel, table=True):  # type: ignore[call-arg, assignment
     last_activity_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     last_seen_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
     updated_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+
+    def status_kind(self) -> EngineInstanceStatus:
+        return EngineInstanceStatus.require(self.status)

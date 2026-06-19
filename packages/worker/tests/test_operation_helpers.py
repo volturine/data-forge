@@ -31,7 +31,8 @@ def test_filter_operator_definition():
 def test_filter_operator_uses_generated_protocol_enum_value():
     operator = FilterOperator.require("==")
 
-    assert operator == enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL
+    assert operator.number == enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL
+    assert FilterOperator.require(enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL) == operator
     assert operator.value == "=="
 
 
@@ -39,7 +40,7 @@ def test_filter_operator_round_trips_through_pickle():
     operator = loads(dumps(FilterOperator.DOUBLE_EQUAL))
 
     assert operator is FilterOperator.DOUBLE_EQUAL
-    assert operator == enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL
+    assert operator.number == enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL
 
 
 def test_filter_operator_definition_invalid():

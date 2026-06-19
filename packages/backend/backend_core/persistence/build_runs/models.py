@@ -1,7 +1,7 @@
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, Enum as SAEnum, Float, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.build_runs.models import BuildRunStatus
@@ -39,7 +39,7 @@ class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
             self.total_steps = event.total_steps
 
     def apply_terminal_event(self, event: compute_schemas.BuildEvent) -> bool:
-        if self.status.is_terminal:
+        if self.status_kind().is_terminal:
             return False
         if isinstance(event, compute_schemas.BuildCompleteEvent):
             self.status = BuildRunStatus.COMPLETED
@@ -71,6 +71,9 @@ class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
             self.completed_at = event.emitted_at
             return True
         return True
+
+    def status_kind(self) -> BuildRunStatus:
+        return BuildRunStatus.require(self.status)
 
     @staticmethod
     def terminal_status_for_event(event: compute_schemas.BuildEvent) -> BuildRunStatus | None:
@@ -130,9 +133,7 @@ class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     schedule_id: str | None = Field(default=None, sa_column=Column(String, nullable=True, index=True))
     analysis_id: str = Field(sa_column=Column(String, nullable=False, index=True))
     analysis_name: str = Field(sa_column=Column(String, nullable=False))
-    status: BuildRunStatus = Field(
-        sa_column=Column(SAEnum(BuildRunStatus, native_enum=False, values_callable=lambda enum_cls: enum_cls.values()), nullable=False, index=True)
-    )
+    status: BuildRunStatus = Field(sa_column=Column(String, nullable=False, index=True))
     request_json: dict[str, object] = Field(sa_column=Column(JSON, nullable=False))
     starter_json: dict[str, object] = Field(sa_column=Column(JSON, nullable=False))
     resource_config_json: dict[str, object] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
@@ -170,9 +171,7 @@ class BuildEvent(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     build_id: str = Field(sa_column=Column(String, nullable=False, index=True))
     namespace: str = Field(sa_column=Column(String, nullable=False, index=True))
     sequence: int = Field(sa_column=Column(Integer, nullable=False))
-    type: compute_schemas.BuildEventType = Field(
-        sa_column=Column(SAEnum(compute_schemas.BuildEventType, native_enum=False, values_callable=lambda enum_cls: enum_cls.values()), nullable=False)
-    )
+    type: str = Field(sa_column=Column(String, nullable=False))
     payload_json: dict[str, object] = Field(sa_column=Column(JSON, nullable=False))
     engine_run_id: str | None = Field(default=None, sa_column=Column(String, nullable=True, index=True))
     emitted_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))

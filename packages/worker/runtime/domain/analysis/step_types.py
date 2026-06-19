@@ -2,21 +2,33 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, fields
-from typing import Final
+from typing import ClassVar, Final, Self
 
-from runtime.domain.enums import DataForgeStrEnum
+from dataforge_protocol import enums_pb2
+from runtime.domain.protocol_enums import ProtocolEnumValue, protocol_token
 
 
-class ChartType(DataForgeStrEnum):
-    BAR = "bar"
-    HORIZONTAL_BAR = "horizontal_bar"
-    AREA = "area"
-    HEATGRID = "heatgrid"
-    HISTOGRAM = "histogram"
-    SCATTER = "scatter"
-    LINE = "line"
-    PIE = "pie"
-    BOXPLOT = "boxplot"
+class ChartType(ProtocolEnumValue):
+    BAR: ClassVar[Self]
+    HORIZONTAL_BAR: ClassVar[Self]
+    AREA: ClassVar[Self]
+    HEATGRID: ClassVar[Self]
+    HISTOGRAM: ClassVar[Self]
+    SCATTER: ClassVar[Self]
+    LINE: ClassVar[Self]
+    PIE: ClassVar[Self]
+    BOXPLOT: ClassVar[Self]
+
+
+ChartType.BAR = ChartType(enums_pb2.CHART_TYPE_BAR, protocol_token("ChartType", enums_pb2.CHART_TYPE_BAR))
+ChartType.HORIZONTAL_BAR = ChartType(enums_pb2.CHART_TYPE_HORIZONTAL_BAR, protocol_token("ChartType", enums_pb2.CHART_TYPE_HORIZONTAL_BAR))
+ChartType.AREA = ChartType(enums_pb2.CHART_TYPE_AREA, protocol_token("ChartType", enums_pb2.CHART_TYPE_AREA))
+ChartType.HEATGRID = ChartType(enums_pb2.CHART_TYPE_HEATGRID, protocol_token("ChartType", enums_pb2.CHART_TYPE_HEATGRID))
+ChartType.HISTOGRAM = ChartType(enums_pb2.CHART_TYPE_HISTOGRAM, protocol_token("ChartType", enums_pb2.CHART_TYPE_HISTOGRAM))
+ChartType.SCATTER = ChartType(enums_pb2.CHART_TYPE_SCATTER, protocol_token("ChartType", enums_pb2.CHART_TYPE_SCATTER))
+ChartType.LINE = ChartType(enums_pb2.CHART_TYPE_LINE, protocol_token("ChartType", enums_pb2.CHART_TYPE_LINE))
+ChartType.PIE = ChartType(enums_pb2.CHART_TYPE_PIE, protocol_token("ChartType", enums_pb2.CHART_TYPE_PIE))
+ChartType.BOXPLOT = ChartType(enums_pb2.CHART_TYPE_BOXPLOT, protocol_token("ChartType", enums_pb2.CHART_TYPE_BOXPLOT))
 
 
 @dataclass(frozen=True, slots=True)

@@ -90,8 +90,8 @@ def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummar
                 current_engine_run_id=row.current_engine_run_id,
                 last_activity_at=row.last_activity_at,
                 last_seen_at=row.last_seen_at,
-                scope=schemas.EngineScope(row.engine_scope),
-                reuse_policy=schemas.EngineReusePolicy(row.engine_reuse_policy),
+                scope=schemas.EngineScope.require(row.engine_scope),
+                reuse_policy=schemas.EngineReusePolicy.require(row.engine_reuse_policy),
                 datasource_id=row.datasource_id,
                 build_id=row.build_id,
             )
@@ -150,7 +150,7 @@ def _read_queue_namespace_summary(
     rows = list(session.execute(stmt).scalars().all())
     queued = [row for row in rows if row.status == BuildJobStatus.QUEUED]
     oldest = min(queued, key=lambda row: row.created_at, default=None)
-    active_rows = [row for row in rows if row.status.is_active]
+    active_rows = [row for row in rows if row.status_kind().is_active]
     orphaned = [row for row in active_rows if row.is_orphaned(reclaimable_worker_ids)]
     age = None if oldest is None else oldest.age_seconds(now=now)
     return schemas.QueueNamespaceSummary(

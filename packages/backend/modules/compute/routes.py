@@ -135,6 +135,7 @@ def _engine_run_active_status(status: EngineRunStatus) -> schemas.ActiveBuildSta
             return schemas.ActiveBuildStatus.FAILED
         case EngineRunStatus.CANCELLED:
             return schemas.ActiveBuildStatus.CANCELLED
+    raise ValueError(f'Unsupported engine run status: {status!r}')
 
 
 def _engine_run_status_filter(status: schemas.ActiveBuildStatus | None) -> EngineRunStatus | None:
@@ -151,6 +152,7 @@ def _engine_run_status_filter(status: schemas.ActiveBuildStatus | None) -> Engin
             return EngineRunStatus.CANCELLED
         case schemas.ActiveBuildStatus.QUEUED:
             return EngineRunStatus.RUNNING
+    raise ValueError(f'Unsupported active build status: {status!r}')
 
 
 def _engine_run_kind_filter(kind: str | None) -> EngineRunKind | str | None:

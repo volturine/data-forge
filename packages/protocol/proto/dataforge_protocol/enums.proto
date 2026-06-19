@@ -10,135 +10,135 @@ extend google.protobuf.EnumValueOptions {
 
 enum AnalysisStatus {
   ANALYSIS_STATUS_UNSPECIFIED = 0;
-  ANALYSIS_STATUS_DRAFT = 1;
-  ANALYSIS_STATUS_RUNNING = 2;
-  ANALYSIS_STATUS_COMPLETED = 3;
-  ANALYSIS_STATUS_ERROR = 4;
+  ANALYSIS_STATUS_DRAFT = 1 [(dataforge_token) = "draft"];
+  ANALYSIS_STATUS_RUNNING = 2 [(dataforge_token) = "running"];
+  ANALYSIS_STATUS_COMPLETED = 3 [(dataforge_token) = "completed"];
+  ANALYSIS_STATUS_ERROR = 4 [(dataforge_token) = "error"];
 }
 
 enum ChartType {
   CHART_TYPE_UNSPECIFIED = 0;
-  CHART_TYPE_BAR = 1;
-  CHART_TYPE_HORIZONTAL_BAR = 2;
-  CHART_TYPE_AREA = 3;
-  CHART_TYPE_HEATGRID = 4;
-  CHART_TYPE_HISTOGRAM = 5;
-  CHART_TYPE_SCATTER = 6;
-  CHART_TYPE_LINE = 7;
-  CHART_TYPE_PIE = 8;
-  CHART_TYPE_BOXPLOT = 9;
+  CHART_TYPE_BAR = 1 [(dataforge_token) = "bar"];
+  CHART_TYPE_HORIZONTAL_BAR = 2 [(dataforge_token) = "horizontal_bar"];
+  CHART_TYPE_AREA = 3 [(dataforge_token) = "area"];
+  CHART_TYPE_HEATGRID = 4 [(dataforge_token) = "heatgrid"];
+  CHART_TYPE_HISTOGRAM = 5 [(dataforge_token) = "histogram"];
+  CHART_TYPE_SCATTER = 6 [(dataforge_token) = "scatter"];
+  CHART_TYPE_LINE = 7 [(dataforge_token) = "line"];
+  CHART_TYPE_PIE = 8 [(dataforge_token) = "pie"];
+  CHART_TYPE_BOXPLOT = 9 [(dataforge_token) = "boxplot"];
 }
 
 enum BuildJobStatus {
   BUILD_JOB_STATUS_UNSPECIFIED = 0;
-  BUILD_JOB_STATUS_QUEUED = 1;
-  BUILD_JOB_STATUS_LEASED = 2;
-  BUILD_JOB_STATUS_RUNNING = 3;
-  BUILD_JOB_STATUS_COMPLETED = 4;
-  BUILD_JOB_STATUS_FAILED = 5;
-  BUILD_JOB_STATUS_CANCELLED = 6;
+  BUILD_JOB_STATUS_QUEUED = 1 [(dataforge_token) = "queued"];
+  BUILD_JOB_STATUS_LEASED = 2 [(dataforge_token) = "leased"];
+  BUILD_JOB_STATUS_RUNNING = 3 [(dataforge_token) = "running"];
+  BUILD_JOB_STATUS_COMPLETED = 4 [(dataforge_token) = "completed"];
+  BUILD_JOB_STATUS_FAILED = 5 [(dataforge_token) = "failed"];
+  BUILD_JOB_STATUS_CANCELLED = 6 [(dataforge_token) = "cancelled"];
 }
 
 enum BuildRunStatus {
   BUILD_RUN_STATUS_UNSPECIFIED = 0;
-  BUILD_RUN_STATUS_QUEUED = 1;
-  BUILD_RUN_STATUS_RUNNING = 2;
-  BUILD_RUN_STATUS_COMPLETED = 3;
-  BUILD_RUN_STATUS_FAILED = 4;
-  BUILD_RUN_STATUS_CANCELLED = 5;
-  BUILD_RUN_STATUS_ORPHANED = 6;
+  BUILD_RUN_STATUS_QUEUED = 1 [(dataforge_token) = "queued"];
+  BUILD_RUN_STATUS_RUNNING = 2 [(dataforge_token) = "running"];
+  BUILD_RUN_STATUS_COMPLETED = 3 [(dataforge_token) = "completed"];
+  BUILD_RUN_STATUS_FAILED = 4 [(dataforge_token) = "failed"];
+  BUILD_RUN_STATUS_CANCELLED = 5 [(dataforge_token) = "cancelled"];
+  BUILD_RUN_STATUS_ORPHANED = 6 [(dataforge_token) = "orphaned"];
 }
 
 enum EngineStatus {
   ENGINE_STATUS_UNSPECIFIED = 0;
-  ENGINE_STATUS_HEALTHY = 1;
-  ENGINE_STATUS_TERMINATED = 2;
+  ENGINE_STATUS_HEALTHY = 1 [(dataforge_token) = "healthy"];
+  ENGINE_STATUS_TERMINATED = 2 [(dataforge_token) = "terminated"];
 }
 
 enum EngineScope {
   ENGINE_SCOPE_UNSPECIFIED = 0;
-  ENGINE_SCOPE_DATASOURCE_PREVIEW = 1;
-  ENGINE_SCOPE_ANALYSIS_INTERACTIVE = 2;
-  ENGINE_SCOPE_BUILD = 3;
+  ENGINE_SCOPE_DATASOURCE_PREVIEW = 1 [(dataforge_token) = "datasource_preview"];
+  ENGINE_SCOPE_ANALYSIS_INTERACTIVE = 2 [(dataforge_token) = "analysis_interactive"];
+  ENGINE_SCOPE_BUILD = 3 [(dataforge_token) = "build"];
 }
 
 enum EngineReusePolicy {
   ENGINE_REUSE_POLICY_UNSPECIFIED = 0;
-  ENGINE_REUSE_POLICY_SHARED = 1;
-  ENGINE_REUSE_POLICY_EXCLUSIVE = 2;
+  ENGINE_REUSE_POLICY_SHARED = 1 [(dataforge_token) = "shared"];
+  ENGINE_REUSE_POLICY_EXCLUSIVE = 2 [(dataforge_token) = "exclusive"];
 }
 
 enum ExportFormat {
   EXPORT_FORMAT_UNSPECIFIED = 0;
-  EXPORT_FORMAT_CSV = 1;
-  EXPORT_FORMAT_PARQUET = 2;
-  EXPORT_FORMAT_JSON = 3;
-  EXPORT_FORMAT_NDJSON = 4;
-  EXPORT_FORMAT_DUCKDB = 5;
-  EXPORT_FORMAT_EXCEL = 6;
+  EXPORT_FORMAT_CSV = 1 [(dataforge_token) = "csv"];
+  EXPORT_FORMAT_PARQUET = 2 [(dataforge_token) = "parquet"];
+  EXPORT_FORMAT_JSON = 3 [(dataforge_token) = "json"];
+  EXPORT_FORMAT_NDJSON = 4 [(dataforge_token) = "ndjson"];
+  EXPORT_FORMAT_DUCKDB = 5 [(dataforge_token) = "duckdb"];
+  EXPORT_FORMAT_EXCEL = 6 [(dataforge_token) = "excel"];
 }
 
 enum ExportDestination {
   EXPORT_DESTINATION_UNSPECIFIED = 0;
-  EXPORT_DESTINATION_DOWNLOAD = 1;
-  EXPORT_DESTINATION_DATASOURCE = 2;
+  EXPORT_DESTINATION_DOWNLOAD = 1 [(dataforge_token) = "download"];
+  EXPORT_DESTINATION_DATASOURCE = 2 [(dataforge_token) = "datasource"];
 }
 
 enum BuildStatus {
   BUILD_STATUS_UNSPECIFIED = 0;
-  BUILD_STATUS_SUCCESS = 1;
-  BUILD_STATUS_WARNING = 2;
+  BUILD_STATUS_SUCCESS = 1 [(dataforge_token) = "success"];
+  BUILD_STATUS_WARNING = 2 [(dataforge_token) = "warning"];
 }
 
 enum BuildTabStatus {
   BUILD_TAB_STATUS_UNSPECIFIED = 0;
-  BUILD_TAB_STATUS_SUCCESS = 1;
-  BUILD_TAB_STATUS_FAILED = 2;
+  BUILD_TAB_STATUS_SUCCESS = 1 [(dataforge_token) = "success"];
+  BUILD_TAB_STATUS_FAILED = 2 [(dataforge_token) = "failed"];
 }
 
 enum ComputeRunStatus {
   COMPUTE_RUN_STATUS_UNSPECIFIED = 0;
-  COMPUTE_RUN_STATUS_SUCCESS = 1;
-  COMPUTE_RUN_STATUS_FAILED = 2;
+  COMPUTE_RUN_STATUS_SUCCESS = 1 [(dataforge_token) = "success"];
+  COMPUTE_RUN_STATUS_FAILED = 2 [(dataforge_token) = "failed"];
 }
 
 enum ActiveBuildStatus {
   ACTIVE_BUILD_STATUS_UNSPECIFIED = 0;
-  ACTIVE_BUILD_STATUS_QUEUED = 1;
-  ACTIVE_BUILD_STATUS_RUNNING = 2;
-  ACTIVE_BUILD_STATUS_COMPLETED = 3;
-  ACTIVE_BUILD_STATUS_FAILED = 4;
-  ACTIVE_BUILD_STATUS_CANCELLED = 5;
+  ACTIVE_BUILD_STATUS_QUEUED = 1 [(dataforge_token) = "queued"];
+  ACTIVE_BUILD_STATUS_RUNNING = 2 [(dataforge_token) = "running"];
+  ACTIVE_BUILD_STATUS_COMPLETED = 3 [(dataforge_token) = "completed"];
+  ACTIVE_BUILD_STATUS_FAILED = 4 [(dataforge_token) = "failed"];
+  ACTIVE_BUILD_STATUS_CANCELLED = 5 [(dataforge_token) = "cancelled"];
 }
 
 enum BuildStepState {
   BUILD_STEP_STATE_UNSPECIFIED = 0;
-  BUILD_STEP_STATE_PENDING = 1;
-  BUILD_STEP_STATE_RUNNING = 2;
-  BUILD_STEP_STATE_COMPLETED = 3;
-  BUILD_STEP_STATE_FAILED = 4;
-  BUILD_STEP_STATE_SKIPPED = 5;
+  BUILD_STEP_STATE_PENDING = 1 [(dataforge_token) = "pending"];
+  BUILD_STEP_STATE_RUNNING = 2 [(dataforge_token) = "running"];
+  BUILD_STEP_STATE_COMPLETED = 3 [(dataforge_token) = "completed"];
+  BUILD_STEP_STATE_FAILED = 4 [(dataforge_token) = "failed"];
+  BUILD_STEP_STATE_SKIPPED = 5 [(dataforge_token) = "skipped"];
 }
 
 enum BuildLogLevel {
   BUILD_LOG_LEVEL_UNSPECIFIED = 0;
-  BUILD_LOG_LEVEL_INFO = 1;
-  BUILD_LOG_LEVEL_WARNING = 2;
-  BUILD_LOG_LEVEL_ERROR = 3;
+  BUILD_LOG_LEVEL_INFO = 1 [(dataforge_token) = "info"];
+  BUILD_LOG_LEVEL_WARNING = 2 [(dataforge_token) = "warning"];
+  BUILD_LOG_LEVEL_ERROR = 3 [(dataforge_token) = "error"];
 }
 
 enum BuildEventType {
   BUILD_EVENT_TYPE_UNSPECIFIED = 0;
-  BUILD_EVENT_TYPE_PLAN = 1;
-  BUILD_EVENT_TYPE_STEP_START = 2;
-  BUILD_EVENT_TYPE_STEP_COMPLETE = 3;
-  BUILD_EVENT_TYPE_STEP_FAILED = 4;
-  BUILD_EVENT_TYPE_PROGRESS = 5;
-  BUILD_EVENT_TYPE_RESOURCES = 6;
-  BUILD_EVENT_TYPE_LOG = 7;
-  BUILD_EVENT_TYPE_COMPLETE = 8;
-  BUILD_EVENT_TYPE_FAILED = 9;
-  BUILD_EVENT_TYPE_CANCELLED = 10;
+  BUILD_EVENT_TYPE_PLAN = 1 [(dataforge_token) = "plan"];
+  BUILD_EVENT_TYPE_STEP_START = 2 [(dataforge_token) = "step_start"];
+  BUILD_EVENT_TYPE_STEP_COMPLETE = 3 [(dataforge_token) = "step_complete"];
+  BUILD_EVENT_TYPE_STEP_FAILED = 4 [(dataforge_token) = "step_failed"];
+  BUILD_EVENT_TYPE_PROGRESS = 5 [(dataforge_token) = "progress"];
+  BUILD_EVENT_TYPE_RESOURCES = 6 [(dataforge_token) = "resources"];
+  BUILD_EVENT_TYPE_LOG = 7 [(dataforge_token) = "log"];
+  BUILD_EVENT_TYPE_COMPLETE = 8 [(dataforge_token) = "complete"];
+  BUILD_EVENT_TYPE_FAILED = 9 [(dataforge_token) = "failed"];
+  BUILD_EVENT_TYPE_CANCELLED = 10 [(dataforge_token) = "cancelled"];
 }
 
 enum ComputeRequestKind {
@@ -170,110 +170,110 @@ enum ComputeRequestStatus {
 
 enum DataSourceCreatedBy {
   DATA_SOURCE_CREATED_BY_UNSPECIFIED = 0;
-  DATA_SOURCE_CREATED_BY_IMPORT = 1;
-  DATA_SOURCE_CREATED_BY_ANALYSIS = 2;
+  DATA_SOURCE_CREATED_BY_IMPORT = 1 [(dataforge_token) = "import"];
+  DATA_SOURCE_CREATED_BY_ANALYSIS = 2 [(dataforge_token) = "analysis"];
 }
 
 enum DataSourceTargetKind {
   DATA_SOURCE_TARGET_KIND_UNSPECIFIED = 0;
-  DATA_SOURCE_TARGET_KIND_ANALYSIS = 1;
-  DATA_SOURCE_TARGET_KIND_RAW = 2;
-  DATA_SOURCE_TARGET_KIND_DATASOURCE = 3;
+  DATA_SOURCE_TARGET_KIND_ANALYSIS = 1 [(dataforge_token) = "analysis"];
+  DATA_SOURCE_TARGET_KIND_RAW = 2 [(dataforge_token) = "raw"];
+  DATA_SOURCE_TARGET_KIND_DATASOURCE = 3 [(dataforge_token) = "datasource"];
 }
 
 enum DataSourceCategory {
   DATA_SOURCE_CATEGORY_UNSPECIFIED = 0;
-  DATA_SOURCE_CATEGORY_FILE = 1;
-  DATA_SOURCE_CATEGORY_DATABASE = 2;
-  DATA_SOURCE_CATEGORY_ANALYSIS = 3;
+  DATA_SOURCE_CATEGORY_FILE = 1 [(dataforge_token) = "file"];
+  DATA_SOURCE_CATEGORY_DATABASE = 2 [(dataforge_token) = "database"];
+  DATA_SOURCE_CATEGORY_ANALYSIS = 3 [(dataforge_token) = "analysis"];
 }
 
 enum DataSourceFileType {
   DATA_SOURCE_FILE_TYPE_UNSPECIFIED = 0;
-  DATA_SOURCE_FILE_TYPE_CSV = 1;
-  DATA_SOURCE_FILE_TYPE_PARQUET = 2;
-  DATA_SOURCE_FILE_TYPE_JSON = 3;
-  DATA_SOURCE_FILE_TYPE_NDJSON = 4;
-  DATA_SOURCE_FILE_TYPE_EXCEL = 5;
+  DATA_SOURCE_FILE_TYPE_CSV = 1 [(dataforge_token) = "csv"];
+  DATA_SOURCE_FILE_TYPE_PARQUET = 2 [(dataforge_token) = "parquet"];
+  DATA_SOURCE_FILE_TYPE_JSON = 3 [(dataforge_token) = "json"];
+  DATA_SOURCE_FILE_TYPE_NDJSON = 4 [(dataforge_token) = "ndjson"];
+  DATA_SOURCE_FILE_TYPE_EXCEL = 5 [(dataforge_token) = "excel"];
 }
 
 enum DataSourceType {
   DATA_SOURCE_TYPE_UNSPECIFIED = 0;
-  DATA_SOURCE_TYPE_FILE = 1;
-  DATA_SOURCE_TYPE_DATABASE = 2;
-  DATA_SOURCE_TYPE_ICEBERG = 3;
-  DATA_SOURCE_TYPE_ANALYSIS = 4;
+  DATA_SOURCE_TYPE_FILE = 1 [(dataforge_token) = "file"];
+  DATA_SOURCE_TYPE_DATABASE = 2 [(dataforge_token) = "database"];
+  DATA_SOURCE_TYPE_ICEBERG = 3 [(dataforge_token) = "iceberg"];
+  DATA_SOURCE_TYPE_ANALYSIS = 4 [(dataforge_token) = "analysis"];
 }
 
 enum EngineInstanceStatus {
   ENGINE_INSTANCE_STATUS_UNSPECIFIED = 0;
-  ENGINE_INSTANCE_STATUS_STARTING = 1;
-  ENGINE_INSTANCE_STATUS_IDLE = 2;
-  ENGINE_INSTANCE_STATUS_RUNNING = 3;
-  ENGINE_INSTANCE_STATUS_STOPPING = 4;
-  ENGINE_INSTANCE_STATUS_STOPPED = 5;
-  ENGINE_INSTANCE_STATUS_FAILED = 6;
+  ENGINE_INSTANCE_STATUS_STARTING = 1 [(dataforge_token) = "starting"];
+  ENGINE_INSTANCE_STATUS_IDLE = 2 [(dataforge_token) = "idle"];
+  ENGINE_INSTANCE_STATUS_RUNNING = 3 [(dataforge_token) = "running"];
+  ENGINE_INSTANCE_STATUS_STOPPING = 4 [(dataforge_token) = "stopping"];
+  ENGINE_INSTANCE_STATUS_STOPPED = 5 [(dataforge_token) = "stopped"];
+  ENGINE_INSTANCE_STATUS_FAILED = 6 [(dataforge_token) = "failed"];
 }
 
 enum EngineRunKind {
   ENGINE_RUN_KIND_UNSPECIFIED = 0;
-  ENGINE_RUN_KIND_BUILD = 1;
-  ENGINE_RUN_KIND_PREVIEW = 2;
-  ENGINE_RUN_KIND_ROW_COUNT = 3;
-  ENGINE_RUN_KIND_DOWNLOAD = 4;
-  ENGINE_RUN_KIND_INGEST = 5;
+  ENGINE_RUN_KIND_BUILD = 1 [(dataforge_token) = "build"];
+  ENGINE_RUN_KIND_PREVIEW = 2 [(dataforge_token) = "preview"];
+  ENGINE_RUN_KIND_ROW_COUNT = 3 [(dataforge_token) = "row_count"];
+  ENGINE_RUN_KIND_DOWNLOAD = 4 [(dataforge_token) = "download"];
+  ENGINE_RUN_KIND_INGEST = 5 [(dataforge_token) = "ingest"];
 }
 
 enum EngineRunStatus {
   ENGINE_RUN_STATUS_UNSPECIFIED = 0;
-  ENGINE_RUN_STATUS_RUNNING = 1;
-  ENGINE_RUN_STATUS_SUCCESS = 2;
-  ENGINE_RUN_STATUS_FAILED = 3;
-  ENGINE_RUN_STATUS_CANCELLED = 4;
+  ENGINE_RUN_STATUS_RUNNING = 1 [(dataforge_token) = "running"];
+  ENGINE_RUN_STATUS_SUCCESS = 2 [(dataforge_token) = "success"];
+  ENGINE_RUN_STATUS_FAILED = 3 [(dataforge_token) = "failed"];
+  ENGINE_RUN_STATUS_CANCELLED = 4 [(dataforge_token) = "cancelled"];
 }
 
 enum EngineRunExecutionCategory {
   ENGINE_RUN_EXECUTION_CATEGORY_UNSPECIFIED = 0;
-  ENGINE_RUN_EXECUTION_CATEGORY_READ = 1;
-  ENGINE_RUN_EXECUTION_CATEGORY_STEP = 2;
-  ENGINE_RUN_EXECUTION_CATEGORY_PLAN = 3;
-  ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE = 4;
-  ENGINE_RUN_EXECUTION_CATEGORY_WRITE = 5;
+  ENGINE_RUN_EXECUTION_CATEGORY_READ = 1 [(dataforge_token) = "read"];
+  ENGINE_RUN_EXECUTION_CATEGORY_STEP = 2 [(dataforge_token) = "step"];
+  ENGINE_RUN_EXECUTION_CATEGORY_PLAN = 3 [(dataforge_token) = "plan"];
+  ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE = 4 [(dataforge_token) = "compute"];
+  ENGINE_RUN_EXECUTION_CATEGORY_WRITE = 5 [(dataforge_token) = "write"];
 }
 
 enum SchemaDiffStatus {
   SCHEMA_DIFF_STATUS_UNSPECIFIED = 0;
-  SCHEMA_DIFF_STATUS_ADDED = 1;
-  SCHEMA_DIFF_STATUS_REMOVED = 2;
-  SCHEMA_DIFF_STATUS_TYPE_CHANGED = 3;
+  SCHEMA_DIFF_STATUS_ADDED = 1 [(dataforge_token) = "added"];
+  SCHEMA_DIFF_STATUS_REMOVED = 2 [(dataforge_token) = "removed"];
+  SCHEMA_DIFF_STATUS_TYPE_CHANGED = 3 [(dataforge_token) = "type_changed"];
 }
 
 enum HealthCheckType {
   HEALTH_CHECK_TYPE_UNSPECIFIED = 0;
-  HEALTH_CHECK_TYPE_ROW_COUNT = 1;
-  HEALTH_CHECK_TYPE_COLUMN_NULL = 2;
-  HEALTH_CHECK_TYPE_COLUMN_UNIQUE = 3;
-  HEALTH_CHECK_TYPE_COLUMN_RANGE = 4;
-  HEALTH_CHECK_TYPE_COLUMN_COUNT = 5;
-  HEALTH_CHECK_TYPE_NULL_PERCENTAGE = 6;
-  HEALTH_CHECK_TYPE_DUPLICATE_PERCENTAGE = 7;
+  HEALTH_CHECK_TYPE_ROW_COUNT = 1 [(dataforge_token) = "row_count"];
+  HEALTH_CHECK_TYPE_COLUMN_NULL = 2 [(dataforge_token) = "column_null"];
+  HEALTH_CHECK_TYPE_COLUMN_UNIQUE = 3 [(dataforge_token) = "column_unique"];
+  HEALTH_CHECK_TYPE_COLUMN_RANGE = 4 [(dataforge_token) = "column_range"];
+  HEALTH_CHECK_TYPE_COLUMN_COUNT = 5 [(dataforge_token) = "column_count"];
+  HEALTH_CHECK_TYPE_NULL_PERCENTAGE = 6 [(dataforge_token) = "null_percentage"];
+  HEALTH_CHECK_TYPE_DUPLICATE_PERCENTAGE = 7 [(dataforge_token) = "duplicate_percentage"];
 }
 
 enum RuntimePayloadKind {
   RUNTIME_PAYLOAD_KIND_UNSPECIFIED = 0;
-  RUNTIME_PAYLOAD_KIND_BUILD = 1;
-  RUNTIME_PAYLOAD_KIND_ENGINE = 2;
-  RUNTIME_PAYLOAD_KIND_JOB = 3;
-  RUNTIME_PAYLOAD_KIND_COMPUTE_REQUEST = 4;
-  RUNTIME_PAYLOAD_KIND_COMPUTE_RESPONSE = 5;
+  RUNTIME_PAYLOAD_KIND_BUILD = 1 [(dataforge_token) = "build"];
+  RUNTIME_PAYLOAD_KIND_ENGINE = 2 [(dataforge_token) = "engine"];
+  RUNTIME_PAYLOAD_KIND_JOB = 3 [(dataforge_token) = "job"];
+  RUNTIME_PAYLOAD_KIND_COMPUTE_REQUEST = 4 [(dataforge_token) = "compute_request"];
+  RUNTIME_PAYLOAD_KIND_COMPUTE_RESPONSE = 5 [(dataforge_token) = "compute_response"];
 }
 
 enum RuntimeWorkerKind {
   RUNTIME_WORKER_KIND_UNSPECIFIED = 0;
-  RUNTIME_WORKER_KIND_API = 1;
-  RUNTIME_WORKER_KIND_BUILD_MANAGER = 2;
-  RUNTIME_WORKER_KIND_BUILD_WORKER = 3;
-  RUNTIME_WORKER_KIND_SCHEDULER = 4;
+  RUNTIME_WORKER_KIND_API = 1 [(dataforge_token) = "api"];
+  RUNTIME_WORKER_KIND_BUILD_MANAGER = 2 [(dataforge_token) = "build_manager"];
+  RUNTIME_WORKER_KIND_BUILD_WORKER = 3 [(dataforge_token) = "build_worker"];
+  RUNTIME_WORKER_KIND_SCHEDULER = 4 [(dataforge_token) = "scheduler"];
 }
 
 enum FilterValueType {

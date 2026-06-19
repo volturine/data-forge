@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from runtime.domain.datasource.source_types import DataSourceFileType, DataSourceType
-from runtime.domain.enums import DataForgeStrEnum
+from runtime.domain.engine_runs.schemas import SchemaDiffStatus
 
 
 class ColumnSchema(BaseModel):
@@ -64,12 +64,6 @@ class ColumnStats(BaseModel):
     unique_count: int | None = None
     min: object | None = None
     max: object | None = None
-
-
-class SchemaDiffStatus(DataForgeStrEnum):
-    ADDED = "added"
-    REMOVED = "removed"
-    TYPE_CHANGED = "type_changed"
 
 
 class SchemaDiff(BaseModel):

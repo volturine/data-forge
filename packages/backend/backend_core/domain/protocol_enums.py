@@ -13,30 +13,41 @@ def protocol_token(enum_name: str, number: int) -> str:
     return cast(str, value_descriptor.GetOptions().Extensions[cast(Any, enums_pb2.dataforge_token)])
 
 
-class ProtocolEnumValue(int):
+class ProtocolEnumValue(str):
     _token_by_number: ClassVar[dict[int, str]]
+    _number_by_token: ClassVar[dict[str, int]]
     _value_by_number: ClassVar[dict[int, Self]]
     _value_by_token: ClassVar[dict[str, Self]]
 
     def __init_subclass__(cls) -> None:
         cls._token_by_number = {}
+        cls._number_by_token = {}
         cls._value_by_number = {}
         cls._value_by_token = {}
 
     def __new__(cls, number: int, token: str) -> Self:
-        value = cast(Self, int.__new__(cls, number))
-        cls._token_by_number[int(value)] = token
-        cls._value_by_number[int(value)] = value
+        value = cast(Self, str.__new__(cls, token))
+        cls._token_by_number[number] = token
+        cls._number_by_token[token] = number
+        cls._value_by_number[number] = value
         cls._value_by_token[token] = value
         return value
 
     @property
     def value(self) -> str:
-        return type(self)._token_by_number[int(self)]
+        return str.__str__(self)
+
+    @property
+    def number(self) -> int:
+        return type(self)._number_by_token[str.__str__(self)]
 
     @classmethod
     def values(cls) -> list[str]:
         return list(cls._value_by_token)
+
+    @classmethod
+    def members(cls) -> list[Self]:
+        return list(cls._value_by_token.values())
 
     @classmethod
     def parse(cls, value: Self | str | int | None) -> Self | None:
@@ -70,17 +81,10 @@ class ProtocolEnumValue(int):
             raise
 
     def __str__(self) -> str:
-        return self.value
+        return str.__str__(self)
 
-    def __reduce__(self) -> tuple[object, tuple[int]]:
-        return (type(self).require, (int(self),))
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, str):
-            return self.value == other
-        return int.__eq__(self, other)
-
-    __hash__ = int.__hash__
+    def __reduce__(self) -> tuple[object, tuple[str]]:
+        return (type(self).require, (str(self),))
 
     @classmethod
     def __get_pydantic_core_schema__(

@@ -1,27 +1,47 @@
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, field_validator
 
+from dataforge_protocol import enums_pb2
 from runtime.domain.analysis.step_types import is_step_type
 from runtime.domain.engine_runs.schemas import EngineRunKind
-from runtime.domain.enums import DataForgeStrEnum
+from runtime.domain.protocol_enums import ProtocolEnumValue, protocol_token
 
 
-class EngineStatus(DataForgeStrEnum):
-    HEALTHY = "healthy"
-    TERMINATED = "terminated"
+class EngineStatus(ProtocolEnumValue):
+    HEALTHY: ClassVar[Self]
+    TERMINATED: ClassVar[Self]
 
 
-class EngineScope(DataForgeStrEnum):
-    DATASOURCE_PREVIEW = "datasource_preview"
-    ANALYSIS_INTERACTIVE = "analysis_interactive"
-    BUILD = "build"
+EngineStatus.HEALTHY = EngineStatus(enums_pb2.ENGINE_STATUS_HEALTHY, protocol_token("EngineStatus", enums_pb2.ENGINE_STATUS_HEALTHY))
+EngineStatus.TERMINATED = EngineStatus(enums_pb2.ENGINE_STATUS_TERMINATED, protocol_token("EngineStatus", enums_pb2.ENGINE_STATUS_TERMINATED))
 
 
-class EngineReusePolicy(DataForgeStrEnum):
-    SHARED = "shared"
-    EXCLUSIVE = "exclusive"
+class EngineScope(ProtocolEnumValue):
+    DATASOURCE_PREVIEW: ClassVar[Self]
+    ANALYSIS_INTERACTIVE: ClassVar[Self]
+    BUILD: ClassVar[Self]
+
+
+EngineScope.DATASOURCE_PREVIEW = EngineScope(
+    enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, protocol_token("EngineScope", enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW)
+)
+EngineScope.ANALYSIS_INTERACTIVE = EngineScope(
+    enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE, protocol_token("EngineScope", enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE)
+)
+EngineScope.BUILD = EngineScope(enums_pb2.ENGINE_SCOPE_BUILD, protocol_token("EngineScope", enums_pb2.ENGINE_SCOPE_BUILD))
+
+
+class EngineReusePolicy(ProtocolEnumValue):
+    SHARED: ClassVar[Self]
+    EXCLUSIVE: ClassVar[Self]
+
+
+EngineReusePolicy.SHARED = EngineReusePolicy(enums_pb2.ENGINE_REUSE_POLICY_SHARED, protocol_token("EngineReusePolicy", enums_pb2.ENGINE_REUSE_POLICY_SHARED))
+EngineReusePolicy.EXCLUSIVE = EngineReusePolicy(
+    enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE, protocol_token("EngineReusePolicy", enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE)
+)
 
 
 class EngineResourceConfig(BaseModel):
@@ -243,18 +263,34 @@ class StepPreviewResponse(BaseModel):
 StepPreviewRequest.model_rebuild()
 
 
-class ExportFormat(DataForgeStrEnum):
-    CSV = "csv"
-    PARQUET = "parquet"
-    JSON = "json"
-    NDJSON = "ndjson"
-    DUCKDB = "duckdb"
-    EXCEL = "excel"
+class ExportFormat(ProtocolEnumValue):
+    CSV: ClassVar[Self]
+    PARQUET: ClassVar[Self]
+    JSON: ClassVar[Self]
+    NDJSON: ClassVar[Self]
+    DUCKDB: ClassVar[Self]
+    EXCEL: ClassVar[Self]
 
 
-class ExportDestination(DataForgeStrEnum):
-    DOWNLOAD = "download"
-    DATASOURCE = "datasource"
+ExportFormat.CSV = ExportFormat(enums_pb2.EXPORT_FORMAT_CSV, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_CSV))
+ExportFormat.PARQUET = ExportFormat(enums_pb2.EXPORT_FORMAT_PARQUET, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_PARQUET))
+ExportFormat.JSON = ExportFormat(enums_pb2.EXPORT_FORMAT_JSON, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_JSON))
+ExportFormat.NDJSON = ExportFormat(enums_pb2.EXPORT_FORMAT_NDJSON, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_NDJSON))
+ExportFormat.DUCKDB = ExportFormat(enums_pb2.EXPORT_FORMAT_DUCKDB, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_DUCKDB))
+ExportFormat.EXCEL = ExportFormat(enums_pb2.EXPORT_FORMAT_EXCEL, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_EXCEL))
+
+
+class ExportDestination(ProtocolEnumValue):
+    DOWNLOAD: ClassVar[Self]
+    DATASOURCE: ClassVar[Self]
+
+
+ExportDestination.DOWNLOAD = ExportDestination(
+    enums_pb2.EXPORT_DESTINATION_DOWNLOAD, protocol_token("ExportDestination", enums_pb2.EXPORT_DESTINATION_DOWNLOAD)
+)
+ExportDestination.DATASOURCE = ExportDestination(
+    enums_pb2.EXPORT_DESTINATION_DATASOURCE, protocol_token("ExportDestination", enums_pb2.EXPORT_DESTINATION_DATASOURCE)
+)
 
 
 class IcebergExportOptions(BaseModel):
@@ -372,23 +408,35 @@ class StepRowCountResponse(BaseModel):
     row_count: int
 
 
-class BuildStatus(DataForgeStrEnum):
-    SUCCESS = "success"
-    WARNING = "warning"
+class BuildStatus(ProtocolEnumValue):
+    SUCCESS: ClassVar[Self]
+    WARNING: ClassVar[Self]
 
     @classmethod
     def coerce(cls, value: object) -> BuildStatus:
         return cls.read(value, default=cls.SUCCESS) or cls.SUCCESS
 
 
-class BuildTabStatus(DataForgeStrEnum):
-    SUCCESS = "success"
-    FAILED = "failed"
+BuildStatus.SUCCESS = BuildStatus(enums_pb2.BUILD_STATUS_SUCCESS, protocol_token("BuildStatus", enums_pb2.BUILD_STATUS_SUCCESS))
+BuildStatus.WARNING = BuildStatus(enums_pb2.BUILD_STATUS_WARNING, protocol_token("BuildStatus", enums_pb2.BUILD_STATUS_WARNING))
 
 
-class ComputeRunStatus(DataForgeStrEnum):
-    SUCCESS = "success"
-    FAILED = "failed"
+class BuildTabStatus(ProtocolEnumValue):
+    SUCCESS: ClassVar[Self]
+    FAILED: ClassVar[Self]
+
+
+BuildTabStatus.SUCCESS = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_SUCCESS, protocol_token("BuildTabStatus", enums_pb2.BUILD_TAB_STATUS_SUCCESS))
+BuildTabStatus.FAILED = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_FAILED, protocol_token("BuildTabStatus", enums_pb2.BUILD_TAB_STATUS_FAILED))
+
+
+class ComputeRunStatus(ProtocolEnumValue):
+    SUCCESS: ClassVar[Self]
+    FAILED: ClassVar[Self]
+
+
+ComputeRunStatus.SUCCESS = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_SUCCESS, protocol_token("ComputeRunStatus", enums_pb2.COMPUTE_RUN_STATUS_SUCCESS))
+ComputeRunStatus.FAILED = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_FAILED, protocol_token("ComputeRunStatus", enums_pb2.COMPUTE_RUN_STATUS_FAILED))
 
 
 class BuildTabResult(BaseModel):
@@ -420,12 +468,12 @@ class BuildRequest(BaseModel):
         return self.analysis_pipeline.tabs[0].datasource.source_type == "schedule"
 
 
-class ActiveBuildStatus(DataForgeStrEnum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+class ActiveBuildStatus(ProtocolEnumValue):
+    QUEUED: ClassVar[Self]
+    RUNNING: ClassVar[Self]
+    COMPLETED: ClassVar[Self]
+    FAILED: ClassVar[Self]
+    CANCELLED: ClassVar[Self]
 
     @property
     def is_terminal(self) -> bool:
@@ -436,22 +484,45 @@ class ActiveBuildStatus(DataForgeStrEnum):
         return cls.read(value, default=cls.QUEUED) or cls.QUEUED
 
 
-class BuildStepState(DataForgeStrEnum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
+ActiveBuildStatus.QUEUED = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_QUEUED, protocol_token("ActiveBuildStatus", enums_pb2.ACTIVE_BUILD_STATUS_QUEUED))
+ActiveBuildStatus.RUNNING = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_RUNNING, protocol_token("ActiveBuildStatus", enums_pb2.ACTIVE_BUILD_STATUS_RUNNING))
+ActiveBuildStatus.COMPLETED = ActiveBuildStatus(
+    enums_pb2.ACTIVE_BUILD_STATUS_COMPLETED, protocol_token("ActiveBuildStatus", enums_pb2.ACTIVE_BUILD_STATUS_COMPLETED)
+)
+ActiveBuildStatus.FAILED = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_FAILED, protocol_token("ActiveBuildStatus", enums_pb2.ACTIVE_BUILD_STATUS_FAILED))
+ActiveBuildStatus.CANCELLED = ActiveBuildStatus(
+    enums_pb2.ACTIVE_BUILD_STATUS_CANCELLED, protocol_token("ActiveBuildStatus", enums_pb2.ACTIVE_BUILD_STATUS_CANCELLED)
+)
 
 
-class BuildLogLevel(DataForgeStrEnum):
-    INFO = "info"
-    WARNING = "warning"
-    ERROR = "error"
+class BuildStepState(ProtocolEnumValue):
+    PENDING: ClassVar[Self]
+    RUNNING: ClassVar[Self]
+    COMPLETED: ClassVar[Self]
+    FAILED: ClassVar[Self]
+    SKIPPED: ClassVar[Self]
+
+
+BuildStepState.PENDING = BuildStepState(enums_pb2.BUILD_STEP_STATE_PENDING, protocol_token("BuildStepState", enums_pb2.BUILD_STEP_STATE_PENDING))
+BuildStepState.RUNNING = BuildStepState(enums_pb2.BUILD_STEP_STATE_RUNNING, protocol_token("BuildStepState", enums_pb2.BUILD_STEP_STATE_RUNNING))
+BuildStepState.COMPLETED = BuildStepState(enums_pb2.BUILD_STEP_STATE_COMPLETED, protocol_token("BuildStepState", enums_pb2.BUILD_STEP_STATE_COMPLETED))
+BuildStepState.FAILED = BuildStepState(enums_pb2.BUILD_STEP_STATE_FAILED, protocol_token("BuildStepState", enums_pb2.BUILD_STEP_STATE_FAILED))
+BuildStepState.SKIPPED = BuildStepState(enums_pb2.BUILD_STEP_STATE_SKIPPED, protocol_token("BuildStepState", enums_pb2.BUILD_STEP_STATE_SKIPPED))
+
+
+class BuildLogLevel(ProtocolEnumValue):
+    INFO: ClassVar[Self]
+    WARNING: ClassVar[Self]
+    ERROR: ClassVar[Self]
 
     @classmethod
     def coerce(cls, value: object) -> BuildLogLevel:
         return cls.read(value, default=cls.INFO) or cls.INFO
+
+
+BuildLogLevel.INFO = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_INFO, protocol_token("BuildLogLevel", enums_pb2.BUILD_LOG_LEVEL_INFO))
+BuildLogLevel.WARNING = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_WARNING, protocol_token("BuildLogLevel", enums_pb2.BUILD_LOG_LEVEL_WARNING))
+BuildLogLevel.ERROR = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_ERROR, protocol_token("BuildLogLevel", enums_pb2.BUILD_LOG_LEVEL_ERROR))
 
 
 class BuildStarter(BaseModel):
@@ -608,17 +679,17 @@ class ActiveBuildListResponse(BaseModel):
     total: int
 
 
-class BuildEventType(DataForgeStrEnum):
-    PLAN = "plan"
-    STEP_START = "step_start"
-    STEP_COMPLETE = "step_complete"
-    STEP_FAILED = "step_failed"
-    PROGRESS = "progress"
-    RESOURCES = "resources"
-    LOG = "log"
-    COMPLETE = "complete"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+class BuildEventType(ProtocolEnumValue):
+    PLAN: ClassVar[Self]
+    STEP_START: ClassVar[Self]
+    STEP_COMPLETE: ClassVar[Self]
+    STEP_FAILED: ClassVar[Self]
+    PROGRESS: ClassVar[Self]
+    RESOURCES: ClassVar[Self]
+    LOG: ClassVar[Self]
+    COMPLETE: ClassVar[Self]
+    FAILED: ClassVar[Self]
+    CANCELLED: ClassVar[Self]
 
     @property
     def is_terminal(self) -> bool:
@@ -665,10 +736,24 @@ class BuildEventType(DataForgeStrEnum):
         return None
 
 
+BuildEventType.PLAN = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PLAN, protocol_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_PLAN))
+BuildEventType.STEP_START = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_START, protocol_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_STEP_START))
+BuildEventType.STEP_COMPLETE = BuildEventType(
+    enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE, protocol_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE)
+)
+BuildEventType.STEP_FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED, protocol_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED))
+BuildEventType.PROGRESS = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PROGRESS, protocol_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_PROGRESS))
+BuildEventType.RESOURCES = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_RESOURCES, protocol_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_RESOURCES))
+BuildEventType.LOG = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_LOG, protocol_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_LOG))
+BuildEventType.COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_COMPLETE, protocol_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_COMPLETE))
+BuildEventType.FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_FAILED, protocol_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_FAILED))
+BuildEventType.CANCELLED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_CANCELLED, protocol_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_CANCELLED))
+
+
 class BuildStreamEvent(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    type: BuildEventType
+    type: str
     build_id: str
     analysis_id: str
     emitted_at: datetime
@@ -683,13 +768,13 @@ class BuildStreamEvent(BaseModel):
 
 
 class BuildPlanEvent(BuildStreamEvent):
-    type: Literal[BuildEventType.PLAN] = BuildEventType.PLAN
+    type: Literal["plan"] = "plan"
     optimized_plan: str
     unoptimized_plan: str
 
 
 class BuildStepStartEvent(BuildStreamEvent):
-    type: Literal[BuildEventType.STEP_START] = BuildEventType.STEP_START
+    type: Literal["step_start"] = "step_start"
     build_step_index: int
     step_index: int
     step_id: str
@@ -699,7 +784,7 @@ class BuildStepStartEvent(BuildStreamEvent):
 
 
 class BuildStepCompleteEvent(BuildStreamEvent):
-    type: Literal[BuildEventType.STEP_COMPLETE] = BuildEventType.STEP_COMPLETE
+    type: Literal["step_complete"] = "step_complete"
     build_step_index: int
     step_index: int
     step_id: str
@@ -711,7 +796,7 @@ class BuildStepCompleteEvent(BuildStreamEvent):
 
 
 class BuildStepFailedEvent(BuildStreamEvent):
-    type: Literal[BuildEventType.STEP_FAILED] = BuildEventType.STEP_FAILED
+    type: Literal["step_failed"] = "step_failed"
     build_step_index: int
     step_index: int
     step_id: str
@@ -722,7 +807,7 @@ class BuildStepFailedEvent(BuildStreamEvent):
 
 
 class BuildProgressEvent(BuildStreamEvent):
-    type: Literal[BuildEventType.PROGRESS] = BuildEventType.PROGRESS
+    type: Literal["progress"] = "progress"
     progress: float
     elapsed_ms: int
     estimated_remaining_ms: int | None = None
@@ -732,7 +817,7 @@ class BuildProgressEvent(BuildStreamEvent):
 
 
 class BuildResourceEvent(BuildStreamEvent):
-    type: Literal[BuildEventType.RESOURCES] = BuildEventType.RESOURCES
+    type: Literal["resources"] = "resources"
     cpu_percent: float
     memory_mb: float
     memory_limit_mb: float | None = None
@@ -741,7 +826,7 @@ class BuildResourceEvent(BuildStreamEvent):
 
 
 class BuildLogEvent(BuildStreamEvent):
-    type: Literal[BuildEventType.LOG] = BuildEventType.LOG
+    type: Literal["log"] = "log"
     level: BuildLogLevel
     message: str
     step_name: str | None = None
@@ -749,7 +834,7 @@ class BuildLogEvent(BuildStreamEvent):
 
 
 class BuildCompleteEvent(BuildStreamEvent):
-    type: Literal[BuildEventType.COMPLETE] = BuildEventType.COMPLETE
+    type: Literal["complete"] = "complete"
     progress: float = 1.0
     elapsed_ms: int
     total_steps: int
@@ -759,7 +844,7 @@ class BuildCompleteEvent(BuildStreamEvent):
 
 
 class BuildFailedEvent(BuildStreamEvent):
-    type: Literal[BuildEventType.FAILED] = BuildEventType.FAILED
+    type: Literal["failed"] = "failed"
     progress: float
     elapsed_ms: int
     total_steps: int
@@ -770,7 +855,7 @@ class BuildFailedEvent(BuildStreamEvent):
 
 
 class BuildCancelledEvent(BuildStreamEvent):
-    type: Literal[BuildEventType.CANCELLED] = BuildEventType.CANCELLED
+    type: Literal["cancelled"] = "cancelled"
     progress: float
     elapsed_ms: int
     total_steps: int

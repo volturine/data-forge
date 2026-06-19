@@ -1,24 +1,37 @@
+from __future__ import annotations
+
 from pathlib import Path
+from typing import ClassVar, Self
 
-from backend_core.domain.enums import DataForgeStrEnum
+from backend_core.domain.protocol_enums import ProtocolEnumValue, protocol_token
+from dataforge_protocol import enums_pb2
 
 
-class DataSourceCategory(DataForgeStrEnum):
-    FILE = 'file'
-    DATABASE = 'database'
-    ANALYSIS = 'analysis'
+class DataSourceCategory(ProtocolEnumValue):
+    FILE: ClassVar[Self]
+    DATABASE: ClassVar[Self]
+    ANALYSIS: ClassVar[Self]
 
     @property
     def is_file_based(self) -> bool:
         return self == DataSourceCategory.FILE
 
 
-class DataSourceFileType(DataForgeStrEnum):
-    CSV = 'csv'
-    PARQUET = 'parquet'
-    JSON = 'json'
-    NDJSON = 'ndjson'
-    EXCEL = 'excel'
+DataSourceCategory.FILE = DataSourceCategory(enums_pb2.DATA_SOURCE_CATEGORY_FILE, protocol_token('DataSourceCategory', enums_pb2.DATA_SOURCE_CATEGORY_FILE))
+DataSourceCategory.DATABASE = DataSourceCategory(
+    enums_pb2.DATA_SOURCE_CATEGORY_DATABASE, protocol_token('DataSourceCategory', enums_pb2.DATA_SOURCE_CATEGORY_DATABASE)
+)
+DataSourceCategory.ANALYSIS = DataSourceCategory(
+    enums_pb2.DATA_SOURCE_CATEGORY_ANALYSIS, protocol_token('DataSourceCategory', enums_pb2.DATA_SOURCE_CATEGORY_ANALYSIS)
+)
+
+
+class DataSourceFileType(ProtocolEnumValue):
+    CSV: ClassVar[Self]
+    PARQUET: ClassVar[Self]
+    JSON: ClassVar[Self]
+    NDJSON: ClassVar[Self]
+    EXCEL: ClassVar[Self]
 
     @property
     def upload_suffixes(self) -> tuple[str, ...]:
@@ -42,14 +55,14 @@ class DataSourceFileType(DataForgeStrEnum):
     @classmethod
     def from_upload_suffix(cls, suffix: str) -> DataSourceFileType | None:
         normalized = suffix.lower()
-        for item in cls:
+        for item in cls.members():
             if normalized in item.upload_suffixes:
                 return item
         return None
 
     @classmethod
     def supported_upload_suffixes(cls) -> tuple[str, ...]:
-        return tuple(suffix for item in cls for suffix in item.upload_suffixes)
+        return tuple(suffix for item in cls.members() for suffix in item.upload_suffixes)
 
     @property
     def uses_csv_options(self) -> bool:
@@ -75,11 +88,24 @@ class DataSourceFileType(DataForgeStrEnum):
             raise ValueError('Parquet path must be a file or directory')
 
 
-class DataSourceType(DataForgeStrEnum):
-    FILE = 'file'
-    DATABASE = 'database'
-    ICEBERG = 'iceberg'
-    ANALYSIS = 'analysis'
+DataSourceFileType.CSV = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_CSV, protocol_token('DataSourceFileType', enums_pb2.DATA_SOURCE_FILE_TYPE_CSV))
+DataSourceFileType.PARQUET = DataSourceFileType(
+    enums_pb2.DATA_SOURCE_FILE_TYPE_PARQUET, protocol_token('DataSourceFileType', enums_pb2.DATA_SOURCE_FILE_TYPE_PARQUET)
+)
+DataSourceFileType.JSON = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_JSON, protocol_token('DataSourceFileType', enums_pb2.DATA_SOURCE_FILE_TYPE_JSON))
+DataSourceFileType.NDJSON = DataSourceFileType(
+    enums_pb2.DATA_SOURCE_FILE_TYPE_NDJSON, protocol_token('DataSourceFileType', enums_pb2.DATA_SOURCE_FILE_TYPE_NDJSON)
+)
+DataSourceFileType.EXCEL = DataSourceFileType(
+    enums_pb2.DATA_SOURCE_FILE_TYPE_EXCEL, protocol_token('DataSourceFileType', enums_pb2.DATA_SOURCE_FILE_TYPE_EXCEL)
+)
+
+
+class DataSourceType(ProtocolEnumValue):
+    FILE: ClassVar[Self]
+    DATABASE: ClassVar[Self]
+    ICEBERG: ClassVar[Self]
+    ANALYSIS: ClassVar[Self]
 
     @property
     def category(self) -> DataSourceCategory:
@@ -110,3 +136,9 @@ class DataSourceType(DataForgeStrEnum):
         if self == DataSourceType.FILE:
             return 'Failed to read file datasource'
         raise ValueError(f'Datasource type {self.value} does not define an ingestion error message')
+
+
+DataSourceType.FILE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_FILE, protocol_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_FILE))
+DataSourceType.DATABASE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_DATABASE, protocol_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_DATABASE))
+DataSourceType.ICEBERG = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ICEBERG, protocol_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_ICEBERG))
+DataSourceType.ANALYSIS = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ANALYSIS, protocol_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_ANALYSIS))

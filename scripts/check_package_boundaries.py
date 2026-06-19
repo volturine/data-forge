@@ -98,6 +98,37 @@ BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
     'from backend_core.domain.enums import DataForgeStrEnum': 'backend operation config enums must be generated-protocol-backed',
     '(DataForgeStrEnum)': 'backend operation config enums must not reintroduce copied StrEnum contracts',
 }
+PROTOCOL_BACKED_ENUM_FILES = [
+    Path('packages/backend/backend_core/domain/analysis/models.py'),
+    Path('packages/backend/backend_core/domain/analysis/step_types.py'),
+    Path('packages/backend/backend_core/domain/build_jobs/models.py'),
+    Path('packages/backend/backend_core/domain/build_runs/models.py'),
+    Path('packages/backend/backend_core/domain/compute/schemas.py'),
+    Path('packages/backend/backend_core/domain/datasource/models.py'),
+    Path('packages/backend/backend_core/domain/datasource/source_types.py'),
+    Path('packages/backend/backend_core/domain/engine_instances/models.py'),
+    Path('packages/backend/backend_core/domain/engine_runs/schemas.py'),
+    Path('packages/backend/backend_core/domain/healthcheck_models.py'),
+    Path('packages/backend/backend_core/domain/runtime/events.py'),
+    Path('packages/backend/backend_core/domain/runtime_workers/models.py'),
+    Path('packages/backend/modules/datasource/schemas.py'),
+    Path('packages/worker/datasources/datasource_schemas.py'),
+    Path('packages/worker/runtime/domain/analysis/models.py'),
+    Path('packages/worker/runtime/domain/analysis/step_types.py'),
+    Path('packages/worker/runtime/domain/build_jobs/models.py'),
+    Path('packages/worker/runtime/domain/build_runs/models.py'),
+    Path('packages/worker/runtime/domain/compute/schemas.py'),
+    Path('packages/worker/runtime/domain/datasource/models.py'),
+    Path('packages/worker/runtime/domain/datasource/source_types.py'),
+    Path('packages/worker/runtime/domain/engine_instances/models.py'),
+    Path('packages/worker/runtime/domain/engine_runs/schemas.py'),
+    Path('packages/worker/runtime/domain/healthcheck_models.py'),
+    Path('packages/worker/runtime/domain/runtime/events.py'),
+    Path('packages/worker/runtime/domain/runtime_workers/models.py'),
+]
+PROTOCOL_BACKED_ENUM_FORBIDDEN_TOKENS = {
+    'DataForgeStrEnum': 'protocol-backed domain enums must use generated protocol descriptors',
+}
 
 
 def is_excluded(path: Path) -> bool:
@@ -172,6 +203,16 @@ def main() -> int:
         for token, reason in BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS.items():
             if token in content:
                 errors.append(f'{backend_step_config_enums.relative_to(ROOT)} contains {reason}: {token}')
+
+    for rel_path in PROTOCOL_BACKED_ENUM_FILES:
+        path = ROOT / rel_path
+        if not path.exists():
+            errors.append(f'protocol-backed enum file is missing: {rel_path}')
+            continue
+        content = path.read_text()
+        for token, reason in PROTOCOL_BACKED_ENUM_FORBIDDEN_TOKENS.items():
+            if token in content:
+                errors.append(f'{rel_path} contains {reason}: {token}')
 
     for package, forbidden_roots in PACKAGE_FORBIDDEN_IMPORT_ROOTS.items():
         for path in iter_python_files(package):

@@ -137,6 +137,7 @@ class HealthCheck(SQLModel, table=True):  # type: ignore[call-arg]
                     f'Duplicates: {pct:.1f}% (threshold: {threshold}%)',
                     self.result_details(actual_percentage=round(pct, 2)),
                 )
+        raise ValueError(f'Unsupported healthcheck type: {self.check_type!r}')
 
     id: str = Field(sa_column=Column(String, primary_key=True))
     datasource_id: str = Field(sa_column=Column(String, nullable=False, index=True))

@@ -619,6 +619,7 @@ def _evaluate_healthcheck(check: HealthCheckSpec, *, values: dict[str, object], 
             threshold = _healthcheck_config_float(check, "threshold") or 0.0
             pct = 0.0 if total == 0 else (1 - unique / total) * 100.0
             return pct <= threshold, f"Duplicates: {pct:.1f}% (threshold: {threshold}%)", _healthcheck_result_details(check, actual_percentage=round(pct, 2))
+    raise ValueError(f"Unsupported healthcheck type: {check.check_type!r}")
 
 
 def _build_healthcheck_expressions(checks: list[HealthCheckSpec], schema_names: set[str]) -> tuple[list[pl.Expr], list[HealthCheckSpec]]:

@@ -92,7 +92,7 @@ def _run_async_handler_in_thread(func):
 
 def _parse_worker_kind(value: str) -> RuntimeWorkerKind:
     try:
-        return RuntimeWorkerKind(value)
+        return RuntimeWorkerKind.require(value)
     except ValueError as exc:
         raise ValueError(f'Unsupported runtime worker kind: {value}') from exc
 

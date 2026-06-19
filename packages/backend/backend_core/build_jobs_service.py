@@ -31,7 +31,7 @@ def create_job(
         id=str(uuid.uuid4()),
         build_id=build_id,
         namespace=namespace,
-        status=status if isinstance(status, BuildJobStatus) else BuildJobStatus(status),
+        status=status if isinstance(status, BuildJobStatus) else BuildJobStatus.require(status),
         priority=priority,
         attempts=0,
         max_attempts=max_attempts,
@@ -58,7 +58,7 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
     queued_clause = table.c.status == BuildJobStatus.QUEUED
-    reclaimable_statuses = [status for status in BuildJobStatus if status.is_reclaimable]
+    reclaimable_statuses = [status for status in BuildJobStatus.members() if status.is_reclaimable]
     lease_expired_clause = table.c.lease_expires_at <= now
     reclaimable_clause = and_(
         table.c.status.in_(reclaimable_statuses),
@@ -174,7 +174,7 @@ def release_worker_jobs(session: Session, *, worker_id: str) -> list[BuildJob]:
     stmt = (
         select(BuildJob)
         .where(BuildJob.lease_owner == worker_id)  # type: ignore[arg-type]
-        .where(table.c.status.in_([status for status in BuildJobStatus if status.is_reclaimable]))
+        .where(table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]))
     )
     jobs = list(session.execute(stmt).scalars().all())
     for job in jobs:

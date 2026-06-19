@@ -44,6 +44,19 @@ def test_compute_run_status_enum_values_are_explicit() -> None:
     assert ComputeRunStatus.FAILED.value == 'failed'
 
 
+def test_compute_domain_enums_are_protocol_descriptor_backed() -> None:
+    assert BuildTabStatus.SUCCESS.number == enums_pb2.BUILD_TAB_STATUS_SUCCESS
+    assert BuildTabStatus.require(enums_pb2.BUILD_TAB_STATUS_SUCCESS) == BuildTabStatus.SUCCESS
+    assert BuildTabStatus.SUCCESS.value == 'success'
+    assert BuildTabStatus.require(enums_pb2.BUILD_TAB_STATUS_SUCCESS) is BuildTabStatus.SUCCESS
+    assert BuildTabStatus.require('success') is BuildTabStatus.SUCCESS
+    assert BuildTabStatus.values() == ['success', 'failed']
+
+    result = BuildTabResult.model_validate({'tab_id': 'tab-1', 'tab_name': 'Tab 1', 'status': enums_pb2.BUILD_TAB_STATUS_FAILED})
+    assert result.status is BuildTabStatus.FAILED
+    assert result.model_dump(mode='json')['status'] == 'failed'
+
+
 def test_proto_engine_resource_config_matches_memory_bounds() -> None:
     validator = Validator()
 

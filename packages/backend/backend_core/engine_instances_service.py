@@ -114,7 +114,7 @@ def mark_namespace_engines_stopped(session: Session, *, worker_id: str, namespac
 
 
 def list_engine_instances(session: Session, *, namespace: str) -> list[EngineInstance]:
-    active = [status for status in EngineInstanceStatus if status.is_active]
+    active = [status for status in EngineInstanceStatus.members() if status.is_active]
     stmt = (
         select(EngineInstance)
         .where(EngineInstance.namespace == namespace)  # type: ignore[arg-type]
@@ -162,7 +162,7 @@ def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object
     return {
         'analysis_id': row.analysis_id,
         'resource_id': _row_resource_id(row),
-        'status': row.status.overview_status,
+        'status': row.status_kind().overview_status,
         'process_id': row.process_id,
         'last_activity': row.last_activity_at.isoformat() if row.last_activity_at is not None else None,
         'current_job_id': row.current_job_id,

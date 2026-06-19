@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
-from backend_core.domain.enums import DataForgeStrEnum
+from backend_core.domain.engine_runs.schemas import SchemaDiffStatus
 from backend_core.object_store_paths import is_object_store_url
 
 
@@ -65,12 +65,6 @@ class ColumnStats(BaseModel):
     unique_count: int | None = None
     min: object | None = None
     max: object | None = None
-
-
-class SchemaDiffStatus(DataForgeStrEnum):
-    ADDED = 'added'
-    REMOVED = 'removed'
-    TYPE_CHANGED = 'type_changed'
 
 
 class SchemaDiff(BaseModel):

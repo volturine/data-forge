@@ -33,7 +33,7 @@ from backend_core.persistence.scheduler.models import Schedule
 
 logger = logging.getLogger(__name__)
 
-_SCHEDULE_TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus if status.is_terminal)
+_SCHEDULE_TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
 
 
 def _utcnow() -> datetime:

@@ -317,7 +317,7 @@ _SCHEMA_HANDLERS: dict[DataSourceType, Callable[[DataSource, str | None], Schema
     DataSourceType.DATABASE: _schema_from_database,
     **{
         source_type: _schema_from_file
-        for source_type in DataSourceType
+        for source_type in DataSourceType.members()
         if source_type.is_file_based and source_type not in {DataSourceType.ANALYSIS, DataSourceType.DATABASE}
     },
 }
@@ -325,7 +325,7 @@ _SCHEMA_HANDLERS: dict[DataSourceType, Callable[[DataSource, str | None], Schema
 
 def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> SchemaInfo:
     try:
-        source_type = DataSourceType(datasource.source_type)
+        source_type = DataSourceType.require(datasource.source_type)
     except ValueError as exc:
         raise DataSourceConnectionError(
             'Unsupported datasource type for schema extraction',

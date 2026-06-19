@@ -1,6 +1,6 @@
 import datetime as dt
 
-from sqlalchemy import Column, DateTime, Enum as SAEnum, Integer, String
+from sqlalchemy import Column, DateTime, Integer, String
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
@@ -15,9 +15,7 @@ class RuntimeWorker(SQLModel, table=True):  # type: ignore[call-arg, assignment]
         return max((current - heartbeat).total_seconds(), 0.0)
 
     id: str = Field(sa_column=Column(String, primary_key=True))
-    kind: RuntimeWorkerKind = Field(
-        sa_column=Column(SAEnum(RuntimeWorkerKind, native_enum=False, values_callable=lambda enum_cls: enum_cls.values()), nullable=False, index=True)
-    )
+    kind: RuntimeWorkerKind = Field(sa_column=Column(String, nullable=False, index=True))
     hostname: str = Field(sa_column=Column(String, nullable=False))
     pid: int = Field(sa_column=Column(Integer, nullable=False))
     capacity: int = Field(default=1, sa_column=Column(Integer, nullable=False))

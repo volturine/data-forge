@@ -11,7 +11,7 @@ from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.datasource.models import DataSource
 
-_TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus if status.is_terminal)
+_TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
 
 
 def _utcnow() -> datetime:
@@ -418,7 +418,7 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
         if isinstance(event, compute_schemas.BuildCompleteEvent | compute_schemas.BuildFailedEvent | compute_schemas.BuildCancelledEvent):
             results = list(event.results)
 
-    status, orphan_error = build_run.status.to_active_build_status()
+    status, orphan_error = build_run.status_kind().to_active_build_status()
     error = build_run.error_message or orphan_error
     resource_config = (
         compute_schemas.BuildResourceConfigSummary.model_validate(build_run.resource_config_json) if isinstance(build_run.resource_config_json, dict) else None
@@ -464,7 +464,7 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
 
 
 def build_summary(build_run: BuildRun) -> compute_schemas.ActiveBuildSummary:
-    status, _orphan_error = build_run.status.to_active_build_status()
+    status, _orphan_error = build_run.status_kind().to_active_build_status()
     resource_config = (
         compute_schemas.BuildResourceConfigSummary.model_validate(build_run.resource_config_json) if isinstance(build_run.resource_config_json, dict) else None
     )
