@@ -94,6 +94,12 @@ WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
     'from runtime.domain.enums import DataForgeStrEnum': 'worker operation config enums must be generated-protocol-backed',
     '(DataForgeStrEnum)': 'worker operation config enums must not reintroduce copied StrEnum contracts',
 }
+WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
+    'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
+}
+BACKEND_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
+    'class EngineIdentityPayload(BaseModel)': 'backend compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
+}
 BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
     'from backend_core.domain.enums import DataForgeStrEnum': 'backend operation config enums must be generated-protocol-backed',
     '(DataForgeStrEnum)': 'backend operation config enums must not reintroduce copied StrEnum contracts',
@@ -200,12 +206,26 @@ def main() -> int:
             if token in content:
                 errors.append(f'{worker_step_config_enums.relative_to(ROOT)} contains {reason}: {token}')
 
+    worker_compute_schemas = ROOT / 'packages/worker/runtime/domain/compute/schemas.py'
+    if worker_compute_schemas.exists():
+        content = worker_compute_schemas.read_text()
+        for token, reason in WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS.items():
+            if token in content:
+                errors.append(f'{worker_compute_schemas.relative_to(ROOT)} contains {reason}: {token}')
+
     backend_step_config_enums = ROOT / 'packages/backend/backend_core/domain/step_config_enums.py'
     if backend_step_config_enums.exists():
         content = backend_step_config_enums.read_text()
         for token, reason in BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS.items():
             if token in content:
                 errors.append(f'{backend_step_config_enums.relative_to(ROOT)} contains {reason}: {token}')
+
+    backend_compute_schemas = ROOT / 'packages/backend/backend_core/domain/compute/schemas.py'
+    if backend_compute_schemas.exists():
+        content = backend_compute_schemas.read_text()
+        for token, reason in BACKEND_COMPUTE_SCHEMA_FORBIDDEN_TOKENS.items():
+            if token in content:
+                errors.append(f'{backend_compute_schemas.relative_to(ROOT)} contains {reason}: {token}')
 
     for rel_path in PROTOCOL_BACKED_ENUM_FILES:
         path = ROOT / rel_path

@@ -97,24 +97,6 @@ def _build_engine_identity(build_id: str) -> compute_pb2.EngineIdentity:
     )
 
 
-def _required_payload_identity_id(payload: dict[str, object], field_name: str) -> str:
-    value = payload.get(field_name)
-    if not isinstance(value, str):
-        raise ValueError(f'engine identity {field_name} is required')
-    return _required_identity_id(value, field_name)
-
-
-def _engine_identity_from_payload(payload: dict[str, object]) -> compute_pb2.EngineIdentity:
-    scope = payload.get('scope')
-    if scope == 'analysis_interactive':
-        return _analysis_interactive_engine_identity(_required_payload_identity_id(payload, 'analysis_id'))
-    if scope == 'datasource_preview':
-        return _datasource_preview_engine_identity(_required_payload_identity_id(payload, 'datasource_id'))
-    if scope == 'build':
-        return _build_engine_identity(_required_payload_identity_id(payload, 'build_id'))
-    raise ValueError('engine identity scope is invalid')
-
-
 def _engine_identity_resource_id(identity: compute_pb2.EngineIdentity) -> str:
     if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField('analysis_id'):
         return identity.analysis_id
@@ -534,11 +516,7 @@ async def preview_step(
     """
     analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
     normalized = request.model_copy(update={'analysis_id': analysis_id})
-    engine_identity = (
-        _engine_identity_from_payload(normalized.engine_identity.model_dump(mode='json'))
-        if normalized.engine_identity is not None
-        else _analysis_interactive_engine_identity(analysis_id)
-    )
+    engine_identity = normalized.engine_identity if normalized.engine_identity is not None else _analysis_interactive_engine_identity(analysis_id)
     manager = _override_manager(http_request)
     if manager is not None:
         executor = _override_compute_executor(http_request)

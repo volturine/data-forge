@@ -42,43 +42,6 @@ _DATASOURCE_REQUEST_KINDS = {
 }
 
 
-def _required_identity_id(value: str, field_name: str) -> str:
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError(f"{field_name} is required")
-    return normalized
-
-
-def _required_payload_identity_id(payload: dict[str, object], field_name: str) -> str:
-    value = payload.get(field_name)
-    if not isinstance(value, str):
-        raise ValueError(f"engine identity {field_name} is required")
-    return _required_identity_id(value, field_name)
-
-
-def _engine_identity_from_payload(payload: dict[str, object]) -> compute_pb2.EngineIdentity:
-    scope = payload.get("scope")
-    if scope == "analysis_interactive":
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-            analysis_id=_required_payload_identity_id(payload, "analysis_id"),
-        )
-    if scope == "datasource_preview":
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-            datasource_id=_required_payload_identity_id(payload, "datasource_id"),
-        )
-    if scope == "build":
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_BUILD,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
-            build_id=_required_payload_identity_id(payload, "build_id"),
-        )
-    raise ValueError("engine identity scope is invalid")
-
-
 def worker_internal_api_client() -> WorkerInternalApiClient:
     return client_from_env()
 
@@ -194,9 +157,6 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
 
         if claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
             preview_request = compute_schemas.StepPreviewRequest.model_validate(claimed.request_json)
-            preview_identity = (
-                _engine_identity_from_payload(preview_request.engine_identity.model_dump(mode="json")) if preview_request.engine_identity is not None else None
-            )
             preview_response = service.preview_step(
                 session=None,
                 manager=manager,
@@ -205,10 +165,10 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 row_limit=preview_request.row_limit,
                 page=preview_request.page,
                 analysis_id=preview_request.analysis_id,
-                engine_identity=preview_identity,
+                engine_identity=preview_request.engine_identity,
                 resource_config=preview_request.resource_config.model_dump() if preview_request.resource_config else None,
                 tab_id=preview_request.tab_id,
-                request_json=preview_request.model_dump(mode="json"),
+                request_json=claimed.request_json,
             )
             _complete_request(client, claimed, response_json=preview_response.model_dump(mode="json"))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:

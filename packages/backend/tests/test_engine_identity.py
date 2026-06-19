@@ -1,5 +1,33 @@
+import pytest
+from pydantic import ValidationError
+
+from backend_core.domain.compute.schemas import StepPreviewRequest
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.compute import executor_client, routes as compute_routes
+
+
+def _preview_payload(engine_identity: dict[str, object]) -> dict[str, object]:
+    return {
+        'analysis_id': 'analysis-1',
+        'engine_identity': engine_identity,
+        'target_step_id': 'step-1',
+        'analysis_pipeline': {
+            'analysis_id': 'analysis-1',
+            'tabs': [
+                {
+                    'id': 'tab-1',
+                    'datasource': {
+                        'id': 'datasource-1',
+                        'analysis_tab_id': 'tab-1',
+                        'source_type': 'csv',
+                        'config': {'branch': 'main'},
+                    },
+                    'output': {'result_id': 'result-1', 'filename': 'result.csv', 'format': 'csv'},
+                    'steps': [{'id': 'step-1', 'type': 'select', 'config': {'columns': []}}],
+                }
+            ],
+        },
+    }
 
 
 def test_analysis_interactive_engine_identity_uses_generated_proto() -> None:
@@ -46,17 +74,38 @@ def test_engine_identity_payload_is_boundary_conversion() -> None:
     }
 
 
-def test_engine_identity_from_payload_is_boundary_conversion() -> None:
-    identity = compute_routes._engine_identity_from_payload(
-        {
-            'scope': 'build',
-            'reuse_policy': 'exclusive',
-            'resource_id': 'build-1',
-            'build_id': 'build-1',
-        }
+def test_step_preview_request_uses_generated_engine_identity() -> None:
+    request = StepPreviewRequest.model_validate(
+        _preview_payload(
+            {
+                'scope': 'datasource_preview',
+                'reuse_policy': 'shared',
+                'resource_id': 'datasource-1',
+                'datasource_id': 'datasource-1',
+            }
+        )
     )
 
-    assert isinstance(identity, compute_pb2.EngineIdentity)
-    assert identity.scope == enums_pb2.ENGINE_SCOPE_BUILD
-    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE
-    assert identity.build_id == 'build-1'
+    assert isinstance(request.engine_identity, compute_pb2.EngineIdentity)
+    assert request.engine_identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
+    assert request.engine_identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert request.engine_identity.datasource_id == 'datasource-1'
+    assert request.model_dump(mode='json')['engine_identity'] == {
+        'scope': 'datasource_preview',
+        'reuse_policy': 'shared',
+        'resource_id': 'datasource-1',
+        'datasource_id': 'datasource-1',
+    }
+
+
+def test_step_preview_request_rejects_invalid_engine_identity_payload() -> None:
+    with pytest.raises(ValidationError, match='engine identity datasource_id is required'):
+        StepPreviewRequest.model_validate(
+            _preview_payload(
+                {
+                    'scope': 'datasource_preview',
+                    'reuse_policy': 'shared',
+                    'resource_id': 'datasource-1',
+                }
+            )
+        )

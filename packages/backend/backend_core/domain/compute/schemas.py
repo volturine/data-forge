@@ -1,12 +1,12 @@
 from datetime import UTC, datetime
 from typing import Annotated, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, StringConstraints, TypeAdapter, WithJsonSchema, field_validator
 
 from backend_core.domain.analysis.step_types import is_step_type
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.domain.protocol_enums import ProtocolEnumValue, protocol_token
-from dataforge_protocol import enums_pb2
+from dataforge_protocol import compute_pb2, enums_pb2
 
 
 class EngineStatus(ProtocolEnumValue):
@@ -223,22 +223,91 @@ class SpawnEngineRequest(BaseModel):
     resource_config: EngineResourceConfig | None = None
 
 
-class EngineIdentityPayload(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+def _required_engine_identity_id(payload: dict[str, object], field_name: str) -> str:
+    value = payload.get(field_name)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f'engine identity {field_name} is required')
+    return value.strip()
 
-    scope: EngineScope
-    reuse_policy: EngineReusePolicy
-    resource_id: str
-    analysis_id: str | None = None
-    datasource_id: str | None = None
-    build_id: str | None = None
+
+def _engine_identity_from_payload(value: object) -> compute_pb2.EngineIdentity:
+    if isinstance(value, compute_pb2.EngineIdentity):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError('engine identity must be a protocol message or object payload')
+    scope = value.get('scope')
+    if scope == 'analysis_interactive':
+        return compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=_required_engine_identity_id(value, 'analysis_id'),
+        )
+    if scope == 'datasource_preview':
+        return compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            datasource_id=_required_engine_identity_id(value, 'datasource_id'),
+        )
+    if scope == 'build':
+        return compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_BUILD,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+            build_id=_required_engine_identity_id(value, 'build_id'),
+        )
+    raise ValueError('engine identity scope is invalid')
+
+
+def _engine_identity_to_payload(identity: compute_pb2.EngineIdentity) -> dict[str, str]:
+    if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField('analysis_id'):
+        return {
+            'scope': 'analysis_interactive',
+            'reuse_policy': 'shared',
+            'resource_id': identity.analysis_id,
+            'analysis_id': identity.analysis_id,
+        }
+    if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.HasField('datasource_id'):
+        return {
+            'scope': 'datasource_preview',
+            'reuse_policy': 'shared',
+            'resource_id': identity.datasource_id,
+            'datasource_id': identity.datasource_id,
+        }
+    if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD and identity.HasField('build_id'):
+        return {
+            'scope': 'build',
+            'reuse_policy': 'exclusive',
+            'resource_id': identity.build_id,
+            'build_id': identity.build_id,
+        }
+    raise ValueError('engine identity is missing the resource id required by its scope')
+
+
+EngineIdentityField = Annotated[
+    compute_pb2.EngineIdentity,
+    BeforeValidator(_engine_identity_from_payload),
+    PlainSerializer(_engine_identity_to_payload, return_type=dict[str, str], when_used='json'),
+    WithJsonSchema(
+        {
+            'type': 'object',
+            'required': ['scope', 'reuse_policy', 'resource_id'],
+            'properties': {
+                'scope': {'type': 'string', 'enum': ['analysis_interactive', 'datasource_preview', 'build']},
+                'reuse_policy': {'type': 'string', 'enum': ['shared', 'exclusive']},
+                'resource_id': {'type': 'string'},
+                'analysis_id': {'type': 'string'},
+                'datasource_id': {'type': 'string'},
+                'build_id': {'type': 'string'},
+            },
+        }
+    ),
+]
 
 
 class StepPreviewRequest(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, from_attributes=True)
 
     analysis_id: str | None = None
-    engine_identity: EngineIdentityPayload | None = None
+    engine_identity: EngineIdentityField | None = None
     target_step_id: str
     analysis_pipeline: AnalysisPipelinePayload
     tab_id: str | None = None

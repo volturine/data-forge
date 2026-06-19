@@ -3,7 +3,7 @@ from typing import Annotated, ClassVar, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, field_validator
 
-from dataforge_protocol import enums_pb2
+from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.domain.analysis.step_types import is_step_type
 from runtime.domain.engine_runs.schemas import EngineRunKind
 from runtime.domain.protocol_enums import ProtocolEnumValue, protocol_token
@@ -223,28 +223,58 @@ class SpawnEngineRequest(BaseModel):
     resource_config: EngineResourceConfig | None = None
 
 
-class EngineIdentityPayload(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+def _required_engine_identity_id(payload: dict[str, object], field_name: str) -> str:
+    value = payload.get(field_name)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"engine identity {field_name} is required")
+    return value.strip()
 
-    scope: EngineScope
-    reuse_policy: EngineReusePolicy
-    resource_id: str
-    analysis_id: str | None = None
-    datasource_id: str | None = None
-    build_id: str | None = None
+
+def _engine_identity_from_payload(value: object) -> compute_pb2.EngineIdentity:
+    if isinstance(value, compute_pb2.EngineIdentity):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError("engine identity must be a protocol message or object payload")
+    scope = value.get("scope")
+    if scope == "analysis_interactive":
+        return compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=_required_engine_identity_id(value, "analysis_id"),
+        )
+    if scope == "datasource_preview":
+        return compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            datasource_id=_required_engine_identity_id(value, "datasource_id"),
+        )
+    if scope == "build":
+        return compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_BUILD,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+            build_id=_required_engine_identity_id(value, "build_id"),
+        )
+    raise ValueError("engine identity scope is invalid")
 
 
 class StepPreviewRequest(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, from_attributes=True)
 
     analysis_id: str | None = None
-    engine_identity: EngineIdentityPayload | None = None
+    engine_identity: compute_pb2.EngineIdentity | None = None
     target_step_id: str
     analysis_pipeline: AnalysisPipelinePayload
     tab_id: str | None = None
     row_limit: int = Field(default=1000, ge=1, le=5000)
     page: int = Field(default=1, ge=1)
     resource_config: EngineResourceConfig | None = None
+
+    @field_validator("engine_identity", mode="before")
+    @classmethod
+    def validate_engine_identity(cls, value: object) -> compute_pb2.EngineIdentity | None:
+        if value is None:
+            return None
+        return _engine_identity_from_payload(value)
 
 
 class StepPreviewResponse(BaseModel):
