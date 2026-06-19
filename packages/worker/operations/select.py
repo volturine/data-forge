@@ -5,22 +5,12 @@ from pydantic import Field
 
 from operations.type_casting import require_polars_type
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.enums import DataForgeStrEnum
-
-
-class PolarsCastType(DataForgeStrEnum):
-    INT64 = "Int64"
-    FLOAT64 = "Float64"
-    BOOLEAN = "Boolean"
-    STRING = "String"
-    UTF8 = "Utf8"
-    DATE = "Date"
-    DATETIME = "Datetime"
+from runtime.domain.step_config_enums import CastMapType
 
 
 class SelectParams(OperationParams):
     columns: list[str]
-    cast_map: dict[str, PolarsCastType] = Field(default_factory=dict)
+    cast_map: dict[str, CastMapType] = Field(default_factory=dict)
 
 
 class SelectHandler(OperationHandler):

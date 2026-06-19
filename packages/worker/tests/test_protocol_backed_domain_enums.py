@@ -1,6 +1,7 @@
 from dataforge_protocol import enums_pb2
 from runtime.domain.compute.schemas import BuildEventType, BuildTabResult, BuildTabStatus
 from runtime.domain.datasource.source_types import DataSourceFileType, DataSourceLoadType, DataSourceType, IcebergReader
+from runtime.domain.step_config_enums import CastMapType
 
 
 def test_worker_compute_enums_are_protocol_descriptor_backed() -> None:
@@ -25,3 +26,11 @@ def test_worker_datasource_enums_keep_string_storage_with_protocol_numbers() -> 
     assert [item.value for item in DataSourceLoadType.members()] == ["file", "database", "duckdb", "iceberg"]
     assert IcebergReader.NATIVE.number == enums_pb2.ICEBERG_READER_NATIVE
     assert IcebergReader.require("native") is IcebergReader.NATIVE
+
+
+def test_worker_cast_map_type_uses_generated_protocol_enum_value() -> None:
+    cast_type = CastMapType.require("Int64")
+
+    assert cast_type.number == enums_pb2.CAST_MAP_TYPE_INT64
+    assert CastMapType.require(enums_pb2.CAST_MAP_TYPE_INT64) is cast_type
+    assert cast_type.value == "Int64"

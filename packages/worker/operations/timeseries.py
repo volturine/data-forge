@@ -1,19 +1,12 @@
 import polars as pl
 
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.enums import DataForgeStrEnum
 from runtime.domain.step_config_enums import (
     DurationUnit,
     TimeComponent,
     TimeDirection,
     TimeseriesOperationType,
 )
-
-
-class TimestampUnit(DataForgeStrEnum):
-    NS = "ns"
-    US = "us"
-    MS = "ms"
 
 
 class TimeseriesParams(OperationParams):
@@ -74,10 +67,10 @@ class TimeseriesHandler(OperationHandler):
             return lf.with_columns(getattr(pl.col(validated.column).dt, method)().alias(validated.new_column))
 
         if validated.operation_type == TimeseriesOperationType.TIMESTAMP:
-            unit = validated.unit
-            if unit == TimestampUnit.NS.value:
+            unit = DurationUnit.MICROSECONDS if validated.unit is None else DurationUnit.require(validated.unit)
+            if unit == DurationUnit.NANOSECONDS:
                 return lf.with_columns(pl.col(validated.column).dt.timestamp("ns").alias(validated.new_column))
-            if unit == TimestampUnit.MS.value:
+            if unit == DurationUnit.MILLISECONDS:
                 return lf.with_columns(pl.col(validated.column).dt.timestamp("ms").alias(validated.new_column))
             return lf.with_columns(pl.col(validated.column).dt.timestamp("us").alias(validated.new_column))
 

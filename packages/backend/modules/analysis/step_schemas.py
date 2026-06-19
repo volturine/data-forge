@@ -11,9 +11,9 @@ from backend_core.domain.analysis.step_types import (
     is_step_type,
     iter_step_types,
 )
-from backend_core.domain.enums import DataForgeStrEnum
 from backend_core.domain.step_config_enums import (
     AxisScale,
+    CastMapType,
     ChartAggregation,
     ChartHeight,
     ChartWidth,
@@ -53,25 +53,6 @@ __all__ = [
     'normalize_step_config',
     'validate_step',
 ]
-
-
-class StepCategory(DataForgeStrEnum):
-    TRANSFORM = 'transform'
-    AGGREGATE = 'aggregate'
-    RESHAPE = 'reshape'
-    IO = 'io'
-    VISUALIZATION = 'visualization'
-    ADVANCED = 'advanced'
-
-
-class CastMapType(DataForgeStrEnum):
-    INT64 = 'Int64'
-    FLOAT64 = 'Float64'
-    BOOLEAN = 'Boolean'
-    STRING = 'String'
-    UTF8 = 'Utf8'
-    DATE = 'Date'
-    DATETIME = 'Datetime'
 
 
 type StepCatalogEntry = dict[str, str | type[BaseModel]]

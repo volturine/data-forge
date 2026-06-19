@@ -306,6 +306,17 @@ enum FilterLogic {
   FILTER_LOGIC_OR = 2 [(dataforge_token) = "OR"];
 }
 
+enum CastMapType {
+  CAST_MAP_TYPE_UNSPECIFIED = 0;
+  CAST_MAP_TYPE_INT64 = 1 [(dataforge_token) = "Int64"];
+  CAST_MAP_TYPE_FLOAT64 = 2 [(dataforge_token) = "Float64"];
+  CAST_MAP_TYPE_BOOLEAN = 3 [(dataforge_token) = "Boolean"];
+  CAST_MAP_TYPE_STRING = 4 [(dataforge_token) = "String"];
+  CAST_MAP_TYPE_UTF8 = 5 [(dataforge_token) = "Utf8"];
+  CAST_MAP_TYPE_DATE = 6 [(dataforge_token) = "Date"];
+  CAST_MAP_TYPE_DATETIME = 7 [(dataforge_token) = "Datetime"];
+}
+
 enum FilterOperator {
   FILTER_OPERATOR_UNSPECIFIED = 0;
   FILTER_OPERATOR_EQUAL = 1 [(dataforge_token) = "="];

@@ -40,6 +40,7 @@ import type {
 import type {
 	AIProvider,
 	AxisScale,
+	CastMapType,
 	ChartAggregation,
 	ChartHeight,
 	ChartType,
@@ -79,8 +80,6 @@ type Field<T, K extends keyof T> = NonNullable<T[K]>;
 type OptionalField<T, K extends keyof T> = Field<T, K> | null;
 type ProtoNumber<T> = Extract<NonNullable<T>, number>;
 type OptionalNumberField<T, K extends keyof T> = ProtoNumber<T[K]> | null;
-
-export type CastMapType = 'Int64' | 'Float64' | 'Boolean' | 'String' | 'Utf8' | 'Date' | 'Datetime';
 
 export type FilterValueType = StepFilterValueType;
 export type FilterConditionValue =

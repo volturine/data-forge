@@ -5,6 +5,7 @@ import {
 	BuildLogLevel as ProtocolBuildLogLevel,
 	BuildStepState as ProtocolBuildStepState,
 	BuildTabStatus as ProtocolBuildTabStatus,
+	CastMapType as ProtocolCastMapType,
 	ChartAggregation as ProtocolChartAggregation,
 	ChartHeight as ProtocolChartHeight,
 	ChartType as ProtocolChartType,
@@ -75,6 +76,16 @@ export const FILTER_LOGIC_TOKENS = {
 	[ProtocolFilterLogic.AND]: 'AND',
 	[ProtocolFilterLogic.OR]: 'OR'
 } as const satisfies Partial<Record<ProtocolFilterLogic, string>>;
+
+export const CAST_MAP_TYPE_TOKENS = {
+	[ProtocolCastMapType.INT64]: 'Int64',
+	[ProtocolCastMapType.FLOAT64]: 'Float64',
+	[ProtocolCastMapType.BOOLEAN]: 'Boolean',
+	[ProtocolCastMapType.STRING]: 'String',
+	[ProtocolCastMapType.UTF8]: 'Utf8',
+	[ProtocolCastMapType.DATE]: 'Date',
+	[ProtocolCastMapType.DATETIME]: 'Datetime'
+} as const satisfies Partial<Record<ProtocolCastMapType, string>>;
 
 export const GROUP_BY_AGGREGATION_FUNCTION_TOKENS = {
 	[ProtocolGroupByAggregationFunction.SUM]: 'sum',
@@ -371,6 +382,7 @@ export const BUILD_LOG_LEVEL_TOKENS = {
 export type FilterOperator = EnumToken<typeof FILTER_OPERATOR_TOKENS>;
 export type FilterValueType = EnumToken<typeof FILTER_VALUE_TYPE_TOKENS>;
 export type FilterLogic = EnumToken<typeof FILTER_LOGIC_TOKENS>;
+export type CastMapType = EnumToken<typeof CAST_MAP_TYPE_TOKENS>;
 export type GroupByAggregationFunction = EnumToken<typeof GROUP_BY_AGGREGATION_FUNCTION_TOKENS>;
 export type WithColumnsExprType = EnumToken<typeof WITH_COLUMNS_EXPR_TYPE_TOKENS>;
 export type DeduplicateKeep = EnumToken<typeof DEDUPLICATE_KEEP_TOKENS>;

@@ -94,6 +94,9 @@ WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
     'from runtime.domain.enums import DataForgeStrEnum': 'worker operation config enums must be generated-protocol-backed',
     '(DataForgeStrEnum)': 'worker operation config enums must not reintroduce copied StrEnum contracts',
 }
+FRONTEND_OPERATION_CONFIG_FORBIDDEN_TOKENS = {
+    "export type CastMapType = 'Int64'": 'frontend cast-map type must be generated-protocol-backed',
+}
 WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
 }
@@ -205,6 +208,21 @@ def main() -> int:
         for token, reason in WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS.items():
             if token in content:
                 errors.append(f'{worker_step_config_enums.relative_to(ROOT)} contains {reason}: {token}')
+
+    worker_operations = ROOT / 'packages/worker/operations'
+    if worker_operations.exists():
+        for operation_file in worker_operations.glob('*.py'):
+            content = operation_file.read_text()
+            for token, reason in WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS.items():
+                if token in content:
+                    errors.append(f'{operation_file.relative_to(ROOT)} contains {reason}: {token}')
+
+    frontend_operation_config = ROOT / 'packages/frontend/src/lib/types/operation-config.ts'
+    if frontend_operation_config.exists():
+        content = frontend_operation_config.read_text()
+        for token, reason in FRONTEND_OPERATION_CONFIG_FORBIDDEN_TOKENS.items():
+            if token in content:
+                errors.append(f'{frontend_operation_config.relative_to(ROOT)} contains {reason}: {token}')
 
     worker_compute_schemas = ROOT / 'packages/worker/runtime/domain/compute/schemas.py'
     if worker_compute_schemas.exists():

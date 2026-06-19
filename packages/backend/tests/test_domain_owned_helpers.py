@@ -11,6 +11,7 @@ from backend_core.domain.engine_runs.schemas import EngineRunExecutionCategory, 
 from backend_core.domain.healthcheck_models import HealthCheckType
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.domain.step_config_enums import (
+    CastMapType,
     ChartAggregation,
     FillNullStrategy,
     FilterOperator,
@@ -321,6 +322,14 @@ def test_filter_operator_uses_generated_protocol_enum_value() -> None:
     assert operator.number == enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL
     assert FilterOperator.require(enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL) == operator
     assert operator.value == '=='
+
+
+def test_cast_map_type_uses_generated_protocol_enum_value() -> None:
+    cast_type = CastMapType.require('Int64')
+
+    assert cast_type.number == enums_pb2.CAST_MAP_TYPE_INT64
+    assert CastMapType.require(enums_pb2.CAST_MAP_TYPE_INT64) is cast_type
+    assert cast_type.value == 'Int64'
 
 
 def test_shared_step_config_enums_cover_notification_contracts() -> None:

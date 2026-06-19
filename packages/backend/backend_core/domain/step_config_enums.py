@@ -89,6 +89,25 @@ FilterLogic.AND = FilterLogic(enums_pb2.FILTER_LOGIC_AND, protocol_token('Filter
 FilterLogic.OR = FilterLogic(enums_pb2.FILTER_LOGIC_OR, protocol_token('FilterLogic', enums_pb2.FILTER_LOGIC_OR))
 
 
+class CastMapType(ProtocolEnumValue):
+    INT64: ClassVar[Self]
+    FLOAT64: ClassVar[Self]
+    BOOLEAN: ClassVar[Self]
+    STRING: ClassVar[Self]
+    UTF8: ClassVar[Self]
+    DATE: ClassVar[Self]
+    DATETIME: ClassVar[Self]
+
+
+CastMapType.INT64 = CastMapType(enums_pb2.CAST_MAP_TYPE_INT64, protocol_token('CastMapType', enums_pb2.CAST_MAP_TYPE_INT64))
+CastMapType.FLOAT64 = CastMapType(enums_pb2.CAST_MAP_TYPE_FLOAT64, protocol_token('CastMapType', enums_pb2.CAST_MAP_TYPE_FLOAT64))
+CastMapType.BOOLEAN = CastMapType(enums_pb2.CAST_MAP_TYPE_BOOLEAN, protocol_token('CastMapType', enums_pb2.CAST_MAP_TYPE_BOOLEAN))
+CastMapType.STRING = CastMapType(enums_pb2.CAST_MAP_TYPE_STRING, protocol_token('CastMapType', enums_pb2.CAST_MAP_TYPE_STRING))
+CastMapType.UTF8 = CastMapType(enums_pb2.CAST_MAP_TYPE_UTF8, protocol_token('CastMapType', enums_pb2.CAST_MAP_TYPE_UTF8))
+CastMapType.DATE = CastMapType(enums_pb2.CAST_MAP_TYPE_DATE, protocol_token('CastMapType', enums_pb2.CAST_MAP_TYPE_DATE))
+CastMapType.DATETIME = CastMapType(enums_pb2.CAST_MAP_TYPE_DATETIME, protocol_token('CastMapType', enums_pb2.CAST_MAP_TYPE_DATETIME))
+
+
 class FilterOperator(ProtocolEnumValue):
     EQUAL: ClassVar[Self]
     DOUBLE_EQUAL: ClassVar[Self]
