@@ -1,7 +1,8 @@
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
+from google.protobuf import json_format, timestamp_pb2
 from sqlalchemy import desc, func, or_, select, update
 from sqlmodel import Session, col
 
@@ -10,6 +11,7 @@ from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.datasource.models import DataSource
+from dataforge_protocol import compute_pb2
 
 _TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
 
@@ -20,6 +22,151 @@ def _utcnow() -> datetime:
 
 def _copy_json_dict(value: dict[str, Any] | None) -> dict[str, object]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
+    normalized = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    timestamp = timestamp_pb2.Timestamp()
+    timestamp.FromDatetime(normalized)
+    return timestamp
+
+
+def _build_event_context_proto(
+    event: compute_schemas.BuildEvent,
+    *,
+    sequence: int,
+) -> compute_pb2.BuildEventContext:
+    context = compute_pb2.BuildEventContext(
+        build_id=event.build_id,
+        analysis_id=event.analysis_id,
+        emitted_at=_timestamp(event.emitted_at),
+        sequence=sequence,
+    )
+    if event.current_kind is not None:
+        context.current_kind = cast(Any, event.current_kind.number)
+    if event.current_datasource_id is not None:
+        context.current_datasource_id = event.current_datasource_id
+    if event.tab_id is not None:
+        context.tab_id = event.tab_id
+    if event.tab_name is not None:
+        context.tab_name = event.tab_name
+    if event.current_output_id is not None:
+        context.current_output_id = event.current_output_id
+    if event.current_output_name is not None:
+        context.current_output_name = event.current_output_name
+    if event.engine_run_id is not None:
+        context.engine_run_id = event.engine_run_id
+    return context
+
+
+def _build_tab_result_proto(result: compute_schemas.BuildTabResult) -> compute_pb2.BuildTabResult:
+    message = compute_pb2.BuildTabResult(
+        tab_id=result.tab_id,
+        tab_name=result.tab_name,
+    )
+    message.status = cast(Any, result.status.number)
+    if result.output_id is not None:
+        message.output_id = result.output_id
+    if result.output_name is not None:
+        message.output_name = result.output_name
+    if result.error is not None:
+        message.error = result.error
+    return message
+
+
+def _build_terminal_event_proto(
+    event: compute_schemas.BuildCompleteEvent | compute_schemas.BuildFailedEvent | compute_schemas.BuildCancelledEvent,
+) -> compute_pb2.BuildTerminalEvent:
+    message = compute_pb2.BuildTerminalEvent(
+        progress=event.progress,
+        elapsed_ms=event.elapsed_ms,
+        total_steps=event.total_steps,
+        tabs_built=event.tabs_built,
+        duration_ms=event.duration_ms,
+    )
+    message.results.extend(_build_tab_result_proto(result) for result in event.results)
+    if isinstance(event, compute_schemas.BuildFailedEvent) and event.error is not None:
+        message.error = event.error
+    if isinstance(event, compute_schemas.BuildCancelledEvent):
+        message.cancelled_at.CopyFrom(_timestamp(event.cancelled_at))
+        if event.cancelled_by is not None:
+            message.cancelled_by = event.cancelled_by
+    return message
+
+
+def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, sequence: int) -> compute_pb2.BuildEvent:
+    message = compute_pb2.BuildEvent(context=_build_event_context_proto(event, sequence=sequence), namespace=namespace)
+    match event:
+        case compute_schemas.BuildPlanEvent():
+            message.plan.optimized_plan = event.optimized_plan
+            message.plan.unoptimized_plan = event.unoptimized_plan
+            return message
+        case compute_schemas.BuildStepStartEvent():
+            message.step_started.build_step_index = event.build_step_index
+            message.step_started.step_index = event.step_index
+            message.step_started.step_id = event.step_id
+            message.step_started.step_name = event.step_name
+            message.step_started.step_type = event.step_type
+            message.step_started.total_steps = event.total_steps
+            return message
+        case compute_schemas.BuildStepCompleteEvent():
+            message.step_completed.build_step_index = event.build_step_index
+            message.step_completed.step_index = event.step_index
+            message.step_completed.step_id = event.step_id
+            message.step_completed.step_name = event.step_name
+            message.step_completed.step_type = event.step_type
+            message.step_completed.duration_ms = event.duration_ms
+            message.step_completed.total_steps = event.total_steps
+            if event.row_count is not None:
+                message.step_completed.row_count = event.row_count
+            return message
+        case compute_schemas.BuildStepFailedEvent():
+            message.step_failed.build_step_index = event.build_step_index
+            message.step_failed.step_index = event.step_index
+            message.step_failed.step_id = event.step_id
+            message.step_failed.step_name = event.step_name
+            message.step_failed.step_type = event.step_type
+            message.step_failed.error = event.error
+            message.step_failed.total_steps = event.total_steps
+            return message
+        case compute_schemas.BuildProgressEvent():
+            message.progress.progress = event.progress
+            message.progress.elapsed_ms = event.elapsed_ms
+            message.progress.total_steps = event.total_steps
+            if event.estimated_remaining_ms is not None:
+                message.progress.estimated_remaining_ms = event.estimated_remaining_ms
+            if event.current_step is not None:
+                message.progress.current_step = event.current_step
+            if event.current_step_index is not None:
+                message.progress.current_step_index = event.current_step_index
+            return message
+        case compute_schemas.BuildResourceEvent():
+            message.resources.cpu_percent = event.cpu_percent
+            message.resources.memory_mb = event.memory_mb
+            message.resources.active_threads = event.active_threads
+            if event.memory_limit_mb is not None:
+                message.resources.memory_limit_mb = event.memory_limit_mb
+            if event.max_threads is not None:
+                message.resources.max_threads = event.max_threads
+            return message
+        case compute_schemas.BuildLogEvent():
+            message.log.level = cast(Any, event.level.number)
+            message.log.message = event.message
+            if event.step_name is not None:
+                message.log.step_name = event.step_name
+            if event.step_id is not None:
+                message.log.step_id = event.step_id
+            return message
+        case compute_schemas.BuildCompleteEvent():
+            message.completed.CopyFrom(_build_terminal_event_proto(event))
+            return message
+        case compute_schemas.BuildFailedEvent():
+            message.failed.CopyFrom(_build_terminal_event_proto(event))
+            return message
+        case compute_schemas.BuildCancelledEvent():
+            message.cancelled.CopyFrom(_build_terminal_event_proto(event))
+            return message
+    raise ValueError(f'Unsupported build event type: {type(event).__name__}')
 
 
 def create_build_run(
@@ -332,9 +479,13 @@ def latest_namespace_update(session: Session, *, namespace: str) -> datetime | N
 
 def serialize_event_row(row: BuildEvent) -> dict[str, object]:
     event = compute_schemas.BuildEventAdapter.validate_python(row.payload_json)
-    payload = event.model_dump(mode='json')
-    payload['sequence'] = row.sequence
-    return payload
+    return cast(
+        dict[str, object],
+        json_format.MessageToDict(
+            _build_event_proto(event, namespace=row.namespace, sequence=row.sequence),
+            always_print_fields_with_no_presence=True,
+        ),
+    )
 
 
 def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.ActiveBuildDetail:

@@ -128,10 +128,41 @@ def test_list_build_events_after_and_latest_sequence(test_db_session) -> None:
     assert first is not None
     assert second is not None
     rows = build_run_service.list_build_events_after(test_db_session, run.id, 1)
+    serialized = build_run_service.serialize_event_row(rows[0])
 
     assert build_run_service.get_latest_sequence(test_db_session, run.id) == 2
     assert [row.sequence for row in rows] == [2]
-    assert build_run_service.serialize_event_row(rows[0])['sequence'] == 2
+    context = serialized['context']
+    log = serialized['log']
+    assert isinstance(context, dict)
+    assert isinstance(log, dict)
+    assert context['sequence'] == 2
+    assert context['buildId'] == run.id
+    assert log['level'] == 'BUILD_LOG_LEVEL_INFO'
+    assert log['message'] == 'two'
+
+
+def test_serialize_event_row_preserves_proto_default_scalars(test_db_session) -> None:
+    run = _create_run(test_db_session)
+    event = compute_schemas.BuildProgressEvent(
+        build_id=run.id,
+        analysis_id=run.analysis_id,
+        emitted_at=datetime.now(UTC),
+        current_kind=EngineRunKind.BUILD,
+        progress=0.0,
+        elapsed_ms=0,
+        total_steps=0,
+    )
+
+    row = build_run_service.append_build_event(test_db_session, build_id=run.id, event=event)
+
+    assert row is not None
+    serialized = build_run_service.serialize_event_row(row)
+    progress = serialized['progress']
+    assert isinstance(progress, dict)
+    assert progress['progress'] == 0.0
+    assert progress['elapsedMs'] == 0
+    assert progress['totalSteps'] == 0
 
 
 def test_fold_build_detail_reconstructs_snapshot(test_db_session) -> None:

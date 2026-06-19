@@ -676,8 +676,10 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
                 async with connect(f'ws://127.0.0.1:{api_two_port}/api/v1/compute/ws/builds/{build_id}?namespace=default&last_sequence=1') as websocket:
                     replay = json.loads(await websocket.recv())
 
-                assert replay['build_id'] == build_id
-                assert replay['sequence'] > 1
+                assert replay['context']['buildId'] == build_id
+                assert replay['context']['sequence'] > 1
+                event_cases = {'plan', 'stepStarted', 'stepCompleted', 'stepFailed', 'progress', 'resources', 'log', 'completed', 'failed', 'cancelled'}
+                assert len(event_cases & set(replay)) == 1
         finally:
             worker.stop()
             api_two.stop()

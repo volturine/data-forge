@@ -1,6 +1,11 @@
 import type { BuildRequest } from './compute';
 import { apiRequest } from './client';
 import { createStream, type StreamHandle } from './websocket';
+import type { BuildEventJson } from '$lib/protocol/dataforge_protocol/compute_pb';
+import {
+	isProtocolBuildEvent,
+	protocolBuildEventToBuildEvent
+} from '$lib/types/protocol-build-stream';
 import type {
 	BuildEvent,
 	BuildDetailSnapshot,
@@ -10,7 +15,7 @@ import type { ActiveBuildDetail } from '$lib/types/build-stream';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
-export type BuildStreamMessage = BuildDetailSnapshot | BuildWebsocketErrorMessage | BuildEvent;
+export type BuildStreamMessage = BuildDetailSnapshot | BuildWebsocketErrorMessage | BuildEventJson;
 
 export interface BuildStreamCallbacks {
 	onSnapshot: (snapshot: BuildDetailSnapshot) => void;
@@ -33,15 +38,6 @@ function isErrorMessage(value: unknown): value is BuildWebsocketErrorMessage {
 	return value.type === 'error' && typeof value.error === 'string';
 }
 
-function isBuildEvent(value: unknown): value is BuildEvent {
-	if (!isObject(value)) return false;
-	if (typeof value.type !== 'string') return false;
-	if (typeof value.build_id !== 'string') return false;
-	if (typeof value.analysis_id !== 'string') return false;
-	if (typeof value.emitted_at !== 'string') return false;
-	return true;
-}
-
 function parseBuildMessage(data: string): BuildStreamMessage | null {
 	try {
 		const parsed: unknown = JSON.parse(data);
@@ -50,7 +46,7 @@ function parseBuildMessage(data: string): BuildStreamMessage | null {
 		}
 		if (isSnapshotMessage(parsed)) return parsed;
 		if (isErrorMessage(parsed)) return parsed;
-		if (isBuildEvent(parsed)) return parsed;
+		if (isProtocolBuildEvent(parsed)) return parsed;
 		return { type: 'error', error: 'Invalid build stream message', status_code: 500 };
 	} catch {
 		return { type: 'error', error: 'Invalid build stream message', status_code: 500 };
@@ -65,14 +61,18 @@ export function startActiveBuild(request: BuildRequest): ResultAsync<ActiveBuild
 }
 
 function isBuildDetailSnapshot(msg: BuildStreamMessage): msg is BuildDetailSnapshot {
-	return msg.type === 'snapshot';
+	return isObject(msg) && (msg as Record<string, unknown>).type === 'snapshot';
 }
 
 function toBuildDetailEvent(msg: BuildStreamMessage): BuildEvent {
-	if (isBuildDetailSnapshot(msg) || msg.type === 'error') {
+	if (isBuildDetailSnapshot(msg) || isErrorMessage(msg)) {
 		throw new Error('Expected build event');
 	}
-	return msg;
+	const event = protocolBuildEventToBuildEvent(msg);
+	if (event === null) {
+		throw new Error('Invalid build stream event');
+	}
+	return event;
 }
 
 export function connectBuildDetailStream(
