@@ -4,10 +4,16 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Any, cast
 
-from dataforge_protocol import compute_pb2, enums_pb2
+from google.protobuf import descriptor as proto_descriptor
+from google.protobuf import json_format, message
+
+from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
+from dataforge_protocol.enums_pb2 import dataforge_token
 from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager, engine_identity_resource_id
 from runtime.config import settings
@@ -156,81 +162,85 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             return
 
         if claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
-            preview_request = compute_schemas.StepPreviewRequest.model_validate(claimed.request_json)
+            preview_request = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
+            analysis_pipeline = _analysis_pipeline_to_service_payload(preview_request.analysis_pipeline)
+            request_json = _step_preview_request_json(preview_request)
             preview_response = service.preview_step(
                 session=None,
                 manager=manager,
                 target_step_id=preview_request.target_step_id,
-                analysis_pipeline=preview_request.analysis_pipeline.model_dump(mode="json"),
+                analysis_pipeline=analysis_pipeline,
                 row_limit=preview_request.row_limit,
                 page=preview_request.page,
-                analysis_id=preview_request.analysis_id,
-                engine_identity=preview_request.engine_identity,
-                resource_config=preview_request.resource_config.model_dump() if preview_request.resource_config else None,
-                tab_id=preview_request.tab_id,
-                request_json=claimed.request_json,
+                analysis_id=preview_request.analysis_id if preview_request.HasField("analysis_id") else None,
+                engine_identity=preview_request.engine_identity if preview_request.HasField("engine_identity") else None,
+                resource_config=_resource_config_from_preview_command(preview_request),
+                tab_id=preview_request.tab_id if preview_request.HasField("tab_id") else None,
+                request_json=request_json,
             )
             _complete_request(client, claimed, response_json=preview_response.model_dump(mode="json"))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
-            schema_request = compute_schemas.StepSchemaRequest.model_validate(claimed.request_json)
-            if schema_request.analysis_id is None:
+            schema_request = cast(compute_pb2.StepSchemaCommand, _compute_command_from_claimed(claimed, "schema"))
+            if not schema_request.HasField("analysis_id"):
                 raise ValueError("analysis_id is required")
             schema_response = service.get_step_schema(
                 session=None,
                 manager=manager,
                 target_step_id=schema_request.target_step_id,
                 analysis_id=schema_request.analysis_id,
-                analysis_pipeline=schema_request.analysis_pipeline.model_dump(mode="json"),
-                tab_id=schema_request.tab_id,
+                analysis_pipeline=_analysis_pipeline_to_service_payload(schema_request.analysis_pipeline),
+                tab_id=schema_request.tab_id if schema_request.HasField("tab_id") else None,
             )
             _complete_request(client, claimed, response_json=schema_response.model_dump(mode="json"))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
-            row_count_request = compute_schemas.StepRowCountRequest.model_validate(claimed.request_json)
-            if row_count_request.analysis_id is None:
+            row_count_request = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
+            if not row_count_request.HasField("analysis_id"):
                 raise ValueError("analysis_id is required")
+            request_json = _step_request_json(row_count_request)
             row_count_response = service.get_step_row_count(
                 session=None,
                 manager=manager,
                 target_step_id=row_count_request.target_step_id,
                 analysis_id=row_count_request.analysis_id,
-                analysis_pipeline=row_count_request.analysis_pipeline.model_dump(mode="json"),
-                tab_id=row_count_request.tab_id,
-                request_json=row_count_request.model_dump(mode="json"),
+                analysis_pipeline=_analysis_pipeline_to_service_payload(row_count_request.analysis_pipeline),
+                tab_id=row_count_request.tab_id if row_count_request.HasField("tab_id") else None,
+                request_json=request_json,
             )
             _complete_request(client, claimed, response_json=row_count_response.model_dump(mode="json"))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
-            download_request = compute_schemas.DownloadRequest.model_validate(claimed.request_json)
+            download_request = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
             file_bytes, filename, content_type = service.download_step(
                 session=None,
                 manager=manager,
                 target_step_id=download_request.target_step_id,
-                analysis_pipeline=download_request.analysis_pipeline.model_dump(mode="json"),
-                export_format=download_request.format.value,
+                analysis_pipeline=_analysis_pipeline_to_service_payload(download_request.analysis_pipeline),
+                export_format=_enum_token(enums_pb2.ExportFormat.DESCRIPTOR, download_request.format),
                 filename=download_request.filename,
-                analysis_id=download_request.analysis_id,
-                tab_id=download_request.tab_id,
+                analysis_id=download_request.analysis_id if download_request.HasField("analysis_id") else None,
+                tab_id=download_request.tab_id if download_request.HasField("tab_id") else None,
             )
             artifact_path = _write_artifact(claimed.id, filename, file_bytes)
             _complete_request(client, claimed, artifact_path=artifact_path, artifact_name=filename, artifact_content_type=content_type)
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
-            export_request = compute_schemas.ExportRequest.model_validate(claimed.request_json)
+            export_request = cast(compute_pb2.ExportCommand, _compute_command_from_claimed(claimed, "export"))
+            request_json = _export_request_json(export_request)
             result = service.export_data(
                 session=None,
                 manager=manager,
                 target_step_id=export_request.target_step_id,
-                analysis_pipeline=export_request.analysis_pipeline.model_dump(mode="json"),
+                analysis_pipeline=_analysis_pipeline_to_service_payload(export_request.analysis_pipeline),
                 filename=export_request.filename,
-                iceberg_options=export_request.iceberg_options.model_dump() if export_request.iceberg_options else None,
-                analysis_id=export_request.analysis_id,
-                tab_id=export_request.tab_id,
-                request_json=export_request.model_dump(mode="json"),
-                result_id=export_request.result_id,
+                iceberg_options=_message_to_service_payload(export_request.iceberg_options) if export_request.HasField("iceberg_options") else None,
+                analysis_id=export_request.analysis_id if export_request.HasField("analysis_id") else None,
+                tab_id=export_request.tab_id if export_request.HasField("tab_id") else None,
+                request_json=request_json,
+                result_id=export_request.result_id if export_request.HasField("result_id") else None,
             )
             export_response = compute_schemas.ExportResponse(
                 success=True,
                 filename=result.datasource_name,
                 format="iceberg",
-                destination=export_request.destination.value,
+                destination=_enum_token(enums_pb2.ExportDestination.DESCRIPTOR, export_request.destination),
                 message=f"Created datasource {result.datasource_name}",
                 datasource_id=result.datasource_id,
                 datasource_name=result.result_meta.get("datasource_name") if isinstance(result.result_meta, dict) else None,
@@ -295,6 +305,151 @@ def _lifecycle_command_from_claimed(claimed: ClaimedComputeRequest, field_name: 
     if command.WhichOneof("command") != field_name:
         raise ValueError(f"compute command envelope must contain {field_name}")
     return getattr(command, field_name)
+
+
+def _compute_command_from_claimed(claimed: ClaimedComputeRequest, field_name: str) -> message.Message:
+    command = claimed.command_envelope.command
+    if command.WhichOneof("command") != field_name:
+        raise ValueError(f"compute command envelope must contain {field_name}")
+    return cast(message.Message, getattr(command, field_name))
+
+
+def _enum_token(enum_descriptor: Any, value: int) -> str:
+    value_descriptor = enum_descriptor.values_by_number[value]
+    return cast(str, value_descriptor.GetOptions().Extensions[cast(Any, dataforge_token)])
+
+
+def _proto_json_to_tokens(value: object, message_descriptor: Any) -> object:
+    if message_descriptor.full_name == "google.protobuf.Struct":
+        return value
+    if isinstance(value, list):
+        return [_proto_json_to_tokens(item, message_descriptor) for item in value]
+    if not isinstance(value, Mapping):
+        return value
+
+    result: dict[str, object] = {}
+    for raw_key, raw_item in value.items():
+        key = str(raw_key)
+        field = message_descriptor.fields_by_name.get(key)
+        if field is None:
+            result[key] = raw_item
+            continue
+        is_map_field = field.message_type is not None and field.message_type.GetOptions().map_entry
+        if field.is_repeated and not is_map_field:
+            if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+                result[key] = [_proto_json_to_tokens(item, field.message_type) for item in cast(list[object], raw_item)]
+            elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+                result[key] = [
+                    _enum_token(field.enum_type, field.enum_type.values_by_name[item].number)
+                    if isinstance(item, str) and item in field.enum_type.values_by_name
+                    else _enum_token(field.enum_type, item)
+                    if isinstance(item, int)
+                    else item
+                    for item in cast(list[object], raw_item)
+                ]
+            else:
+                result[key] = raw_item
+            continue
+        if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+            result[key] = _proto_json_to_tokens(raw_item, field.message_type)
+        elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+            if isinstance(raw_item, str) and raw_item in field.enum_type.values_by_name:
+                result[key] = _enum_token(field.enum_type, field.enum_type.values_by_name[raw_item].number)
+            elif isinstance(raw_item, int):
+                result[key] = _enum_token(field.enum_type, raw_item)
+            else:
+                result[key] = raw_item
+        else:
+            result[key] = raw_item
+    return result
+
+
+def _message_to_service_payload(value: message.Message) -> dict[str, object]:
+    decoded = json_format.MessageToDict(value, preserving_proto_field_name=True)
+    tokenized = _proto_json_to_tokens(decoded, value.DESCRIPTOR)
+    if not isinstance(tokenized, dict):
+        raise ValueError(f"{value.DESCRIPTOR.full_name} must decode to an object")
+    return tokenized
+
+
+def _unwrap_step_config(config: object) -> object:
+    if not isinstance(config, dict) or len(config) != 1:
+        return _unwrap_protocol_value_shapes(config)
+    field_name = next(iter(config))
+    if field_name in analysis_pb2.StepConfig.DESCRIPTOR.fields_by_name:
+        return _unwrap_protocol_value_shapes(config[field_name])
+    return _unwrap_protocol_value_shapes(config)
+
+
+def _unwrap_protocol_value_shapes(value: object) -> object:
+    if isinstance(value, list):
+        return [_unwrap_protocol_value_shapes(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if set(value) == {"string_value"}:
+        return value["string_value"]
+    if set(value) == {"number_value"}:
+        return value["number_value"]
+    if set(value) == {"bool_value"}:
+        return value["bool_value"]
+    if set(value) == {"string_values"}:
+        string_values = value["string_values"]
+        if isinstance(string_values, dict) and isinstance(string_values.get("values"), list):
+            return [_unwrap_protocol_value_shapes(item) for item in string_values["values"]]
+    return {key: _unwrap_protocol_value_shapes(item) for key, item in value.items()}
+
+
+def _analysis_pipeline_to_service_payload(pipeline: analysis_pb2.AnalysisPipelinePayload) -> dict[str, object]:
+    payload = _message_to_service_payload(pipeline)
+    tabs = payload.get("tabs")
+    if isinstance(tabs, list):
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            steps = tab.get("steps")
+            if isinstance(steps, list):
+                for step in steps:
+                    if isinstance(step, dict):
+                        step["config"] = _unwrap_step_config(step.get("config"))
+                        if step.get("type") == "view" and isinstance(step.get("config"), dict):
+                            _restore_view_service_config(cast(dict[str, object], step["config"]))
+    return payload
+
+
+def _restore_view_service_config(config: dict[str, object]) -> None:
+    row_limit = config.pop("row_limit", None)
+    if row_limit is not None:
+        config["rowLimit"] = row_limit
+
+
+def _step_request_json(command: message.Message) -> dict[str, object]:
+    request_json = _message_to_service_payload(command)
+    pipeline = request_json.get("analysis_pipeline")
+    if isinstance(pipeline, dict):
+        request_json["analysis_pipeline"] = _analysis_pipeline_to_service_payload(cast(Any, command).analysis_pipeline)
+    return request_json
+
+
+def _step_preview_request_json(command: compute_pb2.StepPreviewCommand) -> dict[str, object]:
+    return _step_request_json(command)
+
+
+def _export_request_json(command: compute_pb2.ExportCommand) -> dict[str, object]:
+    return _step_request_json(command)
+
+
+def _resource_config_from_preview_command(command: compute_pb2.StepPreviewCommand) -> dict[str, object] | None:
+    if not command.HasField("resource_config"):
+        return None
+    config = command.resource_config
+    result: dict[str, object] = {}
+    if config.HasField("max_threads"):
+        result["max_threads"] = config.max_threads
+    if config.HasField("max_memory_mb"):
+        result["max_memory_mb"] = config.max_memory_mb
+    if config.HasField("streaming_chunk_size"):
+        result["streaming_chunk_size"] = config.streaming_chunk_size
+    return result
 
 
 def _resource_config_from_lifecycle_command(command: compute_pb2.EngineLifecycleCommand) -> dict[str, object] | None:

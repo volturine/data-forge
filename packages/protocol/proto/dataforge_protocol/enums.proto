@@ -90,6 +90,13 @@ enum BuildStatus {
   BUILD_STATUS_WARNING = 2 [(dataforge_token) = "warning"];
 }
 
+enum BuildMode {
+  BUILD_MODE_UNSPECIFIED = 0;
+  BUILD_MODE_FULL = 1 [(dataforge_token) = "full"];
+  BUILD_MODE_INCREMENTAL = 2 [(dataforge_token) = "incremental"];
+  BUILD_MODE_RECREATE = 3 [(dataforge_token) = "recreate"];
+}
+
 enum BuildTabStatus {
   BUILD_TAB_STATUS_UNSPECIFIED = 0;
   BUILD_TAB_STATUS_SUCCESS = 1 [(dataforge_token) = "success"];
@@ -560,10 +567,10 @@ enum RecipientSource {
 
 enum AIProvider {
   AI_PROVIDER_UNSPECIFIED = 0;
-  AI_PROVIDER_OLLAMA = 1;
-  AI_PROVIDER_OPENAI = 2;
-  AI_PROVIDER_OPENROUTER = 3;
-  AI_PROVIDER_HUGGINGFACE = 4;
+  AI_PROVIDER_OLLAMA = 1 [(dataforge_token) = "ollama"];
+  AI_PROVIDER_OPENAI = 2 [(dataforge_token) = "openai"];
+  AI_PROVIDER_OPENROUTER = 3 [(dataforge_token) = "openrouter"];
+  AI_PROVIDER_HUGGINGFACE = 4 [(dataforge_token) = "huggingface"];
 }
 
 enum DeduplicateKeep {

@@ -85,31 +85,11 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(buildAnalysisPipelinePayload('a-1', [t], [datasource()])).toBeNull();
 	});
 
-	test('keeps minimal datasource payload when datasource is missing from list', () => {
+	test('returns null when external datasource metadata is missing', () => {
 		const t = tab({
 			datasource: { id: 'ds-missing', analysis_tab_id: null, config: { branch: 'main' } }
 		});
-		expect(buildAnalysisPipelinePayload('a-1', [t], [datasource()])).toEqual({
-			analysis_id: 'a-1',
-			tabs: [
-				{
-					id: 'tab-1',
-					name: 'Tab 1',
-					datasource: {
-						id: 'ds-missing',
-						analysis_tab_id: null,
-						config: { branch: 'main' }
-					},
-					output: {
-						result_id: 'out-1',
-						format: 'parquet',
-						filename: 'output',
-						build_mode: 'full'
-					},
-					steps: []
-				}
-			]
-		});
+		expect(buildAnalysisPipelinePayload('a-1', [t], [datasource()])).toBeNull();
 	});
 
 	test('handles multiple tabs', () => {

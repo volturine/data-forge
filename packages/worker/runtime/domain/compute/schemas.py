@@ -223,40 +223,6 @@ class SpawnEngineRequest(BaseModel):
     resource_config: EngineResourceConfig | None = None
 
 
-def _required_engine_identity_id(payload: dict[str, object], field_name: str) -> str:
-    value = payload.get(field_name)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"engine identity {field_name} is required")
-    return value.strip()
-
-
-def _engine_identity_from_payload(value: object) -> compute_pb2.EngineIdentity:
-    if isinstance(value, compute_pb2.EngineIdentity):
-        return value
-    if not isinstance(value, dict):
-        raise ValueError("engine identity must be a protocol message or object payload")
-    scope = value.get("scope")
-    if scope == "analysis_interactive":
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-            analysis_id=_required_engine_identity_id(value, "analysis_id"),
-        )
-    if scope == "datasource_preview":
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-            datasource_id=_required_engine_identity_id(value, "datasource_id"),
-        )
-    if scope == "build":
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_BUILD,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
-            build_id=_required_engine_identity_id(value, "build_id"),
-        )
-    raise ValueError("engine identity scope is invalid")
-
-
 class StepPreviewRequest(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, from_attributes=True)
 
@@ -268,13 +234,6 @@ class StepPreviewRequest(BaseModel):
     row_limit: int = Field(default=1000, ge=1, le=5000)
     page: int = Field(default=1, ge=1)
     resource_config: EngineResourceConfig | None = None
-
-    @field_validator("engine_identity", mode="before")
-    @classmethod
-    def validate_engine_identity(cls, value: object) -> compute_pb2.EngineIdentity | None:
-        if value is None:
-            return None
-        return _engine_identity_from_payload(value)
 
 
 class StepPreviewResponse(BaseModel):

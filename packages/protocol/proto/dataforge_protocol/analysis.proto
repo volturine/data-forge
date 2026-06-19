@@ -21,11 +21,30 @@ message AnalysisPipelineStep {
   optional bool is_applied = 5;
 }
 
+message AnalysisPipelineIcebergOutput {
+  string namespace = 1 [(buf.validate.field).string.min_len = 1];
+  string table_name = 2 [(buf.validate.field).string.min_len = 1];
+  string branch = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+message AnalysisPipelineOutputNotification {
+  NotificationMethod method = 1 [(buf.validate.field).enum.defined_only = true];
+  string recipient = 2;
+  string subject_template = 3;
+  string body_template = 4;
+  repeated string subscriber_ids = 5;
+  repeated string excluded_recipients = 6;
+}
+
 message AnalysisPipelineOutput {
   string result_id = 1 [(buf.validate.field).string.min_len = 1];
   string filename = 2 [(buf.validate.field).string.min_len = 1];
   ExportFormat format = 3 [(buf.validate.field).enum.defined_only = true];
   google.protobuf.Struct options = 4;
+  optional DataSourceType datasource_type = 5 [(buf.validate.field).enum.defined_only = true];
+  optional BuildMode build_mode = 6 [(buf.validate.field).enum.defined_only = true];
+  optional AnalysisPipelineIcebergOutput iceberg = 7;
+  optional AnalysisPipelineOutputNotification notification = 8;
 }
 
 message AnalysisPipelineTab {

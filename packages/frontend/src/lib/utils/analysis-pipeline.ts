@@ -98,11 +98,7 @@ function toPipelineDatasource(args: {
 	}
 	const ds = args.datasourceMap.get(args.datasource.id);
 	if (!ds) {
-		return {
-			id: args.datasource.id,
-			analysis_tab_id: null,
-			config
-		};
+		throw new Error(`datasource ${args.datasource.id} metadata is required`);
 	}
 	if (!isRecord(ds.config)) {
 		throw new Error(`datasource ${ds.id} config is invalid`);
@@ -143,12 +139,17 @@ export function buildAnalysisPipelinePayload(
 
 	const pipelineTabs = tabs.map((tab) => {
 		const outputId = outputByTabId.get(tab.id);
-		const datasource = toPipelineDatasource({
-			analysisId,
-			datasource: tab.datasource,
-			datasourceMap,
-			outputById
-		});
+		let datasource: PipelineDatasource;
+		try {
+			datasource = toPipelineDatasource({
+				analysisId,
+				datasource: tab.datasource,
+				datasourceMap,
+				outputById
+			});
+		} catch {
+			return null;
+		}
 		if (!outputId) return null;
 		return {
 			id: tab.id,

@@ -67,7 +67,7 @@ export class AnalysisStore {
 	loadId = $state(0);
 	lastSaved = $state<{ name: string; description: string | null } | null>(null);
 	previewRuns = $state(new SvelteMap<string, boolean>());
-	previewPaused = $state(true);
+	previewPaused = $state(false);
 
 	constructor() {
 		void loadPreviewRuns(this.previewRuns);
@@ -650,7 +650,7 @@ export class AnalysisStore {
 		this.lastSaved = null;
 		this.loading = false;
 		this.error = null;
-		this.previewPaused = true;
+		this.previewPaused = false;
 	}
 
 	buildTabs(datasourceIds: string[]): AnalysisTab[] {

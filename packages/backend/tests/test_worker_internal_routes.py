@@ -39,6 +39,24 @@ def _context(monkeypatch: pytest.MonkeyPatch) -> FakeGrpcContext:
     return FakeGrpcContext(token)
 
 
+def _schema_payload() -> dict[str, object]:
+    return {
+        'analysis_id': 'analysis-2',
+        'target_step_id': 'source',
+        'analysis_pipeline': {
+            'analysis_id': 'analysis-2',
+            'tabs': [
+                {
+                    'id': 'tab-1',
+                    'datasource': {'id': 'datasource-1', 'analysis_tab_id': 'tab-1', 'source_type': 'file', 'config': {'branch': 'main'}},
+                    'output': {'result_id': 'result-1', 'filename': 'result.csv', 'format': 'csv'},
+                    'steps': [],
+                }
+            ],
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_internal_worker_grpc_registers_heartbeats_and_stops(monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
@@ -180,7 +198,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
-        request_json={'analysis_id': 'analysis-2'},
+        request_json=_schema_payload(),
     )
     response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)  # type: ignore[arg-type]
     assert response.request.id == failed_request.id

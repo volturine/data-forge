@@ -527,7 +527,6 @@
 			return;
 		}
 		warmedEngineIdentityCache = nextKey;
-		analysisStore.setPreviewPaused(true);
 		let alive = true;
 		const timer = window.setTimeout(() => {
 			if (!alive) return;

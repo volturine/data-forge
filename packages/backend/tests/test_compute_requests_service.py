@@ -12,6 +12,26 @@ from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, R
 from dataforge_protocol import enums_pb2
 
 
+def _preview_payload() -> dict[str, object]:
+    return {
+        'analysis_id': 'analysis-1',
+        'target_step_id': 'source',
+        'row_limit': 100,
+        'page': 1,
+        'analysis_pipeline': {
+            'analysis_id': 'analysis-1',
+            'tabs': [
+                {
+                    'id': 'tab-1',
+                    'datasource': {'id': 'datasource-1', 'analysis_tab_id': 'tab-1', 'source_type': 'file', 'config': {'branch': 'main'}},
+                    'output': {'result_id': 'result-1', 'filename': 'result.csv', 'format': 'csv'},
+                    'steps': [],
+                }
+            ],
+        },
+    }
+
+
 def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_db_session) -> None:
     create_request = compute_requests_service.create_request(
         test_db_session,
@@ -23,7 +43,7 @@ def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        request_json={'name': 'preview'},
+        request_json=_preview_payload(),
     )
 
     claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
@@ -65,7 +85,7 @@ def test_claim_next_request_prioritizes_user_create_requests_over_background_ing
 
 def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> None:
     request = compute_requests_service.create_request(
-        test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, request_json={'example': True}
+        test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, request_json=_preview_payload()
     )
     request_id = request.id
 
@@ -138,12 +158,102 @@ def test_create_request_stores_typed_command_envelope(test_db_session) -> None:
     assert envelope.command.spawn_engine.resource_config.max_memory_mb == 512
 
 
+def test_create_preview_request_stores_typed_command_envelope(test_db_session) -> None:
+    request = compute_requests_service.create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+
+    envelope = command_envelope_from_json(request.request_json)
+
+    assert envelope.command.WhichOneof('command') == 'preview'
+    assert envelope.command.preview.target_step_id == 'source'
+    assert envelope.command.preview.analysis_pipeline.analysis_id == 'analysis-1'
+    assert envelope.command.preview.analysis_pipeline.tabs[0].datasource.source_type == enums_pb2.DATA_SOURCE_TYPE_FILE
+
+
+def test_create_preview_request_converts_ai_provider_token(test_db_session) -> None:
+    payload = _preview_payload()
+    analysis_pipeline = payload['analysis_pipeline']
+    assert isinstance(analysis_pipeline, dict)
+    tabs = analysis_pipeline['tabs']
+    assert isinstance(tabs, list)
+    tab = tabs[0]
+    assert isinstance(tab, dict)
+    tab['steps'] = [
+        {
+            'id': 'ai-1',
+            'type': 'ai',
+            'config': {
+                'provider': 'ollama',
+                'model': 'llama3.2',
+                'input_columns': [],
+                'output_column': 'ai_result',
+                'error_column': 'ai_error',
+                'prompt_template': 'Classify',
+                'batch_size': 10,
+                'max_retries': 3,
+                'endpoint_url': '',
+                'api_key': '',
+                'temperature': 0.7,
+            },
+            'depends_on': [],
+        }
+    ]
+    payload['target_step_id'] = 'ai-1'
+
+    request = compute_requests_service.create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=payload,
+    )
+
+    envelope = command_envelope_from_json(request.request_json)
+
+    assert envelope.command.preview.analysis_pipeline.tabs[0].steps[0].config.ai.provider == enums_pb2.AI_PROVIDER_OLLAMA
+
+
+def test_create_preview_request_omits_null_repeated_fields(test_db_session) -> None:
+    payload = _preview_payload()
+    analysis_pipeline = payload['analysis_pipeline']
+    assert isinstance(analysis_pipeline, dict)
+    tabs = analysis_pipeline['tabs']
+    assert isinstance(tabs, list)
+    tab = tabs[0]
+    assert isinstance(tab, dict)
+    tab['steps'] = [
+        {
+            'id': 'dedup-1',
+            'type': 'deduplicate',
+            'config': {'subset': None, 'keep': 'first'},
+            'depends_on': [],
+        }
+    ]
+    payload['target_step_id'] = 'dedup-1'
+
+    request = compute_requests_service.create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=payload,
+    )
+
+    envelope = command_envelope_from_json(request.request_json)
+
+    deduplicate = envelope.command.preview.analysis_pipeline.tabs[0].steps[0].config.deduplicate
+    assert list(deduplicate.subset) == []
+    assert deduplicate.keep == enums_pb2.DEDUPLICATE_KEEP_FIRST
+
+
 def test_mark_request_completed_stores_typed_response_envelope(test_db_session) -> None:
     request = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        request_json={'example': True},
+        request_json=_preview_payload(),
     )
 
     completed = compute_requests_service.mark_request_completed(test_db_session, request.id, response_json={'rows': [{'id': 1}]})
@@ -167,7 +277,7 @@ def test_claim_next_request_reclaims_expired_lease(test_db_session) -> None:
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        request_json={'example': True},
+        request_json=_preview_payload(),
     )
     request.status = enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     request.lease_owner = 'live-worker'

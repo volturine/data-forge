@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
-from dataforge_protocol import compute_pb2, enums_pb2
+from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime
@@ -67,6 +67,159 @@ def _command_envelope(
     else:
         envelope.command.datasource_request.CopyFrom(dict_to_struct(payload))
     return envelope
+
+
+def _preview_command_envelope(*, request_id: str) -> compute_pb2.ComputeCommandEnvelope:
+    return compute_pb2.ComputeCommandEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        version=1,
+        idempotency_key=request_id,
+        correlation_id=request_id,
+        command=compute_pb2.ComputeCommand(
+            preview=compute_pb2.StepPreviewCommand(
+                analysis_id="analysis-from-proto",
+                target_step_id="source",
+                analysis_pipeline=analysis_pb2.AnalysisPipelinePayload(
+                    analysis_id="analysis-from-proto",
+                    tabs=[
+                        analysis_pb2.AnalysisPipelineTab(
+                            id="tab-1",
+                            datasource=analysis_pb2.AnalysisPipelineDatasource(
+                                id="datasource-1",
+                                analysis_tab_id="tab-1",
+                                source_type=enums_pb2.DATA_SOURCE_TYPE_FILE,
+                            ),
+                            output=analysis_pb2.AnalysisPipelineOutput(
+                                result_id="result-1",
+                                filename="result.csv",
+                                format=enums_pb2.EXPORT_FORMAT_CSV,
+                            ),
+                        )
+                    ],
+                ),
+                row_limit=25,
+                page=2,
+            )
+        ),
+    )
+
+
+def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> None:
+    pipeline = analysis_pb2.AnalysisPipelinePayload(
+        analysis_id="analysis-1",
+        tabs=[
+            analysis_pb2.AnalysisPipelineTab(
+                id="tab-1",
+                datasource=analysis_pb2.AnalysisPipelineDatasource(
+                    id="datasource-1",
+                    analysis_tab_id="tab-1",
+                    source_type=enums_pb2.DATA_SOURCE_TYPE_FILE,
+                ),
+                output=analysis_pb2.AnalysisPipelineOutput(
+                    result_id="result-1",
+                    filename="result.csv",
+                    format=enums_pb2.EXPORT_FORMAT_CSV,
+                ),
+                steps=[
+                    analysis_pb2.AnalysisPipelineStep(
+                        id="view-1",
+                        type="view",
+                        config=analysis_pb2.StepConfig(view=analysis_pb2.ViewConfig(row_limit=100)),
+                    )
+                ],
+            )
+        ],
+    )
+
+    payload = compute_request_runtime._analysis_pipeline_to_service_payload(pipeline)
+
+    tabs = cast(list[dict[str, object]], payload["tabs"])
+    steps = cast(list[dict[str, object]], tabs[0]["steps"])
+    step_config = steps[0]["config"]
+    assert step_config == {"rowLimit": 100}
+
+
+def test_analysis_pipeline_protocol_deduplicate_absent_subset_is_not_null() -> None:
+    pipeline = analysis_pb2.AnalysisPipelinePayload(
+        analysis_id="analysis-1",
+        tabs=[
+            analysis_pb2.AnalysisPipelineTab(
+                id="tab-1",
+                datasource=analysis_pb2.AnalysisPipelineDatasource(
+                    id="datasource-1",
+                    analysis_tab_id="tab-1",
+                    source_type=enums_pb2.DATA_SOURCE_TYPE_FILE,
+                ),
+                output=analysis_pb2.AnalysisPipelineOutput(
+                    result_id="result-1",
+                    filename="result.csv",
+                    format=enums_pb2.EXPORT_FORMAT_CSV,
+                ),
+                steps=[
+                    analysis_pb2.AnalysisPipelineStep(
+                        id="dedup-1",
+                        type="deduplicate",
+                        config=analysis_pb2.StepConfig(deduplicate=analysis_pb2.DeduplicateConfig(keep=enums_pb2.DEDUPLICATE_KEEP_FIRST)),
+                    )
+                ],
+            )
+        ],
+    )
+
+    payload = compute_request_runtime._analysis_pipeline_to_service_payload(pipeline)
+
+    tabs = cast(list[dict[str, object]], payload["tabs"])
+    steps = cast(list[dict[str, object]], tabs[0]["steps"])
+    step_config = cast(dict[str, object], steps[0]["config"])
+    assert "subset" not in step_config
+    assert step_config == {"keep": "first"}
+
+
+def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypatch) -> None:
+    completed: list[dict[str, object]] = []
+
+    monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
+    monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
+
+    class _PreviewResponse:
+        def model_dump(self, *, mode: str) -> dict[str, object]:
+            assert mode == "json"
+            return {"step_id": "source", "data": []}
+
+    def fake_preview_step(**kwargs):
+        assert kwargs["analysis_id"] == "analysis-from-proto"
+        assert kwargs["target_step_id"] == "source"
+        assert kwargs["row_limit"] == 25
+        assert kwargs["page"] == 2
+        assert kwargs["analysis_pipeline"]["analysis_id"] == "analysis-from-proto"
+        assert kwargs["request_json"]["analysis_id"] == "analysis-from-proto"
+        assert "legacy_payload" not in kwargs["request_json"]
+        return _PreviewResponse()
+
+    class _Client:
+        def complete_compute_request(self, **kwargs):
+            completed.append(kwargs["response_json"])
+
+        def fail_compute_request(self, **_kwargs):
+            raise AssertionError("request should not fail")
+
+        def dispatch_runtime_outbox(self):
+            return 0
+
+    monkeypatch.setattr(compute_request_runtime, "worker_internal_api_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime.service, "preview_step", fake_preview_step)
+
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-preview",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json={"legacy_payload": True},
+        command_envelope=_preview_command_envelope(request_id="req-preview"),
+    )
+
+    compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
+
+    assert completed == [{"step_id": "source", "data": []}]
 
 
 def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) -> None:

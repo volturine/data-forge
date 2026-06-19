@@ -207,14 +207,29 @@ export async function waitForInlinePreviewReady(
 	const table = page.locator('[data-testid="inline-data-table"]');
 	await expect(table).toBeVisible({ timeout });
 
-	const ready = page.locator('[data-testid="inline-data-table"][data-preview-ready="true"]');
 	const failure = page.locator(':text("Preview failed")');
 	const started = Date.now();
+	let lastTableState = 'no table state captured';
 
 	for (let attempt = 0; attempt < 6; attempt += 1) {
 		const windowStarted = Date.now();
 		while (Date.now() - windowStarted < timeout) {
-			if (await ready.isVisible().catch(() => false)) return;
+			const count = await table.count();
+			for (let index = 0; index < count; index += 1) {
+				const candidate = table.nth(index);
+				const visible = await candidate.isVisible().catch(() => false);
+				const ready = await candidate.getAttribute('data-preview-ready').catch(() => null);
+				const state = await candidate.getAttribute('data-preview-state').catch(() => null);
+				const columns = await candidate.getAttribute('data-preview-columns').catch(() => null);
+				const error = await candidate.getAttribute('data-preview-error').catch(() => null);
+				if (visible) {
+					lastTableState = `state=${state ?? 'unknown'} columns=${columns ?? 'unknown'} ready=${ready ?? 'false'} error=${error ?? 'none'}`;
+				}
+				if (visible && ready === 'true') return;
+				if (visible && state === 'error') {
+					throw new Error(`Inline preview failed before ready: ${error ?? 'unknown error'}`);
+				}
+			}
 			if (
 				await failure
 					.first()
@@ -232,7 +247,9 @@ export async function waitForInlinePreviewReady(
 		}
 	}
 
-	throw new Error(`Timed out waiting for inline preview readiness after ${Date.now() - started}ms`);
+	throw new Error(
+		`Timed out waiting for inline preview readiness after ${Date.now() - started}ms (${lastTableState})`
+	);
 }
 
 export async function waitForAnalysisLoadError(
