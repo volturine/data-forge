@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import type { BuildEventJson } from '$lib/protocol/dataforge_protocol/compute_pb';
+import {
+	BUILD_LOG_LEVEL_JSON_TOKENS,
+	BUILD_TAB_STATUS_JSON_TOKENS,
+	ENGINE_RUN_KIND_JSON_TOKENS
+} from '$lib/types/protocol-enum-tokens';
 import { isProtocolBuildEvent, protocolBuildEventToBuildEvent } from './protocol-build-stream';
 
 const BASE_CONTEXT = {
@@ -63,5 +68,14 @@ describe('protocol build stream conversion', () => {
 				emitted_at: '2025-01-01T00:00:00Z'
 			})
 		).toBe(false);
+	});
+
+	test('uses protocol enum JSON token tables for generated build stream enums', () => {
+		expect(ENGINE_RUN_KIND_JSON_TOKENS.ENGINE_RUN_KIND_ROW_COUNT).toBe('row_count');
+		expect(ENGINE_RUN_KIND_JSON_TOKENS.ENGINE_RUN_KIND_UNSPECIFIED).toBeNull();
+		expect(BUILD_TAB_STATUS_JSON_TOKENS.BUILD_TAB_STATUS_FAILED).toBe('failed');
+		expect(BUILD_TAB_STATUS_JSON_TOKENS.BUILD_TAB_STATUS_UNSPECIFIED).toBeNull();
+		expect(BUILD_LOG_LEVEL_JSON_TOKENS.BUILD_LOG_LEVEL_WARNING).toBe('warning');
+		expect(BUILD_LOG_LEVEL_JSON_TOKENS.BUILD_LOG_LEVEL_UNSPECIFIED).toBeNull();
 	});
 });

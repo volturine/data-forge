@@ -41,6 +41,11 @@ import {
 	WithColumnsExprType as ProtocolWithColumnsExprType,
 	YAxisPosition as ProtocolYAxisPosition
 } from '$lib/protocol/dataforge_protocol/enums_pb';
+import type {
+	BuildLogLevelJson as ProtocolBuildLogLevelJson,
+	BuildTabStatusJson as ProtocolBuildTabStatusJson,
+	EngineRunKindJson as ProtocolEngineRunKindJson
+} from '$lib/protocol/dataforge_protocol/enums_pb';
 
 type EnumToken<T extends object> = T[keyof T];
 
@@ -378,6 +383,28 @@ export const BUILD_LOG_LEVEL_TOKENS = {
 	[ProtocolBuildLogLevel.WARNING]: 'warning',
 	[ProtocolBuildLogLevel.ERROR]: 'error'
 } as const satisfies Partial<Record<ProtocolBuildLogLevel, string>>;
+
+export const ENGINE_RUN_KIND_JSON_TOKENS = {
+	ENGINE_RUN_KIND_UNSPECIFIED: null,
+	ENGINE_RUN_KIND_BUILD: 'build',
+	ENGINE_RUN_KIND_PREVIEW: 'preview',
+	ENGINE_RUN_KIND_ROW_COUNT: 'row_count',
+	ENGINE_RUN_KIND_DOWNLOAD: 'download',
+	ENGINE_RUN_KIND_INGEST: 'ingest'
+} as const satisfies Record<ProtocolEngineRunKindJson, string | null>;
+
+export const BUILD_TAB_STATUS_JSON_TOKENS = {
+	BUILD_TAB_STATUS_UNSPECIFIED: null,
+	BUILD_TAB_STATUS_SUCCESS: 'success',
+	BUILD_TAB_STATUS_FAILED: 'failed'
+} as const satisfies Record<ProtocolBuildTabStatusJson, string | null>;
+
+export const BUILD_LOG_LEVEL_JSON_TOKENS = {
+	BUILD_LOG_LEVEL_UNSPECIFIED: null,
+	BUILD_LOG_LEVEL_INFO: 'info',
+	BUILD_LOG_LEVEL_WARNING: 'warning',
+	BUILD_LOG_LEVEL_ERROR: 'error'
+} as const satisfies Record<ProtocolBuildLogLevelJson, string | null>;
 
 export type FilterOperator = EnumToken<typeof FILTER_OPERATOR_TOKENS>;
 export type FilterValueType = EnumToken<typeof FILTER_VALUE_TYPE_TOKENS>;

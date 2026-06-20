@@ -8,13 +8,13 @@ import type {
 	BuildTabStatusJson,
 	EngineRunKindJson
 } from '$lib/protocol/dataforge_protocol/enums_pb';
-import type {
-	BuildEvent,
-	BuildLogLevel,
-	BuildTabResult,
-	BuildTabStatus,
-	EngineRunKind
-} from '$lib/types/build-stream';
+import type { BuildEvent, BuildTabResult } from '$lib/types/build-stream';
+import {
+	BUILD_LOG_LEVEL_JSON_TOKENS,
+	BUILD_TAB_STATUS_JSON_TOKENS,
+	ENGINE_RUN_KIND_JSON_TOKENS
+} from '$lib/types/protocol-enum-tokens';
+import type { BuildLogLevel, BuildTabStatus, EngineRunKind } from '$lib/types/protocol-enum-tokens';
 
 type BuildEventOneofKey =
 	| 'cancelled'
@@ -55,28 +55,6 @@ const EVENT_KEYS: BuildEventOneofKey[] = [
 	'stepFailed',
 	'stepStarted'
 ];
-
-const ENGINE_RUN_KIND_TOKENS: Record<EngineRunKindJson, EngineRunKind | null> = {
-	ENGINE_RUN_KIND_UNSPECIFIED: null,
-	ENGINE_RUN_KIND_BUILD: 'build',
-	ENGINE_RUN_KIND_PREVIEW: 'preview',
-	ENGINE_RUN_KIND_ROW_COUNT: 'row_count',
-	ENGINE_RUN_KIND_DOWNLOAD: 'download',
-	ENGINE_RUN_KIND_INGEST: 'ingest'
-};
-
-const BUILD_TAB_STATUS_TOKENS: Record<BuildTabStatusJson, BuildTabStatus | null> = {
-	BUILD_TAB_STATUS_UNSPECIFIED: null,
-	BUILD_TAB_STATUS_SUCCESS: 'success',
-	BUILD_TAB_STATUS_FAILED: 'failed'
-};
-
-const BUILD_LOG_LEVEL_TOKENS: Record<BuildLogLevelJson, BuildLogLevel | null> = {
-	BUILD_LOG_LEVEL_UNSPECIFIED: null,
-	BUILD_LOG_LEVEL_INFO: 'info',
-	BUILD_LOG_LEVEL_WARNING: 'warning',
-	BUILD_LOG_LEVEL_ERROR: 'error'
-};
 
 function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null;
@@ -120,15 +98,15 @@ function optionalInt64(value: unknown): number | null {
 }
 
 function engineRunKindToken(value: EngineRunKindJson | undefined): EngineRunKind | null {
-	return value === undefined ? null : ENGINE_RUN_KIND_TOKENS[value];
+	return value === undefined ? null : (ENGINE_RUN_KIND_JSON_TOKENS[value] ?? null);
 }
 
 function buildTabStatusToken(value: BuildTabStatusJson | undefined): BuildTabStatus | null {
-	return value === undefined ? null : BUILD_TAB_STATUS_TOKENS[value];
+	return value === undefined ? null : (BUILD_TAB_STATUS_JSON_TOKENS[value] ?? null);
 }
 
 function buildLogLevelToken(value: BuildLogLevelJson | undefined): BuildLogLevel | null {
-	return value === undefined ? null : BUILD_LOG_LEVEL_TOKENS[value];
+	return value === undefined ? null : (BUILD_LOG_LEVEL_JSON_TOKENS[value] ?? null);
 }
 
 function baseFromContext(context: BuildEventContextJson | undefined): BuildEventBase | null {

@@ -104,6 +104,11 @@ FRONTEND_OPERATION_COMPONENT_FORBIDDEN_PATTERNS = {
     re.compile(r'\btype\s+DownloadConfigData\b'): 'pipeline config binding must use protocol-anchored DownloadConfigData',
     re.compile(r'\bconst\s+CAST_TYPES\s*=\s*\['): 'select cast options must come from generated protocol enum tokens',
 }
+FRONTEND_BUILD_STREAM_ADAPTER_FORBIDDEN_PATTERNS = {
+    re.compile(r'\bconst\s+ENGINE_RUN_KIND_TOKENS\s*:'): 'build-stream generated JSON enum tokens must live in protocol-enum-tokens.ts',
+    re.compile(r'\bconst\s+BUILD_TAB_STATUS_TOKENS\s*:'): 'build-stream generated JSON enum tokens must live in protocol-enum-tokens.ts',
+    re.compile(r'\bconst\s+BUILD_LOG_LEVEL_TOKENS\s*:'): 'build-stream generated JSON enum tokens must live in protocol-enum-tokens.ts',
+}
 WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
 }
@@ -242,6 +247,13 @@ def main() -> int:
             for pattern, reason in FRONTEND_OPERATION_COMPONENT_FORBIDDEN_PATTERNS.items():
                 if pattern.search(content):
                     errors.append(f'{component_path.relative_to(ROOT)} contains {reason}: {pattern.pattern}')
+
+    frontend_build_stream_adapter = ROOT / 'packages/frontend/src/lib/types/protocol-build-stream.ts'
+    if frontend_build_stream_adapter.exists():
+        content = frontend_build_stream_adapter.read_text()
+        for pattern, reason in FRONTEND_BUILD_STREAM_ADAPTER_FORBIDDEN_PATTERNS.items():
+            if pattern.search(content):
+                errors.append(f'{frontend_build_stream_adapter.relative_to(ROOT)} contains {reason}: {pattern.pattern}')
 
     worker_compute_schemas = ROOT / 'packages/worker/runtime/domain/compute/schemas.py'
     if worker_compute_schemas.exists():
