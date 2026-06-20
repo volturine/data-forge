@@ -4,6 +4,7 @@ package dataforge.runtime;
 
 import "buf/validate/validate.proto";
 import "dataforge_protocol/analysis.proto";
+import "dataforge_protocol/datasource.proto";
 import "dataforge_protocol/enums.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
@@ -103,6 +104,7 @@ message ComputeCommand {
     EngineLifecycleCommand configure_engine = 7;
     EngineLifecycleCommand shutdown_engine = 8;
     google.protobuf.Struct datasource_request = 9;
+    DatasourceCommand datasource = 10;
   }
 }
 
@@ -145,6 +147,7 @@ message ComputeResponse {
     StepRowCountResult row_count = 3;
     ExportResult export = 4;
     google.protobuf.Struct dynamic_response = 5;
+    DatasourceResult datasource = 6;
   }
 }
 

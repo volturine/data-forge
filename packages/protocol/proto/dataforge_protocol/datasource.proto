@@ -5,6 +5,7 @@ package dataforge.runtime;
 import "buf/validate/validate.proto";
 import "dataforge_protocol/enums.proto";
 import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
 
 message DatasourceRef {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
@@ -20,4 +21,200 @@ message DatasourceMetadata {
   google.protobuf.Struct config = 6;
   google.protobuf.Struct schema_cache = 7;
   bool is_hidden = 8;
+}
+
+message CsvOptions {
+  string delimiter = 1 [(buf.validate.field).string.min_len = 1];
+  string quote_char = 2 [(buf.validate.field).string.min_len = 1];
+  bool has_header = 3;
+  int32 skip_rows = 4 [(buf.validate.field).int32.gte = 0];
+  string encoding = 5 [(buf.validate.field).string.min_len = 1];
+}
+
+message CreateFileDatasourceCommand {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  optional string description = 2;
+  string file_path = 3 [(buf.validate.field).string.min_len = 1];
+  DataSourceFileType file_type = 4 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Struct options = 5;
+  optional CsvOptions csv_options = 6;
+  optional string sheet_name = 7;
+  optional int32 start_row = 8 [(buf.validate.field).int32.gte = 0];
+  optional int32 start_col = 9 [(buf.validate.field).int32.gte = 0];
+  optional int32 end_col = 10 [(buf.validate.field).int32.gte = 0];
+  optional int32 end_row = 11 [(buf.validate.field).int32.gte = 0];
+  optional bool has_header = 12;
+  optional string table_name = 13;
+  optional string named_range = 14;
+  optional string cell_range = 15;
+  optional string owner_id = 16 [(buf.validate.field).string.min_len = 1];
+}
+
+message CreateDatabaseDatasourceCommand {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  optional string description = 2;
+  string connection_string = 3 [(buf.validate.field).string.min_len = 1];
+  string query = 4 [(buf.validate.field).string.min_len = 1];
+  string branch = 5 [(buf.validate.field).string.min_len = 1];
+  optional string owner_id = 6 [(buf.validate.field).string.min_len = 1];
+}
+
+message CreateIcebergDatasourceCommand {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  optional string description = 2;
+  google.protobuf.Struct source = 3 [(buf.validate.field).required = true];
+  string branch = 4 [(buf.validate.field).string.min_len = 1];
+  optional string owner_id = 5 [(buf.validate.field).string.min_len = 1];
+}
+
+message IngestDatasourceCommand {
+  string datasource_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message DatasourceSchemaCommand {
+  string datasource_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string sheet_name = 2;
+  bool refresh = 3;
+}
+
+message DatasourceColumnStatsCommand {
+  string datasource_id = 1 [(buf.validate.field).string.min_len = 1];
+  string column_name = 2 [(buf.validate.field).string.min_len = 1];
+  bool use_sample = 3;
+  int32 sample_size = 4 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 1000000
+  }];
+  google.protobuf.Struct datasource_config = 5;
+}
+
+message CompareIcebergSnapshotsCommand {
+  string datasource_id = 1 [(buf.validate.field).string.min_len = 1];
+  string snapshot_a = 2 [(buf.validate.field).string.min_len = 1];
+  string snapshot_b = 3 [(buf.validate.field).string.min_len = 1];
+  int32 row_limit = 4 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 1000
+  }];
+}
+
+message DatasourceCommand {
+  oneof command {
+    CreateFileDatasourceCommand create_file = 1;
+    CreateDatabaseDatasourceCommand create_database = 2;
+    CreateIcebergDatasourceCommand create_iceberg = 3;
+    IngestDatasourceCommand ingest = 4;
+    DatasourceSchemaCommand schema = 5;
+    DatasourceColumnStatsCommand column_stats = 6;
+    CompareIcebergSnapshotsCommand compare_iceberg_snapshots = 7;
+  }
+}
+
+message DataSourceRecord {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+  optional string description = 3;
+  DataSourceType source_type = 4 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Struct config = 5;
+  optional google.protobuf.Struct schema_cache = 6;
+  optional string created_by_analysis_id = 7 [(buf.validate.field).string.min_len = 1];
+  DataSourceCreatedBy created_by = 8 [(buf.validate.field).enum.defined_only = true];
+  bool is_hidden = 9;
+  google.protobuf.Timestamp created_at = 10;
+  optional string output_of_tab_id = 11 [(buf.validate.field).string.min_len = 1];
+}
+
+message ColumnSchema {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  string dtype = 2 [(buf.validate.field).string.min_len = 1];
+  bool nullable = 3;
+  optional string sample_value = 4;
+  optional string description = 5;
+}
+
+message SchemaInfo {
+  repeated ColumnSchema columns = 1;
+  optional int64 row_count = 2 [(buf.validate.field).int64.gte = 0];
+  repeated string sheet_names = 3;
+}
+
+message HistogramBin {
+  double start = 1;
+  double end = 2;
+  int64 count = 3 [(buf.validate.field).int64.gte = 0];
+}
+
+message ColumnStats {
+  string column = 1 [(buf.validate.field).string.min_len = 1];
+  string dtype = 2 [(buf.validate.field).string.min_len = 1];
+  int64 null_count = 3 [(buf.validate.field).int64.gte = 0];
+  optional int64 unique_count = 4 [(buf.validate.field).int64.gte = 0];
+  optional google.protobuf.Value min = 5;
+  optional google.protobuf.Value max = 6;
+}
+
+message SchemaDiff {
+  string column = 1 [(buf.validate.field).string.min_len = 1];
+  SchemaDiffStatus status = 2 [(buf.validate.field).enum.defined_only = true];
+  optional string type_a = 3;
+  optional string type_b = 4;
+}
+
+message SnapshotPreview {
+  repeated string columns = 1;
+  map<string, string> column_types = 2;
+  repeated google.protobuf.Struct rows = 3;
+  int64 row_count = 4 [(buf.validate.field).int64.gte = 0];
+}
+
+message SnapshotCompareResult {
+  string datasource_id = 1 [(buf.validate.field).string.min_len = 1];
+  string snapshot_a = 2 [(buf.validate.field).string.min_len = 1];
+  string snapshot_b = 3 [(buf.validate.field).string.min_len = 1];
+  int64 row_count_a = 4 [(buf.validate.field).int64.gte = 0];
+  int64 row_count_b = 5 [(buf.validate.field).int64.gte = 0];
+  int64 row_count_delta = 6;
+  repeated SchemaDiff schema_diff = 7;
+  repeated ColumnStats stats_a = 8;
+  repeated ColumnStats stats_b = 9;
+  SnapshotPreview preview_a = 10 [(buf.validate.field).required = true];
+  SnapshotPreview preview_b = 11 [(buf.validate.field).required = true];
+}
+
+message ColumnStatsResult {
+  string column = 1 [(buf.validate.field).string.min_len = 1];
+  string dtype = 2 [(buf.validate.field).string.min_len = 1];
+  int64 count = 3 [(buf.validate.field).int64.gte = 0];
+  int64 null_count = 4 [(buf.validate.field).int64.gte = 0];
+  double null_percentage = 5 [(buf.validate.field).double.gte = 0];
+  optional int64 unique = 6 [(buf.validate.field).int64.gte = 0];
+  optional double mean = 7;
+  optional double std = 8;
+  optional google.protobuf.Value min = 9;
+  optional google.protobuf.Value max = 10;
+  optional double median = 11;
+  optional double q25 = 12;
+  optional double q75 = 13;
+  optional int64 true_count = 14 [(buf.validate.field).int64.gte = 0];
+  optional int64 false_count = 15 [(buf.validate.field).int64.gte = 0];
+  optional int64 min_length = 16 [(buf.validate.field).int64.gte = 0];
+  optional int64 max_length = 17 [(buf.validate.field).int64.gte = 0];
+  optional double avg_length = 18 [(buf.validate.field).double.gte = 0];
+  repeated google.protobuf.Struct top_values = 19;
+  repeated HistogramBin histogram = 20;
+}
+
+message DatasourceErrorResult {
+  string error = 1 [(buf.validate.field).string.min_len = 1];
+  string message = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message DatasourceResult {
+  oneof result {
+    DataSourceRecord datasource = 1;
+    SchemaInfo schema = 2;
+    ColumnStatsResult column_stats = 3;
+    SnapshotCompareResult snapshot_compare = 4;
+    DatasourceErrorResult error = 5;
+  }
 }

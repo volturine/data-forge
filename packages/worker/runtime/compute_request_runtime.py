@@ -157,7 +157,10 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
     token = set_namespace_context(claimed.namespace)
     try:
         if claimed.kind in _DATASOURCE_REQUEST_KINDS:
-            response_json = client.execute_datasource_request(namespace=claimed.namespace, kind=claimed.kind, request_json=claimed.request_json)
+            if claimed.command_envelope.command.WhichOneof("command") != "datasource":
+                raise ValueError("compute command envelope must contain datasource")
+            datasource_command = claimed.command_envelope.command.datasource
+            response_json = client.execute_datasource_request(namespace=claimed.namespace, kind=claimed.kind, command=datasource_command)
             _complete_request(client, claimed, response_json=response_json)
             return
 

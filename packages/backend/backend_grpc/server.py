@@ -31,7 +31,7 @@ from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute.base import EngineStatusInfo
-from backend_core.domain.compute_requests.models import compute_request_kind_name, kind_from_proto
+from backend_core.domain.compute_requests.models import compute_request_kind_name, datasource_result_from_payload, kind_from_proto
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
@@ -292,86 +292,118 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session = next(session_gen)
         try:
             kind = _proto_compute_request_kind(request.kind)
-            request_json = struct_to_dict(request.request)
+            command = request.command
             response: Any
             if kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE:
-                raw_csv_options = request_json.get('csv_options')
-                csv_options = datasource_runtime_service.CSVOptions.model_validate(raw_csv_options) if isinstance(raw_csv_options, dict) else None
+                if command.WhichOneof('command') != 'create_file':
+                    raise ValueError('datasource command must contain create_file')
+                create_file = command.create_file
+                csv_options = None
+                if create_file.HasField('csv_options'):
+                    csv_options = datasource_runtime_service.CSVOptions(
+                        delimiter=create_file.csv_options.delimiter,
+                        quote_char=create_file.csv_options.quote_char,
+                        has_header=create_file.csv_options.has_header,
+                        skip_rows=create_file.csv_options.skip_rows,
+                        encoding=create_file.csv_options.encoding,
+                    )
                 response = datasource_runtime_service.create_file_datasource(
                     session=session,
-                    name=str(request_json['name']),
-                    description=str(request_json['description']) if request_json.get('description') is not None else None,
-                    file_path=str(request_json['file_path']),
-                    file_type=str(request_json['file_type']),
-                    options=_read_optional_dict(request_json, 'options'),
+                    name=create_file.name,
+                    description=create_file.description if create_file.HasField('description') else None,
+                    file_path=create_file.file_path,
+                    file_type=proto_value_to_enum_name(enums_pb2.DataSourceFileType, 'DATA_SOURCE_FILE_TYPE', create_file.file_type),
+                    options=struct_to_dict(create_file.options),
                     csv_options=csv_options,
-                    sheet_name=_read_optional_str(request_json, 'sheet_name'),
-                    start_row=_read_optional_int(request_json, 'start_row'),
-                    start_col=_read_optional_int(request_json, 'start_col'),
-                    end_col=_read_optional_int(request_json, 'end_col'),
-                    end_row=_read_optional_int(request_json, 'end_row'),
-                    has_header=bool(request_json['has_header']) if request_json.get('has_header') is not None else None,
-                    table_name=_read_optional_str(request_json, 'table_name'),
-                    named_range=_read_optional_str(request_json, 'named_range'),
-                    cell_range=_read_optional_str(request_json, 'cell_range'),
-                    owner_id=_read_optional_str(request_json, 'owner_id'),
+                    sheet_name=create_file.sheet_name if create_file.HasField('sheet_name') else None,
+                    start_row=create_file.start_row if create_file.HasField('start_row') else None,
+                    start_col=create_file.start_col if create_file.HasField('start_col') else None,
+                    end_col=create_file.end_col if create_file.HasField('end_col') else None,
+                    end_row=create_file.end_row if create_file.HasField('end_row') else None,
+                    has_header=create_file.has_header if create_file.HasField('has_header') else None,
+                    table_name=create_file.table_name if create_file.HasField('table_name') else None,
+                    named_range=create_file.named_range if create_file.HasField('named_range') else None,
+                    cell_range=create_file.cell_range if create_file.HasField('cell_range') else None,
+                    owner_id=create_file.owner_id if create_file.HasField('owner_id') else None,
                 )
             elif kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE:
+                if command.WhichOneof('command') != 'create_database':
+                    raise ValueError('datasource command must contain create_database')
+                create_database = command.create_database
                 response = datasource_runtime_service.create_database_datasource(
                     session=session,
-                    name=str(request_json['name']),
-                    description=str(request_json['description']) if request_json.get('description') is not None else None,
-                    connection_string=str(request_json['connection_string']),
-                    query=str(request_json['query']),
-                    branch=str(request_json['branch']),
-                    owner_id=str(request_json['owner_id']) if request_json.get('owner_id') is not None else None,
+                    name=create_database.name,
+                    description=create_database.description if create_database.HasField('description') else None,
+                    connection_string=create_database.connection_string,
+                    query=create_database.query,
+                    branch=create_database.branch,
+                    owner_id=create_database.owner_id if create_database.HasField('owner_id') else None,
                 )
             elif kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE:
-                raw_source = request_json.get('source')
-                if not isinstance(raw_source, dict):
-                    raise ValueError('source is required')
+                if command.WhichOneof('command') != 'create_iceberg':
+                    raise ValueError('datasource command must contain create_iceberg')
+                create_iceberg = command.create_iceberg
                 response = datasource_runtime_service.create_iceberg_datasource(
                     session=session,
-                    name=str(request_json['name']),
-                    description=str(request_json['description']) if request_json.get('description') is not None else None,
-                    source=dict(raw_source),
-                    branch=str(request_json['branch']),
-                    owner_id=str(request_json['owner_id']) if request_json.get('owner_id') is not None else None,
+                    name=create_iceberg.name,
+                    description=create_iceberg.description if create_iceberg.HasField('description') else None,
+                    source=struct_to_dict(create_iceberg.source),
+                    branch=create_iceberg.branch,
+                    owner_id=create_iceberg.owner_id if create_iceberg.HasField('owner_id') else None,
                 )
             elif kind == enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE:
-                response = datasource_runtime_service.ingest_external_datasource(session, str(request_json['datasource_id']))
+                if command.WhichOneof('command') != 'ingest':
+                    raise ValueError('datasource command must contain ingest')
+                response = datasource_runtime_service.ingest_external_datasource(session, command.ingest.datasource_id)
             elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
+                if command.WhichOneof('command') != 'schema':
+                    raise ValueError('datasource command must contain schema')
+                schema = command.schema
                 response = datasource_runtime_service.get_datasource_schema(
                     session,
-                    str(request_json['datasource_id']),
-                    sheet_name=_read_optional_str(request_json, 'sheet_name'),
-                    refresh=bool(request_json.get('refresh', False)),
+                    schema.datasource_id,
+                    sheet_name=schema.sheet_name if schema.HasField('sheet_name') else None,
+                    refresh=schema.refresh,
                 )
             elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
+                if command.WhichOneof('command') != 'column_stats':
+                    raise ValueError('datasource command must contain column_stats')
+                column_stats = command.column_stats
                 response = datasource_runtime_service.get_column_stats(
                     session=session,
-                    datasource_id=str(request_json['datasource_id']),
-                    column_name=str(request_json['column_name']),
-                    use_sample=bool(request_json.get('use_sample', True)),
-                    sample_size=_read_optional_int(request_json, 'sample_size') or 10000,
-                    datasource_config=_read_optional_dict(request_json, 'datasource_config'),
+                    datasource_id=column_stats.datasource_id,
+                    column_name=column_stats.column_name,
+                    use_sample=column_stats.use_sample,
+                    sample_size=column_stats.sample_size,
+                    datasource_config=struct_to_dict(column_stats.datasource_config),
                 )
             elif kind == enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS:
+                if command.WhichOneof('command') != 'compare_iceberg_snapshots':
+                    raise ValueError('datasource command must contain compare_iceberg_snapshots')
+                compare_snapshots = command.compare_iceberg_snapshots
                 response = datasource_runtime_service.compare_iceberg_snapshots(
                     session,
-                    str(request_json['datasource_id']),
-                    str(request_json['snapshot_a']),
-                    str(request_json['snapshot_b']),
-                    _read_optional_int(request_json, 'row_limit') or 10,
+                    compare_snapshots.datasource_id,
+                    compare_snapshots.snapshot_a,
+                    compare_snapshots.snapshot_b,
+                    compare_snapshots.row_limit,
                 )
             else:
                 raise ValueError(f'Unsupported datasource request kind: {compute_request_kind_name(kind)}')
-            return worker_runtime_pb2.JsonResponse(response=dict_to_struct(response.model_dump(mode='json')))
+            response_payload = response.model_dump(mode='json')
+            return worker_runtime_pb2.JsonResponse(
+                response=dict_to_struct(response_payload),
+                datasource_result=datasource_result_from_payload(kind, response_payload),
+            )
         except AppError as exc:
             if exc.error_code != 'DATASOURCE_NOT_FOUND':
                 raise
             logger.warning('Datasource not found for %s: %s', compute_request_kind_name(kind), exc)
-            return worker_runtime_pb2.JsonResponse(response=dict_to_struct({'error': 'datasource_not_found', 'message': str(exc)}))
+            response_payload = {'error': 'datasource_not_found', 'message': str(exc)}
+            return worker_runtime_pb2.JsonResponse(
+                response=dict_to_struct(response_payload),
+                datasource_result=datasource_result_from_payload(kind, response_payload),
+            )
         finally:
             session.close()
             session_gen.close()

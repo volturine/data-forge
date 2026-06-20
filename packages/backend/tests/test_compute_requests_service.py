@@ -37,7 +37,7 @@ def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
-        request_json={'name': 'upload'},
+        request_json={'name': 'upload', 'file_path': 's3://data/upload.csv', 'file_type': 'csv', 'options': {}},
     )
     preview = compute_requests_service.create_request(
         test_db_session,
@@ -63,13 +63,13 @@ def test_claim_next_request_prioritizes_user_create_requests_over_background_ing
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
-        request_json={'name': 'background'},
+        request_json={'datasource_id': 'background'},
     )
     create_request = compute_requests_service.create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
-        request_json={'name': 'upload'},
+        request_json={'name': 'upload', 'file_path': 's3://data/upload.csv', 'file_type': 'csv', 'options': {}},
     )
 
     claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
@@ -148,7 +148,6 @@ def test_create_request_stores_typed_command_envelope(test_db_session) -> None:
     assert request.request_json['correlation_id'] == request.id
     assert compute_requests_service.command_payload(request)['engine_identity'] == {
         'analysis_id': 'analysis-1',
-        'resource_id': 'analysis-1',
         'reuse_policy': 'shared',
         'scope': 'analysis_interactive',
     }
@@ -256,7 +255,19 @@ def test_mark_request_completed_stores_typed_response_envelope(test_db_session) 
         request_json=_preview_payload(),
     )
 
-    completed = compute_requests_service.mark_request_completed(test_db_session, request.id, response_json={'rows': [{'id': 1}]})
+    completed = compute_requests_service.mark_request_completed(
+        test_db_session,
+        request.id,
+        response_json={
+            'step_id': 'source',
+            'columns': ['id'],
+            'column_types': {'id': 'Int64'},
+            'data': [{'id': 1}],
+            'total_rows': 1,
+            'page': 1,
+            'page_size': 100,
+        },
+    )
 
     assert completed.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
     assert completed.response_json is not None
@@ -265,11 +276,90 @@ def test_mark_request_completed_stores_typed_response_envelope(test_db_session) 
     assert completed.response_json['correlation_id'] == request.id
     assert completed.response_json['status'] == 'COMPUTE_REQUEST_STATUS_COMPLETED'
     assert 'error_message' not in completed.response_json
-    assert compute_requests_service.response_payload(completed) == {'rows': [{'id': 1}]}
+    assert compute_requests_service.response_payload(completed) == {
+        'step_id': 'source',
+        'columns': ['id'],
+        'column_types': {'id': 'Int64'},
+        'data': [{'id': 1}],
+        'total_rows': 1,
+        'page': 1,
+        'page_size': 100,
+    }
     outbox_event = test_db_session.execute(select(RuntimeOutboxEvent)).scalars().one()
     assert outbox_event.kind == RuntimePayloadKind.COMPUTE_RESPONSE.value
     assert outbox_event.status == RuntimeOutboxStatus.PENDING
     assert outbox_event.payload_json == {'kind': RuntimePayloadKind.COMPUTE_RESPONSE.value, 'request_id': request.id}
+
+
+def test_row_count_response_preserves_zero_count(test_db_session) -> None:
+    request = compute_requests_service.create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
+        request_json=_preview_payload(),
+    )
+
+    completed = compute_requests_service.mark_request_completed(test_db_session, request.id, response_json={'step_id': 'filter-1', 'row_count': 0})
+
+    assert compute_requests_service.response_payload(completed) == {'step_id': 'filter-1', 'row_count': 0}
+
+
+def test_failed_response_preserves_integral_status_code(test_db_session) -> None:
+    request = compute_requests_service.create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+
+    failed = compute_requests_service.mark_request_failed(
+        test_db_session,
+        request.id,
+        error_message='Datasource output is not available',
+        response_json={'error': 'Datasource output is not available', 'status_code': 409},
+    )
+
+    assert compute_requests_service.response_payload(failed) == {
+        'error': 'Datasource output is not available',
+        'status_code': 409,
+    }
+
+
+def test_column_stats_response_preserves_required_zero_defaults(test_db_session) -> None:
+    request = compute_requests_service.create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
+        request_json={
+            'datasource_id': 'datasource-1',
+            'column_name': 'city',
+            'use_sample': True,
+            'sample_size': 1000,
+            'datasource_config': {},
+        },
+    )
+
+    completed = compute_requests_service.mark_request_completed(
+        test_db_session,
+        request.id,
+        response_json={
+            'column': 'city',
+            'dtype': 'String',
+            'count': 2,
+            'null_count': 0,
+            'null_percentage': 0.0,
+            'histogram': [{'start': 0.0, 'end': 1.0, 'count': 0}, {'start': 1.0, 'end': 2.0, 'count': 2}],
+        },
+    )
+
+    assert compute_requests_service.response_payload(completed) == {
+        'column': 'city',
+        'dtype': 'String',
+        'count': 2,
+        'null_count': 0,
+        'null_percentage': 0.0,
+        'histogram': [{'start': 0.0, 'end': 1.0, 'count': 0}, {'start': 1.0, 'end': 2.0, 'count': 2}],
+    }
 
 
 def test_claim_next_request_reclaims_expired_lease(test_db_session) -> None:

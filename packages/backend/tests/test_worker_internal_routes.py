@@ -19,7 +19,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 from backend_grpc.codec import dict_to_struct, struct_to_dict
 from backend_grpc.server import WorkerRuntimeServicer
-from dataforge_protocol import common_pb2, enums_pb2, worker_runtime_pb2
+from dataforge_protocol import common_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2
 
 
 class FakeGrpcContext:
@@ -168,12 +168,10 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     assert response.request.namespace == 'default'
     assert response.request.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE
     assert response.request.command.command.WhichOneof('command') == 'shutdown_engine'
-    assert struct_to_dict(response.request.command.payload)['engine_identity'] == {
-        'analysis_id': 'analysis-1',
-        'resource_id': 'analysis-1',
-        'reuse_policy': 'shared',
-        'scope': 'analysis_interactive',
-    }
+    engine_identity = response.request.command.command.shutdown_engine.engine_identity
+    assert engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
+    assert engine_identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert engine_identity.analysis_id == 'analysis-1'
     test_db_session.refresh(request)
     assert request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     assert request.lease_owner == worker_id
@@ -243,21 +241,20 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
         worker_runtime_pb2.WorkerExecuteDatasourceRequest(
             namespace='default',
             kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
-            request=dict_to_struct(
-                {
-                    'name': 'Created',
-                    'description': None,
-                    'connection_string': 'postgresql://example/db',
-                    'query': 'SELECT 1',
-                    'branch': 'main',
-                    'owner_id': None,
-                }
+            command=datasource_pb2.DatasourceCommand(
+                create_database=datasource_pb2.CreateDatabaseDatasourceCommand(
+                    name='Created',
+                    connection_string='postgresql://example/db',
+                    query='SELECT 1',
+                    branch='main',
+                )
             ),
         ),
         context,  # type: ignore[arg-type]
     )
 
     assert struct_to_dict(response.response) == {'id': 'ds-1', 'name': 'Created'}
+    assert response.datasource_result.datasource.id == 'ds-1'
 
 
 @pytest.mark.asyncio

@@ -9,8 +9,10 @@ from datetime import datetime
 from typing import Any, TypeVar, cast
 
 import grpc
+from google.protobuf import descriptor as proto_descriptor
+from google.protobuf import json_format, message
 
-from dataforge_protocol import common_pb2, compute_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
+from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
 from worker_grpc.codec import (
     datetime_to_timestamp,
     dict_to_struct,
@@ -152,7 +154,7 @@ class WorkerInternalApiClient:
             id=response.request.id,
             namespace=response.request.namespace,
             kind=command.kind,
-            request_json=struct_to_dict(command.payload),
+            request_json=_compute_command_payload(command),
             command_envelope=command,
         )
 
@@ -216,18 +218,20 @@ class WorkerInternalApiClient:
     def release_compute_requests(self, *, worker_id: str) -> int:
         return int(self._call(lambda: self._stub.ReleaseComputeRequests(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata())).count)
 
-    def execute_datasource_request(self, *, namespace: str, kind: enums_pb2.ComputeRequestKind, request_json: dict[str, object]) -> dict[str, object]:
+    def execute_datasource_request(self, *, namespace: str, kind: enums_pb2.ComputeRequestKind, command: datasource_pb2.DatasourceCommand) -> dict[str, object]:
         response = self._call(
             lambda: self._stub.ExecuteDatasourceRequest(
                 worker_runtime_pb2.WorkerExecuteDatasourceRequest(
                     namespace=namespace,
                     kind=kind,
-                    request=dict_to_struct(request_json),
+                    command=command,
                 ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
             )
         )
+        if response.HasField("datasource_result"):
+            return _datasource_result_payload(response.datasource_result)
         return struct_to_dict(response.response)
 
     def schedule_ingest_datasource(self, *, namespace: str, datasource_id: str) -> dict[str, object]:
@@ -749,6 +753,186 @@ def _required_mapping_dict(payload: Mapping[str, object], key: str) -> dict[str,
     return value
 
 
+def _enum_name_from_token(enum_descriptor: Any, value: object) -> object:
+    if not isinstance(value, str) or value in enum_descriptor.values_by_name:
+        return value
+    for enum_value in enum_descriptor.values:
+        token = enum_value.GetOptions().Extensions[cast(Any, enums_pb2.dataforge_token)]
+        if token == value:
+            return enum_value.name
+    return value
+
+
+def _enum_token(enum_descriptor: Any, value: int) -> str:
+    value_descriptor = enum_descriptor.values_by_number[value]
+    return cast(str, value_descriptor.GetOptions().Extensions[cast(Any, enums_pb2.dataforge_token)])
+
+
+def _tokens_to_proto_json(value: object, message_descriptor: Any) -> object:
+    if message_descriptor.full_name == "google.protobuf.Struct":
+        return value
+    if isinstance(value, list):
+        return [_tokens_to_proto_json(item, message_descriptor) for item in value]
+    if not isinstance(value, Mapping):
+        return value
+
+    result: dict[str, object] = {}
+    for raw_key, raw_item in value.items():
+        key = str(raw_key)
+        field = message_descriptor.fields_by_name.get(key)
+        if field is None:
+            result[key] = raw_item
+            continue
+        is_map_field = field.message_type is not None and field.message_type.GetOptions().map_entry
+        if field.is_repeated and not is_map_field:
+            if raw_item is None:
+                continue
+            if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+                result[key] = [_tokens_to_proto_json(item, field.message_type) for item in cast(list[object], raw_item)]
+            elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+                result[key] = [_enum_name_from_token(field.enum_type, item) for item in cast(list[object], raw_item)]
+            else:
+                result[key] = raw_item
+            continue
+        if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+            if raw_item is not None:
+                result[key] = _tokens_to_proto_json(raw_item, field.message_type)
+        elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+            result[key] = _enum_name_from_token(field.enum_type, raw_item)
+        else:
+            result[key] = raw_item
+    return result
+
+
+def _proto_json_to_tokens(value: object, message_descriptor: Any) -> object:
+    if message_descriptor.full_name == "google.protobuf.Struct":
+        return value
+    if isinstance(value, list):
+        return [_proto_json_to_tokens(item, message_descriptor) for item in value]
+    if not isinstance(value, Mapping):
+        return value
+
+    result: dict[str, object] = {}
+    for raw_key, raw_item in value.items():
+        key = str(raw_key)
+        field = message_descriptor.fields_by_name.get(key)
+        if field is None:
+            result[key] = raw_item
+            continue
+        is_map_field = field.message_type is not None and field.message_type.GetOptions().map_entry
+        if field.is_repeated and not is_map_field:
+            if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+                result[key] = [_proto_json_to_tokens(item, field.message_type) for item in cast(list[object], raw_item)]
+            elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+                result[key] = [
+                    _enum_token(field.enum_type, field.enum_type.values_by_name[item].number)
+                    if isinstance(item, str) and item in field.enum_type.values_by_name
+                    else _enum_token(field.enum_type, item)
+                    if isinstance(item, int)
+                    else item
+                    for item in cast(list[object], raw_item)
+                ]
+            else:
+                result[key] = raw_item
+            continue
+        if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+            result[key] = _proto_json_to_tokens(raw_item, field.message_type)
+        elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+            if isinstance(raw_item, str) and raw_item in field.enum_type.values_by_name:
+                result[key] = _enum_token(field.enum_type, field.enum_type.values_by_name[raw_item].number)
+            elif isinstance(raw_item, int):
+                result[key] = _enum_token(field.enum_type, raw_item)
+            else:
+                result[key] = raw_item
+        else:
+            result[key] = raw_item
+    return result
+
+
+def _parse_proto_message[ProtoMessageT: message.Message](message_type: type[ProtoMessageT], payload: dict[str, object]) -> ProtoMessageT:
+    proto_json = _tokens_to_proto_json(payload, message_type.DESCRIPTOR)
+    return cast(ProtoMessageT, json_format.ParseDict(cast(dict[str, object], proto_json), message_type()))
+
+
+def _message_to_payload(value: message.Message) -> dict[str, object]:
+    decoded = json_format.MessageToDict(value, preserving_proto_field_name=True)
+    tokenized = _proto_json_to_tokens(decoded, value.DESCRIPTOR)
+    if not isinstance(tokenized, dict):
+        raise ValueError(f"{value.DESCRIPTOR.full_name} must decode to an object")
+    return cast(dict[str, object], tokenized)
+
+
+def _compute_command_payload(envelope: compute_pb2.ComputeCommandEnvelope) -> dict[str, object]:
+    command = envelope.command
+    selected = command.WhichOneof("command")
+    if selected is None:
+        return struct_to_dict(envelope.payload)
+    if selected == "datasource":
+        datasource_command = command.datasource
+        datasource_field = datasource_command.WhichOneof("command")
+        if datasource_field is None:
+            return {}
+        return _message_to_payload(getattr(datasource_command, datasource_field))
+    return _message_to_payload(getattr(command, selected))
+
+
+def _datasource_result_payload(result: datasource_pb2.DatasourceResult) -> dict[str, object]:
+    selected = result.WhichOneof("result")
+    if selected is None:
+        return {}
+    return _message_to_payload(getattr(result, selected))
+
+
+def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
+    result = datasource_pb2.DatasourceResult()
+    if "error" in payload:
+        result.error.CopyFrom(_parse_proto_message(datasource_pb2.DatasourceErrorResult, payload))
+    elif kind in {
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
+    }:
+        result.datasource.CopyFrom(_parse_proto_message(datasource_pb2.DataSourceRecord, payload))
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
+        result.schema.CopyFrom(_parse_proto_message(datasource_pb2.SchemaInfo, payload))
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
+        result.column_stats.CopyFrom(_parse_proto_message(datasource_pb2.ColumnStatsResult, payload))
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS:
+        result.snapshot_compare.CopyFrom(_parse_proto_message(datasource_pb2.SnapshotCompareResult, payload))
+    else:
+        raise ValueError(f"Unsupported datasource response kind: {kind}")
+    return result
+
+
+def _compute_response(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeResponse:
+    response = compute_pb2.ComputeResponse()
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
+        preview_payload = dict(payload)
+        rows = preview_payload.pop("data", [])
+        preview_payload["rows"] = rows
+        response.preview.CopyFrom(_parse_proto_message(compute_pb2.StepPreviewResult, preview_payload))
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
+        response.schema.CopyFrom(_parse_proto_message(compute_pb2.StepSchemaResult, payload))
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
+        response.row_count.CopyFrom(_parse_proto_message(compute_pb2.StepRowCountResult, payload))
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
+        response.export.CopyFrom(_parse_proto_message(compute_pb2.ExportResult, payload))
+    elif kind in {
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+        enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
+        enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
+    }:
+        response.datasource.CopyFrom(_datasource_result(kind, payload))
+    else:
+        response.dynamic_response.CopyFrom(dict_to_struct(payload))
+    return response
+
+
 def _compute_response_envelope(
     *,
     kind: enums_pb2.ComputeRequestKind,
@@ -763,8 +947,10 @@ def _compute_response_envelope(
         correlation_id=request_id,
         status=status,
     )
-    envelope.payload.CopyFrom(dict_to_struct(response_json))
-    envelope.response.dynamic_response.CopyFrom(dict_to_struct(response_json))
+    if status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED:
+        envelope.response.dynamic_response.CopyFrom(dict_to_struct(response_json))
+    else:
+        envelope.response.CopyFrom(_compute_response(kind, response_json))
     if error_message is not None:
         envelope.error_message = error_message
     return envelope

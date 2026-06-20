@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
-from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
+from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime
@@ -26,7 +26,6 @@ from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
 from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
-from worker_grpc.codec import dict_to_struct
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -61,11 +60,13 @@ def _command_envelope(
         idempotency_key=request_id,
         correlation_id=request_id,
     )
-    envelope.payload.CopyFrom(dict_to_struct(payload))
     if shutdown_identity is not None:
         envelope.command.shutdown_engine.engine_identity.CopyFrom(shutdown_identity)
     else:
-        envelope.command.datasource_request.CopyFrom(dict_to_struct(payload))
+        datasource_id = payload.get("datasource_id")
+        if not isinstance(datasource_id, str):
+            raise ValueError("datasource_id is required")
+        envelope.command.datasource.schema.CopyFrom(datasource_pb2.DatasourceSchemaCommand(datasource_id=datasource_id))
     return envelope
 
 

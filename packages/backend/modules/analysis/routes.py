@@ -13,6 +13,7 @@ from backend_core.dependencies import (
 from backend_core.domain.analysis.step_types import is_step_type
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.error_handlers import handle_errors
+from backend_core.exceptions import PipelineExecutionError
 from backend_core.validation import AnalysisId, parse_analysis_id
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.analysis import schemas, service
@@ -263,7 +264,7 @@ async def delete_analysis(
         service.delete_analysis(session, analysis_id_value)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    with contextlib.suppress(HTTPException):
+    try:
         await executor_client.shutdown_engine(
             session,
             identity=compute_pb2.EngineIdentity(
@@ -273,6 +274,11 @@ async def delete_analysis(
             ),
             runtime_probe=runtime_probe,
         )
+    except HTTPException:
+        pass
+    except PipelineExecutionError as exc:
+        if 'not found' not in str(exc).lower():
+            raise
 
 
 @router.post('/{analysis_id}/preview', mcp=True)
