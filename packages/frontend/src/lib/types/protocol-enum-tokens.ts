@@ -34,6 +34,7 @@ import {
 	SortBy as ProtocolSortBy,
 	SortDirection as ProtocolSortDirection,
 	StackMode as ProtocolStackMode,
+	StepType as ProtocolStepType,
 	StringTransformMethod as ProtocolStringTransformMethod,
 	TimeComponent as ProtocolTimeComponent,
 	TimeDirection as ProtocolTimeDirection,
@@ -189,6 +190,45 @@ export const CHART_TYPE_TOKENS = {
 	[ProtocolChartType.PIE]: 'pie',
 	[ProtocolChartType.BOXPLOT]: 'boxplot'
 } as const satisfies Partial<Record<ProtocolChartType, string>>;
+
+export const STEP_TYPE_TOKENS = {
+	[ProtocolStepType.SELECT]: 'select',
+	[ProtocolStepType.DROP]: 'drop',
+	[ProtocolStepType.FILTER]: 'filter',
+	[ProtocolStepType.GROUPBY]: 'groupby',
+	[ProtocolStepType.JOIN]: 'join',
+	[ProtocolStepType.UNION_BY_NAME]: 'union_by_name',
+	[ProtocolStepType.UNPIVOT]: 'unpivot',
+	[ProtocolStepType.EXPLODE]: 'explode',
+	[ProtocolStepType.PIVOT]: 'pivot',
+	[ProtocolStepType.SAMPLE]: 'sample',
+	[ProtocolStepType.LIMIT]: 'limit',
+	[ProtocolStepType.TOPK]: 'topk',
+	[ProtocolStepType.VIEW]: 'view',
+	[ProtocolStepType.EXPORT]: 'export',
+	[ProtocolStepType.DOWNLOAD]: 'download',
+	[ProtocolStepType.CHART]: 'chart',
+	[ProtocolStepType.NOTIFICATION]: 'notification',
+	[ProtocolStepType.AI]: 'ai',
+	[ProtocolStepType.DATASOURCE]: 'datasource',
+	[ProtocolStepType.SORT]: 'sort',
+	[ProtocolStepType.RENAME]: 'rename',
+	[ProtocolStepType.EXPRESSION]: 'expression',
+	[ProtocolStepType.WITH_COLUMNS]: 'with_columns',
+	[ProtocolStepType.FILL_NULL]: 'fill_null',
+	[ProtocolStepType.DEDUPLICATE]: 'deduplicate',
+	[ProtocolStepType.STRING_TRANSFORM]: 'string_transform',
+	[ProtocolStepType.TIMESERIES]: 'timeseries',
+	[ProtocolStepType.PLOT_BAR]: 'plot_bar',
+	[ProtocolStepType.PLOT_HORIZONTAL_BAR]: 'plot_horizontal_bar',
+	[ProtocolStepType.PLOT_AREA]: 'plot_area',
+	[ProtocolStepType.PLOT_HEATGRID]: 'plot_heatgrid',
+	[ProtocolStepType.PLOT_HISTOGRAM]: 'plot_histogram',
+	[ProtocolStepType.PLOT_SCATTER]: 'plot_scatter',
+	[ProtocolStepType.PLOT_LINE]: 'plot_line',
+	[ProtocolStepType.PLOT_PIE]: 'plot_pie',
+	[ProtocolStepType.PLOT_BOXPLOT]: 'plot_boxplot'
+} as const satisfies Partial<Record<ProtocolStepType, string>>;
 
 export const GROUP_SORT_BY_TOKENS = {
 	[ProtocolGroupSortBy.NAME]: 'name',
@@ -421,6 +461,7 @@ export type ChartAggregation = EnumToken<typeof CHART_AGGREGATION_TOKENS>;
 export type YAxisPosition = EnumToken<typeof Y_AXIS_POSITION_TOKENS>;
 export type ReferenceAxis = EnumToken<typeof REFERENCE_AXIS_TOKENS>;
 export type ChartType = EnumToken<typeof CHART_TYPE_TOKENS>;
+export type ProtocolPipelineStepType = EnumToken<typeof STEP_TYPE_TOKENS>;
 export type GroupSortBy = EnumToken<typeof GROUP_SORT_BY_TOKENS>;
 export type SortDirection = EnumToken<typeof SORT_DIRECTION_TOKENS>;
 export type StackMode = EnumToken<typeof STACK_MODE_TOKENS>;

@@ -1,4 +1,5 @@
 from dataforge_protocol import enums_pb2
+from runtime.domain.analysis.step_types import PipelineStepType
 from runtime.domain.compute.schemas import BuildEventType, BuildTabResult, BuildTabStatus
 from runtime.domain.datasource.source_types import DataSourceFileType, DataSourceLoadType, DataSourceType, IcebergReader
 from runtime.domain.step_config_enums import CastMapType
@@ -14,6 +15,12 @@ def test_worker_compute_enums_are_protocol_descriptor_backed() -> None:
     result = BuildTabResult.model_validate({"tab_id": "tab-1", "tab_name": "Tab 1", "status": enums_pb2.BUILD_TAB_STATUS_SUCCESS})
     assert result.status is BuildTabStatus.SUCCESS
     assert result.model_dump(mode="json")["status"] == "success"
+
+
+def test_worker_step_types_are_protocol_descriptor_backed() -> None:
+    assert PipelineStepType.FILTER.number == enums_pb2.STEP_TYPE_FILTER
+    assert PipelineStepType.require(enums_pb2.STEP_TYPE_FILTER) is PipelineStepType.FILTER
+    assert PipelineStepType.require("filter") is PipelineStepType.FILTER
 
 
 def test_worker_datasource_enums_keep_string_storage_with_protocol_numbers() -> None:

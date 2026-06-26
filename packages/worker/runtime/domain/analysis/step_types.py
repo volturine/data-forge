@@ -31,6 +31,85 @@ ChartType.PIE = ChartType(enums_pb2.CHART_TYPE_PIE, protocol_token("ChartType", 
 ChartType.BOXPLOT = ChartType(enums_pb2.CHART_TYPE_BOXPLOT, protocol_token("ChartType", enums_pb2.CHART_TYPE_BOXPLOT))
 
 
+class PipelineStepType(ProtocolEnumValue):
+    SELECT: ClassVar[Self]
+    DROP: ClassVar[Self]
+    FILTER: ClassVar[Self]
+    GROUPBY: ClassVar[Self]
+    JOIN: ClassVar[Self]
+    UNION_BY_NAME: ClassVar[Self]
+    UNPIVOT: ClassVar[Self]
+    EXPLODE: ClassVar[Self]
+    PIVOT: ClassVar[Self]
+    SAMPLE: ClassVar[Self]
+    LIMIT: ClassVar[Self]
+    TOPK: ClassVar[Self]
+    VIEW: ClassVar[Self]
+    EXPORT: ClassVar[Self]
+    DOWNLOAD: ClassVar[Self]
+    CHART: ClassVar[Self]
+    NOTIFICATION: ClassVar[Self]
+    AI: ClassVar[Self]
+    DATASOURCE: ClassVar[Self]
+    SORT: ClassVar[Self]
+    RENAME: ClassVar[Self]
+    EXPRESSION: ClassVar[Self]
+    WITH_COLUMNS: ClassVar[Self]
+    FILL_NULL: ClassVar[Self]
+    DEDUPLICATE: ClassVar[Self]
+    STRING_TRANSFORM: ClassVar[Self]
+    TIMESERIES: ClassVar[Self]
+    PLOT_BAR: ClassVar[Self]
+    PLOT_HORIZONTAL_BAR: ClassVar[Self]
+    PLOT_AREA: ClassVar[Self]
+    PLOT_HEATGRID: ClassVar[Self]
+    PLOT_HISTOGRAM: ClassVar[Self]
+    PLOT_SCATTER: ClassVar[Self]
+    PLOT_LINE: ClassVar[Self]
+    PLOT_PIE: ClassVar[Self]
+    PLOT_BOXPLOT: ClassVar[Self]
+
+
+PipelineStepType.SELECT = PipelineStepType(enums_pb2.STEP_TYPE_SELECT, protocol_token("StepType", enums_pb2.STEP_TYPE_SELECT))
+PipelineStepType.DROP = PipelineStepType(enums_pb2.STEP_TYPE_DROP, protocol_token("StepType", enums_pb2.STEP_TYPE_DROP))
+PipelineStepType.FILTER = PipelineStepType(enums_pb2.STEP_TYPE_FILTER, protocol_token("StepType", enums_pb2.STEP_TYPE_FILTER))
+PipelineStepType.GROUPBY = PipelineStepType(enums_pb2.STEP_TYPE_GROUPBY, protocol_token("StepType", enums_pb2.STEP_TYPE_GROUPBY))
+PipelineStepType.JOIN = PipelineStepType(enums_pb2.STEP_TYPE_JOIN, protocol_token("StepType", enums_pb2.STEP_TYPE_JOIN))
+PipelineStepType.UNION_BY_NAME = PipelineStepType(enums_pb2.STEP_TYPE_UNION_BY_NAME, protocol_token("StepType", enums_pb2.STEP_TYPE_UNION_BY_NAME))
+PipelineStepType.UNPIVOT = PipelineStepType(enums_pb2.STEP_TYPE_UNPIVOT, protocol_token("StepType", enums_pb2.STEP_TYPE_UNPIVOT))
+PipelineStepType.EXPLODE = PipelineStepType(enums_pb2.STEP_TYPE_EXPLODE, protocol_token("StepType", enums_pb2.STEP_TYPE_EXPLODE))
+PipelineStepType.PIVOT = PipelineStepType(enums_pb2.STEP_TYPE_PIVOT, protocol_token("StepType", enums_pb2.STEP_TYPE_PIVOT))
+PipelineStepType.SAMPLE = PipelineStepType(enums_pb2.STEP_TYPE_SAMPLE, protocol_token("StepType", enums_pb2.STEP_TYPE_SAMPLE))
+PipelineStepType.LIMIT = PipelineStepType(enums_pb2.STEP_TYPE_LIMIT, protocol_token("StepType", enums_pb2.STEP_TYPE_LIMIT))
+PipelineStepType.TOPK = PipelineStepType(enums_pb2.STEP_TYPE_TOPK, protocol_token("StepType", enums_pb2.STEP_TYPE_TOPK))
+PipelineStepType.VIEW = PipelineStepType(enums_pb2.STEP_TYPE_VIEW, protocol_token("StepType", enums_pb2.STEP_TYPE_VIEW))
+PipelineStepType.EXPORT = PipelineStepType(enums_pb2.STEP_TYPE_EXPORT, protocol_token("StepType", enums_pb2.STEP_TYPE_EXPORT))
+PipelineStepType.DOWNLOAD = PipelineStepType(enums_pb2.STEP_TYPE_DOWNLOAD, protocol_token("StepType", enums_pb2.STEP_TYPE_DOWNLOAD))
+PipelineStepType.CHART = PipelineStepType(enums_pb2.STEP_TYPE_CHART, protocol_token("StepType", enums_pb2.STEP_TYPE_CHART))
+PipelineStepType.NOTIFICATION = PipelineStepType(enums_pb2.STEP_TYPE_NOTIFICATION, protocol_token("StepType", enums_pb2.STEP_TYPE_NOTIFICATION))
+PipelineStepType.AI = PipelineStepType(enums_pb2.STEP_TYPE_AI, protocol_token("StepType", enums_pb2.STEP_TYPE_AI))
+PipelineStepType.DATASOURCE = PipelineStepType(enums_pb2.STEP_TYPE_DATASOURCE, protocol_token("StepType", enums_pb2.STEP_TYPE_DATASOURCE))
+PipelineStepType.SORT = PipelineStepType(enums_pb2.STEP_TYPE_SORT, protocol_token("StepType", enums_pb2.STEP_TYPE_SORT))
+PipelineStepType.RENAME = PipelineStepType(enums_pb2.STEP_TYPE_RENAME, protocol_token("StepType", enums_pb2.STEP_TYPE_RENAME))
+PipelineStepType.EXPRESSION = PipelineStepType(enums_pb2.STEP_TYPE_EXPRESSION, protocol_token("StepType", enums_pb2.STEP_TYPE_EXPRESSION))
+PipelineStepType.WITH_COLUMNS = PipelineStepType(enums_pb2.STEP_TYPE_WITH_COLUMNS, protocol_token("StepType", enums_pb2.STEP_TYPE_WITH_COLUMNS))
+PipelineStepType.FILL_NULL = PipelineStepType(enums_pb2.STEP_TYPE_FILL_NULL, protocol_token("StepType", enums_pb2.STEP_TYPE_FILL_NULL))
+PipelineStepType.DEDUPLICATE = PipelineStepType(enums_pb2.STEP_TYPE_DEDUPLICATE, protocol_token("StepType", enums_pb2.STEP_TYPE_DEDUPLICATE))
+PipelineStepType.STRING_TRANSFORM = PipelineStepType(enums_pb2.STEP_TYPE_STRING_TRANSFORM, protocol_token("StepType", enums_pb2.STEP_TYPE_STRING_TRANSFORM))
+PipelineStepType.TIMESERIES = PipelineStepType(enums_pb2.STEP_TYPE_TIMESERIES, protocol_token("StepType", enums_pb2.STEP_TYPE_TIMESERIES))
+PipelineStepType.PLOT_BAR = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_BAR, protocol_token("StepType", enums_pb2.STEP_TYPE_PLOT_BAR))
+PipelineStepType.PLOT_HORIZONTAL_BAR = PipelineStepType(
+    enums_pb2.STEP_TYPE_PLOT_HORIZONTAL_BAR, protocol_token("StepType", enums_pb2.STEP_TYPE_PLOT_HORIZONTAL_BAR)
+)
+PipelineStepType.PLOT_AREA = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_AREA, protocol_token("StepType", enums_pb2.STEP_TYPE_PLOT_AREA))
+PipelineStepType.PLOT_HEATGRID = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_HEATGRID, protocol_token("StepType", enums_pb2.STEP_TYPE_PLOT_HEATGRID))
+PipelineStepType.PLOT_HISTOGRAM = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_HISTOGRAM, protocol_token("StepType", enums_pb2.STEP_TYPE_PLOT_HISTOGRAM))
+PipelineStepType.PLOT_SCATTER = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_SCATTER, protocol_token("StepType", enums_pb2.STEP_TYPE_PLOT_SCATTER))
+PipelineStepType.PLOT_LINE = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_LINE, protocol_token("StepType", enums_pb2.STEP_TYPE_PLOT_LINE))
+PipelineStepType.PLOT_PIE = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_PIE, protocol_token("StepType", enums_pb2.STEP_TYPE_PLOT_PIE))
+PipelineStepType.PLOT_BOXPLOT = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_BOXPLOT, protocol_token("StepType", enums_pb2.STEP_TYPE_PLOT_BOXPLOT))
+
+
 @dataclass(frozen=True, slots=True)
 class StepType:
     value: str
@@ -53,42 +132,59 @@ _TIMING_SUFFIX_RE = re.compile(r"^(?P<base>.+?)_(?P<index>\d+)$")
 
 @dataclass(frozen=True, slots=True)
 class StepTypes:
-    select: StepType = StepType(value="select", label="Select")
-    drop: StepType = StepType(value="drop", label="Drop")
-    filter: StepType = StepType(value="filter", label="Filter")
-    groupby: StepType = StepType(value="groupby", label="Group By")
-    join: StepType = StepType(value="join", label="Join", dependency_config_keys=("right_source",))
-    union_by_name: StepType = StepType(value="union_by_name", label="Union By Name", dependency_config_keys=("sources",))
-    unpivot: StepType = StepType(value="unpivot", label="Unpivot")
-    explode: StepType = StepType(value="explode", label="Explode")
-    pivot: StepType = StepType(value="pivot", label="Pivot")
-    sample: StepType = StepType(value="sample", label="Sample")
-    limit: StepType = StepType(value="limit", label="Limit")
-    topk: StepType = StepType(value="topk", label="Top K")
-    view: StepType = StepType(value="view", label="View")
-    export: StepType = StepType(value="export", label="Export")
-    download: StepType = StepType(value="download", label="Download")
-    chart: StepType = StepType(value="chart", label="Chart")
-    notification: StepType = StepType(value="notification", label="Notify")
-    ai: StepType = StepType(value="ai", label="AI")
-    datasource: StepType = StepType(value="datasource", label="Datasource")
-    sort: StepType = StepType(value="sort", label="Sort")
-    rename: StepType = StepType(value="rename", label="Rename")
-    expression: StepType = StepType(value="expression", label="Expression")
-    with_columns: StepType = StepType(value="with_columns", label="With Columns")
-    fill_null: StepType = StepType(value="fill_null", label="Fill Null")
-    deduplicate: StepType = StepType(value="deduplicate", label="Deduplicate")
-    string_transform: StepType = StepType(value="string_transform", label="String Transform")
-    timeseries: StepType = StepType(value="timeseries", label="Time Series")
-    plot_bar: StepType = StepType(value="plot_bar", label="Bar Chart", normalized="chart", chart_type=ChartType.BAR)
-    plot_horizontal_bar: StepType = StepType(value="plot_horizontal_bar", label="Horizontal Bar Chart", normalized="chart", chart_type=ChartType.HORIZONTAL_BAR)
-    plot_area: StepType = StepType(value="plot_area", label="Area Chart", normalized="chart", chart_type=ChartType.AREA)
-    plot_heatgrid: StepType = StepType(value="plot_heatgrid", label="Heatgrid", normalized="chart", chart_type=ChartType.HEATGRID)
-    plot_histogram: StepType = StepType(value="plot_histogram", label="Histogram", normalized="chart", chart_type=ChartType.HISTOGRAM)
-    plot_scatter: StepType = StepType(value="plot_scatter", label="Scatter Plot", normalized="chart", chart_type=ChartType.SCATTER)
-    plot_line: StepType = StepType(value="plot_line", label="Line Chart", normalized="chart", chart_type=ChartType.LINE)
-    plot_pie: StepType = StepType(value="plot_pie", label="Pie Chart", normalized="chart", chart_type=ChartType.PIE)
-    plot_boxplot: StepType = StepType(value="plot_boxplot", label="Box Plot", normalized="chart", chart_type=ChartType.BOXPLOT)
+    select: StepType = StepType(value=PipelineStepType.SELECT.value, label="Select")
+    drop: StepType = StepType(value=PipelineStepType.DROP.value, label="Drop")
+    filter: StepType = StepType(value=PipelineStepType.FILTER.value, label="Filter")
+    groupby: StepType = StepType(value=PipelineStepType.GROUPBY.value, label="Group By")
+    join: StepType = StepType(value=PipelineStepType.JOIN.value, label="Join", dependency_config_keys=("right_source",))
+    union_by_name: StepType = StepType(value=PipelineStepType.UNION_BY_NAME.value, label="Union By Name", dependency_config_keys=("sources",))
+    unpivot: StepType = StepType(value=PipelineStepType.UNPIVOT.value, label="Unpivot")
+    explode: StepType = StepType(value=PipelineStepType.EXPLODE.value, label="Explode")
+    pivot: StepType = StepType(value=PipelineStepType.PIVOT.value, label="Pivot")
+    sample: StepType = StepType(value=PipelineStepType.SAMPLE.value, label="Sample")
+    limit: StepType = StepType(value=PipelineStepType.LIMIT.value, label="Limit")
+    topk: StepType = StepType(value=PipelineStepType.TOPK.value, label="Top K")
+    view: StepType = StepType(value=PipelineStepType.VIEW.value, label="View")
+    export: StepType = StepType(value=PipelineStepType.EXPORT.value, label="Export")
+    download: StepType = StepType(value=PipelineStepType.DOWNLOAD.value, label="Download")
+    chart: StepType = StepType(value=PipelineStepType.CHART.value, label="Chart")
+    notification: StepType = StepType(value=PipelineStepType.NOTIFICATION.value, label="Notify")
+    ai: StepType = StepType(value=PipelineStepType.AI.value, label="AI")
+    datasource: StepType = StepType(value=PipelineStepType.DATASOURCE.value, label="Datasource")
+    sort: StepType = StepType(value=PipelineStepType.SORT.value, label="Sort")
+    rename: StepType = StepType(value=PipelineStepType.RENAME.value, label="Rename")
+    expression: StepType = StepType(value=PipelineStepType.EXPRESSION.value, label="Expression")
+    with_columns: StepType = StepType(value=PipelineStepType.WITH_COLUMNS.value, label="With Columns")
+    fill_null: StepType = StepType(value=PipelineStepType.FILL_NULL.value, label="Fill Null")
+    deduplicate: StepType = StepType(value=PipelineStepType.DEDUPLICATE.value, label="Deduplicate")
+    string_transform: StepType = StepType(value=PipelineStepType.STRING_TRANSFORM.value, label="String Transform")
+    timeseries: StepType = StepType(value=PipelineStepType.TIMESERIES.value, label="Time Series")
+    plot_bar: StepType = StepType(value=PipelineStepType.PLOT_BAR.value, label="Bar Chart", normalized=PipelineStepType.CHART.value, chart_type=ChartType.BAR)
+    plot_horizontal_bar: StepType = StepType(
+        value=PipelineStepType.PLOT_HORIZONTAL_BAR.value,
+        label="Horizontal Bar Chart",
+        normalized=PipelineStepType.CHART.value,
+        chart_type=ChartType.HORIZONTAL_BAR,
+    )
+    plot_area: StepType = StepType(
+        value=PipelineStepType.PLOT_AREA.value, label="Area Chart", normalized=PipelineStepType.CHART.value, chart_type=ChartType.AREA
+    )
+    plot_heatgrid: StepType = StepType(
+        value=PipelineStepType.PLOT_HEATGRID.value, label="Heatgrid", normalized=PipelineStepType.CHART.value, chart_type=ChartType.HEATGRID
+    )
+    plot_histogram: StepType = StepType(
+        value=PipelineStepType.PLOT_HISTOGRAM.value, label="Histogram", normalized=PipelineStepType.CHART.value, chart_type=ChartType.HISTOGRAM
+    )
+    plot_scatter: StepType = StepType(
+        value=PipelineStepType.PLOT_SCATTER.value, label="Scatter Plot", normalized=PipelineStepType.CHART.value, chart_type=ChartType.SCATTER
+    )
+    plot_line: StepType = StepType(
+        value=PipelineStepType.PLOT_LINE.value, label="Line Chart", normalized=PipelineStepType.CHART.value, chart_type=ChartType.LINE
+    )
+    plot_pie: StepType = StepType(value=PipelineStepType.PLOT_PIE.value, label="Pie Chart", normalized=PipelineStepType.CHART.value, chart_type=ChartType.PIE)
+    plot_boxplot: StepType = StepType(
+        value=PipelineStepType.PLOT_BOXPLOT.value, label="Box Plot", normalized=PipelineStepType.CHART.value, chart_type=ChartType.BOXPLOT
+    )
 
     def _definition_for(self, step_type: str) -> StepType | None:
         for step_field in fields(self):

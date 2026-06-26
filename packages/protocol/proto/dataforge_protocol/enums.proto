@@ -29,6 +29,46 @@ enum ChartType {
   CHART_TYPE_BOXPLOT = 9 [(dataforge_token) = "boxplot"];
 }
 
+enum StepType {
+  STEP_TYPE_UNSPECIFIED = 0;
+  STEP_TYPE_SELECT = 1 [(dataforge_token) = "select"];
+  STEP_TYPE_DROP = 2 [(dataforge_token) = "drop"];
+  STEP_TYPE_FILTER = 3 [(dataforge_token) = "filter"];
+  STEP_TYPE_GROUPBY = 4 [(dataforge_token) = "groupby"];
+  STEP_TYPE_JOIN = 5 [(dataforge_token) = "join"];
+  STEP_TYPE_UNION_BY_NAME = 6 [(dataforge_token) = "union_by_name"];
+  STEP_TYPE_UNPIVOT = 7 [(dataforge_token) = "unpivot"];
+  STEP_TYPE_EXPLODE = 8 [(dataforge_token) = "explode"];
+  STEP_TYPE_PIVOT = 9 [(dataforge_token) = "pivot"];
+  STEP_TYPE_SAMPLE = 10 [(dataforge_token) = "sample"];
+  STEP_TYPE_LIMIT = 11 [(dataforge_token) = "limit"];
+  STEP_TYPE_TOPK = 12 [(dataforge_token) = "topk"];
+  STEP_TYPE_VIEW = 13 [(dataforge_token) = "view"];
+  STEP_TYPE_EXPORT = 14 [(dataforge_token) = "export"];
+  STEP_TYPE_DOWNLOAD = 15 [(dataforge_token) = "download"];
+  STEP_TYPE_CHART = 16 [(dataforge_token) = "chart"];
+  STEP_TYPE_NOTIFICATION = 17 [(dataforge_token) = "notification"];
+  STEP_TYPE_AI = 18 [(dataforge_token) = "ai"];
+  STEP_TYPE_DATASOURCE = 19 [(dataforge_token) = "datasource"];
+  STEP_TYPE_SORT = 20 [(dataforge_token) = "sort"];
+  STEP_TYPE_RENAME = 21 [(dataforge_token) = "rename"];
+  STEP_TYPE_EXPRESSION = 22 [(dataforge_token) = "expression"];
+  STEP_TYPE_WITH_COLUMNS = 23 [(dataforge_token) = "with_columns"];
+  STEP_TYPE_FILL_NULL = 24 [(dataforge_token) = "fill_null"];
+  STEP_TYPE_DEDUPLICATE = 25 [(dataforge_token) = "deduplicate"];
+  STEP_TYPE_STRING_TRANSFORM = 26 [(dataforge_token) = "string_transform"];
+  STEP_TYPE_TIMESERIES = 27 [(dataforge_token) = "timeseries"];
+  STEP_TYPE_PLOT_BAR = 28 [(dataforge_token) = "plot_bar"];
+  STEP_TYPE_PLOT_HORIZONTAL_BAR = 29 [(dataforge_token) = "plot_horizontal_bar"];
+  STEP_TYPE_PLOT_AREA = 30 [(dataforge_token) = "plot_area"];
+  STEP_TYPE_PLOT_HEATGRID = 31 [(dataforge_token) = "plot_heatgrid"];
+  STEP_TYPE_PLOT_HISTOGRAM = 32 [(dataforge_token) = "plot_histogram"];
+  STEP_TYPE_PLOT_SCATTER = 33 [(dataforge_token) = "plot_scatter"];
+  STEP_TYPE_PLOT_LINE = 34 [(dataforge_token) = "plot_line"];
+  STEP_TYPE_PLOT_PIE = 35 [(dataforge_token) = "plot_pie"];
+  STEP_TYPE_PLOT_BOXPLOT = 36 [(dataforge_token) = "plot_boxplot"];
+}
+
 enum BuildJobStatus {
   BUILD_JOB_STATUS_UNSPECIFIED = 0;
   BUILD_JOB_STATUS_QUEUED = 1 [(dataforge_token) = "queued"];

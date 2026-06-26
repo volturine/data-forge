@@ -1,10 +1,18 @@
 from backend_core.domain.analysis.step_types import (
+    PipelineStepType,
     chart_type_for_step,
     get_step_timing_key,
     is_chart_step_type,
     is_plot_alias_step_type,
     normalize_step_type,
 )
+from dataforge_protocol import enums_pb2
+
+
+def test_step_types_are_generated_protocol_backed() -> None:
+    assert PipelineStepType.FILTER.number == enums_pb2.STEP_TYPE_FILTER
+    assert PipelineStepType.require(enums_pb2.STEP_TYPE_FILTER) is PipelineStepType.FILTER
+    assert PipelineStepType.require('filter') is PipelineStepType.FILTER
 
 
 def test_chart_alias_helpers_are_explicit() -> None:

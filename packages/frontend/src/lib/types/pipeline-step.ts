@@ -1,49 +1,18 @@
-import type { ChartType } from '$lib/types/protocol-enum-tokens';
+import type { ChartType, ProtocolPipelineStepType } from '$lib/types/protocol-enum-tokens';
+import { STEP_TYPE_TOKENS } from '$lib/types/protocol-enum-tokens';
 
 export type { ChartType };
 
-export type CanonicalStepType =
-	| 'select'
-	| 'drop'
-	| 'filter'
-	| 'groupby'
-	| 'join'
-	| 'union_by_name'
-	| 'unpivot'
-	| 'explode'
-	| 'pivot'
-	| 'sample'
-	| 'limit'
-	| 'topk'
-	| 'view'
-	| 'export'
-	| 'download'
-	| 'chart'
-	| 'notification'
-	| 'ai'
-	| 'datasource'
-	| 'sort'
-	| 'rename'
-	| 'expression'
-	| 'with_columns'
-	| 'fill_null'
-	| 'deduplicate'
-	| 'string_transform'
-	| 'timeseries';
-
-export type PlotAliasStepType =
-	| 'plot_bar'
-	| 'plot_horizontal_bar'
-	| 'plot_area'
-	| 'plot_heatgrid'
-	| 'plot_histogram'
-	| 'plot_scatter'
-	| 'plot_line'
-	| 'plot_pie'
-	| 'plot_boxplot';
+export type PlotAliasStepType = Extract<ProtocolPipelineStepType, `plot_${string}`>;
+export type CanonicalStepType = Exclude<ProtocolPipelineStepType, PlotAliasStepType>;
 
 export type KnownPipelineStepType = CanonicalStepType | PlotAliasStepType;
 export type PipelineStepType = KnownPipelineStepType | (string & {});
+
+export const KNOWN_PIPELINE_STEP_TYPES = Object.values(STEP_TYPE_TOKENS) as KnownPipelineStepType[];
+export const CANONICAL_STEP_TYPES = KNOWN_PIPELINE_STEP_TYPES.filter(
+	(stepType): stepType is CanonicalStepType => !stepType.startsWith('plot_')
+);
 
 export const CHART_ALIAS_TO_TYPE = {
 	plot_bar: 'bar',
