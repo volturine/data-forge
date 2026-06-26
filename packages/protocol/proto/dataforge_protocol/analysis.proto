@@ -15,10 +15,14 @@ message AnalysisPipelineDatasource {
 
 message AnalysisPipelineStep {
   string id = 1 [(buf.validate.field).string.min_len = 1];
-  string type = 2 [(buf.validate.field).string.min_len = 1];
+  string type = 2 [
+    deprecated = true,
+    (buf.validate.field).string.min_len = 1
+  ];
   StepConfig config = 3;
   repeated string depends_on = 4;
   optional bool is_applied = 5;
+  StepType step_type = 6 [(buf.validate.field).enum.defined_only = true];
 }
 
 message AnalysisPipelineIcebergOutput {

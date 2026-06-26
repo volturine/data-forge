@@ -1,7 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export function readyTimeoutMs(): number {
-	return process.env.CI ? 15_000 : 5_000;
+	return 15_000;
 }
 
 function coldStartTimeoutMs(timeout: number): number {

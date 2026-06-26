@@ -180,6 +180,16 @@ def _enum_name_from_token(enum_descriptor: Any, value: object) -> object:
     return value
 
 
+def _enum_number_from_token(enum_descriptor: Any, value: object, *, field_name: str) -> int:
+    enum_name = _enum_name_from_token(enum_descriptor, value)
+    if not isinstance(enum_name, str):
+        raise ValueError(f'{field_name} must be a string enum token')
+    try:
+        return cast(int, enum_descriptor.values_by_name[enum_name].number)
+    except KeyError as exc:
+        raise ValueError(f'{field_name} is invalid') from exc
+
+
 def _tokens_to_proto_json(value: object, message_descriptor: Any) -> object:
     if message_descriptor.full_name == 'google.protobuf.Struct':
         return value
@@ -345,7 +355,9 @@ def _pipeline_payload_for_proto(payload: dict[str, object]) -> dict[str, object]
                     proto_steps.append(step)
                     continue
                 proto_step = dict(step)
-                proto_step['config'] = _wrap_step_config(proto_step.get('type'), proto_step.get('config', {}))
+                raw_step_type = proto_step.get('step_type') or proto_step.get('type')
+                proto_step['step_type'] = _enum_number_from_token(enums_pb2.StepType.DESCRIPTOR, raw_step_type, field_name='step_type')
+                proto_step['config'] = _wrap_step_config(raw_step_type, proto_step.get('config', {}))
                 proto_steps.append(proto_step)
             proto_tab['steps'] = proto_steps
         proto_tabs.append(proto_tab)
@@ -379,13 +391,7 @@ def _required_int(payload: dict[str, object], key: str) -> int:
 
 
 def _required_proto_enum(enum_descriptor: Any, payload: dict[str, object], key: str) -> Any:
-    value = _enum_name_from_token(enum_descriptor, payload.get(key))
-    if not isinstance(value, str):
-        raise ValueError(f'{key} must be a string enum token')
-    try:
-        return enum_descriptor.values_by_name[value].number
-    except KeyError as exc:
-        raise ValueError(f'{key} is invalid') from exc
+    return _enum_number_from_token(enum_descriptor, payload.get(key), field_name=key)
 
 
 def _set_optional_string(message_value: message.Message, field_name: str, value: str | None) -> None:

@@ -215,6 +215,51 @@ def test_create_preview_request_converts_ai_provider_token(test_db_session) -> N
     assert envelope.command.preview.analysis_pipeline.tabs[0].steps[0].config.ai.provider == enums_pb2.AI_PROVIDER_OLLAMA
 
 
+def test_create_preview_request_populates_protocol_step_type(test_db_session) -> None:
+    payload = _preview_payload()
+    analysis_pipeline = payload['analysis_pipeline']
+    assert isinstance(analysis_pipeline, dict)
+    tabs = analysis_pipeline['tabs']
+    assert isinstance(tabs, list)
+    tab = tabs[0]
+    assert isinstance(tab, dict)
+    tab['steps'] = [
+        {
+            'id': 'plot-1',
+            'type': 'plot_scatter',
+            'config': {'x_column': 'age', 'y_column': 'score'},
+            'depends_on': [],
+        }
+    ]
+    payload['target_step_id'] = 'plot-1'
+
+    request = compute_requests_service.create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=payload,
+    )
+
+    envelope = command_envelope_from_json(request.request_json)
+    step = envelope.command.preview.analysis_pipeline.tabs[0].steps[0]
+
+    assert step.type == 'plot_scatter'
+    assert step.step_type == enums_pb2.STEP_TYPE_PLOT_SCATTER
+    assert step.config.WhichOneof('config') == 'chart'
+    command_payload = compute_requests_service.command_payload(request)
+    command_pipeline = command_payload['analysis_pipeline']
+    assert isinstance(command_pipeline, dict)
+    command_tabs = command_pipeline['tabs']
+    assert isinstance(command_tabs, list)
+    command_tab = command_tabs[0]
+    assert isinstance(command_tab, dict)
+    command_steps = command_tab['steps']
+    assert isinstance(command_steps, list)
+    command_step = command_steps[0]
+    assert isinstance(command_step, dict)
+    assert command_step['step_type'] == 'plot_scatter'
+
+
 def test_create_preview_request_omits_null_repeated_fields(test_db_session) -> None:
     payload = _preview_payload()
     analysis_pipeline = payload['analysis_pipeline']

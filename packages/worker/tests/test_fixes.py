@@ -140,6 +140,44 @@ def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> Non
     assert step_config == {"rowLimit": 100}
 
 
+def test_analysis_pipeline_protocol_step_type_drives_service_step_type() -> None:
+    pipeline = analysis_pb2.AnalysisPipelinePayload(
+        analysis_id="analysis-1",
+        tabs=[
+            analysis_pb2.AnalysisPipelineTab(
+                id="tab-1",
+                datasource=analysis_pb2.AnalysisPipelineDatasource(
+                    id="datasource-1",
+                    analysis_tab_id="tab-1",
+                    source_type=enums_pb2.DATA_SOURCE_TYPE_FILE,
+                ),
+                output=analysis_pb2.AnalysisPipelineOutput(
+                    result_id="result-1",
+                    filename="result.csv",
+                    format=enums_pb2.EXPORT_FORMAT_CSV,
+                ),
+                steps=[
+                    analysis_pb2.AnalysisPipelineStep(
+                        id="plot-1",
+                        type="chart",
+                        step_type=enums_pb2.STEP_TYPE_PLOT_SCATTER,
+                        config=analysis_pb2.StepConfig(chart=analysis_pb2.ChartConfig(chart_type=enums_pb2.CHART_TYPE_SCATTER)),
+                    )
+                ],
+            )
+        ],
+    )
+
+    payload = compute_request_runtime._analysis_pipeline_to_service_payload(pipeline)
+
+    tabs = cast(list[dict[str, object]], payload["tabs"])
+    steps = cast(list[dict[str, object]], tabs[0]["steps"])
+    step = steps[0]
+    assert step["type"] == "plot_scatter"
+    assert "step_type" not in step
+    assert step["config"] == {"chart_type": "scatter"}
+
+
 def test_analysis_pipeline_protocol_deduplicate_absent_subset_is_not_null() -> None:
     pipeline = analysis_pb2.AnalysisPipelinePayload(
         analysis_id="analysis-1",

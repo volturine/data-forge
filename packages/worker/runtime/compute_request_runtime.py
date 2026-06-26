@@ -413,6 +413,9 @@ def _analysis_pipeline_to_service_payload(pipeline: analysis_pb2.AnalysisPipelin
             if isinstance(steps, list):
                 for step in steps:
                     if isinstance(step, dict):
+                        protocol_step_type = step.pop("step_type", None)
+                        if isinstance(protocol_step_type, str):
+                            step["type"] = protocol_step_type
                         step["config"] = _unwrap_step_config(step.get("config"))
                         if step.get("type") == "view" and isinstance(step.get("config"), dict):
                             _restore_view_service_config(cast(dict[str, object], step["config"]))
