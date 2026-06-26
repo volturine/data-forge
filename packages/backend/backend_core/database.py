@@ -1,7 +1,7 @@
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from threading import Lock
-from typing import Concatenate, ParamSpec, TypeVar
+from typing import Concatenate, ParamSpec
 
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection, Engine
@@ -17,7 +17,6 @@ from backend_core.namespace import (
 )
 
 P = ParamSpec('P')
-T = TypeVar('T')
 
 _PUBLIC_SCHEMA = 'public'
 _POSTGRES_INIT_LOCK_KEY = 4815162342
@@ -269,17 +268,23 @@ def _seed_shared_state() -> None:
     _invalidate_settings_cache()
 
 
+def run_settings_connection_locked[T](func: Callable[[Connection], T]) -> T:
+    engine = get_settings_engine()
+    with engine.begin() as connection:
+        if connection.dialect.name != 'postgresql':
+            return func(connection)
+        connection.execute(text('SELECT pg_advisory_lock(:key)'), {'key': _POSTGRES_INIT_LOCK_KEY})
+        try:
+            return func(connection)
+        finally:
+            connection.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': _POSTGRES_INIT_LOCK_KEY})
+
+
 def _run_postgres_init_locked(func) -> None:
     from backend_core.migrations import ensure_database_exists
 
     ensure_database_exists(settings.database_url)
-    engine = get_settings_engine()
-    with engine.connect() as connection:
-        connection.execute(text('SELECT pg_advisory_lock(:key)'), {'key': _POSTGRES_INIT_LOCK_KEY})
-        try:
-            func()
-        finally:
-            connection.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': _POSTGRES_INIT_LOCK_KEY})
+    run_settings_connection_locked(lambda _connection: func())
 
 
 def _namespace_init_key(namespace: str) -> tuple[str, str]:

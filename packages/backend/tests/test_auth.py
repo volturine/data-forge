@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi import Depends, FastAPI
-from sqlalchemy import text
+from sqlalchemy import Table, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from backend_core.auth_exceptions import (
@@ -114,6 +114,30 @@ def test_verification_token_type_enum_values() -> None:
         'email_verify',
         'password_reset',
     ]
+
+
+def test_backend_public_tables_use_locked_settings_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend_core import public_schema
+
+    observed: dict[str, object] = {}
+
+    def fake_create_all(connection: object, *, tables: Sequence[Table]) -> None:
+        observed['connection'] = connection
+        observed['tables'] = tables
+
+    def fake_run_locked(func):
+        observed['locked'] = True
+        return func('locked-connection')
+
+    monkeypatch.setattr(public_schema.User.metadata, 'create_all', fake_create_all)
+    monkeypatch.setattr(public_schema, 'run_settings_connection_locked', fake_run_locked)
+
+    public_schema.ensure_backend_public_tables()
+
+    assert observed['locked'] is True
+    assert observed['connection'] == 'locked-connection'
+    tables = cast(Sequence[Table], observed['tables'])
+    assert public_schema.ChatSession.__tablename__ in {table.name for table in tables}
 
 
 @pytest.fixture(scope='function')
