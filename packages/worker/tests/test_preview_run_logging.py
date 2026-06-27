@@ -1,8 +1,9 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
+from dataforge_protocol import compute_pb2, enums_pb2
 from runtime import compute_service
-from runtime.compute_manager import ProcessManager, analysis_interactive_engine_identity
+from runtime.compute_manager import ProcessManager
 
 
 def _pipeline(sample_datasource, analysis_id: str) -> dict[str, object]:
@@ -43,12 +44,21 @@ def _preview_request(analysis_id: str, pipeline: dict[str, object]) -> dict[str,
     }
 
 
+def _analysis_identity(analysis_id: str) -> compute_pb2.EngineIdentity:
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id=analysis_id,
+        resource_id=analysis_id,
+    )
+
+
 def test_preview_step_persists_engine_run_by_default(sample_datasource, monkeypatch) -> None:
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", True)
     analysis_id = f"preview-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
     manager = ProcessManager()
-    identity = analysis_interactive_engine_identity(analysis_id)
+    identity = _analysis_identity(analysis_id)
     internal_client = _internal_client_mock()
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
@@ -83,7 +93,7 @@ def test_preview_step_skips_engine_run_persistence_when_disabled(sample_datasour
     analysis_id = f"preview-no-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
     manager = ProcessManager()
-    identity = analysis_interactive_engine_identity(analysis_id)
+    identity = _analysis_identity(analysis_id)
     internal_client = _internal_client_mock()
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):

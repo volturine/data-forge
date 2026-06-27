@@ -33,55 +33,6 @@ def _default_engine_factory(resource_id: str, resource_config: dict | None = Non
     return PolarsComputeEngine(resource_id, resource_config=resource_config)
 
 
-def _required_identity_id(value: str, field_name: str) -> str:
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError(f"{field_name} is required")
-    return normalized
-
-
-def analysis_interactive_engine_identity(analysis_id: str) -> EngineIdentity:
-    resource_id = _required_identity_id(analysis_id, "analysis_id")
-    return compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-        analysis_id=resource_id,
-        resource_id=resource_id,
-    )
-
-
-def datasource_preview_engine_identity(datasource_id: str) -> EngineIdentity:
-    resource_id = _required_identity_id(datasource_id, "datasource_id")
-    return compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-        datasource_id=resource_id,
-        resource_id=resource_id,
-    )
-
-
-def build_engine_identity(build_id: str) -> EngineIdentity:
-    resource_id = _required_identity_id(build_id, "build_id")
-    return compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_BUILD,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
-        build_id=resource_id,
-        resource_id=resource_id,
-    )
-
-
-def engine_identity_resource_id(identity: EngineIdentity) -> str:
-    if identity.resource_id:
-        return identity.resource_id
-    if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField("analysis_id"):
-        return identity.analysis_id
-    if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.HasField("datasource_id"):
-        return identity.datasource_id
-    if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD and identity.HasField("build_id"):
-        return identity.build_id
-    raise ValueError("engine identity is missing the resource id required by its scope")
-
-
 def _engine_identity_analysis_id(identity: EngineIdentity) -> str | None:
     return identity.analysis_id if identity.HasField("analysis_id") else None
 
@@ -146,18 +97,21 @@ class ProcessManager:
             self._reaper_thread.start()
 
     def _key(self, identity: EngineIdentity, namespace: str | None = None) -> EngineIdentityKey:
+        resource_id = identity.resource_id.strip()
+        if not resource_id:
+            raise ValueError("engine identity resource_id is required")
         return EngineIdentityKey(
             namespace=namespace or get_namespace(),
             scope=identity.scope,
             reuse_policy=identity.reuse_policy,
-            resource_id=engine_identity_resource_id(identity),
+            resource_id=resource_id,
         )
 
     def spawn_engine(self, identity: EngineIdentity, resource_config: dict | None = None) -> EngineInfo:
         """Spawn a new compute engine or reuse an existing one for the same identity."""
-        resource_id = engine_identity_resource_id(identity)
         normalized_config = self._normalize_config(resource_config)
         qualified_key = self._key(identity)
+        resource_id = qualified_key.resource_id
         namespace = qualified_key.namespace
         wait_event: threading.Event | None = None
         reused_info: EngineInfo | None = None
@@ -335,7 +289,7 @@ class ProcessManager:
             if info is None:
                 return EngineStatusInfo(
                     analysis_id=_engine_identity_analysis_id(persisted_identity) or "",
-                    resource_id=engine_identity_resource_id(persisted_identity),
+                    resource_id=persisted_identity.resource_id,
                     status=EngineStatus.TERMINATED,
                     process_id=None,
                     last_activity=None,
@@ -359,7 +313,7 @@ class ProcessManager:
 
             return EngineStatusInfo(
                 analysis_id=_engine_identity_analysis_id(persisted_identity) or "",
-                resource_id=engine_identity_resource_id(persisted_identity),
+                resource_id=persisted_identity.resource_id,
                 status=EngineStatus.HEALTHY if is_alive else EngineStatus.TERMINATED,
                 process_id=engine.process_id,
                 last_activity=info.last_activity.isoformat(),

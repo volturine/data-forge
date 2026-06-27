@@ -3,7 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any, cast
 
-from runtime.compute_manager import ProcessManager, analysis_interactive_engine_identity
+from dataforge_protocol import compute_pb2, enums_pb2
+from runtime.compute_manager import ProcessManager
 
 
 class _FakeEngine:
@@ -59,7 +60,12 @@ def test_process_manager_reaps_idle_shared_engines(monkeypatch) -> None:
         return cast(Any, _FakeEngine(resource_id, resource_config))
 
     manager = ProcessManager(engine_factory=fake_engine_factory)
-    identity = analysis_interactive_engine_identity("analysis-1")
+    identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id="analysis-1",
+        resource_id="analysis-1",
+    )
     try:
         manager.spawn_engine(identity)
         assert manager.get_engine(identity) is not None

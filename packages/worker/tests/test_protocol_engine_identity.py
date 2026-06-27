@@ -36,6 +36,7 @@ def test_step_preview_request_uses_generated_engine_identity() -> None:
         scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
         reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
         datasource_id="datasource-1",
+        resource_id="datasource-1",
     )
     request = StepPreviewRequest.model_validate(_preview_payload(identity))
 
@@ -43,6 +44,7 @@ def test_step_preview_request_uses_generated_engine_identity() -> None:
     assert request.engine_identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
     assert request.engine_identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
     assert request.engine_identity.datasource_id == "datasource-1"
+    assert request.engine_identity.resource_id == "datasource-1"
 
 
 def test_step_preview_request_rejects_invalid_engine_identity_payload() -> None:

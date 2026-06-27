@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from runtime.compute_manager import ProcessManager, datasource_preview_engine_identity
+from dataforge_protocol import compute_pb2, enums_pb2
+from runtime.compute_manager import ProcessManager
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,12 @@ def _process_pending_datasource_delete(
     manager: ProcessManager,
     client: WorkerInternalApiClient,
 ) -> bool:
-    identity = datasource_preview_engine_identity(datasource_id)
+    identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        datasource_id=datasource_id,
+        resource_id=datasource_id,
+    )
     engine = manager.get_engine(identity, namespace=namespace)
     if engine is not None and engine.current_job_id and engine.is_process_alive():
         return False

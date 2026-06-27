@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from backend_core.domain.compute.schemas import StepPreviewRequest
 from dataforge_protocol import compute_pb2, enums_pb2
-from modules.compute import executor_client, routes as compute_routes
+from modules.compute import executor_client
 
 
 def _preview_payload(engine_identity: dict[str, object]) -> dict[str, object]:
@@ -30,30 +30,47 @@ def _preview_payload(engine_identity: dict[str, object]) -> dict[str, object]:
     }
 
 
-def test_analysis_interactive_engine_identity_uses_generated_proto() -> None:
-    identity = compute_routes._analysis_interactive_engine_identity('analysis-1')
+def test_analysis_interactive_identity_uses_generated_proto_directly() -> None:
+    identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id='analysis-1',
+        resource_id='analysis-1',
+    )
 
     assert isinstance(identity, compute_pb2.EngineIdentity)
     assert identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
     assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
     assert identity.analysis_id == 'analysis-1'
+    assert identity.resource_id == 'analysis-1'
     assert not identity.HasField('datasource_id')
     assert not identity.HasField('build_id')
 
 
-def test_datasource_preview_engine_identity_uses_generated_proto() -> None:
-    identity = compute_routes._datasource_preview_engine_identity('ds-1')
+def test_datasource_preview_identity_uses_generated_proto_directly() -> None:
+    identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        datasource_id='ds-1',
+        resource_id='ds-1',
+    )
 
     assert isinstance(identity, compute_pb2.EngineIdentity)
     assert identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
     assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
     assert not identity.HasField('analysis_id')
     assert identity.datasource_id == 'ds-1'
+    assert identity.resource_id == 'ds-1'
     assert not identity.HasField('build_id')
 
 
-def test_build_engine_identity_uses_generated_proto() -> None:
-    identity = compute_routes._build_engine_identity('build-1')
+def test_build_identity_uses_generated_proto_directly() -> None:
+    identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_BUILD,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        build_id='build-1',
+        resource_id='build-1',
+    )
 
     assert isinstance(identity, compute_pb2.EngineIdentity)
     assert identity.scope == enums_pb2.ENGINE_SCOPE_BUILD
@@ -61,10 +78,16 @@ def test_build_engine_identity_uses_generated_proto() -> None:
     assert not identity.HasField('analysis_id')
     assert not identity.HasField('datasource_id')
     assert identity.build_id == 'build-1'
+    assert identity.resource_id == 'build-1'
 
 
 def test_engine_identity_payload_is_boundary_conversion() -> None:
-    identity = compute_routes._datasource_preview_engine_identity('ds-1')
+    identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        datasource_id='ds-1',
+        resource_id='ds-1',
+    )
 
     assert executor_client._engine_identity_payload(identity) == {
         'scope': 'datasource_preview',

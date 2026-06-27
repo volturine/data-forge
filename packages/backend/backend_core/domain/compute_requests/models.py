@@ -103,20 +103,28 @@ def _required_payload_str(payload: dict[str, object], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'{key} is required')
-    return value
+    return value.strip()
+
+
+def _resource_id_for_scope(payload: dict[str, object], key: str) -> str:
+    resource_id = _required_payload_str(payload, 'resource_id')
+    scoped_id = _required_payload_str(payload, key)
+    if resource_id != scoped_id:
+        raise ValueError(f'resource_id must match {key}')
+    return resource_id
 
 
 def _engine_identity_from_payload(payload: dict[str, object]) -> compute_pb2.EngineIdentity:
     scope = payload.get('scope')
     reuse_policy = payload.get('reuse_policy')
     if scope == 'analysis_interactive':
-        resource_id = _required_payload_str(payload, 'analysis_id')
+        resource_id = _resource_id_for_scope(payload, 'analysis_id')
         identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE, analysis_id=resource_id, resource_id=resource_id)
     elif scope == 'datasource_preview':
-        resource_id = _required_payload_str(payload, 'datasource_id')
+        resource_id = _resource_id_for_scope(payload, 'datasource_id')
         identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, datasource_id=resource_id, resource_id=resource_id)
     elif scope == 'build':
-        resource_id = _required_payload_str(payload, 'build_id')
+        resource_id = _resource_id_for_scope(payload, 'build_id')
         identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_BUILD, build_id=resource_id, resource_id=resource_id)
     else:
         raise ValueError('engine identity scope is invalid')

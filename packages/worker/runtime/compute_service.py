@@ -21,8 +21,8 @@ from pyiceberg.table import Table as IcebergTable
 from sqlalchemy.exc import IntegrityError
 
 from builds.build_live import ActiveBuild
-from dataforge_protocol import compute_pb2
-from runtime.compute_manager import ProcessManager, analysis_interactive_engine_identity, build_engine_identity
+from dataforge_protocol import compute_pb2, enums_pb2
+from runtime.compute_manager import ProcessManager
 from runtime.compute_monitor import monitor_engine_resources
 from runtime.compute_utils import (
     apply_steps,
@@ -1709,9 +1709,19 @@ def _resolve_export_engine_identity(
     if engine_identity is not None:
         return engine_identity
     if build_id is not None:
-        return build_engine_identity(build_id)
+        return compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_BUILD,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+            build_id=build_id,
+            resource_id=build_id,
+        )
     if analysis_id:
-        return analysis_interactive_engine_identity(analysis_id)
+        return compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=analysis_id,
+            resource_id=analysis_id,
+        )
     raise ValueError("Export requires analysis_id or engine identity")
 
 
@@ -1771,7 +1781,12 @@ def preview_step(
         preview_steps = steps[: step_index + 1]
         preview_steps = _hydrate_udfs(session, preview_steps)
 
-    resolved_engine_identity = engine_identity or analysis_interactive_engine_identity(analysis_id_value)
+    resolved_engine_identity = engine_identity or compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id=analysis_id_value,
+        resource_id=analysis_id_value,
+    )
     engine = _acquire_engine(manager, resolved_engine_identity, resource_config=resource_config)
     persist_preview_runs = settings.persist_preview_runs
     run_response = None
@@ -1952,7 +1967,15 @@ def get_step_schema(
         schema_steps = steps[: step_index + 1]
         schema_steps = _hydrate_udfs(session, schema_steps)
 
-    engine = _acquire_engine(manager, analysis_interactive_engine_identity(analysis_id_value))
+    engine = _acquire_engine(
+        manager,
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=analysis_id_value,
+            resource_id=analysis_id_value,
+        ),
+    )
 
     additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
 
@@ -2030,7 +2053,15 @@ def get_step_row_count(
         count_steps = steps[: step_index + 1]
         count_steps = _hydrate_udfs(session, count_steps)
 
-    engine = _acquire_engine(manager, analysis_interactive_engine_identity(analysis_id_value))
+    engine = _acquire_engine(
+        manager,
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=analysis_id_value,
+            resource_id=analysis_id_value,
+        ),
+    )
 
     additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
 
@@ -2570,7 +2601,15 @@ def download_step(
         download_steps = steps[: step_index + 1]
         download_steps = _hydrate_udfs(session, download_steps)
 
-    engine = _acquire_engine(manager, analysis_interactive_engine_identity(analysis_id_value))
+    engine = _acquire_engine(
+        manager,
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=analysis_id_value,
+            resource_id=analysis_id_value,
+        ),
+    )
     branch = _resolve_branch_value(datasource_config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
     request_payload = _ensure_request_branch(
@@ -3136,7 +3175,12 @@ async def _stop_stream_task(task: asyncio.Task | None) -> None:
 
 
 async def _prewarm_build_engine(manager: ProcessManager, *, build_id: str) -> None:
-    identity = build_engine_identity(build_id)
+    identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_BUILD,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        build_id=build_id,
+        resource_id=build_id,
+    )
     try:
         await asyncio.to_thread(manager.spawn_engine, identity)
         await asyncio.to_thread(manager.set_engine_runtime_context, identity, current_build_id=build_id, current_engine_run_id=None)
@@ -3193,7 +3237,12 @@ async def run_analysis_build_stream(
         engine_run_id=build.current_engine_run_id,
     )
 
-    build_engine_identity_value = build_engine_identity(build.build_id)
+    build_identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_BUILD,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        build_id=build.build_id,
+        resource_id=build.build_id,
+    )
     build_engine_prewarm_task = asyncio.create_task(_prewarm_build_engine(manager, build_id=build.build_id))
     results: list[dict] = []
     tabs_built = 0
@@ -3373,7 +3422,12 @@ async def run_analysis_build_stream(
                 if isinstance(run_id, str):
                     build.current_engine_run_id = run_id
                     manager.set_engine_runtime_context(
-                        build_engine_identity(build.build_id),
+                        compute_pb2.EngineIdentity(
+                            scope=enums_pb2.ENGINE_SCOPE_BUILD,
+                            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+                            build_id=build.build_id,
+                            resource_id=build.build_id,
+                        ),
                         current_build_id=build.build_id,
                         current_engine_run_id=run_id,
                     )
@@ -3602,7 +3656,7 @@ async def run_analysis_build_stream(
                     job_started=handle_job_started,
                     build_stage_event=handle_stage_event,
                     resources_fn=lambda: [item.model_dump(mode="json") for item in build.resources],
-                    engine_identity=build_engine_identity_value,
+                    engine_identity=build_identity,
                     build_id=build.build_id,
                 )
                 build.current_engine_run_id = result.engine_run_id
@@ -3819,7 +3873,15 @@ async def run_analysis_build_stream(
     if isinstance(prewarm_result, BaseException) and not isinstance(prewarm_result, asyncio.CancelledError):
         raise prewarm_result
     with contextlib.suppress(Exception):
-        await asyncio.to_thread(manager.shutdown_engine, build_engine_identity(build.build_id))
+        await asyncio.to_thread(
+            manager.shutdown_engine,
+            compute_pb2.EngineIdentity(
+                scope=enums_pb2.ENGINE_SCOPE_BUILD,
+                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+                build_id=build.build_id,
+                resource_id=build.build_id,
+            ),
+        )
     return {
         "analysis_id": analysis_id_value,
         "tabs_built": tabs_built,

@@ -230,6 +230,14 @@ def _required_engine_identity_id(payload: dict[str, object], field_name: str) ->
     return value.strip()
 
 
+def _engine_identity_resource_from_payload(payload: dict[str, object], field_name: str) -> str:
+    resource_id = _required_engine_identity_id(payload, 'resource_id')
+    scoped_id = _required_engine_identity_id(payload, field_name)
+    if resource_id != scoped_id:
+        raise ValueError(f'engine identity resource_id must match {field_name}')
+    return resource_id
+
+
 def _engine_identity_from_payload(value: object) -> compute_pb2.EngineIdentity:
     if isinstance(value, compute_pb2.EngineIdentity):
         return value
@@ -237,7 +245,7 @@ def _engine_identity_from_payload(value: object) -> compute_pb2.EngineIdentity:
         raise ValueError('engine identity must be a protocol message or object payload')
     scope = value.get('scope')
     if scope == 'analysis_interactive':
-        resource_id = _required_engine_identity_id(value, 'analysis_id')
+        resource_id = _engine_identity_resource_from_payload(value, 'analysis_id')
         return compute_pb2.EngineIdentity(
             scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
             reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
@@ -245,7 +253,7 @@ def _engine_identity_from_payload(value: object) -> compute_pb2.EngineIdentity:
             resource_id=resource_id,
         )
     if scope == 'datasource_preview':
-        resource_id = _required_engine_identity_id(value, 'datasource_id')
+        resource_id = _engine_identity_resource_from_payload(value, 'datasource_id')
         return compute_pb2.EngineIdentity(
             scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
             reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
@@ -253,7 +261,7 @@ def _engine_identity_from_payload(value: object) -> compute_pb2.EngineIdentity:
             resource_id=resource_id,
         )
     if scope == 'build':
-        resource_id = _required_engine_identity_id(value, 'build_id')
+        resource_id = _engine_identity_resource_from_payload(value, 'build_id')
         return compute_pb2.EngineIdentity(
             scope=enums_pb2.ENGINE_SCOPE_BUILD,
             reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
@@ -268,21 +276,21 @@ def _engine_identity_to_payload(identity: compute_pb2.EngineIdentity) -> dict[st
         return {
             'scope': 'analysis_interactive',
             'reuse_policy': 'shared',
-            'resource_id': identity.resource_id or identity.analysis_id,
+            'resource_id': identity.resource_id,
             'analysis_id': identity.analysis_id,
         }
     if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.HasField('datasource_id'):
         return {
             'scope': 'datasource_preview',
             'reuse_policy': 'shared',
-            'resource_id': identity.resource_id or identity.datasource_id,
+            'resource_id': identity.resource_id,
             'datasource_id': identity.datasource_id,
         }
     if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD and identity.HasField('build_id'):
         return {
             'scope': 'build',
             'reuse_policy': 'exclusive',
-            'resource_id': identity.resource_id or identity.build_id,
+            'resource_id': identity.resource_id,
             'build_id': identity.build_id,
         }
     raise ValueError('engine identity is missing the resource id required by its scope')

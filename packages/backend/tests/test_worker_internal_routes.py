@@ -172,6 +172,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     assert engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
     assert engine_identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
     assert engine_identity.analysis_id == 'analysis-1'
+    assert engine_identity.resource_id == 'analysis-1'
     test_db_session.refresh(request)
     assert request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     assert request.lease_owner == worker_id

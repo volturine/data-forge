@@ -22,18 +22,6 @@ from modules.datasource import schemas as datasource_schemas
 EngineIdentity = compute_pb2.EngineIdentity
 
 
-def _engine_identity_resource_id(identity: EngineIdentity) -> str:
-    if identity.resource_id:
-        return identity.resource_id
-    if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField('analysis_id'):
-        return identity.analysis_id
-    if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.HasField('datasource_id'):
-        return identity.datasource_id
-    if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD and identity.HasField('build_id'):
-        return identity.build_id
-    raise ValueError('engine identity is missing the resource id required by its scope')
-
-
 def _engine_identity_payload(identity: EngineIdentity) -> dict[str, str]:
     if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW:
         scope = 'datasource_preview'
@@ -54,7 +42,7 @@ def _engine_identity_payload(identity: EngineIdentity) -> dict[str, str]:
     payload = {
         'scope': scope,
         'reuse_policy': reuse_policy,
-        'resource_id': _engine_identity_resource_id(identity),
+        'resource_id': identity.resource_id,
     }
     if identity.HasField('analysis_id'):
         payload['analysis_id'] = identity.analysis_id

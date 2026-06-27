@@ -78,6 +78,14 @@ FORBIDDEN_SOURCE_TOKENS = {
     'engine_key': 'engine-key string identity',
     'storage_key': 'engine storage-key string identity',
     'EngineIdentityInput': 'engine identity aliases hide generated dataforge_protocol.compute_pb2.EngineIdentity',
+    'analysis_interactive_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
+    'datasource_preview_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
+    'build_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
+    'engine_identity_resource_id': 'engine identity resource helper; read dataforge_protocol.compute_pb2.EngineIdentity.resource_id directly',
+    '_analysis_interactive_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
+    '_datasource_preview_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
+    '_build_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
+    '_engine_identity_resource_id': 'engine identity resource helper; read dataforge_protocol.compute_pb2.EngineIdentity.resource_id directly',
     'def _resolve_identity(self, identity': 'string-derived engine identity resolver; use dataforge_protocol.compute_pb2.EngineIdentity',
     'data_plane_object_store': 'deleted backend data-plane object-store facade',
     'data_plane_iceberg': 'deleted backend data-plane Iceberg facade',
@@ -228,6 +236,23 @@ def imported_roots(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             roots.add(node.module.split('.')[0])
     return roots
+
+
+def engine_identity_constructor_lines(path: Path) -> list[int]:
+    tree = ast.parse(path.read_text(), filename=str(path))
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        is_engine_identity = (isinstance(func, ast.Attribute) and func.attr == 'EngineIdentity') or (
+            isinstance(func, ast.Name) and func.id == 'EngineIdentity'
+        )
+        if not is_engine_identity:
+            continue
+        if not any(keyword.arg == 'resource_id' for keyword in node.keywords):
+            lines.append(node.lineno)
+    return lines
 
 
 def iter_source_files():
@@ -408,6 +433,9 @@ def main() -> int:
             if legacy:
                 rel = path.relative_to(ROOT)
                 errors.append(f'{rel} imports deleted legacy contract roots: {", ".join(legacy)}')
+            for line in engine_identity_constructor_lines(path):
+                rel = path.relative_to(ROOT)
+                errors.append(f'{rel}:{line} constructs EngineIdentity without explicit resource_id')
 
     for path in iter_source_files():
         content = path.read_text()

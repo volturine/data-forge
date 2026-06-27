@@ -30,7 +30,7 @@ class _StubManager:
 
     @staticmethod
     def _identity_key(identity) -> str:
-        return f'{identity.scope}:{compute_routes._engine_identity_resource_id(identity)}'
+        return f'{identity.scope}:{identity.resource_id}'
 
     def get_engine(self, identity):
         return _StubEngine() if self._identity_key(identity).endswith(':build-1') else None
@@ -38,7 +38,7 @@ class _StubManager:
     def get_engine_status(self, identity) -> dict[str, object]:
         return {
             'analysis_id': identity.analysis_id if identity.HasField('analysis_id') else '',
-            'resource_id': compute_routes._engine_identity_resource_id(identity),
+            'resource_id': identity.resource_id,
             'status': 'healthy',
             'scope': 'datasource_preview' if identity.HasField('datasource_id') else 'build' if identity.HasField('build_id') else 'analysis_interactive',
             'reuse_policy': 'exclusive' if identity.HasField('build_id') else 'shared',

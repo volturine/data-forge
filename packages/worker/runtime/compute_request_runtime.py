@@ -15,7 +15,7 @@ from google.protobuf import json_format, message
 from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
 from dataforge_protocol.enums_pb2 import dataforge_token
 from runtime import compute_service as service
-from runtime.compute_manager import ProcessManager, engine_identity_resource_id
+from runtime.compute_manager import ProcessManager
 from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
@@ -273,12 +273,12 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             identity = command.engine_identity
             engine = manager.get_engine(identity)
             if engine is None:
-                raise engine_not_found(engine_identity_resource_id(identity))
+                raise engine_not_found(identity.resource_id)
             deadline = time.monotonic() + _ENGINE_SHUTDOWN_WAIT_SECONDS
             while engine.current_job_id and engine.is_process_alive() and time.monotonic() < deadline:
                 time.sleep(_ENGINE_SHUTDOWN_POLL_SECONDS)
             if engine.current_job_id and engine.is_process_alive():
-                raise EngineBusyError(engine_identity_resource_id(identity))
+                raise EngineBusyError(identity.resource_id)
             manager.shutdown_engine(identity)
             _complete_request(client, claimed, response_json={"success": True})
         else:
