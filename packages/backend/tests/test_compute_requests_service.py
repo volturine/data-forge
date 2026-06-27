@@ -7,6 +7,7 @@ from sqlmodel import select
 from backend_core import compute_requests_service
 from backend_core.domain.compute_requests.models import (
     command_envelope_from_json,
+    command_from_payload,
     command_payload,
     dict_to_struct,
     response_envelope_from_json,
@@ -38,14 +39,31 @@ def _preview_payload() -> dict[str, object]:
     }
 
 
+def _create_request(
+    test_db_session,
+    *,
+    namespace: str,
+    kind: enums_pb2.ComputeRequestKind,
+    request_json: dict[str, object],
+    commit: bool = True,
+) -> ComputeRequest:
+    return compute_requests_service.create_request(
+        test_db_session,
+        namespace=namespace,
+        kind=kind,
+        command=command_from_payload(kind, request_json),
+        commit=commit,
+    )
+
+
 def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_db_session) -> None:
-    create_request = compute_requests_service.create_request(
+    create_request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
         request_json={'name': 'upload', 'file_path': 's3://data/upload.csv', 'file_type': 'csv', 'options': {}},
     )
-    preview = compute_requests_service.create_request(
+    preview = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
@@ -65,13 +83,13 @@ def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_
 
 
 def test_claim_next_request_prioritizes_user_create_requests_over_background_ingest(test_db_session) -> None:
-    background = compute_requests_service.create_request(
+    background = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
         request_json={'datasource_id': 'background'},
     )
-    create_request = compute_requests_service.create_request(
+    create_request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
@@ -90,9 +108,7 @@ def test_claim_next_request_prioritizes_user_create_requests_over_background_ing
 
 
 def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> None:
-    request = compute_requests_service.create_request(
-        test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, request_json=_preview_payload()
-    )
+    request = _create_request(test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, request_json=_preview_payload())
     request_id = request.id
 
     duplicate = (
@@ -135,7 +151,7 @@ def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> 
 
 
 def test_create_request_stores_typed_command_envelope(test_db_session) -> None:
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
@@ -168,7 +184,7 @@ def test_create_request_stores_typed_command_envelope(test_db_session) -> None:
 
 
 def test_create_preview_request_stores_typed_command_envelope(test_db_session) -> None:
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
@@ -213,7 +229,7 @@ def test_create_preview_request_converts_ai_provider_token(test_db_session) -> N
     ]
     payload['target_step_id'] = 'ai-1'
 
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
@@ -243,7 +259,7 @@ def test_create_preview_request_populates_protocol_step_type(test_db_session) ->
     ]
     payload['target_step_id'] = 'plot-1'
 
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
@@ -288,7 +304,7 @@ def test_create_preview_request_omits_null_repeated_fields(test_db_session) -> N
     ]
     payload['target_step_id'] = 'dedup-1'
 
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
@@ -303,7 +319,7 @@ def test_create_preview_request_omits_null_repeated_fields(test_db_session) -> N
 
 
 def test_mark_request_completed_stores_typed_response_envelope(test_db_session) -> None:
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
@@ -349,7 +365,7 @@ def test_mark_request_completed_stores_typed_response_envelope(test_db_session) 
 
 
 def test_row_count_response_preserves_zero_count(test_db_session) -> None:
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
@@ -362,7 +378,7 @@ def test_row_count_response_preserves_zero_count(test_db_session) -> None:
 
 
 def test_failed_response_preserves_integral_status_code(test_db_session) -> None:
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
@@ -393,7 +409,7 @@ def test_failed_response_preserves_integral_status_code(test_db_session) -> None
 
 
 def test_datasource_error_result_shape_uses_typed_compute_error_message(test_db_session) -> None:
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
@@ -438,7 +454,7 @@ def test_compute_envelope_payload_helpers_reject_deprecated_payload_only_message
 
 
 def test_column_stats_response_preserves_required_zero_defaults(test_db_session) -> None:
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
@@ -475,7 +491,7 @@ def test_column_stats_response_preserves_required_zero_defaults(test_db_session)
 
 
 def test_claim_next_request_reclaims_expired_lease(test_db_session) -> None:
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,

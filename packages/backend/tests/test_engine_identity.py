@@ -81,7 +81,7 @@ def test_build_identity_uses_generated_proto_directly() -> None:
     assert identity.resource_id == 'build-1'
 
 
-def test_engine_identity_payload_is_boundary_conversion() -> None:
+def test_engine_identity_is_carried_directly_in_lifecycle_command() -> None:
     identity = compute_pb2.EngineIdentity(
         scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
         reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
@@ -89,12 +89,11 @@ def test_engine_identity_payload_is_boundary_conversion() -> None:
         resource_id='ds-1',
     )
 
-    assert executor_client._engine_identity_payload(identity) == {
-        'scope': 'datasource_preview',
-        'reuse_policy': 'shared',
-        'resource_id': 'ds-1',
-        'datasource_id': 'ds-1',
-    }
+    command = executor_client._lifecycle_command('spawn_engine', identity, {'max_threads': 4})
+
+    assert command.WhichOneof('command') == 'spawn_engine'
+    assert command.spawn_engine.engine_identity == identity
+    assert command.spawn_engine.resource_config.max_threads == 4
 
 
 def test_step_preview_request_uses_generated_engine_identity() -> None:

@@ -12,7 +12,7 @@ from backend_core.database import run_settings_db
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
-from backend_core.domain.compute_requests.models import response_envelope
+from backend_core.domain.compute_requests.models import command_from_payload, response_envelope
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
@@ -55,6 +55,21 @@ def _schema_payload() -> dict[str, object]:
             ],
         },
     }
+
+
+def _create_request(
+    test_db_session: Session,
+    *,
+    namespace: str,
+    kind: enums_pb2.ComputeRequestKind,
+    request_json: dict[str, object],
+):
+    return compute_requests_service.create_request(
+        test_db_session,
+        namespace=namespace,
+        kind=kind,
+        command=command_from_payload(kind, request_json),
+    )
 
 
 @pytest.mark.asyncio
@@ -146,7 +161,7 @@ async def test_internal_worker_grpc_counts_and_releases_jobs(test_db_session: Se
 async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     worker_id = f'build-manager:{uuid.uuid4()}'
-    request = compute_requests_service.create_request(
+    request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
@@ -193,7 +208,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     test_db_session.refresh(request)
     assert request.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
 
-    failed_request = compute_requests_service.create_request(
+    failed_request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,

@@ -515,7 +515,7 @@ def _datasource_command(kind: enums_pb2.ComputeRequestKind, payload: dict[str, o
     return command
 
 
-def _command_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeCommand:
+def command_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeCommand:
     command = compute_pb2.ComputeCommand()
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
         command.preview.CopyFrom(_step_preview_command(payload))
@@ -550,7 +550,7 @@ def command_envelope(
     *,
     kind: enums_pb2.ComputeRequestKind,
     request_id: str,
-    payload: dict[str, object],
+    command: compute_pb2.ComputeCommand,
 ) -> compute_pb2.ComputeCommandEnvelope:
     envelope = compute_pb2.ComputeCommandEnvelope(
         kind=kind_to_proto(kind),
@@ -558,7 +558,7 @@ def command_envelope(
         idempotency_key=request_id,
         correlation_id=request_id,
     )
-    envelope.command.CopyFrom(_command_from_payload(kind, payload))
+    envelope.command.CopyFrom(command)
     return envelope
 
 

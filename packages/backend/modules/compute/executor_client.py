@@ -12,6 +12,7 @@ from backend_core.data_plane_client import client_from_settings
 from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_requests.live import response_hub
+from backend_core.domain.compute_requests.models import command_from_payload
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import PipelineExecutionError
 from backend_core.namespace import get_namespace
@@ -20,37 +21,6 @@ from dataforge_protocol import compute_pb2, enums_pb2
 from modules.datasource import schemas as datasource_schemas
 
 EngineIdentity = compute_pb2.EngineIdentity
-
-
-def _engine_identity_payload(identity: EngineIdentity) -> dict[str, str]:
-    if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW:
-        scope = 'datasource_preview'
-    elif identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE:
-        scope = 'analysis_interactive'
-    elif identity.scope == enums_pb2.ENGINE_SCOPE_BUILD:
-        scope = 'build'
-    else:
-        raise ValueError('engine identity scope is unspecified')
-
-    if identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED:
-        reuse_policy = 'shared'
-    elif identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE:
-        reuse_policy = 'exclusive'
-    else:
-        raise ValueError('engine identity reuse policy is unspecified')
-
-    payload = {
-        'scope': scope,
-        'reuse_policy': reuse_policy,
-        'resource_id': identity.resource_id,
-    }
-    if identity.HasField('analysis_id'):
-        payload['analysis_id'] = identity.analysis_id
-    if identity.HasField('datasource_id'):
-        payload['datasource_id'] = identity.datasource_id
-    if identity.HasField('build_id'):
-        payload['build_id'] = identity.build_id
-    return payload
 
 
 def _ensure_runtime_available(runtime_probe: RuntimeAvailabilityProbe) -> None:
@@ -63,7 +33,7 @@ async def _submit_and_wait(
     session: Session,
     *,
     kind: enums_pb2.ComputeRequestKind,
-    request_json: dict[str, object],
+    command: compute_pb2.ComputeCommand,
     runtime_probe: RuntimeAvailabilityProbe,
 ):
     _ensure_runtime_available(runtime_probe)
@@ -72,7 +42,7 @@ async def _submit_and_wait(
             session,
             namespace=get_namespace(),
             kind=kind,
-            request_json=request_json,
+            command=command,
             commit=False,
         )
         runtime_outbox_service.enqueue_compute_request_notification(session, request_id=request.id, commit=False)
@@ -107,6 +77,24 @@ async def _submit_and_wait(
     raise PipelineExecutionError(message)
 
 
+def _resource_config_message(resource_config: dict[str, object]) -> compute_pb2.EngineResourceConfig:
+    config = compute_pb2.EngineResourceConfig()
+    for key in ('max_threads', 'max_memory_mb', 'streaming_chunk_size'):
+        value = resource_config.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            setattr(config, key, value)
+    return config
+
+
+def _lifecycle_command(field_name: str, identity: EngineIdentity, resource_config: dict[str, object] | None = None) -> compute_pb2.ComputeCommand:
+    command = compute_pb2.ComputeCommand()
+    lifecycle = compute_pb2.EngineLifecycleCommand(engine_identity=identity)
+    if resource_config is not None:
+        lifecycle.resource_config.CopyFrom(_resource_config_message(resource_config))
+    getattr(command, field_name).CopyFrom(lifecycle)
+    return command
+
+
 async def preview_step(
     session: Session,
     request: compute_schemas.StepPreviewRequest,
@@ -116,7 +104,7 @@ async def preview_step(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        request_json=request.model_dump(mode='json'),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, request.model_dump(mode='json')),
         runtime_probe=runtime_probe,
     )
     return compute_schemas.StepPreviewResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -131,7 +119,7 @@ async def get_step_schema(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
-        request_json=request.model_dump(mode='json'),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA, request.model_dump(mode='json')),
         runtime_probe=runtime_probe,
     )
     return compute_schemas.StepSchemaResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -146,7 +134,7 @@ async def get_step_row_count(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
-        request_json=request.model_dump(mode='json'),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT, request.model_dump(mode='json')),
         runtime_probe=runtime_probe,
     )
     return compute_schemas.StepRowCountResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -161,7 +149,7 @@ async def download_step(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
-        request_json=request.model_dump(mode='json'),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD, request.model_dump(mode='json')),
         runtime_probe=runtime_probe,
     )
     if not completed.artifact_path or not completed.artifact_name or not completed.artifact_content_type:
@@ -186,7 +174,7 @@ async def export_data(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
-        request_json=request.model_dump(mode='json'),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_EXPORT, request.model_dump(mode='json')),
         runtime_probe=runtime_probe,
     )
     return compute_schemas.ExportResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -217,24 +205,27 @@ async def create_file_datasource(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
         runtime_probe=runtime_probe,
-        request_json={
-            'name': name,
-            'description': description,
-            'file_path': file_path,
-            'file_type': file_type,
-            'options': options or {},
-            'csv_options': csv_options,
-            'sheet_name': sheet_name,
-            'start_row': start_row,
-            'start_col': start_col,
-            'end_col': end_col,
-            'end_row': end_row,
-            'has_header': has_header,
-            'table_name': table_name,
-            'named_range': named_range,
-            'cell_range': cell_range,
-            'owner_id': owner_id,
-        },
+        command=command_from_payload(
+            enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+            {
+                'name': name,
+                'description': description,
+                'file_path': file_path,
+                'file_type': file_type,
+                'options': options or {},
+                'csv_options': csv_options,
+                'sheet_name': sheet_name,
+                'start_row': start_row,
+                'start_col': start_col,
+                'end_col': end_col,
+                'end_row': end_row,
+                'has_header': has_header,
+                'table_name': table_name,
+                'named_range': named_range,
+                'cell_range': cell_range,
+                'owner_id': owner_id,
+            },
+        ),
     )
     return datasource_schemas.DataSourceResponse.model_validate(compute_requests_service.response_payload(completed))
 
@@ -254,14 +245,17 @@ async def create_database_datasource(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
         runtime_probe=runtime_probe,
-        request_json={
-            'name': name,
-            'description': description,
-            'connection_string': connection_string,
-            'query': query,
-            'branch': branch,
-            'owner_id': owner_id,
-        },
+        command=command_from_payload(
+            enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
+            {
+                'name': name,
+                'description': description,
+                'connection_string': connection_string,
+                'query': query,
+                'branch': branch,
+                'owner_id': owner_id,
+            },
+        ),
     )
     return datasource_schemas.DataSourceResponse.model_validate(compute_requests_service.response_payload(completed))
 
@@ -280,13 +274,16 @@ async def create_iceberg_datasource(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
         runtime_probe=runtime_probe,
-        request_json={
-            'name': name,
-            'description': description,
-            'source': source,
-            'branch': branch,
-            'owner_id': owner_id,
-        },
+        command=command_from_payload(
+            enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
+            {
+                'name': name,
+                'description': description,
+                'source': source,
+                'branch': branch,
+                'owner_id': owner_id,
+            },
+        ),
     )
     return datasource_schemas.DataSourceResponse.model_validate(compute_requests_service.response_payload(completed))
 
@@ -300,7 +297,7 @@ async def ingest_datasource(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
-        request_json={'datasource_id': datasource_id},
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE, {'datasource_id': datasource_id}),
         runtime_probe=runtime_probe,
     )
     return datasource_schemas.DataSourceResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -317,11 +314,14 @@ async def get_datasource_schema(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
-        request_json={
-            'datasource_id': datasource_id,
-            'sheet_name': sheet_name,
-            'refresh': refresh,
-        },
+        command=command_from_payload(
+            enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+            {
+                'datasource_id': datasource_id,
+                'sheet_name': sheet_name,
+                'refresh': refresh,
+            },
+        ),
         runtime_probe=runtime_probe,
     )
     return datasource_schemas.SchemaInfo.model_validate(compute_requests_service.response_payload(completed))
@@ -340,13 +340,16 @@ async def get_column_stats(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
-        request_json={
-            'datasource_id': datasource_id,
-            'column_name': column_name,
-            'use_sample': use_sample,
-            'sample_size': sample_size,
-            'datasource_config': datasource_config or {},
-        },
+        command=command_from_payload(
+            enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
+            {
+                'datasource_id': datasource_id,
+                'column_name': column_name,
+                'use_sample': use_sample,
+                'sample_size': sample_size,
+                'datasource_config': datasource_config or {},
+            },
+        ),
         runtime_probe=runtime_probe,
     )
     return datasource_schemas.ColumnStatsResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -364,12 +367,15 @@ async def compare_iceberg_snapshots(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
-        request_json={
-            'datasource_id': datasource_id,
-            'snapshot_a': snapshot_a,
-            'snapshot_b': snapshot_b,
-            'row_limit': row_limit,
-        },
+        command=command_from_payload(
+            enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
+            {
+                'datasource_id': datasource_id,
+                'snapshot_a': snapshot_a,
+                'snapshot_b': snapshot_b,
+                'row_limit': row_limit,
+            },
+        ),
         runtime_probe=runtime_probe,
     )
     return datasource_schemas.SnapshotCompareResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -385,10 +391,7 @@ async def spawn_engine(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
-        request_json={
-            'engine_identity': _engine_identity_payload(identity),
-            'resource_config': resource_config or {},
-        },
+        command=_lifecycle_command('spawn_engine', identity, resource_config or {}),
         runtime_probe=runtime_probe,
     )
     return compute_schemas.EngineStatusSchema.model_validate(compute_requests_service.response_payload(completed))
@@ -404,7 +407,7 @@ async def configure_engine(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
-        request_json={'engine_identity': _engine_identity_payload(identity), 'resource_config': resource_config},
+        command=_lifecycle_command('configure_engine', identity, resource_config),
         runtime_probe=runtime_probe,
     )
     return compute_schemas.EngineStatusSchema.model_validate(compute_requests_service.response_payload(completed))
@@ -419,6 +422,6 @@ async def shutdown_engine(
     await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
-        request_json={'engine_identity': _engine_identity_payload(identity)},
+        command=_lifecycle_command('shutdown_engine', identity),
         runtime_probe=runtime_probe,
     )

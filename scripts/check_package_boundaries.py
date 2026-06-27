@@ -245,12 +245,30 @@ def engine_identity_constructor_lines(path: Path) -> list[int]:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        is_engine_identity = (isinstance(func, ast.Attribute) and func.attr == 'EngineIdentity') or (
-            isinstance(func, ast.Name) and func.id == 'EngineIdentity'
-        )
+        is_engine_identity = (isinstance(func, ast.Attribute) and func.attr == 'EngineIdentity') or (isinstance(func, ast.Name) and func.id == 'EngineIdentity')
         if not is_engine_identity:
             continue
         if not any(keyword.arg == 'resource_id' for keyword in node.keywords):
+            lines.append(node.lineno)
+    return lines
+
+
+def raw_compute_request_creation_lines(path: Path) -> list[int]:
+    tree = ast.parse(path.read_text(), filename=str(path))
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        is_compute_request_service_call = (
+            isinstance(func, ast.Attribute)
+            and func.attr == 'create_request'
+            and isinstance(func.value, ast.Name)
+            and func.value.id == 'compute_requests_service'
+        )
+        if not is_compute_request_service_call:
+            continue
+        if any(keyword.arg == 'request_json' for keyword in node.keywords):
             lines.append(node.lineno)
     return lines
 
@@ -436,6 +454,9 @@ def main() -> int:
             for line in engine_identity_constructor_lines(path):
                 rel = path.relative_to(ROOT)
                 errors.append(f'{rel}:{line} constructs EngineIdentity without explicit resource_id')
+            for line in raw_compute_request_creation_lines(path):
+                rel = path.relative_to(ROOT)
+                errors.append(f'{rel}:{line} calls compute_requests_service.create_request with raw request_json; pass a typed ComputeCommand')
 
     for path in iter_source_files():
         content = path.read_text()

@@ -22,7 +22,7 @@ from backend_core.domain.compute_requests.models import (
     status_from_proto,
 )
 from backend_core.persistence.compute_requests.models import ComputeRequest
-from dataforge_protocol import enums_pb2
+from dataforge_protocol import compute_pb2, enums_pb2
 
 _BLOCKING_REQUEST_KINDS = frozenset(
     {
@@ -66,14 +66,14 @@ def create_request(
     *,
     namespace: str,
     kind: enums_pb2.ComputeRequestKind,
-    request_json: dict[str, object],
+    command: compute_pb2.ComputeCommand,
     commit: bool = True,
 ) -> ComputeRequest:
     now = _utcnow()
     request_id = str(uuid.uuid4())
     envelope = command_envelope(
         kind=kind,
-        payload=request_json,
+        command=command,
         request_id=request_id,
     )
     request = ComputeRequest(
