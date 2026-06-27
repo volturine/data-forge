@@ -109,6 +109,21 @@ FRONTEND_BUILD_STREAM_ADAPTER_FORBIDDEN_PATTERNS = {
     re.compile(r'\bconst\s+BUILD_TAB_STATUS_TOKENS\s*:'): 'build-stream generated JSON enum tokens must live in protocol-enum-tokens.ts',
     re.compile(r'\bconst\s+BUILD_LOG_LEVEL_TOKENS\s*:'): 'build-stream generated JSON enum tokens must live in protocol-enum-tokens.ts',
 }
+FRONTEND_BUILD_STREAM_TYPES_REQUIRED_TOKENS = {
+    'ActiveBuildSummaryJson as ProtocolActiveBuildSummaryJson': 'active build summary type must be anchored to generated protocol JSON',
+    'ActiveBuildDetailJson as ProtocolActiveBuildDetailJson': 'active build detail type must be anchored to generated protocol JSON',
+    'BuildSnapshotMessageJson as ProtocolBuildSnapshotMessageJson': 'build snapshot websocket type must be anchored to generated protocol JSON',
+    'ActiveBuildListResponseJson as ProtocolActiveBuildListResponseJson': 'active build list response must be anchored to generated protocol JSON',
+}
+FRONTEND_BUILD_API_FORBIDDEN_PATTERNS = {
+    re.compile(r'\binterface\s+ActiveBuildListResponse\b'): 'build list response must be imported from protocol-anchored build-stream types',
+}
+PROTOCOL_COMPUTE_REQUIRED_TOKENS = {
+    'message ActiveBuildSummary': 'protocol must own active build summary DTOs',
+    'message ActiveBuildDetail': 'protocol must own active build detail DTOs',
+    'message BuildSnapshotMessage': 'protocol must own build snapshot websocket DTOs',
+    'message BuildWebsocketErrorMessage': 'protocol must own build websocket error DTOs',
+}
 WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
 }
@@ -269,6 +284,27 @@ def main() -> int:
         for pattern, reason in FRONTEND_BUILD_STREAM_ADAPTER_FORBIDDEN_PATTERNS.items():
             if pattern.search(content):
                 errors.append(f'{frontend_build_stream_adapter.relative_to(ROOT)} contains {reason}: {pattern.pattern}')
+
+    frontend_build_stream_types = ROOT / 'packages/frontend/src/lib/types/build-stream.ts'
+    if frontend_build_stream_types.exists():
+        content = frontend_build_stream_types.read_text()
+        for token, reason in FRONTEND_BUILD_STREAM_TYPES_REQUIRED_TOKENS.items():
+            if token not in content:
+                errors.append(f'{frontend_build_stream_types.relative_to(ROOT)} is missing {reason}: {token}')
+
+    frontend_build_api = ROOT / 'packages/frontend/src/lib/api/builds.ts'
+    if frontend_build_api.exists():
+        content = frontend_build_api.read_text()
+        for pattern, reason in FRONTEND_BUILD_API_FORBIDDEN_PATTERNS.items():
+            if pattern.search(content):
+                errors.append(f'{frontend_build_api.relative_to(ROOT)} contains {reason}: {pattern.pattern}')
+
+    protocol_compute = ROOT / 'packages/protocol/proto/dataforge_protocol/compute.proto'
+    if protocol_compute.exists():
+        content = protocol_compute.read_text()
+        for token, reason in PROTOCOL_COMPUTE_REQUIRED_TOKENS.items():
+            if token not in content:
+                errors.append(f'{protocol_compute.relative_to(ROOT)} is missing {reason}: {token}')
 
     worker_compute_schemas = ROOT / 'packages/worker/runtime/domain/compute/schemas.py'
     if worker_compute_schemas.exists():

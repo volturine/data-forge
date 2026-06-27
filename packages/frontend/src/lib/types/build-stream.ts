@@ -4,6 +4,21 @@ import type {
 	ListEngineRunsParams
 } from '$lib/api/engine-runs';
 import type {
+	ActiveBuildDetailJson as ProtocolActiveBuildDetailJson,
+	ActiveBuildListResponseJson as ProtocolActiveBuildListResponseJson,
+	ActiveBuildSummaryJson as ProtocolActiveBuildSummaryJson,
+	BuildListSnapshotMessageJson as ProtocolBuildListSnapshotMessageJson,
+	BuildLogEntryJson as ProtocolBuildLogEntryJson,
+	BuildQueryPlanSnapshotJson as ProtocolBuildQueryPlanSnapshotJson,
+	BuildResourceConfigSummaryJson as ProtocolBuildResourceConfigSummaryJson,
+	BuildResourceSnapshotJson as ProtocolBuildResourceSnapshotJson,
+	BuildSnapshotMessageJson as ProtocolBuildSnapshotMessageJson,
+	BuildStarterJson as ProtocolBuildStarterJson,
+	BuildStepSnapshotJson as ProtocolBuildStepSnapshotJson,
+	BuildTabResultJson as ProtocolBuildTabResultJson,
+	BuildWebsocketErrorMessageJson as ProtocolBuildWebsocketErrorMessageJson
+} from '$lib/protocol/dataforge_protocol/compute_pb';
+import type {
 	ActiveBuildStatus,
 	BuildLogLevel,
 	BuildStepState,
@@ -12,6 +27,17 @@ import type {
 } from '$lib/types/protocol-enum-tokens';
 
 export type { ActiveBuildStatus, BuildLogLevel, BuildStepState, BuildTabStatus, EngineRunKind };
+
+type Field<T, K extends keyof T> = NonNullable<T[K]>;
+type StringField<T, K extends keyof T> = Extract<Field<T, K>, string>;
+type NumberField<T, K extends keyof T> = Extract<Field<T, K>, number>;
+type OptionalStringField<T, K extends keyof T> = StringField<T, K> | null;
+type OptionalNumberField<T, K extends keyof T> = NumberField<T, K> | null;
+type StructHttpField<T, K extends keyof T> =
+	Field<T, K> extends Record<string, unknown> ? Record<string, unknown> : never;
+type OptionalStructHttpField<T, K extends keyof T> = StructHttpField<T, K> | null;
+type Int64HttpNumber<T, K extends keyof T> = Field<T, K> extends string ? number : never;
+type OptionalInt64HttpNumber<T, K extends keyof T> = Int64HttpNumber<T, K> | null;
 
 export interface BuildPlanEvent {
 	type: 'plan';
@@ -157,12 +183,12 @@ export interface BuildLogEvent {
 }
 
 export interface BuildTabResult {
-	tab_id: string;
-	tab_name: string;
+	tab_id: StringField<ProtocolBuildTabResultJson, 'tabId'>;
+	tab_name: StringField<ProtocolBuildTabResultJson, 'tabName'>;
 	status: BuildTabStatus;
-	output_id: string | null;
-	output_name: string | null;
-	error: string | null;
+	output_id: OptionalStringField<ProtocolBuildTabResultJson, 'outputId'>;
+	output_name: OptionalStringField<ProtocolBuildTabResultJson, 'outputName'>;
+	error: OptionalStringField<ProtocolBuildTabResultJson, 'error'>;
 }
 
 export interface BuildCompleteEvent {
@@ -244,113 +270,136 @@ export type BuildEvent =
 	| BuildStepStartEvent;
 
 export interface BuildStarter {
-	user_id: string | null;
-	display_name: string | null;
-	email: string | null;
-	triggered_by: string | null;
+	user_id: OptionalStringField<ProtocolBuildStarterJson, 'userId'>;
+	display_name: OptionalStringField<ProtocolBuildStarterJson, 'displayName'>;
+	email: OptionalStringField<ProtocolBuildStarterJson, 'email'>;
+	triggered_by: OptionalStringField<ProtocolBuildStarterJson, 'triggeredBy'>;
 }
 
 export interface BuildResourceConfigSummary {
-	max_threads: number | null;
-	max_memory_mb: number | null;
-	streaming_chunk_size: number | null;
+	max_threads: OptionalNumberField<ProtocolBuildResourceConfigSummaryJson, 'maxThreads'>;
+	max_memory_mb: OptionalNumberField<ProtocolBuildResourceConfigSummaryJson, 'maxMemoryMb'>;
+	streaming_chunk_size: OptionalNumberField<
+		ProtocolBuildResourceConfigSummaryJson,
+		'streamingChunkSize'
+	>;
 }
 
 export interface ActiveBuildSummary {
-	build_id: string;
-	analysis_id: string;
-	analysis_name: string;
-	namespace: string;
+	build_id: StringField<ProtocolActiveBuildSummaryJson, 'buildId'>;
+	analysis_id: StringField<ProtocolActiveBuildSummaryJson, 'analysisId'>;
+	analysis_name: StringField<ProtocolActiveBuildSummaryJson, 'analysisName'>;
+	namespace: StringField<ProtocolActiveBuildSummaryJson, 'namespace'>;
 	status: ActiveBuildStatus;
-	started_at: string;
+	started_at: StringField<ProtocolActiveBuildSummaryJson, 'startedAt'>;
 	starter: BuildStarter;
 	resource_config: BuildResourceConfigSummary | null;
-	progress: number;
-	elapsed_ms: number;
-	estimated_remaining_ms: number | null;
-	current_step: string | null;
-	current_step_index: number | null;
-	total_steps: number;
+	progress: NumberField<ProtocolActiveBuildSummaryJson, 'progress'>;
+	elapsed_ms: NumberField<ProtocolActiveBuildSummaryJson, 'elapsedMs'>;
+	estimated_remaining_ms: OptionalNumberField<
+		ProtocolActiveBuildSummaryJson,
+		'estimatedRemainingMs'
+	>;
+	current_step: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentStep'>;
+	current_step_index: OptionalNumberField<ProtocolActiveBuildSummaryJson, 'currentStepIndex'>;
+	total_steps: NumberField<ProtocolActiveBuildSummaryJson, 'totalSteps'>;
 	current_kind: EngineRunKind | null;
-	current_datasource_id: string | null;
-	current_tab_id: string | null;
-	current_tab_name: string | null;
-	current_output_id: string | null;
-	current_output_name: string | null;
-	current_engine_run_id: string | null;
-	total_tabs: number;
-	cancelled_at: string | null;
-	cancelled_by: string | null;
-	result_json: Record<string, unknown> | null;
+	current_datasource_id: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentDatasourceId'>;
+	current_tab_id: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentTabId'>;
+	current_tab_name: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentTabName'>;
+	current_output_id: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentOutputId'>;
+	current_output_name: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentOutputName'>;
+	current_engine_run_id: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentEngineRunId'>;
+	total_tabs: NumberField<ProtocolActiveBuildSummaryJson, 'totalTabs'>;
+	cancelled_at: OptionalStringField<ProtocolActiveBuildSummaryJson, 'cancelledAt'>;
+	cancelled_by: OptionalStringField<ProtocolActiveBuildSummaryJson, 'cancelledBy'>;
+	result_json: OptionalStructHttpField<ProtocolActiveBuildSummaryJson, 'resultJson'>;
 }
 
 export interface BuildStepSnapshot {
-	build_step_index: number;
-	step_index: number;
-	step_id: string;
-	step_name: string;
-	step_type: string;
-	tab_id: string | null;
-	tab_name: string | null;
+	build_step_index: NumberField<ProtocolBuildStepSnapshotJson, 'buildStepIndex'>;
+	step_index: NumberField<ProtocolBuildStepSnapshotJson, 'stepIndex'>;
+	step_id: StringField<ProtocolBuildStepSnapshotJson, 'stepId'>;
+	step_name: StringField<ProtocolBuildStepSnapshotJson, 'stepName'>;
+	step_type: StringField<ProtocolBuildStepSnapshotJson, 'stepType'>;
+	tab_id: OptionalStringField<ProtocolBuildStepSnapshotJson, 'tabId'>;
+	tab_name: OptionalStringField<ProtocolBuildStepSnapshotJson, 'tabName'>;
 	state: BuildStepState;
-	duration_ms: number | null;
-	row_count: number | null;
-	error: string | null;
+	duration_ms: OptionalNumberField<ProtocolBuildStepSnapshotJson, 'durationMs'>;
+	row_count: OptionalInt64HttpNumber<ProtocolBuildStepSnapshotJson, 'rowCount'>;
+	error: OptionalStringField<ProtocolBuildStepSnapshotJson, 'error'>;
 }
 
 export interface BuildQueryPlanSnapshot {
-	tab_id: string | null;
-	tab_name: string | null;
-	optimized_plan: string;
-	unoptimized_plan: string;
+	tab_id: OptionalStringField<ProtocolBuildQueryPlanSnapshotJson, 'tabId'>;
+	tab_name: OptionalStringField<ProtocolBuildQueryPlanSnapshotJson, 'tabName'>;
+	optimized_plan: StringField<ProtocolBuildQueryPlanSnapshotJson, 'optimizedPlan'>;
+	unoptimized_plan: StringField<ProtocolBuildQueryPlanSnapshotJson, 'unoptimizedPlan'>;
 }
 
 export interface BuildResourceSnapshot {
-	sampled_at: string;
-	cpu_percent: number;
-	memory_mb: number;
-	memory_limit_mb: number | null;
-	active_threads: number;
-	max_threads: number | null;
+	sampled_at: StringField<ProtocolBuildResourceSnapshotJson, 'sampledAt'>;
+	cpu_percent: NumberField<ProtocolBuildResourceSnapshotJson, 'cpuPercent'>;
+	memory_mb: NumberField<ProtocolBuildResourceSnapshotJson, 'memoryMb'>;
+	memory_limit_mb: OptionalNumberField<ProtocolBuildResourceSnapshotJson, 'memoryLimitMb'>;
+	active_threads: NumberField<ProtocolBuildResourceSnapshotJson, 'activeThreads'>;
+	max_threads: OptionalNumberField<ProtocolBuildResourceSnapshotJson, 'maxThreads'>;
 }
 
 export interface BuildLogEntry {
-	timestamp: string;
+	timestamp: StringField<ProtocolBuildLogEntryJson, 'timestamp'>;
 	level: BuildLogLevel;
-	message: string;
-	step_name: string | null;
-	step_id: string | null;
-	tab_id: string | null;
-	tab_name: string | null;
+	message: StringField<ProtocolBuildLogEntryJson, 'message'>;
+	step_name: OptionalStringField<ProtocolBuildLogEntryJson, 'stepName'>;
+	step_id: OptionalStringField<ProtocolBuildLogEntryJson, 'stepId'>;
+	tab_id: OptionalStringField<ProtocolBuildLogEntryJson, 'tabId'>;
+	tab_name: OptionalStringField<ProtocolBuildLogEntryJson, 'tabName'>;
 }
 
 export interface ActiveBuildDetail extends ActiveBuildSummary {
-	steps: BuildStepSnapshot[];
-	query_plans: BuildQueryPlanSnapshot[];
+	steps: Field<ProtocolActiveBuildDetailJson, 'steps'> extends unknown[]
+		? BuildStepSnapshot[]
+		: never;
+	query_plans: Field<ProtocolActiveBuildDetailJson, 'queryPlans'> extends unknown[]
+		? BuildQueryPlanSnapshot[]
+		: never;
 	latest_resources: BuildResourceSnapshot | null;
-	resources: BuildResourceSnapshot[];
-	logs: BuildLogEntry[];
-	results: BuildTabResult[];
-	duration_ms: number | null;
-	error: string | null;
-	request_json: Record<string, unknown> | null;
+	resources: Field<ProtocolActiveBuildDetailJson, 'resources'> extends unknown[]
+		? BuildResourceSnapshot[]
+		: never;
+	logs: Field<ProtocolActiveBuildDetailJson, 'logs'> extends unknown[] ? BuildLogEntry[] : never;
+	results: Field<ProtocolActiveBuildDetailJson, 'results'> extends unknown[]
+		? BuildTabResult[]
+		: never;
+	duration_ms: OptionalNumberField<ProtocolActiveBuildDetailJson, 'durationMs'>;
+	error: OptionalStringField<ProtocolActiveBuildDetailJson, 'error'>;
+	request_json: OptionalStructHttpField<ProtocolActiveBuildDetailJson, 'requestJson'>;
 }
 
 export interface BuildDetailSnapshot {
 	type: 'snapshot';
 	build: ActiveBuildDetail;
-	last_sequence?: number;
+	last_sequence?: NumberField<ProtocolBuildSnapshotMessageJson, 'lastSequence'>;
 }
 
 export interface BuildsSnapshot {
 	type: 'snapshot';
-	builds: ActiveBuildSummary[];
+	builds: Field<ProtocolBuildListSnapshotMessageJson, 'builds'> extends unknown[]
+		? ActiveBuildSummary[]
+		: never;
 }
 
 export interface BuildWebsocketErrorMessage {
 	type: 'error';
-	error: string;
-	status_code: number;
+	error: StringField<ProtocolBuildWebsocketErrorMessageJson, 'error'>;
+	status_code: NumberField<ProtocolBuildWebsocketErrorMessageJson, 'statusCode'>;
+}
+
+export interface ActiveBuildListResponse {
+	builds: Field<ProtocolActiveBuildListResponseJson, 'builds'> extends unknown[]
+		? ActiveBuildSummary[]
+		: never;
+	total: NumberField<ProtocolActiveBuildListResponseJson, 'total'>;
 }
 
 export type BuildStatus =

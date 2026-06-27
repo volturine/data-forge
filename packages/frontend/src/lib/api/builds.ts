@@ -2,7 +2,7 @@ import { apiRequest } from './client';
 import type { ApiError } from './client';
 import type { ResultAsync } from 'neverthrow';
 import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
-import type { ActiveBuildDetail, ActiveBuildSummary } from '$lib/types/build-stream';
+import type { ActiveBuildDetail, ActiveBuildListResponse } from '$lib/types/build-stream';
 import { shareInFlight } from './in-flight';
 
 export interface ListBuildsParams {
@@ -13,11 +13,6 @@ export interface ListBuildsParams {
 	search?: string;
 	limit?: number;
 	offset?: number;
-}
-
-interface ActiveBuildListResponse {
-	builds: ActiveBuildSummary[];
-	total: number;
 }
 
 function buildQueryString(params?: ListBuildsParams): string {

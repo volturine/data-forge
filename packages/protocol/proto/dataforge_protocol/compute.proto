@@ -348,3 +348,132 @@ message BuildEvent {
     BuildTerminalEvent cancelled = 12;
   }
 }
+
+message BuildStarter {
+  optional string user_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string display_name = 2 [(buf.validate.field).string.min_len = 1];
+  optional string email = 3 [(buf.validate.field).string.email = true];
+  optional string triggered_by = 4 [(buf.validate.field).string.min_len = 1];
+}
+
+message BuildResourceConfigSummary {
+  optional int32 max_threads = 1 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 64
+  }];
+  optional int32 max_memory_mb = 2 [(buf.validate.field).int32.gte = 0];
+  optional int32 streaming_chunk_size = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message BuildStepSnapshot {
+  int32 build_step_index = 1 [(buf.validate.field).int32.gte = 0];
+  int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
+  string step_id = 3 [(buf.validate.field).string.min_len = 1];
+  string step_name = 4;
+  string step_type = 5 [
+    deprecated = true,
+    (buf.validate.field).string.min_len = 1
+  ];
+  optional string tab_id = 6;
+  optional string tab_name = 7;
+  BuildStepState state = 8 [(buf.validate.field).enum.defined_only = true];
+  optional int32 duration_ms = 9 [(buf.validate.field).int32.gte = 0];
+  optional int64 row_count = 10 [(buf.validate.field).int64.gte = 0];
+  optional string error = 11;
+  BuildStepKind step_kind = 12;
+}
+
+message BuildQueryPlanSnapshot {
+  optional string tab_id = 1;
+  optional string tab_name = 2;
+  string optimized_plan = 3;
+  string unoptimized_plan = 4;
+}
+
+message BuildResourceSnapshot {
+  google.protobuf.Timestamp sampled_at = 1;
+  double cpu_percent = 2 [(buf.validate.field).double.gte = 0];
+  double memory_mb = 3 [(buf.validate.field).double.gte = 0];
+  optional double memory_limit_mb = 4 [(buf.validate.field).double.gte = 0];
+  int32 active_threads = 5 [(buf.validate.field).int32.gte = 0];
+  optional int32 max_threads = 6 [(buf.validate.field).int32.gte = 0];
+}
+
+message BuildLogEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  BuildLogLevel level = 2 [(buf.validate.field).enum.defined_only = true];
+  string message = 3 [(buf.validate.field).string.min_len = 1];
+  optional string step_name = 4;
+  optional string step_id = 5;
+  optional string tab_id = 6;
+  optional string tab_name = 7;
+}
+
+message ActiveBuildSummary {
+  string build_id = 1 [(buf.validate.field).string.min_len = 1];
+  string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
+  string analysis_name = 3;
+  string namespace = 4 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  ActiveBuildStatus status = 5 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Timestamp started_at = 6;
+  BuildStarter starter = 7 [(buf.validate.field).required = true];
+  optional BuildResourceConfigSummary resource_config = 8;
+  double progress = 9 [(buf.validate.field).double = {
+    gte: 0
+    lte: 1
+  }];
+  int32 elapsed_ms = 10 [(buf.validate.field).int32.gte = 0];
+  optional int32 estimated_remaining_ms = 11 [(buf.validate.field).int32.gte = 0];
+  optional string current_step = 12;
+  optional int32 current_step_index = 13 [(buf.validate.field).int32.gte = 0];
+  int32 total_steps = 14 [(buf.validate.field).int32.gte = 0];
+  optional EngineRunKind current_kind = 15 [(buf.validate.field).enum.defined_only = true];
+  optional string current_datasource_id = 16;
+  optional string current_tab_id = 17;
+  optional string current_tab_name = 18;
+  optional string current_output_id = 19;
+  optional string current_output_name = 20;
+  optional string current_engine_run_id = 21;
+  int32 total_tabs = 22 [(buf.validate.field).int32.gte = 0];
+  optional google.protobuf.Timestamp cancelled_at = 23;
+  optional string cancelled_by = 24;
+  optional google.protobuf.Struct result_json = 25;
+}
+
+message ActiveBuildDetail {
+  ActiveBuildSummary summary = 1 [(buf.validate.field).required = true];
+  repeated BuildStepSnapshot steps = 2;
+  repeated BuildQueryPlanSnapshot query_plans = 3;
+  optional BuildResourceSnapshot latest_resources = 4;
+  repeated BuildResourceSnapshot resources = 5;
+  repeated BuildLogEntry logs = 6;
+  repeated BuildTabResult results = 7;
+  optional int32 duration_ms = 8 [(buf.validate.field).int32.gte = 0];
+  optional string error = 9;
+  optional google.protobuf.Struct request_json = 10;
+}
+
+message ActiveBuildListResponse {
+  repeated ActiveBuildSummary builds = 1;
+  int32 total = 2 [(buf.validate.field).int32.gte = 0];
+}
+
+message BuildSnapshotMessage {
+  string type = 1 [(buf.validate.field).string.min_len = 1];
+  ActiveBuildDetail build = 2 [(buf.validate.field).required = true];
+  int32 last_sequence = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message BuildListSnapshotMessage {
+  string type = 1 [(buf.validate.field).string.min_len = 1];
+  repeated ActiveBuildSummary builds = 2;
+}
+
+message BuildWebsocketErrorMessage {
+  string type = 1 [(buf.validate.field).string.min_len = 1];
+  string error = 2 [(buf.validate.field).string.min_len = 1];
+  int32 status_code = 3 [(buf.validate.field).int32 = {
+    gte: 100
+    lte: 599
+  }];
+}
