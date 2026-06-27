@@ -118,11 +118,31 @@ FRONTEND_BUILD_STREAM_TYPES_REQUIRED_TOKENS = {
 FRONTEND_BUILD_API_FORBIDDEN_PATTERNS = {
     re.compile(r'\binterface\s+ActiveBuildListResponse\b'): 'build list response must be imported from protocol-anchored build-stream types',
 }
+FRONTEND_COMPUTE_TYPES_REQUIRED_TOKENS = {
+    'EngineIdentityJson as ProtocolEngineIdentityJson': 'engine identity payload must be anchored to generated protocol JSON',
+    'EngineStatusResultJson as ProtocolEngineStatusResultJson': 'engine status response must be anchored to generated protocol JSON',
+    'EngineResourceConfigJson as ProtocolEngineResourceConfigJson': 'engine resource config must be anchored to generated protocol JSON',
+}
+FRONTEND_COMPUTE_API_REQUIRED_TOKENS = {
+    'StepPreviewCommandJson as ProtocolStepPreviewCommandJson': 'step preview request must be anchored to generated protocol JSON',
+    'StepPreviewResultJson as ProtocolStepPreviewResultJson': 'step preview response must be anchored to generated protocol JSON',
+    'ExportCommandJson as ProtocolExportCommandJson': 'export request must be anchored to generated protocol JSON',
+    'ExportResultJson as ProtocolExportResultJson': 'export response must be anchored to generated protocol JSON',
+    'DownloadCommandJson as ProtocolDownloadCommandJson': 'download request must be anchored to generated protocol JSON',
+    'StepSchemaCommandJson as ProtocolStepSchemaCommandJson': 'step schema request must be anchored to generated protocol JSON',
+    'StepRowCountResultJson as ProtocolStepRowCountResultJson': 'row-count response must be anchored to generated protocol JSON',
+}
+FRONTEND_COMPUTE_TYPES_FORBIDDEN_PATTERNS = {
+    re.compile(r"export\s+type\s+EngineStatus\s*=\s*'healthy'"): 'engine status literals must come from generated protocol enum tokens',
+    re.compile(r"export\s+type\s+EngineScope\s*=\s*'datasource_preview'"): 'engine scope literals must come from generated protocol enum tokens',
+    re.compile(r"export\s+type\s+EngineReusePolicy\s*=\s*'shared'"): 'engine reuse policy literals must come from generated protocol enum tokens',
+}
 PROTOCOL_COMPUTE_REQUIRED_TOKENS = {
     'message ActiveBuildSummary': 'protocol must own active build summary DTOs',
     'message ActiveBuildDetail': 'protocol must own active build detail DTOs',
     'message BuildSnapshotMessage': 'protocol must own build snapshot websocket DTOs',
     'message BuildWebsocketErrorMessage': 'protocol must own build websocket error DTOs',
+    'string resource_id = 6': 'protocol EngineIdentity must explicitly carry resource_id',
 }
 WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
@@ -298,6 +318,23 @@ def main() -> int:
         for pattern, reason in FRONTEND_BUILD_API_FORBIDDEN_PATTERNS.items():
             if pattern.search(content):
                 errors.append(f'{frontend_build_api.relative_to(ROOT)} contains {reason}: {pattern.pattern}')
+
+    frontend_compute_types = ROOT / 'packages/frontend/src/lib/types/compute.ts'
+    if frontend_compute_types.exists():
+        content = frontend_compute_types.read_text()
+        for token, reason in FRONTEND_COMPUTE_TYPES_REQUIRED_TOKENS.items():
+            if token not in content:
+                errors.append(f'{frontend_compute_types.relative_to(ROOT)} is missing {reason}: {token}')
+        for pattern, reason in FRONTEND_COMPUTE_TYPES_FORBIDDEN_PATTERNS.items():
+            if pattern.search(content):
+                errors.append(f'{frontend_compute_types.relative_to(ROOT)} contains {reason}: {pattern.pattern}')
+
+    frontend_compute_api = ROOT / 'packages/frontend/src/lib/api/compute.ts'
+    if frontend_compute_api.exists():
+        content = frontend_compute_api.read_text()
+        for token, reason in FRONTEND_COMPUTE_API_REQUIRED_TOKENS.items():
+            if token not in content:
+                errors.append(f'{frontend_compute_api.relative_to(ROOT)} is missing {reason}: {token}')
 
     protocol_compute = ROOT / 'packages/protocol/proto/dataforge_protocol/compute.proto'
     if protocol_compute.exists():

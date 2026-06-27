@@ -5,6 +5,18 @@ import type {
 	EngineScope,
 	EngineStatusResponse
 } from '$lib/types/compute';
+import type {
+	DownloadCommandJson as ProtocolDownloadCommandJson,
+	ExportCommandJson as ProtocolExportCommandJson,
+	ExportResultJson as ProtocolExportResultJson,
+	IcebergExportOptionsJson as ProtocolIcebergExportOptionsJson,
+	StepPreviewCommandJson as ProtocolStepPreviewCommandJson,
+	StepPreviewResultJson as ProtocolStepPreviewResultJson,
+	StepRowCountResultJson as ProtocolStepRowCountResultJson,
+	StepSchemaCommandJson as ProtocolStepSchemaCommandJson,
+	StepSchemaResultJson as ProtocolStepSchemaResultJson
+} from '$lib/protocol/dataforge_protocol/compute_pb';
+import type { ExportDestination, ExportFormat } from '$lib/types/protocol-enum-tokens';
 import type { AnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 import { apiBlobRequest, apiRequest } from './client';
 import { okAsync, ResultAsync } from 'neverthrow';
@@ -15,28 +27,38 @@ import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
 import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
 import { shareInFlight } from './in-flight';
 
+type Field<T, K extends keyof T> = NonNullable<T[K]>;
+type StringField<T, K extends keyof T> = Extract<Field<T, K>, string>;
+type NumberField<T, K extends keyof T> = Extract<Field<T, K>, number>;
+type OptionalStringField<T, K extends keyof T> = StringField<T, K> | null;
+type StructHttpField<T, K extends keyof T> =
+	Field<T, K> extends Record<string, unknown> ? Record<string, unknown> : never;
+type StructArrayHttpField<T, K extends keyof T> =
+	Field<T, K> extends unknown[] ? Array<Record<string, unknown>> : never;
+type Int64HttpNumber<T, K extends keyof T> = Field<T, K> extends string ? number : never;
+
 export interface StepPreviewRequest {
-	analysis_id?: string;
+	analysis_id?: OptionalStringField<ProtocolStepPreviewCommandJson, 'analysisId'>;
 	engine_identity?: EngineIdentityPayload | null;
-	target_step_id: string;
+	target_step_id: StringField<ProtocolStepPreviewCommandJson, 'targetStepId'>;
 	analysis_pipeline: AnalysisPipelinePayload;
-	tab_id?: string | null;
-	row_limit?: number;
-	page?: number;
+	tab_id?: OptionalStringField<ProtocolStepPreviewCommandJson, 'tabId'>;
+	row_limit?: NumberField<ProtocolStepPreviewCommandJson, 'rowLimit'>;
+	page?: NumberField<ProtocolStepPreviewCommandJson, 'page'>;
 	resource_config?: EngineResourceConfig | null;
 }
 
 export type StepPreviewResourceConfig = StepPreviewRequest['resource_config'];
 
 export interface StepPreviewResponse {
-	step_id: string;
-	columns: string[];
-	column_types?: Record<string, string>;
-	data: Array<Record<string, unknown>>;
-	total_rows: number;
-	page: number;
-	page_size: number;
-	metadata?: Record<string, unknown>;
+	step_id: StringField<ProtocolStepPreviewResultJson, 'stepId'>;
+	columns: Field<ProtocolStepPreviewResultJson, 'columns'>;
+	column_types?: Field<ProtocolStepPreviewResultJson, 'columnTypes'>;
+	data: StructArrayHttpField<ProtocolStepPreviewResultJson, 'rows'>;
+	total_rows: NumberField<ProtocolStepPreviewResultJson, 'totalRows'>;
+	page: NumberField<ProtocolStepPreviewResultJson, 'page'>;
+	page_size: NumberField<ProtocolStepPreviewResultJson, 'pageSize'>;
+	metadata?: StructHttpField<ProtocolStepPreviewResultJson, 'metadata'>;
 }
 
 const previewInFlight = new Map<string, ResultAsync<StepPreviewResponse, ApiError>>();
@@ -154,29 +176,29 @@ export function getEngineDefaults(): ResultAsync<EngineDefaults, ApiError> {
 }
 
 export interface ExportRequest {
-	analysis_id?: string;
-	target_step_id: string;
+	analysis_id?: OptionalStringField<ProtocolExportCommandJson, 'analysisId'>;
+	target_step_id: StringField<ProtocolExportCommandJson, 'targetStepId'>;
 	analysis_pipeline: AnalysisPipelinePayload;
-	tab_id?: string | null;
-	format?: 'csv' | 'parquet' | 'json' | 'ndjson' | 'duckdb';
-	filename?: string;
-	destination: 'download' | 'datasource';
+	tab_id?: OptionalStringField<ProtocolExportCommandJson, 'tabId'>;
+	format?: ExportFormat;
+	filename?: StringField<ProtocolExportCommandJson, 'filename'>;
+	destination: ExportDestination;
 	iceberg_options?: {
-		table_name?: string;
-		namespace?: string;
-		branch: string;
+		table_name?: StringField<ProtocolIcebergExportOptionsJson, 'tableName'>;
+		namespace?: StringField<ProtocolIcebergExportOptionsJson, 'namespace'>;
+		branch: StringField<ProtocolIcebergExportOptionsJson, 'branch'>;
 	};
-	result_id: string;
+	result_id: StringField<ProtocolExportCommandJson, 'resultId'>;
 }
 
 export interface ExportResponse {
-	success: boolean;
-	filename: string;
-	format: string;
-	destination: string;
-	message: string | null;
-	datasource_id: string | null;
-	datasource_name?: string | null;
+	success: Field<ProtocolExportResultJson, 'success'>;
+	filename: StringField<ProtocolExportResultJson, 'filename'>;
+	format: ExportFormat;
+	destination: ExportDestination;
+	message: OptionalStringField<ProtocolExportResultJson, 'message'>;
+	datasource_id: OptionalStringField<ProtocolExportResultJson, 'datasourceId'>;
+	datasource_name?: OptionalStringField<ProtocolExportResultJson, 'datasourceName'>;
 }
 
 export function exportData(request: ExportRequest): ResultAsync<Blob | ExportResponse, ApiError> {
@@ -208,12 +230,12 @@ export function exportData(request: ExportRequest): ResultAsync<Blob | ExportRes
 }
 
 export interface DownloadRequest {
-	analysis_id?: string;
-	target_step_id: string;
+	analysis_id?: OptionalStringField<ProtocolDownloadCommandJson, 'analysisId'>;
+	target_step_id: StringField<ProtocolDownloadCommandJson, 'targetStepId'>;
 	analysis_pipeline: AnalysisPipelinePayload;
-	tab_id?: string | null;
-	format?: 'csv' | 'parquet' | 'json' | 'ndjson' | 'excel' | 'duckdb';
-	filename?: string;
+	tab_id?: OptionalStringField<ProtocolDownloadCommandJson, 'tabId'>;
+	format?: ExportFormat;
+	filename?: StringField<ProtocolDownloadCommandJson, 'filename'>;
 }
 
 export function downloadStep(request: DownloadRequest): ResultAsync<Blob, ApiError> {
@@ -245,16 +267,16 @@ export function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export interface StepSchemaRequest {
-	analysis_id?: string;
-	target_step_id: string;
+	analysis_id?: OptionalStringField<ProtocolStepSchemaCommandJson, 'analysisId'>;
+	target_step_id: StringField<ProtocolStepSchemaCommandJson, 'targetStepId'>;
 	analysis_pipeline: AnalysisPipelinePayload;
-	tab_id?: string | null;
+	tab_id?: OptionalStringField<ProtocolStepSchemaCommandJson, 'tabId'>;
 }
 
 export interface StepSchemaResponse {
-	step_id: string;
-	columns: string[];
-	column_types: Record<string, string>;
+	step_id: StringField<ProtocolStepSchemaResultJson, 'stepId'>;
+	columns: Field<ProtocolStepSchemaResultJson, 'columns'>;
+	column_types: Field<ProtocolStepSchemaResultJson, 'columnTypes'>;
 }
 
 export function getStepSchema(
@@ -274,8 +296,8 @@ export function getStepSchema(
 export type StepRowCountRequest = StepSchemaRequest;
 
 export interface StepRowCountResponse {
-	step_id: string;
-	row_count: number;
+	step_id: StringField<ProtocolStepRowCountResultJson, 'stepId'>;
+	row_count: Int64HttpNumber<ProtocolStepRowCountResultJson, 'rowCount'>;
 }
 
 export function getStepRowCount(

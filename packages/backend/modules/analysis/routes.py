@@ -271,6 +271,7 @@ async def delete_analysis(
                 scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
                 reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
                 analysis_id=analysis_id_value,
+                resource_id=analysis_id_value,
             ),
             runtime_probe=runtime_probe,
         )

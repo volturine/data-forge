@@ -23,6 +23,8 @@ EngineIdentity = compute_pb2.EngineIdentity
 
 
 def _engine_identity_resource_id(identity: EngineIdentity) -> str:
+    if identity.resource_id:
+        return identity.resource_id
     if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField('analysis_id'):
         return identity.analysis_id
     if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.HasField('datasource_id'):

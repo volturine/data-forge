@@ -156,12 +156,14 @@ def test_create_request_stores_typed_command_envelope(test_db_session) -> None:
     assert request.request_json['correlation_id'] == request.id
     assert compute_requests_service.command_payload(request)['engine_identity'] == {
         'analysis_id': 'analysis-1',
+        'resource_id': 'analysis-1',
         'reuse_policy': 'shared',
         'scope': 'analysis_interactive',
     }
     envelope = command_envelope_from_json(request.request_json)
     assert envelope.command.WhichOneof('command') == 'spawn_engine'
     assert envelope.command.spawn_engine.engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
+    assert envelope.command.spawn_engine.engine_identity.resource_id == 'analysis-1'
     assert envelope.command.spawn_engine.resource_config.max_memory_mb == 512
 
 

@@ -41,30 +41,38 @@ def _required_identity_id(value: str, field_name: str) -> str:
 
 
 def analysis_interactive_engine_identity(analysis_id: str) -> EngineIdentity:
+    resource_id = _required_identity_id(analysis_id, "analysis_id")
     return compute_pb2.EngineIdentity(
         scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
         reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-        analysis_id=_required_identity_id(analysis_id, "analysis_id"),
+        analysis_id=resource_id,
+        resource_id=resource_id,
     )
 
 
 def datasource_preview_engine_identity(datasource_id: str) -> EngineIdentity:
+    resource_id = _required_identity_id(datasource_id, "datasource_id")
     return compute_pb2.EngineIdentity(
         scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
         reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-        datasource_id=_required_identity_id(datasource_id, "datasource_id"),
+        datasource_id=resource_id,
+        resource_id=resource_id,
     )
 
 
 def build_engine_identity(build_id: str) -> EngineIdentity:
+    resource_id = _required_identity_id(build_id, "build_id")
     return compute_pb2.EngineIdentity(
         scope=enums_pb2.ENGINE_SCOPE_BUILD,
         reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
-        build_id=_required_identity_id(build_id, "build_id"),
+        build_id=resource_id,
+        resource_id=resource_id,
     )
 
 
 def engine_identity_resource_id(identity: EngineIdentity) -> str:
+    if identity.resource_id:
+        return identity.resource_id
     if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField("analysis_id"):
         return identity.analysis_id
     if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.HasField("datasource_id"):

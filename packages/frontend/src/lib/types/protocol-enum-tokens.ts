@@ -15,8 +15,11 @@ import {
 	DeduplicateKeep as ProtocolDeduplicateKeep,
 	DisplayUnits as ProtocolDisplayUnits,
 	DurationUnit as ProtocolDurationUnit,
+	EngineReusePolicy as ProtocolEngineReusePolicy,
 	EngineRunExecutionCategory as ProtocolEngineRunExecutionCategory,
 	EngineRunKind as ProtocolEngineRunKind,
+	EngineScope as ProtocolEngineScope,
+	EngineStatus as ProtocolEngineStatus,
 	ExportDestination as ProtocolExportDestination,
 	ExportFormat as ProtocolExportFormat,
 	FillNullStrategy as ProtocolFillNullStrategy,
@@ -400,6 +403,22 @@ export const ENGINE_RUN_KIND_TOKENS = {
 	[ProtocolEngineRunKind.INGEST]: 'ingest'
 } as const satisfies Partial<Record<ProtocolEngineRunKind, string>>;
 
+export const ENGINE_STATUS_TOKENS = {
+	[ProtocolEngineStatus.HEALTHY]: 'healthy',
+	[ProtocolEngineStatus.TERMINATED]: 'terminated'
+} as const satisfies Partial<Record<ProtocolEngineStatus, string>>;
+
+export const ENGINE_SCOPE_TOKENS = {
+	[ProtocolEngineScope.DATASOURCE_PREVIEW]: 'datasource_preview',
+	[ProtocolEngineScope.ANALYSIS_INTERACTIVE]: 'analysis_interactive',
+	[ProtocolEngineScope.BUILD]: 'build'
+} as const satisfies Partial<Record<ProtocolEngineScope, string>>;
+
+export const ENGINE_REUSE_POLICY_TOKENS = {
+	[ProtocolEngineReusePolicy.SHARED]: 'shared',
+	[ProtocolEngineReusePolicy.EXCLUSIVE]: 'exclusive'
+} as const satisfies Partial<Record<ProtocolEngineReusePolicy, string>>;
+
 export const BUILD_STEP_STATE_TOKENS = {
 	[ProtocolBuildStepState.PENDING]: 'pending',
 	[ProtocolBuildStepState.RUNNING]: 'running',
@@ -544,6 +563,9 @@ export type DurationUnit = EnumToken<typeof DURATION_UNIT_TOKENS>;
 export type TimeDirection = EnumToken<typeof TIME_DIRECTION_TOKENS>;
 export type StringTransformMethod = EnumToken<typeof STRING_TRANSFORM_METHOD_TOKENS>;
 export type EngineRunKind = EnumToken<typeof ENGINE_RUN_KIND_TOKENS>;
+export type EngineStatus = EnumToken<typeof ENGINE_STATUS_TOKENS>;
+export type EngineScope = EnumToken<typeof ENGINE_SCOPE_TOKENS>;
+export type EngineReusePolicy = EnumToken<typeof ENGINE_REUSE_POLICY_TOKENS>;
 export type BuildStepState = EnumToken<typeof BUILD_STEP_STATE_TOKENS>;
 export type ActiveBuildStatus = EnumToken<typeof ACTIVE_BUILD_STATUS_TOKENS>;
 export type BuildTabStatus = EnumToken<typeof BUILD_TAB_STATUS_TOKENS>;

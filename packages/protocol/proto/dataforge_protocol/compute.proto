@@ -16,6 +16,7 @@ message EngineIdentity {
   optional string analysis_id = 3 [(buf.validate.field).string.min_len = 1];
   optional string datasource_id = 4 [(buf.validate.field).string.min_len = 1];
   optional string build_id = 5 [(buf.validate.field).string.min_len = 1];
+  string resource_id = 6 [(buf.validate.field).string.min_len = 1];
 }
 
 message EngineResourceConfig {

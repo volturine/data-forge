@@ -110,11 +110,14 @@ def _engine_identity_from_payload(payload: dict[str, object]) -> compute_pb2.Eng
     scope = payload.get('scope')
     reuse_policy = payload.get('reuse_policy')
     if scope == 'analysis_interactive':
-        identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE, analysis_id=_required_payload_str(payload, 'analysis_id'))
+        resource_id = _required_payload_str(payload, 'analysis_id')
+        identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE, analysis_id=resource_id, resource_id=resource_id)
     elif scope == 'datasource_preview':
-        identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, datasource_id=_required_payload_str(payload, 'datasource_id'))
+        resource_id = _required_payload_str(payload, 'datasource_id')
+        identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, datasource_id=resource_id, resource_id=resource_id)
     elif scope == 'build':
-        identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_BUILD, build_id=_required_payload_str(payload, 'build_id'))
+        resource_id = _required_payload_str(payload, 'build_id')
+        identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_BUILD, build_id=resource_id, resource_id=resource_id)
     else:
         raise ValueError('engine identity scope is invalid')
     if reuse_policy == 'shared':
