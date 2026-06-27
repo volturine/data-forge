@@ -6,6 +6,7 @@ import "buf/validate/validate.proto";
 import "dataforge_protocol/analysis.proto";
 import "dataforge_protocol/datasource.proto";
 import "dataforge_protocol/enums.proto";
+import "dataforge_protocol/errors.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -140,14 +141,56 @@ message ExportResult {
   optional string datasource_name = 7 [(buf.validate.field).string.min_len = 1];
 }
 
+message EngineDefaults {
+  int32 max_threads = 1 [(buf.validate.field).int32.gte = 0];
+  int32 max_memory_mb = 2 [(buf.validate.field).int32.gte = 0];
+  int32 streaming_chunk_size = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message EngineStatusResult {
+  string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  string resource_id = 2 [(buf.validate.field).string.min_len = 1];
+  EngineStatus status = 3 [(buf.validate.field).enum.defined_only = true];
+  optional int32 process_id = 4 [(buf.validate.field).int32.gte = 0];
+  optional string last_activity = 5;
+  optional string current_job_id = 6;
+  optional EngineResourceConfig resource_config = 7;
+  optional EngineResourceConfig effective_resources = 8;
+  optional EngineDefaults defaults = 9;
+  optional EngineScope scope = 10 [(buf.validate.field).enum.defined_only = true];
+  optional EngineReusePolicy reuse_policy = 11 [(buf.validate.field).enum.defined_only = true];
+  optional string datasource_id = 12 [(buf.validate.field).string.min_len = 1];
+  optional string build_id = 13 [(buf.validate.field).string.min_len = 1];
+  optional string current_build_id = 14 [(buf.validate.field).string.min_len = 1];
+  optional string current_engine_run_id = 15 [(buf.validate.field).string.min_len = 1];
+}
+
+message ComputeAckResult {
+  bool success = 1;
+}
+
+message ComputeErrorResult {
+  string error = 1 [(buf.validate.field).string.min_len = 1];
+  optional int32 status_code = 2 [(buf.validate.field).int32 = {
+    gte: 100
+    lte: 599
+  }];
+  optional ErrorCode error_code = 3 [(buf.validate.field).enum.defined_only = true];
+  optional google.protobuf.Struct details = 4;
+  optional string message = 5 [(buf.validate.field).string.min_len = 1];
+}
+
 message ComputeResponse {
   oneof response {
     StepPreviewResult preview = 1;
     StepSchemaResult schema = 2;
     StepRowCountResult row_count = 3;
     ExportResult export = 4;
-    google.protobuf.Struct dynamic_response = 5;
+    google.protobuf.Struct dynamic_response = 5 [deprecated = true];
     DatasourceResult datasource = 6;
+    EngineStatusResult engine_status = 7;
+    ComputeAckResult ack = 8;
+    ComputeErrorResult error = 9;
   }
 }
 

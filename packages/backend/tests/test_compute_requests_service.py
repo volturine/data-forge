@@ -5,11 +5,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from backend_core import compute_requests_service
-from backend_core.domain.compute_requests.models import command_envelope_from_json
+from backend_core.domain.compute_requests.models import (
+    command_envelope_from_json,
+    command_payload,
+    dict_to_struct,
+    response_envelope_from_json,
+    response_payload,
+)
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
-from dataforge_protocol import enums_pb2
+from dataforge_protocol import compute_pb2, enums_pb2, errors_pb2
 
 
 def _preview_payload() -> dict[str, object]:
@@ -118,6 +124,8 @@ def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> 
     assert failed.response_json['correlation_id'] == request_id
     assert failed.response_json['status'] == 'COMPUTE_REQUEST_STATUS_FAILED'
     assert failed.response_json['error_message'] == 'boom'
+    response_envelope = response_envelope_from_json(failed.response_json)
+    assert response_envelope.response.WhichOneof('response') == 'error'
     assert compute_requests_service.response_payload(failed) == {'error': 'boom', 'status_code': 500}
     outbox_event = test_db_session.execute(select(RuntimeOutboxEvent)).scalars().one()
     assert outbox_event.kind == RuntimePayloadKind.COMPUTE_RESPONSE.value
@@ -321,6 +329,8 @@ def test_mark_request_completed_stores_typed_response_envelope(test_db_session) 
     assert completed.response_json['correlation_id'] == request.id
     assert completed.response_json['status'] == 'COMPUTE_REQUEST_STATUS_COMPLETED'
     assert 'error_message' not in completed.response_json
+    response_envelope = response_envelope_from_json(completed.response_json)
+    assert response_envelope.response.WhichOneof('response') == 'preview'
     assert compute_requests_service.response_payload(completed) == {
         'step_id': 'source',
         'columns': ['id'],
@@ -361,13 +371,68 @@ def test_failed_response_preserves_integral_status_code(test_db_session) -> None
         test_db_session,
         request.id,
         error_message='Datasource output is not available',
-        response_json={'error': 'Datasource output is not available', 'status_code': 409},
+        response_json={
+            'error': 'Datasource output is not available',
+            'status_code': 409,
+            'error_code': 'DATASOURCE_NOT_FOUND',
+            'details': {'datasource_id': 'datasource-1'},
+        },
     )
 
     assert compute_requests_service.response_payload(failed) == {
         'error': 'Datasource output is not available',
         'status_code': 409,
+        'error_code': 'DATASOURCE_NOT_FOUND',
+        'details': {'datasource_id': 'datasource-1'},
     }
+    response_envelope = response_envelope_from_json(failed.response_json or {})
+    assert response_envelope.response.WhichOneof('response') == 'error'
+    assert response_envelope.response.error.error_code == errors_pb2.ERROR_CODE_DATASOURCE_NOT_FOUND
+
+
+def test_datasource_error_result_shape_uses_typed_compute_error_message(test_db_session) -> None:
+    request = compute_requests_service.create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+        request_json={'datasource_id': 'missing'},
+    )
+
+    completed = compute_requests_service.mark_request_completed(
+        test_db_session,
+        request.id,
+        response_json={'error': 'datasource_not_found', 'message': 'DataSource missing not found'},
+    )
+
+    assert compute_requests_service.response_payload(completed) == {
+        'error': 'datasource_not_found',
+        'message': 'DataSource missing not found',
+    }
+    response_envelope = response_envelope_from_json(completed.response_json or {})
+    assert response_envelope.response.WhichOneof('response') == 'error'
+    assert response_envelope.response.error.message == 'DataSource missing not found'
+
+
+def test_compute_envelope_payload_helpers_reject_deprecated_payload_only_messages() -> None:
+    command_envelope = compute_pb2.ComputeCommandEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        version=1,
+        idempotency_key='request-1',
+        correlation_id='request-1',
+        payload=dict_to_struct({'legacy': True}),
+    )
+    response_envelope = compute_pb2.ComputeResponseEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        version=1,
+        correlation_id='request-1',
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+        payload=dict_to_struct({'legacy': True}),
+    )
+
+    with pytest.raises(ValueError, match='missing typed command'):
+        command_payload(command_envelope)
+    with pytest.raises(ValueError, match='missing typed response'):
+        response_payload(response_envelope)
 
 
 def test_column_stats_response_preserves_required_zero_defaults(test_db_session) -> None:

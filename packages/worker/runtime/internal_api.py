@@ -756,16 +756,34 @@ def _required_mapping_dict(payload: Mapping[str, object], key: str) -> dict[str,
 def _enum_name_from_token(enum_descriptor: Any, value: object) -> object:
     if not isinstance(value, str) or value in enum_descriptor.values_by_name:
         return value
+    prefixed_value = f"{_enum_prefix(enum_descriptor)}_{value}"
+    if prefixed_value in enum_descriptor.values_by_name:
+        return prefixed_value
     for enum_value in enum_descriptor.values:
-        token = enum_value.GetOptions().Extensions[cast(Any, enums_pb2.dataforge_token)]
+        options = enum_value.GetOptions()
+        if not options.HasExtension(cast(Any, enums_pb2.dataforge_token)):
+            continue
+        token = options.Extensions[cast(Any, enums_pb2.dataforge_token)]
         if token == value:
             return enum_value.name
     return value
 
 
+def _enum_prefix(enum_descriptor: Any) -> str:
+    chars: list[str] = []
+    for index, char in enumerate(enum_descriptor.name):
+        if char.isupper() and index > 0:
+            chars.append("_")
+        chars.append(char.upper())
+    return "".join(chars)
+
+
 def _enum_token(enum_descriptor: Any, value: int) -> str:
     value_descriptor = enum_descriptor.values_by_number[value]
-    return cast(str, value_descriptor.GetOptions().Extensions[cast(Any, enums_pb2.dataforge_token)])
+    options = value_descriptor.GetOptions()
+    if options.HasExtension(cast(Any, enums_pb2.dataforge_token)):
+        return cast(str, options.Extensions[cast(Any, enums_pb2.dataforge_token)])
+    return value_descriptor.name.removeprefix(f"{_enum_prefix(enum_descriptor)}_")
 
 
 def _tokens_to_proto_json(value: object, message_descriptor: Any) -> object:
@@ -866,7 +884,7 @@ def _compute_command_payload(envelope: compute_pb2.ComputeCommandEnvelope) -> di
     command = envelope.command
     selected = command.WhichOneof("command")
     if selected is None:
-        return struct_to_dict(envelope.payload)
+        raise ValueError("Compute command envelope is missing typed command")
     if selected == "datasource":
         datasource_command = command.datasource
         datasource_field = datasource_command.WhichOneof("command")
@@ -907,7 +925,9 @@ def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, ob
 
 def _compute_response(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeResponse:
     response = compute_pb2.ComputeResponse()
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
+    if "error" in payload:
+        response.error.CopyFrom(_parse_proto_message(compute_pb2.ComputeErrorResult, payload))
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
         preview_payload = dict(payload)
         rows = preview_payload.pop("data", [])
         preview_payload["rows"] = rows
@@ -919,6 +939,16 @@ def _compute_response(kind: enums_pb2.ComputeRequestKind, payload: dict[str, obj
     elif kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
         response.export.CopyFrom(_parse_proto_message(compute_pb2.ExportResult, payload))
     elif kind in {
+        enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
+    }:
+        response.engine_status.CopyFrom(_parse_proto_message(compute_pb2.EngineStatusResult, payload))
+    elif kind in {
+        enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
+        enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+    }:
+        response.ack.CopyFrom(_parse_proto_message(compute_pb2.ComputeAckResult, payload or {"success": True}))
+    elif kind in {
         enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
         enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
         enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
@@ -929,7 +959,7 @@ def _compute_response(kind: enums_pb2.ComputeRequestKind, payload: dict[str, obj
     }:
         response.datasource.CopyFrom(_datasource_result(kind, payload))
     else:
-        response.dynamic_response.CopyFrom(dict_to_struct(payload))
+        raise ValueError(f"Unsupported compute response kind: {kind}")
     return response
 
 
@@ -947,10 +977,7 @@ def _compute_response_envelope(
         correlation_id=request_id,
         status=status,
     )
-    if status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED:
-        envelope.response.dynamic_response.CopyFrom(dict_to_struct(response_json))
-    else:
-        envelope.response.CopyFrom(_compute_response(kind, response_json))
+    envelope.response.CopyFrom(_compute_response(kind, response_json or ({"error": error_message} if error_message is not None else {})))
     if error_message is not None:
         envelope.error_message = error_message
     return envelope

@@ -1345,6 +1345,14 @@ class TestChartDataHeatgrid:
 
 
 class TestStepTimingLabels:
+    def test_missing_object_store_metadata_is_datasource_metadata_missing(self):
+        error = RuntimeError("AWS Error NO_SUCH_KEY during GetObject operation: The specified key does not exist.")
+
+        error_kind, error_details = PolarsComputeEngine._classify_engine_error(error)
+
+        assert error_kind == "datasource_metadata_missing"
+        assert error_details == {}
+
     def _make_csv_config(self) -> tuple[str, dict]:
         """Create a temp CSV file and return (path, datasource_config)."""
         fd, path = tempfile.mkstemp(suffix=".csv")

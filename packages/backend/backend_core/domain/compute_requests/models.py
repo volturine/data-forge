@@ -173,11 +173,26 @@ def _optional_payload_dict(payload: dict[str, object], key: str) -> dict[str, ob
 def _enum_name_from_token(enum_descriptor: Any, value: object) -> object:
     if not isinstance(value, str) or value in enum_descriptor.values_by_name:
         return value
+    prefixed_value = f'{_enum_prefix(enum_descriptor)}_{value}'
+    if prefixed_value in enum_descriptor.values_by_name:
+        return prefixed_value
     for enum_value in enum_descriptor.values:
-        token = enum_value.GetOptions().Extensions[cast(Any, enums_pb2.dataforge_token)]
+        options = enum_value.GetOptions()
+        if not options.HasExtension(cast(Any, enums_pb2.dataforge_token)):
+            continue
+        token = options.Extensions[cast(Any, enums_pb2.dataforge_token)]
         if token == value:
             return enum_value.name
     return value
+
+
+def _enum_prefix(enum_descriptor: Any) -> str:
+    chars: list[str] = []
+    for index, char in enumerate(enum_descriptor.name):
+        if char.isupper() and index > 0:
+            chars.append('_')
+        chars.append(char.upper())
+    return ''.join(chars)
 
 
 def _enum_number_from_token(enum_descriptor: Any, value: object, *, field_name: str) -> int:
@@ -232,7 +247,10 @@ def _tokens_to_proto_json(value: object, message_descriptor: Any) -> object:
 
 def _enum_token(enum_descriptor: Any, value: int) -> str:
     value_descriptor = enum_descriptor.values_by_number[value]
-    return cast(str, value_descriptor.GetOptions().Extensions[cast(Any, enums_pb2.dataforge_token)])
+    options = value_descriptor.GetOptions()
+    if options.HasExtension(cast(Any, enums_pb2.dataforge_token)):
+        return cast(str, options.Extensions[cast(Any, enums_pb2.dataforge_token)])
+    return value_descriptor.name.removeprefix(f'{_enum_prefix(enum_descriptor)}_')
 
 
 def _proto_scalar_to_payload(raw_item: object, field: Any) -> object:
@@ -561,7 +579,9 @@ def datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload: 
 
 def _response_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeResponse:
     response = compute_pb2.ComputeResponse()
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
+    if 'error' in payload:
+        response.error.CopyFrom(_parse_proto_message(compute_pb2.ComputeErrorResult, payload))
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
         preview_payload = dict(payload)
         rows = preview_payload.pop('data', [])
         preview_payload['rows'] = rows
@@ -573,6 +593,16 @@ def _response_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str
     elif kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
         response.export.CopyFrom(_parse_proto_message(compute_pb2.ExportResult, payload))
     elif kind in {
+        enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
+    }:
+        response.engine_status.CopyFrom(_parse_proto_message(compute_pb2.EngineStatusResult, payload))
+    elif kind in {
+        enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
+        enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+    }:
+        response.ack.CopyFrom(_parse_proto_message(compute_pb2.ComputeAckResult, payload or {'success': True}))
+    elif kind in {
         enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
         enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
         enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
@@ -583,7 +613,7 @@ def _response_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str
     }:
         response.datasource.CopyFrom(_datasource_result(kind, payload))
     else:
-        response.dynamic_response.CopyFrom(dict_to_struct(payload))
+        raise ValueError(f'Unsupported compute response kind: {compute_request_kind_name(kind)}')
     return response
 
 
@@ -601,10 +631,7 @@ def response_envelope(
         correlation_id=request_id,
         status=status_to_proto(status),
     )
-    if status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED:
-        envelope.response.dynamic_response.CopyFrom(dict_to_struct(payload or {}))
-    else:
-        envelope.response.CopyFrom(_response_from_payload(kind, payload or {}))
+    envelope.response.CopyFrom(_response_from_payload(kind, payload or ({'error': error_message} if error_message is not None else {})))
     if error_message is not None:
         envelope.error_message = error_message
     return envelope
@@ -627,7 +654,7 @@ def command_payload(envelope: compute_pb2.ComputeCommandEnvelope) -> dict[str, o
     command = envelope.command
     selected = command.WhichOneof('command')
     if selected is None:
-        return struct_to_dict(envelope.payload)
+        raise ValueError('Compute command envelope is missing typed command')
     value = getattr(command, selected)
     if selected == 'datasource':
         datasource_command = cast(datasource_pb2.DatasourceCommand, value)
@@ -642,7 +669,7 @@ def response_payload(envelope: compute_pb2.ComputeResponseEnvelope) -> dict[str,
     response = envelope.response
     selected = response.WhichOneof('response')
     if selected is None:
-        return struct_to_dict(envelope.payload)
+        raise ValueError('Compute response envelope is missing typed response')
     value = getattr(response, selected)
     payload = _message_to_payload(value)
     if selected == 'preview':
@@ -651,6 +678,8 @@ def response_payload(envelope: compute_pb2.ComputeResponseEnvelope) -> dict[str,
         payload.setdefault('total_rows', 0)
     if selected == 'row_count':
         payload.setdefault('row_count', 0)
+    if selected == 'ack':
+        return {}
     if selected == 'datasource':
         result = cast(datasource_pb2.DatasourceResult, value)
         result_field = result.WhichOneof('result')

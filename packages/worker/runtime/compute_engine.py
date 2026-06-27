@@ -65,6 +65,8 @@ class PolarsComputeEngine:
         if isinstance(exc, OSError) and getattr(exc, "errno", None) == 2:
             return "datasource_metadata_missing", {}
         message = str(exc)
+        if "NO_SUCH_KEY" in message and "GetObject" in message:
+            return "datasource_metadata_missing", {}
         if ("Failed to open local file" in message or "No such file or directory" in message) and "/metadata/" in message and ".metadata.json" in message:
             return "datasource_metadata_missing", {}
         if isinstance(exc, ValueError):

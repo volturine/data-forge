@@ -20,7 +20,7 @@ from backend_core.domain.compute.schemas import (
     ComputeRunStatus,
     StepPreviewRequest,
 )
-from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
+from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2, errors_pb2
 
 
 def test_build_tab_result_status_is_enum_backed() -> None:
@@ -124,6 +124,56 @@ def test_proto_compute_preview_command_rejects_invalid_pagination() -> None:
 
     with pytest.raises(ProtoValidationError):
         Validator().validate(envelope)
+
+
+def test_proto_compute_response_uses_typed_engine_ack_and_error_oneofs() -> None:
+    validator = Validator()
+
+    engine_response = compute_pb2.ComputeResponseEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
+        version=1,
+        correlation_id='request-1',
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+        response=compute_pb2.ComputeResponse(
+            engine_status=compute_pb2.EngineStatusResult(
+                analysis_id='analysis-1',
+                resource_id='analysis-1',
+                status=enums_pb2.ENGINE_STATUS_HEALTHY,
+                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            )
+        ),
+    )
+    ack_response = compute_pb2.ComputeResponseEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+        version=1,
+        correlation_id='request-2',
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+        response=compute_pb2.ComputeResponse(ack=compute_pb2.ComputeAckResult(success=True)),
+    )
+    error_response = compute_pb2.ComputeResponseEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        version=1,
+        correlation_id='request-3',
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
+        error_message='boom',
+        response=compute_pb2.ComputeResponse(
+            error=compute_pb2.ComputeErrorResult(
+                error='boom',
+                status_code=500,
+                error_code=errors_pb2.ERROR_CODE_PIPELINE_EXECUTION_ERROR,
+                details={'step_id': 'step-1'},
+            )
+        ),
+    )
+
+    validator.validate(engine_response)
+    validator.validate(ack_response)
+    validator.validate(error_response)
+
+    assert engine_response.response.WhichOneof('response') == 'engine_status'
+    assert ack_response.response.WhichOneof('response') == 'ack'
+    assert error_response.response.WhichOneof('response') == 'error'
 
 
 def test_build_event_type_enum_values_are_explicit() -> None:

@@ -120,6 +120,16 @@ WORKER_STEP_CONVERTER_REQUIRED_TOKENS = {
 BACKEND_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'backend compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
 }
+COMPUTE_ENVELOPE_FORBIDDEN_TOKENS = {
+    'return struct_to_dict(envelope.payload)': 'compute envelopes must reject deprecated payload-only messages',
+    'response.dynamic_response.CopyFrom': 'compute responses must use typed protocol oneof variants',
+    'envelope.response.dynamic_response.CopyFrom': 'compute responses must use typed protocol oneof variants',
+}
+COMPUTE_ENVELOPE_REQUIRED_TOKENS = {
+    'compute_pb2.ComputeErrorResult': 'compute failures must use typed protocol error responses',
+    'compute_pb2.EngineStatusResult': 'engine lifecycle responses must use typed protocol engine status responses',
+    'compute_pb2.ComputeAckResult': 'acknowledgement responses must use typed protocol ack responses',
+}
 BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
     'from backend_core.domain.enums import DataForgeStrEnum': 'backend operation config enums must be generated-protocol-backed',
     '(DataForgeStrEnum)': 'backend operation config enums must not reintroduce copied StrEnum contracts',
@@ -287,6 +297,22 @@ def main() -> int:
         for token, reason in BACKEND_COMPUTE_SCHEMA_FORBIDDEN_TOKENS.items():
             if token in content:
                 errors.append(f'{backend_compute_schemas.relative_to(ROOT)} contains {reason}: {token}')
+
+    for rel_path in (
+        Path('packages/backend/backend_core/domain/compute_requests/models.py'),
+        Path('packages/worker/runtime/internal_api.py'),
+    ):
+        path = ROOT / rel_path
+        if not path.exists():
+            errors.append(f'compute envelope adapter is missing: {rel_path}')
+            continue
+        content = path.read_text()
+        for token, reason in COMPUTE_ENVELOPE_FORBIDDEN_TOKENS.items():
+            if token in content:
+                errors.append(f'{rel_path} contains {reason}: {token}')
+        for token, reason in COMPUTE_ENVELOPE_REQUIRED_TOKENS.items():
+            if token not in content:
+                errors.append(f'{rel_path} is missing {reason}: {token}')
 
     for rel_path in PROTOCOL_BACKED_ENUM_FILES:
         path = ROOT / rel_path
