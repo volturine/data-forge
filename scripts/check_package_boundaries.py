@@ -112,6 +112,11 @@ FRONTEND_BUILD_STREAM_ADAPTER_FORBIDDEN_PATTERNS = {
 WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
 }
+WORKER_STEP_CONVERTER_REQUIRED_TOKENS = {
+    'analysis_pb2.AnalysisPipelineStep': 'worker step conversion must parse generated protocol step contracts',
+    'analysis_pb2.StepConfig.DESCRIPTOR': 'worker step conversion must unwrap generated StepConfig oneof contracts',
+    'json_format.ParseDict': 'worker step conversion must reject shapes that do not parse as generated protocol messages',
+}
 BACKEND_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'backend compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
 }
@@ -261,6 +266,13 @@ def main() -> int:
         for token, reason in WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS.items():
             if token in content:
                 errors.append(f'{worker_compute_schemas.relative_to(ROOT)} contains {reason}: {token}')
+
+    worker_step_converter = ROOT / 'packages/worker/operations/step_converter.py'
+    if worker_step_converter.exists():
+        content = worker_step_converter.read_text()
+        for token, reason in WORKER_STEP_CONVERTER_REQUIRED_TOKENS.items():
+            if token not in content:
+                errors.append(f'{worker_step_converter.relative_to(ROOT)} is missing {reason}: {token}')
 
     backend_step_config_enums = ROOT / 'packages/backend/backend_core/domain/step_config_enums.py'
     if backend_step_config_enums.exists():

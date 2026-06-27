@@ -18,10 +18,17 @@ Backend format:
 """
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any, cast
 
-from dataforge_protocol import enums_pb2
+from google.protobuf import descriptor as proto_descriptor
+from google.protobuf import json_format, message
+from google.protobuf.json_format import ParseError
+from protovalidate import ValidationError as ProtoValidationError
+from protovalidate import Validator
+
+from dataforge_protocol import analysis_pb2, enums_pb2
 from operations.ai import ai_provider_name
 from runtime.domain.analysis.step_types import (
     STEP_TYPES,
@@ -45,6 +52,351 @@ from runtime.domain.step_config_enums import (
 )
 
 logger = logging.getLogger(__name__)
+_PROTO_VALIDATOR = Validator()
+_PROTOCOL_CONFIG_DEFAULTS: dict[str, dict[str, object]] = {
+    STEP_TYPES.chart.value: {
+        "bins": 10,
+        "aggregation": ChartAggregation.SUM.value,
+        "group_sort_order": SortDirection.ASC.value,
+        "stack_mode": "grouped",
+        "area_opacity": 0.35,
+        "sort_order": SortDirection.ASC.value,
+        "y_axis_scale": "linear",
+        "display_units": DisplayUnits.NONE.value,
+        "decimal_places": 2,
+        "legend_position": LegendPosition.RIGHT.value,
+    },
+    STEP_TYPES.notification.value: {"batch_size": 10},
+    STEP_TYPES.ai.value: {
+        "provider": ai_provider_name(enums_pb2.AI_PROVIDER_OLLAMA),
+        "batch_size": 10,
+        "max_retries": 3,
+        "temperature": 0.7,
+    },
+}
+
+
+def _enum_name_from_token(enum_descriptor: Any, value: object) -> object:
+    if not isinstance(value, str) or value in enum_descriptor.values_by_name:
+        return value
+    for enum_value in enum_descriptor.values:
+        options = enum_value.GetOptions()
+        if options.HasExtension(cast(Any, enums_pb2.dataforge_token)) and options.Extensions[cast(Any, enums_pb2.dataforge_token)] == value:
+            return enum_value.name
+    return value
+
+
+def _enum_token(enum_descriptor: Any, value: int) -> str:
+    value_descriptor = enum_descriptor.values_by_number[value]
+    return cast(str, value_descriptor.GetOptions().Extensions[cast(Any, enums_pb2.dataforge_token)])
+
+
+def _filter_value_for_proto(value: object) -> object:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        field_names = set(analysis_pb2.FilterValue.DESCRIPTOR.fields_by_name)
+        json_names = {field.json_name for field in analysis_pb2.FilterValue.DESCRIPTOR.fields}
+        if not any(str(key) in field_names or str(key) in json_names for key in value):
+            raise ValueError("filter value object must use a FilterValue oneof field")
+        return dict(value)
+    if isinstance(value, bool):
+        return {"bool_value": value}
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return {"number_value": value}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        values = list(value)
+        if not all(isinstance(item, str) for item in values):
+            raise ValueError("filter list values must contain only strings")
+        return {"string_values": {"values": values}}
+    if isinstance(value, str):
+        return {"string_value": value}
+    raise ValueError(f"Unsupported filter value type: {type(value).__name__}")
+
+
+def _tokens_to_proto_json(value: object, message_descriptor: Any) -> object:
+    if message_descriptor.full_name == "google.protobuf.Struct":
+        return value
+    if message_descriptor.full_name == "dataforge.runtime.FilterValue":
+        return _filter_value_for_proto(value)
+    if isinstance(value, list):
+        return [_tokens_to_proto_json(item, message_descriptor) for item in value]
+    if not isinstance(value, Mapping):
+        return value
+
+    result: dict[str, object] = {}
+    for raw_key, raw_item in value.items():
+        key = str(raw_key)
+        field = message_descriptor.fields_by_name.get(key)
+        if field is None:
+            result[key] = raw_item
+            continue
+        is_map_field = field.message_type is not None and field.message_type.GetOptions().map_entry
+        if field.is_repeated and not is_map_field:
+            if raw_item is None:
+                continue
+            if not isinstance(raw_item, Sequence) or isinstance(raw_item, str | bytes | bytearray):
+                raise ValueError(f"{key} must be a list")
+            if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+                result[key] = [_tokens_to_proto_json(item, field.message_type) for item in raw_item]
+            elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+                result[key] = [_enum_name_from_token(field.enum_type, item) for item in raw_item]
+            else:
+                result[key] = list(raw_item)
+            continue
+        if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+            if raw_item is not None:
+                result[key] = _tokens_to_proto_json(raw_item, field.message_type)
+        elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+            result[key] = _enum_name_from_token(field.enum_type, raw_item)
+        else:
+            result[key] = raw_item
+    return result
+
+
+def _proto_json_to_tokens(value: object, message_descriptor: Any) -> object:
+    if message_descriptor.full_name == "google.protobuf.Struct":
+        return value
+    if isinstance(value, list):
+        return [_proto_json_to_tokens(item, message_descriptor) for item in value]
+    if not isinstance(value, Mapping):
+        return value
+
+    result: dict[str, object] = {}
+    for raw_key, raw_item in value.items():
+        key = str(raw_key)
+        field = message_descriptor.fields_by_name.get(key)
+        if field is None:
+            result[key] = raw_item
+            continue
+        is_map_field = field.message_type is not None and field.message_type.GetOptions().map_entry
+        if field.is_repeated and not is_map_field:
+            if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+                result[key] = [_proto_json_to_tokens(item, field.message_type) for item in cast(list[object], raw_item)]
+            elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+                result[key] = [
+                    _enum_token(field.enum_type, field.enum_type.values_by_name[item].number)
+                    if isinstance(item, str) and item in field.enum_type.values_by_name
+                    else _enum_token(field.enum_type, item)
+                    if isinstance(item, int)
+                    else item
+                    for item in cast(list[object], raw_item)
+                ]
+            else:
+                result[key] = raw_item
+            continue
+        if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+            result[key] = _proto_json_to_tokens(raw_item, field.message_type)
+        elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+            if isinstance(raw_item, str) and raw_item in field.enum_type.values_by_name:
+                result[key] = _enum_token(field.enum_type, field.enum_type.values_by_name[raw_item].number)
+            elif isinstance(raw_item, int):
+                result[key] = _enum_token(field.enum_type, raw_item)
+            else:
+                result[key] = raw_item
+        else:
+            result[key] = raw_item
+    return result
+
+
+def _parse_proto_message[ProtoMessageT: message.Message](message_type: type[ProtoMessageT], payload: dict[str, object]) -> ProtoMessageT:
+    proto_json = _tokens_to_proto_json(payload, message_type.DESCRIPTOR)
+    try:
+        parsed = cast(ProtoMessageT, json_format.ParseDict(cast(dict[str, object], proto_json), message_type()))
+        _PROTO_VALIDATOR.validate(parsed)
+        return parsed
+    except ParseError as exc:
+        raise ValueError(str(exc)) from exc
+    except ProtoValidationError as exc:
+        raise ValueError(_proto_validation_message(exc)) from exc
+
+
+def _proto_validation_message(exc: ProtoValidationError) -> str:
+    violations = exc.to_proto().violations
+    messages: list[str] = []
+    for violation in violations:
+        field_path = ".".join(element.field_name for element in violation.field.elements if element.field_name)
+        messages.append(f"{field_path}: {violation.message}" if field_path else violation.message)
+    return "; ".join(messages) if messages else str(exc)
+
+
+def _message_to_payload(value: message.Message) -> dict[str, object]:
+    decoded = json_format.MessageToDict(value, preserving_proto_field_name=True)
+    tokenized = _proto_json_to_tokens(decoded, value.DESCRIPTOR)
+    if not isinstance(tokenized, dict):
+        raise ValueError(f"{value.DESCRIPTOR.full_name} must decode to an object")
+    return cast(dict[str, object], tokenized)
+
+
+def _is_wrapped_step_config(config: Mapping[str, object]) -> bool:
+    return _wrapped_step_config_field(config) is not None
+
+
+def _wrapped_step_config_field(config: Mapping[str, object]) -> str | None:
+    if len(config) != 1:
+        return None
+    field_name = next(iter(config))
+    if field_name in analysis_pb2.StepConfig.DESCRIPTOR.fields_by_name and isinstance(config[field_name], Mapping):
+        return field_name
+    return None
+
+
+def _step_config_descriptor(step_type: str) -> Any | None:
+    normalized_step_type = normalize_step_type(step_type)
+    field = analysis_pb2.StepConfig.DESCRIPTOR.fields_by_name.get(normalized_step_type)
+    return field.message_type if field is not None else None
+
+
+def _unwrapped_source_config(step_type: str, config: Mapping[str, object]) -> Mapping[str, object]:
+    normalized_step_type = normalize_step_type(step_type)
+    wrapped_field = _wrapped_step_config_field(config)
+    if wrapped_field is None:
+        return config
+    if wrapped_field != normalized_step_type:
+        raise ValueError(f"Step config field '{wrapped_field}' does not match step type '{step_type}'")
+    wrapped_value = config[wrapped_field]
+    return cast(Mapping[str, object], wrapped_value)
+
+
+def _config_with_protocol_defaults(step_type: str, config: Mapping[str, object]) -> dict[str, object]:
+    defaults = _PROTOCOL_CONFIG_DEFAULTS.get(normalize_step_type(step_type))
+    if defaults is None:
+        return dict(config)
+    return {**defaults, **config}
+
+
+def _wrap_step_config(step_type: str, config: Mapping[str, object]) -> dict[str, object]:
+    normalized_step_type = normalize_step_type(step_type)
+    if _is_wrapped_step_config(config):
+        _unwrapped_source_config(step_type, config)
+        return dict(config)
+    if normalized_step_type not in analysis_pb2.StepConfig.DESCRIPTOR.fields_by_name:
+        return dict(config)
+    return {normalized_step_type: dict(config)}
+
+
+def _field_source_key(source: Mapping[str, object], field: Any) -> str | None:
+    if field.name in source:
+        return cast(str, field.name)
+    if field.json_name in source:
+        return cast(str, field.json_name)
+    return None
+
+
+def _is_map_field(field: Any) -> bool:
+    return field.message_type is not None and field.message_type.GetOptions().map_entry
+
+
+def _enum_token_from_source(enum_descriptor: Any, value: object) -> object:
+    enum_name = _enum_name_from_token(enum_descriptor, value)
+    if isinstance(enum_name, str) and enum_name in enum_descriptor.values_by_name:
+        return _enum_token(enum_descriptor, enum_descriptor.values_by_name[enum_name].number)
+    if isinstance(enum_name, int):
+        return _enum_token(enum_descriptor, enum_name)
+    return value
+
+
+def _preserve_explicit_default_config_fields(
+    config_descriptor: Any | None,
+    source_config: Mapping[str, object],
+    decoded_config: dict[str, object],
+) -> dict[str, object]:
+    if config_descriptor is None:
+        return decoded_config
+
+    preserved = dict(decoded_config)
+    for field_descriptor in config_descriptor.fields:
+        source_key = _field_source_key(source_config, field_descriptor)
+        if source_key is None or field_descriptor.name in preserved or field_descriptor.is_repeated or _is_map_field(field_descriptor):
+            continue
+        source_value = source_config[source_key]
+        if field_descriptor.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
+            preserved[field_descriptor.name] = _enum_token_from_source(field_descriptor.enum_type, source_value)
+        elif field_descriptor.type != proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
+            preserved[field_descriptor.name] = source_value
+    return preserved
+
+
+def _unwrap_protocol_value_shapes(value: object) -> object:
+    if isinstance(value, list):
+        return [_unwrap_protocol_value_shapes(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if set(value) == {"string_value"}:
+        return value["string_value"]
+    if set(value) == {"number_value"}:
+        return value["number_value"]
+    if set(value) == {"bool_value"}:
+        return value["bool_value"]
+    if set(value) == {"string_values"}:
+        string_values = value["string_values"]
+        if isinstance(string_values, dict) and isinstance(string_values.get("values"), list):
+            return [_unwrap_protocol_value_shapes(item) for item in string_values["values"]]
+    return {key: _unwrap_protocol_value_shapes(item) for key, item in value.items()}
+
+
+def _unwrap_step_config(config: object) -> dict[str, object]:
+    if not isinstance(config, dict) or len(config) != 1:
+        unwrapped = _unwrap_protocol_value_shapes(config)
+        return cast(dict[str, object], unwrapped) if isinstance(unwrapped, dict) else {}
+    field_name = next(iter(config))
+    if field_name in analysis_pb2.StepConfig.DESCRIPTOR.fields_by_name:
+        unwrapped = _unwrap_protocol_value_shapes(config[field_name])
+        return cast(dict[str, object], unwrapped) if isinstance(unwrapped, dict) else {}
+    unwrapped = _unwrap_protocol_value_shapes(config)
+    return cast(dict[str, object], unwrapped) if isinstance(unwrapped, dict) else {}
+
+
+def _restore_service_config_shape(step_type: str, config: dict[str, object]) -> dict[str, object]:
+    if step_type == STEP_TYPES.view.value and "row_limit" in config:
+        restored = dict(config)
+        restored["rowLimit"] = restored.pop("row_limit")
+        return restored
+    return config
+
+
+def _protocol_step_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    raw_step_type = payload.get("step_type") or payload.get("type")
+    if not isinstance(raw_step_type, str) or not raw_step_type.strip():
+        raise ValueError("Step must have a type field")
+    if not is_step_type(raw_step_type):
+        raise ValueError(f"Unknown step type '{raw_step_type}'")
+
+    raw_config = payload.get("config")
+    if raw_config is None:
+        config: dict[str, object] = {}
+    elif isinstance(raw_config, Mapping):
+        config = dict(raw_config)
+    else:
+        raise ValueError("Step config must be an object")
+
+    chart_type = chart_type_for_step(raw_step_type)
+    if chart_type is not None:
+        existing_chart_type = config.get("chart_type")
+        if isinstance(existing_chart_type, str) and existing_chart_type and existing_chart_type != chart_type.value:
+            raise ValueError(f"chart_type '{existing_chart_type}' does not match step type '{raw_step_type}'")
+        config["chart_type"] = chart_type.value
+    config = _config_with_protocol_defaults(raw_step_type, config)
+
+    raw_deps = payload.get("depends_on")
+    if raw_deps is not None and not (isinstance(raw_deps, list) and all(isinstance(dep, str) and dep.strip() for dep in raw_deps)):
+        raise ValueError("Step depends_on must be a list of step ids")
+
+    proto_payload = dict(payload)
+    proto_payload["type"] = raw_step_type
+    proto_payload["step_type"] = _enum_name_from_token(enums_pb2.StepType.DESCRIPTOR, raw_step_type)
+    proto_payload["config"] = _wrap_step_config(raw_step_type, config)
+    protocol_step = _parse_proto_message(analysis_pb2.AnalysisPipelineStep, cast(dict[str, object], proto_payload))
+    result = _message_to_payload(protocol_step)
+    protocol_step_type = result.pop("step_type", None)
+    if isinstance(protocol_step_type, str):
+        result["type"] = protocol_step_type
+    source_config = _unwrapped_source_config(raw_step_type, config)
+    unwrapped_config = _unwrap_step_config(result.get("config"))
+    config_descriptor = _step_config_descriptor(raw_step_type)
+    unwrapped_config = _preserve_explicit_default_config_fields(config_descriptor, source_config, unwrapped_config)
+    result["config"] = _restore_service_config_shape(cast(str, result["type"]), unwrapped_config)
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,30 +409,28 @@ class FrontendStep:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, object]) -> "FrontendStep":
-        allowed_keys = {"id", "type", "config", "depends_on", "is_applied"}
+        allowed_keys = {"id", "type", "step_type", "config", "depends_on", "is_applied"}
         unknown_keys = sorted(set(payload) - allowed_keys)
         if unknown_keys:
             raise ValueError(f"Step has unknown field(s): {', '.join(unknown_keys)}")
 
-        step_type = payload.get("type")
+        protocol_payload = _protocol_step_payload(payload)
+
+        step_type = protocol_payload.get("type")
         if not isinstance(step_type, str) or not step_type.strip():
             raise ValueError("Step must have a type field")
-        if not is_step_type(step_type):
-            raise ValueError(f"Unknown step type '{step_type}'")
 
-        step_id = payload.get("id")
+        step_id = protocol_payload.get("id")
         if not isinstance(step_id, str) or not step_id.strip():
             raise ValueError("Step must have an id field")
 
-        raw_config = payload.get("config")
-        if raw_config is None:
-            config: dict[str, object] = {}
-        elif isinstance(raw_config, dict):
+        raw_config = protocol_payload.get("config")
+        if isinstance(raw_config, dict):
             config = raw_config
         else:
-            raise ValueError("Step config must be an object")
+            config = {}
 
-        raw_deps = payload.get("depends_on")
+        raw_deps = protocol_payload.get("depends_on")
         if raw_deps is None:
             depends_on: tuple[str, ...] = ()
         elif isinstance(raw_deps, list) and all(isinstance(dep, str) and dep.strip() for dep in raw_deps):
@@ -88,7 +438,7 @@ class FrontendStep:
         else:
             raise ValueError("Step depends_on must be a list of step ids")
 
-        raw_applied = payload.get("is_applied")
+        raw_applied = protocol_payload.get("is_applied")
         if raw_applied is not None and not isinstance(raw_applied, bool):
             raise ValueError("Step is_applied must be a boolean")
         is_applied = raw_applied if isinstance(raw_applied, bool) else None
