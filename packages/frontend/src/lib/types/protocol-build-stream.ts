@@ -1,4 +1,5 @@
 import type {
+	BuildStepKindJson,
 	BuildEventContextJson,
 	BuildEventJson,
 	BuildTabResultJson
@@ -12,7 +13,9 @@ import type { BuildEvent, BuildTabResult } from '$lib/types/build-stream';
 import {
 	BUILD_LOG_LEVEL_JSON_TOKENS,
 	BUILD_TAB_STATUS_JSON_TOKENS,
-	ENGINE_RUN_KIND_JSON_TOKENS
+	ENGINE_RUN_EXECUTION_CATEGORY_JSON_TOKENS,
+	ENGINE_RUN_KIND_JSON_TOKENS,
+	STEP_TYPE_JSON_TOKENS
 } from '$lib/types/protocol-enum-tokens';
 import type { BuildLogLevel, BuildTabStatus, EngineRunKind } from '$lib/types/protocol-enum-tokens';
 
@@ -109,6 +112,19 @@ function buildLogLevelToken(value: BuildLogLevelJson | undefined): BuildLogLevel
 	return value === undefined ? null : (BUILD_LOG_LEVEL_JSON_TOKENS[value] ?? null);
 }
 
+function stepTypeToken(
+	kind: BuildStepKindJson | undefined,
+	legacyStepType: unknown
+): string | null {
+	if (kind?.pipeline !== undefined) {
+		return STEP_TYPE_JSON_TOKENS[kind.pipeline] ?? null;
+	}
+	if (kind?.executionCategory !== undefined) {
+		return ENGINE_RUN_EXECUTION_CATEGORY_JSON_TOKENS[kind.executionCategory] ?? null;
+	}
+	return optionalString(legacyStepType);
+}
+
 function baseFromContext(context: BuildEventContextJson | undefined): BuildEventBase | null {
 	if (context === undefined) return null;
 	const buildId = requiredString(context.buildId);
@@ -168,7 +184,9 @@ export function protocolBuildEventToBuildEvent(event: BuildEventJson): BuildEven
 		const buildStepIndex = requiredNumber(event.stepStarted.buildStepIndex);
 		const stepIndex = requiredNumber(event.stepStarted.stepIndex);
 		const stepId = requiredString(event.stepStarted.stepId);
-		if (buildStepIndex === null || stepIndex === null || stepId === null) return null;
+		const stepType = stepTypeToken(event.stepStarted.stepKind, event.stepStarted.stepType);
+		if (buildStepIndex === null || stepIndex === null || stepId === null || stepType === null)
+			return null;
 		return {
 			...base,
 			type: 'step_start',
@@ -176,7 +194,7 @@ export function protocolBuildEventToBuildEvent(event: BuildEventJson): BuildEven
 			step_index: stepIndex,
 			step_id: stepId,
 			step_name: event.stepStarted.stepName ?? '',
-			step_type: event.stepStarted.stepType ?? '',
+			step_type: stepType,
 			total_steps: event.stepStarted.totalSteps ?? 0
 		};
 	}
@@ -186,7 +204,14 @@ export function protocolBuildEventToBuildEvent(event: BuildEventJson): BuildEven
 		const stepIndex = requiredNumber(event.stepCompleted.stepIndex);
 		const stepId = requiredString(event.stepCompleted.stepId);
 		const durationMs = requiredNumber(event.stepCompleted.durationMs);
-		if (buildStepIndex === null || stepIndex === null || stepId === null || durationMs === null)
+		const stepType = stepTypeToken(event.stepCompleted.stepKind, event.stepCompleted.stepType);
+		if (
+			buildStepIndex === null ||
+			stepIndex === null ||
+			stepId === null ||
+			durationMs === null ||
+			stepType === null
+		)
 			return null;
 		return {
 			...base,
@@ -195,7 +220,7 @@ export function protocolBuildEventToBuildEvent(event: BuildEventJson): BuildEven
 			step_index: stepIndex,
 			step_id: stepId,
 			step_name: event.stepCompleted.stepName ?? '',
-			step_type: event.stepCompleted.stepType ?? '',
+			step_type: stepType,
 			duration_ms: durationMs,
 			row_count: optionalInt64(event.stepCompleted.rowCount),
 			total_steps: event.stepCompleted.totalSteps ?? 0
@@ -207,7 +232,14 @@ export function protocolBuildEventToBuildEvent(event: BuildEventJson): BuildEven
 		const stepIndex = requiredNumber(event.stepFailed.stepIndex);
 		const stepId = requiredString(event.stepFailed.stepId);
 		const error = requiredString(event.stepFailed.error);
-		if (buildStepIndex === null || stepIndex === null || stepId === null || error === null)
+		const stepType = stepTypeToken(event.stepFailed.stepKind, event.stepFailed.stepType);
+		if (
+			buildStepIndex === null ||
+			stepIndex === null ||
+			stepId === null ||
+			error === null ||
+			stepType === null
+		)
 			return null;
 		return {
 			...base,
@@ -216,7 +248,7 @@ export function protocolBuildEventToBuildEvent(event: BuildEventJson): BuildEven
 			step_index: stepIndex,
 			step_id: stepId,
 			step_name: event.stepFailed.stepName ?? '',
-			step_type: event.stepFailed.stepType ?? '',
+			step_type: stepType,
 			error,
 			total_steps: event.stepFailed.totalSteps ?? 0
 		};

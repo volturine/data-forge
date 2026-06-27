@@ -18,6 +18,22 @@ PG_PORT=""
 RUSTFS_CONTAINER="dataforge-e2e-rustfs-$$"
 RUSTFS_LABEL="data-forge.test-rustfs=1"
 RUSTFS_PORT=""
+pick_host_port() {
+    python - "$@" <<'PY'
+import socket
+import sys
+
+reserved = {int(value) for value in sys.argv[1:] if value}
+for _ in range(100):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    if port not in reserved:
+        print(port)
+        raise SystemExit(0)
+raise SystemExit("failed to choose an unreserved free TCP port")
+PY
+}
 kill_tree() {
     local pid="$1"
     if [ -z "$pid" ] || ! kill -0 "$pid" >/dev/null 2>&1; then
@@ -108,6 +124,7 @@ docker volume ls -q --filter "label=${PG_LABEL}" | xargs -r docker volume rm -f 
 docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
 docker volume rm -f "${PG_VOLUME}" >/dev/null 2>&1 || true
 docker volume create --label "${PG_LABEL}" "${PG_VOLUME}" >/dev/null
+PG_PORT="$(pick_host_port "${PORT}" "${FRONTEND_PORT}" "${INTERNAL_GRPC_PORT}" "${WORKER_DATA_PLANE_GRPC_PORT}")"
 docker run -d --rm \
     --label "${PG_LABEL}" \
     --name "${PG_CONTAINER}" \
@@ -115,9 +132,8 @@ docker run -d --rm \
     -e POSTGRES_DB=dataforge \
     -e POSTGRES_USER=dataforge \
     -e POSTGRES_PASSWORD=dataforge \
-    -p 127.0.0.1::5432 \
+    -p "127.0.0.1:${PG_PORT}:5432" \
     postgres:18-alpine -c max_connections=300 >/dev/null
-PG_PORT="$(docker port "${PG_CONTAINER}" 5432/tcp | awk -F: '{print $NF}')"
 if [ -z "$PG_PORT" ]; then
     echo "Failed to resolve e2e Postgres host port" >&2
     exit 1
@@ -135,14 +151,14 @@ done
 echo "Starting e2e RustFS"
 docker ps -aq --filter "label=${RUSTFS_LABEL}" | xargs -r docker rm -f >/dev/null 2>&1 || true
 docker rm -f "${RUSTFS_CONTAINER}" >/dev/null 2>&1 || true
+RUSTFS_PORT="$(pick_host_port "${PORT}" "${FRONTEND_PORT}" "${INTERNAL_GRPC_PORT}" "${WORKER_DATA_PLANE_GRPC_PORT}" "${PG_PORT}")"
 docker run -d --rm \
     --label "${RUSTFS_LABEL}" \
     --name "${RUSTFS_CONTAINER}" \
     -e RUSTFS_ACCESS_KEY="${OBJECT_STORE_ACCESS_KEY}" \
     -e RUSTFS_SECRET_KEY="${OBJECT_STORE_SECRET_KEY}" \
-    -p 127.0.0.1::9000 \
+    -p "127.0.0.1:${RUSTFS_PORT}:9000" \
     rustfs/rustfs:latest /data >/dev/null
-RUSTFS_PORT="$(docker port "${RUSTFS_CONTAINER}" 9000/tcp | awk -F: '{print $NF}')"
 if [ -z "$RUSTFS_PORT" ]; then
     echo "Failed to resolve e2e RustFS host port" >&2
     exit 1

@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlmodel import select
 
 from backend_core import build_runs_service as build_run_service
@@ -163,6 +164,85 @@ def test_serialize_event_row_preserves_proto_default_scalars(test_db_session) ->
     assert progress['progress'] == 0.0
     assert progress['elapsedMs'] == 0
     assert progress['totalSteps'] == 0
+
+
+def test_serialize_step_event_includes_protocol_pipeline_step_kind(test_db_session) -> None:
+    run = _create_run(test_db_session)
+    row = build_run_service.append_build_event(
+        test_db_session,
+        build_id=run.id,
+        event=compute_schemas.BuildStepStartEvent(
+            build_id=run.id,
+            analysis_id=run.analysis_id,
+            emitted_at=datetime.now(UTC),
+            current_kind=EngineRunKind.BUILD,
+            build_step_index=1,
+            step_index=0,
+            step_id='step-1',
+            step_name='Filter rows',
+            step_type='filter',
+            total_steps=2,
+        ),
+    )
+
+    assert row is not None
+    serialized = build_run_service.serialize_event_row(row)
+    step_started = serialized['stepStarted']
+    assert isinstance(step_started, dict)
+    assert step_started['stepType'] == 'filter'
+    assert step_started['stepKind'] == {'pipeline': 'STEP_TYPE_FILTER'}
+
+
+def test_serialize_step_event_includes_protocol_execution_category_kind(test_db_session) -> None:
+    run = _create_run(test_db_session)
+    row = build_run_service.append_build_event(
+        test_db_session,
+        build_id=run.id,
+        event=compute_schemas.BuildStepCompleteEvent(
+            build_id=run.id,
+            analysis_id=run.analysis_id,
+            emitted_at=datetime.now(UTC),
+            current_kind=EngineRunKind.BUILD,
+            build_step_index=0,
+            step_index=0,
+            step_id='tab-1:initial_read',
+            step_name='Initial Read',
+            step_type='read',
+            duration_ms=25,
+            total_steps=2,
+        ),
+    )
+
+    assert row is not None
+    serialized = build_run_service.serialize_event_row(row)
+    step_completed = serialized['stepCompleted']
+    assert isinstance(step_completed, dict)
+    assert step_completed['stepType'] == 'read'
+    assert step_completed['stepKind'] == {'executionCategory': 'ENGINE_RUN_EXECUTION_CATEGORY_READ'}
+
+
+def test_serialize_step_event_rejects_untyped_step_kind(test_db_session) -> None:
+    run = _create_run(test_db_session)
+    row = build_run_service.append_build_event(
+        test_db_session,
+        build_id=run.id,
+        event=compute_schemas.BuildStepStartEvent(
+            build_id=run.id,
+            analysis_id=run.analysis_id,
+            emitted_at=datetime.now(UTC),
+            current_kind=EngineRunKind.BUILD,
+            build_step_index=1,
+            step_index=0,
+            step_id='step-1',
+            step_name='Unknown stage',
+            step_type='unknown',
+            total_steps=2,
+        ),
+    )
+
+    assert row is not None
+    with pytest.raises(ValueError, match='Unsupported build step type'):
+        build_run_service.serialize_event_row(row)
 
 
 def test_fold_build_detail_reconstructs_snapshot(test_db_session) -> None:

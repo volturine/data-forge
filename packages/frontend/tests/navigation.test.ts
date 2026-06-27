@@ -327,8 +327,7 @@ test.describe('Navigation – engines live monitor', () => {
 
 test.describe('Navigation – chat panel smoke', () => {
 	test('chat trigger opens panel and close button dismisses it', async ({ page }) => {
-		await page.goto('/');
-		await waitForAppShell(page);
+		await gotoAuthedRoute(page, '/');
 
 		const trigger = page.getByRole('button', { name: 'AI Assistant' });
 		await expect(trigger).toBeVisible();
@@ -345,8 +344,7 @@ test.describe('Navigation – chat panel smoke', () => {
 	});
 
 	test('chat panel closes via Escape key', async ({ page }) => {
-		await page.goto('/');
-		await waitForAppShell(page);
+		await gotoAuthedRoute(page, '/');
 
 		await page.getByRole('button', { name: 'AI Assistant' }).click();
 		const panel = page.locator('#chat-panel');
@@ -357,8 +355,7 @@ test.describe('Navigation – chat panel smoke', () => {
 	});
 
 	test('chat panel toggle: second click closes the panel', async ({ page }) => {
-		await page.goto('/');
-		await waitForAppShell(page);
+		await gotoAuthedRoute(page, '/');
 
 		const trigger = page.getByRole('button', { name: 'AI Assistant' });
 		await trigger.click();
@@ -371,8 +368,7 @@ test.describe('Navigation – chat panel smoke', () => {
 	});
 
 	test('chat panel provider switch updates model selector', async ({ page }) => {
-		await page.goto('/');
-		await waitForAppShell(page);
+		await gotoAuthedRoute(page, '/');
 
 		const trigger = page.getByRole('button', { name: 'AI Assistant' });
 		await trigger.click();

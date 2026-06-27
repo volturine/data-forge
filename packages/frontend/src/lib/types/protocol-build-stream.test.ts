@@ -70,6 +70,51 @@ describe('protocol build stream conversion', () => {
 		).toBe(false);
 	});
 
+	test('uses generated pipeline step kind instead of deprecated step type string', () => {
+		const protocolEvent = {
+			context: BASE_CONTEXT,
+			namespace: 'default',
+			stepStarted: {
+				buildStepIndex: 2,
+				stepIndex: 1,
+				stepId: 'step-1',
+				stepName: 'Filter rows',
+				stepType: 'legacy_wrong',
+				stepKind: { pipeline: 'STEP_TYPE_FILTER' },
+				totalSteps: 4
+			}
+		} satisfies BuildEventJson;
+
+		expect(protocolBuildEventToBuildEvent(protocolEvent)).toMatchObject({
+			type: 'step_start',
+			step_id: 'step-1',
+			step_type: 'filter'
+		});
+	});
+
+	test('uses generated execution category for synthetic build stages', () => {
+		const protocolEvent = {
+			context: BASE_CONTEXT,
+			namespace: 'default',
+			stepCompleted: {
+				buildStepIndex: 0,
+				stepIndex: 0,
+				stepId: 'tab-1:initial_read',
+				stepName: 'Initial Read',
+				stepType: 'legacy_wrong',
+				stepKind: { executionCategory: 'ENGINE_RUN_EXECUTION_CATEGORY_READ' },
+				durationMs: 25,
+				totalSteps: 4
+			}
+		} satisfies BuildEventJson;
+
+		expect(protocolBuildEventToBuildEvent(protocolEvent)).toMatchObject({
+			type: 'step_complete',
+			step_id: 'tab-1:initial_read',
+			step_type: 'read'
+		});
+	});
+
 	test('uses protocol enum JSON token tables for generated build stream enums', () => {
 		expect(ENGINE_RUN_KIND_JSON_TOKENS.ENGINE_RUN_KIND_ROW_COUNT).toBe('row_count');
 		expect(ENGINE_RUN_KIND_JSON_TOKENS.ENGINE_RUN_KIND_UNSPECIFIED).toBeNull();

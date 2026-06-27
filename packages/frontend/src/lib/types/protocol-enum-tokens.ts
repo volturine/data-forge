@@ -15,6 +15,7 @@ import {
 	DeduplicateKeep as ProtocolDeduplicateKeep,
 	DisplayUnits as ProtocolDisplayUnits,
 	DurationUnit as ProtocolDurationUnit,
+	EngineRunExecutionCategory as ProtocolEngineRunExecutionCategory,
 	EngineRunKind as ProtocolEngineRunKind,
 	ExportDestination as ProtocolExportDestination,
 	ExportFormat as ProtocolExportFormat,
@@ -45,7 +46,9 @@ import {
 import type {
 	BuildLogLevelJson as ProtocolBuildLogLevelJson,
 	BuildTabStatusJson as ProtocolBuildTabStatusJson,
-	EngineRunKindJson as ProtocolEngineRunKindJson
+	EngineRunExecutionCategoryJson as ProtocolEngineRunExecutionCategoryJson,
+	EngineRunKindJson as ProtocolEngineRunKindJson,
+	StepTypeJson as ProtocolStepTypeJson
 } from '$lib/protocol/dataforge_protocol/enums_pb';
 
 type EnumToken<T extends object> = T[keyof T];
@@ -424,6 +427,14 @@ export const BUILD_LOG_LEVEL_TOKENS = {
 	[ProtocolBuildLogLevel.ERROR]: 'error'
 } as const satisfies Partial<Record<ProtocolBuildLogLevel, string>>;
 
+export const ENGINE_RUN_EXECUTION_CATEGORY_TOKENS = {
+	[ProtocolEngineRunExecutionCategory.READ]: 'read',
+	[ProtocolEngineRunExecutionCategory.STEP]: 'step',
+	[ProtocolEngineRunExecutionCategory.PLAN]: 'plan',
+	[ProtocolEngineRunExecutionCategory.COMPUTE]: 'compute',
+	[ProtocolEngineRunExecutionCategory.WRITE]: 'write'
+} as const satisfies Partial<Record<ProtocolEngineRunExecutionCategory, string>>;
+
 export const ENGINE_RUN_KIND_JSON_TOKENS = {
 	ENGINE_RUN_KIND_UNSPECIFIED: null,
 	ENGINE_RUN_KIND_BUILD: 'build',
@@ -445,6 +456,55 @@ export const BUILD_LOG_LEVEL_JSON_TOKENS = {
 	BUILD_LOG_LEVEL_WARNING: 'warning',
 	BUILD_LOG_LEVEL_ERROR: 'error'
 } as const satisfies Record<ProtocolBuildLogLevelJson, string | null>;
+
+export const STEP_TYPE_JSON_TOKENS = {
+	STEP_TYPE_UNSPECIFIED: null,
+	STEP_TYPE_SELECT: 'select',
+	STEP_TYPE_DROP: 'drop',
+	STEP_TYPE_FILTER: 'filter',
+	STEP_TYPE_GROUPBY: 'groupby',
+	STEP_TYPE_JOIN: 'join',
+	STEP_TYPE_UNION_BY_NAME: 'union_by_name',
+	STEP_TYPE_UNPIVOT: 'unpivot',
+	STEP_TYPE_EXPLODE: 'explode',
+	STEP_TYPE_PIVOT: 'pivot',
+	STEP_TYPE_SAMPLE: 'sample',
+	STEP_TYPE_LIMIT: 'limit',
+	STEP_TYPE_TOPK: 'topk',
+	STEP_TYPE_VIEW: 'view',
+	STEP_TYPE_EXPORT: 'export',
+	STEP_TYPE_DOWNLOAD: 'download',
+	STEP_TYPE_CHART: 'chart',
+	STEP_TYPE_NOTIFICATION: 'notification',
+	STEP_TYPE_AI: 'ai',
+	STEP_TYPE_DATASOURCE: 'datasource',
+	STEP_TYPE_SORT: 'sort',
+	STEP_TYPE_RENAME: 'rename',
+	STEP_TYPE_EXPRESSION: 'expression',
+	STEP_TYPE_WITH_COLUMNS: 'with_columns',
+	STEP_TYPE_FILL_NULL: 'fill_null',
+	STEP_TYPE_DEDUPLICATE: 'deduplicate',
+	STEP_TYPE_STRING_TRANSFORM: 'string_transform',
+	STEP_TYPE_TIMESERIES: 'timeseries',
+	STEP_TYPE_PLOT_BAR: 'plot_bar',
+	STEP_TYPE_PLOT_HORIZONTAL_BAR: 'plot_horizontal_bar',
+	STEP_TYPE_PLOT_AREA: 'plot_area',
+	STEP_TYPE_PLOT_HEATGRID: 'plot_heatgrid',
+	STEP_TYPE_PLOT_HISTOGRAM: 'plot_histogram',
+	STEP_TYPE_PLOT_SCATTER: 'plot_scatter',
+	STEP_TYPE_PLOT_LINE: 'plot_line',
+	STEP_TYPE_PLOT_PIE: 'plot_pie',
+	STEP_TYPE_PLOT_BOXPLOT: 'plot_boxplot'
+} as const satisfies Record<ProtocolStepTypeJson, string | null>;
+
+export const ENGINE_RUN_EXECUTION_CATEGORY_JSON_TOKENS = {
+	ENGINE_RUN_EXECUTION_CATEGORY_UNSPECIFIED: null,
+	ENGINE_RUN_EXECUTION_CATEGORY_READ: 'read',
+	ENGINE_RUN_EXECUTION_CATEGORY_STEP: 'step',
+	ENGINE_RUN_EXECUTION_CATEGORY_PLAN: 'plan',
+	ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE: 'compute',
+	ENGINE_RUN_EXECUTION_CATEGORY_WRITE: 'write'
+} as const satisfies Record<ProtocolEngineRunExecutionCategoryJson, string | null>;
 
 export type FilterOperator = EnumToken<typeof FILTER_OPERATOR_TOKENS>;
 export type FilterValueType = EnumToken<typeof FILTER_VALUE_TYPE_TOKENS>;
@@ -488,3 +548,4 @@ export type BuildStepState = EnumToken<typeof BUILD_STEP_STATE_TOKENS>;
 export type ActiveBuildStatus = EnumToken<typeof ACTIVE_BUILD_STATUS_TOKENS>;
 export type BuildTabStatus = EnumToken<typeof BUILD_TAB_STATUS_TOKENS>;
 export type BuildLogLevel = EnumToken<typeof BUILD_LOG_LEVEL_TOKENS>;
+export type EngineRunExecutionCategory = EnumToken<typeof ENGINE_RUN_EXECUTION_CATEGORY_TOKENS>;

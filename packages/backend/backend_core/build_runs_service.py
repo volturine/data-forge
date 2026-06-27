@@ -6,9 +6,10 @@ from google.protobuf import json_format, timestamp_pb2
 from sqlalchemy import desc, func, or_, select, update
 from sqlmodel import Session, col
 
+from backend_core.domain.analysis.step_types import PipelineStepType
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
-from backend_core.domain.engine_runs.schemas import EngineRunKind
+from backend_core.domain.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from dataforge_protocol import compute_pb2
@@ -74,6 +75,24 @@ def _build_tab_result_proto(result: compute_schemas.BuildTabResult) -> compute_p
     return message
 
 
+def _build_step_kind_proto(step_type: str) -> compute_pb2.BuildStepKind:
+    message = compute_pb2.BuildStepKind()
+    try:
+        message.pipeline = cast(Any, PipelineStepType.require(step_type).number)
+        return message
+    except ValueError:
+        pass
+
+    try:
+        category = EngineRunExecutionCategory.require(step_type)
+    except ValueError:
+        raise ValueError(f'Unsupported build step type for protocol event: {step_type!r}') from None
+    if category in {EngineRunExecutionCategory.READ, EngineRunExecutionCategory.WRITE}:
+        message.execution_category = cast(Any, category.number)
+        return message
+    raise ValueError(f'Unsupported build execution category for protocol step event: {step_type!r}')
+
+
 def _build_terminal_event_proto(
     event: compute_schemas.BuildCompleteEvent | compute_schemas.BuildFailedEvent | compute_schemas.BuildCancelledEvent,
 ) -> compute_pb2.BuildTerminalEvent:
@@ -107,6 +126,7 @@ def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, seq
             message.step_started.step_id = event.step_id
             message.step_started.step_name = event.step_name
             message.step_started.step_type = event.step_type
+            message.step_started.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
             message.step_started.total_steps = event.total_steps
             return message
         case compute_schemas.BuildStepCompleteEvent():
@@ -115,6 +135,7 @@ def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, seq
             message.step_completed.step_id = event.step_id
             message.step_completed.step_name = event.step_name
             message.step_completed.step_type = event.step_type
+            message.step_completed.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
             message.step_completed.duration_ms = event.duration_ms
             message.step_completed.total_steps = event.total_steps
             if event.row_count is not None:
@@ -126,6 +147,7 @@ def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, seq
             message.step_failed.step_id = event.step_id
             message.step_failed.step_name = event.step_name
             message.step_failed.step_type = event.step_type
+            message.step_failed.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
             message.step_failed.error = event.error
             message.step_failed.total_steps = event.total_steps
             return message

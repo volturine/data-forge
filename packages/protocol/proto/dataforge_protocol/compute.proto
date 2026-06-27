@@ -198,13 +198,24 @@ message BuildPlanEvent {
   string unoptimized_plan = 2;
 }
 
+message BuildStepKind {
+  oneof kind {
+    StepType pipeline = 1;
+    EngineRunExecutionCategory execution_category = 2;
+  }
+}
+
 message BuildStepStartedEvent {
   int32 build_step_index = 1 [(buf.validate.field).int32.gte = 0];
   int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
   string step_id = 3 [(buf.validate.field).string.min_len = 1];
   string step_name = 4;
-  string step_type = 5 [(buf.validate.field).string.min_len = 1];
+  string step_type = 5 [
+    deprecated = true,
+    (buf.validate.field).string.min_len = 1
+  ];
   int32 total_steps = 6 [(buf.validate.field).int32.gte = 0];
+  BuildStepKind step_kind = 7;
 }
 
 message BuildStepCompletedEvent {
@@ -212,10 +223,14 @@ message BuildStepCompletedEvent {
   int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
   string step_id = 3 [(buf.validate.field).string.min_len = 1];
   string step_name = 4;
-  string step_type = 5 [(buf.validate.field).string.min_len = 1];
+  string step_type = 5 [
+    deprecated = true,
+    (buf.validate.field).string.min_len = 1
+  ];
   int32 duration_ms = 6 [(buf.validate.field).int32.gte = 0];
   optional int64 row_count = 7 [(buf.validate.field).int64.gte = 0];
   int32 total_steps = 8 [(buf.validate.field).int32.gte = 0];
+  BuildStepKind step_kind = 9;
 }
 
 message BuildStepFailedEvent {
@@ -223,9 +238,13 @@ message BuildStepFailedEvent {
   int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
   string step_id = 3 [(buf.validate.field).string.min_len = 1];
   string step_name = 4;
-  string step_type = 5 [(buf.validate.field).string.min_len = 1];
+  string step_type = 5 [
+    deprecated = true,
+    (buf.validate.field).string.min_len = 1
+  ];
   string error = 6 [(buf.validate.field).string.min_len = 1];
   int32 total_steps = 7 [(buf.validate.field).int32.gte = 0];
+  BuildStepKind step_kind = 8;
 }
 
 message BuildProgressEvent {
