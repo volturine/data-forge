@@ -129,7 +129,7 @@ function isErrorMessage(msg: unknown): msg is { type: 'error'; error: string } {
 	return value.type === 'error' && typeof value.error === 'string';
 }
 
-export function createStream<TSnapshot, TEvent = never, TMessage = { type: string }>(
+export function createStream<TSnapshot, TEvent = never, TMessage extends object = { type: string }>(
 	endpoint: string,
 	options: {
 		parse: (data: string) => TMessage | null;

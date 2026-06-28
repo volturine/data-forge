@@ -276,6 +276,7 @@ async def delete_analysis(
             runtime_probe=runtime_probe,
         )
     except HTTPException:
+        # Engine teardown is best-effort after the analysis row has been deleted.
         pass
     except PipelineExecutionError as exc:
         if 'not found' not in str(exc).lower():

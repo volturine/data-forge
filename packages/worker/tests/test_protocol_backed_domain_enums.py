@@ -21,6 +21,8 @@ def test_worker_step_types_are_protocol_descriptor_backed() -> None:
     assert PipelineStepType.FILTER.number == enums_pb2.STEP_TYPE_FILTER
     assert PipelineStepType.require(enums_pb2.STEP_TYPE_FILTER) is PipelineStepType.FILTER
     assert PipelineStepType.require("filter") is PipelineStepType.FILTER
+    assert PipelineStepType.FILTER == "filter"
+    assert hash(PipelineStepType.FILTER) == hash("filter")
 
 
 def test_worker_datasource_enums_keep_string_storage_with_protocol_numbers() -> None:
