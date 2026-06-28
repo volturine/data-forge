@@ -145,13 +145,16 @@ message WorkerDatasourceMetadataRequest {
 }
 
 message WorkerDatasourceMetadataResponse {
+  reserved 6;
+  reserved "schema_cache";
+
   bool found = 1;
   optional string id = 2;
   optional string name = 3;
   optional DataSourceType source_type = 4 [(buf.validate.field).enum.defined_only = true];
   optional google.protobuf.Struct config = 5;
-  optional google.protobuf.Struct schema_cache = 6;
   optional bool is_hidden = 7;
+  SchemaInfo schema_info = 8;
 }
 
 message WorkerUdfCodesRequest {
@@ -191,15 +194,18 @@ message WorkerUpdateBuildResultRequest {
 }
 
 message WorkerUpsertOutputDatasourceRequest {
+  reserved 6;
+  reserved "schema_cache";
+
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string result_id = 2 [(buf.validate.field).string.min_len = 1];
   string name = 3 [(buf.validate.field).string.min_len = 1];
   DataSourceType source_type = 4 [(buf.validate.field).enum.defined_only = true];
   google.protobuf.Struct config = 5;
-  google.protobuf.Struct schema_cache = 6;
   optional string analysis_id = 7 [(buf.validate.field).string.min_len = 1];
   optional bool is_hidden = 8;
   bool keep_schema_cache = 9;
+  SchemaInfo schema_info = 10 [(buf.validate.field).required = true];
 }
 
 message WorkerUpsertOutputDatasourceResponse {

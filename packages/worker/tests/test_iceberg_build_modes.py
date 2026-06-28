@@ -6,7 +6,7 @@ import pyarrow as pa  # type: ignore[import-untyped]
 from pyiceberg.schema import Schema as IcebergSchema
 from pyiceberg.types import NestedField, StringType
 
-from runtime.compute_service import _sync_iceberg_schema, export_data
+from runtime.compute_service import _schema_cache_payload_from_arrow, _sync_iceberg_schema, export_data
 from runtime.domain.compute.base import EngineResult
 from runtime.namespace import namespace_paths
 
@@ -110,6 +110,20 @@ class TestSyncIcebergSchema:
 
 
 class TestBuildModeWiring:
+    def test_schema_cache_payload_from_arrow_preserves_engine_dtype_and_nullable(self):
+        payload = _schema_cache_payload_from_arrow(
+            pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("name", pa.string(), nullable=True)]),
+            {"schema": {"id": "Int64", "name": {"dtype": "Utf8", "nullable": False}}, "row_count": 2},
+        )
+
+        assert payload == {
+            "columns": [
+                {"name": "id", "dtype": "Int64", "nullable": False},
+                {"name": "name", "dtype": "Utf8", "nullable": False},
+            ],
+            "row_count": 2,
+        }
+
     def _make_pipeline(self, datasource: SimpleNamespace, output_ds_id: str, build_mode: str = "full") -> dict:
         return {
             "analysis_id": str(uuid.uuid4()),

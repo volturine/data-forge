@@ -13,14 +13,17 @@ message DatasourceRef {
 }
 
 message DatasourceMetadata {
+  reserved 7;
+  reserved "schema_cache";
+
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string name = 2 [(buf.validate.field).string.min_len = 1];
   DataSourceType source_type = 3 [(buf.validate.field).enum.defined_only = true];
   DataSourceCreatedBy created_by = 4 [(buf.validate.field).enum.defined_only = true];
   DataSourceTargetKind target_kind = 5 [(buf.validate.field).enum.defined_only = true];
   google.protobuf.Struct config = 6;
-  google.protobuf.Struct schema_cache = 7;
   bool is_hidden = 8;
+  SchemaInfo schema_info = 9;
 }
 
 message CsvOptions {
@@ -111,17 +114,20 @@ message DatasourceCommand {
 }
 
 message DataSourceRecord {
+  reserved 6;
+  reserved "schema_cache";
+
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string name = 2 [(buf.validate.field).string.min_len = 1];
   optional string description = 3;
   DataSourceType source_type = 4 [(buf.validate.field).enum.defined_only = true];
   google.protobuf.Struct config = 5;
-  optional google.protobuf.Struct schema_cache = 6;
   optional string created_by_analysis_id = 7 [(buf.validate.field).string.min_len = 1];
   DataSourceCreatedBy created_by = 8 [(buf.validate.field).enum.defined_only = true];
   bool is_hidden = 9;
   google.protobuf.Timestamp created_at = 10;
   optional string output_of_tab_id = 11 [(buf.validate.field).string.min_len = 1];
+  SchemaInfo schema_info = 12;
 }
 
 message ColumnSchema {

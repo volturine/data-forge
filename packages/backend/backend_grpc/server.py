@@ -9,6 +9,7 @@ from email.message import EmailMessage
 from typing import Any, cast
 
 import grpc
+from google.protobuf import json_format
 from sqlalchemy import select
 
 from backend_core import (
@@ -59,6 +60,7 @@ from backend_grpc.validation import ProtovalidateAioInterceptor
 from dataforge_protocol import (
     common_pb2,
     compute_pb2,
+    datasource_pb2,
     enums_pb2,
     scheduler_runtime_pb2,
     scheduler_runtime_pb2_grpc,
@@ -297,6 +299,36 @@ def _build_resource_config_payload(message: compute_pb2.BuildResourceConfigSumma
     for field in ('max_threads', 'max_memory_mb', 'streaming_chunk_size'):
         if message.HasField(field):
             payload[field] = getattr(message, field)
+    return payload
+
+
+def _schema_info_proto(payload: dict[str, object] | None) -> datasource_pb2.SchemaInfo:
+    if not isinstance(payload, dict):
+        return datasource_pb2.SchemaInfo()
+    return cast(datasource_pb2.SchemaInfo, json_format.ParseDict(payload, datasource_pb2.SchemaInfo()))
+
+
+def _schema_info_payload(message: datasource_pb2.SchemaInfo) -> dict[str, object]:
+    columns: list[dict[str, object]] = []
+    for column in message.columns:
+        column_payload: dict[str, object] = {
+            'name': column.name,
+            'dtype': column.dtype,
+            'nullable': column.nullable,
+        }
+        if column.HasField('sample_value'):
+            column_payload['sample_value'] = column.sample_value
+        if column.HasField('description'):
+            column_payload['description'] = column.description
+        columns.append(column_payload)
+
+    payload: dict[str, object] = {}
+    if columns:
+        payload['columns'] = columns
+    if message.HasField('row_count'):
+        payload['row_count'] = message.row_count
+    if message.sheet_names:
+        payload['sheet_names'] = list(message.sheet_names)
     return payload
 
 
@@ -623,7 +655,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 is_hidden=datasource.is_hidden,
             )
             if isinstance(datasource.schema_cache, dict):
-                response.schema_cache.CopyFrom(dict_to_struct(dict(datasource.schema_cache)))
+                response.schema_info.CopyFrom(_schema_info_proto(dict(datasource.schema_cache)))
             return response
         finally:
             session.close()
@@ -703,7 +735,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session = next(session_gen)
         try:
             config = struct_to_dict(request.config)
-            schema_cache = struct_to_dict(request.schema_cache)
+            schema_cache = _schema_info_payload(request.schema_info)
             existing = session.get(DataSource, request.result_id)
             if existing is not None:
                 existing.name = request.name

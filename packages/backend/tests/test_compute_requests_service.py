@@ -9,13 +9,14 @@ from backend_core.domain.compute_requests.models import (
     command_envelope_from_json,
     command_from_payload,
     command_payload,
+    datasource_result_from_payload,
     response_envelope_from_json,
     response_payload,
 )
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
-from dataforge_protocol import compute_pb2, enums_pb2, errors_pb2
+from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2, errors_pb2
 
 
 def _preview_payload() -> dict[str, object]:
@@ -196,6 +197,37 @@ def test_create_preview_request_stores_typed_command_envelope(test_db_session) -
     assert envelope.command.preview.target_step_id == 'source'
     assert envelope.command.preview.analysis_pipeline.analysis_id == 'analysis-1'
     assert envelope.command.preview.analysis_pipeline.tabs[0].datasource.source_type == enums_pb2.DATA_SOURCE_TYPE_FILE
+
+
+def test_datasource_response_uses_typed_schema_info_but_preserves_schema_cache_payload() -> None:
+    payload: dict[str, object] = {
+        'id': 'datasource-1',
+        'name': 'Datasource',
+        'source_type': 'file',
+        'config': {'file_path': 's3://bucket/data.csv'},
+        'schema_cache': {
+            'columns': [{'name': 'id', 'dtype': 'Int64', 'nullable': False}],
+            'row_count': 1,
+        },
+        'created_by': 'import',
+        'is_hidden': False,
+        'created_at': '2026-06-28T00:00:00Z',
+    }
+
+    result = datasource_result_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE, payload)
+
+    assert result.WhichOneof('result') == 'datasource'
+    assert isinstance(result.datasource.schema_info, datasource_pb2.SchemaInfo)
+    assert result.datasource.schema_info.columns[0].name == 'id'
+    envelope = compute_pb2.ComputeResponseEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
+        version=1,
+        correlation_id='request-1',
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+        response=compute_pb2.ComputeResponse(datasource=result),
+    )
+    decoded = response_payload(envelope)
+    assert decoded['schema_cache'] == payload['schema_cache']
 
 
 def test_create_preview_request_converts_ai_provider_token(test_db_session) -> None:

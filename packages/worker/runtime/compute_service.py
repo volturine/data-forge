@@ -858,6 +858,29 @@ def _build_export_result_metadata(
     return result
 
 
+def _schema_cache_payload_from_arrow(arrow_schema: pa.Schema, data: Mapping[str, object]) -> dict[str, object]:
+    raw_schema = data.get("schema")
+    schema_by_name = raw_schema if isinstance(raw_schema, Mapping) else {}
+    columns: list[dict[str, object]] = []
+    for field in arrow_schema:
+        raw_column = schema_by_name.get(field.name)
+        dtype = raw_column.get("dtype") if isinstance(raw_column, Mapping) else raw_column
+        nullable = raw_column.get("nullable") if isinstance(raw_column, Mapping) else None
+        columns.append(
+            {
+                "name": field.name,
+                "dtype": str(dtype if dtype is not None else field.type),
+                "nullable": nullable if isinstance(nullable, bool) else field.nullable,
+            }
+        )
+
+    payload: dict[str, object] = {"columns": columns}
+    row_count = data.get("row_count")
+    if isinstance(row_count, int) and not isinstance(row_count, bool):
+        payload["row_count"] = row_count
+    return payload
+
+
 def _build_engine_run_execution_entries(
     result_data: dict | None,
     *,
@@ -2432,7 +2455,7 @@ def export_data(
         if tab_id:
             iceberg_ds_config["analysis_tab_id"] = str(tab_id)
         iceberg_ds_config = _set_snapshot_metadata(iceberg_ds_config, snapshot_id, snapshot_timestamp_ms)
-        schema_cache = data.get("schema", {})
+        schema_cache = _schema_cache_payload_from_arrow(arrow_table.schema, data)
         target_ds = _upsert_output_datasource(
             session=session,
             result_id=result_id,

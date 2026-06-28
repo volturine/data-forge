@@ -17,7 +17,7 @@ from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
-from backend_grpc.codec import datetime_to_timestamp
+from backend_grpc.codec import datetime_to_timestamp, dict_to_struct
 from backend_grpc.server import WorkerRuntimeServicer
 from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2
 
@@ -271,6 +271,62 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
 
     assert response.result.datasource.id == 'ds-1'
     assert response.result.datasource.name == 'Created'
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_uses_typed_schema_info_for_datasource_metadata(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    datasource_id = str(uuid.uuid4())
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='Typed schema datasource',
+            source_type=DataSourceType.FILE.value,
+            config={'file_path': 's3://bucket/source.csv'},
+            schema_cache={'columns': [{'name': 'id', 'dtype': 'Int64', 'nullable': False}], 'row_count': 1},
+            is_hidden=False,
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    response = await WorkerRuntimeServicer().GetDatasourceMetadata(
+        worker_runtime_pb2.WorkerDatasourceMetadataRequest(namespace='default', datasource_id=datasource_id),
+        context,  # type: ignore[arg-type]
+    )
+
+    assert response.found is True
+    assert response.schema_info.columns[0].name == 'id'
+    assert response.schema_info.row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_upserts_output_datasource_with_typed_schema_info(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    datasource_id = str(uuid.uuid4())
+
+    response = await WorkerRuntimeServicer().UpsertOutputDatasource(
+        worker_runtime_pb2.WorkerUpsertOutputDatasourceRequest(
+            namespace='default',
+            result_id=datasource_id,
+            name='Typed output',
+            source_type=enums_pb2.DATA_SOURCE_TYPE_ANALYSIS,
+            config=dict_to_struct({'metadata_path': 's3://bucket/output'}),
+            schema_info=datasource_pb2.SchemaInfo(
+                columns=[datasource_pb2.ColumnSchema(name='score', dtype='Float64', nullable=True)],
+                row_count=10,
+            ),
+            keep_schema_cache=False,
+        ),
+        context,  # type: ignore[arg-type]
+    )
+
+    datasource = test_db_session.get(DataSource, response.datasource_id)
+    assert datasource is not None
+    assert datasource.schema_cache == {
+        'columns': [{'name': 'score', 'dtype': 'Float64', 'nullable': True}],
+        'row_count': 10,
+    }
 
 
 @pytest.mark.asyncio

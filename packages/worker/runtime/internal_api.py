@@ -256,7 +256,7 @@ class WorkerInternalApiClient:
             name=_optional_str(response, "name"),
             source_type=_optional_proto_enum_name(response, "source_type", enums_pb2.DataSourceType, "DATA_SOURCE_TYPE"),
             config=optional_struct_to_dict(response, "config"),
-            schema_cache=optional_struct_to_dict(response, "schema_cache"),
+            schema_cache=_schema_info_payload(response.schema_info) if response.HasField("schema_info") else None,
             is_hidden=_optional_bool(response, "is_hidden"),
         )
 
@@ -320,7 +320,7 @@ class WorkerInternalApiClient:
             name=name,
             source_type=enum_to_proto_value("DATA_SOURCE_TYPE", source_type),
             config=dict_to_struct(config),
-            schema_cache=dict_to_struct(schema_cache),
+            schema_info=_parse_proto_message(datasource_pb2.SchemaInfo, schema_cache),
             keep_schema_cache=keep_schema_cache,
         )
         if analysis_id is not None:
@@ -888,6 +888,30 @@ def _message_to_payload(value: message.Message) -> dict[str, object]:
     return cast(dict[str, object], tokenized)
 
 
+def _schema_info_payload(value: datasource_pb2.SchemaInfo) -> dict[str, object]:
+    columns: list[dict[str, object]] = []
+    for column in value.columns:
+        column_payload: dict[str, object] = {
+            "name": column.name,
+            "dtype": column.dtype,
+            "nullable": column.nullable,
+        }
+        if column.HasField("sample_value"):
+            column_payload["sample_value"] = column.sample_value
+        if column.HasField("description"):
+            column_payload["description"] = column.description
+        columns.append(column_payload)
+
+    payload: dict[str, object] = {}
+    if columns:
+        payload["columns"] = columns
+    if value.HasField("row_count"):
+        payload["row_count"] = value.row_count
+    if value.sheet_names:
+        payload["sheet_names"] = list(value.sheet_names)
+    return payload
+
+
 def _compute_command_payload(envelope: compute_pb2.ComputeCommandEnvelope) -> dict[str, object]:
     command = envelope.command
     selected = command.WhichOneof("command")
@@ -906,7 +930,13 @@ def _datasource_result_payload(result: datasource_pb2.DatasourceResult) -> dict[
     selected = result.WhichOneof("result")
     if selected is None:
         return {}
-    return _message_to_payload(getattr(result, selected))
+    payload = _message_to_payload(getattr(result, selected))
+    if selected == "schema":
+        return _schema_info_payload(result.schema)
+    if selected == "datasource":
+        payload.pop("schema_info", None)
+        payload["schema_cache"] = _schema_info_payload(result.datasource.schema_info) if result.datasource.HasField("schema_info") else None
+    return payload
 
 
 def _required_event_str(payload: Mapping[str, object], key: str) -> str:
@@ -1119,7 +1149,7 @@ def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, ob
         enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
         enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
     }:
-        result.datasource.CopyFrom(_parse_proto_message(datasource_pb2.DataSourceRecord, payload))
+        result.datasource.CopyFrom(_parse_proto_message(datasource_pb2.DataSourceRecord, _datasource_record_payload_for_proto(payload)))
     elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
         result.schema.CopyFrom(_parse_proto_message(datasource_pb2.SchemaInfo, payload))
     elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
@@ -1129,6 +1159,14 @@ def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, ob
     else:
         raise ValueError(f"Unsupported datasource response kind: {kind}")
     return result
+
+
+def _datasource_record_payload_for_proto(payload: dict[str, object]) -> dict[str, object]:
+    proto_payload = dict(payload)
+    schema_cache = proto_payload.pop("schema_cache", None)
+    if isinstance(schema_cache, Mapping):
+        proto_payload["schema_info"] = dict(schema_cache)
+    return proto_payload
 
 
 def _compute_response(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeResponse:

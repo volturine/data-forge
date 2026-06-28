@@ -573,7 +573,7 @@ def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, ob
         enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
         enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
     }:
-        result.datasource.CopyFrom(_parse_proto_message(datasource_pb2.DataSourceRecord, payload))
+        result.datasource.CopyFrom(_parse_proto_message(datasource_pb2.DataSourceRecord, _datasource_record_payload_for_proto(payload)))
     elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
         result.schema.CopyFrom(_parse_proto_message(datasource_pb2.SchemaInfo, payload))
     elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
@@ -587,6 +587,38 @@ def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, ob
 
 def datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
     return _datasource_result(kind, payload)
+
+
+def _datasource_record_payload_for_proto(payload: dict[str, object]) -> dict[str, object]:
+    proto_payload = dict(payload)
+    schema_cache = proto_payload.pop('schema_cache', None)
+    if isinstance(schema_cache, Mapping):
+        proto_payload['schema_info'] = dict(schema_cache)
+    return proto_payload
+
+
+def _schema_info_payload(message: datasource_pb2.SchemaInfo) -> dict[str, object]:
+    columns: list[dict[str, object]] = []
+    for column in message.columns:
+        column_payload: dict[str, object] = {
+            'name': column.name,
+            'dtype': column.dtype,
+            'nullable': column.nullable,
+        }
+        if column.HasField('sample_value'):
+            column_payload['sample_value'] = column.sample_value
+        if column.HasField('description'):
+            column_payload['description'] = column.description
+        columns.append(column_payload)
+
+    payload: dict[str, object] = {}
+    if columns:
+        payload['columns'] = columns
+    if message.HasField('row_count'):
+        payload['row_count'] = message.row_count
+    if message.sheet_names:
+        payload['sheet_names'] = list(message.sheet_names)
+    return payload
 
 
 def _response_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeResponse:
@@ -698,8 +730,12 @@ def response_payload(envelope: compute_pb2.ComputeResponseEnvelope) -> dict[str,
         if result_field is None:
             return {}
         datasource_payload = _message_to_payload(getattr(result, result_field))
+        if result_field == 'schema':
+            return _schema_info_payload(result.schema)
         if result_field == 'datasource':
-            for nullable_field in ('description', 'schema_cache', 'created_by_analysis_id', 'output_of_tab_id'):
+            datasource_payload.pop('schema_info', None)
+            datasource_payload['schema_cache'] = _schema_info_payload(result.datasource.schema_info) if result.datasource.HasField('schema_info') else None
+            for nullable_field in ('description', 'created_by_analysis_id', 'output_of_tab_id'):
                 datasource_payload.setdefault(nullable_field, None)
         if result_field == 'column_stats':
             datasource_payload.setdefault('count', 0)

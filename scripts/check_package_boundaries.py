@@ -186,6 +186,9 @@ PROTOCOL_FORBIDDEN_TOKENS = {
     'optional google.protobuf.Struct resource_config = 7': 'build-run payloads must use typed BuildResourceConfigSummary messages',
     'google.protobuf.Struct options = 1': 'object-store storage options must use typed ObjectStoreStorageOptions messages',
     'google.protobuf.Struct schema = 2': 'Iceberg schema sync must use typed ArrowSchemaIpc messages',
+    'google.protobuf.Struct schema_cache = 7': 'datasource metadata must use typed SchemaInfo messages',
+    'optional google.protobuf.Struct schema_cache = 6': 'datasource records must use typed SchemaInfo messages',
+    'google.protobuf.Struct schema_cache = 6': 'datasource output upserts must use typed SchemaInfo messages',
     'message JsonResponse': 'worker runtime RPCs must return typed protocol responses, not generic JSON envelopes',
     'returns (JsonResponse)': 'worker runtime RPCs must return typed protocol responses, not generic JSON envelopes',
 }
