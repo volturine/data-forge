@@ -17,9 +17,9 @@ from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
-from backend_grpc.codec import dict_to_struct, struct_to_dict
+from backend_grpc.codec import datetime_to_timestamp
 from backend_grpc.server import WorkerRuntimeServicer
-from dataforge_protocol import common_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2
+from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2
 
 
 class FakeGrpcContext:
@@ -269,8 +269,8 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
         context,  # type: ignore[arg-type]
     )
 
-    assert struct_to_dict(response.response) == {'id': 'ds-1', 'name': 'Created'}
-    assert response.datasource_result.datasource.id == 'ds-1'
+    assert response.result.datasource.id == 'ds-1'
+    assert response.result.datasource.name == 'Created'
 
 
 @pytest.mark.asyncio
@@ -301,7 +301,25 @@ async def test_internal_worker_grpc_persists_build_event(test_db_session: Sessio
     )
 
     response = await WorkerRuntimeServicer().PersistBuildEvent(
-        worker_runtime_pb2.WorkerPersistBuildEventRequest(namespace='default', build_id=build_id, event=dict_to_struct(event.model_dump(mode='json'))),
+        worker_runtime_pb2.WorkerPersistBuildEventRequest(
+            namespace='default',
+            build_id=build_id,
+            build_event=compute_pb2.BuildEvent(
+                namespace='default',
+                context=compute_pb2.BuildEventContext(
+                    build_id=build_id,
+                    analysis_id=analysis_id,
+                    emitted_at=datetime_to_timestamp(event.emitted_at),
+                ),
+                completed=compute_pb2.BuildTerminalEvent(
+                    progress=event.progress,
+                    elapsed_ms=event.elapsed_ms,
+                    total_steps=event.total_steps,
+                    tabs_built=event.tabs_built,
+                    duration_ms=event.duration_ms,
+                ),
+            ),
+        ),
         context,  # type: ignore[arg-type]
     )
 

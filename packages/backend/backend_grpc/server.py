@@ -56,7 +56,15 @@ from backend_grpc.codec import (
     timestamp_to_datetime,
 )
 from backend_grpc.validation import ProtovalidateAioInterceptor
-from dataforge_protocol import common_pb2, enums_pb2, scheduler_runtime_pb2, scheduler_runtime_pb2_grpc, worker_runtime_pb2, worker_runtime_pb2_grpc
+from dataforge_protocol import (
+    common_pb2,
+    compute_pb2,
+    enums_pb2,
+    scheduler_runtime_pb2,
+    scheduler_runtime_pb2_grpc,
+    worker_runtime_pb2,
+    worker_runtime_pb2_grpc,
+)
 from modules.datasource import runtime_service as datasource_runtime_service
 from modules.scheduler import service as scheduler_service
 
@@ -134,6 +142,162 @@ def _optional_bool(message: Any, field: str) -> bool | None:
 
 def _optional_int(message: Any, field: str) -> int | None:
     return getattr(message, field) if message.HasField(field) else None
+
+
+def _build_step_kind_token(message: compute_pb2.BuildStepKind) -> str:
+    match message.WhichOneof('kind'):
+        case 'pipeline':
+            return proto_value_to_enum_name(enums_pb2.StepType, 'STEP_TYPE', message.pipeline)
+        case 'execution_category':
+            return proto_value_to_enum_name(enums_pb2.EngineRunExecutionCategory, 'ENGINE_RUN_EXECUTION_CATEGORY', message.execution_category)
+        case _:
+            raise ValueError('build step event is missing step_kind')
+
+
+def _build_tab_result_payload(message: compute_pb2.BuildTabResult) -> dict[str, object]:
+    payload: dict[str, object] = {
+        'tab_id': message.tab_id,
+        'tab_name': message.tab_name,
+        'status': proto_value_to_enum_name(enums_pb2.BuildTabStatus, 'BUILD_TAB_STATUS', message.status),
+    }
+    for field in ('output_id', 'output_name', 'error'):
+        if message.HasField(field):
+            payload[field] = getattr(message, field)
+    return payload
+
+
+def _build_terminal_event_payload(message: compute_pb2.BuildTerminalEvent) -> dict[str, object]:
+    payload: dict[str, object] = {
+        'progress': message.progress,
+        'elapsed_ms': message.elapsed_ms,
+        'total_steps': message.total_steps,
+        'tabs_built': message.tabs_built,
+        'results': [_build_tab_result_payload(result) for result in message.results],
+        'duration_ms': message.duration_ms,
+    }
+    if message.HasField('error'):
+        payload['error'] = message.error
+    if message.HasField('cancelled_at'):
+        payload['cancelled_at'] = timestamp_to_datetime(message.cancelled_at)
+    if message.HasField('cancelled_by'):
+        payload['cancelled_by'] = message.cancelled_by
+    return payload
+
+
+def _build_event_payload(message: compute_pb2.BuildEvent) -> dict[str, object]:
+    context = message.context
+    payload: dict[str, object] = {
+        'build_id': context.build_id,
+        'analysis_id': context.analysis_id,
+        'emitted_at': timestamp_to_datetime(context.emitted_at),
+    }
+    if context.HasField('sequence'):
+        payload['sequence'] = context.sequence
+    if context.HasField('current_kind'):
+        payload['current_kind'] = proto_value_to_enum_name(enums_pb2.EngineRunKind, 'ENGINE_RUN_KIND', context.current_kind)
+    for field in ('current_datasource_id', 'tab_id', 'tab_name', 'current_output_id', 'current_output_name', 'engine_run_id'):
+        if context.HasField(field):
+            payload[field] = getattr(context, field)
+
+    match message.WhichOneof('event'):
+        case 'plan':
+            payload.update({'type': 'plan', 'optimized_plan': message.plan.optimized_plan, 'unoptimized_plan': message.plan.unoptimized_plan})
+        case 'step_started':
+            payload.update(
+                {
+                    'type': 'step_start',
+                    'build_step_index': message.step_started.build_step_index,
+                    'step_index': message.step_started.step_index,
+                    'step_id': message.step_started.step_id,
+                    'step_name': message.step_started.step_name,
+                    'step_type': _build_step_kind_token(message.step_started.step_kind),
+                    'total_steps': message.step_started.total_steps,
+                }
+            )
+        case 'step_completed':
+            payload.update(
+                {
+                    'type': 'step_complete',
+                    'build_step_index': message.step_completed.build_step_index,
+                    'step_index': message.step_completed.step_index,
+                    'step_id': message.step_completed.step_id,
+                    'step_name': message.step_completed.step_name,
+                    'step_type': _build_step_kind_token(message.step_completed.step_kind),
+                    'duration_ms': message.step_completed.duration_ms,
+                    'total_steps': message.step_completed.total_steps,
+                }
+            )
+            if message.step_completed.HasField('row_count'):
+                payload['row_count'] = message.step_completed.row_count
+        case 'step_failed':
+            payload.update(
+                {
+                    'type': 'step_failed',
+                    'build_step_index': message.step_failed.build_step_index,
+                    'step_index': message.step_failed.step_index,
+                    'step_id': message.step_failed.step_id,
+                    'step_name': message.step_failed.step_name,
+                    'step_type': _build_step_kind_token(message.step_failed.step_kind),
+                    'error': message.step_failed.error,
+                    'total_steps': message.step_failed.total_steps,
+                }
+            )
+        case 'progress':
+            payload.update(
+                {
+                    'type': 'progress',
+                    'progress': message.progress.progress,
+                    'elapsed_ms': message.progress.elapsed_ms,
+                    'total_steps': message.progress.total_steps,
+                }
+            )
+            if message.progress.HasField('estimated_remaining_ms'):
+                payload['estimated_remaining_ms'] = message.progress.estimated_remaining_ms
+            if message.progress.HasField('current_step'):
+                payload['current_step'] = message.progress.current_step
+            if message.progress.HasField('current_step_index'):
+                payload['current_step_index'] = message.progress.current_step_index
+        case 'resources':
+            payload.update(
+                {
+                    'type': 'resources',
+                    'cpu_percent': message.resources.cpu_percent,
+                    'memory_mb': message.resources.memory_mb,
+                    'active_threads': message.resources.active_threads,
+                }
+            )
+            if message.resources.HasField('memory_limit_mb'):
+                payload['memory_limit_mb'] = message.resources.memory_limit_mb
+            if message.resources.HasField('max_threads'):
+                payload['max_threads'] = message.resources.max_threads
+        case 'log':
+            payload.update(
+                {
+                    'type': 'log',
+                    'level': proto_value_to_enum_name(enums_pb2.BuildLogLevel, 'BUILD_LOG_LEVEL', message.log.level),
+                    'message': message.log.message,
+                }
+            )
+            for field in ('step_name', 'step_id'):
+                if message.log.HasField(field):
+                    payload[field] = getattr(message.log, field)
+        case 'completed':
+            payload.update({'type': 'complete', **_build_terminal_event_payload(message.completed)})
+        case 'failed':
+            payload.update({'type': 'failed', **_build_terminal_event_payload(message.failed)})
+        case 'cancelled':
+            payload.update({'type': 'cancelled', **_build_terminal_event_payload(message.cancelled)})
+        case _:
+            raise ValueError('build event is missing typed event payload')
+    return payload
+
+
+def _build_resource_config_payload(message: compute_pb2.BuildResourceConfigSummary) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for field in ('max_threads', 'max_memory_mb', 'streaming_chunk_size'):
+        if message.HasField(field):
+            payload[field] = getattr(message, field)
+    return payload
 
 
 def _response(worker_id: str) -> common_pb2.RuntimeWorkerResponse:
@@ -286,7 +450,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     @_run_async_handler_in_thread
     async def ExecuteDatasourceRequest(
         self, request: worker_runtime_pb2.WorkerExecuteDatasourceRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.JsonResponse:
+    ) -> worker_runtime_pb2.WorkerDatasourceCommandResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
         session = next(session_gen)
@@ -391,19 +555,13 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             else:
                 raise ValueError(f'Unsupported datasource request kind: {compute_request_kind_name(kind)}')
             response_payload = response.model_dump(mode='json')
-            return worker_runtime_pb2.JsonResponse(
-                response=dict_to_struct(response_payload),
-                datasource_result=datasource_result_from_payload(kind, response_payload),
-            )
+            return worker_runtime_pb2.WorkerDatasourceCommandResponse(result=datasource_result_from_payload(kind, response_payload))
         except AppError as exc:
             if exc.error_code != 'DATASOURCE_NOT_FOUND':
                 raise
             logger.warning('Datasource not found for %s: %s', compute_request_kind_name(kind), exc)
             response_payload = {'error': 'datasource_not_found', 'message': str(exc)}
-            return worker_runtime_pb2.JsonResponse(
-                response=dict_to_struct(response_payload),
-                datasource_result=datasource_result_from_payload(kind, response_payload),
-            )
+            return worker_runtime_pb2.WorkerDatasourceCommandResponse(result=datasource_result_from_payload(kind, response_payload))
         finally:
             session.close()
             session_gen.close()
@@ -412,13 +570,16 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     @_run_async_handler_in_thread
     async def ScheduleIngestDatasource(
         self, request: worker_runtime_pb2.WorkerScheduleIngestDatasourceRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.JsonResponse:
+    ) -> worker_runtime_pb2.WorkerScheduleIngestDatasourceResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
         session = next(session_gen)
         try:
             response = datasource_runtime_service.ingest_datasource_for_schedule(session, request.datasource_id)
-            return worker_runtime_pb2.JsonResponse(response=dict_to_struct(response.model_dump(mode='json')))
+            result = datasource_result_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE, response.model_dump(mode='json'))
+            if result.WhichOneof('result') != 'datasource':
+                raise ValueError('schedule ingest must return a datasource result')
+            return worker_runtime_pb2.WorkerScheduleIngestDatasourceResponse(datasource=result.datasource)
         finally:
             session.close()
             session_gen.close()
@@ -792,7 +953,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     async def PersistBuildEvent(
         self, request: worker_runtime_pb2.WorkerPersistBuildEventRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerPersistBuildEventResponse:
-        event = compute_schemas.BuildEventAdapter.validate_python(struct_to_dict(request.event))
+        event = compute_schemas.BuildEventAdapter.validate_python(_build_event_payload(request.build_event))
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
         session = next(session_gen)
@@ -802,7 +963,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 namespace=request.namespace,
                 build_id=request.build_id,
                 event=event,
-                resource_config_json=struct_field_to_dict(request, 'resource_config'),
+                resource_config_json=_build_resource_config_payload(request.build_resource_config) if request.HasField('build_resource_config') else None,
             )
         finally:
             session.close()

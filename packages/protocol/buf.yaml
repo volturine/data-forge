@@ -15,3 +15,5 @@ lint:
 breaking:
   use:
     - WIRE_JSON
+  except:
+    - RPC_SAME_RESPONSE_TYPE

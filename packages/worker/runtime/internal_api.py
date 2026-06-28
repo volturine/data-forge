@@ -230,9 +230,7 @@ class WorkerInternalApiClient:
                 metadata=self._metadata(),
             )
         )
-        if response.HasField("datasource_result"):
-            return _datasource_result_payload(response.datasource_result)
-        return struct_to_dict(response.response)
+        return _datasource_result_payload(response.result)
 
     def schedule_ingest_datasource(self, *, namespace: str, datasource_id: str) -> dict[str, object]:
         response = self._call(
@@ -242,7 +240,7 @@ class WorkerInternalApiClient:
                 metadata=self._metadata(),
             )
         )
-        return struct_to_dict(response.response)
+        return _message_to_payload(response.datasource)
 
     def datasource_metadata(self, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
         response = self._call(
@@ -513,9 +511,9 @@ class WorkerInternalApiClient:
         event: dict[str, object],
         resource_config_json: dict[str, object] | None = None,
     ) -> int | None:
-        request = worker_runtime_pb2.WorkerPersistBuildEventRequest(namespace=namespace, build_id=build_id, event=dict_to_struct(event))
+        request = worker_runtime_pb2.WorkerPersistBuildEventRequest(namespace=namespace, build_id=build_id, build_event=_build_event_proto(namespace, event))
         if resource_config_json is not None:
-            request.resource_config.CopyFrom(dict_to_struct(resource_config_json))
+            request.build_resource_config.CopyFrom(_parse_proto_message(compute_pb2.BuildResourceConfigSummary, resource_config_json))
         response = self._call(lambda: self._stub.PersistBuildEvent(request, timeout=self._timeout_seconds, metadata=self._metadata()))
         return int(response.sequence) if response.HasField("sequence") else None
 
@@ -778,6 +776,16 @@ def _enum_prefix(enum_descriptor: Any) -> str:
     return "".join(chars)
 
 
+def _enum_number_from_token(enum_descriptor: Any, value: object, *, field_name: str) -> Any:
+    enum_name = _enum_name_from_token(enum_descriptor, value)
+    if not isinstance(enum_name, str):
+        raise ValueError(f"{field_name} must be a string enum token")
+    try:
+        return cast(int, enum_descriptor.values_by_name[enum_name].number)
+    except KeyError as exc:
+        raise ValueError(f"{field_name} is invalid") from exc
+
+
 def _enum_token(enum_descriptor: Any, value: int) -> str:
     value_descriptor = enum_descriptor.values_by_number[value]
     options = value_descriptor.GetOptions()
@@ -899,6 +907,206 @@ def _datasource_result_payload(result: datasource_pb2.DatasourceResult) -> dict[
     if selected is None:
         return {}
     return _message_to_payload(getattr(result, selected))
+
+
+def _required_event_str(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"build event {key} is required")
+    return value
+
+
+def _optional_event_str(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"build event {key} must be a string")
+    return value
+
+
+def _optional_event_int(payload: Mapping[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"build event {key} must be an integer")
+    return value
+
+
+def _required_event_int(payload: Mapping[str, object], key: str) -> int:
+    value = _optional_event_int(payload, key)
+    if value is None:
+        raise ValueError(f"build event {key} is required")
+    return value
+
+
+def _optional_event_float(payload: Mapping[str, object], key: str) -> float | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"build event {key} must be numeric")
+    return float(value)
+
+
+def _required_event_float(payload: Mapping[str, object], key: str) -> float:
+    value = _optional_event_float(payload, key)
+    if value is None:
+        raise ValueError(f"build event {key} is required")
+    return value
+
+
+def _event_datetime(payload: Mapping[str, object], key: str) -> datetime:
+    value = payload.get(key)
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value.strip():
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    raise ValueError(f"build event {key} is required")
+
+
+def _build_step_kind_proto(step_type: object) -> compute_pb2.BuildStepKind:
+    if not isinstance(step_type, str) or not step_type.strip():
+        raise ValueError("build step event step_type is required")
+    message = compute_pb2.BuildStepKind()
+    try:
+        message.pipeline = _enum_number_from_token(enums_pb2.StepType.DESCRIPTOR, step_type, field_name="step_type")
+        return message
+    except ValueError:
+        category = _enum_number_from_token(enums_pb2.EngineRunExecutionCategory.DESCRIPTOR, step_type, field_name="step_type")
+        if category not in {enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_READ, enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_WRITE}:
+            raise ValueError(f"Unsupported build execution category for protocol step event: {step_type!r}") from None
+        message.execution_category = category
+        return message
+
+
+def _build_tab_result_proto(payload: Mapping[str, object]) -> compute_pb2.BuildTabResult:
+    message = compute_pb2.BuildTabResult(
+        tab_id=_required_event_str(payload, "tab_id"),
+        tab_name=_required_event_str(payload, "tab_name"),
+    )
+    message.status = _enum_number_from_token(enums_pb2.BuildTabStatus.DESCRIPTOR, payload.get("status"), field_name="status")
+    for field in ("output_id", "output_name", "error"):
+        value = _optional_event_str(payload, field)
+        if value is not None:
+            setattr(message, field, value)
+    return message
+
+
+def _build_terminal_event_proto(payload: Mapping[str, object]) -> compute_pb2.BuildTerminalEvent:
+    message = compute_pb2.BuildTerminalEvent(
+        progress=_required_event_float(payload, "progress"),
+        elapsed_ms=_required_event_int(payload, "elapsed_ms"),
+        total_steps=_required_event_int(payload, "total_steps"),
+        tabs_built=_required_event_int(payload, "tabs_built"),
+        duration_ms=_required_event_int(payload, "duration_ms"),
+    )
+    results = payload.get("results")
+    if not isinstance(results, list):
+        raise ValueError("build terminal event results must be a list")
+    for result in results:
+        if not isinstance(result, Mapping):
+            raise ValueError("build terminal event results must be objects")
+        message.results.append(_build_tab_result_proto(result))
+    error = _optional_event_str(payload, "error")
+    if error is not None:
+        message.error = error
+    if payload.get("cancelled_at") is not None:
+        message.cancelled_at.CopyFrom(datetime_to_timestamp(_event_datetime(payload, "cancelled_at")))
+    cancelled_by = _optional_event_str(payload, "cancelled_by")
+    if cancelled_by is not None:
+        message.cancelled_by = cancelled_by
+    return message
+
+
+def _build_event_proto(namespace: str, payload: Mapping[str, object]) -> compute_pb2.BuildEvent:
+    context = compute_pb2.BuildEventContext(
+        build_id=_required_event_str(payload, "build_id"),
+        analysis_id=_required_event_str(payload, "analysis_id"),
+        emitted_at=datetime_to_timestamp(_event_datetime(payload, "emitted_at")),
+    )
+    sequence = _optional_event_int(payload, "sequence")
+    if sequence is not None:
+        context.sequence = sequence
+    current_kind = payload.get("current_kind")
+    if current_kind is not None:
+        context.current_kind = _enum_number_from_token(enums_pb2.EngineRunKind.DESCRIPTOR, current_kind, field_name="current_kind")
+    for field in ("current_datasource_id", "tab_id", "tab_name", "current_output_id", "current_output_name", "engine_run_id"):
+        value = _optional_event_str(payload, field)
+        if value is not None:
+            setattr(context, field, value)
+
+    message = compute_pb2.BuildEvent(context=context, namespace=namespace)
+    match _required_event_str(payload, "type"):
+        case "plan":
+            message.plan.optimized_plan = _required_event_str(payload, "optimized_plan")
+            message.plan.unoptimized_plan = _required_event_str(payload, "unoptimized_plan")
+        case "step_start":
+            message.step_started.build_step_index = _required_event_int(payload, "build_step_index")
+            message.step_started.step_index = _required_event_int(payload, "step_index")
+            message.step_started.step_id = _required_event_str(payload, "step_id")
+            message.step_started.step_name = _required_event_str(payload, "step_name")
+            message.step_started.total_steps = _required_event_int(payload, "total_steps")
+            message.step_started.step_kind.CopyFrom(_build_step_kind_proto(payload.get("step_type")))
+        case "step_complete":
+            message.step_completed.build_step_index = _required_event_int(payload, "build_step_index")
+            message.step_completed.step_index = _required_event_int(payload, "step_index")
+            message.step_completed.step_id = _required_event_str(payload, "step_id")
+            message.step_completed.step_name = _required_event_str(payload, "step_name")
+            message.step_completed.duration_ms = _required_event_int(payload, "duration_ms")
+            row_count = _optional_event_int(payload, "row_count")
+            if row_count is not None:
+                message.step_completed.row_count = row_count
+            message.step_completed.total_steps = _required_event_int(payload, "total_steps")
+            message.step_completed.step_kind.CopyFrom(_build_step_kind_proto(payload.get("step_type")))
+        case "step_failed":
+            message.step_failed.build_step_index = _required_event_int(payload, "build_step_index")
+            message.step_failed.step_index = _required_event_int(payload, "step_index")
+            message.step_failed.step_id = _required_event_str(payload, "step_id")
+            message.step_failed.step_name = _required_event_str(payload, "step_name")
+            message.step_failed.error = _required_event_str(payload, "error")
+            message.step_failed.total_steps = _required_event_int(payload, "total_steps")
+            message.step_failed.step_kind.CopyFrom(_build_step_kind_proto(payload.get("step_type")))
+        case "progress":
+            message.progress.progress = _required_event_float(payload, "progress")
+            message.progress.elapsed_ms = _required_event_int(payload, "elapsed_ms")
+            estimated_remaining_ms = _optional_event_int(payload, "estimated_remaining_ms")
+            if estimated_remaining_ms is not None:
+                message.progress.estimated_remaining_ms = estimated_remaining_ms
+            current_step = _optional_event_str(payload, "current_step")
+            if current_step is not None:
+                message.progress.current_step = current_step
+            current_step_index = _optional_event_int(payload, "current_step_index")
+            if current_step_index is not None:
+                message.progress.current_step_index = current_step_index
+            message.progress.total_steps = _required_event_int(payload, "total_steps")
+        case "resources":
+            message.resources.cpu_percent = _required_event_float(payload, "cpu_percent")
+            message.resources.memory_mb = _required_event_float(payload, "memory_mb")
+            memory_limit_mb = _optional_event_float(payload, "memory_limit_mb")
+            if memory_limit_mb is not None:
+                message.resources.memory_limit_mb = memory_limit_mb
+            message.resources.active_threads = _required_event_int(payload, "active_threads")
+            max_threads = _optional_event_int(payload, "max_threads")
+            if max_threads is not None:
+                message.resources.max_threads = max_threads
+        case "log":
+            message.log.level = _enum_number_from_token(enums_pb2.BuildLogLevel.DESCRIPTOR, payload.get("level"), field_name="level")
+            message.log.message = _required_event_str(payload, "message")
+            for field in ("step_name", "step_id"):
+                value = _optional_event_str(payload, field)
+                if value is not None:
+                    setattr(message.log, field, value)
+        case "complete":
+            message.completed.CopyFrom(_build_terminal_event_proto(payload))
+        case "failed":
+            message.failed.CopyFrom(_build_terminal_event_proto(payload))
+        case "cancelled":
+            message.cancelled.CopyFrom(_build_terminal_event_proto(payload))
+        case event_type:
+            raise ValueError(f"Unsupported build event type: {event_type!r}")
+    return message
 
 
 def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:

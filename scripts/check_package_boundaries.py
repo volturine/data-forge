@@ -180,6 +180,19 @@ PROTOCOL_FORBIDDEN_TOKENS = {
     'google.protobuf.Struct raw': 'runtime events must use typed protocol event payloads',
     'string step_type = 5': 'build stream events must use generated BuildStepKind, not legacy step_type strings',
     'google.protobuf.Struct payload = 5': 'compute envelopes must not carry deprecated generic payload fields',
+    'google.protobuf.Struct event = 3': 'build-event RPCs must use typed BuildEvent messages, not generic Struct payloads',
+    'optional google.protobuf.Struct resource_config = 4': 'build-event RPCs must use typed BuildResourceConfigSummary messages',
+    'message JsonResponse': 'worker runtime RPCs must return typed protocol responses, not generic JSON envelopes',
+    'returns (JsonResponse)': 'worker runtime RPCs must return typed protocol responses, not generic JSON envelopes',
+}
+WORKER_RUNTIME_RPC_FORBIDDEN_TOKENS = {
+    'return struct_to_dict(response.response)': 'worker runtime RPC clients must not fall back to generic JSON response fields',
+    'response=dict_to_struct(response_payload)': 'worker runtime RPC servers must return typed protocol responses',
+    'response=dict_to_struct(response.model_dump': 'worker runtime RPC servers must return typed protocol responses',
+    'struct_to_dict(request.event)': 'worker runtime RPC servers must decode typed BuildEvent messages',
+    "struct_field_to_dict(request, 'resource_config')": 'worker runtime RPC servers must decode typed BuildResourceConfigSummary messages',
+    'event=dict_to_struct(event)': 'worker runtime RPC clients must send typed BuildEvent messages',
+    'request.resource_config.CopyFrom(dict_to_struct': 'worker runtime RPC clients must send typed BuildResourceConfigSummary messages',
 }
 BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
     'from backend_core.domain.enums import DataForgeStrEnum': 'backend operation config enums must be generated-protocol-backed',
@@ -437,6 +450,19 @@ def main() -> int:
         for token, reason in COMPUTE_ENVELOPE_REQUIRED_TOKENS.items():
             if token not in content:
                 errors.append(f'{rel_path} is missing {reason}: {token}')
+
+    for rel_path in (
+        Path('packages/backend/backend_grpc/server.py'),
+        Path('packages/worker/runtime/internal_api.py'),
+    ):
+        path = ROOT / rel_path
+        if not path.exists():
+            errors.append(f'worker runtime RPC implementation is missing: {rel_path}')
+            continue
+        content = path.read_text()
+        for token, reason in WORKER_RUNTIME_RPC_FORBIDDEN_TOKENS.items():
+            if token in content:
+                errors.append(f'{rel_path} contains {reason}: {token}')
 
     for rel_path in PROTOCOL_BACKED_ENUM_FILES:
         path = ROOT / rel_path

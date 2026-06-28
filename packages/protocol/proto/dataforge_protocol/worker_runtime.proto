@@ -21,8 +21,8 @@ service WorkerRuntimeService {
   rpc FailComputeRequest(WorkerFailComputeRequestRequest) returns (RuntimeWorkerResponse);
   rpc ReleaseComputeRequests(RuntimeWorkerRequest) returns (CountResponse);
 
-  rpc ExecuteDatasourceRequest(WorkerExecuteDatasourceRequest) returns (JsonResponse);
-  rpc ScheduleIngestDatasource(WorkerScheduleIngestDatasourceRequest) returns (JsonResponse);
+  rpc ExecuteDatasourceRequest(WorkerExecuteDatasourceRequest) returns (WorkerDatasourceCommandResponse);
+  rpc ScheduleIngestDatasource(WorkerScheduleIngestDatasourceRequest) returns (WorkerScheduleIngestDatasourceResponse);
   rpc GetDatasourceMetadata(WorkerDatasourceMetadataRequest) returns (WorkerDatasourceMetadataResponse);
   rpc GetUdfCodes(WorkerUdfCodesRequest) returns (WorkerUdfCodesResponse);
   rpc GetAnalysisMetadata(WorkerAnalysisMetadataRequest) returns (WorkerAnalysisMetadataResponse);
@@ -131,9 +131,12 @@ message WorkerScheduleIngestDatasourceRequest {
   string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
-message JsonResponse {
-  google.protobuf.Struct response = 1;
-  optional DatasourceResult datasource_result = 2;
+message WorkerDatasourceCommandResponse {
+  DatasourceResult result = 1 [(buf.validate.field).required = true];
+}
+
+message WorkerScheduleIngestDatasourceResponse {
+  DataSourceRecord datasource = 1 [(buf.validate.field).required = true];
 }
 
 message WorkerDatasourceMetadataRequest {
@@ -299,10 +302,13 @@ message WorkerNamespacesResponse {
 }
 
 message WorkerPersistBuildEventRequest {
+  reserved 3, 4;
+  reserved "event", "resource_config";
+
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string build_id = 2 [(buf.validate.field).string.min_len = 1];
-  google.protobuf.Struct event = 3;
-  optional google.protobuf.Struct resource_config = 4;
+  BuildEvent build_event = 5 [(buf.validate.field).required = true];
+  optional BuildResourceConfigSummary build_resource_config = 6;
 }
 
 message WorkerPersistBuildEventResponse {
