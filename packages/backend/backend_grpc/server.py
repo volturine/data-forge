@@ -300,6 +300,24 @@ def _build_resource_config_payload(message: compute_pb2.BuildResourceConfigSumma
     return payload
 
 
+def _build_starter_proto(payload: dict[str, object]) -> compute_pb2.BuildStarter:
+    message = compute_pb2.BuildStarter()
+    for field in ('user_id', 'display_name', 'email', 'triggered_by'):
+        value = payload.get(field)
+        if isinstance(value, str):
+            setattr(message, field, value)
+    return message
+
+
+def _build_resource_config_proto(payload: dict[str, object]) -> compute_pb2.BuildResourceConfigSummary:
+    message = compute_pb2.BuildResourceConfigSummary()
+    for field in ('max_threads', 'max_memory_mb', 'streaming_chunk_size'):
+        value = payload.get(field)
+        if isinstance(value, int) and not isinstance(value, bool):
+            setattr(message, field, value)
+    return message
+
+
 def _response(worker_id: str) -> common_pb2.RuntimeWorkerResponse:
     return common_pb2.RuntimeWorkerResponse(worker_id=worker_id)
 
@@ -991,7 +1009,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 analysis_id=run.analysis_id,
                 analysis_name=run.analysis_name,
                 request=dict_to_struct(dict(run.request_json)),
-                starter=dict_to_struct(dict(run.starter_json)),
+                build_starter=_build_starter_proto(dict(run.starter_json)),
                 current_datasource_id=run.current_datasource_id,
                 current_tab_id=run.current_tab_id,
                 current_tab_name=run.current_tab_name,
@@ -1003,7 +1021,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 payload.current_kind = _proto_value('ENGINE_RUN_KIND', run.current_kind)
             payload.started_at.CopyFrom(datetime_to_timestamp(run.started_at))
             if isinstance(run.resource_config_json, dict):
-                payload.resource_config.CopyFrom(dict_to_struct(dict(run.resource_config_json)))
+                payload.build_resource_config.CopyFrom(_build_resource_config_proto(dict(run.resource_config_json)))
             return worker_runtime_pb2.WorkerStartBuildRunResponse(run=payload)
         finally:
             session.close()

@@ -182,6 +182,8 @@ PROTOCOL_FORBIDDEN_TOKENS = {
     'google.protobuf.Struct payload = 5': 'compute envelopes must not carry deprecated generic payload fields',
     'google.protobuf.Struct event = 3': 'build-event RPCs must use typed BuildEvent messages, not generic Struct payloads',
     'optional google.protobuf.Struct resource_config = 4': 'build-event RPCs must use typed BuildResourceConfigSummary messages',
+    'google.protobuf.Struct starter = 6': 'build-run payloads must use typed BuildStarter messages',
+    'optional google.protobuf.Struct resource_config = 7': 'build-run payloads must use typed BuildResourceConfigSummary messages',
     'message JsonResponse': 'worker runtime RPCs must return typed protocol responses, not generic JSON envelopes',
     'returns (JsonResponse)': 'worker runtime RPCs must return typed protocol responses, not generic JSON envelopes',
 }
@@ -193,6 +195,10 @@ WORKER_RUNTIME_RPC_FORBIDDEN_TOKENS = {
     "struct_field_to_dict(request, 'resource_config')": 'worker runtime RPC servers must decode typed BuildResourceConfigSummary messages',
     'event=dict_to_struct(event)': 'worker runtime RPC clients must send typed BuildEvent messages',
     'request.resource_config.CopyFrom(dict_to_struct': 'worker runtime RPC clients must send typed BuildResourceConfigSummary messages',
+    'starter=dict_to_struct': 'worker runtime RPC servers must return typed BuildStarter messages',
+    'payload.resource_config.CopyFrom(dict_to_struct': 'worker runtime RPC servers must return typed BuildResourceConfigSummary messages',
+    'starter_json=struct_to_dict(run.starter)': 'worker runtime RPC clients must decode typed BuildStarter messages',
+    'optional_struct_to_dict(run, "resource_config")': 'worker runtime RPC clients must decode typed BuildResourceConfigSummary messages',
 }
 BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
     'from backend_core.domain.enums import DataForgeStrEnum': 'backend operation config enums must be generated-protocol-backed',

@@ -316,13 +316,14 @@ message WorkerPersistBuildEventResponse {
 }
 
 message WorkerBuildRunPayload {
+  reserved 6, 7;
+  reserved "starter", "resource_config";
+
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string analysis_id = 3 [(buf.validate.field).string.min_len = 1];
   string analysis_name = 4 [(buf.validate.field).string.min_len = 1];
   google.protobuf.Struct request = 5;
-  google.protobuf.Struct starter = 6;
-  optional google.protobuf.Struct resource_config = 7;
   optional EngineRunKind current_kind = 8 [(buf.validate.field).enum.defined_only = true];
   optional string current_datasource_id = 9 [(buf.validate.field).string.min_len = 1];
   optional string current_tab_id = 10 [(buf.validate.field).string.min_len = 1];
@@ -331,6 +332,8 @@ message WorkerBuildRunPayload {
   optional string current_output_name = 13 [(buf.validate.field).string.min_len = 1];
   google.protobuf.Timestamp started_at = 14;
   int32 total_tabs = 15 [(buf.validate.field).int32.gte = 1];
+  BuildStarter build_starter = 16 [(buf.validate.field).required = true];
+  optional BuildResourceConfigSummary build_resource_config = 17;
 }
 
 message WorkerStartBuildRunRequest {

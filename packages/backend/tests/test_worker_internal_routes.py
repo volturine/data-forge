@@ -342,6 +342,7 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
         analysis_name='Start gRPC boundary test',
         request_json={'analysis_pipeline': {'analysis_id': analysis_id, 'tabs': []}, 'tab_id': 'tab-1'},
         starter_json={'triggered_by': 'test'},
+        resource_config_json={'max_threads': 4, 'max_memory_mb': 1024, 'streaming_chunk_size': 500},
         status=BuildRunStatus.QUEUED,
         current_kind=EngineRunKind.BUILD.value,
         created_at=datetime.now(UTC),
@@ -356,6 +357,10 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
     assert response.run.id == build_id
     assert response.run.analysis_id == analysis_id
     assert response.run.current_kind == enums_pb2.ENGINE_RUN_KIND_BUILD
+    assert response.run.build_starter.triggered_by == 'test'
+    assert response.run.build_resource_config.max_threads == 4
+    assert response.run.build_resource_config.max_memory_mb == 1024
+    assert response.run.build_resource_config.streaming_chunk_size == 500
     run = build_runs_service.get_build_run(test_db_session, build_id)
     assert run is not None
     assert run.status == BuildRunStatus.RUNNING
