@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import base64
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from uuid import UUID
 
 import pyarrow as pa  # type: ignore[import-untyped]
 
+from dataforge_protocol import iceberg_pb2
 from worker_grpc.codec import dict_to_struct, struct_to_dict
-from worker_grpc.data_plane_server import _arrow_schema_from_payload
+from worker_grpc.data_plane_server import _arrow_schema_from_proto
 
 
 def test_worker_grpc_json_payload_normalizes_json_boundary_values() -> None:
@@ -44,14 +44,7 @@ def test_worker_grpc_json_payload_normalizes_json_boundary_values() -> None:
 def test_worker_grpc_arrow_schema_payload_round_trips() -> None:
     schema = pa.schema([pa.field("id", pa.int64()), pa.field("name", pa.string())])
     encoded = schema.serialize().to_pybytes()
-    payload = struct_to_dict(
-        dict_to_struct(
-            {
-                "arrow_schema_ipc_base64": base64.b64encode(encoded).decode("ascii"),
-            }
-        )
-    )
 
-    decoded = _arrow_schema_from_payload(payload)
+    decoded = _arrow_schema_from_proto(iceberg_pb2.ArrowSchemaIpc(payload=encoded))
 
     assert decoded == schema

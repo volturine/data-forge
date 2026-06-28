@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import threading
 from datetime import UTC, datetime
@@ -15,12 +14,37 @@ from pyiceberg.table import StaticTable
 from dataforge_protocol import common_pb2, iceberg_pb2, iceberg_pb2_grpc, object_store_pb2, object_store_pb2_grpc
 from runtime import compute_service, iceberg_metadata, iceberg_snapshot_reader, object_store
 from runtime.config import settings
-from worker_grpc.codec import dict_to_struct, struct_to_dict
+from worker_grpc.codec import dict_to_struct
 from worker_grpc.validation import ProtovalidateAioInterceptor
 
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"
 _MAX_DATA_PLANE_MESSAGE_BYTES = 128 * 1024 * 1024
+
+
+def _object_store_storage_options_proto(payload: dict[str, object]) -> object_store_pb2.ObjectStoreStorageOptions:
+    return object_store_pb2.ObjectStoreStorageOptions(
+        endpoint_url=_required_str(payload, "s3.endpoint"),
+        access_key_id=_required_str(payload, "s3.access-key-id"),
+        secret_access_key=_required_str(payload, "s3.secret-access-key"),
+        region=_required_str(payload, "s3.region"),
+        force_virtual_addressing=_required_bool(payload, "s3.force-virtual-addressing"),
+        py_io_impl=_required_str(payload, "py-io-impl"),
+    )
+
+
+def _required_str(payload: dict[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"object storage option {key} must be a non-empty string")
+    return value
+
+
+def _required_bool(payload: dict[str, object], key: str) -> bool:
+    value = payload.get(key)
+    if not isinstance(value, bool):
+        raise ValueError(f"object storage option {key} must be a boolean")
+    return value
 
 
 class ThreadedDataPlaneServer:
@@ -61,7 +85,9 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
     ) -> object_store_pb2.ObjectStoreStorageOptionsResponse:
         del request
         await _require_internal_token(context)
-        return object_store_pb2.ObjectStoreStorageOptionsResponse(options=dict_to_struct(object_store.object_store_storage_options()))
+        return object_store_pb2.ObjectStoreStorageOptionsResponse(
+            storage_options=_object_store_storage_options_proto(object_store.object_store_storage_options())
+        )
 
     async def UploadBytes(self, request: object_store_pb2.ObjectStoreBytes, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreUrl:
         await _require_internal_token(context)
@@ -144,7 +170,7 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
     async def SyncSchema(self, request: iceberg_pb2.IcebergSchemaSyncRequest, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
         await _require_internal_token(context)
         try:
-            schema = _arrow_schema_from_payload(struct_to_dict(request.schema))
+            schema = _arrow_schema_from_proto(request.arrow_schema)
         except (TypeError, ValueError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
         table = await asyncio.to_thread(
@@ -211,17 +237,15 @@ def _timestamp_from_ms(timestamp_ms: int) -> Any:
     return stamp
 
 
-def _arrow_schema_from_payload(payload: dict[str, object]) -> pa.Schema:
-    encoded = payload.get("arrow_schema_ipc_base64")
-    if not isinstance(encoded, str) or not encoded:
-        raise ValueError("schema.arrow_schema_ipc_base64 is required")
+def _arrow_schema_from_proto(payload: iceberg_pb2.ArrowSchemaIpc) -> pa.Schema:
+    if not payload.payload:
+        raise ValueError("arrow_schema.payload is required")
     try:
-        data = base64.b64decode(encoded, validate=True)
-        schema = pa.ipc.read_schema(pa.BufferReader(data))
+        schema = pa.ipc.read_schema(pa.BufferReader(bytes(payload.payload)))
     except Exception as exc:
-        raise ValueError("schema.arrow_schema_ipc_base64 must contain a serialized Arrow schema") from exc
+        raise ValueError("arrow_schema.payload must contain a serialized Arrow schema") from exc
     if not isinstance(schema, pa.Schema):
-        raise TypeError("schema.arrow_schema_ipc_base64 did not decode to a pyarrow.Schema")
+        raise TypeError("arrow_schema.payload did not decode to a pyarrow.Schema")
     return schema
 
 

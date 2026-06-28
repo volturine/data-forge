@@ -7,7 +7,7 @@ from typing import TypeVar, cast
 import grpc
 
 from backend_core.config import settings
-from backend_grpc.codec import dict_to_struct, struct_to_dict
+from backend_grpc.codec import struct_to_dict
 from dataforge_protocol import common_pb2, iceberg_pb2, iceberg_pb2_grpc, object_store_pb2, object_store_pb2_grpc
 
 _TOKEN_METADATA_KEY = 'x-internal-token'
@@ -66,7 +66,7 @@ class WorkerDataPlaneClient:
 
     def read_object_store_storage_options(self) -> dict[str, object]:
         response = self._call(lambda: self._object_store.StorageOptions(common_pb2.EmptyRequest(), timeout=self._timeout_seconds, metadata=self._metadata()))
-        return struct_to_dict(response.options)
+        return _object_store_storage_options_payload(response.storage_options)
 
     def upload_object_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
         request = object_store_pb2.ObjectStoreBytes(target=object_store_pb2.ObjectStoreUrl(url=target_url), data=data)
@@ -162,7 +162,7 @@ class WorkerDataPlaneClient:
         return cast(list[dict[str, object]], rows) if isinstance(rows, list) else []
 
     def sync_table_schema(self, *, metadata_path: str, schema_payload: dict[str, object]) -> None:
-        request = iceberg_pb2.IcebergSchemaSyncRequest(metadata_path=metadata_path, schema=dict_to_struct(schema_payload))
+        request = iceberg_pb2.IcebergSchemaSyncRequest(metadata_path=metadata_path, arrow_schema=_arrow_schema_proto(schema_payload))
         self._call(lambda: self._iceberg.SyncSchema(request, timeout=self._timeout_seconds, metadata=self._metadata()))
 
     def list_snapshots(self, *, namespace: str, datasource_id: str, branch: str | None = None) -> IcebergSnapshots:
@@ -209,3 +209,27 @@ class WorkerDataPlaneClient:
 
 def client_from_settings() -> WorkerDataPlaneClient:
     return WorkerDataPlaneClient()
+
+
+def _object_store_storage_options_payload(options: object_store_pb2.ObjectStoreStorageOptions) -> dict[str, object]:
+    return {
+        's3.endpoint': options.endpoint_url,
+        's3.access-key-id': options.access_key_id,
+        's3.secret-access-key': options.secret_access_key,
+        's3.region': options.region,
+        's3.force-virtual-addressing': options.force_virtual_addressing,
+        'py-io-impl': options.py_io_impl,
+    }
+
+
+def _arrow_schema_proto(payload: dict[str, object]) -> iceberg_pb2.ArrowSchemaIpc:
+    encoded = payload.get('arrow_schema_ipc_base64')
+    if not isinstance(encoded, str) or not encoded:
+        raise ValueError('schema.arrow_schema_ipc_base64 is required')
+    import base64
+
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except ValueError as exc:
+        raise ValueError('schema.arrow_schema_ipc_base64 must contain base64-encoded Arrow schema IPC') from exc
+    return iceberg_pb2.ArrowSchemaIpc(payload=data)

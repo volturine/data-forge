@@ -4,7 +4,6 @@ package dataforge.runtime;
 
 import "buf/validate/validate.proto";
 import "dataforge_protocol/common.proto";
-import "google/protobuf/struct.proto";
 
 message ObjectStoreUrl {
   string url = 1 [(buf.validate.field).string.pattern = "^s3://[^/]+/.+$"];
@@ -20,8 +19,20 @@ message ObjectStoreJoinRequest {
   repeated string parts = 2 [(buf.validate.field).repeated.min_items = 1];
 }
 
+message ObjectStoreStorageOptions {
+  string endpoint_url = 1 [(buf.validate.field).string.uri = true];
+  string access_key_id = 2 [(buf.validate.field).string.min_len = 1];
+  string secret_access_key = 3 [(buf.validate.field).string.min_len = 1];
+  string region = 4 [(buf.validate.field).string.min_len = 1];
+  bool force_virtual_addressing = 5;
+  string py_io_impl = 6 [(buf.validate.field).string.min_len = 1];
+}
+
 message ObjectStoreStorageOptionsResponse {
-  google.protobuf.Struct options = 1;
+  reserved 1;
+  reserved "options";
+
+  ObjectStoreStorageOptions storage_options = 2 [(buf.validate.field).required = true];
 }
 
 message ObjectStoreBytes {

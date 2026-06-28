@@ -14,9 +14,16 @@ message IcebergTableRef {
   optional string branch = 4 [(buf.validate.field).string.min_len = 1];
 }
 
+message ArrowSchemaIpc {
+  bytes payload = 1 [(buf.validate.field).bytes.min_len = 1];
+}
+
 message IcebergSchemaSyncRequest {
+  reserved 2;
+  reserved "schema";
+
   string metadata_path = 1 [(buf.validate.field).string.min_len = 1];
-  google.protobuf.Struct schema = 2;
+  ArrowSchemaIpc arrow_schema = 3 [(buf.validate.field).required = true];
 }
 
 message IcebergMetadataPathResponse {
