@@ -14,6 +14,7 @@ import type {
 	BuildResourceSnapshotJson as ProtocolBuildResourceSnapshotJson,
 	BuildSnapshotMessageJson as ProtocolBuildSnapshotMessageJson,
 	BuildStarterJson as ProtocolBuildStarterJson,
+	BuildStepKindJson as ProtocolBuildStepKindJson,
 	BuildStepSnapshotJson as ProtocolBuildStepSnapshotJson,
 	BuildTabResultJson as ProtocolBuildTabResultJson,
 	BuildWebsocketErrorMessageJson as ProtocolBuildWebsocketErrorMessageJson
@@ -38,6 +39,10 @@ type StructHttpField<T, K extends keyof T> =
 type OptionalStructHttpField<T, K extends keyof T> = StructHttpField<T, K> | null;
 type Int64HttpNumber<T, K extends keyof T> = Field<T, K> extends string ? number : never;
 type OptionalInt64HttpNumber<T, K extends keyof T> = Int64HttpNumber<T, K> | null;
+type BuildStepTypeField =
+	Field<ProtocolBuildStepSnapshotJson, 'stepKind'> extends ProtocolBuildStepKindJson
+		? string
+		: never;
 
 export interface BuildPlanEvent {
 	type: 'plan';
@@ -321,7 +326,7 @@ export interface BuildStepSnapshot {
 	step_index: NumberField<ProtocolBuildStepSnapshotJson, 'stepIndex'>;
 	step_id: StringField<ProtocolBuildStepSnapshotJson, 'stepId'>;
 	step_name: StringField<ProtocolBuildStepSnapshotJson, 'stepName'>;
-	step_type: StringField<ProtocolBuildStepSnapshotJson, 'stepType'>;
+	step_type: BuildStepTypeField;
 	tab_id: OptionalStringField<ProtocolBuildStepSnapshotJson, 'tabId'>;
 	tab_name: OptionalStringField<ProtocolBuildStepSnapshotJson, 'tabName'>;
 	state: BuildStepState;

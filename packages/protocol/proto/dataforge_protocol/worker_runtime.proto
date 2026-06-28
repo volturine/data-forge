@@ -82,10 +82,12 @@ message WorkerClaimBuildJobResponse {
 }
 
 message WorkerClaimedComputeRequest {
+  reserved 4;
+  reserved "request";
+
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   ComputeRequestKind kind = 3 [(buf.validate.field).enum.defined_only = true];
-  google.protobuf.Struct request = 4 [deprecated = true];
   ComputeCommandEnvelope command = 5 [(buf.validate.field).required = true];
 }
 
@@ -94,9 +96,11 @@ message WorkerClaimComputeRequestResponse {
 }
 
 message WorkerCompleteComputeRequestRequest {
+  reserved 3;
+  reserved "response";
+
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string request_id = 2 [(buf.validate.field).string.min_len = 1];
-  optional google.protobuf.Struct response = 3 [deprecated = true];
   optional string artifact_path = 4 [(buf.validate.field).string.min_len = 1];
   optional string artifact_name = 5 [(buf.validate.field).string.min_len = 1];
   optional string artifact_content_type = 6 [(buf.validate.field).string.min_len = 1];
@@ -104,17 +108,21 @@ message WorkerCompleteComputeRequestRequest {
 }
 
 message WorkerFailComputeRequestRequest {
+  reserved 4;
+  reserved "response";
+
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string request_id = 2 [(buf.validate.field).string.min_len = 1];
   string error_message = 3 [(buf.validate.field).string.min_len = 1];
-  google.protobuf.Struct response = 4 [deprecated = true];
   ComputeResponseEnvelope response_envelope = 5 [(buf.validate.field).required = true];
 }
 
 message WorkerExecuteDatasourceRequest {
+  reserved 3;
+  reserved "request";
+
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   ComputeRequestKind kind = 2 [(buf.validate.field).enum.defined_only = true];
-  google.protobuf.Struct request = 3 [deprecated = true];
   DatasourceCommand command = 4 [(buf.validate.field).required = true];
 }
 

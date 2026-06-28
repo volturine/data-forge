@@ -137,7 +137,7 @@ def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> Non
                 steps=[
                     analysis_pb2.AnalysisPipelineStep(
                         id="view-1",
-                        type="view",
+                        step_type=enums_pb2.STEP_TYPE_VIEW,
                         config=analysis_pb2.StepConfig(view=analysis_pb2.ViewConfig(row_limit=100)),
                     )
                 ],
@@ -172,7 +172,6 @@ def test_analysis_pipeline_protocol_step_type_drives_service_step_type() -> None
                 steps=[
                     analysis_pb2.AnalysisPipelineStep(
                         id="plot-1",
-                        type="chart",
                         step_type=enums_pb2.STEP_TYPE_PLOT_SCATTER,
                         config=analysis_pb2.StepConfig(chart=analysis_pb2.ChartConfig(chart_type=enums_pb2.CHART_TYPE_SCATTER)),
                     )
@@ -210,7 +209,7 @@ def test_analysis_pipeline_protocol_deduplicate_absent_subset_is_not_null() -> N
                 steps=[
                     analysis_pb2.AnalysisPipelineStep(
                         id="dedup-1",
-                        type="deduplicate",
+                        step_type=enums_pb2.STEP_TYPE_DEDUPLICATE,
                         config=analysis_pb2.StepConfig(deduplicate=analysis_pb2.DeduplicateConfig(keep=enums_pb2.DEDUPLICATE_KEEP_FIRST)),
                     )
                 ],

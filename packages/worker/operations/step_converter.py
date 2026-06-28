@@ -383,7 +383,7 @@ def _protocol_step_payload(payload: Mapping[str, object]) -> dict[str, object]:
         raise ValueError("Step depends_on must be a list of step ids")
 
     proto_payload = dict(payload)
-    proto_payload["type"] = raw_step_type
+    proto_payload.pop("type", None)
     proto_payload["step_type"] = _enum_name_from_token(enums_pb2.StepType.DESCRIPTOR, raw_step_type)
     proto_payload["config"] = _wrap_step_config(raw_step_type, config)
     protocol_step = _parse_proto_message(analysis_pb2.AnalysisPipelineStep, cast(dict[str, object], proto_payload))

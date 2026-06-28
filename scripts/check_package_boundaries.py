@@ -173,6 +173,14 @@ COMPUTE_ENVELOPE_REQUIRED_TOKENS = {
     'compute_pb2.EngineStatusResult': 'engine lifecycle responses must use typed protocol engine status responses',
     'compute_pb2.ComputeAckResult': 'acknowledgement responses must use typed protocol ack responses',
 }
+PROTOCOL_FORBIDDEN_TOKENS = {
+    'deprecated = true': 'deprecated protocol compatibility fields must be removed, not carried forward',
+    'google.protobuf.Struct datasource_request': 'compute commands must use typed DatasourceCommand, not generic datasource_request payloads',
+    'google.protobuf.Struct dynamic_response': 'compute responses must use typed oneof variants, not generic dynamic_response payloads',
+    'google.protobuf.Struct raw': 'runtime events must use typed protocol event payloads',
+    'string step_type = 5': 'build stream events must use generated BuildStepKind, not legacy step_type strings',
+    'google.protobuf.Struct payload = 5': 'compute envelopes must not carry deprecated generic payload fields',
+}
 BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
     'from backend_core.domain.enums import DataForgeStrEnum': 'backend operation config enums must be generated-protocol-backed',
     '(DataForgeStrEnum)': 'backend operation config enums must not reintroduce copied StrEnum contracts',
@@ -439,6 +447,13 @@ def main() -> int:
         for token, reason in PROTOCOL_BACKED_ENUM_FORBIDDEN_TOKENS.items():
             if token in content:
                 errors.append(f'{rel_path} contains {reason}: {token}')
+
+    for path in (PACKAGES / 'protocol' / 'proto').rglob('*.proto'):
+        content = path.read_text()
+        for token, reason in PROTOCOL_FORBIDDEN_TOKENS.items():
+            if token in content:
+                rel = path.relative_to(ROOT)
+                errors.append(f'{rel} contains {reason}: {token}')
 
     for package, forbidden_roots in PACKAGE_FORBIDDEN_IMPORT_ROOTS.items():
         for path in iter_python_files(package):

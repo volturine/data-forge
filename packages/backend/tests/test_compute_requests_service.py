@@ -9,7 +9,6 @@ from backend_core.domain.compute_requests.models import (
     command_envelope_from_json,
     command_from_payload,
     command_payload,
-    dict_to_struct,
     response_envelope_from_json,
     response_payload,
 )
@@ -269,7 +268,6 @@ def test_create_preview_request_populates_protocol_step_type(test_db_session) ->
     envelope = command_envelope_from_json(request.request_json)
     step = envelope.command.preview.analysis_pipeline.tabs[0].steps[0]
 
-    assert step.type == 'plot_scatter'
     assert step.step_type == enums_pb2.STEP_TYPE_PLOT_SCATTER
     assert step.config.WhichOneof('config') == 'chart'
     command_payload = compute_requests_service.command_payload(request)
@@ -431,20 +429,18 @@ def test_datasource_error_result_shape_uses_typed_compute_error_message(test_db_
     assert response_envelope.response.error.message == 'DataSource missing not found'
 
 
-def test_compute_envelope_payload_helpers_reject_deprecated_payload_only_messages() -> None:
+def test_compute_envelope_payload_helpers_reject_missing_typed_messages() -> None:
     command_envelope = compute_pb2.ComputeCommandEnvelope(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         version=1,
         idempotency_key='request-1',
         correlation_id='request-1',
-        payload=dict_to_struct({'legacy': True}),
     )
     response_envelope = compute_pb2.ComputeResponseEnvelope(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         version=1,
         correlation_id='request-1',
         status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
-        payload=dict_to_struct({'legacy': True}),
     )
 
     with pytest.raises(ValueError, match='missing typed command'):

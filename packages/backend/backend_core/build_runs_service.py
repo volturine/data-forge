@@ -125,7 +125,6 @@ def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, seq
             message.step_started.step_index = event.step_index
             message.step_started.step_id = event.step_id
             message.step_started.step_name = event.step_name
-            message.step_started.step_type = event.step_type
             message.step_started.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
             message.step_started.total_steps = event.total_steps
             return message
@@ -134,7 +133,6 @@ def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, seq
             message.step_completed.step_index = event.step_index
             message.step_completed.step_id = event.step_id
             message.step_completed.step_name = event.step_name
-            message.step_completed.step_type = event.step_type
             message.step_completed.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
             message.step_completed.duration_ms = event.duration_ms
             message.step_completed.total_steps = event.total_steps
@@ -146,7 +144,6 @@ def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, seq
             message.step_failed.step_index = event.step_index
             message.step_failed.step_id = event.step_id
             message.step_failed.step_name = event.step_name
-            message.step_failed.step_type = event.step_type
             message.step_failed.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
             message.step_failed.error = event.error
             message.step_failed.total_steps = event.total_steps

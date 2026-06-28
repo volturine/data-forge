@@ -70,7 +70,7 @@ describe('protocol build stream conversion', () => {
 		).toBe(false);
 	});
 
-	test('uses generated pipeline step kind instead of deprecated step type string', () => {
+	test('uses generated pipeline step kind for build step type', () => {
 		const protocolEvent = {
 			context: BASE_CONTEXT,
 			namespace: 'default',
@@ -79,7 +79,6 @@ describe('protocol build stream conversion', () => {
 				stepIndex: 1,
 				stepId: 'step-1',
 				stepName: 'Filter rows',
-				stepType: 'legacy_wrong',
 				stepKind: { pipeline: 'STEP_TYPE_FILTER' },
 				totalSteps: 4
 			}
@@ -101,7 +100,6 @@ describe('protocol build stream conversion', () => {
 				stepIndex: 0,
 				stepId: 'tab-1:initial_read',
 				stepName: 'Initial Read',
-				stepType: 'legacy_wrong',
 				stepKind: { executionCategory: 'ENGINE_RUN_EXECUTION_CATEGORY_READ' },
 				durationMs: 25,
 				totalSteps: 4
@@ -113,6 +111,22 @@ describe('protocol build stream conversion', () => {
 			step_id: 'tab-1:initial_read',
 			step_type: 'read'
 		});
+	});
+
+	test('rejects step events without generated step kind', () => {
+		const protocolEvent = {
+			context: BASE_CONTEXT,
+			namespace: 'default',
+			stepStarted: {
+				buildStepIndex: 2,
+				stepIndex: 1,
+				stepId: 'step-1',
+				stepName: 'Filter rows',
+				totalSteps: 4
+			}
+		} satisfies BuildEventJson;
+
+		expect(protocolBuildEventToBuildEvent(protocolEvent)).toBeNull();
 	});
 
 	test('uses protocol enum JSON token tables for generated build stream enums', () => {

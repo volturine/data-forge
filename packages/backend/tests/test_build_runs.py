@@ -189,7 +189,7 @@ def test_serialize_step_event_includes_protocol_pipeline_step_kind(test_db_sessi
     serialized = build_run_service.serialize_event_row(row)
     step_started = serialized['stepStarted']
     assert isinstance(step_started, dict)
-    assert step_started['stepType'] == 'filter'
+    assert 'stepType' not in step_started
     assert step_started['stepKind'] == {'pipeline': 'STEP_TYPE_FILTER'}
 
 
@@ -217,7 +217,7 @@ def test_serialize_step_event_includes_protocol_execution_category_kind(test_db_
     serialized = build_run_service.serialize_event_row(row)
     step_completed = serialized['stepCompleted']
     assert isinstance(step_completed, dict)
-    assert step_completed['stepType'] == 'read'
+    assert 'stepType' not in step_completed
     assert step_completed['stepKind'] == {'executionCategory': 'ENGINE_RUN_EXECUTION_CATEGORY_READ'}
 
 

@@ -385,6 +385,7 @@ def _pipeline_payload_for_proto(payload: dict[str, object]) -> dict[str, object]
                     continue
                 proto_step = dict(step)
                 raw_step_type = proto_step.get('step_type') or proto_step.get('type')
+                proto_step.pop('type', None)
                 proto_step['step_type'] = _enum_number_from_token(enums_pb2.StepType.DESCRIPTOR, raw_step_type, field_name='step_type')
                 proto_step['config'] = _wrap_step_config(raw_step_type, proto_step.get('config', {}))
                 proto_steps.append(proto_step)

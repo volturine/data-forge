@@ -96,6 +96,9 @@ message EngineLifecycleCommand {
 }
 
 message ComputeCommand {
+  reserved 9;
+  reserved "datasource_request";
+
   oneof command {
     StepPreviewCommand preview = 1;
     StepSchemaCommand schema = 2;
@@ -105,7 +108,6 @@ message ComputeCommand {
     EngineLifecycleCommand spawn_engine = 6;
     EngineLifecycleCommand configure_engine = 7;
     EngineLifecycleCommand shutdown_engine = 8;
-    google.protobuf.Struct datasource_request = 9;
     DatasourceCommand datasource = 10;
   }
 }
@@ -182,12 +184,14 @@ message ComputeErrorResult {
 }
 
 message ComputeResponse {
+  reserved 5;
+  reserved "dynamic_response";
+
   oneof response {
     StepPreviewResult preview = 1;
     StepSchemaResult schema = 2;
     StepRowCountResult row_count = 3;
     ExportResult export = 4;
-    google.protobuf.Struct dynamic_response = 5 [deprecated = true];
     DatasourceResult datasource = 6;
     EngineStatusResult engine_status = 7;
     ComputeAckResult ack = 8;
@@ -196,20 +200,24 @@ message ComputeResponse {
 }
 
 message ComputeCommandEnvelope {
+  reserved 5;
+  reserved "payload";
+
   ComputeRequestKind kind = 1 [(buf.validate.field).enum.defined_only = true];
   int32 version = 2 [(buf.validate.field).int32.gte = 1];
   string idempotency_key = 3 [(buf.validate.field).string.min_len = 1];
   string correlation_id = 4 [(buf.validate.field).string.min_len = 1];
-  google.protobuf.Struct payload = 5 [deprecated = true];
   ComputeCommand command = 7;
 }
 
 message ComputeResponseEnvelope {
+  reserved 5;
+  reserved "payload";
+
   ComputeRequestKind kind = 1 [(buf.validate.field).enum.defined_only = true];
   int32 version = 2 [(buf.validate.field).int32.gte = 1];
   string correlation_id = 3 [(buf.validate.field).string.min_len = 1];
   ComputeRequestStatus status = 4 [(buf.validate.field).enum.defined_only = true];
-  google.protobuf.Struct payload = 5 [deprecated = true];
   optional string error_message = 6;
   ComputeResponse response = 7;
 }
@@ -250,27 +258,25 @@ message BuildStepKind {
 }
 
 message BuildStepStartedEvent {
+  reserved 5;
+  reserved "step_type";
+
   int32 build_step_index = 1 [(buf.validate.field).int32.gte = 0];
   int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
   string step_id = 3 [(buf.validate.field).string.min_len = 1];
   string step_name = 4;
-  string step_type = 5 [
-    deprecated = true,
-    (buf.validate.field).string.min_len = 1
-  ];
   int32 total_steps = 6 [(buf.validate.field).int32.gte = 0];
   BuildStepKind step_kind = 7;
 }
 
 message BuildStepCompletedEvent {
+  reserved 5;
+  reserved "step_type";
+
   int32 build_step_index = 1 [(buf.validate.field).int32.gte = 0];
   int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
   string step_id = 3 [(buf.validate.field).string.min_len = 1];
   string step_name = 4;
-  string step_type = 5 [
-    deprecated = true,
-    (buf.validate.field).string.min_len = 1
-  ];
   int32 duration_ms = 6 [(buf.validate.field).int32.gte = 0];
   optional int64 row_count = 7 [(buf.validate.field).int64.gte = 0];
   int32 total_steps = 8 [(buf.validate.field).int32.gte = 0];
@@ -278,14 +284,13 @@ message BuildStepCompletedEvent {
 }
 
 message BuildStepFailedEvent {
+  reserved 5;
+  reserved "step_type";
+
   int32 build_step_index = 1 [(buf.validate.field).int32.gte = 0];
   int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
   string step_id = 3 [(buf.validate.field).string.min_len = 1];
   string step_name = 4;
-  string step_type = 5 [
-    deprecated = true,
-    (buf.validate.field).string.min_len = 1
-  ];
   string error = 6 [(buf.validate.field).string.min_len = 1];
   int32 total_steps = 7 [(buf.validate.field).int32.gte = 0];
   BuildStepKind step_kind = 8;
@@ -367,14 +372,13 @@ message BuildResourceConfigSummary {
 }
 
 message BuildStepSnapshot {
+  reserved 5;
+  reserved "step_type";
+
   int32 build_step_index = 1 [(buf.validate.field).int32.gte = 0];
   int32 step_index = 2 [(buf.validate.field).int32.gte = 0];
   string step_id = 3 [(buf.validate.field).string.min_len = 1];
   string step_name = 4;
-  string step_type = 5 [
-    deprecated = true,
-    (buf.validate.field).string.min_len = 1
-  ];
   optional string tab_id = 6;
   optional string tab_name = 7;
   BuildStepState state = 8 [(buf.validate.field).enum.defined_only = true];

@@ -14,11 +14,10 @@ message AnalysisPipelineDatasource {
 }
 
 message AnalysisPipelineStep {
+  reserved 2;
+  reserved "type";
+
   string id = 1 [(buf.validate.field).string.min_len = 1];
-  string type = 2 [
-    deprecated = true,
-    (buf.validate.field).string.min_len = 1
-  ];
   StepConfig config = 3;
   repeated string depends_on = 4;
   optional bool is_applied = 5;

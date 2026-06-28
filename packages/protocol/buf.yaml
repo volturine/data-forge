@@ -14,4 +14,4 @@ lint:
     - RPC_RESPONSE_STANDARD_NAME
 breaking:
   use:
-    - FILE
+    - WIRE_JSON
