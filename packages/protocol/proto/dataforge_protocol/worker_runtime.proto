@@ -245,6 +245,9 @@ message WorkerRecordHealthCheckResultsRequest {
 }
 
 message WorkerCreateEngineRunRequest {
+  reserved 12, 14;
+  reserved "step_timings", "execution_entries";
+
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   optional string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
   string datasource_id = 3 [(buf.validate.field).string.min_len = 1];
@@ -256,22 +259,55 @@ message WorkerCreateEngineRunRequest {
   optional google.protobuf.Timestamp created_at = 9;
   optional google.protobuf.Timestamp completed_at = 10;
   optional int64 duration_ms = 11 [(buf.validate.field).int64.gte = 0];
-  optional google.protobuf.Struct step_timings = 12;
   optional string query_plan = 13 [(buf.validate.field).string.min_len = 1];
-  repeated google.protobuf.Struct execution_entries = 14;
   double progress = 15 [(buf.validate.field).double = {
     gte: 0
     lte: 1
   }];
   optional string current_step = 16 [(buf.validate.field).string.min_len = 1];
   optional string triggered_by = 17 [(buf.validate.field).string.min_len = 1];
+  map<string, double> timing_by_key = 18;
+  repeated EngineRunExecutionEntry execution_entry = 19;
+}
+
+message EngineRunStepTimings {
+  map<string, double> values = 1;
+}
+
+message EngineRunExecutionEntryList {
+  repeated EngineRunExecutionEntry entries = 1;
+}
+
+message WorkerEngineRunUpdateFields {
+  optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+  optional EngineRunKind kind = 3 [(buf.validate.field).enum.defined_only = true];
+  optional EngineRunStatus status = 4 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Struct request_json = 5;
+  google.protobuf.Struct result_json = 6;
+  optional string error_message = 7 [(buf.validate.field).string.min_len = 1];
+  optional google.protobuf.Timestamp completed_at = 8;
+  optional int64 duration_ms = 9 [(buf.validate.field).int64.gte = 0];
+  EngineRunStepTimings step_timings = 10;
+  optional string query_plan = 11 [(buf.validate.field).string.min_len = 1];
+  EngineRunExecutionEntryList execution_entries = 12;
+  optional double progress = 13 [(buf.validate.field).double = {
+    gte: 0
+    lte: 1
+  }];
+  optional string current_step = 14 [(buf.validate.field).string.min_len = 1];
+  optional string triggered_by = 15 [(buf.validate.field).string.min_len = 1];
+  bool clear_current_step = 16;
 }
 
 message WorkerUpdateEngineRunRequest {
+  reserved 3;
+  reserved "fields";
+
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string run_id = 2 [(buf.validate.field).string.min_len = 1];
-  google.protobuf.Struct fields = 3;
   bool merge_result = 4;
+  WorkerEngineRunUpdateFields update = 5 [(buf.validate.field).required = true];
 }
 
 message WorkerEngineRunStateRequest {
@@ -352,9 +388,12 @@ message WorkerStartBuildRunResponse {
 }
 
 message WorkerPersistEngineSnapshotRequest {
+  reserved 3;
+  reserved "statuses";
+
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  repeated google.protobuf.Struct statuses = 3;
+  repeated EngineStatusResult engine_status = 4;
 }
 
 message WorkerPendingDatasourceDelete {

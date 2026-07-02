@@ -51,7 +51,6 @@ from backend_grpc.codec import (
     enum_to_proto_value,
     optional_timestamp_to_datetime,
     proto_value_to_enum_name,
-    repeated_structs_to_dicts,
     struct_field_to_dict,
     struct_to_dict,
     timestamp_to_datetime,
@@ -330,6 +329,104 @@ def _schema_info_payload(message: datasource_pb2.SchemaInfo) -> dict[str, object
     if message.sheet_names:
         payload['sheet_names'] = list(message.sheet_names)
     return payload
+
+
+def _engine_run_execution_entry_payload(entry: compute_pb2.EngineRunExecutionEntry) -> dict[str, object]:
+    payload: dict[str, object] = {
+        'key': entry.key,
+        'label': entry.label,
+        'category': proto_value_to_enum_name(enums_pb2.EngineRunExecutionCategory, 'ENGINE_RUN_EXECUTION_CATEGORY', entry.category),
+        'order': entry.order,
+    }
+    if entry.HasField('duration_ms'):
+        payload['duration_ms'] = entry.duration_ms
+    if entry.HasField('share_pct'):
+        payload['share_pct'] = entry.share_pct
+    if entry.HasField('optimized_plan'):
+        payload['optimized_plan'] = entry.optimized_plan
+    if entry.HasField('unoptimized_plan'):
+        payload['unoptimized_plan'] = entry.unoptimized_plan
+    if entry.HasField('step_type'):
+        payload['metadata'] = {'step_type': proto_value_to_enum_name(enums_pb2.StepType, 'STEP_TYPE', entry.step_type)}
+    return payload
+
+
+def _engine_resource_config_payload(message: compute_pb2.EngineResourceConfig) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    if message.HasField('max_threads'):
+        payload['max_threads'] = message.max_threads
+    if message.HasField('max_memory_mb'):
+        payload['max_memory_mb'] = message.max_memory_mb
+    if message.HasField('streaming_chunk_size'):
+        payload['streaming_chunk_size'] = message.streaming_chunk_size
+    return payload
+
+
+def _engine_defaults_payload(message: compute_pb2.EngineDefaults) -> dict[str, object]:
+    return {
+        'max_threads': message.max_threads,
+        'max_memory_mb': message.max_memory_mb,
+        'streaming_chunk_size': message.streaming_chunk_size,
+    }
+
+
+def _engine_status_info_payload(message: compute_pb2.EngineStatusResult) -> EngineStatusInfo:
+    return EngineStatusInfo(
+        analysis_id=message.analysis_id,
+        resource_id=message.resource_id,
+        status=proto_value_to_enum_name(enums_pb2.EngineStatus, 'ENGINE_STATUS', message.status),
+        process_id=message.process_id if message.HasField('process_id') else None,
+        last_activity=message.last_activity if message.HasField('last_activity') else None,
+        current_job_id=message.current_job_id if message.HasField('current_job_id') else None,
+        resource_config=_engine_resource_config_payload(message.resource_config) if message.HasField('resource_config') else None,
+        effective_resources=_engine_resource_config_payload(message.effective_resources) if message.HasField('effective_resources') else None,
+        defaults=_engine_defaults_payload(message.defaults) if message.HasField('defaults') else {},
+        scope=proto_value_to_enum_name(enums_pb2.EngineScope, 'ENGINE_SCOPE', message.scope) if message.HasField('scope') else None,
+        reuse_policy=proto_value_to_enum_name(enums_pb2.EngineReusePolicy, 'ENGINE_REUSE_POLICY', message.reuse_policy)
+        if message.HasField('reuse_policy')
+        else None,
+        datasource_id=message.datasource_id if message.HasField('datasource_id') else None,
+        build_id=message.build_id if message.HasField('build_id') else None,
+        current_build_id=message.current_build_id if message.HasField('current_build_id') else None,
+        current_engine_run_id=message.current_engine_run_id if message.HasField('current_engine_run_id') else None,
+    )
+
+
+def _engine_run_update_kwargs(update: worker_runtime_pb2.WorkerEngineRunUpdateFields, *, merge_result: bool) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {'merge_result_json': merge_result}
+    if update.HasField('analysis_id'):
+        kwargs['analysis_id'] = update.analysis_id
+    if update.HasField('datasource_id'):
+        kwargs['datasource_id'] = update.datasource_id
+    if update.HasField('kind'):
+        kwargs['kind'] = proto_value_to_enum_name(enums_pb2.EngineRunKind, 'ENGINE_RUN_KIND', update.kind)
+    if update.HasField('status'):
+        kwargs['status'] = proto_value_to_enum_name(enums_pb2.EngineRunStatus, 'ENGINE_RUN_STATUS', update.status)
+    if update.HasField('request_json'):
+        kwargs['request_json'] = struct_to_dict(update.request_json)
+    if update.HasField('result_json'):
+        kwargs['result_json'] = struct_to_dict(update.result_json)
+    if update.HasField('error_message'):
+        kwargs['error_message'] = update.error_message
+    if update.HasField('completed_at'):
+        kwargs['completed_at'] = timestamp_to_datetime(update.completed_at)
+    if update.HasField('duration_ms'):
+        kwargs['duration_ms'] = update.duration_ms
+    if update.HasField('step_timings'):
+        kwargs['step_timings'] = dict(update.step_timings.values)
+    if update.HasField('query_plan'):
+        kwargs['query_plan'] = update.query_plan
+    if update.HasField('execution_entries'):
+        kwargs['execution_entries'] = [_engine_run_execution_entry_payload(entry) for entry in update.execution_entries.entries]
+    if update.HasField('progress'):
+        kwargs['progress'] = update.progress
+    if update.clear_current_step:
+        kwargs['current_step'] = None
+    if update.HasField('current_step'):
+        kwargs['current_step'] = update.current_step
+    if update.HasField('triggered_by'):
+        kwargs['triggered_by'] = update.triggered_by
+    return kwargs
 
 
 def _build_starter_proto(payload: dict[str, object]) -> compute_pb2.BuildStarter:
@@ -851,9 +948,9 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     created_at=optional_timestamp_to_datetime(request, 'created_at'),
                     completed_at=optional_timestamp_to_datetime(request, 'completed_at'),
                     duration_ms=_optional_int(request, 'duration_ms'),
-                    step_timings=cast(dict[str, float] | None, struct_field_to_dict(request, 'step_timings')),
+                    step_timings=dict(request.timing_by_key) if request.timing_by_key else None,
                     query_plan=_optional_str(request, 'query_plan'),
-                    execution_entries=repeated_structs_to_dicts(request.execution_entries) or None,
+                    execution_entries=[_engine_run_execution_entry_payload(entry) for entry in request.execution_entry] or None,
                     progress=request.progress,
                     current_step=_optional_str(request, 'current_step'),
                     triggered_by=_optional_str(request, 'triggered_by'),
@@ -867,29 +964,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     async def UpdateEngineRun(
         self, request: worker_runtime_pb2.WorkerUpdateEngineRunRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.IdResponse:
-        fields = struct_to_dict(request.fields)
-        kwargs: dict[str, Any] = {'merge_result_json': request.merge_result}
-        for key in (
-            'analysis_id',
-            'datasource_id',
-            'kind',
-            'status',
-            'request_json',
-            'result_json',
-            'error_message',
-            'duration_ms',
-            'step_timings',
-            'query_plan',
-            'execution_entries',
-            'progress',
-            'current_step',
-            'triggered_by',
-        ):
-            if key in fields:
-                kwargs[key] = fields[key]
-        if 'completed_at' in fields:
-            value = fields['completed_at']
-            kwargs['completed_at'] = datetime.fromisoformat(value) if isinstance(value, str) else None
+        kwargs = _engine_run_update_kwargs(request.update, merge_result=request.merge_result)
         token = set_namespace_context(request.namespace)
         try:
             run = run_db(lambda session: engine_run_service.update_engine_run(session, request.run_id, **kwargs))
@@ -1063,7 +1138,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     async def PersistEngineSnapshot(
         self, request: worker_runtime_pb2.WorkerPersistEngineSnapshotRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.CountResponse:
-        statuses = [EngineStatusInfo(**cast(dict[str, Any], status)) for status in repeated_structs_to_dicts(request.statuses)]
+        statuses = [_engine_status_info_payload(status) for status in request.engine_status]
 
         def _write(session: Any) -> None:
             engine_instance_service.persist_engine_snapshot(

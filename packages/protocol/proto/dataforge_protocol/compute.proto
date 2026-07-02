@@ -151,7 +151,7 @@ message EngineDefaults {
 }
 
 message EngineStatusResult {
-  string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  string analysis_id = 1;
   string resource_id = 2 [(buf.validate.field).string.min_len = 1];
   EngineStatus status = 3 [(buf.validate.field).enum.defined_only = true];
   optional int32 process_id = 4 [(buf.validate.field).int32.gte = 0];
@@ -255,6 +255,21 @@ message BuildStepKind {
     StepType pipeline = 1;
     EngineRunExecutionCategory execution_category = 2;
   }
+}
+
+message EngineRunExecutionEntry {
+  string key = 1 [(buf.validate.field).string.min_len = 1];
+  string label = 2 [(buf.validate.field).string.min_len = 1];
+  EngineRunExecutionCategory category = 3 [(buf.validate.field).enum.defined_only = true];
+  int32 order = 4 [(buf.validate.field).int32.gte = 0];
+  optional double duration_ms = 5 [(buf.validate.field).double.gte = 0];
+  optional double share_pct = 6 [(buf.validate.field).double = {
+    gte: 0
+    lte: 100
+  }];
+  optional string optimized_plan = 7;
+  optional string unoptimized_plan = 8;
+  optional StepType step_type = 9 [(buf.validate.field).enum.defined_only = true];
 }
 
 message BuildStepStartedEvent {

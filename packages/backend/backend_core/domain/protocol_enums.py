@@ -37,6 +37,14 @@ class ProtocolEnumValue(str):
     def value(self) -> str:
         return str.__str__(self)
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, str):
+            return False
+        return str.__eq__(self, other)
+
+    def __hash__(self) -> int:
+        return str.__hash__(self)
+
     @property
     def number(self) -> int:
         return type(self)._number_by_token[str.__str__(self)]
@@ -82,12 +90,6 @@ class ProtocolEnumValue(str):
 
     def __str__(self) -> str:
         return str.__str__(self)
-
-    def __eq__(self, other: object) -> bool:
-        return str.__eq__(self, other)
-
-    def __hash__(self) -> int:
-        return str.__hash__(self)
 
     def __reduce__(self) -> tuple[object, tuple[str]]:
         return (type(self).require, (str(self),))

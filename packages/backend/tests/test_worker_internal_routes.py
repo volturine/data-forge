@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlmodel import Session
 
-from backend_core import build_jobs_service, build_runs_service, compute_requests_service
+from backend_core import build_jobs_service, build_runs_service, compute_requests_service, engine_instances_service, engine_runs_service
 from backend_core.config import settings
 from backend_core.database import run_settings_db
 from backend_core.domain.build_jobs.models import BuildJobStatus
@@ -327,6 +327,143 @@ async def test_internal_worker_grpc_upserts_output_datasource_with_typed_schema_
         'columns': [{'name': 'score', 'dtype': 'Float64', 'nullable': True}],
         'row_count': 10,
     }
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_creates_engine_run_with_typed_execution_entries(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+
+    response = await WorkerRuntimeServicer().CreateEngineRun(
+        worker_runtime_pb2.WorkerCreateEngineRunRequest(
+            namespace='default',
+            analysis_id='analysis-1',
+            datasource_id='datasource-1',
+            kind=enums_pb2.ENGINE_RUN_KIND_PREVIEW,
+            status=enums_pb2.ENGINE_RUN_STATUS_SUCCESS,
+            request=dict_to_struct({'target_step_id': 'source'}),
+            result=dict_to_struct({'row_count': 1}),
+            timing_by_key={'filter': 12.5},
+            execution_entry=[
+                compute_pb2.EngineRunExecutionEntry(
+                    key='filter',
+                    label='Filter',
+                    category=enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP,
+                    order=0,
+                    duration_ms=12.5,
+                    share_pct=100.0,
+                    step_type=enums_pb2.STEP_TYPE_FILTER,
+                )
+            ],
+            progress=1.0,
+        ),
+        context,  # type: ignore[arg-type]
+    )
+
+    run = engine_runs_service.get_engine_run(test_db_session, response.id)
+    assert run is not None
+    assert run.step_timings == {'filter': 12.5}
+    assert run.execution_entries[0].category == 'step'
+    assert run.execution_entries[0].metadata == {'step_type': 'filter'}
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_updates_engine_run_with_typed_fields(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    servicer = WorkerRuntimeServicer()
+    created = await servicer.CreateEngineRun(
+        worker_runtime_pb2.WorkerCreateEngineRunRequest(
+            namespace='default',
+            analysis_id='analysis-1',
+            datasource_id='datasource-1',
+            kind=enums_pb2.ENGINE_RUN_KIND_PREVIEW,
+            status=enums_pb2.ENGINE_RUN_STATUS_RUNNING,
+            request=dict_to_struct({'target_step_id': 'source'}),
+            progress=0.25,
+        ),
+        context,  # type: ignore[arg-type]
+    )
+
+    completed_at = datetime.now(UTC)
+    response = await servicer.UpdateEngineRun(
+        worker_runtime_pb2.WorkerUpdateEngineRunRequest(
+            namespace='default',
+            run_id=created.id,
+            merge_result=False,
+            update=worker_runtime_pb2.WorkerEngineRunUpdateFields(
+                status=enums_pb2.ENGINE_RUN_STATUS_SUCCESS,
+                result_json=dict_to_struct({'row_count': 2}),
+                completed_at=datetime_to_timestamp(completed_at),
+                duration_ms=42,
+                step_timings=worker_runtime_pb2.EngineRunStepTimings(values={'filter': 2.5}),
+                execution_entries=worker_runtime_pb2.EngineRunExecutionEntryList(
+                    entries=[
+                        compute_pb2.EngineRunExecutionEntry(
+                            key='filter',
+                            label='Filter',
+                            category=enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP,
+                            order=0,
+                            duration_ms=2.5,
+                            step_type=enums_pb2.STEP_TYPE_FILTER,
+                        )
+                    ]
+                ),
+                progress=1.0,
+                current_step='filter',
+            ),
+        ),
+        context,  # type: ignore[arg-type]
+    )
+
+    assert response.id == created.id
+    run = engine_runs_service.get_engine_run(test_db_session, created.id)
+    assert run is not None
+    assert run.status == 'success'
+    assert run.result_json is not None
+    assert run.result_json['row_count'] == 2
+    assert run.step_timings == {'filter': 2.5}
+    assert run.current_step == 'filter'
+    assert run.progress == 1.0
+    assert run.execution_entries[0].metadata == {'step_type': 'filter'}
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+
+    response = await WorkerRuntimeServicer().PersistEngineSnapshot(
+        worker_runtime_pb2.WorkerPersistEngineSnapshotRequest(
+            worker_id='worker-typed-snapshot',
+            namespace='default',
+            engine_status=[
+                compute_pb2.EngineStatusResult(
+                    analysis_id='analysis-1',
+                    resource_id='datasource-1',
+                    status=enums_pb2.ENGINE_STATUS_HEALTHY,
+                    process_id=1234,
+                    last_activity=datetime.now(UTC).isoformat(),
+                    current_job_id='job-1',
+                    resource_config=compute_pb2.EngineResourceConfig(max_threads=2),
+                    effective_resources=compute_pb2.EngineResourceConfig(max_threads=2, max_memory_mb=1024),
+                    defaults=compute_pb2.EngineDefaults(max_threads=2, max_memory_mb=1024, streaming_chunk_size=500),
+                    scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+                    reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                    datasource_id='datasource-1',
+                )
+            ],
+        ),
+        context,  # type: ignore[arg-type]
+    )
+
+    assert response.count == 1
+
+    instances = [
+        instance
+        for instance in run_settings_db(engine_instances_service.list_engine_instances, namespace='default')
+        if instance.worker_id == 'worker-typed-snapshot'
+    ]
+    assert len(instances) == 1
+    assert instances[0].resource_config_json == {'max_threads': 2}
+    assert instances[0].effective_resources_json == {'max_threads': 2, 'max_memory_mb': 1024}
 
 
 @pytest.mark.asyncio

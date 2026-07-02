@@ -189,8 +189,45 @@ PROTOCOL_FORBIDDEN_TOKENS = {
     'google.protobuf.Struct schema_cache = 7': 'datasource metadata must use typed SchemaInfo messages',
     'optional google.protobuf.Struct schema_cache = 6': 'datasource records must use typed SchemaInfo messages',
     'google.protobuf.Struct schema_cache = 6': 'datasource output upserts must use typed SchemaInfo messages',
+    'optional google.protobuf.Struct step_timings = 12': 'engine-run timing maps must use typed protocol maps',
+    'repeated google.protobuf.Struct execution_entries = 14': 'engine-run execution entries must use typed protocol messages',
+    'google.protobuf.Struct fields = 3': 'engine-run updates must use typed WorkerEngineRunUpdateFields',
+    'repeated google.protobuf.Struct statuses = 3': 'engine snapshots must use typed EngineStatusResult messages',
     'message JsonResponse': 'worker runtime RPCs must return typed protocol responses, not generic JSON envelopes',
     'returns (JsonResponse)': 'worker runtime RPCs must return typed protocol responses, not generic JSON envelopes',
+}
+PROTO_STRUCT_FIELD_PATTERN = re.compile(r'\bgoogle\.protobuf\.Struct\s+(\w+)\s*=\s*(\d+)')
+PROTO_MESSAGE_PATTERN = re.compile(r'^\s*message\s+(\w+)\s*\{')
+PROTO_STRUCT_ALLOWLIST = {
+    'proto/dataforge_protocol/analysis.proto:AnalysisPipelineDatasource.config': 'datasource configs are provider/user-defined JSON escape hatches',
+    'proto/dataforge_protocol/analysis.proto:AnalysisPipelineOutput.options': 'export output options are destination-specific JSON escape hatches',
+    'proto/dataforge_protocol/analysis.proto:AIConfig.request_options': 'AI request options are provider-specific JSON escape hatches',
+    'proto/dataforge_protocol/compute.proto:StepPreviewResult.rows': 'preview rows are arbitrary datasource result objects',
+    'proto/dataforge_protocol/compute.proto:StepPreviewResult.metadata': 'preview metadata is engine/provider-specific',
+    'proto/dataforge_protocol/compute.proto:ComputeErrorResult.details': 'error details are intentionally extensible diagnostics',
+    'proto/dataforge_protocol/compute.proto:ActiveBuildSummary.result_json': 'active build summaries expose persisted runtime result JSON at the API boundary',
+    'proto/dataforge_protocol/compute.proto:ActiveBuildDetail.request_json': 'active build details expose persisted runtime request JSON at the API boundary',
+    'proto/dataforge_protocol/datasource.proto:DatasourceMetadata.config': 'datasource configs are provider/user-defined JSON escape hatches',
+    'proto/dataforge_protocol/datasource.proto:CreateFileDatasourceCommand.options': 'file datasource options are format-specific JSON escape hatches',
+    'proto/dataforge_protocol/datasource.proto:CreateIcebergDatasourceCommand.source': 'Iceberg source descriptors are provider-specific JSON escape hatches',
+    'proto/dataforge_protocol/datasource.proto:DatasourceColumnStatsCommand.datasource_config': 'column stats run against datasource config JSON persisted at the boundary',
+    'proto/dataforge_protocol/datasource.proto:DataSourceRecord.config': 'datasource records expose provider/user-defined config JSON',
+    'proto/dataforge_protocol/datasource.proto:SnapshotPreview.rows': 'snapshot previews contain arbitrary row objects',
+    'proto/dataforge_protocol/datasource.proto:ColumnStatsResult.top_values': 'top-value stats contain arbitrary value/count records by column type',
+    'proto/dataforge_protocol/errors.proto:ErrorInfo.details': 'error details are intentionally extensible diagnostics',
+    'proto/dataforge_protocol/iceberg.proto:IcebergSnapshotScanResponse.rows': 'Iceberg snapshot scans return arbitrary row objects',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerDatasourceMetadataResponse.config': 'datasource metadata exposes provider/user-defined config JSON',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerUpdateBuildResultRequest.result': 'build result is persisted runtime JSON at the database boundary',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerUpsertOutputDatasourceRequest.config': 'output datasource config is provider/user-defined JSON',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerHealthCheckSpec.config': 'healthcheck config is check-type-specific JSON',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerHealthCheckResultPayload.details': 'healthcheck result details are check-type-specific diagnostics',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerCreateEngineRunRequest.request': 'engine-run request is persisted runtime JSON at the database boundary',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerCreateEngineRunRequest.result': 'engine-run result is persisted runtime JSON at the database boundary',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerEngineRunUpdateFields.request_json': 'engine-run request updates write persisted runtime JSON at the database boundary',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerEngineRunUpdateFields.result_json': 'engine-run result updates write persisted runtime JSON at the database boundary',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerEngineRunStateResponse.result': 'engine-run state exposes persisted runtime result JSON',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerBuildRunPayload.request': 'build-run start payload exposes persisted runtime request JSON',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerGenerateAIRequest.options': 'AI generation options are provider-specific JSON',
 }
 WORKER_RUNTIME_RPC_FORBIDDEN_TOKENS = {
     'return struct_to_dict(response.response)': 'worker runtime RPC clients must not fall back to generic JSON response fields',
@@ -204,6 +241,14 @@ WORKER_RUNTIME_RPC_FORBIDDEN_TOKENS = {
     'payload.resource_config.CopyFrom(dict_to_struct': 'worker runtime RPC servers must return typed BuildResourceConfigSummary messages',
     'starter_json=struct_to_dict(run.starter)': 'worker runtime RPC clients must decode typed BuildStarter messages',
     'optional_struct_to_dict(run, "resource_config")': 'worker runtime RPC clients must decode typed BuildResourceConfigSummary messages',
+    "struct_field_to_dict(request, 'step_timings')": 'worker runtime RPCs must decode typed engine-run timing maps',
+    'execution_entries=repeated_structs_to_dicts(request.execution_entries)': 'worker runtime RPCs must decode typed engine-run execution entries',
+    'execution_entries=[dict_to_struct(entry)': 'worker runtime RPC clients must send typed engine-run execution entries',
+    'request.step_timings.CopyFrom(dict_to_struct': 'worker runtime RPC clients must send typed engine-run timing maps',
+    'fields=dict_to_struct(fields)': 'worker runtime RPC clients must send typed engine-run update fields',
+    'struct_to_dict(request.fields)': 'worker runtime RPC servers must decode typed engine-run update fields',
+    'statuses=[dict_to_struct(dict(status))': 'worker runtime RPC clients must send typed engine snapshots',
+    'repeated_structs_to_dicts(request.statuses)': 'worker runtime RPC servers must decode typed engine snapshots',
 }
 BACKEND_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
     'from backend_core.domain.enums import DataForgeStrEnum': 'backend operation config enums must be generated-protocol-backed',
@@ -316,6 +361,22 @@ def iter_source_files():
             if is_excluded(rel):
                 continue
             yield path
+
+
+def proto_struct_fields(path: Path) -> list[str]:
+    rel = path.relative_to(ROOT / 'packages' / 'protocol').as_posix()
+    current_message: str | None = None
+    fields: list[str] = []
+    for line in path.read_text().splitlines():
+        message_match = PROTO_MESSAGE_PATTERN.match(line)
+        if message_match:
+            current_message = message_match.group(1)
+        field_match = PROTO_STRUCT_FIELD_PATTERN.search(line)
+        if field_match and current_message is not None:
+            fields.append(f'{rel}:{current_message}.{field_match.group(1)}')
+        if line.strip() == '}':
+            current_message = None
+    return fields
 
 
 def main() -> int:
@@ -485,12 +546,21 @@ def main() -> int:
             if token in content:
                 errors.append(f'{rel_path} contains {reason}: {token}')
 
+    seen_proto_struct_fields: set[str] = set()
     for path in (PACKAGES / 'protocol' / 'proto').rglob('*.proto'):
         content = path.read_text()
         for token, reason in PROTOCOL_FORBIDDEN_TOKENS.items():
             if token in content:
                 rel = path.relative_to(ROOT)
                 errors.append(f'{rel} contains {reason}: {token}')
+        for field in proto_struct_fields(path):
+            seen_proto_struct_fields.add(field)
+            if field not in PROTO_STRUCT_ALLOWLIST:
+                errors.append(f'{path.relative_to(ROOT)} contains unclassified google.protobuf.Struct field: {field}')
+
+    stale_struct_allowlist = sorted(set(PROTO_STRUCT_ALLOWLIST) - seen_proto_struct_fields)
+    if stale_struct_allowlist:
+        errors.append(f'protocol Struct allowlist references missing fields: {", ".join(stale_struct_allowlist)}')
 
     for package, forbidden_roots in PACKAGE_FORBIDDEN_IMPORT_ROOTS.items():
         for path in iter_python_files(package):

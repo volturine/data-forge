@@ -400,7 +400,7 @@ class WorkerInternalApiClient:
             kind=enum_to_proto_value("ENGINE_RUN_KIND", kind),
             status=enum_to_proto_value("ENGINE_RUN_STATUS", status),
             request=dict_to_struct(request_json),
-            execution_entries=[dict_to_struct(entry) for entry in execution_entries or []],
+            execution_entry=[_engine_run_execution_entry_proto(entry) for entry in execution_entries or []],
             progress=progress,
         )
         if analysis_id is not None:
@@ -416,7 +416,7 @@ class WorkerInternalApiClient:
         if duration_ms is not None:
             request.duration_ms = duration_ms
         if step_timings is not None:
-            request.step_timings.CopyFrom(dict_to_struct(cast(dict[str, object], step_timings)))
+            request.timing_by_key.update({str(key): float(value) for key, value in step_timings.items()})
         if query_plan is not None:
             request.query_plan = query_plan
         if current_step is not None:
@@ -438,8 +438,8 @@ class WorkerInternalApiClient:
                 worker_runtime_pb2.WorkerUpdateEngineRunRequest(
                     namespace=namespace,
                     run_id=run_id,
-                    fields=dict_to_struct(fields),
                     merge_result=merge_result_json,
+                    update=_engine_run_update_proto(fields),
                 ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
@@ -552,7 +552,7 @@ class WorkerInternalApiClient:
                 worker_runtime_pb2.WorkerPersistEngineSnapshotRequest(
                     worker_id=worker_id,
                     namespace=namespace,
-                    statuses=[dict_to_struct(dict(status)) for status in statuses],
+                    engine_status=[_engine_status_result_proto(status) for status in statuses],
                 ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
@@ -737,11 +737,210 @@ def _required_mapping_str(payload: Mapping[str, object], key: str) -> str:
     return value
 
 
+def _mapping_str(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        raise RuntimeError(f"Payload missing string {key}: {payload!r}")
+    return value
+
+
 def _required_mapping_bool(payload: Mapping[str, object], key: str) -> bool:
     value = payload.get(key)
     if not isinstance(value, bool):
         raise RuntimeError(f"Payload missing boolean {key}: {payload!r}")
     return value
+
+
+def _required_mapping_int(payload: Mapping[str, object], key: str) -> int:
+    value = payload.get(key)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise RuntimeError(f"Payload missing integer {key}: {payload!r}")
+    return value
+
+
+def _optional_mapping_float(payload: Mapping[str, object], key: str) -> float | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise RuntimeError(f"Payload field {key} must be numeric: {payload!r}")
+    return float(value)
+
+
+def _optional_mapping_str(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise RuntimeError(f"Payload field {key} must be a string: {payload!r}")
+    return value
+
+
+def _engine_run_entry_step_type(payload: Mapping[str, object]) -> enums_pb2.StepType | None:
+    value = payload.get("step_type")
+    if value is None:
+        metadata = payload.get("metadata")
+        if isinstance(metadata, Mapping):
+            value = metadata.get("step_type")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise RuntimeError(f"Engine run execution entry step_type must be a string: {payload!r}")
+    return cast(enums_pb2.StepType, enum_to_proto_value("STEP_TYPE", value))
+
+
+def _engine_run_execution_entry_proto(payload: Mapping[str, object]) -> compute_pb2.EngineRunExecutionEntry:
+    entry = compute_pb2.EngineRunExecutionEntry(
+        key=_required_mapping_str(payload, "key"),
+        label=_required_mapping_str(payload, "label"),
+        category=enum_to_proto_value("ENGINE_RUN_EXECUTION_CATEGORY", _required_mapping_str(payload, "category")),
+        order=_required_mapping_int(payload, "order"),
+    )
+    duration_ms = _optional_mapping_float(payload, "duration_ms")
+    if duration_ms is not None:
+        entry.duration_ms = duration_ms
+    share_pct = _optional_mapping_float(payload, "share_pct")
+    if share_pct is not None:
+        entry.share_pct = share_pct
+    optimized_plan = _optional_mapping_str(payload, "optimized_plan")
+    if optimized_plan is not None:
+        entry.optimized_plan = optimized_plan
+    unoptimized_plan = _optional_mapping_str(payload, "unoptimized_plan")
+    if unoptimized_plan is not None:
+        entry.unoptimized_plan = unoptimized_plan
+    step_type = _engine_run_entry_step_type(payload)
+    if step_type is not None:
+        entry.step_type = step_type
+    return entry
+
+
+def _datetime_field(value: object, *, key: str) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    raise RuntimeError(f"Payload field {key} must be an ISO datetime string: {value!r}")
+
+
+def _mapping_dict_field(payload: Mapping[str, object], key: str) -> dict[str, object]:
+    value = payload.get(key)
+    if not isinstance(value, dict):
+        raise RuntimeError(f"Payload field {key} must be an object: {payload!r}")
+    return value
+
+
+def _engine_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.EngineResourceConfig:
+    config = compute_pb2.EngineResourceConfig()
+    for field in ("max_threads", "max_memory_mb", "streaming_chunk_size"):
+        value = payload.get(field)
+        if value is not None:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise RuntimeError(f"Engine resource field {field} must be an integer: {payload!r}")
+            setattr(config, field, value)
+    return config
+
+
+def _engine_defaults_proto(payload: Mapping[str, object]) -> compute_pb2.EngineDefaults:
+    return compute_pb2.EngineDefaults(
+        max_threads=_required_mapping_int(payload, "max_threads"),
+        max_memory_mb=_required_mapping_int(payload, "max_memory_mb"),
+        streaming_chunk_size=_required_mapping_int(payload, "streaming_chunk_size"),
+    )
+
+
+def _engine_status_result_proto(payload: Mapping[str, object]) -> compute_pb2.EngineStatusResult:
+    status = compute_pb2.EngineStatusResult(
+        analysis_id=_mapping_str(payload, "analysis_id"),
+        resource_id=_required_mapping_str(payload, "resource_id"),
+        status=enum_to_proto_value("ENGINE_STATUS", _required_mapping_str(payload, "status")),
+    )
+    process_id = payload.get("process_id")
+    if process_id is not None:
+        if not isinstance(process_id, int) or isinstance(process_id, bool):
+            raise RuntimeError(f"Engine status process_id must be an integer: {payload!r}")
+        status.process_id = process_id
+    for field in ("last_activity", "current_job_id", "datasource_id", "build_id", "current_build_id", "current_engine_run_id"):
+        value = payload.get(field)
+        if value is not None:
+            if not isinstance(value, str):
+                raise RuntimeError(f"Engine status field {field} must be a string: {payload!r}")
+            setattr(status, field, value)
+    resource_config = payload.get("resource_config")
+    if isinstance(resource_config, Mapping):
+        status.resource_config.CopyFrom(_engine_resource_config_proto(resource_config))
+    effective_resources = payload.get("effective_resources")
+    if isinstance(effective_resources, Mapping):
+        status.effective_resources.CopyFrom(_engine_resource_config_proto(effective_resources))
+    defaults = payload.get("defaults")
+    if isinstance(defaults, Mapping):
+        status.defaults.CopyFrom(_engine_defaults_proto(defaults))
+    scope = payload.get("scope")
+    if scope is not None:
+        if not isinstance(scope, str):
+            raise RuntimeError(f"Engine status scope must be a string: {payload!r}")
+        status.scope = enum_to_proto_value("ENGINE_SCOPE", scope)
+    reuse_policy = payload.get("reuse_policy")
+    if reuse_policy is not None:
+        if not isinstance(reuse_policy, str):
+            raise RuntimeError(f"Engine status reuse_policy must be a string: {payload!r}")
+        status.reuse_policy = enum_to_proto_value("ENGINE_REUSE_POLICY", reuse_policy)
+    return status
+
+
+def _engine_run_update_proto(fields: Mapping[str, object]) -> worker_runtime_pb2.WorkerEngineRunUpdateFields:
+    update = worker_runtime_pb2.WorkerEngineRunUpdateFields()
+    if "analysis_id" in fields:
+        update.analysis_id = _required_mapping_str(fields, "analysis_id")
+    if "datasource_id" in fields:
+        update.datasource_id = _required_mapping_str(fields, "datasource_id")
+    if "kind" in fields:
+        update.kind = enum_to_proto_value("ENGINE_RUN_KIND", _required_mapping_str(fields, "kind"))
+    if "status" in fields:
+        update.status = enum_to_proto_value("ENGINE_RUN_STATUS", _required_mapping_str(fields, "status"))
+    if "request_json" in fields:
+        update.request_json.CopyFrom(dict_to_struct(_mapping_dict_field(fields, "request_json")))
+    if "result_json" in fields:
+        update.result_json.CopyFrom(dict_to_struct(_mapping_dict_field(fields, "result_json")))
+    if "error_message" in fields:
+        update.error_message = _required_mapping_str(fields, "error_message")
+    if "completed_at" in fields:
+        update.completed_at.CopyFrom(datetime_to_timestamp(_datetime_field(fields["completed_at"], key="completed_at")))
+    if "duration_ms" in fields:
+        update.duration_ms = _required_mapping_int(fields, "duration_ms")
+    if "step_timings" in fields:
+        step_timings = _mapping_dict_field(fields, "step_timings")
+        update.step_timings.SetInParent()
+        for key, value in step_timings.items():
+            if not isinstance(value, int | float) or isinstance(value, bool):
+                raise RuntimeError(f"Step timing value must be numeric: {fields!r}")
+            update.step_timings.values[str(key)] = float(value)
+    if "query_plan" in fields:
+        update.query_plan = _required_mapping_str(fields, "query_plan")
+    if "execution_entries" in fields:
+        entries = fields.get("execution_entries")
+        if not isinstance(entries, list):
+            raise RuntimeError(f"Payload field execution_entries must be a list: {fields!r}")
+        update.execution_entries.SetInParent()
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                raise RuntimeError(f"Execution entry must be an object: {entry!r}")
+            update.execution_entries.entries.append(_engine_run_execution_entry_proto(entry))
+    if "progress" in fields:
+        progress = _optional_mapping_float(fields, "progress")
+        if progress is None:
+            raise RuntimeError(f"Payload field progress must be numeric: {fields!r}")
+        update.progress = progress
+    if "current_step" in fields:
+        value = fields.get("current_step")
+        if value is None:
+            update.clear_current_step = True
+        elif isinstance(value, str) and value:
+            update.current_step = value
+        else:
+            raise RuntimeError(f"Payload field current_step must be a string or null: {fields!r}")
+    if "triggered_by" in fields:
+        update.triggered_by = _required_mapping_str(fields, "triggered_by")
+    return update
 
 
 def _required_mapping_dict(payload: Mapping[str, object], key: str) -> dict[str, object]:

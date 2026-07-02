@@ -15,7 +15,7 @@ from builds.build_live import ActiveBuild
 from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
-from runtime import compute_request_runtime, compute_service, datasource_delete_runtime
+from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, internal_api
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
@@ -25,6 +25,83 @@ from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
 # ---------------------------------------------------------------------------
 # Build runtime regressions
 # ---------------------------------------------------------------------------
+
+
+def test_engine_run_execution_entry_proto_uses_typed_fields() -> None:
+    entry = internal_api._engine_run_execution_entry_proto(
+        {
+            "key": "filter",
+            "label": "Filter",
+            "category": "step",
+            "order": 0,
+            "duration_ms": 12.5,
+            "share_pct": 100.0,
+            "metadata": {"step_type": "filter"},
+        }
+    )
+
+    assert isinstance(entry, compute_pb2.EngineRunExecutionEntry)
+    assert entry.category == enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP
+    assert entry.step_type == enums_pb2.STEP_TYPE_FILTER
+    assert entry.duration_ms == 12.5
+    assert entry.share_pct == 100.0
+
+
+def test_engine_run_update_proto_uses_typed_patch_fields() -> None:
+    update = internal_api._engine_run_update_proto(
+        {
+            "status": "success",
+            "result_json": {"row_count": 2},
+            "completed_at": datetime.now(UTC).isoformat(),
+            "duration_ms": 42,
+            "step_timings": {"filter": 2.5},
+            "execution_entries": [
+                {
+                    "key": "filter",
+                    "label": "Filter",
+                    "category": "step",
+                    "order": 0,
+                    "duration_ms": 2.5,
+                    "metadata": {"step_type": "filter"},
+                }
+            ],
+            "progress": 1.0,
+            "current_step": None,
+        }
+    )
+
+    assert update.status == enums_pb2.ENGINE_RUN_STATUS_SUCCESS
+    assert update.HasField("result_json")
+    assert update.HasField("completed_at")
+    assert update.step_timings.values["filter"] == 2.5
+    assert update.execution_entries.entries[0].step_type == enums_pb2.STEP_TYPE_FILTER
+    assert update.progress == 1.0
+    assert update.clear_current_step is True
+
+
+def test_engine_status_result_proto_uses_typed_snapshot_fields() -> None:
+    status = internal_api._engine_status_result_proto(
+        {
+            "analysis_id": "analysis-1",
+            "resource_id": "datasource-1",
+            "status": "healthy",
+            "process_id": 1234,
+            "last_activity": datetime.now(UTC).isoformat(),
+            "current_job_id": "job-1",
+            "resource_config": {"max_threads": 2},
+            "effective_resources": {"max_threads": 2, "max_memory_mb": 1024},
+            "defaults": {"max_threads": 2, "max_memory_mb": 1024, "streaming_chunk_size": 500},
+            "scope": "datasource_preview",
+            "reuse_policy": "shared",
+            "datasource_id": "datasource-1",
+        }
+    )
+
+    assert status.status == enums_pb2.ENGINE_STATUS_HEALTHY
+    assert status.resource_config.max_threads == 2
+    assert status.effective_resources.max_memory_mb == 1024
+    assert status.defaults.streaming_chunk_size == 500
+    assert status.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
 
 
 def _engine_identity_payload(identity) -> dict[str, str]:
