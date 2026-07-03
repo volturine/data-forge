@@ -18,6 +18,7 @@ import {
 import { connectBuildDetailStream, getActiveBuild, startActiveBuild } from '$lib/api/build-stream';
 import type { BuildRequest, CancelBuildResponse } from '$lib/api/compute';
 import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
+import { ReconnectionManager } from './reconnection-manager';
 
 const MAX_LOGS = 500;
 const MAX_RESOURCE_HISTORY = 120;
@@ -49,7 +50,7 @@ export class BuildStreamStore {
 
 	private connection: { close: () => void } | null = null;
 	private generation = 0;
-	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private reconnect = new ReconnectionManager(RECONNECT_DELAY_MS);
 	private shouldReconnect = false;
 	private targetBuildId: string | null = null;
 	private reconnectAttempts = 0;
@@ -202,28 +203,25 @@ export class BuildStreamStore {
 	}
 
 	private scheduleReconnect(buildId: string, generation: number): void {
-		if (this.reconnectTimer !== null) return;
+		if (this.reconnect.scheduled) return;
 		this.reconnectAttempts++;
 		if (this.reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
 			this.shouldReconnect = false;
 			void this.finalizeDisconnectedBuild(buildId, generation);
 			return;
 		}
-		this.reconnectTimer = setTimeout(() => {
-			this.reconnectTimer = null;
+		this.reconnect.schedule(() => {
 			if (generation !== this.generation) return;
 			if (!this.shouldReconnect || this.done) return;
 			if (this.targetBuildId !== buildId) return;
 			if (!this.buildId) this.buildId = buildId;
 			if (this.status === 'disconnected') this.status = 'connecting';
 			this.openConnection(buildId, generation);
-		}, RECONNECT_DELAY_MS);
+		});
 	}
 
 	private clearReconnectTimer(): void {
-		if (this.reconnectTimer === null) return;
-		clearTimeout(this.reconnectTimer);
-		this.reconnectTimer = null;
+		this.reconnect.clear();
 	}
 
 	private scheduleRefresh(generation: number): void {

@@ -4,6 +4,7 @@ import {
 	shutdownAnalysisEngine as shutdownAnalysisEngineApi,
 	shutdownEngineByIdentity
 } from '$lib/api/compute';
+import { ReconnectionManager } from './reconnection-manager';
 import { SvelteSet } from 'svelte/reactivity';
 
 const RECONNECT_DELAY_MS = 1_000;
@@ -22,7 +23,7 @@ export class EnginesStore {
 	private shuttingDown = new SvelteSet<string>();
 
 	private connection: { close: () => void } | null = null;
-	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private reconnect = new ReconnectionManager(RECONNECT_DELAY_MS);
 	private shouldReconnect = false;
 	private subscribers = 0;
 	private holdUntilEmpty = false;
@@ -160,18 +161,14 @@ export class EnginesStore {
 	}
 
 	private scheduleReconnect(): void {
-		if (this.reconnectTimer !== null) return;
-		this.reconnectTimer = setTimeout(() => {
-			this.reconnectTimer = null;
+		this.reconnect.schedule(() => {
 			if (!this.shouldReconnect) return;
 			this.openConnection(false);
-		}, RECONNECT_DELAY_MS);
+		});
 	}
 
 	private clearReconnectTimer(): void {
-		if (this.reconnectTimer === null) return;
-		clearTimeout(this.reconnectTimer);
-		this.reconnectTimer = null;
+		this.reconnect.clear();
 	}
 }
 
