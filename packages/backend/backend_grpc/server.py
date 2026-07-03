@@ -46,6 +46,7 @@ from backend_core.persistence.telegram.models import TelegramListener, TelegramS
 from backend_core.persistence.udfs.models import Udf
 from backend_core.settings_projection import get_resolved_smtp, get_resolved_telegram_settings, get_resolved_telegram_token
 from backend_core.smtp import send_smtp_message
+from backend_core.sqlmodel_typing import sa
 from backend_grpc.codec import (
     datetime_to_timestamp,
     dict_to_struct,
@@ -770,7 +771,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             ids = [udf_id for udf_id in request.udf_ids if udf_id]
             if not ids:
                 return worker_runtime_pb2.WorkerUdfCodesResponse()
-            stmt = select(Udf).where(Udf.id.in_(ids))  # type: ignore[attr-defined]
+            stmt = select(Udf).where(sa(Udf.id.in_(ids)))  # type: ignore[attr-defined]
             codes = {udf.id: udf.code for udf in session.execute(stmt).scalars().all()}
             return worker_runtime_pb2.WorkerUdfCodesResponse(codes=codes)
         finally:
@@ -884,7 +885,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session_gen = get_db()
         session = next(session_gen)
         try:
-            stmt = select(HealthCheck).where(HealthCheck.datasource_id == request.datasource_id)  # type: ignore[arg-type]
+            stmt = select(HealthCheck).where(sa(HealthCheck.datasource_id == request.datasource_id))
             checks = [check for check in session.execute(stmt).scalars().all() if check.enabled]
             return worker_runtime_pb2.WorkerListHealthChecksResponse(
                 checks=[
@@ -1284,7 +1285,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             if request.active_subscribers:
                 rows = (
                     session.execute(
-                        select(TelegramSubscriber).where(TelegramSubscriber.is_active == True)  # type: ignore[arg-type]  # noqa: E712
+                        select(TelegramSubscriber).where(sa(TelegramSubscriber.is_active == True))  # noqa: E712
                     )
                     .scalars()
                     .all()
@@ -1294,7 +1295,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 return []
             listeners = (
                 session.execute(
-                    select(TelegramListener).where(TelegramListener.datasource_id == datasource_id),  # type: ignore[arg-type]
+                    select(TelegramListener).where(sa(TelegramListener.datasource_id == datasource_id)),
                 )
                 .scalars()
                 .all()
@@ -1305,8 +1306,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             rows = (
                 session.execute(
                     select(TelegramSubscriber)
-                    .where(TelegramSubscriber.id.in_(subscriber_ids))  # type: ignore[union-attr]
-                    .where(TelegramSubscriber.is_active == True),  # type: ignore[arg-type]  # noqa: E712
+                    .where(sa(TelegramSubscriber.id.in_(subscriber_ids)))  # type: ignore[union-attr]
+                    .where(sa(TelegramSubscriber.is_active == True)),  # noqa: E712
                 )
                 .scalars()
                 .all()

@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 
 from backend_core.exceptions import datasource_not_found
 from backend_core.persistence.datasource.models import DataSource
+from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
 
 
@@ -39,7 +40,7 @@ def request_delete(session: Session, datasource_id: str, *, now: datetime | None
 def list_pending_deletes(session: Session) -> list[DataSource]:
     stmt = (
         select(DataSource)
-        .where(DataSource.is_pending_delete == True)  # type: ignore[arg-type]  # noqa: E712
-        .order_by(DataSource.delete_requested_at, DataSource.created_at, DataSource.id)  # type: ignore[arg-type]
+        .where(sa(DataSource.is_pending_delete == True))  # noqa: E712
+        .order_by(sa(DataSource.delete_requested_at), sa(DataSource.created_at), sa(DataSource.id))
     )
     return list(session.execute(stmt).scalars().all())

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, Final
 
 from sqlalchemy import desc, or_, select
-from sqlmodel import Session, col
+from sqlmodel import Session
 
 from backend_core.domain.analysis.step_types import get_step_timing_key
 from backend_core.domain.compute import schemas as compute_schemas
@@ -30,6 +30,7 @@ from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.engine_runs.models import EngineRun
+from backend_core.sqlmodel_typing import col, sa
 
 logger = logging.getLogger(__name__)
 
@@ -390,43 +391,43 @@ def list_engine_runs(
     limit: int = 100,
     offset: int = 0,
 ) -> list[EngineRunResponseSchema]:
-    stmt = select(EngineRun).where(EngineRun.namespace == get_namespace())  # type: ignore[arg-type]
+    stmt = select(EngineRun).where(sa(EngineRun.namespace == get_namespace()))
     stmt = stmt.join(
         DataSource,
         col(EngineRun.datasource_id) == col(DataSource.id),
         isouter=True,
-    )  # type: ignore[arg-type]
+    )
     stmt = stmt.join(
         Analysis,
         col(EngineRun.analysis_id) == col(Analysis.id),
         isouter=True,
-    )  # type: ignore[arg-type]
+    )
     if analysis_id is not None:
-        stmt = stmt.where(EngineRun.analysis_id == analysis_id)  # type: ignore[arg-type]
+        stmt = stmt.where(sa(EngineRun.analysis_id == analysis_id))
     if datasource_id is not None:
-        stmt = stmt.where(EngineRun.datasource_id == datasource_id)  # type: ignore[arg-type]
+        stmt = stmt.where(sa(EngineRun.datasource_id == datasource_id))
     if kind is not None:
         coerced_kind = EngineRunKind.require(kind)
         if coerced_kind == EngineRunKind.BUILD:
             return []
-        stmt = stmt.where(EngineRun.kind == coerced_kind.value)  # type: ignore[arg-type]
+        stmt = stmt.where(sa(EngineRun.kind == coerced_kind.value))
     else:
-        stmt = stmt.where(EngineRun.kind != EngineRunKind.BUILD.value)  # type: ignore[arg-type]
+        stmt = stmt.where(sa(EngineRun.kind != EngineRunKind.BUILD.value))
     if status is not None:
-        stmt = stmt.where(EngineRun.status == EngineRunStatus.require(status).value)  # type: ignore[arg-type]
+        stmt = stmt.where(sa(EngineRun.status == EngineRunStatus.require(status).value))
     if search:
         q = f'%{search}%'
         stmt = stmt.where(
             or_(
-                col(EngineRun.id).ilike(q),  # type: ignore[arg-type]
-                col(EngineRun.analysis_id).ilike(q),  # type: ignore[arg-type]
-                col(EngineRun.datasource_id).ilike(q),  # type: ignore[arg-type]
-                col(DataSource.name).ilike(q),  # type: ignore[arg-type]
-                col(Analysis.name).ilike(q),  # type: ignore[arg-type]
+                col(EngineRun.id).ilike(q),
+                col(EngineRun.analysis_id).ilike(q),
+                col(EngineRun.datasource_id).ilike(q),
+                col(DataSource.name).ilike(q),
+                col(Analysis.name).ilike(q),
             )
         )
 
-    stmt = stmt.order_by(desc(EngineRun.created_at)).limit(limit).offset(offset)  # type: ignore[arg-type]
+    stmt = stmt.order_by(desc(sa(EngineRun.created_at))).limit(limit).offset(offset)
     runs = session.execute(stmt).scalars().all()
     return [_serialize_run(run) for run in runs]
 

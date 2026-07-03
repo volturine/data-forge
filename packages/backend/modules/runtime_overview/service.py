@@ -14,6 +14,7 @@ from backend_core.namespace import list_namespaces, reset_namespace, set_namespa
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.engine_instances.models import EngineInstance
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
+from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
 
 from . import schemas
@@ -49,7 +50,7 @@ def api_process(worker_id: str | None) -> schemas.ApiProcessSummary:
 
 def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary]:
     now = _utcnow()
-    stmt = select(RuntimeWorker).order_by(RuntimeWorker.kind, RuntimeWorker.started_at)  # type: ignore[arg-type]
+    stmt = select(RuntimeWorker).order_by(sa(RuntimeWorker.kind), sa(RuntimeWorker.started_at))
     rows = list(session.execute(stmt).scalars().all())
     return [
         schemas.RuntimeWorkerSummary(
@@ -69,7 +70,7 @@ def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary
 
 
 def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummary]:
-    stmt = select(EngineInstance).order_by(EngineInstance.namespace, EngineInstance.analysis_id)  # type: ignore[arg-type]
+    stmt = select(EngineInstance).order_by(EngineInstance.namespace, EngineInstance.analysis_id)
     rows = list(session.execute(stmt).scalars().all())
     items: list[schemas.EngineInstanceSummary] = []
     for row in rows:
@@ -143,7 +144,7 @@ def _read_queue_namespace_summary(
     reclaimable_worker_ids: set[str],
 ) -> schemas.QueueNamespaceSummary:
     now = _utcnow()
-    stmt = select(BuildJob).where(BuildJob.namespace == namespace)  # type: ignore[arg-type]
+    stmt = select(BuildJob).where(sa(BuildJob.namespace == namespace))
     rows = list(session.execute(stmt).scalars().all())
     queued = [row for row in rows if row.status == BuildJobStatus.QUEUED]
     oldest = min(queued, key=lambda row: row.created_at, default=None)

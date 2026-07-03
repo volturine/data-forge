@@ -7,7 +7,7 @@ from typing import Any
 
 import croniter  # type: ignore[import-untyped]
 from sqlalchemy import or_, select
-from sqlmodel import Session, col
+from sqlmodel import Session
 
 from backend_core import (
     build_jobs_service as build_job_service,
@@ -30,6 +30,7 @@ from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
+from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
 
 logger = logging.getLogger(__name__)
@@ -404,21 +405,21 @@ def list_schedules(
         select(Schedule)
         .join(DataSource, col(Schedule.datasource_id) == col(DataSource.id), isouter=True)
         .join(Analysis, col(DataSource.created_by_analysis_id) == col(Analysis.id), isouter=True)
-    )  # type: ignore[arg-type]
+    )
     if datasource_id:
         query = query.where(col(Schedule.datasource_id) == datasource_id)
     if search:
         q = f'%{search}%'
         query = query.where(
             or_(
-                col(Schedule.id).ilike(q),  # type: ignore[arg-type]
-                col(Schedule.datasource_id).ilike(q),  # type: ignore[arg-type]
-                col(Schedule.cron_expression).ilike(q),  # type: ignore[arg-type]
-                col(DataSource.name).ilike(q),  # type: ignore[arg-type]
-                col(Analysis.name).ilike(q),  # type: ignore[arg-type]
+                col(Schedule.id).ilike(q),
+                col(Schedule.datasource_id).ilike(q),
+                col(Schedule.cron_expression).ilike(q),
+                col(DataSource.name).ilike(q),
+                col(Analysis.name).ilike(q),
             )
         )
-    query = query.order_by(col(Schedule.created_at).desc()).limit(limit).offset(offset)  # type: ignore[arg-type]
+    query = query.order_by(col(Schedule.created_at).desc()).limit(limit).offset(offset)
     result = session.execute(query)
     schedules = result.scalars().all()
     datasource_ids = {schedule.datasource_id for schedule in schedules}
@@ -549,7 +550,7 @@ def get_build_order(session: Session, analysis_id: str) -> list[str]:
 
     deps = (
         session.execute(
-            select(AnalysisDataSource).where(AnalysisDataSource.analysis_id.in_(list(graph.keys()))),  # type: ignore[arg-type, attr-defined]
+            select(AnalysisDataSource).where(sa(AnalysisDataSource.analysis_id.in_(list(graph.keys())))),  # type: ignore[attr-defined]
         )
         .scalars()
         .all()
@@ -639,7 +640,7 @@ def get_due_schedules(session: Session) -> list[Schedule]:
     """Return all enabled schedules that are due to run."""
     now = _utcnow().replace(tzinfo=None)
     result = session.execute(
-        select(Schedule).where(col(Schedule.enabled) == True),  # type: ignore[arg-type]  # noqa: E712
+        select(Schedule).where(col(Schedule.enabled) == True),  # noqa: E712
     )
     schedules = result.scalars().all()
     ds_ids = [sched.datasource_id for sched in schedules]
@@ -687,7 +688,7 @@ def claim_due_schedules(
     reclaimable = set(reclaimable_owner_ids or ())
     base = (
         select(Schedule)
-        .where(col(Schedule.enabled) == True)  # type: ignore[arg-type]  # noqa: E712
+        .where(col(Schedule.enabled) == True)  # noqa: E712
         .where(
             or_(
                 table.c.lease_owner.is_(None),

@@ -5,6 +5,7 @@ import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -230,9 +231,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
 # Global exception handlers for consistent structured error responses
-app.add_exception_handler(AppError, app_error_handler)  # type: ignore[arg-type]
-app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
-app.add_exception_handler(Exception, generic_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(AppError, cast(Any, app_error_handler))
+app.add_exception_handler(RequestValidationError, cast(Any, validation_error_handler))
+app.add_exception_handler(Exception, generic_error_handler)
 
 
 @app.middleware('http')

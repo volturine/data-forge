@@ -4,7 +4,7 @@ from typing import Any, cast
 
 from google.protobuf import json_format, timestamp_pb2
 from sqlalchemy import desc, func, or_, select, update
-from sqlmodel import Session, col
+from sqlmodel import Session
 
 from backend_core.domain.analysis.step_types import PipelineStepType
 from backend_core.domain.build_runs.models import BuildRunStatus
@@ -13,6 +13,7 @@ from backend_core.domain.engine_runs.schemas import EngineRunExecutionCategory, 
 from backend_core.json_utils import copy_json_dict
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.datasource.models import DataSource
+from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
 from dataforge_protocol import compute_pb2
 
@@ -246,12 +247,7 @@ def get_build_run(session: Session, build_id: str) -> BuildRun | None:
 
 
 def get_build_run_by_engine_run(session: Session, engine_run_id: str) -> BuildRun | None:
-    stmt = (
-        select(BuildRun)
-        .where(BuildRun.current_engine_run_id == engine_run_id)  # type: ignore[arg-type]
-        .order_by(desc(BuildRun.updated_at))  # type: ignore[arg-type]
-        .limit(1)
-    )
+    stmt = select(BuildRun).where(sa(BuildRun.current_engine_run_id == engine_run_id)).order_by(desc(sa(BuildRun.updated_at))).limit(1)
     return session.execute(stmt).scalars().first()
 
 
@@ -271,38 +267,38 @@ def list_build_runs(
         DataSource,
         col(BuildRun.current_datasource_id) == col(DataSource.id),
         isouter=True,
-    )  # type: ignore[arg-type]
+    )
     if analysis_id is not None:
-        stmt = stmt.where(BuildRun.analysis_id == analysis_id)  # type: ignore[arg-type]
+        stmt = stmt.where(sa(BuildRun.analysis_id == analysis_id))
     if datasource_id is not None:
         stmt = stmt.where(
             or_(
-                BuildRun.current_datasource_id == datasource_id,  # type: ignore[arg-type]
-                BuildRun.current_output_id == datasource_id,  # type: ignore[arg-type]
+                sa(BuildRun.current_datasource_id == datasource_id),
+                sa(BuildRun.current_output_id == datasource_id),
             )
         )
     if kind is not None:
-        stmt = stmt.where(BuildRun.current_kind == kind)  # type: ignore[arg-type]
+        stmt = stmt.where(sa(BuildRun.current_kind == kind))
     if status is not None:
-        stmt = stmt.where(BuildRun.status == BuildRunStatus.require(status))  # type: ignore[arg-type]
+        stmt = stmt.where(sa(BuildRun.status == BuildRunStatus.require(status)))
     if current_engine_run_id is not None:
-        stmt = stmt.where(BuildRun.current_engine_run_id == current_engine_run_id)  # type: ignore[arg-type]
+        stmt = stmt.where(sa(BuildRun.current_engine_run_id == current_engine_run_id))
     if search:
         q = f'%{search}%'
         stmt = stmt.where(
             or_(
-                col(BuildRun.id).ilike(q),  # type: ignore[arg-type]
-                col(BuildRun.analysis_id).ilike(q),  # type: ignore[arg-type]
-                col(BuildRun.current_datasource_id).ilike(q),  # type: ignore[arg-type]
-                col(BuildRun.current_output_id).ilike(q),  # type: ignore[arg-type]
-                col(BuildRun.current_tab_name).ilike(q),  # type: ignore[arg-type]
-                col(BuildRun.current_output_name).ilike(q),  # type: ignore[arg-type]
-                col(BuildRun.current_step).ilike(q),  # type: ignore[arg-type]
-                col(BuildRun.analysis_name).ilike(q),  # type: ignore[arg-type]
-                col(DataSource.name).ilike(q),  # type: ignore[arg-type]
+                col(BuildRun.id).ilike(q),
+                col(BuildRun.analysis_id).ilike(q),
+                col(BuildRun.current_datasource_id).ilike(q),
+                col(BuildRun.current_output_id).ilike(q),
+                col(BuildRun.current_tab_name).ilike(q),
+                col(BuildRun.current_output_name).ilike(q),
+                col(BuildRun.current_step).ilike(q),
+                col(BuildRun.analysis_name).ilike(q),
+                col(DataSource.name).ilike(q),
             )
         )
-    stmt = stmt.order_by(desc(BuildRun.created_at)).limit(limit).offset(offset)  # type: ignore[arg-type]
+    stmt = stmt.order_by(desc(sa(BuildRun.created_at))).limit(limit).offset(offset)
     runs = list(session.execute(stmt).scalars().all())
     for run in runs:
         session.refresh(run)
@@ -310,25 +306,15 @@ def list_build_runs(
 
 
 def has_inflight_build_for_schedule(session: Session, schedule_id: str) -> bool:
-    stmt = (
-        select(BuildRun)
-        .where(BuildRun.schedule_id == schedule_id)  # type: ignore[arg-type]
-        .where(BuildRun.status == BuildRunStatus.QUEUED)  # type: ignore[arg-type]
-        .limit(1)
-    )
+    stmt = select(BuildRun).where(sa(BuildRun.schedule_id == schedule_id)).where(sa(BuildRun.status == BuildRunStatus.QUEUED)).limit(1)
     if session.execute(stmt).first() is not None:
         return True
-    running_stmt = (
-        select(BuildRun)
-        .where(BuildRun.schedule_id == schedule_id)  # type: ignore[arg-type]
-        .where(BuildRun.status == BuildRunStatus.RUNNING)  # type: ignore[arg-type]
-        .limit(1)
-    )
+    running_stmt = select(BuildRun).where(sa(BuildRun.schedule_id == schedule_id)).where(sa(BuildRun.status == BuildRunStatus.RUNNING)).limit(1)
     return session.execute(running_stmt).first() is not None
 
 
 def _next_sequence(session: Session, build_id: str) -> int:
-    stmt = select(func.max(BuildEvent.sequence)).where(BuildEvent.build_id == build_id)  # type: ignore[arg-type]
+    stmt = select(func.max(BuildEvent.sequence)).where(sa(BuildEvent.build_id == build_id))
     last = session.execute(stmt).scalar_one()
     return (int(last) if isinstance(last, int) else 0) + 1
 
@@ -336,9 +322,9 @@ def _next_sequence(session: Session, build_id: str) -> int:
 def _cas_update_build_run(session: Session, *, run: BuildRun, values: dict[str, object], expected_status: BuildRunStatus) -> BuildRun | None:
     result = session.execute(
         update(BuildRun)
-        .where(BuildRun.id == run.id)  # type: ignore[arg-type]
-        .where(BuildRun.status == expected_status)  # type: ignore[arg-type]
-        .where(BuildRun.version == run.version)  # type: ignore[arg-type]
+        .where(sa(BuildRun.id == run.id))
+        .where(sa(BuildRun.status == expected_status))
+        .where(sa(BuildRun.version == run.version))
         .values(**values)
     )
     rowcount = getattr(result, 'rowcount', None)
@@ -460,32 +446,23 @@ def append_build_event(
 
 
 def _list_build_events(session: Session, build_id: str) -> list[BuildEvent]:
-    stmt = (
-        select(BuildEvent)
-        .where(BuildEvent.build_id == build_id)  # type: ignore[arg-type]
-        .order_by(BuildEvent.sequence)  # type: ignore[arg-type]
-    )
+    stmt = select(BuildEvent).where(sa(BuildEvent.build_id == build_id)).order_by(sa(BuildEvent.sequence))
     return list(session.execute(stmt).scalars().all())
 
 
 def list_build_events_after(session: Session, build_id: str, sequence: int = 0) -> list[BuildEvent]:
-    stmt = (
-        select(BuildEvent)
-        .where(BuildEvent.build_id == build_id)  # type: ignore[arg-type]
-        .where(BuildEvent.sequence > sequence)  # type: ignore[arg-type]
-        .order_by(BuildEvent.sequence)  # type: ignore[arg-type]
-    )
+    stmt = select(BuildEvent).where(sa(BuildEvent.build_id == build_id)).where(sa(BuildEvent.sequence > sequence)).order_by(sa(BuildEvent.sequence))
     return list(session.execute(stmt).scalars().all())
 
 
 def get_latest_sequence(session: Session, build_id: str) -> int:
-    stmt = select(func.max(BuildEvent.sequence)).where(BuildEvent.build_id == build_id)  # type: ignore[arg-type]
+    stmt = select(func.max(BuildEvent.sequence)).where(sa(BuildEvent.build_id == build_id))
     last = session.execute(stmt).scalar_one()
     return int(last) if isinstance(last, int) else 0
 
 
 def latest_namespace_update(session: Session, *, namespace: str) -> datetime | None:
-    stmt = select(func.max(BuildRun.updated_at)).where(BuildRun.namespace == namespace)  # type: ignore[arg-type]
+    stmt = select(func.max(BuildRun.updated_at)).where(sa(BuildRun.namespace == namespace))
     updated = session.execute(stmt).scalar_one()
     return updated if isinstance(updated, datetime) else None
 
@@ -664,7 +641,7 @@ def build_summary(build_run: BuildRun) -> compute_schemas.ActiveBuildSummary:
 
 def mark_running_builds_orphaned(session: Session, *, now: datetime | None = None) -> int:
     marker = now or _utcnow()
-    stmt = select(BuildRun).where(BuildRun.status == BuildRunStatus.RUNNING)  # type: ignore[arg-type]
+    stmt = select(BuildRun).where(sa(BuildRun.status == BuildRunStatus.RUNNING))
     runs = list(session.execute(stmt).scalars().all())
     if not runs:
         return 0

@@ -14,6 +14,7 @@ from typing import Any
 from sqlmodel import Session as DbSession, select
 
 from backend_core.secrets import decrypt_secret, encrypt_secret
+from backend_core.sqlmodel_typing import sa
 from modules.chat.models import ChatSession
 
 logger = logging.getLogger(__name__)
@@ -194,7 +195,7 @@ class SessionStore:
         if live:
             return live
         with self._db() as db:
-            row = db.exec(select(ChatSession).where(ChatSession.id == session_id)).first()
+            row = db.exec(select(ChatSession).where(sa(ChatSession.id == session_id))).first()
             if not row:
                 return None
             live = LiveSession(row)

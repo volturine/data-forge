@@ -17,6 +17,7 @@ from backend_core.auth_exceptions import (
 from backend_core.database import get_settings_db, run_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.proxy import client_ip, request_scheme
+from backend_core.sqlmodel_typing import sa
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import (
     AuthProvider,
@@ -204,8 +205,8 @@ async def login(
         raise AccountDisabledError()
     password_provider = session.exec(
         select(AuthProvider).where(
-            AuthProvider.user_id == user.id,
-            AuthProvider.provider == AuthProviderName.PASSWORD,
+            sa(AuthProvider.user_id == user.id),
+            sa(AuthProvider.provider == AuthProviderName.PASSWORD),
         ),
     ).first()
     if not password_provider:

@@ -7,7 +7,7 @@ def normalize_step_timings(values: dict | None) -> dict[str, float]:
     normalized: dict[str, float] = {}
     for key, value in values.items():
         try:
-            normalized[str(key)] = float(value)  # type: ignore[arg-type]
+            normalized[str(key)] = float(value)
         except TypeError, ValueError:
             continue
     return normalized

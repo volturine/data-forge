@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from sqlalchemy import select
-from sqlmodel import Session, col
+from sqlmodel import Session
 
 from backend_core.exceptions import AnalysisCycleError
 from backend_core.persistence.analysis.models import AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource
+from backend_core.sqlmodel_typing import col
 
 
 def detect_analysis_cycle(session: Session, analysis_id: str, source_analysis_id: str) -> bool:
@@ -17,8 +18,8 @@ def detect_analysis_cycle(session: Session, analysis_id: str, source_analysis_id
         if target_id in visited:
             return False
         visited.add(target_id)
-        stmt = select(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == target_id)  # type: ignore[arg-type]
-        links = session.execute(stmt).scalars().all()  # type: ignore[arg-type]
+        stmt = select(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == target_id)
+        links = session.execute(stmt).scalars().all()
         datasources = [session.get(DataSource, link.datasource_id) for link in links]
         for datasource in datasources:
             if datasource is None or not datasource.is_analysis_source:

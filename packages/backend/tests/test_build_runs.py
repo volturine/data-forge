@@ -9,6 +9,7 @@ from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.build_runs.models import BuildEvent
+from backend_core.sqlmodel_typing import sa
 
 
 def _starter() -> dict[str, object]:
@@ -531,7 +532,7 @@ def test_append_build_event_rejects_conflicting_terminal_event_for_terminal_run(
 
     first = build_run_service.append_build_event(test_db_session, build_id=run.id, event=cancelled)
     second = build_run_service.append_build_event(test_db_session, build_id=run.id, event=complete)
-    rows = test_db_session.exec(select(BuildEvent).where(BuildEvent.build_id == run.id)).all()
+    rows = test_db_session.exec(select(BuildEvent).where(sa(BuildEvent.build_id == run.id))).all()
 
     assert first is not None
     assert second is None
@@ -601,7 +602,7 @@ def test_get_build_run_by_engine_run_returns_latest_match(test_db_session) -> No
     )
 
     found = build_run_service.get_build_run_by_engine_run(test_db_session, 'engine-42')
-    events = test_db_session.exec(select(BuildEvent).where(BuildEvent.build_id == second.id)).all()
+    events = test_db_session.exec(select(BuildEvent).where(sa(BuildEvent.build_id == second.id))).all()
 
     assert found is not None
     assert found.id == second.id

@@ -14,6 +14,7 @@ from backend_core.exceptions import DataSourceValidationError
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.engine_runs.models import EngineRun
+from backend_core.sqlmodel_typing import sa
 from modules.datasource.service import create_analysis_datasource
 
 
@@ -763,11 +764,7 @@ class TestDatasourceUpdateRunLogging:
         response = client.put(f'/api/v1/datasource/{ds.id}', json={'name': 'Renamed Raw'})
         assert response.status_code == 200
 
-        runs = (
-            test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == ds.id))  # type: ignore[arg-type]
-            .scalars()
-            .all()
-        )
+        runs = test_db_session.execute(select(EngineRun).where(sa(EngineRun.datasource_id == ds.id))).scalars().all()
         assert runs == []
 
     def test_update_rejects_system_snapshot_fields(self, client, test_db_session, sample_csv_object_url: str):

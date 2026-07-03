@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
-from sqlmodel import Session, col
+from sqlmodel import Session
 
 from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, require_ai_provider
 from backend_core.analysis_cycles import assert_no_analysis_cycle
@@ -36,6 +36,7 @@ from backend_core.settings_store import (
     get_resolved_openai_settings,
     get_resolved_openrouter_key,
 )
+from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import enums_pb2
 from modules.analysis.pipeline_compiler import compile_step
 from modules.analysis.schemas import (
@@ -72,8 +73,8 @@ def _to_response(analysis: Analysis, *, is_favorite: bool = False) -> AnalysisRe
 def _favorite_ids(session: Session, user_id: str | None, analysis_ids: list[str]) -> set[str]:
     if not user_id or not analysis_ids:
         return set()
-    stmt = select(col(AnalysisFavorite.analysis_id)).where(col(AnalysisFavorite.user_id) == user_id)  # type: ignore[arg-type]
-    stmt = stmt.where(col(AnalysisFavorite.analysis_id).in_(analysis_ids))  # type: ignore[arg-type]
+    stmt = select(col(AnalysisFavorite.analysis_id)).where(col(AnalysisFavorite.user_id) == user_id)
+    stmt = stmt.where(col(AnalysisFavorite.analysis_id).in_(analysis_ids))
     rows = session.execute(stmt).all()
     return {str(analysis_id) for (analysis_id,) in rows}
 
@@ -667,11 +668,11 @@ def list_analyses(
     session: Session,  # type: ignore[type-arg]
 ) -> list[AnalysisGalleryItemSchema]:
     stmt = select(Analysis).options(
-        defer(Analysis.pipeline_definition),  # type: ignore[arg-type]
-        defer(Analysis.description),  # type: ignore[arg-type]
-        defer(Analysis.status),  # type: ignore[arg-type]
-        defer(Analysis.result_path),  # type: ignore[arg-type]
-        defer(Analysis.owner_id),  # type: ignore[arg-type]
+        defer(sa(Analysis.pipeline_definition)),
+        defer(sa(Analysis.description)),
+        defer(sa(Analysis.status)),
+        defer(sa(Analysis.result_path)),
+        defer(sa(Analysis.owner_id)),
     )
     analyses = list(session.execute(stmt).scalars())
     return [
@@ -695,17 +696,17 @@ def list_favorite_analyses(
 ) -> list[AnalysisGalleryItemSchema]:
     if not user_id:
         return []
-    favorite_stmt = select(col(AnalysisFavorite.analysis_id)).where(col(AnalysisFavorite.user_id) == user_id)  # type: ignore[arg-type]
+    favorite_stmt = select(col(AnalysisFavorite.analysis_id)).where(col(AnalysisFavorite.user_id) == user_id)
     favorite_ids = [str(analysis_id) for (analysis_id,) in session.execute(favorite_stmt).all()]
     if not favorite_ids:
         return []
-    analysis_stmt = select(Analysis).where(col(Analysis.id).in_(favorite_ids))  # type: ignore[arg-type]
+    analysis_stmt = select(Analysis).where(col(Analysis.id).in_(favorite_ids))
     analysis_stmt = analysis_stmt.options(
-        defer(Analysis.pipeline_definition),  # type: ignore[arg-type]
-        defer(Analysis.description),  # type: ignore[arg-type]
-        defer(Analysis.status),  # type: ignore[arg-type]
-        defer(Analysis.result_path),  # type: ignore[arg-type]
-        defer(Analysis.owner_id),  # type: ignore[arg-type]
+        defer(sa(Analysis.pipeline_definition)),
+        defer(sa(Analysis.description)),
+        defer(sa(Analysis.status)),
+        defer(sa(Analysis.result_path)),
+        defer(sa(Analysis.owner_id)),
     )
     analyses = list(session.execute(analysis_stmt).scalars())
     analyses.sort(key=lambda analysis: analysis.updated_at, reverse=True)
@@ -1075,7 +1076,7 @@ def delete_analysis(
 
     created_datasources = (
         session.execute(
-            select(DataSource).where(col(DataSource.created_by_analysis_id) == analysis_id),  # type: ignore[arg-type]
+            select(DataSource).where(col(DataSource.created_by_analysis_id) == analysis_id),
         )
         .scalars()
         .all()
@@ -1086,7 +1087,7 @@ def delete_analysis(
             cleanup_datasource_storage(ds)
             session.delete(ds)
 
-    session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))  # type: ignore[arg-type]
+    session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))
 
     session.delete(analysis)
     session.commit()

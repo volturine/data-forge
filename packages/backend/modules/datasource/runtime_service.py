@@ -29,6 +29,7 @@ from backend_core.iceberg_catalog import load_runtime_catalog
 from backend_core.namespace import get_namespace, namespace_paths
 from backend_core.object_store_paths import is_object_store_url
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
+from backend_core.sqlmodel_typing import sa
 from modules.datasource.runtime_loading import load_datasource_frame as load_datasource
 from modules.datasource.schemas import (
     ColumnSchema,
@@ -866,9 +867,7 @@ def ingest_datasource_for_schedule(session: Session, datasource_id: str) -> Data
 
 
 def _get_column_metadata_map(session: Session, datasource_id: str) -> dict[str, str | None]:
-    rows = session.exec(
-        select(DataSourceColumnMetadata).where(DataSourceColumnMetadata.datasource_id == datasource_id)  # type: ignore[arg-type]
-    ).all()
+    rows = session.exec(select(DataSourceColumnMetadata).where(sa(DataSourceColumnMetadata.datasource_id == datasource_id))).all()
     return {row.column_name: row.description for row in rows}
 
 

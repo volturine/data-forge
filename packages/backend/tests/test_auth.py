@@ -28,6 +28,7 @@ from backend_core.namespace import namespace_paths
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.udfs.models import Udf
+from backend_core.sqlmodel_typing import sa
 from main import app
 from modules.auth.dependencies import get_current_user, get_optional_user
 from modules.auth.models import (
@@ -232,13 +233,13 @@ class TestUserService:
             ensure_default_user(session)
 
         with Session(engine) as session:
-            user = session.exec(select(User).where(User.email == 'seeded@example.com')).first()
+            user = session.exec(select(User).where(sa(User.email == 'seeded@example.com'))).first()
             assert user is not None
             assert user.display_name == 'Seeded User'
             provider = session.exec(
                 select(AuthProvider).where(
-                    AuthProvider.user_id == user.id,
-                    AuthProvider.provider == AuthProviderName.PASSWORD,
+                    sa(AuthProvider.user_id == user.id),
+                    sa(AuthProvider.provider == AuthProviderName.PASSWORD),
                 ),
             ).first()
             assert provider is not None
@@ -256,8 +257,8 @@ class TestUserService:
         assert user.has_password is True
         provider = auth_db_session.exec(
             select(AuthProvider).where(
-                AuthProvider.user_id == user.id,
-                AuthProvider.provider == AuthProviderName.PASSWORD,
+                sa(AuthProvider.user_id == user.id),
+                sa(AuthProvider.provider == AuthProviderName.PASSWORD),
             ),
         ).first()
         assert provider is not None
@@ -307,8 +308,8 @@ class TestUserService:
         assert updated.display_name == 'Second User'
         provider = auth_db_session.exec(
             select(AuthProvider).where(
-                AuthProvider.user_id == updated.id,
-                AuthProvider.provider == AuthProviderName.PASSWORD,
+                sa(AuthProvider.user_id == updated.id),
+                sa(AuthProvider.provider == AuthProviderName.PASSWORD),
             ),
         ).first()
         assert provider is not None
@@ -340,8 +341,8 @@ class TestUserService:
         assert updated.display_name == 'Renamed Default'
         provider = auth_db_session.exec(
             select(AuthProvider).where(
-                AuthProvider.user_id == updated.id,
-                AuthProvider.provider == AuthProviderName.PASSWORD,
+                sa(AuthProvider.user_id == updated.id),
+                sa(AuthProvider.provider == AuthProviderName.PASSWORD),
             ),
         ).first()
         assert provider is not None
@@ -358,8 +359,8 @@ class TestUserService:
 
         provider = auth_db_session.exec(
             select(AuthProvider).where(
-                AuthProvider.user_id == user.id,
-                AuthProvider.provider == AuthProviderName.PASSWORD,
+                sa(AuthProvider.user_id == user.id),
+                sa(AuthProvider.provider == AuthProviderName.PASSWORD),
             ),
         ).first()
         assert provider is not None
@@ -414,8 +415,8 @@ class TestUserService:
 
         provider = auth_db_session.exec(
             select(AuthProvider).where(
-                AuthProvider.user_id == user.id,
-                AuthProvider.provider == AuthProviderName.PASSWORD,
+                sa(AuthProvider.user_id == user.id),
+                sa(AuthProvider.provider == AuthProviderName.PASSWORD),
             ),
         ).first()
         assert provider is not None
@@ -502,9 +503,9 @@ class TestUserService:
             delete_user_account(auth_db_session, user.id)
 
             with Session(namespace_engine) as namespace_session:
-                datasource_owner = namespace_session.exec(select(DataSource.owner_id).where(DataSource.id == 'namespace-datasource')).one()
-                analysis_owner = namespace_session.exec(select(Analysis.owner_id).where(Analysis.id == 'namespace-analysis')).one()
-                udf_owner = namespace_session.exec(select(Udf.owner_id).where(Udf.id == 'namespace-udf')).one()
+                datasource_owner = namespace_session.exec(select(DataSource.owner_id).where(sa(DataSource.id == 'namespace-datasource'))).one()
+                analysis_owner = namespace_session.exec(select(Analysis.owner_id).where(sa(Analysis.id == 'namespace-analysis'))).one()
+                udf_owner = namespace_session.exec(select(Udf.owner_id).where(sa(Udf.id == 'namespace-udf'))).one()
 
             assert datasource_owner is None
             assert analysis_owner is None
@@ -630,8 +631,8 @@ class TestOAuthService:
         assert user.has_password is False
         provider = auth_db_session.exec(
             select(AuthProvider).where(
-                AuthProvider.user_id == user.id,
-                AuthProvider.provider == AuthProviderName.GOOGLE,
+                sa(AuthProvider.user_id == user.id),
+                sa(AuthProvider.provider == AuthProviderName.GOOGLE),
             ),
         ).first()
         assert provider is not None
@@ -686,7 +687,7 @@ class TestOAuthService:
         )
 
         assert resolved.id == user.id
-        providers = auth_db_session.exec(select(AuthProvider).where(AuthProvider.user_id == user.id)).all()
+        providers = auth_db_session.exec(select(AuthProvider).where(sa(AuthProvider.user_id == user.id))).all()
         assert len(providers) == 1
 
     def test_find_or_create_oauth_user_existing_email(self, auth_db_session: Session) -> None:
@@ -702,7 +703,7 @@ class TestOAuthService:
         )
 
         assert resolved.id == user.id
-        providers = auth_db_session.exec(select(AuthProvider).where(AuthProvider.user_id == user.id)).all()
+        providers = auth_db_session.exec(select(AuthProvider).where(sa(AuthProvider.user_id == user.id))).all()
         names = {item.provider for item in providers}
         assert names == {AuthProviderName.PASSWORD, AuthProviderName.GOOGLE}
 
@@ -719,7 +720,7 @@ class TestOAuthService:
 
         unlink_provider(auth_db_session, user.id, AuthProviderName.GOOGLE)
 
-        providers = auth_db_session.exec(select(AuthProvider).where(AuthProvider.user_id == user.id)).all()
+        providers = auth_db_session.exec(select(AuthProvider).where(sa(AuthProvider.user_id == user.id))).all()
         names = {item.provider for item in providers}
         assert names == {AuthProviderName.PASSWORD}
 
@@ -752,7 +753,7 @@ class TestOAuthService:
         with pytest.raises(ProviderUnlinkError, match='missing account'):
             unlink_provider(auth_db_session, user.id, AuthProviderName.GOOGLE)
 
-        providers = auth_db_session.exec(select(AuthProvider).where(AuthProvider.user_id == user.id)).all()
+        providers = auth_db_session.exec(select(AuthProvider).where(sa(AuthProvider.user_id == user.id))).all()
         names = {item.provider for item in providers}
         assert names == {AuthProviderName.PASSWORD, AuthProviderName.GOOGLE}
 
@@ -774,7 +775,7 @@ class TestVerificationTokenService:
 
         assert isinstance(token, str)
         assert len(token) >= 32
-        row = auth_db_session.exec(select(VerificationToken).where(VerificationToken.token == token)).first()
+        row = auth_db_session.exec(select(VerificationToken).where(sa(VerificationToken.token == token))).first()
         assert row is not None
         assert row.user_id == user.id
         assert row.token_type == VerificationTokenType.EMAIL_VERIFY
@@ -796,7 +797,7 @@ class TestVerificationTokenService:
         resolved_user_id = validate_verification_token(auth_db_session, token=token, token_type=VerificationTokenType.EMAIL_VERIFY)
 
         assert resolved_user_id == user.id
-        row = auth_db_session.exec(select(VerificationToken).where(VerificationToken.token == token)).first()
+        row = auth_db_session.exec(select(VerificationToken).where(sa(VerificationToken.token == token))).first()
         assert row is not None
         assert row.used is True
 
@@ -812,7 +813,7 @@ class TestVerificationTokenService:
             user_id=user.id,
             token_type=VerificationTokenType.EMAIL_VERIFY,
         )
-        row = auth_db_session.exec(select(VerificationToken).where(VerificationToken.token == token)).first()
+        row = auth_db_session.exec(select(VerificationToken).where(sa(VerificationToken.token == token))).first()
         assert row is not None
         row.expires_at = row.expires_at.replace(tzinfo=UTC)
         auth_db_session.add(row)
@@ -990,8 +991,8 @@ class TestAuthRoutes:
         assert user.email_verified is True
         tokens = auth_db_session.exec(
             select(VerificationToken).where(
-                VerificationToken.user_id == user.id,
-                VerificationToken.token_type == VerificationTokenType.EMAIL_VERIFY,
+                sa(VerificationToken.user_id == user.id),
+                sa(VerificationToken.token_type == VerificationTokenType.EMAIL_VERIFY),
             )
         ).all()
         assert tokens == []
@@ -1022,7 +1023,7 @@ class TestAuthRoutes:
 
         with Session(auth_engine) as fresh_session:
             stored_user = fresh_session.get(User, user.id)
-            provider = fresh_session.exec(select(AuthProvider).where(AuthProvider.user_id == user.id)).first()
+            provider = fresh_session.exec(select(AuthProvider).where(sa(AuthProvider.user_id == user.id))).first()
 
         assert stored_user is not None
         assert stored_user.email == 'provider-order@example.com'
@@ -1205,13 +1206,13 @@ class TestAuthRoutes:
         assert 'session_token=' in set_cookie
         assert 'Max-Age=0' in set_cookie
         assert get_user_by_id(auth_db_session, user.id) is None
-        assert auth_db_session.exec(select(AuthProvider).where(AuthProvider.user_id == user.id)).all() == []
-        assert auth_db_session.exec(select(UserSession).where(UserSession.user_id == user.id)).all() == []
-        assert auth_db_session.exec(select(VerificationToken).where(VerificationToken.user_id == user.id)).all() == []
+        assert auth_db_session.exec(select(AuthProvider).where(sa(AuthProvider.user_id == user.id))).all() == []
+        assert auth_db_session.exec(select(UserSession).where(sa(UserSession.user_id == user.id))).all() == []
+        assert auth_db_session.exec(select(VerificationToken).where(sa(VerificationToken.user_id == user.id))).all() == []
 
-        datasource_owner = auth_db_session.exec(select(DataSource.owner_id).where(DataSource.id == datasource_id)).one_or_none()
-        analysis_owner = auth_db_session.exec(select(Analysis.owner_id).where(Analysis.id == analysis_id)).one_or_none()
-        udf_owner = auth_db_session.exec(select(Udf.owner_id).where(Udf.id == udf_id)).one_or_none()
+        datasource_owner = auth_db_session.exec(select(DataSource.owner_id).where(sa(DataSource.id == datasource_id))).one_or_none()
+        analysis_owner = auth_db_session.exec(select(Analysis.owner_id).where(sa(Analysis.id == analysis_id))).one_or_none()
+        udf_owner = auth_db_session.exec(select(Udf.owner_id).where(sa(Udf.id == udf_id))).one_or_none()
         assert datasource_owner is None
         assert analysis_owner is None
         assert udf_owner is None
@@ -1294,8 +1295,8 @@ class TestAuthRoutes:
         assert response.json()['message'] == 'If the email exists, a password reset link has been sent'
         row = auth_db_session.exec(
             select(VerificationToken).where(
-                VerificationToken.user_id == user.id,
-                VerificationToken.token_type == VerificationTokenType.PASSWORD_RESET,
+                sa(VerificationToken.user_id == user.id),
+                sa(VerificationToken.token_type == VerificationTokenType.PASSWORD_RESET),
             ),
         ).first()
         assert row is not None
@@ -1311,7 +1312,7 @@ class TestAuthRoutes:
         assert response.status_code == 200
         assert response.json()['message'] == 'If the email exists, a password reset link has been sent'
         rows = auth_db_session.exec(
-            select(VerificationToken).where(VerificationToken.token_type == VerificationTokenType.PASSWORD_RESET),
+            select(VerificationToken).where(sa(VerificationToken.token_type == VerificationTokenType.PASSWORD_RESET)),
         ).all()
         assert len(rows) == 0
 
@@ -1339,8 +1340,8 @@ class TestAuthRoutes:
         assert response.json()['message'] == 'Password reset successful'
         provider = auth_db_session.exec(
             select(AuthProvider).where(
-                AuthProvider.user_id == user.id,
-                AuthProvider.provider == AuthProviderName.PASSWORD,
+                sa(AuthProvider.user_id == user.id),
+                sa(AuthProvider.provider == AuthProviderName.PASSWORD),
             ),
         ).first()
         assert provider is not None
@@ -1348,7 +1349,7 @@ class TestAuthRoutes:
         hashed = provider.provider_metadata.get('password_hash')
         assert isinstance(hashed, str)
         assert verify_password('Newpassword123', hashed) is True
-        token_row = auth_db_session.exec(select(VerificationToken).where(VerificationToken.token == token)).first()
+        token_row = auth_db_session.exec(select(VerificationToken).where(sa(VerificationToken.token == token))).first()
         assert token_row is not None
         assert token_row.used is True
         refreshed_session = auth_db_session.get(UserSession, user_session.id)

@@ -8,6 +8,7 @@ from backend_core.domain.compute.base import EngineStatusInfo
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
 from backend_core.json_utils import copy_json_object
 from backend_core.persistence.engine_instances.models import EngineInstance
+from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
 
 
@@ -86,7 +87,7 @@ def persist_engine_snapshot(session: Session, *, worker_id: str, namespace: str,
 
 def mark_namespace_engines_stopped(session: Session, *, worker_id: str, namespace: str, active_engine_identities: set[str], now: datetime | None = None) -> int:
     stamp = now or _utcnow()
-    stmt = select(EngineInstance).where(EngineInstance.worker_id == worker_id).where(EngineInstance.namespace == namespace)  # type: ignore[arg-type]
+    stmt = select(EngineInstance).where(sa(EngineInstance.worker_id == worker_id)).where(sa(EngineInstance.namespace == namespace))
     rows = list(session.execute(stmt).scalars().all())
     updated = 0
     for row in rows:
@@ -111,9 +112,9 @@ def list_engine_instances(session: Session, *, namespace: str) -> list[EngineIns
     active = [status for status in EngineInstanceStatus.members() if status.is_active]
     stmt = (
         select(EngineInstance)
-        .where(EngineInstance.namespace == namespace)  # type: ignore[arg-type]
-        .where(EngineInstance.status.in_(active))  # type: ignore[attr-defined]
-        .order_by(EngineInstance.engine_scope, EngineInstance.analysis_id, EngineInstance.datasource_id, EngineInstance.build_id)  # type: ignore[arg-type]
+        .where(sa(EngineInstance.namespace == namespace))
+        .where(sa(EngineInstance.status.in_(active)))  # type: ignore[attr-defined]
+        .order_by(sa(EngineInstance.engine_scope), sa(EngineInstance.analysis_id), sa(EngineInstance.datasource_id), sa(EngineInstance.build_id))
     )
     return list(session.execute(stmt).scalars().all())
 
@@ -147,7 +148,7 @@ def list_engine_projection(session: Session, *, namespace: str) -> list[EngineIn
 
 
 def latest_namespace_update(session: Session, *, namespace: str) -> datetime | None:
-    stmt = select(func.max(EngineInstance.updated_at)).where(EngineInstance.namespace == namespace)  # type: ignore[arg-type]
+    stmt = select(func.max(EngineInstance.updated_at)).where(sa(EngineInstance.namespace == namespace))
     value = session.execute(stmt).scalar_one()
     return value if isinstance(value, datetime) else None
 

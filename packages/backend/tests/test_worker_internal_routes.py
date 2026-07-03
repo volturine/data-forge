@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import pytest
 from sqlmodel import Session
@@ -86,15 +87,15 @@ async def test_internal_worker_grpc_registers_heartbeats_and_stops(monkeypatch: 
             pid=123,
             capacity=1,
         ),
-        context,  # type: ignore[arg-type]
+        cast(Any, context),
     )
-    await servicer.HeartbeatWorker(worker_runtime_pb2.RuntimeWorkerHeartbeatRequest(worker_id=worker_id, active_jobs=1), context)  # type: ignore[arg-type]
+    await servicer.HeartbeatWorker(worker_runtime_pb2.RuntimeWorkerHeartbeatRequest(worker_id=worker_id, active_jobs=1), context)
 
     worker = run_settings_db(lambda session: session.get(RuntimeWorker, worker_id))
     assert worker is not None
     assert worker.active_jobs == 1
 
-    await servicer.StopWorker(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)  # type: ignore[arg-type]
+    await servicer.StopWorker(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
     worker = run_settings_db(lambda session: session.get(RuntimeWorker, worker_id))
     assert worker is not None
     assert worker.stopped_at is not None
@@ -119,7 +120,7 @@ async def test_internal_worker_grpc_claims_and_finalizes_build_job(test_db_sessi
     job = build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
     servicer = WorkerRuntimeServicer()
 
-    response = await servicer.ClaimBuildJob(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)  # type: ignore[arg-type]
+    response = await servicer.ClaimBuildJob(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
 
     assert response.HasField('job')
     assert response.job.job_id == job.id
@@ -131,7 +132,7 @@ async def test_internal_worker_grpc_claims_and_finalizes_build_job(test_db_sessi
 
     await servicer.FinalizeBuildJob(
         worker_runtime_pb2.WorkerFinalizeBuildJobRequest(job_id=job.id, build_id=build_id, namespace='default'),
-        context,  # type: ignore[arg-type]
+        cast(Any, context),
     )
     test_db_session.refresh(job)
     assert job.status == BuildJobStatus.COMPLETED
@@ -146,11 +147,11 @@ async def test_internal_worker_grpc_counts_and_releases_jobs(test_db_session: Se
     job = build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
     servicer = WorkerRuntimeServicer()
 
-    queued = await servicer.GetQueuedBuildJobCount(common_pb2.EmptyRequest(), context)  # type: ignore[arg-type]
+    queued = await servicer.GetQueuedBuildJobCount(common_pb2.EmptyRequest(), context)
     assert queued.count >= 1
 
-    await servicer.ClaimBuildJob(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)  # type: ignore[arg-type]
-    released = await servicer.ReleaseBuildWorkerJobs(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)  # type: ignore[arg-type]
+    await servicer.ClaimBuildJob(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
+    released = await servicer.ReleaseBuildWorkerJobs(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
     assert released.count == 1
     test_db_session.refresh(job)
     assert job.status == BuildJobStatus.QUEUED
@@ -176,7 +177,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     )
     servicer = WorkerRuntimeServicer()
 
-    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)  # type: ignore[arg-type]
+    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
 
     assert response.HasField('request')
     assert response.request.id == request.id
@@ -203,7 +204,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
                 payload={'success': True},
             ),
         ),
-        context,  # type: ignore[arg-type]
+        context,
     )
     test_db_session.refresh(request)
     assert request.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
@@ -214,7 +215,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
         request_json=_schema_payload(),
     )
-    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)  # type: ignore[arg-type]
+    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
     assert response.request.id == failed_request.id
 
     await servicer.FailComputeRequest(
@@ -230,7 +231,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
                 error_message='boom',
             ),
         ),
-        context,  # type: ignore[arg-type]
+        context,
     )
     test_db_session.refresh(failed_request)
     assert failed_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
@@ -266,7 +267,7 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
                 )
             ),
         ),
-        context,  # type: ignore[arg-type]
+        context,
     )
 
     assert response.result.datasource.id == 'ds-1'
@@ -292,7 +293,7 @@ async def test_internal_worker_grpc_uses_typed_schema_info_for_datasource_metada
 
     response = await WorkerRuntimeServicer().GetDatasourceMetadata(
         worker_runtime_pb2.WorkerDatasourceMetadataRequest(namespace='default', datasource_id=datasource_id),
-        context,  # type: ignore[arg-type]
+        context,
     )
 
     assert response.found is True
@@ -318,7 +319,7 @@ async def test_internal_worker_grpc_upserts_output_datasource_with_typed_schema_
             ),
             keep_schema_cache=False,
         ),
-        context,  # type: ignore[arg-type]
+        context,
     )
 
     datasource = test_db_session.get(DataSource, response.datasource_id)
@@ -356,7 +357,7 @@ async def test_internal_worker_grpc_creates_engine_run_with_typed_execution_entr
             ],
             progress=1.0,
         ),
-        context,  # type: ignore[arg-type]
+        context,
     )
 
     run = engine_runs_service.get_engine_run(test_db_session, response.id)
@@ -380,7 +381,7 @@ async def test_internal_worker_grpc_updates_engine_run_with_typed_fields(test_db
             request=dict_to_struct({'target_step_id': 'source'}),
             progress=0.25,
         ),
-        context,  # type: ignore[arg-type]
+        context,
     )
 
     completed_at = datetime.now(UTC)
@@ -411,7 +412,7 @@ async def test_internal_worker_grpc_updates_engine_run_with_typed_fields(test_db
                 current_step='filter',
             ),
         ),
-        context,  # type: ignore[arg-type]
+        context,
     )
 
     assert response.id == created.id
@@ -451,7 +452,7 @@ async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: 
                 )
             ],
         ),
-        context,  # type: ignore[arg-type]
+        cast(Any, context),
     )
 
     assert response.count == 1
@@ -513,7 +514,7 @@ async def test_internal_worker_grpc_persists_build_event(test_db_session: Sessio
                 ),
             ),
         ),
-        context,  # type: ignore[arg-type]
+        context,
     )
 
     assert response.sequence == 1
@@ -543,7 +544,7 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
 
     response = await WorkerRuntimeServicer().StartBuildRun(
         worker_runtime_pb2.WorkerStartBuildRunRequest(namespace='default', build_id=build_id),
-        context,  # type: ignore[arg-type]
+        context,
     )
 
     assert response.HasField('run')
@@ -579,12 +580,12 @@ async def test_internal_worker_grpc_lists_and_finalizes_datasource_delete(test_d
     test_db_session.commit()
     servicer = WorkerRuntimeServicer()
 
-    response = await servicer.ListPendingDatasourceDeletes(common_pb2.EmptyRequest(), context)  # type: ignore[arg-type]
+    response = await servicer.ListPendingDatasourceDeletes(common_pb2.EmptyRequest(), context)
     assert (datasource_id, 'default') in {(item.datasource_id, item.namespace) for item in response.deletes}
 
     finalized = await servicer.FinalizeDatasourceDelete(
         worker_runtime_pb2.WorkerFinalizeDatasourceDeleteRequest(namespace='default', datasource_id=datasource_id),
-        context,  # type: ignore[arg-type]
+        context,
     )
     assert finalized.deleted is True
     test_db_session.expire_all()

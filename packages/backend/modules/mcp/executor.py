@@ -54,7 +54,7 @@ async def call_tool(
 
     method_name = method.value if isinstance(method, MCPHttpMethod) else method
 
-    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+    transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
         payload = args.get('payload')
         headers = {'Content-Type': 'application/json'}

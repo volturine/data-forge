@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
+from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
 
 
@@ -76,8 +77,8 @@ def get_worker(session: Session, worker_id: str) -> RuntimeWorker | None:
 def list_workers(session: Session, *, kind: RuntimeWorkerKind | None = None) -> list[RuntimeWorker]:
     stmt = select(RuntimeWorker)
     if kind is not None:
-        stmt = stmt.where(RuntimeWorker.kind == kind)  # type: ignore[arg-type]
-    stmt = stmt.order_by(RuntimeWorker.started_at)  # type: ignore[arg-type]
+        stmt = stmt.where(sa(RuntimeWorker.kind == kind))
+    stmt = stmt.order_by(sa(RuntimeWorker.started_at))
     return list(session.execute(stmt).scalars().all())
 
 

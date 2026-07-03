@@ -7,6 +7,7 @@ from sqlmodel import Session
 
 from backend_core.exceptions import UdfValidationError, udf_not_found
 from backend_core.persistence.udfs.models import Udf
+from backend_core.sqlmodel_typing import sa
 from modules.udf.schemas import (
     UdfCloneSchema,
     UdfCreateSchema,
@@ -57,7 +58,7 @@ def create_udf(session: Session, data: UdfCreateSchema, owner_id: str | None = N
 
 
 def get_udf(session: Session, udf_id: str) -> UdfResponseSchema:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
+    result = session.execute(select(Udf).where(sa(Udf.id == udf_id)))  # type: ignore[attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
         raise udf_not_found(udf_id)
@@ -74,7 +75,7 @@ def list_udfs(
 
     if query:
         q = f'%{query.lower()}%'
-        stmt = stmt.where(or_(Udf.name.ilike(q), Udf.description.ilike(q)))  # type: ignore[arg-type, attr-defined, union-attr]
+        stmt = stmt.where(or_(Udf.name.ilike(q), Udf.description.ilike(q)))  # type: ignore[attr-defined, union-attr]
 
     result = session.execute(stmt)
     udfs = result.scalars().all()
@@ -84,7 +85,7 @@ def list_udfs(
 
 
 def update_udf(session: Session, udf_id: str, data: UdfUpdateSchema) -> UdfResponseSchema:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
+    result = session.execute(select(Udf).where(sa(Udf.id == udf_id)))  # type: ignore[attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
         raise udf_not_found(udf_id)
@@ -110,7 +111,7 @@ def update_udf(session: Session, udf_id: str, data: UdfUpdateSchema) -> UdfRespo
 
 
 def delete_udf(session: Session, udf_id: str) -> None:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
+    result = session.execute(select(Udf).where(sa(Udf.id == udf_id)))  # type: ignore[attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
         raise udf_not_found(udf_id)
@@ -119,7 +120,7 @@ def delete_udf(session: Session, udf_id: str) -> None:
 
 
 def clone_udf(session: Session, udf_id: str, data: UdfCloneSchema) -> UdfResponseSchema:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
+    result = session.execute(select(Udf).where(sa(Udf.id == udf_id)))  # type: ignore[attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
         raise udf_not_found(udf_id)
@@ -160,7 +161,7 @@ def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseS
 
     imported: list[Udf] = []
     for item in payload.udfs:
-        existing_result = session.execute(select(Udf).where(Udf.name == item.name))  # type: ignore[arg-type, attr-defined]
+        existing_result = session.execute(select(Udf).where(sa(Udf.name == item.name)))  # type: ignore[attr-defined]
         udf = existing_result.scalar_one_or_none()
 
         if udf and not payload.overwrite:

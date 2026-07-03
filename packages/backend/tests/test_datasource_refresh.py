@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.engine_runs.models import EngineRun
+from backend_core.sqlmodel_typing import sa
 
 
 class TestDatasourceIngest:
@@ -47,11 +48,7 @@ class TestDatasourceIngest:
         assert out.config['source']['source_type'] == 'file'
         assert out.config['source']['file_type'] == 'csv'
 
-        runs = (
-            test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == out.id))  # type: ignore[arg-type]
-            .scalars()
-            .all()
-        )
+        runs = test_db_session.execute(select(EngineRun).where(sa(EngineRun.datasource_id == out.id))).scalars().all()
         assert len(runs) == 1
         assert runs[0].kind == 'ingest'
         assert runs[0].status == 'success'
@@ -104,11 +101,7 @@ class TestDatasourceIngest:
         assert out.config['source']['connection_string'] == 'postgresql://example/db'
         assert out.config['source']['query'] == 'select * from public.users'
 
-        runs = (
-            test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == out.id))  # type: ignore[arg-type]
-            .scalars()
-            .all()
-        )
+        runs = test_db_session.execute(select(EngineRun).where(sa(EngineRun.datasource_id == out.id))).scalars().all()
         assert len(runs) == 1
         assert runs[0].kind == 'ingest'
         assert runs[0].status == 'success'
@@ -152,11 +145,7 @@ class TestDatasourceIngest:
         assert out.source_type == 'iceberg'
         assert out.config['source']['source_type'] == 'file'
 
-        runs = (
-            test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == out.id))  # type: ignore[arg-type]
-            .scalars()
-            .all()
-        )
+        runs = test_db_session.execute(select(EngineRun).where(sa(EngineRun.datasource_id == out.id))).scalars().all()
         assert len(runs) == 1
         assert runs[0].kind == 'ingest'
         assert runs[0].status == 'success'
@@ -213,11 +202,7 @@ class TestDatasourceIngest:
         assert out.config['ingest'] is not None
         mock_write.assert_called_once_with(mock_load.return_value, out.config['metadata_path'], build_mode='full')
 
-        runs = (
-            test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == ds.id))  # type: ignore[arg-type]
-            .scalars()
-            .all()
-        )
+        runs = test_db_session.execute(select(EngineRun).where(sa(EngineRun.datasource_id == ds.id))).scalars().all()
         assert len(runs) == 1
         assert runs[0].kind == 'ingest'
         assert runs[0].status == 'success'

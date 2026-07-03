@@ -8,6 +8,7 @@ from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_loc
 from backend_core.config import settings
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.persistence.build_jobs.models import BuildJob
+from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
 
 
@@ -45,7 +46,7 @@ def create_job(
 
 
 def get_job_by_build_id(session: Session, build_id: str) -> BuildJob | None:
-    stmt = select(BuildJob).where(BuildJob.build_id == build_id)  # type: ignore[arg-type]
+    stmt = select(BuildJob).where(sa(BuildJob.build_id == build_id))
     return session.execute(stmt).scalars().first()
 
 
@@ -63,9 +64,9 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
     )
     base = (
         select(BuildJob)
-        .where(BuildJob.available_at <= now)  # type: ignore[arg-type]
+        .where(sa(BuildJob.available_at <= now))
         .where(or_(queued_clause, reclaimable_clause))
-        .order_by(desc(BuildJob.priority), BuildJob.created_at)  # type: ignore[arg-type]
+        .order_by(desc(sa(BuildJob.priority)), sa(BuildJob.created_at))
         .limit(1)
     )
     stmt = with_for_update_skip_locked(session, base)
@@ -153,7 +154,7 @@ def mark_job_cancelled(session: Session, job_id: str) -> BuildJob:
 
 
 def queued_job_count(session: Session) -> int:
-    stmt = select(BuildJob).where(BuildJob.status == BuildJobStatus.QUEUED)  # type: ignore[arg-type]
+    stmt = select(BuildJob).where(sa(BuildJob.status == BuildJobStatus.QUEUED))
     return len(session.execute(stmt).scalars().all())
 
 
@@ -162,7 +163,7 @@ def release_worker_jobs(session: Session, *, worker_id: str) -> list[BuildJob]:
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     stmt = (
         select(BuildJob)
-        .where(BuildJob.lease_owner == worker_id)  # type: ignore[arg-type]
+        .where(sa(BuildJob.lease_owner == worker_id))
         .where(table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]))
     )
     jobs = list(session.execute(stmt).scalars().all())

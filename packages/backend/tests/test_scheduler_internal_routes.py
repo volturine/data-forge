@@ -13,6 +13,7 @@ from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 from backend_core.persistence.scheduler.models import Schedule
+from backend_core.sqlmodel_typing import sa
 from backend_grpc.server import SchedulerRuntimeServicer
 from dataforge_protocol import common_pb2, scheduler_runtime_pb2
 
@@ -39,7 +40,7 @@ async def test_internal_scheduler_grpc_rejects_missing_token(monkeypatch: pytest
     _set_internal_token(monkeypatch)
 
     with pytest.raises(RuntimeError, match='Invalid internal runtime token'):
-        await SchedulerRuntimeServicer().HeartbeatScheduler(common_pb2.RuntimeWorkerRequest(worker_id='scheduler-1'), FakeGrpcContext(None))  # type: ignore[arg-type]
+        await SchedulerRuntimeServicer().HeartbeatScheduler(common_pb2.RuntimeWorkerRequest(worker_id='scheduler-1'), FakeGrpcContext(None))
 
 
 @pytest.mark.asyncio
@@ -51,7 +52,7 @@ async def test_internal_scheduler_grpc_registers_and_stops_worker(monkeypatch: p
 
     await servicer.RegisterScheduler(
         scheduler_runtime_pb2.SchedulerRegisterRequest(worker_id=worker_id, hostname='scheduler-host', pid=123, capacity=1),
-        context,  # type: ignore[arg-type]
+        context,
     )
 
     worker = run_settings_db(lambda session: session.get(RuntimeWorker, worker_id))
@@ -59,7 +60,7 @@ async def test_internal_scheduler_grpc_registers_and_stops_worker(monkeypatch: p
     assert worker.hostname == 'scheduler-host'
     assert worker.stopped_at is None
 
-    await servicer.StopScheduler(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)  # type: ignore[arg-type]
+    await servicer.StopScheduler(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
 
     worker = run_settings_db(lambda session: session.get(RuntimeWorker, worker_id))
     assert worker is not None
@@ -88,7 +89,7 @@ async def test_internal_scheduler_grpc_run_due_enqueues_build_job(
 
     response = await SchedulerRuntimeServicer().RunDueSchedules(
         common_pb2.RuntimeWorkerRequest(worker_id=worker_id),
-        FakeGrpcContext(token),  # type: ignore[arg-type]
+        FakeGrpcContext(token),
     )
 
     assert response.handled is True
@@ -101,5 +102,5 @@ async def test_internal_scheduler_grpc_run_due_enqueues_build_job(
     build_id = response.enqueued[0].build_id
     assert schedule.last_triggered_at is not None
     assert schedule.lease_owner == worker_id
-    job = test_db_session.execute(select(BuildJob).where(BuildJob.build_id == build_id)).scalar_one_or_none()  # type: ignore[arg-type]
+    job = test_db_session.execute(select(BuildJob).where(sa(BuildJob.build_id == build_id))).scalar_one_or_none()
     assert job is not None

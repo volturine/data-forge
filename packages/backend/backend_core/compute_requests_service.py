@@ -21,6 +21,7 @@ from backend_core.domain.compute_requests.models import (
     status_from_proto,
 )
 from backend_core.persistence.compute_requests.models import ComputeRequest
+from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
 from dataforge_protocol import compute_pb2, enums_pb2
 
@@ -243,16 +244,14 @@ def mark_request_failed(session: Session, request_id: str, *, error_message: str
 
 
 def queued_request_count(session: Session) -> int:
-    stmt = select(ComputeRequest).where(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED)  # type: ignore[arg-type]
+    stmt = select(ComputeRequest).where(sa(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED))
     return len(session.execute(stmt).scalars().all())
 
 
 def release_worker_requests(session: Session, *, worker_id: str) -> list[ComputeRequest]:
     now = _utcnow()
     stmt = (
-        select(ComputeRequest)
-        .where(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)  # type: ignore[arg-type]
-        .where(ComputeRequest.lease_owner == worker_id)  # type: ignore[arg-type]
+        select(ComputeRequest).where(sa(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)).where(sa(ComputeRequest.lease_owner == worker_id))
     )
     rows = list(session.execute(stmt).scalars().all())
     for row in rows:

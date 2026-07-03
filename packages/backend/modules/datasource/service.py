@@ -10,7 +10,7 @@ from openpyxl import load_workbook
 from openpyxl.utils.cell import get_column_letter, range_boundaries
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import defer
-from sqlmodel import Session, col
+from sqlmodel import Session
 
 from backend_core import datasource_delete_service
 from backend_core.datasource_storage import cleanup_datasource_storage
@@ -19,6 +19,7 @@ from backend_core.domain.datasource.source_types import DataSourceFileType, Data
 from backend_core.exceptions import DataSourceValidationError, datasource_not_found
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
+from backend_core.sqlmodel_typing import col, sa
 from modules.datasource.schemas import (
     BatchColumnDescriptionUpdate,
     ColumnDescriptionPatch,
@@ -674,7 +675,7 @@ def format_excel_cell_range(
 
 def _get_column_metadata_map(session: Session, datasource_id: str) -> dict[str, str | None]:
     rows = session.execute(
-        select(DataSourceColumnMetadata).where(DataSourceColumnMetadata.datasource_id == datasource_id),  # type: ignore[arg-type]
+        select(DataSourceColumnMetadata).where(sa(DataSourceColumnMetadata.datasource_id == datasource_id)),
     ).scalars()
     return {row.column_name: row.description for row in rows}
 
@@ -712,7 +713,7 @@ def update_column_descriptions(
             )
 
     existing = session.execute(
-        select(DataSourceColumnMetadata).where(DataSourceColumnMetadata.datasource_id == datasource_id),  # type: ignore[arg-type]
+        select(DataSourceColumnMetadata).where(sa(DataSourceColumnMetadata.datasource_id == datasource_id)),
     ).scalars()
     existing_by_name = {row.column_name: row for row in existing}
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -753,13 +754,11 @@ def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
 
 def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceListItem]:
     query = (
-        select(DataSource)
-        .options(defer(DataSource.schema_cache))  # type: ignore[arg-type]
-        .where(col(DataSource.is_pending_delete) == False)  # type: ignore[arg-type]  # noqa: E712
+        select(DataSource).options(defer(sa(DataSource.schema_cache))).where(col(DataSource.is_pending_delete) == False)  # noqa: E712
     )
     if not include_hidden:
         # SQLModel field typed as bool; == creates SA expression at runtime
-        query = query.where(col(DataSource.is_hidden) == False)  # type: ignore[arg-type]  # noqa: E712
+        query = query.where(col(DataSource.is_hidden) == False)  # noqa: E712
     datasources = session.execute(query).scalars().all()
     results: list[DataSourceListItem] = []
     for ds in datasources:

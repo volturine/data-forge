@@ -27,6 +27,7 @@ from backend_core.config import settings
 from backend_core.database import namespace_connection
 from backend_core.namespace import list_namespaces
 from backend_core.smtp import send_smtp_message
+from backend_core.sqlmodel_typing import sa
 from backend_core.time import naive_utc_now as _utcnow
 from modules.auth.models import (
     AuthProvider,
@@ -154,7 +155,7 @@ def _normalize_default_user_name(name: str, email: str) -> str:
 
 
 def _get_password_provider(session: Session, user_id: str) -> AuthProvider | None:
-    stmt = select(AuthProvider).where(AuthProvider.user_id == user_id, AuthProvider.provider == _PASSWORD_PROVIDER)
+    stmt = select(AuthProvider).where(sa(AuthProvider.user_id == user_id), sa(AuthProvider.provider == _PASSWORD_PROVIDER))
     return session.exec(stmt).first()
 
 
@@ -326,7 +327,7 @@ def create_user(
 
 def get_user_by_email(session: Session, email: str) -> User | None:
     normalized_email = email.strip().lower()
-    stmt = select(User).where(User.email == normalized_email)
+    stmt = select(User).where(sa(User.email == normalized_email))
     return session.exec(stmt).first()
 
 
@@ -335,7 +336,7 @@ def get_user_by_id(session: Session, user_id: str) -> User | None:
 
 
 def get_user_providers(session: Session, user_id: str) -> list[AuthProviderName]:
-    stmt = select(AuthProvider).where(AuthProvider.user_id == user_id)
+    stmt = select(AuthProvider).where(sa(AuthProvider.user_id == user_id))
     providers = session.exec(stmt).all()
     return [AuthProviderName(provider.provider) for provider in providers]
 
@@ -379,7 +380,7 @@ def update_profile(
 
 def change_password(session: Session, user_id: str, current_password: str, new_password: str) -> None:
     validate_password(new_password)
-    stmt = select(AuthProvider).where(AuthProvider.user_id == user_id, AuthProvider.provider == _PASSWORD_PROVIDER)
+    stmt = select(AuthProvider).where(sa(AuthProvider.user_id == user_id), sa(AuthProvider.provider == _PASSWORD_PROVIDER))
     provider = session.exec(stmt).first()
     if not provider:
         raise InvalidCredentialsError()
@@ -455,7 +456,7 @@ def revoke_session(session: Session, session_id: str) -> None:
 
 
 def revoke_all_sessions(session: Session, user_id: str) -> None:
-    stmt = select(UserSession).where(UserSession.user_id == user_id, UserSession.revoked == False)  # type: ignore[arg-type]  # noqa: E712
+    stmt = select(UserSession).where(sa(UserSession.user_id == user_id), sa(UserSession.revoked == False))  # noqa: E712
     sessions = session.exec(stmt).all()
     if not sessions:
         return
@@ -474,8 +475,8 @@ def link_provider(
 ) -> AuthProvider:
     existing = session.exec(
         select(AuthProvider).where(
-            AuthProvider.provider == provider,
-            AuthProvider.provider_subject == provider_subject,
+            sa(AuthProvider.provider == provider),
+            sa(AuthProvider.provider_subject == provider_subject),
         ),
     ).first()
     if existing:
@@ -509,8 +510,8 @@ def find_or_create_oauth_user(
     normalized_email = email.strip().lower()
     existing = session.exec(
         select(AuthProvider).where(
-            AuthProvider.provider == provider_name,
-            AuthProvider.provider_subject == provider_subject,
+            sa(AuthProvider.provider == provider_name),
+            sa(AuthProvider.provider_subject == provider_subject),
         ),
     ).first()
     if existing:
@@ -567,7 +568,7 @@ def find_or_create_oauth_user(
 
 def unlink_provider(session: Session, user_id: str, provider: AuthProviderName) -> None:
     provider_name = AuthProviderName.require(provider)
-    providers_stmt = select(AuthProvider).where(AuthProvider.user_id == user_id)
+    providers_stmt = select(AuthProvider).where(sa(AuthProvider.user_id == user_id))
     providers = session.exec(providers_stmt).all()
     if len(providers) <= 1:
         raise ProviderUnlinkError()
@@ -613,8 +614,8 @@ def create_verification_token(
 def validate_verification_token(session: Session, token: str, token_type: VerificationTokenType) -> str:
     token_type_value = VerificationTokenType.require(token_type)
     stmt = select(VerificationToken).where(
-        VerificationToken.token == token,
-        VerificationToken.token_type == token_type_value,
+        sa(VerificationToken.token == token),
+        sa(VerificationToken.token_type == token_type_value),
     )
     row = session.exec(stmt).first()
     if not row:
@@ -670,8 +671,8 @@ async def resend_verification(session: Session, user_id: str) -> bool:
         return False
 
     stmt = select(VerificationToken).where(
-        VerificationToken.user_id == user_id,
-        VerificationToken.token_type == _EMAIL_VERIFY,
+        sa(VerificationToken.user_id == user_id),
+        sa(VerificationToken.token_type == _EMAIL_VERIFY),
     )
     rows = session.exec(stmt).all()
     last = max(rows, key=lambda row: row.created_at) if rows else None
@@ -724,8 +725,8 @@ async def send_password_reset_email(user_email: str, token: str) -> bool:
 def reset_password(session: Session, token: str, new_password: str) -> None:
     validate_password(new_password)
     stmt = select(VerificationToken).where(
-        VerificationToken.token == token,
-        VerificationToken.token_type == _PASSWORD_RESET,
+        sa(VerificationToken.token == token),
+        sa(VerificationToken.token_type == _PASSWORD_RESET),
     )
     row = session.exec(stmt).first()
     if not row:
@@ -739,7 +740,7 @@ def reset_password(session: Session, token: str, new_password: str) -> None:
     if not user:
         raise TokenInvalidError()
     provider = session.exec(
-        select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == _PASSWORD_PROVIDER),
+        select(AuthProvider).where(sa(AuthProvider.user_id == user.id), sa(AuthProvider.provider == _PASSWORD_PROVIDER)),
     ).first()
     if provider:
         provider.provider_metadata = {'password_hash': hash_password(new_password)}

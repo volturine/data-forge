@@ -12,6 +12,7 @@ from backend_core.namespace import get_namespace
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.engine_runs.models import EngineRun
+from backend_core.sqlmodel_typing import sa
 
 
 def _read_snapshot_id(payload: dict[str, object] | None) -> str | None:
@@ -50,11 +51,11 @@ def _build_run_snapshot_ids(
         select(BuildRun)
         .where(
             or_(
-                BuildRun.current_datasource_id == datasource_id,  # type: ignore[arg-type]
-                BuildRun.current_output_id == datasource_id,  # type: ignore[arg-type]
+                sa(BuildRun.current_datasource_id == datasource_id),
+                sa(BuildRun.current_output_id == datasource_id),
             )
         )
-        .where(BuildRun.status == BuildRunStatus.COMPLETED)  # type: ignore[arg-type]
+        .where(sa(BuildRun.status == BuildRunStatus.COMPLETED))
     )
     runs = session.execute(stmt).scalars().all()
     snapshot_ids: set[str] = set()
@@ -77,9 +78,9 @@ def _ingest_run_snapshot_ids(
 ) -> set[str]:
     stmt = (
         select(EngineRun)
-        .where(EngineRun.datasource_id == datasource_id)  # type: ignore[arg-type]
-        .where(EngineRun.kind == EngineRunKind.INGEST.value)  # type: ignore[arg-type]
-        .where(EngineRun.status == EngineRunStatus.SUCCESS.value)  # type: ignore[arg-type]
+        .where(sa(EngineRun.datasource_id == datasource_id))
+        .where(sa(EngineRun.kind == EngineRunKind.INGEST.value))
+        .where(sa(EngineRun.status == EngineRunStatus.SUCCESS.value))
     )
     runs = session.execute(stmt).scalars().all()
     direct_snapshot_ids: set[str] = set()

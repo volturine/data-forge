@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import cast
 
 import pytest
 
@@ -66,7 +67,7 @@ async def test_scheduler_loop_registers_runs_due_work_and_stops() -> None:
     await scheduler_main.scheduler_loop(
         stop_event,
         "scheduler-1",
-        client=client,  # type: ignore[arg-type]
+        client=cast(scheduler_main.SchedulerApiClient, client),
         check_interval_seconds=1,
         heartbeat_seconds=60,
     )

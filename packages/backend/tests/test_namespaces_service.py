@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session
 
 from backend_core import namespaces_service
 from backend_core.persistence.namespaces.models import RuntimeNamespace
@@ -44,7 +46,7 @@ class _RacingNamespaceSession:
 def test_register_namespace_recovers_from_concurrent_insert() -> None:
     session = _RacingNamespaceSession()
 
-    record = namespaces_service.register_namespace(session, 'alpha')  # type: ignore[arg-type]
+    record = namespaces_service.register_namespace(cast(Session, session), 'alpha')
 
     assert session.rolled_back is True
     assert record.name == 'alpha'

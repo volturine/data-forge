@@ -3,10 +3,11 @@ import importlib.util
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
-from runtime.internal_api import ClaimedBuildJob
+from runtime.internal_api import ClaimedBuildJob, WorkerInternalApiClient
 from runtime.worker_runtime import build_worker_loop
 
 
@@ -82,7 +83,7 @@ async def test_build_worker_loop_tracks_runtime_worker_lifecycle() -> None:
             stop_event,
             "worker-1",
             run_job,
-            client=client,  # type: ignore[arg-type]
+            client=cast(WorkerInternalApiClient, client),
             heartbeat_seconds=0.01,
         )
     )
@@ -105,7 +106,7 @@ async def test_build_worker_loop_exits_after_one_job_when_max_jobs_set() -> None
         assert namespace == "default"
         seen.append(job_build_id)
 
-    await build_worker_loop(stop_event, "worker-once", run_job, client=client, max_jobs=1)  # type: ignore[arg-type]
+    await build_worker_loop(stop_event, "worker-once", run_job, client=cast(WorkerInternalApiClient, client), max_jobs=1)
 
     assert len(seen) == 1
 

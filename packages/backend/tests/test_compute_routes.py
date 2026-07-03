@@ -10,6 +10,7 @@ from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
+from backend_core.sqlmodel_typing import sa
 from main import app
 from modules.compute import routes as compute_routes
 
@@ -196,7 +197,7 @@ def test_start_build_recreates_deleted_output_placeholder(client, test_db_sessio
     assert datasource.created_by_analysis_id == 'analysis-1'
     assert datasource.is_hidden is True
     assert test_db_session.get(BuildRun, build_id) is not None
-    assert test_db_session.execute(select(BuildJob).where(BuildJob.build_id == build_id)).scalars().first() is not None
+    assert test_db_session.execute(select(BuildJob).where(sa(BuildJob.build_id == build_id))).scalars().first() is not None
     outbox_table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
     outbox_rows = test_db_session.execute(select(RuntimeOutboxEvent).order_by(outbox_table.c.created_at)).scalars().all()
     assert [row.status for row in outbox_rows] == [RuntimeOutboxStatus.DISPATCHED, RuntimeOutboxStatus.DISPATCHED]

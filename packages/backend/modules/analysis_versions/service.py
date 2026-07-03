@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import cast
 
 from sqlalchemy import delete, desc, func, insert, select
-from sqlmodel import Session, col
+from sqlmodel import Session
 
 from backend_core.analysis_cycles import assert_no_analysis_cycle
 from backend_core.exceptions import (
@@ -15,17 +15,14 @@ from backend_core.exceptions import (
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.analysis_versions.models import AnalysisVersion
 from backend_core.persistence.datasource.models import DataSource
+from backend_core.sqlmodel_typing import col
 from modules.analysis import service as analysis_service
 
 
 def create_version(session: Session, analysis: Analysis, *, commit: bool = True) -> AnalysisVersion:
     version_id = str(uuid.uuid4())
     now = datetime.now(UTC).replace(tzinfo=None)
-    next_version = (
-        select(func.coalesce(func.max(AnalysisVersion.version), 0) + 1)
-        .where(col(AnalysisVersion.analysis_id) == analysis.id)  # type: ignore[arg-type]
-        .scalar_subquery()
-    )
+    next_version = select(func.coalesce(func.max(AnalysisVersion.version), 0) + 1).where(col(AnalysisVersion.analysis_id) == analysis.id).scalar_subquery()
     stmt = insert(AnalysisVersion).values(
         id=version_id,
         analysis_id=analysis.id,
@@ -47,14 +44,14 @@ def create_version(session: Session, analysis: Analysis, *, commit: bool = True)
 
 
 def list_versions(session: Session, analysis_id: str) -> list[AnalysisVersion]:
-    stmt = select(AnalysisVersion).where(col(AnalysisVersion.analysis_id) == analysis_id)  # type: ignore[arg-type]
-    stmt = stmt.order_by(desc(col(AnalysisVersion.version)))  # type: ignore[arg-type]
+    stmt = select(AnalysisVersion).where(col(AnalysisVersion.analysis_id) == analysis_id)
+    stmt = stmt.order_by(desc(col(AnalysisVersion.version)))
     result = session.execute(stmt)
     return cast(list[AnalysisVersion], list(result.scalars().all()))
 
 
 def get_version(session: Session, analysis_id: str, version: int) -> AnalysisVersion | None:
-    stmt = select(AnalysisVersion).where(  # type: ignore[arg-type]
+    stmt = select(AnalysisVersion).where(
         col(AnalysisVersion.analysis_id) == analysis_id,
         col(AnalysisVersion.version) == version,
     )
@@ -100,7 +97,7 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
     analysis_service.validate_stored_pipeline_definition(session, pipeline_definition, analysis_id)
     tabs = pipeline_definition.get('tabs', [])
 
-    stmt = delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id)  # type: ignore[arg-type]
+    stmt = delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id)
     session.execute(stmt)
     datasource_ids: list[str] = []
     for tab in tabs:

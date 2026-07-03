@@ -9,6 +9,7 @@ from backend_core.claiming import with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
+from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
 
 
@@ -75,8 +76,8 @@ def dispatch_pending_events(session: Session, *, limit: int = 100) -> int:
     base = (
         select(RuntimeOutboxEvent)
         .where(table.c.status.in_([RuntimeOutboxStatus.PENDING, RuntimeOutboxStatus.FAILED]))
-        .where(RuntimeOutboxEvent.available_at <= now)  # type: ignore[arg-type]
-        .order_by(RuntimeOutboxEvent.created_at)  # type: ignore[arg-type]
+        .where(sa(RuntimeOutboxEvent.available_at <= now))
+        .order_by(sa(RuntimeOutboxEvent.created_at))
         .limit(limit)
     )
     stmt = with_for_update_skip_locked(session, base)

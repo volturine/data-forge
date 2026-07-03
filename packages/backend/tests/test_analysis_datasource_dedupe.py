@@ -4,6 +4,7 @@ from sqlalchemy import select
 
 from backend_core.persistence.analysis.models import AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource
+from backend_core.sqlmodel_typing import sa
 
 
 class TestAnalysisDatasourceDedupe:
@@ -50,6 +51,6 @@ class TestAnalysisDatasourceDedupe:
         response = client.post('/api/v1/analysis', json=payload)
         assert response.status_code == 200
         analysis_id = response.json()['id']
-        rows = test_db_session.execute(select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id)).scalars().all()
+        rows = test_db_session.execute(select(AnalysisDataSource).where(sa(AnalysisDataSource.analysis_id == analysis_id))).scalars().all()
         assert len(rows) == 1
         assert rows[0].datasource_id == shared_id

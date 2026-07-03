@@ -7,6 +7,7 @@ from sqlmodel import Session
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.locks.models import ResourceLock
+from backend_core.sqlmodel_typing import sa
 from main import app
 from modules.analysis.schemas import AnalysisResponseSchema
 from modules.auth.dependencies import get_optional_user
@@ -494,13 +495,7 @@ class TestAnalysisCreate:
         with Session(test_engine) as fresh_session:
             created = fresh_session.get(Analysis, analysis_id)
             assert created is not None
-            links = (
-                fresh_session.execute(
-                    select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id)  # type: ignore[arg-type]
-                )
-                .scalars()
-                .all()
-            )
+            links = fresh_session.execute(select(AnalysisDataSource).where(sa(AnalysisDataSource.analysis_id == analysis_id))).scalars().all()
             assert [link.datasource_id for link in links] == [sample_datasource.id]
 
 
@@ -743,7 +738,7 @@ class TestAnalysisUpdate:
 
         assert response.status_code == 200
         assert response.json() == {'analysis_id': sample_analysis.id, 'is_favorite': True}
-        stmt = select(AnalysisFavorite).where(AnalysisFavorite.user_id == test_user.id, AnalysisFavorite.analysis_id == sample_analysis.id)  # type: ignore[arg-type]
+        stmt = select(AnalysisFavorite).where(sa(AnalysisFavorite.user_id == test_user.id), sa(AnalysisFavorite.analysis_id == sample_analysis.id))
         row = test_db_session.execute(stmt).scalar_one_or_none()
         assert row is not None
 
@@ -755,7 +750,7 @@ class TestAnalysisUpdate:
 
         assert response.status_code == 200
         assert response.json() == {'analysis_id': sample_analysis.id, 'is_favorite': False}
-        stmt = select(AnalysisFavorite).where(AnalysisFavorite.user_id == test_user.id, AnalysisFavorite.analysis_id == sample_analysis.id)  # type: ignore[arg-type]
+        stmt = select(AnalysisFavorite).where(sa(AnalysisFavorite.user_id == test_user.id), sa(AnalysisFavorite.analysis_id == sample_analysis.id))
         row = test_db_session.execute(stmt).scalar_one_or_none()
         assert row is None
 
@@ -937,14 +932,14 @@ class TestAnalysisDelete:
     def test_delete_analysis_cascades_links(self, client, sample_analysis: Analysis, test_db_session):
         analysis_id = sample_analysis.id
 
-        result = test_db_session.execute(select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id))  # type: ignore[arg-type]
+        result = test_db_session.execute(select(AnalysisDataSource).where(sa(AnalysisDataSource.analysis_id == analysis_id)))
         links_before = result.scalars().all()
         assert len(links_before) > 0
 
         response = client.delete(f'/api/v1/analysis/{analysis_id}')
         assert response.status_code == 204
 
-        result = test_db_session.execute(select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id))  # type: ignore[arg-type]
+        result = test_db_session.execute(select(AnalysisDataSource).where(sa(AnalysisDataSource.analysis_id == analysis_id)))
         links_after = result.scalars().all()
         assert len(links_after) == 0
 

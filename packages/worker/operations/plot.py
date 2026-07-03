@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast
 
 import polars as pl
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -421,8 +422,8 @@ def _build_histogram(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
 
     # Column is cast to Float64 above, so min/max are always float.
     # Polars type stubs return PythonLiteral; explicit cast narrows for mypy.
-    fmin: float = float(min_raw)  # type: ignore[arg-type]
-    fmax: float = float(max_raw)  # type: ignore[arg-type]
+    fmin = float(cast(float, min_raw))
+    fmax = float(cast(float, max_raw))
 
     if fmin == fmax:
         return pl.LazyFrame(
