@@ -62,7 +62,7 @@ Status: resolved in the protocol-first rewrite. `packages/protocol` is now the s
 | --- | ---------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 21  | ✅ **Remove redundant docstrings**          | `backend_core/exceptions.py`, `worker/runtime/exceptions.py` | Resolved by removing low-signal backend exception docstrings; worker exceptions were already using docstring-free classes. |
 | 22  | ✅ **Remove copy-pasted SQLModel comments** | `engine_runs_service.py` | Resolved by removing the remaining stale SQLModel/Pydantic explanatory comment; the actionable typing cleanup remains tracked by #10/#23. |
-| 23  | **Audit `# type: ignore` comments**      | All 30+ files with `# type: ignore[arg-type]`                | Replace individual ignores with a module-level or project-level mypy override if the pattern is universal.                                                           |
+| 23  | ✅ **Audit `# type: ignore` comments**      | Backend, worker, and scheduler `# type: ignore[arg-type]` sites | Audited and found non-universal: sites include SQLModel query typing, FastAPI handler registration, gRPC fake contexts, numeric coercion, and tests. The real implementation cleanup remains tracked by #10 rather than hidden behind a broad override. |
 
 ---
 
