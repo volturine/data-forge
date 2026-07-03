@@ -14,12 +14,9 @@ from backend_core.namespace import list_namespaces, reset_namespace, set_namespa
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.engine_instances.models import EngineInstance
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
+from backend_core.time import utc_now as _utcnow
 
 from . import schemas
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _as_utc(value: datetime) -> datetime:

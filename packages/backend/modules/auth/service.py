@@ -27,6 +27,7 @@ from backend_core.config import settings
 from backend_core.database import namespace_connection
 from backend_core.namespace import list_namespaces
 from backend_core.smtp import send_smtp_message
+from backend_core.time import naive_utc_now as _utcnow
 from modules.auth.models import (
     AuthProvider,
     AuthProviderName,
@@ -36,10 +37,6 @@ from modules.auth.models import (
     VerificationToken,
     VerificationTokenType,
 )
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _naive_utc(value: datetime) -> datetime:

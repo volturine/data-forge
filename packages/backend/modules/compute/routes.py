@@ -38,6 +38,7 @@ from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import engine_not_found
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
 from backend_core.persistence.analysis.models import Analysis
+from backend_core.time import utc_now as _utcnow
 from backend_core.validation import (
     AnalysisId,
     DataSourceId,
@@ -339,10 +340,6 @@ async def _require_websocket_user(websocket: WebSocket) -> User:
     if user is None:
         raise HTTPException(status_code=401, detail='Not authenticated')
     return user
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _analysis_name(session: Session, analysis_id: str | None) -> str:

@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
@@ -7,11 +7,8 @@ from sqlmodel import Session
 
 from backend_core.config import settings
 from backend_core.persistence.locks.models import ResourceLock
+from backend_core.time import utc_now as _utcnow
 from modules.locks.schemas import LockStatusResponse
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _expires_at(now: datetime, ttl_seconds: int | None) -> datetime:

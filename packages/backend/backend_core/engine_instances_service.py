@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -6,15 +6,9 @@ from sqlmodel import Session, select
 
 from backend_core.domain.compute.base import EngineStatusInfo
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
+from backend_core.json_utils import copy_json_object
 from backend_core.persistence.engine_instances.models import EngineInstance
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
-
-
-def _copy_json(value: dict[str, object] | None) -> dict[str, object] | None:
-    return dict(value) if isinstance(value, dict) else None
+from backend_core.time import utc_now as _utcnow
 
 
 def _required_identity_value(value: str | None, field_name: str) -> str:
@@ -33,8 +27,8 @@ def _apply_engine_status(row: EngineInstance, *, status: EngineStatusInfo, stamp
     row.current_job_id = status.current_job_id
     row.current_build_id = status.current_build_id
     row.current_engine_run_id = status.current_engine_run_id
-    row.resource_config_json = _copy_json(status.resource_config)
-    row.effective_resources_json = _copy_json(status.effective_resources)
+    row.resource_config_json = copy_json_object(status.resource_config)
+    row.effective_resources_json = copy_json_object(status.effective_resources)
     row.last_activity_at = _read_dt(status.last_activity) or row.last_activity_at or stamp
     row.last_seen_at = stamp
     row.updated_at = stamp
@@ -60,8 +54,8 @@ def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, st
             current_job_id=status.current_job_id,
             current_build_id=status.current_build_id,
             current_engine_run_id=status.current_engine_run_id,
-            resource_config_json=_copy_json(status.resource_config),
-            effective_resources_json=_copy_json(status.effective_resources),
+            resource_config_json=copy_json_object(status.resource_config),
+            effective_resources_json=copy_json_object(status.effective_resources),
             last_activity_at=_read_dt(status.last_activity) or stamp,
             last_seen_at=stamp,
             updated_at=stamp,
@@ -166,8 +160,8 @@ def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object
         'process_id': row.process_id,
         'last_activity': row.last_activity_at.isoformat() if row.last_activity_at is not None else None,
         'current_job_id': row.current_job_id,
-        'resource_config': _copy_json(row.resource_config_json),
-        'effective_resources': _copy_json(row.effective_resources_json),
+        'resource_config': copy_json_object(row.resource_config_json),
+        'effective_resources': copy_json_object(row.effective_resources_json),
         'defaults': defaults,
         'scope': row.engine_scope,
         'reuse_policy': row.engine_reuse_policy,

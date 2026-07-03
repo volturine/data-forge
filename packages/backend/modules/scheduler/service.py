@@ -30,14 +30,11 @@ from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
+from backend_core.time import utc_now as _utcnow
 
 logger = logging.getLogger(__name__)
 
 _SCHEDULE_TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _naive_utc(value: datetime) -> datetime:

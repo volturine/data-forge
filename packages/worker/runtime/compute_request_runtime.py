@@ -21,6 +21,7 @@ from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
 from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
 from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
+from runtime.json_utils import copy_json_object
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
 
@@ -78,8 +79,7 @@ class ClaimedComputeRequest:
         return str(value) if value is not None else None
 
     def read_dict(self, key: str) -> dict[str, object] | None:
-        value = self.request_json.get(key)
-        return dict(value) if isinstance(value, dict) else None
+        return copy_json_object(self.request_json.get(key))
 
 
 def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:

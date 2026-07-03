@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy import select
 from sqlmodel import Session
@@ -8,10 +8,7 @@ from backend_core import runtime_ipc
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
+from backend_core.time import utc_now as _utcnow
 
 
 def enqueue_runtime_event(session: Session, payload: dict[str, object], *, commit: bool = True) -> RuntimeOutboxEvent:

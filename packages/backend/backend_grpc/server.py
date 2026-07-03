@@ -36,6 +36,7 @@ from backend_core.domain.compute_requests.models import compute_request_kind_nam
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
+from backend_core.json_utils import copy_json_object
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.namespaces_service import list_runtime_namespaces
 from backend_core.persistence.analysis.models import Analysis
@@ -129,8 +130,7 @@ def _read_optional_int(payload: dict[str, object], key: str) -> int | None:
 
 
 def _read_optional_dict(payload: dict[str, object], key: str) -> dict[str, object] | None:
-    value = payload.get(key)
-    return dict(value) if isinstance(value, dict) else None
+    return copy_json_object(payload.get(key))
 
 
 def _optional_str(message: Any, field: str) -> str | None:

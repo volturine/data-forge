@@ -46,9 +46,11 @@ from runtime.exceptions import (
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
 from runtime.internal_api import HealthCheckSpec, client_from_env
+from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import notification_service, render_template
 from runtime.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
+from runtime.time import utc_now as _utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -169,10 +171,6 @@ class BuildCancelledError(Exception):
         self.run_id = run_id
         self.cancelled_at = cancelled_at
         self.cancelled_by = cancelled_by
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _resource_summary(engine) -> dict[str, int | None]:
@@ -1050,10 +1048,6 @@ def _update_engine_run(
     )
 
 
-def _copy_json_dict(value: object) -> dict[str, object]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
 def _tab_name_from_pipeline(analysis_pipeline: dict, tab_id: str | None) -> str | None:
     tabs = analysis_pipeline.get("tabs")
     if not isinstance(tabs, list):
@@ -1208,7 +1202,7 @@ def _load_engine_run_result_json(session: object | None, run_id: str) -> dict[st
     state = client_from_env().engine_run_state(namespace=get_namespace(), run_id=run_id)
     if state is None:
         return {}
-    return _copy_json_dict(state.get("result_json"))
+    return copy_json_dict(state.get("result_json"))
 
 
 def _raise_if_engine_run_cancelled(session: object | None, run_id: str) -> None:
@@ -1354,8 +1348,8 @@ def _build_canonical_engine_run_result(
         total_tabs=total_tabs,
         resource_config=resource_config,
     )
-    result.update(_copy_json_dict(existing_result))
-    result.update(_copy_json_dict(summary_meta))
+    result.update(copy_json_dict(existing_result))
+    result.update(copy_json_dict(summary_meta))
 
     result["current_output_id"] = current_output_id
     result["current_output_name"] = current_output_name

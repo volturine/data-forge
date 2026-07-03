@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import (
     JSON,
@@ -14,10 +14,7 @@ from sqlalchemy import (
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.enums import DataForgeStrEnum
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+from backend_core.time import naive_utc_now as _utcnow
 
 
 class UserStatus(DataForgeStrEnum):

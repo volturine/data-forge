@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any, cast
 
 from sqlalchemy import and_, case, or_, select, update
@@ -22,6 +22,7 @@ from backend_core.domain.compute_requests.models import (
     status_from_proto,
 )
 from backend_core.persistence.compute_requests.models import ComputeRequest
+from backend_core.time import utc_now as _utcnow
 from dataforge_protocol import compute_pb2, enums_pb2
 
 _BLOCKING_REQUEST_KINDS = frozenset(
@@ -55,10 +56,6 @@ def _request_priority_clause(table):
         *[(table.c.kind == kind, 1) for kind in _INTERACTIVE_REQUEST_KINDS],
         else_=2,
     )
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def create_request(

@@ -8,12 +8,13 @@ import time
 import uuid
 from collections import deque
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import WebSocket
 
 from runtime.domain.compute import schemas
 from runtime.domain.engine_runs.schemas import EngineRunKind
+from runtime.time import utc_now as _utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +27,6 @@ _FINISHED_BUILD_TTL_SECONDS = 900
 _LOG_MESSAGE_MAX = 4000
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:

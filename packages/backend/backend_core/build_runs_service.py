@@ -10,19 +10,13 @@ from backend_core.domain.analysis.step_types import PipelineStepType
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind
+from backend_core.json_utils import copy_json_dict
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.datasource.models import DataSource
+from backend_core.time import utc_now as _utcnow
 from dataforge_protocol import compute_pb2
 
 _TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
-
-
-def _copy_json_dict(value: dict[str, Any] | None) -> dict[str, object]:
-    return dict(value) if isinstance(value, dict) else {}
 
 
 def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
@@ -222,10 +216,10 @@ def create_build_run(
         analysis_id=analysis_id,
         analysis_name=analysis_name,
         status=BuildRunStatus.require(status),
-        request_json=_copy_json_dict(request_json),
-        starter_json=_copy_json_dict(starter_json),
-        resource_config_json=_copy_json_dict(resource_config_json) if isinstance(resource_config_json, dict) else None,
-        result_json=_copy_json_dict(result_json) if isinstance(result_json, dict) else None,
+        request_json=copy_json_dict(request_json),
+        starter_json=copy_json_dict(starter_json),
+        resource_config_json=copy_json_dict(resource_config_json) if isinstance(resource_config_json, dict) else None,
+        result_json=copy_json_dict(result_json) if isinstance(result_json, dict) else None,
         current_engine_run_id=current_engine_run_id,
         current_kind=current_kind,
         current_datasource_id=current_datasource_id,
@@ -400,7 +394,7 @@ def update_build_result_json(session: Session, build_id: str, result_json: dict[
     run = session.get(BuildRun, build_id)
     if run is None:
         raise ValueError(f'Build run {build_id} not found')
-    run.result_json = _copy_json_dict(result_json) if isinstance(result_json, dict) else None
+    run.result_json = copy_json_dict(result_json) if isinstance(result_json, dict) else None
     run.updated_at = _utcnow()
     run.version += 1
     session.add(run)
@@ -424,7 +418,7 @@ def append_build_event(
     if should_update_run:
         run.apply_event_context(event)
         if resource_config_json is not None:
-            run.resource_config_json = _copy_json_dict(resource_config_json)
+            run.resource_config_json = copy_json_dict(resource_config_json)
 
         run.apply_runtime_event(event)
 
@@ -594,7 +588,7 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
         compute_schemas.BuildResourceConfigSummary.model_validate(build_run.resource_config_json) if isinstance(build_run.resource_config_json, dict) else None
     )
     starter = compute_schemas.BuildStarter.model_validate(build_run.starter_json)
-    result_json = _copy_json_dict(build_run.result_json) if isinstance(build_run.result_json, dict) else None
+    result_json = copy_json_dict(build_run.result_json) if isinstance(build_run.result_json, dict) else None
     return compute_schemas.ActiveBuildDetail(
         build_id=build_run.id,
         analysis_id=build_run.analysis_id,
@@ -664,7 +658,7 @@ def build_summary(build_run: BuildRun) -> compute_schemas.ActiveBuildSummary:
         total_tabs=build_run.total_tabs,
         cancelled_at=build_run.cancelled_at,
         cancelled_by=build_run.cancelled_by,
-        result_json=_copy_json_dict(build_run.result_json) if isinstance(build_run.result_json, dict) else None,
+        result_json=copy_json_dict(build_run.result_json) if isinstance(build_run.result_json, dict) else None,
     )
 
 

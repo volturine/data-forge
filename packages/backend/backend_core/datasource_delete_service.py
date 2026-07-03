@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlmodel import Session, select
 
 from backend_core.exceptions import datasource_not_found
 from backend_core.persistence.datasource.models import DataSource
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
+from backend_core.time import utc_now as _utcnow
 
 
 def get_datasource(session: Session, datasource_id: str) -> DataSource | None:

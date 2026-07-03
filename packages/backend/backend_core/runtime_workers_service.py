@@ -1,13 +1,10 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlmodel import Session, select
 
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
+from backend_core.time import utc_now as _utcnow
 
 
 def register_worker(

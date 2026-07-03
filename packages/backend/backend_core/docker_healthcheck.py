@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import socket
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, timedelta
 
 from backend_core import runtime_workers_service as runtime_worker_service
 from backend_core.database import run_settings_db
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
-
-
-def _now() -> datetime:
-    return datetime.now(UTC)
+from backend_core.time import utc_now
 
 
 def worker_healthy(*, kind: RuntimeWorkerKind, heartbeat_seconds: float = 15.0, hostname: str | None = None) -> bool:
@@ -28,5 +25,5 @@ def worker_healthy(*, kind: RuntimeWorkerKind, heartbeat_seconds: float = 15.0, 
     row = run_settings_db(_read)
     if row is None:
         return False
-    age = _now() - row.last_heartbeat_at.replace(tzinfo=UTC)
+    age = utc_now() - row.last_heartbeat_at.replace(tzinfo=UTC)
     return age <= timedelta(seconds=heartbeat_seconds)

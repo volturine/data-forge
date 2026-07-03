@@ -25,6 +25,7 @@ from backend_core.domain.engine_runs.schemas import (
 )
 from backend_core.engine_runs_utils import normalize_step_timings
 from backend_core.exceptions import EngineRunComparisonError, engine_run_not_found
+from backend_core.json_utils import copy_json_dict
 from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
@@ -136,10 +137,6 @@ def build_execution_entries(
     return entries
 
 
-def _copy_result_json(value: dict[str, Any] | None) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
 def _latest_completed_step_name(result_json: dict[str, Any]) -> str | None:
     raw_steps = result_json.get('steps')
     if not isinstance(raw_steps, list):
@@ -170,7 +167,7 @@ def cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str | None
 
     now = datetime.now(UTC)
     reason = f'Cancelled by {cancelled_by}' if cancelled_by else 'Cancelled'
-    existing = _copy_result_json(run.result_json)
+    existing = copy_json_dict(run.result_json)
     existing.pop('data', None)
     existing.pop('schema', None)
     existing['results'] = []
@@ -312,7 +309,7 @@ def update_engine_run(
         if result_json is None:
             run.result_json = None
         elif isinstance(result_json, dict):
-            base = _copy_result_json(run.result_json) if merge_result_json else {}
+            base = copy_json_dict(run.result_json) if merge_result_json else {}
             base.update(result_json)
             run.result_json = base
     if not isinstance(error_message, _UnsetType):
@@ -332,7 +329,7 @@ def update_engine_run(
     if not isinstance(triggered_by, _UnsetType):
         run.triggered_by = triggered_by if triggered_by is None or isinstance(triggered_by, str) else run.triggered_by
     if not isinstance(execution_entries, _UnsetType):
-        next_result_json = _copy_result_json(run.result_json)
+        next_result_json = copy_json_dict(run.result_json)
         if execution_entries is None:
             next_result_json.pop('execution_entries', None)
         elif isinstance(execution_entries, list):
