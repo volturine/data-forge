@@ -60,7 +60,7 @@ Status: resolved in the protocol-first rewrite. `packages/protocol` is now the s
 
 | #   | Task                                     | Files Affected                                               | Notes                                                                                                                                                                |
 | --- | ---------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 21  | **Remove redundant docstrings**          | `backend_core/exceptions.py`, `worker/runtime/exceptions.py` | Docstrings like `"""Raised when a datasource is not found."""` for `DataSourceNotFoundError` add zero value.                                                         |
+| 21  | ✅ **Remove redundant docstrings**          | `backend_core/exceptions.py`, `worker/runtime/exceptions.py` | Resolved by removing low-signal backend exception docstrings; worker exceptions were already using docstring-free classes. |
 | 22  | ✅ **Remove copy-pasted SQLModel comments** | `engine_runs_service.py` | Resolved by removing the remaining stale SQLModel/Pydantic explanatory comment; the actionable typing cleanup remains tracked by #10/#23. |
 | 23  | **Audit `# type: ignore` comments**      | All 30+ files with `# type: ignore[arg-type]`                | Replace individual ignores with a module-level or project-level mypy override if the pattern is universal.                                                           |
 
