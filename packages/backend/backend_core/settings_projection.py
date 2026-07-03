@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from threading import Lock
 
 from sqlmodel import Session
@@ -10,8 +11,97 @@ from backend_core.secrets import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SMTP_PORT = 587
+DEFAULT_OPENAI_ENDPOINT_URL = 'https://api.openai.com'
+DEFAULT_OPENAI_MODEL = 'gpt-4o-mini'
+DEFAULT_OLLAMA_ENDPOINT_URL = 'http://localhost:11434'
+DEFAULT_OLLAMA_MODEL = 'llama3.2'
+DEFAULT_HUGGINGFACE_MODEL = 'google/flan-t5-base'
+
 _RESOLVED_LOCK = Lock()
-_RESOLVED_CACHE: dict[int, dict[str, object]] = {}
+_RESOLVED_CACHE: dict[int, ResolvedSettingsSnapshot] = {}
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSettingsSnapshot:
+    exists: bool
+    smtp_host: str = ''
+    smtp_port: int = DEFAULT_SMTP_PORT
+    smtp_user: str = ''
+    smtp_password: str = ''
+    telegram_bot_enabled: bool = False
+    telegram_bot_token: str = ''
+    openrouter_api_key: str = ''
+    openrouter_default_model: str = ''
+    openai_api_key: str = ''
+    openai_endpoint_url: str = DEFAULT_OPENAI_ENDPOINT_URL
+    openai_default_model: str = DEFAULT_OPENAI_MODEL
+    openai_organization_id: str = ''
+    ollama_endpoint_url: str = DEFAULT_OLLAMA_ENDPOINT_URL
+    ollama_default_model: str = DEFAULT_OLLAMA_MODEL
+    huggingface_api_token: str = ''
+    huggingface_default_model: str = DEFAULT_HUGGINGFACE_MODEL
+
+    @classmethod
+    def from_row(cls, row: AppSettings) -> ResolvedSettingsSnapshot:
+        return cls(
+            exists=True,
+            smtp_host=row.smtp_host,
+            smtp_port=row.smtp_port,
+            smtp_user=row.smtp_user,
+            smtp_password=_read_secret(row, 'smtp_password'),
+            telegram_bot_enabled=row.telegram_bot_enabled,
+            telegram_bot_token=_read_secret(row, 'telegram_bot_token'),
+            openrouter_api_key=_read_secret(row, 'openrouter_api_key'),
+            openrouter_default_model=row.openrouter_default_model,
+            openai_api_key=_read_secret(row, 'openai_api_key'),
+            openai_endpoint_url=row.openai_endpoint_url or DEFAULT_OPENAI_ENDPOINT_URL,
+            openai_default_model=row.openai_default_model or DEFAULT_OPENAI_MODEL,
+            openai_organization_id=row.openai_organization_id or '',
+            ollama_endpoint_url=row.ollama_endpoint_url or DEFAULT_OLLAMA_ENDPOINT_URL,
+            ollama_default_model=row.ollama_default_model or DEFAULT_OLLAMA_MODEL,
+            huggingface_api_token=_read_secret(row, 'huggingface_api_token'),
+            huggingface_default_model=row.huggingface_default_model or DEFAULT_HUGGINGFACE_MODEL,
+        )
+
+    def smtp_settings(self) -> dict[str, object]:
+        if self.exists and self.smtp_host:
+            return {
+                'host': self.smtp_host,
+                'port': self.smtp_port,
+                'user': self.smtp_user,
+                'password': self.smtp_password,
+            }
+        return {'host': '', 'port': DEFAULT_SMTP_PORT, 'user': '', 'password': ''}
+
+    def telegram_settings(self) -> dict[str, object]:
+        if not self.exists:
+            return {'enabled': False, 'token': ''}
+        enabled = bool(self.telegram_bot_enabled and self.telegram_bot_token)
+        return {'enabled': enabled, 'token': self.telegram_bot_token}
+
+    def openrouter_key(self) -> str:
+        return self.openrouter_api_key if self.exists else ''
+
+    def openai_settings(self) -> dict[str, str]:
+        return {
+            'api_key': self.openai_api_key if self.exists else '',
+            'endpoint_url': self.openai_endpoint_url,
+            'default_model': self.openai_default_model,
+            'organization_id': self.openai_organization_id if self.exists else '',
+        }
+
+    def ollama_settings(self) -> dict[str, str]:
+        return {'endpoint_url': self.ollama_endpoint_url, 'default_model': self.ollama_default_model}
+
+    def huggingface_settings(self) -> dict[str, str]:
+        return {
+            'api_token': self.huggingface_api_token if self.exists else '',
+            'default_model': self.huggingface_default_model,
+        }
+
+    def default_model(self) -> str:
+        return self.openrouter_default_model if self.exists else ''
 
 
 def invalidate_resolved_settings_cache() -> None:
@@ -32,51 +122,14 @@ def _active_settings_engine_id() -> int:
     return id(get_settings_engine())
 
 
-def _load_resolved_snapshot(session: Session) -> dict[str, object]:
+def _load_resolved_snapshot(session: Session) -> ResolvedSettingsSnapshot:
     row = session.get(AppSettings, 1)
     if not row:
-        return {
-            'exists': False,
-            'smtp_host': '',
-            'smtp_port': 587,
-            'smtp_user': '',
-            'smtp_password': '',
-            'telegram_bot_enabled': False,
-            'telegram_bot_token': '',
-            'openrouter_api_key': '',
-            'openrouter_default_model': '',
-            'openai_api_key': '',
-            'openai_endpoint_url': 'https://api.openai.com',
-            'openai_default_model': 'gpt-4o-mini',
-            'openai_organization_id': '',
-            'ollama_endpoint_url': 'http://localhost:11434',
-            'ollama_default_model': 'llama3.2',
-            'huggingface_api_token': '',
-            'huggingface_default_model': 'google/flan-t5-base',
-        }
-
-    return {
-        'exists': True,
-        'smtp_host': row.smtp_host,
-        'smtp_port': row.smtp_port,
-        'smtp_user': row.smtp_user,
-        'smtp_password': _read_secret(row, 'smtp_password'),
-        'telegram_bot_enabled': row.telegram_bot_enabled,
-        'telegram_bot_token': _read_secret(row, 'telegram_bot_token'),
-        'openrouter_api_key': _read_secret(row, 'openrouter_api_key'),
-        'openrouter_default_model': row.openrouter_default_model,
-        'openai_api_key': _read_secret(row, 'openai_api_key'),
-        'openai_endpoint_url': row.openai_endpoint_url or 'https://api.openai.com',
-        'openai_default_model': row.openai_default_model or 'gpt-4o-mini',
-        'openai_organization_id': row.openai_organization_id or '',
-        'ollama_endpoint_url': row.ollama_endpoint_url or 'http://localhost:11434',
-        'ollama_default_model': row.ollama_default_model or 'llama3.2',
-        'huggingface_api_token': _read_secret(row, 'huggingface_api_token'),
-        'huggingface_default_model': row.huggingface_default_model or 'google/flan-t5-base',
-    }
+        return ResolvedSettingsSnapshot(exists=False)
+    return ResolvedSettingsSnapshot.from_row(row)
 
 
-def _get_resolved_snapshot() -> dict[str, object]:
+def _get_resolved_snapshot() -> ResolvedSettingsSnapshot:
     from backend_core.database import run_settings_db
 
     key = _active_settings_engine_id()
@@ -92,16 +145,7 @@ def _get_resolved_snapshot() -> dict[str, object]:
 
 
 def get_resolved_smtp() -> dict[str, object]:
-    resolved = _get_resolved_snapshot()
-    port = resolved['smtp_port']
-    if bool(resolved['exists']) and bool(resolved['smtp_host']):
-        return {
-            'host': str(resolved['smtp_host']),
-            'port': port if isinstance(port, int) else 587,
-            'user': str(resolved['smtp_user']),
-            'password': str(resolved['smtp_password']),
-        }
-    return {'host': '', 'port': 587, 'user': '', 'password': ''}
+    return _get_resolved_snapshot().smtp_settings()
 
 
 def get_resolved_telegram_token() -> str:
@@ -110,45 +154,24 @@ def get_resolved_telegram_token() -> str:
 
 
 def get_resolved_telegram_settings() -> dict[str, object]:
-    resolved = _get_resolved_snapshot()
-    if not bool(resolved['exists']):
-        return {'enabled': False, 'token': ''}
-    token = str(resolved['telegram_bot_token'])
-    enabled = bool(resolved['telegram_bot_enabled'] and token)
-    return {'enabled': enabled, 'token': token}
+    return _get_resolved_snapshot().telegram_settings()
 
 
 def get_resolved_openrouter_key() -> str:
-    resolved = _get_resolved_snapshot()
-    return str(resolved['openrouter_api_key']) if bool(resolved['exists']) else ''
+    return _get_resolved_snapshot().openrouter_key()
 
 
 def get_resolved_openai_settings() -> dict[str, str]:
-    resolved = _get_resolved_snapshot()
-    if not bool(resolved['exists']):
-        return {'api_key': '', 'endpoint_url': 'https://api.openai.com', 'default_model': 'gpt-4o-mini', 'organization_id': ''}
-    return {
-        'api_key': str(resolved['openai_api_key']),
-        'endpoint_url': str(resolved['openai_endpoint_url']),
-        'default_model': str(resolved['openai_default_model']),
-        'organization_id': str(resolved['openai_organization_id']),
-    }
+    return _get_resolved_snapshot().openai_settings()
 
 
 def get_resolved_ollama_settings() -> dict[str, str]:
-    resolved = _get_resolved_snapshot()
-    if not bool(resolved['exists']):
-        return {'endpoint_url': 'http://localhost:11434', 'default_model': 'llama3.2'}
-    return {'endpoint_url': str(resolved['ollama_endpoint_url']), 'default_model': str(resolved['ollama_default_model'])}
+    return _get_resolved_snapshot().ollama_settings()
 
 
 def get_resolved_huggingface_settings() -> dict[str, str]:
-    resolved = _get_resolved_snapshot()
-    if not bool(resolved['exists']):
-        return {'api_token': '', 'default_model': 'google/flan-t5-base'}
-    return {'api_token': str(resolved['huggingface_api_token']), 'default_model': str(resolved['huggingface_default_model'])}
+    return _get_resolved_snapshot().huggingface_settings()
 
 
 def get_resolved_default_model() -> str:
-    resolved = _get_resolved_snapshot()
-    return str(resolved['openrouter_default_model']) if bool(resolved['exists']) else ''
+    return _get_resolved_snapshot().default_model()
