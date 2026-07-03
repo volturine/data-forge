@@ -71,7 +71,7 @@ Status: resolved in the protocol-first rewrite. `packages/protocol` is now the s
 | #   | Task                                                      | Files Affected                                                                                                                   | Notes                                                                                                   |
 | --- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | 24  | ✅ **Audit `build-stream.svelte.ts` vs `engines.svelte.ts`** | `build-stream.svelte.ts`, `engines.svelte.ts`, `reconnection-manager.ts`, `types/build-stream.ts` | Resolved by #14 for shared reconnection behavior. Build stream types are now protocol-anchored in `types/build-stream.ts`; the old `build-stream.generated.ts` file no longer exists. |
-| 25  | **Review generated type files**                           | `step-schemas.generated.ts`, `build-stream.generated.ts`                                                                         | Ensure the generation scripts (`scripts/generate_ts_*.py`) are not producing redundant or stale output. |
+| 25  | ✅ **Review generated type files**                           | `scripts/check_package_boundaries.py`, protocol-anchored frontend types | Resolved by the protocol rewrite: deleted backend-derived TS generators and `*.generated.ts` imports are blocked by package-boundary checks, while frontend build-stream types derive from generated protocol JSON shapes. |
 
 ---
 
