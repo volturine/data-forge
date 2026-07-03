@@ -41,7 +41,7 @@ Status: resolved in the protocol-first rewrite. `packages/protocol` is now the s
 | 13  | ✅ **Extract generic `PaginatedStore` base class**   | `paginated-store.svelte.ts`, `builds.svelte.ts`, `engine-runs.svelte.ts` | Resolved with a rune-aware `PaginatedStore` base for shared status, error, params, in-flight, pending refresh, token, load, refresh, close, reset, and fetch lifecycle behavior. |
 | 14  | ✅ **Extract `StreamStore` / `ReconnectionManager`** | `reconnection-manager.ts`, `engines.svelte.ts`, `build-stream.svelte.ts` | Resolved with a shared `ReconnectionManager` for reconnect timer scheduling and clearing while keeping stream-specific state transitions in each store. |
 | 15  | ✅ **Extract generic API result handler**            | `paginated-store.svelte.ts`, `builds.svelte.ts`, `engine-runs.svelte.ts` | Resolved for the truly repeated list-result lifecycle by `PaginatedStore`; remaining datasource/engine `.match()` calls are command-specific boundary adapters with distinct side effects. |
-| 16  | **Consolidate store lifecycle patterns**          | `builds.svelte.ts`, `engine-runs.svelte.ts`, `engines.svelte.ts`, `chat.svelte.ts`       | Token/counter race prevention, `inFlight`/`pendingRefresh`, `close()`/`reset()` are copy-pasted.                                                |
+| 16  | ✅ **Consolidate store lifecycle patterns**          | `paginated-store.svelte.ts`, `reconnection-manager.ts`, `builds.svelte.ts`, `engine-runs.svelte.ts`, `engines.svelte.ts`, `build-stream.svelte.ts` | Resolved by moving list token/in-flight/pending-refresh lifecycle into `PaginatedStore` and reconnect timer lifecycle into `ReconnectionManager`; chat keeps its distinct EventSource retry/backoff flow. |
 
 ---
 
