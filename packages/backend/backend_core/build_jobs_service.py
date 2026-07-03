@@ -1,11 +1,10 @@
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, cast
 
-from sqlalchemy import and_, desc, or_, select, update
-from sqlalchemy.engine import CursorResult
+from sqlalchemy import and_, desc, or_, select
 from sqlmodel import Session
 
+from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.persistence.build_jobs.models import BuildJob
@@ -69,36 +68,29 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
         .order_by(desc(BuildJob.priority), BuildJob.created_at)  # type: ignore[arg-type]
         .limit(1)
     )
-    dialect = session.get_bind().dialect.name
-    stmt = base.with_for_update(skip_locked=True) if dialect == 'postgresql' else base
+    stmt = with_for_update_skip_locked(session, base)
     row = session.execute(stmt).scalars().first()
     if row is None:
         return None
     current_attempts = row.attempts
     previous_status = row.status
     previous_owner = row.lease_owner
-    claim = (
-        update(BuildJob)
-        .where(BuildJob.id == row.id)
-        .where(BuildJob.attempts == current_attempts)  # type: ignore[arg-type]
-        .where(BuildJob.status == previous_status)  # type: ignore[arg-type]
+    claimed = claim_by_lease_owner(
+        session,
+        BuildJob,
+        table=table,
+        row_id=row.id,
+        previous_owner=previous_owner,
+        extra_conditions=(table.c.attempts == current_attempts, table.c.status == previous_status),
+        values={
+            'status': BuildJobStatus.RUNNING,
+            'lease_owner': worker_id,
+            'lease_expires_at': now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
+            'attempts': current_attempts + 1,
+            'updated_at': now,
+        },
     )
-    claim = (
-        claim.where(table.c.lease_owner.is_(None)) if previous_owner is None else claim.where(BuildJob.lease_owner == previous_owner)  # type: ignore[arg-type]
-    )
-    result = cast(
-        CursorResult[Any],
-        session.execute(
-            claim.values(
-                status=BuildJobStatus.RUNNING,
-                lease_owner=worker_id,
-                lease_expires_at=now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
-                attempts=current_attempts + 1,
-                updated_at=now,
-            )
-        ),
-    )
-    if result.rowcount != 1:
+    if not claimed:
         session.rollback()
         return None
     session.commit()

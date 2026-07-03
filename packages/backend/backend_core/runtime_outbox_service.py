@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlmodel import Session
 
 from backend_core import runtime_ipc
+from backend_core.claiming import with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
@@ -78,8 +79,7 @@ def dispatch_pending_events(session: Session, *, limit: int = 100) -> int:
         .order_by(RuntimeOutboxEvent.created_at)  # type: ignore[arg-type]
         .limit(limit)
     )
-    dialect = session.get_bind().dialect.name
-    stmt = base.with_for_update(skip_locked=True) if dialect == 'postgresql' else base
+    stmt = with_for_update_skip_locked(session, base)
     events = list(session.execute(stmt).scalars().all())
     dispatched = 0
     for event in events:

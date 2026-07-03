@@ -3,11 +3,10 @@ import uuid
 from collections import deque
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 import croniter  # type: ignore[import-untyped]
-from sqlalchemy import or_, select, update
-from sqlalchemy.engine import CursorResult
+from sqlalchemy import or_, select
 from sqlmodel import Session, col
 
 from backend_core import (
@@ -15,6 +14,7 @@ from backend_core import (
     build_runs_service as build_run_service,
     runtime_outbox_service,
 )
+from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_locked
 from backend_core.domain.build_jobs.live import hub as build_job_hub
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
@@ -695,8 +695,7 @@ def claim_due_schedules(
             )
         )
     )
-    dialect = session.get_bind().dialect.name
-    stmt = base.with_for_update(skip_locked=True) if dialect == 'postgresql' else base
+    stmt = with_for_update_skip_locked(session, base)
     schedules = list(session.execute(stmt).scalars().all())
     due_ids = {schedule.id for schedule in get_due_schedules(session)}
     due = [schedule for schedule in schedules if schedule.id in due_ids]
@@ -704,21 +703,19 @@ def claim_due_schedules(
     for schedule in due[:limit]:
         if build_run_service.has_inflight_build_for_schedule(session, schedule.id):
             continue
-        claim = update(Schedule).where(Schedule.id == schedule.id)
-        claim = (
-            claim.where(table.c.lease_owner.is_(None)) if schedule.lease_owner is None else claim.where(Schedule.lease_owner == schedule.lease_owner)  # type: ignore[arg-type]
+        claimed_schedule = claim_by_lease_owner(
+            session,
+            Schedule,
+            table=table,
+            row_id=schedule.id,
+            previous_owner=schedule.lease_owner,
+            values={
+                'lease_owner': worker_id,
+                'lease_expires_at': None,
+                'last_claimed_at': naive_stamp,
+            },
         )
-        result = cast(
-            CursorResult[Any],
-            session.execute(
-                claim.values(
-                    lease_owner=worker_id,
-                    lease_expires_at=None,
-                    last_claimed_at=naive_stamp,
-                )
-            ),
-        )
-        if result.rowcount != 1:
+        if not claimed_schedule:
             continue
         claimed.append(schedule)
     if not claimed:

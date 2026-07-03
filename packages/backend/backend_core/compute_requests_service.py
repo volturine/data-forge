@@ -1,12 +1,11 @@
 import uuid
 from datetime import timedelta
-from typing import Any, cast
 
-from sqlalchemy import and_, case, or_, select, update
-from sqlalchemy.engine import CursorResult
+from sqlalchemy import and_, case, or_, select
 from sqlmodel import Session
 
 from backend_core import runtime_outbox_service
+from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.compute_requests.models import (
     command_envelope,
@@ -152,29 +151,27 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
         or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable), table.c.lease_expires_at <= now),
     )
     base = select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).order_by(_request_priority_clause(table), table.c.created_at).limit(1)
-    dialect = session.get_bind().dialect.name
-    stmt = base.with_for_update(skip_locked=True) if dialect == 'postgresql' else base
+    stmt = with_for_update_skip_locked(session, base)
     row = session.execute(stmt).scalars().first()
     if row is None:
         return None
     previous_status = row.status
     previous_owner = row.lease_owner
-    claim = update(ComputeRequest).where(ComputeRequest.id == row.id).where(ComputeRequest.status == previous_status)  # type: ignore[arg-type]
-    claim = (
-        claim.where(table.c.lease_owner.is_(None)) if previous_owner is None else claim.where(ComputeRequest.lease_owner == previous_owner)  # type: ignore[arg-type]
+    lease_claimed = claim_by_lease_owner(
+        session,
+        ComputeRequest,
+        table=table,
+        row_id=row.id,
+        previous_owner=previous_owner,
+        extra_conditions=(table.c.status == previous_status,),
+        values={
+            'status': enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
+            'lease_owner': worker_id,
+            'lease_expires_at': now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
+            'updated_at': now,
+        },
     )
-    result = cast(
-        CursorResult[Any],
-        session.execute(
-            claim.values(
-                status=enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
-                lease_owner=worker_id,
-                lease_expires_at=now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
-                updated_at=now,
-            )
-        ),
-    )
-    if result.rowcount != 1:
+    if not lease_claimed:
         session.rollback()
         return None
     session.commit()
