@@ -1,5 +1,5 @@
-from backend_core.healthcheck_runner import run_healthchecks
 from modules.healthcheck.routes import router
+from modules.healthcheck.runner import run_healthchecks
 from modules.healthcheck.service import (
     create_healthcheck,
     delete_healthcheck,

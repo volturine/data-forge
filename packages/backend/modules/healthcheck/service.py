@@ -6,14 +6,14 @@ from sqlmodel import Session, col
 
 from backend_core.domain.healthcheck_models import HealthCheckType
 from backend_core.exceptions import HealthcheckValidationError, healthcheck_not_found
-from backend_core.healthcheck_schemas import (
+from backend_core.persistence.datasource.models import DataSource
+from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
+from modules.healthcheck.schemas import (
     HealthCheckCreate,
     HealthCheckResponse,
     HealthCheckResultResponse,
     HealthCheckUpdate,
 )
-from backend_core.persistence.datasource.models import DataSource
-from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
 
 
 def list_healthchecks(

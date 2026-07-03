@@ -3,7 +3,6 @@ import uuid
 from fastapi import Depends
 from sqlmodel import Session
 
-from backend_core import healthcheck_schemas as schemas
 from backend_core.database import get_db
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import InvalidIdError
@@ -12,7 +11,7 @@ from backend_core.validation import (
     parse_datasource_id,
     parse_healthcheck_id,
 )
-from modules.healthcheck import service
+from modules.healthcheck import schemas, service
 from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/healthchecks', tags=['healthchecks'])

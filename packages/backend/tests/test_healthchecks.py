@@ -3,9 +3,9 @@ from datetime import UTC, datetime, timedelta
 
 import polars as pl
 
-from backend_core.healthcheck_runner import run_healthchecks
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
+from modules.healthcheck.runner import run_healthchecks
 
 
 def _create_datasource(session, ds_id: str | None = None) -> DataSource:
