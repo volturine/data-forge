@@ -401,7 +401,6 @@ def list_engine_runs(
         col(EngineRun.analysis_id) == col(Analysis.id),
         isouter=True,
     )  # type: ignore[arg-type]
-    # SQLModel type annotations not fully compatible with Pydantic v2 - needed for .where() calls
     if analysis_id is not None:
         stmt = stmt.where(EngineRun.analysis_id == analysis_id)  # type: ignore[arg-type]
     if datasource_id is not None:
