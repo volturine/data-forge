@@ -70,7 +70,7 @@ Status: resolved in the protocol-first rewrite. `packages/protocol` is now the s
 
 | #   | Task                                                      | Files Affected                                                                                                                   | Notes                                                                                                   |
 | --- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| 24  | **Audit `build-stream.svelte.ts` vs `engines.svelte.ts`** | Already covered in #14, but also check if `build-stream` types (`build-stream.ts` + `build-stream.generated.ts`) can be unified. |
+| 24  | ✅ **Audit `build-stream.svelte.ts` vs `engines.svelte.ts`** | `build-stream.svelte.ts`, `engines.svelte.ts`, `reconnection-manager.ts`, `types/build-stream.ts` | Resolved by #14 for shared reconnection behavior. Build stream types are now protocol-anchored in `types/build-stream.ts`; the old `build-stream.generated.ts` file no longer exists. |
 | 25  | **Review generated type files**                           | `step-schemas.generated.ts`, `build-stream.generated.ts`                                                                         | Ensure the generation scripts (`scripts/generate_ts_*.py`) are not producing redundant or stale output. |
 
 ---
