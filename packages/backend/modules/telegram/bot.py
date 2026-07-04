@@ -3,6 +3,7 @@ import threading
 
 import httpx
 from sqlalchemy.exc import SQLAlchemyError
+from sqlmodel import Session
 
 from backend_core import http as http_client
 
@@ -236,7 +237,7 @@ class TelegramBot:
         from backend_core.database import run_db
         from backend_core.telegram_store import add_subscriber
 
-        def _add(session) -> None:  # type: ignore[no-untyped-def]
+        def _add(session: Session) -> None:
             add_subscriber(session, chat_id, title, self._token)
 
         try:
@@ -251,7 +252,7 @@ class TelegramBot:
         from backend_core.database import run_db
         from backend_core.telegram_store import get_subscriber_by_chat
 
-        def _remove(session) -> None:  # type: ignore[no-untyped-def]
+        def _remove(session: Session) -> None:
             sub = get_subscriber_by_chat(session, chat_id, self._token)
             if sub:
                 sub.is_active = False
