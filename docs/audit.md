@@ -1,6 +1,8 @@
 ## Summary of Exploration
 
-I analyzed the **605 source files** across the four main packages (`backend` 223 files, `frontend` 269 files, `worker` 97 files, `scheduler` 3 files, plus config/scripts). I used a combination of direct file inspection, `grep` pattern analysis, and a delegated deep-dive agent to identify systemic duplication and structural repetition.
+The initial audit analyzed **605 source files** across the four main packages (`backend` 223 files, `frontend` 269 files, `worker` 97 files, `scheduler` 3 files, plus config/scripts). A follow-up scan on 2026-07-04 covered **793 package/script source files** after the protocol rewrite and subsequent cleanup commits, excluding virtualenvs, `node_modules`, package-local generated `dataforge_protocol`, Svelte build output, and other build artifacts.
+
+The original P0 contract problem is resolved. Remaining exact duplicates are now limited to generated third-party protobuf validation files, empty package marker files, empty frontend route loaders, and a small set of deliberately package-local runtime helpers called out below.
 
 ---
 
@@ -51,7 +53,7 @@ Status: resolved in the protocol-first rewrite. `packages/protocol` is now the s
 | --- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 17  | ✅ **Audit backend_core for orphaned modules**             | `docker_healthcheck.py`, `public_schema.py`, `proxy.py`, `migrations.py`, `analysis_cycles.py`, `engine_live.py`, `error_handlers.py`, `modules/healthcheck/runner.py` | Resolved by moving `healthcheck_runner.py` into `modules/healthcheck`, folding one-consumer `app_error_status.py` into `error_handlers.py`, confirming `build_live.py` is already absent, and retaining the remaining modules as active infrastructure owners. |
 | 18  | ✅ **Merge `healthcheck_schemas` + `healthcheck_runner`**  | `modules/healthcheck/schemas.py`, `modules/healthcheck/runner.py`, `modules/healthcheck/*` | Resolved by moving healthcheck API schemas and runner into the owning `modules/healthcheck` package and updating callers/tests without backend_core compatibility aliases. |
-| 19  | ✅ **Consolidate runtime notification modules**            | `backend_core/runtime_notifications.py`, `worker/runtime/runtime_notifications.py`, `worker/runtime/notification_delivery.py`, `worker/operations/notification.py` | Reviewed and retained by ownership boundary: backend runtime notifications wake backend live hubs from worker outbox payloads; worker runtime notifications wake job/request loops; worker notification delivery is the operation-facing RPC client. |
+| 19  | ✅ **Consolidate runtime notification modules**            | `backend_core/runtime_notifications.py`, `worker/runtime/runtime_notifications.py`, `worker/runtime/notification_delivery.py`, `worker/operations/notification.py`, `backend_core/live_hubs.py`, `worker/runtime/live_hubs.py` | Reviewed and retained by ownership boundary: backend runtime notifications wake backend live hubs from worker outbox payloads; worker runtime notifications wake job/request loops; worker notification delivery is the operation-facing RPC client. Repeated version-counter live hubs were reduced to package-local `VersionHub`/`KeyedVersionHub` primitives, and unused opposite-side live hubs were removed. |
 | 20  | ✅ **Review `backend_core/smtp.py` + `telegram_store.py`** | `backend_core/smtp.py`, `backend_core/telegram_store.py`, `modules/settings`, `modules/auth`, `modules/telegram`, `backend_grpc` | Reviewed and retained: SMTP centralizes TLS/send behavior across settings, auth, and gRPC; Telegram store owns persistence for routes and bot handling. `modules/notification` is currently empty, so there is no duplicate owner to merge into. |
 
 ---
@@ -84,12 +86,12 @@ Status: resolved in the protocol-first rewrite. `packages/protocol` is now the s
 
 ---
 
-## Suggested Execution Order
+## Follow-Up Scan Results
 
-1. **Start with P0** (shared contracts package). This is the biggest architectural win and unblocks everything else.
-2. **Parallel**: P1 utilities (`_utcnow`, JSON copy, claim/lease helper) — these are low-risk, high-impact.
-3. **Then**: Fix the `# type: ignore` systemic issue (either via mypy config or by fixing SQLModel annotations).
-4. **Then**: Frontend store consolidation and backend service consolidation.
-5. **Finally**: Comment cleanup and orphaned module audit.
+| #   | Task | Files Affected | Notes |
+| --- | ---- | -------------- | ----- |
+| 28  | ✅ **Consolidate live hub primitives** | `backend_core/live_hubs.py`, `worker/runtime/live_hubs.py`, `domain/build_jobs/live.py`, `domain/compute_requests/live.py`, deleted `worker/runtime/domain/build_runs/live.py` | Resolved after the original audit closeout. Replaced repeated version-counter hub classes with package-local primitives, removed the unused backend `request_hub`, removed the unused worker `response_hub`, and deleted the unused worker build-run live notification hub. |
+| 29  | 🟡 **Retain explicit package-boundary helpers** | `backend_grpc/validation.py` ↔ `worker_grpc/validation.py`, `backend_core/json_utils.py` ↔ `worker/runtime/json_utils.py`, `backend_core/domain/protocol_enums.py` ↔ `worker/runtime/domain/protocol_enums.py` | These remain intentionally package-local because the architecture forbids a runtime `protocol` wrapper package or cross-package shared runtime dependency. Eliminating the last lines of duplication would require generating package-local helper code from protocol tooling, or accepting a new runtime shared package. |
+| 30  | ✅ **Remove stale execution-plan language** | `docs/audit.md` | Replaced the pre-implementation "suggested execution order" with the current follow-up scan result so the audit no longer reads like unstarted work. |
 
-This task list is ready to be converted into individual issues or PRs. Would you like me to begin executing any of these tasks?
+The remaining non-generated exact duplicates are deliberate boundary code, not active contract drift. If the project later decides that zero duplicated helper code matters more than strict package independence, the cleanest next step is protocol-owned generation of package-local enum/validation/helper adapters, still without importing `packages/protocol` at runtime.
