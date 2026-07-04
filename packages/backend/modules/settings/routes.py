@@ -2,6 +2,7 @@
 
 import logging
 from email.message import EmailMessage
+from typing import Protocol, cast
 
 from fastapi import Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -32,12 +33,33 @@ logger = logging.getLogger(__name__)
 router = MCPRouter(prefix='/settings', tags=['settings'])
 
 
-def _apply_telegram_bot_runtime(enabled: bool, token: str, telegram_bot) -> None:  # type: ignore[no-untyped-def]
+class TelegramBotRuntime(Protocol):
+    @property
+    def running(self) -> bool: ...
+
+    def start(self, token: str) -> None: ...
+
+    def stop(self) -> None: ...
+
+
+def _apply_telegram_bot_runtime(enabled: bool, token: str, telegram_bot: TelegramBotRuntime) -> None:
     if enabled and token:
         telegram_bot.start(token)
         return
     if telegram_bot.running:
         telegram_bot.stop()
+
+
+def _extract_telegram_chat(update: dict[str, object]) -> dict[str, object] | None:
+    payload = update.get('message')
+    if not isinstance(payload, dict):
+        payload = update.get('channel_post')
+    if not isinstance(payload, dict):
+        return None
+    chat = payload.get('chat')
+    if not isinstance(chat, dict):
+        return None
+    return cast(dict[str, object], chat)
 
 
 @router.get('', response_model=SettingsResponse, mcp=True)
@@ -168,15 +190,7 @@ async def detect_telegram_chat(
         seen: dict[str, str] = {}
 
         for update in updates:
-            chat: dict[str, object] | None = None
-            if 'message' in update:
-                msg = update['message']
-                if isinstance(msg, dict):
-                    chat = msg.get('chat')  # type: ignore[assignment]
-            elif 'channel_post' in update:
-                post = update['channel_post']
-                if isinstance(post, dict):
-                    chat = post.get('chat')  # type: ignore[assignment]
+            chat = _extract_telegram_chat(update)
             if not chat:
                 continue
             cid = str(chat['id'])
@@ -227,15 +241,7 @@ async def detect_custom_bot_chat(
         seen: dict[str, str] = {}
 
         for update in updates:
-            chat: dict[str, object] | None = None
-            if 'message' in update:
-                msg = update['message']
-                if isinstance(msg, dict):
-                    chat = msg.get('chat')  # type: ignore[assignment]
-            elif 'channel_post' in update:
-                post = update['channel_post']
-                if isinstance(post, dict):
-                    chat = post.get('chat')  # type: ignore[assignment]
+            chat = _extract_telegram_chat(update)
             if not chat:
                 continue
             cid = str(chat['id'])
