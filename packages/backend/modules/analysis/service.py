@@ -286,7 +286,7 @@ def _rewrite_import_payload(
     return rewritten
 
 
-def _collect_missing_import_datasources(session: Session, pipeline: dict[str, Any]) -> list[str]:  # type: ignore[type-arg]
+def _collect_missing_import_datasources(session: Session, pipeline: dict[str, Any]) -> list[str]:
     missing: set[str] = set()
     tabs = pipeline.get('tabs')
     if not isinstance(tabs, list):
@@ -492,7 +492,7 @@ def _resolved_generation_provider(
 
 
 def validate_stored_pipeline_definition(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     pipeline_definition: dict[str, Any],
     analysis_id: str,
 ) -> None:
@@ -514,7 +514,7 @@ def validate_stored_pipeline_definition(
 
 
 def _validate_analysis_payload(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     data: AnalysisCreateSchema | AnalysisUpdateSchema,
     analysis_id: str | None = None,
 ) -> tuple[list[PipelineTab], list[str]]:
@@ -601,7 +601,7 @@ def _validate_analysis_payload(
 
 
 def validate_analysis(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     data: AnalysisCreateSchema,
 ) -> dict[str, Any]:
     """Validate analysis payload without persisting."""
@@ -610,7 +610,7 @@ def validate_analysis(
 
 
 def create_analysis(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     data: AnalysisCreateSchema,
     owner_id: str | None = None,
 ) -> AnalysisResponseSchema:
@@ -653,7 +653,7 @@ def create_analysis(
 
 
 def get_analysis(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
 ) -> AnalysisResponseSchema:
     analysis = session.get(Analysis, analysis_id)
@@ -665,7 +665,7 @@ def get_analysis(
 
 
 def list_analyses(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
 ) -> list[AnalysisGalleryItemSchema]:
     stmt = select(Analysis).options(
         defer(sa(Analysis.pipeline_definition)),
@@ -691,7 +691,7 @@ def list_analyses(
 
 
 def list_favorite_analyses(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     user_id: str | None,
 ) -> list[AnalysisGalleryItemSchema]:
     if not user_id:
@@ -734,7 +734,7 @@ def get_analysis_template(template_id: str) -> dict[str, Any]:
 
 
 def duplicate_analysis(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
     data: DuplicateAnalysisSchema,
     owner_id: str | None = None,
@@ -827,7 +827,7 @@ def duplicate_analysis(
 
 
 def import_analysis(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     data: ImportAnalysisSchema,
     owner_id: str | None = None,
 ) -> AnalysisResponseSchema:
@@ -850,7 +850,7 @@ def import_analysis(
 
 
 def generate_analysis_pipeline(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     data: GenerateAnalysisSchema,
 ) -> dict[str, Any]:
     if not data.datasources:
@@ -998,7 +998,7 @@ def generate_analysis_pipeline(
 
 
 def update_analysis(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
     data: AnalysisUpdateSchema,
 ) -> AnalysisResponseSchema:
@@ -1036,7 +1036,7 @@ def update_analysis(
 
 
 def set_favorite(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
     user_id: str,
     is_favorite: bool,
@@ -1064,7 +1064,7 @@ def set_favorite(
 
 
 def delete_analysis(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
 ) -> None:
     from modules.datasource.service import cleanup_datasource_storage
@@ -1094,7 +1094,7 @@ def delete_analysis(
 
 
 def add_step(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
     tab_id: str,
     step_type: str,
@@ -1157,7 +1157,7 @@ def add_step(
 
 
 def get_step(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
     tab_id: str,
     step_id: str,
@@ -1175,7 +1175,7 @@ def get_step(
 
 
 def update_step(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
     tab_id: str,
     step_id: str,
@@ -1209,7 +1209,7 @@ def update_step(
 
 
 def remove_step(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
     tab_id: str,
     step_id: str,
@@ -1240,7 +1240,7 @@ def remove_step(
 
 
 def derive_tab(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
     tab_id: str,
     name: str | None = None,
@@ -1315,7 +1315,7 @@ def _next_duplicate_tab_name(tabs: list[PipelineTab], source_name: str) -> str:
 
 
 def duplicate_tab(
-    session: Session,  # type: ignore[type-arg]
+    session: Session,
     analysis_id: str,
     tab_id: str,
     name: str | None = None,
