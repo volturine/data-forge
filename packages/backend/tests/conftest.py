@@ -276,12 +276,10 @@ def clear_build_job_hub():
 
 @pytest.fixture(autouse=True, scope='function')
 def clear_compute_request_hubs():
-    from backend_core.domain.compute_requests.live import request_hub, response_hub
+    from backend_core.domain.compute_requests.live import response_hub
 
-    asyncio.run(request_hub.clear())
     asyncio.run(response_hub.clear())
     yield
-    asyncio.run(request_hub.clear())
     asyncio.run(response_hub.clear())
 
 
