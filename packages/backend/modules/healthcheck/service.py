@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import desc, or_, select
+from sqlalchemy import or_, select
 from sqlmodel import Session
 
 from backend_core.domain.healthcheck_models import HealthCheckType
@@ -40,7 +40,7 @@ def list_healthchecks(
                 col(DataSource.name).ilike(q),
             )
         )
-    query = query.order_by(desc(sa(HealthCheck.created_at))).limit(limit).offset(offset)
+    query = query.order_by(col(HealthCheck.created_at).desc()).limit(limit).offset(offset)
     checks = session.execute(query).scalars().all()
     return [HealthCheckResponse.model_validate(check) for check in checks]
 
@@ -62,7 +62,7 @@ def list_all_healthchecks(
                 col(DataSource.name).ilike(q),
             )
         )
-    query = query.order_by(desc(sa(HealthCheck.created_at))).limit(limit).offset(offset)
+    query = query.order_by(col(HealthCheck.created_at).desc()).limit(limit).offset(offset)
     checks = session.execute(query).scalars().all()
     return [HealthCheckResponse.model_validate(check) for check in checks]
 
@@ -116,21 +116,21 @@ def list_results(session: Session, datasource_id: str, limit: int = 10) -> list[
     datasource = session.get(DataSource, datasource_id)
     if not datasource:
         return []
-    query = select(HealthCheckResult).order_by(HealthCheckResult.checked_at.desc()).limit(limit)  # type: ignore[union-attr, attr-defined]
+    query = select(HealthCheckResult).order_by(col(HealthCheckResult.checked_at).desc()).limit(limit)
     checks = session.execute(
-        select(HealthCheck.id).where(sa(HealthCheck.datasource_id == datasource_id)),  # type: ignore[call-overload]
+        select(col(HealthCheck.id)).where(col(HealthCheck.datasource_id) == datasource_id),
     )
     check_ids = checks.scalars().all()
     if not check_ids:
         return []
     results = session.execute(
-        query.where(sa(HealthCheckResult.healthcheck_id.in_(check_ids))),  # type: ignore[union-attr, attr-defined]
+        query.where(col(HealthCheckResult.healthcheck_id).in_(check_ids)),
     )
     return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
 
 
 def list_all_results(session: Session, limit: int = 10) -> list[HealthCheckResultResponse]:
-    query = select(HealthCheckResult).order_by(HealthCheckResult.checked_at.desc()).limit(limit)  # type: ignore[union-attr, attr-defined]
+    query = select(HealthCheckResult).order_by(col(HealthCheckResult.checked_at).desc()).limit(limit)
     results = session.execute(query)
     return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
 
@@ -140,10 +140,7 @@ def list_results_for_check(session: Session, healthcheck_id: str, limit: int = 1
     if not check:
         return []
     results = session.execute(
-        select(HealthCheckResult)
-        .where(sa(HealthCheckResult.healthcheck_id == healthcheck_id))
-        .order_by(HealthCheckResult.checked_at.desc())  # type: ignore[union-attr, attr-defined]
-        .limit(limit),
+        select(HealthCheckResult).where(sa(HealthCheckResult.healthcheck_id == healthcheck_id)).order_by(col(HealthCheckResult.checked_at).desc()).limit(limit),
     )
     return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
 
