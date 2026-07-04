@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlmodel import Session
 
 from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
-from backend_core.sqlmodel_typing import sa
+from backend_core.sqlmodel_typing import col, sa
 from backend_core.telegram_schemas import (
     ListenerCreate,
     ListenerResponse,
@@ -132,7 +132,7 @@ def remove_listener(session: Session, listener_id: int) -> None:
 def auto_populate_listeners(session: Session, datasource_id: str) -> list[ListenerResponse]:
     subs = (
         session.execute(
-            select(TelegramSubscriber).where(sa(TelegramSubscriber.is_active == True)),  # noqa: E712
+            select(TelegramSubscriber).where(col(TelegramSubscriber.is_active).is_(True)),
         )
         .scalars()
         .all()
@@ -157,9 +157,7 @@ def get_notification_chat_ids(session: Session, datasource_id: str) -> list[tupl
         return []
     subs = (
         session.execute(
-            select(TelegramSubscriber)
-            .where(sa(TelegramSubscriber.id.in_(sub_ids)))  # type: ignore[union-attr]
-            .where(sa(TelegramSubscriber.is_active == True)),  # noqa: E712
+            select(TelegramSubscriber).where(col(TelegramSubscriber.id).in_(sub_ids)).where(col(TelegramSubscriber.is_active).is_(True)),
         )
         .scalars()
         .all()
