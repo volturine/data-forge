@@ -50,8 +50,14 @@ class TestSafeInt:
     def test_str_int(self) -> None:
         assert _safe_int('100') == 100
 
+    def test_float(self) -> None:
+        assert _safe_int(12.9) == 12
+
     def test_invalid(self) -> None:
         assert _safe_int('abc') is None
+
+    def test_non_scalar(self) -> None:
+        assert _safe_int({'row_count': 10}) is None
 
 
 class TestSchemasDiff:

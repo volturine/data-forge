@@ -490,8 +490,10 @@ def compare_engine_runs(session: Session, run_a_id: str, run_b_id: str, datasour
 def _safe_int(val: object) -> int | None:
     if val is None:
         return None
+    if not isinstance(val, (str, bytes, bytearray, int, float)):
+        return None
     try:
-        return int(val)  # type: ignore[call-overload]
+        return int(val)
     except TypeError, ValueError:
         return None
 
