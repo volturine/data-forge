@@ -8,7 +8,7 @@ from backend_core.domain.compute.base import EngineStatusInfo
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
 from backend_core.json_utils import copy_json_object
 from backend_core.persistence.engine_instances.models import EngineInstance
-from backend_core.sqlmodel_typing import sa
+from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
 
 
@@ -113,7 +113,7 @@ def list_engine_instances(session: Session, *, namespace: str) -> list[EngineIns
     stmt = (
         select(EngineInstance)
         .where(sa(EngineInstance.namespace == namespace))
-        .where(sa(EngineInstance.status.in_(active)))  # type: ignore[attr-defined]
+        .where(col(EngineInstance.status).in_(active))
         .order_by(sa(EngineInstance.engine_scope), sa(EngineInstance.analysis_id), sa(EngineInstance.datasource_id), sa(EngineInstance.build_id))
     )
     return list(session.execute(stmt).scalars().all())
