@@ -35,11 +35,14 @@ router = MCPRouter(prefix='/settings', tags=['settings'])
 
 class TelegramBotRuntime(Protocol):
     @property
-    def running(self) -> bool: ...
+    def running(self) -> bool:
+        pass
 
-    def start(self, token: str) -> None: ...
+    def start(self, token: str) -> None:
+        pass
 
-    def stop(self) -> None: ...
+    def stop(self) -> None:
+        pass
 
 
 def _apply_telegram_bot_runtime(enabled: bool, token: str, telegram_bot: TelegramBotRuntime) -> None:

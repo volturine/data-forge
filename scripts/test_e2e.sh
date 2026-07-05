@@ -34,6 +34,14 @@ for _ in range(100):
 raise SystemExit("failed to choose an unreserved free TCP port")
 PY
 }
+INTERNAL_GRPC_PORT="$(pick_host_port "${PORT}" "${FRONTEND_PORT}")"
+WORKER_DATA_PLANE_GRPC_PORT="$(pick_host_port "${PORT}" "${FRONTEND_PORT}" "${INTERNAL_GRPC_PORT}")"
+export INTERNAL_GRPC_PORT
+export INTERNAL_GRPC_TARGET="127.0.0.1:${INTERNAL_GRPC_PORT}"
+export WORKER_DATA_PLANE_GRPC_PORT
+export WORKER_DATA_PLANE_GRPC_TARGET="127.0.0.1:${WORKER_DATA_PLANE_GRPC_PORT}"
+echo "Using e2e internal gRPC port ${INTERNAL_GRPC_PORT}"
+echo "Using e2e worker data-plane gRPC port ${WORKER_DATA_PLANE_GRPC_PORT}"
 kill_tree() {
     local pid="$1"
     if [ -z "$pid" ] || ! kill -0 "$pid" >/dev/null 2>&1; then

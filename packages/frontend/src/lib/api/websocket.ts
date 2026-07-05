@@ -124,7 +124,7 @@ export interface StreamHandle {
 }
 
 function isErrorMessage(msg: unknown): msg is { type: 'error'; error: string } {
-	if (typeof msg !== 'object' || msg === null) return false;
+	if (msg === null || typeof msg !== 'object') return false;
 	const value = msg as Record<string, unknown>;
 	return value.type === 'error' && typeof value.error === 'string';
 }
