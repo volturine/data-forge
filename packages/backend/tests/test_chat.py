@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from backend_core.secrets import encrypt_secret
@@ -1459,6 +1460,30 @@ class TestProductionHardening:
             )
         assert resp.status_code == 502
         assert 'bad gateway' in resp.json()['detail']
+
+    @pytest.mark.asyncio
+    async def test_chat_with_tools_rejects_non_object_provider_json(self) -> None:
+        """OpenRouter chat completions must return a JSON object."""
+        from modules.chat.openrouter import OpenRouterError, chat_with_tools
+
+        transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=[]))
+        async with httpx.AsyncClient(transport=transport) as async_client:
+            with patch('modules.chat.openrouter.http_client.get_async_client', return_value=async_client):
+                with pytest.raises(OpenRouterError, match='non-object JSON response'):
+                    await chat_with_tools('sk-test', 'gpt-test', [{'role': 'user', 'content': 'hello'}], [])
+
+    @pytest.mark.asyncio
+    async def test_chat_with_tools_returns_provider_json_object(self) -> None:
+        """OpenRouter chat completions preserve valid provider response objects."""
+        from modules.chat.openrouter import chat_with_tools
+
+        payload = {'id': 'completion-1', 'choices': [{'message': {'content': 'hello'}}]}
+        transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+        async with httpx.AsyncClient(transport=transport) as async_client:
+            with patch('modules.chat.openrouter.http_client.get_async_client', return_value=async_client):
+                result = await chat_with_tools('sk-test', 'gpt-test', [{'role': 'user', 'content': 'hello'}], [])
+
+        assert result == payload
 
     def test_reopen_stream_preserves_queued_events(self) -> None:
         """Events queued before reopen_stream are not lost."""

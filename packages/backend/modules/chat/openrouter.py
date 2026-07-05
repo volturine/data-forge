@@ -23,6 +23,19 @@ class OpenRouterError(Exception):
     """Raised on OpenRouter API failures."""
 
 
+def _response_json_object(resp: httpx.Response, *, operation: str) -> dict[str, Any]:
+    data: object = resp.json()
+    if not isinstance(data, dict):
+        raise OpenRouterError(f'OpenRouter {operation} returned a non-object JSON response')
+
+    result: dict[str, Any] = {}
+    for key, value in data.items():
+        if not isinstance(key, str):
+            raise OpenRouterError(f'OpenRouter {operation} returned a JSON object with a non-string key')
+        result[key] = value
+    return result
+
+
 def _headers(api_key: str) -> dict[str, str]:
     return {
         'Authorization': f'Bearer {api_key}',
@@ -79,7 +92,7 @@ async def chat_with_tools(
     )
     if not resp.is_success:
         raise OpenRouterError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
-    return resp.json()  # type: ignore[no-any-return]
+    return _response_json_object(resp, operation='chat completion')
 
 
 async def list_models(api_key: str) -> list[dict]:
