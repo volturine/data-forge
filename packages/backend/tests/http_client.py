@@ -68,6 +68,11 @@ class WebSocketDenialResponse(httpx.Response, WebSocketDisconnect):  # type: ign
     pass
 
 
+class _TemplateDebugResponse(httpx.Response):
+    template: Any
+    context: Any
+
+
 class WebSocketTestSession:
     def __init__(self, app: ASGI3App, scope: Scope, portal_factory: _PortalFactory) -> None:
         self.app = app
@@ -285,14 +290,20 @@ class _TestClientTransport(httpx.BaseTransport):
         elif not response_started:
             raw_kwargs = {'status_code': 500, 'headers': []}
 
-        response = httpx.Response(
+        if template is None:
+            return httpx.Response(
+                **raw_kwargs,
+                request=request,
+                stream=httpx.ByteStream(response_stream.read()),
+            )
+
+        response = _TemplateDebugResponse(
             **raw_kwargs,
             request=request,
             stream=httpx.ByteStream(response_stream.read()),
         )
-        if template is not None:
-            response.template = template  # type: ignore[attr-defined]
-            response.context = context  # type: ignore[attr-defined]
+        response.template = template
+        response.context = context
         return response
 
 
