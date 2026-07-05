@@ -27,7 +27,7 @@ from backend_core.config import settings
 from backend_core.database import namespace_connection
 from backend_core.namespace import list_namespaces
 from backend_core.smtp import send_smtp_message
-from backend_core.sqlmodel_typing import sa
+from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import naive_utc_now as _utcnow
 from modules.auth.models import (
     AuthProvider,
@@ -456,7 +456,7 @@ def revoke_session(session: Session, session_id: str) -> None:
 
 
 def revoke_all_sessions(session: Session, user_id: str) -> None:
-    stmt = select(UserSession).where(sa(UserSession.user_id == user_id), sa(UserSession.revoked == False))  # noqa: E712
+    stmt = select(UserSession).where(sa(UserSession.user_id == user_id), col(UserSession.revoked).is_(False))
     sessions = session.exec(stmt).all()
     if not sessions:
         return
