@@ -1283,13 +1283,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
 
         def _list_targets(session: Any) -> list[tuple[str, str]]:
             if request.active_subscribers:
-                rows = (
-                    session.execute(
-                        select(TelegramSubscriber).where(sa(TelegramSubscriber.is_active == True))  # noqa: E712
-                    )
-                    .scalars()
-                    .all()
-                )
+                rows = session.execute(select(TelegramSubscriber).where(col(TelegramSubscriber.is_active).is_(True))).scalars().all()
                 return [(row.chat_id, row.bot_token) for row in rows if row.bot_token]
             if not datasource_id:
                 return []
@@ -1305,9 +1299,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 return []
             rows = (
                 session.execute(
-                    select(TelegramSubscriber)
-                    .where(sa(TelegramSubscriber.id.in_(subscriber_ids)))  # type: ignore[union-attr]
-                    .where(sa(TelegramSubscriber.is_active == True)),  # noqa: E712
+                    select(TelegramSubscriber).where(col(TelegramSubscriber.id).in_(subscriber_ids)).where(col(TelegramSubscriber.is_active).is_(True)),
                 )
                 .scalars()
                 .all()

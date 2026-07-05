@@ -18,6 +18,7 @@ from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
+from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
 from backend_core.persistence.udfs.models import Udf
 from backend_grpc.codec import datetime_to_timestamp, dict_to_struct
 from backend_grpc.server import WorkerRuntimeServicer
@@ -353,6 +354,57 @@ async def test_internal_worker_grpc_returns_udf_codes_by_id(test_db_session: Ses
     )
 
     assert response.codes == {udf_id: 'def udf():\n    return "typed"'}
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_returns_active_telegram_targets(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    test_db_session.add_all(
+        [
+            TelegramSubscriber(chat_id='active-chat', title='Active', bot_token='tok-active', is_active=True, subscribed_at=datetime.now(UTC)),
+            TelegramSubscriber(chat_id='inactive-chat', title='Inactive', bot_token='tok-inactive', is_active=False, subscribed_at=datetime.now(UTC)),
+            TelegramSubscriber(chat_id='empty-token-chat', title='No token', bot_token='', is_active=True, subscribed_at=datetime.now(UTC)),
+        ]
+    )
+    test_db_session.commit()
+
+    response = await WorkerRuntimeServicer().GetTelegramTargets(
+        worker_runtime_pb2.WorkerTelegramTargetsRequest(namespace='default', active_subscribers=True),
+        context,
+    )
+
+    assert [(target.chat_id, target.bot_token) for target in response.targets] == [('active-chat', 'tok-active')]
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_returns_datasource_telegram_targets(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    active = TelegramSubscriber(chat_id='datasource-chat', title='Datasource', bot_token='tok-ds', is_active=True, subscribed_at=datetime.now(UTC))
+    inactive = TelegramSubscriber(chat_id='inactive-chat', title='Inactive', bot_token='tok-inactive', is_active=False, subscribed_at=datetime.now(UTC))
+    other = TelegramSubscriber(chat_id='other-chat', title='Other', bot_token='tok-other', is_active=True, subscribed_at=datetime.now(UTC))
+    test_db_session.add_all([active, inactive, other])
+    test_db_session.commit()
+    active_id = active.id
+    inactive_id = inactive.id
+    other_id = other.id
+    assert active_id is not None
+    assert inactive_id is not None
+    assert other_id is not None
+    test_db_session.add_all(
+        [
+            TelegramListener(subscriber_id=active_id, datasource_id='datasource-target'),
+            TelegramListener(subscriber_id=inactive_id, datasource_id='datasource-target'),
+            TelegramListener(subscriber_id=other_id, datasource_id='other-datasource'),
+        ]
+    )
+    test_db_session.commit()
+
+    response = await WorkerRuntimeServicer().GetTelegramTargets(
+        worker_runtime_pb2.WorkerTelegramTargetsRequest(namespace='default', datasource_id='datasource-target'),
+        context,
+    )
+
+    assert [(target.chat_id, target.bot_token) for target in response.targets] == [('datasource-chat', 'tok-ds')]
 
 
 @pytest.mark.asyncio
