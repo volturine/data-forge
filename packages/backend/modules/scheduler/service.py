@@ -30,7 +30,7 @@ from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
-from backend_core.sqlmodel_typing import col, sa
+from backend_core.sqlmodel_typing import col
 from backend_core.time import utc_now as _utcnow
 
 logger = logging.getLogger(__name__)
@@ -550,7 +550,7 @@ def get_build_order(session: Session, analysis_id: str) -> list[str]:
 
     deps = (
         session.execute(
-            select(AnalysisDataSource).where(sa(AnalysisDataSource.analysis_id.in_(list(graph.keys())))),  # type: ignore[attr-defined]
+            select(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id).in_(list(graph.keys()))),
         )
         .scalars()
         .all()
@@ -640,7 +640,7 @@ def get_due_schedules(session: Session) -> list[Schedule]:
     """Return all enabled schedules that are due to run."""
     now = _utcnow().replace(tzinfo=None)
     result = session.execute(
-        select(Schedule).where(col(Schedule.enabled) == True),  # noqa: E712
+        select(Schedule).where(col(Schedule.enabled).is_(True)),
     )
     schedules = result.scalars().all()
     ds_ids = [sched.datasource_id for sched in schedules]
@@ -688,7 +688,7 @@ def claim_due_schedules(
     reclaimable = set(reclaimable_owner_ids or ())
     base = (
         select(Schedule)
-        .where(col(Schedule.enabled) == True)  # noqa: E712
+        .where(col(Schedule.enabled).is_(True))
         .where(
             or_(
                 table.c.lease_owner.is_(None),
