@@ -1109,7 +1109,7 @@ def get_column_stats(
     if column_name not in schema:
         raise ValueError(f'Column not found: {column_name}')
     if use_sample:
-        lazy = lazy.head(sample_size)  # type: ignore[attr-defined]
+        lazy = lazy.limit(sample_size)
     frame = lazy.select([pl.col(column_name)]).collect()
     series = frame[column_name]
     dtype = schema[column_name]
@@ -1152,7 +1152,7 @@ def get_column_stats(
         )
         return ColumnStatsResponse.model_validate(stats)
     if isinstance(dtype, pl.Utf8):
-        length_series = series.str.len_chars()  # type: ignore[attr-defined]
+        length_series = pl.select(pl.Series(column_name, series).str.len_chars()).to_series()
         stats.update(
             {
                 'unique': series.n_unique(),
