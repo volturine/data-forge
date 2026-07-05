@@ -46,7 +46,7 @@ from backend_core.persistence.telegram.models import TelegramListener, TelegramS
 from backend_core.persistence.udfs.models import Udf
 from backend_core.settings_projection import get_resolved_smtp, get_resolved_telegram_settings, get_resolved_telegram_token
 from backend_core.smtp import send_smtp_message
-from backend_core.sqlmodel_typing import sa
+from backend_core.sqlmodel_typing import col, sa
 from backend_grpc.codec import (
     datetime_to_timestamp,
     dict_to_struct,
@@ -771,7 +771,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             ids = [udf_id for udf_id in request.udf_ids if udf_id]
             if not ids:
                 return worker_runtime_pb2.WorkerUdfCodesResponse()
-            stmt = select(Udf).where(sa(Udf.id.in_(ids)))  # type: ignore[attr-defined]
+            stmt = select(Udf).where(col(Udf.id).in_(ids))
             codes = {udf.id: udf.code for udf in session.execute(stmt).scalars().all()}
             return worker_runtime_pb2.WorkerUdfCodesResponse(codes=codes)
         finally:

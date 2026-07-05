@@ -18,6 +18,7 @@ from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
+from backend_core.persistence.udfs.models import Udf
 from backend_grpc.codec import datetime_to_timestamp, dict_to_struct
 from backend_grpc.server import WorkerRuntimeServicer
 from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2
@@ -328,6 +329,30 @@ async def test_internal_worker_grpc_upserts_output_datasource_with_typed_schema_
         'columns': [{'name': 'score', 'dtype': 'Float64', 'nullable': True}],
         'row_count': 10,
     }
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_returns_udf_codes_by_id(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    udf_id = str(uuid.uuid4())
+    test_db_session.add(
+        Udf(
+            id=udf_id,
+            name='typed_lookup',
+            signature={'inputs': [], 'output_dtype': 'String'},
+            code='def udf():\n    return "typed"',
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    response = await WorkerRuntimeServicer().GetUdfCodes(
+        worker_runtime_pb2.WorkerUdfCodesRequest(namespace='default', udf_ids=[udf_id, 'missing-udf']),
+        context,
+    )
+
+    assert response.codes == {udf_id: 'def udf():\n    return "typed"'}
 
 
 @pytest.mark.asyncio
