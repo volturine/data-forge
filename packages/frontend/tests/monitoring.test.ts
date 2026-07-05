@@ -460,7 +460,13 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 
 			// Clear and type new expression, then press Enter
 			await cronInput.fill('30 12 * * 1');
+			const saveResponse = page.waitForResponse(
+				(response) =>
+					response.url().includes(`/v1/schedules/${scheduleId}`) &&
+					response.request().method() === 'PUT'
+			);
 			await cronInput.press('Enter');
+			await expect((await saveResponse).ok()).toBe(true);
 
 			// Refetch re-renders the expanded row, so re-open it before checking persisted text.
 			await gotoMonitoringTab(page, 'schedules');
