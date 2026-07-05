@@ -753,12 +753,9 @@ def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
 
 
 def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceListItem]:
-    query = (
-        select(DataSource).options(defer(sa(DataSource.schema_cache))).where(col(DataSource.is_pending_delete) == False)  # noqa: E712
-    )
+    query = select(DataSource).options(defer(sa(DataSource.schema_cache))).where(col(DataSource.is_pending_delete).is_(False))
     if not include_hidden:
-        # SQLModel field typed as bool; == creates SA expression at runtime
-        query = query.where(col(DataSource.is_hidden) == False)  # noqa: E712
+        query = query.where(col(DataSource.is_hidden).is_(False))
     datasources = session.execute(query).scalars().all()
     results: list[DataSourceListItem] = []
     for ds in datasources:
