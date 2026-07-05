@@ -1,6 +1,12 @@
+from typing import cast
+
 import polars as pl
 
 from modules.datasource.runtime_service import _compute_histogram
+
+
+def _total_count(histogram: list[dict[str, object]]) -> int:
+    return sum(cast(int, bucket['count']) for bucket in histogram)
 
 
 class TestDatasourceHistogram:
@@ -28,8 +34,7 @@ class TestDatasourceHistogram:
         assert len(result) == 2
         assert result[0]['start'] == 0.0
         assert result[1]['end'] == 10.0
-        total = sum(b['count'] for b in result)  # type: ignore[call-overload]
-        assert total == 2
+        assert _total_count(result) == 2
 
     def test_default_20_bins(self):
         """Default call returns 20 bins."""
@@ -47,8 +52,7 @@ class TestDatasourceHistogram:
         """Sum of bin counts equals series length."""
         s = pl.Series('x', [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
         result = _compute_histogram(s, bins=5)
-        total = sum(b['count'] for b in result)  # type: ignore[call-overload]
-        assert total == 10
+        assert _total_count(result) == 10
 
     def test_bins_are_contiguous(self):
         """Each bin starts where the previous one ended."""
@@ -64,16 +68,14 @@ class TestDatasourceHistogram:
         assert len(result) == 4
         assert result[0]['start'] == -10.0
         assert result[-1]['end'] == 10.0
-        total = sum(b['count'] for b in result)  # type: ignore[call-overload]
-        assert total == 5
+        assert _total_count(result) == 5
 
     def test_integer_series(self):
         """Works with integer (non-float) series."""
         s = pl.Series('x', [1, 2, 3, 4, 5])
         result = _compute_histogram(s, bins=3)
         assert len(result) == 3
-        total = sum(b['count'] for b in result)  # type: ignore[call-overload]
-        assert total == 5
+        assert _total_count(result) == 5
 
     def test_values_rounded(self):
         """Bin edges are rounded to 4 decimal places."""
@@ -95,5 +97,4 @@ class TestDatasourceHistogram:
         """Histogram is computed on non-null values (caller should filter)."""
         s = pl.Series('x', [1.0, 2.0, 3.0])  # caller filters nulls before calling
         result = _compute_histogram(s, bins=3)
-        total = sum(b['count'] for b in result)  # type: ignore[call-overload]
-        assert total == 3
+        assert _total_count(result) == 3
