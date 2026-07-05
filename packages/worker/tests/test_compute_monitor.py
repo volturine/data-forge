@@ -18,7 +18,7 @@ class _StubProcess:
     def oneshot(self):
         yield self
 
-    def cpu_percent(self, interval=None) -> float:  # noqa: ANN001
+    def cpu_percent(self, interval: float | None = None) -> float:
         if not self._primed:
             self._primed = True
             return 0.0
