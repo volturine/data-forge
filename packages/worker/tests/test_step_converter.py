@@ -117,7 +117,7 @@ def test_convert_step_format_returns_frozen_backend_step_dataclass() -> None:
     assert step.params["chart_type"] == "scatter"
 
     with pytest.raises(dataclasses.FrozenInstanceError):
-        step.operation = "filter"  # type: ignore[misc]
+        setattr(step, "operation", "filter")
 
 
 def test_convert_step_format_parses_config_through_protocol_step_config() -> None:
