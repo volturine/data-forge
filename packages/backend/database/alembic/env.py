@@ -87,7 +87,7 @@ def _target_metadata():
     return metadata
 
 
-def _include_object(object_, name, type_, reflected, compare_to):  # type: ignore[no-untyped-def]
+def _include_object(object_: object, name: str | None, type_: str, reflected: bool, compare_to: object | None) -> bool:
     del object_, reflected, compare_to
     if type_ != 'table':
         return True
