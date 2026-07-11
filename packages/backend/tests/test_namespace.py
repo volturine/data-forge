@@ -85,7 +85,7 @@ def test_list_namespaces_endpoint_merges_filesystem_and_runtime_namespaces(monke
     assert response.json() == {'namespaces': ['alpha', 'beta', 'default']}
 
 
-def test_create_namespace_endpoint_registers_namespace(monkeypatch):
+def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     created: list[str] = []
     registered: list[str] = []
 

@@ -2,6 +2,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlmodel import Session
+
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.persistence.analysis.models import Analysis
@@ -9,6 +11,7 @@ from backend_core.persistence.analysis_versions.models import AnalysisVersion
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.locks.models import ResourceLock
 from modules.analysis_versions.service import create_version, get_version
+from tests.http_client import TestClient
 
 
 def test_list_versions_returns_versions(test_db_session, client, sample_datasource: DataSource):
@@ -456,7 +459,7 @@ def test_restore_version_cycle_detection(test_db_session, client, sample_datasou
     assert 'analysis cannot use itself' in response.json()['detail'].lower()
 
 
-def test_restore_version_requires_datasource(test_db_session, client):
+def test_restore_version_requires_datasource(test_db_session: Session, client: TestClient) -> None:
     analysis_id = str(uuid.uuid4())
     missing_ds_id = str(uuid.uuid4())
     pipeline_definition: dict[str, object] = {
