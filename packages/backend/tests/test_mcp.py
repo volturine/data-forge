@@ -898,7 +898,7 @@ class TestRouterDecoratorOnboarding:
         assert len(tools) == 1
         assert tools[0]['id'] == 'stable_custom_tool'
 
-    def test_description_prefers_docstring_when_operation_text_missing(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def test_description_prefers_docstring_when_operation_text_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from fastapi import FastAPI
 
         from modules.mcp import registry as reg
@@ -1297,7 +1297,7 @@ class TestMCPCapabilities:
 
 
 class TestBuildRegistryFailFast:
-    def test_raises_on_unsupported_schema(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def test_raises_on_unsupported_schema(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import pytest
         from fastapi import APIRouter, FastAPI
 
@@ -1378,7 +1378,7 @@ class TestBuildRegistryFailFast:
 
 
 class TestStartupEnforcement:
-    def test_startup_raises_on_unsupported_schema(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def test_startup_raises_on_unsupported_schema(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import pytest
         from fastapi import APIRouter, FastAPI
 
@@ -1417,7 +1417,7 @@ class TestStartupEnforcement:
         with pytest.raises(ValueError, match='startup_check'):
             get_registry(app)
 
-    def test_startup_populates_cache_so_no_double_build(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def test_startup_populates_cache_so_no_double_build(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from fastapi import FastAPI
 
         import modules.mcp.routes as routes_mod
