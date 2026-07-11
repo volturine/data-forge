@@ -103,9 +103,3 @@ class AuthSettings(BaseSettings):
 
 
 settings = AuthSettings()
-
-
-def reload_settings() -> AuthSettings:
-    global settings  # noqa: PLW0603
-    settings = AuthSettings()
-    return settings
