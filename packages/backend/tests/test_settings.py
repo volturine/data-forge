@@ -79,6 +79,40 @@ class TestGetSettings:
 
 
 class TestConfigRoute:
+    def test_frontend_config_cache_expires_and_invalidates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from modules.config.routes import FrontendConfig, FrontendConfigCache
+
+        clock = iter((100.0, 100.0, 111.0, 111.0, 112.0))
+        monkeypatch.setattr('modules.config.routes.time.monotonic', lambda: next(clock))
+        cache = FrontendConfigCache(ttl=10.0)
+        calls = 0
+
+        def create() -> FrontendConfig:
+            nonlocal calls
+            calls += 1
+            return FrontendConfig(
+                timezone='UTC',
+                normalize_tz=False,
+                log_client_batch_size=1,
+                log_client_flush_interval_ms=1,
+                log_client_dedupe_window_ms=1,
+                log_client_flush_cooldown_ms=1,
+                log_queue_max_size=1,
+                public_idb_debug=False,
+                smtp_enabled=False,
+                telegram_enabled=False,
+                default_namespace='public',
+                auth_required=False,
+                verify_email_address=False,
+            )
+
+        first = cache.get_or_create(create)
+        assert cache.get_or_create(create) is first
+        assert cache.get_or_create(create) is not first
+        cache.invalidate()
+        assert cache.get_or_create(create) is not first
+        assert calls == 3
+
     def test_config_endpoint_returns_cached_frontend_config(self, client: TestClient) -> None:
         resp = client.get('/api/v1/config')
         assert resp.status_code == 200
