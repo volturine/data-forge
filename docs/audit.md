@@ -2,15 +2,33 @@
 
 The initial audit analyzed **605 source files** across the four main packages (`backend` 223 files, `frontend` 269 files, `worker` 97 files, `scheduler` 3 files, plus config/scripts). A follow-up scan on 2026-07-04 covered **793 package/script source files** after the protocol rewrite and subsequent cleanup commits, excluding virtualenvs, `node_modules`, package-local generated `dataforge_protocol`, Svelte build output, and other build artifacts.
 
-The original P0 contract problem is resolved. Remaining exact duplicates are now limited to generated third-party protobuf validation files, empty package marker files, empty frontend route loaders, and a small set of deliberately package-local runtime helpers called out below.
+The original mirrored contract packages were removed, but the broader P0 contract problem is not yet fully resolved. A repository-wide checkpoint on 2026-07-14 found remaining mirrored runtime models, duplicated object-store policy, handwritten protobuf descriptor adapters, and frontend protocol translation tables. The completion checkpoint below is authoritative until every item is implemented and verified.
+
+---
+
+## 2026-07-14 Completion Checkpoint
+
+Status: **in progress**. The old `backend_contracts` and `worker_models` packages remain deleted, generated protocol trees remain package-local and ignored, and the current remote CI baseline is green. The remaining work is architectural rather than a rollback of the protocol rewrite.
+
+| # | Completion item | Acceptance evidence |
+| --- | --- | --- |
+| C1 | Remove mirrored backend/worker compute and datasource schemas | Worker runtime consumes generated protocol messages or worker-owned execution objects; backend alone owns HTTP/OpenAPI Pydantic schemas; package-boundary checks reject reintroduction. |
+| C2 | Make worker the sole owner of object-store and Iceberg data-plane policy | Backend has no object-store URL/prefix implementation and performs all data-plane policy and operations through typed worker RPCs. |
+| C3 | Remove handwritten descriptor-walking protocol bridges | Runtime communication constructs and reads generated messages directly; JSON conversion remains only at explicit HTTP and database boundaries with one owner per boundary. |
+| C4 | Make local protocol generation declarative and deterministic | `packages/protocol` owns the complete local toolchain and generation configuration; generation does not use remote plugins, compatibility wrappers, or scattered package scripts. |
+| C5 | Replace stable `Struct` fields and justify dynamic escape hatches | Every remaining `Struct` is an intentionally dynamic row, provider option, persisted JSON, or diagnostic field; stable shapes use messages, enums, optional fields, and oneofs. |
+| C6 | Remove duplicated protocol support and frontend protocol tables | Enum-token handling, validation, codecs, and build-event decoding have a single generated or package-owned implementation without mirrored source files. |
+| C7 | Complete maintainability cleanup | Shared frontend recipes replace repeated control styles, oversized modules are split by ownership, suppression debt is removed or precisely justified, and dead package scaffolding is deleted. |
+
+Final gate: `just verify`, `just test`, and `just test-e2e` pass locally; GitHub CI and CodeQL pass for the final commit; package-boundary checks cover every deleted or forbidden architecture path.
 
 ---
 
 ## Consolidated Cleanup Task List
 
-### ✅ **P0 — Protocol-First Contract Unification**
+### 🟡 **P0 — Protocol-First Contract Unification**
 
-Status: resolved in the protocol-first rewrite. `packages/protocol` is now the single source of truth for wire contracts; backend, worker, and scheduler generate package-local `dataforge_protocol.*` code from it during install, checks, tests, dev, e2e, CI, and Docker builds. The generated trees are ignored rather than committed. The deleted `backend_contracts` and `worker_models` roots are not shimmed, and `just check` enforces package-boundary failures for the old import roots, deleted generated gRPC compatibility paths, generic protocol JSON payloads, engine-key prefix fossils, and removed backend data-plane facades.
+Status: **in progress**. The protocol-first rewrite removed the original mirrored package roots and established generated wire contracts, but the completion checkpoint above records the remaining duplicated runtime ownership and handwritten adaptation code. P0 is resolved only when C1–C7 and the final gate are complete.
 
 | #   | Task                                     | Files Affected                                                                                                                         | Notes                                                                                                                                                                           |
 | --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -121,4 +139,4 @@ Status: resolved in the protocol-first rewrite. `packages/protocol` is now the s
 | 56  | ✅ **Remove unused auth-settings reload API** | `backend_core/auth_config.py` | Removed the unreferenced reloader that rebound a module-global settings object, eliminating its global-state lint suppression without changing configuration consumers. |
 | 57  | ✅ **Type Alembic include-object callback** | `database/alembic/env.py` | Replaced the migration callback's untyped-function suppression with an explicit opaque-object and primitive-argument contract. |
 
-The remaining non-generated exact duplicates are deliberate boundary code, not active contract drift. If the project later decides that zero duplicated helper code matters more than strict package independence, the cleanest next step is protocol-owned generation of package-local enum/validation/helper adapters, still without importing `packages/protocol` at runtime.
+The remaining work is tracked by the completion checkpoint at the top of this document. Resolved items below remain historical evidence and must not be read as overriding an open checkpoint item.
