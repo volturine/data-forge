@@ -42,12 +42,12 @@ class FauxDatasourceRuntime:
     ):
         from backend_core.data_plane_client import client_from_settings
         from backend_core.namespace import get_namespace
-        from backend_core.object_store_paths import join_object_store_url, object_store_url
 
-        metadata_root = object_store_url('namespaces', get_namespace(), 'clean', uuid.uuid4().hex, 'master')
-        client_from_settings().upload_object_bytes(
+        data_plane = client_from_settings()
+        metadata_root = data_plane.build_object_url('namespaces', get_namespace(), 'clean', uuid.uuid4().hex, 'master')
+        data_plane.upload_object_bytes(
             b'{"metadata":"placeholder"}',
-            join_object_store_url(metadata_root, 'metadata', '00000-placeholder.metadata.json'),
+            data_plane.join_object_url(metadata_root, 'metadata', '00000-placeholder.metadata.json'),
         )
 
         datasource = DataSource(
@@ -214,9 +214,9 @@ class FauxDatasourceRuntime:
     @contextlib.contextmanager
     def _materialized_source_path(self, file_path: str):
         from backend_core.data_plane_client import client_from_settings
-        from backend_core.object_store_paths import is_object_store_url
 
-        if not is_object_store_url(file_path):
+        data_plane = client_from_settings()
+        if not data_plane.classify_object_url(file_path).is_object_store:
             yield file_path
             return
         suffix = Path(file_path).suffix or '.dat'
@@ -224,7 +224,7 @@ class FauxDatasourceRuntime:
         os.close(fd)
         temp_path = Path(temp_name)
         try:
-            temp_path.write_bytes(client_from_settings().download_object_bytes(file_path))
+            temp_path.write_bytes(data_plane.download_object_bytes(file_path))
             yield str(temp_path)
         finally:
             with contextlib.suppress(FileNotFoundError):

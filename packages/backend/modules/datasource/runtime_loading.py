@@ -12,7 +12,6 @@ from openpyxl import load_workbook
 from backend_core.data_plane_client import client_from_settings
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceLoadType, IcebergReader
 from backend_core.namespace import get_namespace
-from backend_core.object_store_paths import is_object_store_url
 
 
 def _csv_opts(opts: dict[str, Any] | None) -> dict[str, Any]:
@@ -141,7 +140,7 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         if not isinstance(opts, dict):
             opts = {}
         opts = _merge_excel_opts(config, opts)
-        if is_object_store_url(str(file_path)):
+        if client_from_settings().classify_object_url(str(file_path)).is_object_store:
             temp_path = _download_object_store_file(str(file_path))
             local_path = str(temp_path)
             local_config = {**config, 'file_path': local_path}

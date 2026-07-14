@@ -39,6 +39,13 @@ class IcebergSnapshots:
     snapshots: list[IcebergSnapshotInfo]
 
 
+@dataclass(frozen=True, slots=True)
+class ObjectStoreUrlClassification:
+    is_object_store: bool
+    is_managed: bool
+    object_url: str | None
+
+
 class WorkerDataPlaneClient:
     def __init__(self, *, target: str | None = None, token: str | None = None, timeout_seconds: float = 120.0) -> None:
         self._target = target or settings.worker_data_plane_grpc_target
@@ -53,6 +60,20 @@ class WorkerDataPlaneClient:
         )
         self._object_store = object_store_pb2_grpc.ObjectStoreServiceStub(self._channel)
         self._iceberg = iceberg_pb2_grpc.IcebergServiceStub(self._channel)
+
+    def classify_object_url(self, value: str) -> ObjectStoreUrlClassification:
+        response = self._call(
+            lambda: self._object_store.ClassifyUrl(
+                object_store_pb2.ObjectStoreUrlClassificationRequest(value=value),
+                timeout=self._timeout_seconds,
+                metadata=self._metadata(),
+            )
+        )
+        return ObjectStoreUrlClassification(
+            is_object_store=response.is_object_store,
+            is_managed=response.is_managed,
+            object_url=response.object_url.url if response.HasField('object_url') else None,
+        )
 
     def build_object_url(self, *parts: str, bucket: str | None = None) -> str:
         request = object_store_pb2.ObjectStorePathParts(parts=parts)

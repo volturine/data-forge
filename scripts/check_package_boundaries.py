@@ -38,6 +38,7 @@ ROOT_TEST_ARTIFACT_PREFIXES = ('test-results', 'playwright-report')
 FORBIDDEN_OWNER_DUPLICATES = [
     Path('packages/backend/backend_core/contracts'),
     Path('packages/backend/backend_core/engine_identity.py'),
+    Path('packages/backend/backend_core/object_store_paths.py'),
     Path('packages/backend/modules/analysis/models.py'),
     Path('packages/backend/modules/datasource/models.py'),
     Path('packages/backend/modules/health/models.py'),

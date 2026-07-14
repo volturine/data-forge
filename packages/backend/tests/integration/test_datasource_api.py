@@ -7,7 +7,6 @@ import polars as pl
 from sqlmodel import select
 
 from backend_core.exceptions import DataSourceValidationError
-from backend_core.object_store_paths import is_object_store_url
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from main import app
 from modules.auth.dependencies import get_optional_user
@@ -34,7 +33,9 @@ class TestDataSourceUpload:
         assert 'id' in result
         assert 'created_at' in result
         assert result['config']['branch'] == 'master'
-        assert is_object_store_url(result['config']['metadata_path'])
+        from backend_core.data_plane_client import client_from_settings
+
+        assert client_from_settings().classify_object_url(result['config']['metadata_path']).is_object_store
 
     def test_upload_csv_file_with_description_success(self, client, temp_upload_dir: Path, mock_file_upload: dict):
         files = {

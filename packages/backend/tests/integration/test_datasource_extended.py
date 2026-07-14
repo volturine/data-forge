@@ -226,12 +226,12 @@ class TestDataSourceValidation:
 
     def test_preflight_excel_path_rejects_non_xlsx(self, client, temp_upload_dir: Path):
         from backend_core.data_plane_client import client_from_settings
-        from backend_core.object_store_paths import object_store_url
 
         csv_path = temp_upload_dir / 'invalid.csv'
         csv_path.write_text('a,b\n1,2')
-        object_url = object_store_url('tests', uuid.uuid4().hex, csv_path.name)
-        client_from_settings().upload_object_bytes(csv_path.read_bytes(), object_url)
+        data_plane = client_from_settings()
+        object_url = data_plane.build_object_url('tests', uuid.uuid4().hex, csv_path.name)
+        data_plane.upload_object_bytes(csv_path.read_bytes(), object_url)
         payload = {'file_path': object_url}
 
         response = client.post('/api/v1/datasource/preflight-path', json=payload)
@@ -240,7 +240,6 @@ class TestDataSourceValidation:
 
     def test_preflight_excel_path_returns_preview(self, client, temp_upload_dir: Path):
         from backend_core.data_plane_client import client_from_settings
-        from backend_core.object_store_paths import object_store_url
 
         excel_path = temp_upload_dir / 'path.xlsx'
         workbook = Workbook()
@@ -253,8 +252,9 @@ class TestDataSourceValidation:
         sheet.append([2, 'B'])
         workbook.save(excel_path)
 
-        object_url = object_store_url('tests', uuid.uuid4().hex, excel_path.name)
-        client_from_settings().upload_object_bytes(excel_path.read_bytes(), object_url)
+        data_plane = client_from_settings()
+        object_url = data_plane.build_object_url('tests', uuid.uuid4().hex, excel_path.name)
+        data_plane.upload_object_bytes(excel_path.read_bytes(), object_url)
         payload = {'file_path': object_url}
 
         response = client.post('/api/v1/datasource/preflight-path', json=payload)
@@ -611,7 +611,6 @@ class TestDataSourceDeletion:
 
         assert create.status_code == 200
         from backend_core.data_plane_client import client_from_settings
-        from backend_core.object_store_paths import is_object_store_url
 
         body = create.json()
         datasource_id = body['id']
@@ -619,8 +618,8 @@ class TestDataSourceDeletion:
         source = body['config']['source']
         upload_path = source['file_path']
 
-        assert is_object_store_url(metadata_path)
         data_plane = client_from_settings()
+        assert data_plane.classify_object_url(metadata_path).is_object_store
         assert bool(data_plane.list_metadata_files(metadata_path))
         assert data_plane.object_exists(upload_path)
         assert source['source_type'] == 'file'

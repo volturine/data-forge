@@ -19,12 +19,13 @@ _BUCKET_READY_LOCK = Lock()
 def is_object_store_url(value: str | None) -> bool:
     if not isinstance(value, str) or not value:
         return False
-    return urlparse(value).scheme.lower() == "s3"
+    parsed = urlparse(value)
+    return parsed.scheme.lower() == "s3" and bool(parsed.netloc) and bool(parsed.path.lstrip("/"))
 
 
 def parse_object_store_url(url: str) -> tuple[str, str]:
     parsed = urlparse(url)
-    if parsed.scheme.lower() != "s3" or not parsed.netloc:
+    if parsed.scheme.lower() != "s3" or not parsed.netloc or not parsed.path.lstrip("/"):
         raise ValueError(f"Object storage URL must be s3://bucket/key, got: {url}")
     return parsed.netloc, parsed.path.lstrip("/")
 
@@ -52,6 +53,16 @@ def join_object_store_url(base_url: str, *parts: str) -> str:
     suffix = "/".join(part.strip("/") for part in parts if part and part.strip("/"))
     next_key = "/".join(part for part in [key.rstrip("/"), suffix] if part)
     return f"s3://{bucket}/{next_key}"
+
+
+def is_managed_object_store_url(url: str) -> bool:
+    if not is_object_store_url(url):
+        return False
+    bucket, key = parse_object_store_url(url)
+    if bucket != object_store_bucket():
+        return False
+    managed_prefix = object_store_prefix()
+    return key == managed_prefix or key.startswith(managed_prefix + "/")
 
 
 def object_store_storage_options() -> dict[str, object]:

@@ -70,6 +70,21 @@ async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
 
 
 class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
+    async def ClassifyUrl(
+        self,
+        request: object_store_pb2.ObjectStoreUrlClassificationRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> object_store_pb2.ObjectStoreUrlClassificationResponse:
+        await _require_internal_token(context)
+        is_object_store = object_store.is_object_store_url(request.value)
+        response = object_store_pb2.ObjectStoreUrlClassificationResponse(
+            is_object_store=is_object_store,
+            is_managed=is_object_store and object_store.is_managed_object_store_url(request.value),
+        )
+        if is_object_store:
+            response.object_url.url = request.value
+        return response
+
     async def BuildUrl(self, request: object_store_pb2.ObjectStorePathParts, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreUrl:
         await _require_internal_token(context)
         return object_store_pb2.ObjectStoreUrl(url=object_store.object_store_url(*request.parts, bucket=request.bucket if request.HasField("bucket") else None))
@@ -102,6 +117,8 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
 
     async def DeleteObject(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
         await _require_internal_token(context)
+        if not object_store.is_managed_object_store_url(request.url):
+            await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Object is outside the worker-managed storage prefix")
         await asyncio.to_thread(object_store.delete_object, request.url)
         return common_pb2.EmptyRequest()
 
@@ -130,6 +147,8 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
 
     async def DeletePrefix(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
         await _require_internal_token(context)
+        if not object_store.is_managed_object_store_url(request.url):
+            await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Prefix is outside the worker-managed storage prefix")
         await asyncio.to_thread(object_store.delete_prefix, request.url)
         return common_pb2.EmptyRequest()
 

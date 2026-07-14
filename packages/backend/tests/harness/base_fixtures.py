@@ -6,6 +6,7 @@ from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import boto3  # type: ignore[import-untyped]
 import pytest
@@ -247,15 +248,35 @@ class _TestWorkerDataPlaneClient:
                 raise
             self._s3().create_bucket(Bucket=settings.object_store_bucket)
 
-    def build_object_url(self, *parts: str, bucket: str | None = None) -> str:
-        from backend_core.object_store_paths import object_store_url
+    @staticmethod
+    def _parse_object_url(url: str) -> tuple[str, str]:
+        parsed = urlparse(url)
+        if parsed.scheme.lower() != 's3' or not parsed.netloc or not parsed.path.lstrip('/'):
+            raise ValueError(f'Object storage URL must be s3://bucket/key, got: {url}')
+        return parsed.netloc, parsed.path.lstrip('/')
 
-        return object_store_url(*parts, bucket=bucket)
+    def classify_object_url(self, value: str) -> Any:
+        from backend_core.data_plane_client import ObjectStoreUrlClassification
+
+        try:
+            bucket, key = self._parse_object_url(value)
+        except ValueError:
+            return ObjectStoreUrlClassification(is_object_store=False, is_managed=False, object_url=None)
+        settings = self._settings()
+        prefix = settings.object_store_prefix.strip('/').strip()
+        is_managed = bucket == settings.object_store_bucket and (key == prefix or key.startswith(prefix + '/'))
+        return ObjectStoreUrlClassification(is_object_store=True, is_managed=is_managed, object_url=value)
+
+    def build_object_url(self, *parts: str, bucket: str | None = None) -> str:
+        settings = self._settings()
+        cleaned = [settings.object_store_prefix.strip('/').strip(), *(part.strip('/') for part in parts if part.strip('/'))]
+        key = '/'.join(part for part in cleaned if part)
+        return f's3://{bucket or settings.object_store_bucket}/{key}'
 
     def join_object_url(self, base_url: str, *parts: str) -> str:
-        from backend_core.object_store_paths import join_object_store_url
-
-        return join_object_store_url(base_url, *parts)
+        bucket, key = self._parse_object_url(base_url)
+        suffix = '/'.join(part.strip('/') for part in parts if part.strip('/'))
+        return f's3://{bucket}/{"/".join(part for part in (key.rstrip("/"), suffix) if part)}'
 
     def read_object_store_storage_options(self) -> dict[str, object]:
         settings = self._settings()
@@ -269,10 +290,8 @@ class _TestWorkerDataPlaneClient:
         }
 
     def upload_object_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
-        from backend_core.object_store_paths import parse_object_store_url
-
         self._ensure_bucket_exists()
-        bucket, key = parse_object_store_url(target_url)
+        bucket, key = self._parse_object_url(target_url)
         kwargs: dict[str, object] = {'Bucket': bucket, 'Key': key, 'Body': data}
         if content_type is not None:
             kwargs['ContentType'] = content_type
@@ -280,22 +299,16 @@ class _TestWorkerDataPlaneClient:
         return target_url
 
     def download_object_bytes(self, source_url: str) -> bytes:
-        from backend_core.object_store_paths import parse_object_store_url
-
-        bucket, key = parse_object_store_url(source_url)
+        bucket, key = self._parse_object_url(source_url)
         response = self._s3().get_object(Bucket=bucket, Key=key)
         return response['Body'].read()
 
     def delete_object(self, source_url: str) -> None:
-        from backend_core.object_store_paths import parse_object_store_url
-
-        bucket, key = parse_object_store_url(source_url)
+        bucket, key = self._parse_object_url(source_url)
         self._s3().delete_object(Bucket=bucket, Key=key)
 
     def object_exists(self, source_url: str) -> bool:
-        from backend_core.object_store_paths import parse_object_store_url
-
-        bucket, key = parse_object_store_url(source_url)
+        bucket, key = self._parse_object_url(source_url)
         try:
             self._s3().head_object(Bucket=bucket, Key=key)
         except ClientError as exc:
@@ -307,9 +320,7 @@ class _TestWorkerDataPlaneClient:
         return True
 
     def list_prefixes(self, prefix_url: str) -> list[str]:
-        from backend_core.object_store_paths import parse_object_store_url
-
-        bucket, key = parse_object_store_url(prefix_url)
+        bucket, key = self._parse_object_url(prefix_url)
         prefix = key.rstrip('/')
         if prefix:
             prefix = prefix + '/'
@@ -325,9 +336,7 @@ class _TestWorkerDataPlaneClient:
         return sorted(names)
 
     def list_metadata_files(self, base_url: str) -> list[str]:
-        from backend_core.object_store_paths import parse_object_store_url
-
-        bucket, key = parse_object_store_url(base_url)
+        bucket, key = self._parse_object_url(base_url)
         prefix = key.rstrip('/')
         if prefix and not prefix.endswith('/metadata') and '/metadata/' not in prefix:
             prefix = prefix + '/metadata'
@@ -342,9 +351,7 @@ class _TestWorkerDataPlaneClient:
         return sorted(results)
 
     def delete_managed_prefix(self, prefix_url: str) -> None:
-        from backend_core.object_store_paths import parse_object_store_url
-
-        bucket, key = parse_object_store_url(prefix_url)
+        bucket, key = self._parse_object_url(prefix_url)
         prefix = key.rstrip('/')
         if prefix:
             prefix = prefix + '/'
@@ -515,10 +522,10 @@ def sample_json_file(temp_upload_dir: Path) -> Path:
 
 def _upload_test_object(local_path: Path) -> str:
     from backend_core.data_plane_client import client_from_settings
-    from backend_core.object_store_paths import object_store_url
 
-    target_url = object_store_url('tests', uuid.uuid4().hex, local_path.name)
-    client_from_settings().upload_object_bytes(local_path.read_bytes(), target_url)
+    data_plane = client_from_settings()
+    target_url = data_plane.build_object_url('tests', uuid.uuid4().hex, local_path.name)
+    data_plane.upload_object_bytes(local_path.read_bytes(), target_url)
     return target_url
 
 

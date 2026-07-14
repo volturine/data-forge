@@ -7,7 +7,6 @@ from backend_core.data_plane_client import client_from_settings
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.exceptions import FileError
 from backend_core.iceberg_catalog import load_runtime_catalog
-from backend_core.object_store_paths import is_managed_object_store_url
 from backend_core.persistence.datasource.models import DataSource
 
 logger = logging.getLogger(__name__)
@@ -31,10 +30,13 @@ class DatasourceStorageCleanup:
 
     @staticmethod
     def _delete_managed_prefix(prefix: object) -> None:
-        if not isinstance(prefix, str) or not is_managed_object_store_url(prefix):
+        if not isinstance(prefix, str):
+            return
+        data_plane = client_from_settings()
+        if not data_plane.classify_object_url(prefix).is_managed:
             return
         try:
-            client_from_settings().delete_managed_prefix(prefix)
+            data_plane.delete_managed_prefix(prefix)
             logger.info('Deleted Iceberg object prefix: %s', prefix)
         except Exception as exc:
             logger.error('Object storage error when deleting Iceberg prefix %s: %s', prefix, exc)
@@ -46,10 +48,13 @@ class DatasourceStorageCleanup:
 
     @staticmethod
     def _delete_managed_object(file_path: object) -> None:
-        if not isinstance(file_path, str) or not is_managed_object_store_url(file_path):
+        if not isinstance(file_path, str):
+            return
+        data_plane = client_from_settings()
+        if not data_plane.classify_object_url(file_path).is_managed:
             return
         try:
-            client_from_settings().delete_object(file_path)
+            data_plane.delete_object(file_path)
             logger.info('Deleted object: %s', file_path)
         except Exception as exc:
             logger.error('Object storage error when deleting file %s: %s', file_path, exc)

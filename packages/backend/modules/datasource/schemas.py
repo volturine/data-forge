@@ -1,10 +1,22 @@
 from datetime import datetime
 
+from protovalidate import ValidationError, Validator
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.domain.engine_runs.schemas import SchemaDiffStatus
-from backend_core.object_store_paths import is_object_store_url
+from dataforge_protocol import object_store_pb2
+
+_PROTOCOL_VALIDATOR = Validator()
+
+
+def _validated_object_store_url(value: str) -> str:
+    normalized = value.strip()
+    try:
+        _PROTOCOL_VALIDATOR.validate(object_store_pb2.ObjectStoreUrl(url=normalized))
+    except ValidationError as exc:
+        raise ValueError('file_path must be an s3:// URL') from exc
+    return normalized
 
 
 class ColumnSchema(BaseModel):
@@ -140,10 +152,7 @@ class ExcelPreflightPathRequest(BaseModel):
     @field_validator('file_path')
     @classmethod
     def _validate_file_path(cls, value: str) -> str:
-        normalized = value.strip()
-        if not is_object_store_url(normalized):
-            raise ValueError('file_path must be an s3:// URL')
-        return normalized
+        return _validated_object_store_url(value)
 
 
 class ExcelPreflightResponse(BaseModel):
@@ -200,10 +209,7 @@ class FileDataSourceConfig(BaseModel):
     @field_validator('file_path')
     @classmethod
     def _validate_file_path(cls, value: str) -> str:
-        normalized = value.strip()
-        if not is_object_store_url(normalized):
-            raise ValueError('file_path must be an s3:// URL')
-        return normalized
+        return _validated_object_store_url(value)
 
 
 class DatabaseDataSourceConfig(BaseModel):

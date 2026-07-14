@@ -27,7 +27,6 @@ from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStat
 from backend_core.exceptions import DataSourceConnectionError, DataSourceValidationError, datasource_not_found
 from backend_core.iceberg_catalog import load_runtime_catalog
 from backend_core.namespace import get_namespace, namespace_paths
-from backend_core.object_store_paths import is_object_store_url
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from backend_core.sqlmodel_typing import sa
 from modules.datasource.runtime_loading import load_datasource_frame as load_datasource
@@ -109,7 +108,7 @@ def _coerce_database_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.Lazy
 @contextlib.contextmanager
 def _materialized_file_source(source_config: dict[str, Any]):
     file_path = source_config.get('file_path')
-    if not isinstance(file_path, str) or not is_object_store_url(file_path):
+    if not isinstance(file_path, str) or not client_from_settings().classify_object_url(file_path).is_object_store:
         yield source_config
         return
     suffix = Path(urlparse(file_path).path).suffix or f'.{source_config.get("file_type") or "dat"}'
@@ -126,7 +125,7 @@ def _materialized_file_source(source_config: dict[str, Any]):
 
 def _validate_source_file_path(file_path: str, file_type: DataSourceFileType) -> str:
     normalized = file_path.strip()
-    if not is_object_store_url(normalized):
+    if not client_from_settings().classify_object_url(normalized).is_object_store:
         raise ValueError('file_path must be an s3:// URL')
     if not client_from_settings().object_exists(normalized):
         raise ValueError(f'Object not found: {normalized}')

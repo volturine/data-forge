@@ -9,6 +9,16 @@ message ObjectStoreUrl {
   string url = 1 [(buf.validate.field).string.pattern = "^s3://[^/]+/.+$"];
 }
 
+message ObjectStoreUrlClassificationRequest {
+  string value = 1;
+}
+
+message ObjectStoreUrlClassificationResponse {
+  bool is_object_store = 1;
+  bool is_managed = 2;
+  optional ObjectStoreUrl object_url = 3;
+}
+
 message ObjectStorePathParts {
   repeated string parts = 1 [(buf.validate.field).repeated.min_items = 1];
   optional string bucket = 2 [(buf.validate.field).string.min_len = 1];
@@ -54,6 +64,7 @@ message ObjectStoreMetadataFilesResponse {
 }
 
 service ObjectStoreService {
+  rpc ClassifyUrl(ObjectStoreUrlClassificationRequest) returns (ObjectStoreUrlClassificationResponse);
   rpc BuildUrl(ObjectStorePathParts) returns (ObjectStoreUrl);
   rpc JoinUrl(ObjectStoreJoinRequest) returns (ObjectStoreUrl);
   rpc StorageOptions(EmptyRequest) returns (ObjectStoreStorageOptionsResponse);

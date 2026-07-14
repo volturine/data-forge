@@ -16,7 +16,6 @@ from backend_core.domain.compute_requests.models import command_from_payload
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import PipelineExecutionError
 from backend_core.namespace import get_namespace
-from backend_core.object_store_paths import is_object_store_url
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.datasource import schemas as datasource_schemas
 
@@ -154,8 +153,8 @@ async def download_step(
     )
     if not completed.artifact_path or not completed.artifact_name or not completed.artifact_content_type:
         raise PipelineExecutionError('Download artifact missing from compute response')
-    if is_object_store_url(completed.artifact_path):
-        data_plane = client_from_settings()
+    data_plane = client_from_settings()
+    if data_plane.classify_object_url(completed.artifact_path).is_object_store:
         data = data_plane.download_object_bytes(completed.artifact_path)
         data_plane.delete_object(completed.artifact_path)
         return data, completed.artifact_name, completed.artifact_content_type

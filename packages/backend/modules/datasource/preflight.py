@@ -8,7 +8,6 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from backend_core.data_plane_client import client_from_settings
-from backend_core.object_store_paths import is_object_store_url
 
 
 @dataclass
@@ -79,8 +78,10 @@ async def _cleanup_expired() -> None:
 async def _delete_source(path: str, *, delete_source: bool) -> None:
     if not delete_source:
         return
-    if is_object_store_url(path):
-        await asyncio.to_thread(client_from_settings().delete_object, path)
+    data_plane = client_from_settings()
+    classification = await asyncio.to_thread(data_plane.classify_object_url, path)
+    if classification.is_managed:
+        await asyncio.to_thread(data_plane.delete_object, path)
         return
     local_path = Path(path)
     if not local_path.exists():

@@ -22,7 +22,6 @@ from backend_core.domain.datasource.source_types import DataSourceFileType, Data
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import AppError
 from backend_core.namespace import get_namespace
-from backend_core.object_store_paths import is_object_store_url
 from backend_core.validation import (
     DataSourceId,
     PreflightId,
@@ -98,7 +97,7 @@ async def _stage_upload_to_object_store(file: UploadFile, target_name: str) -> s
 
 @contextlib.contextmanager
 def _local_excel_source(source_path: str):
-    if is_object_store_url(source_path):
+    if client_from_settings().classify_object_url(source_path).is_object_store:
         temp_path = _temporary_upload_path(Path(source_path).suffix or '.xlsx')
         try:
             temp_path.parent.mkdir(parents=True, exist_ok=True)
@@ -112,7 +111,7 @@ def _local_excel_source(source_path: str):
 
 
 def _list_export_branches(metadata_path: str, current_branch: str | None = None) -> list[str]:
-    if is_object_store_url(metadata_path):
+    if client_from_settings().classify_object_url(metadata_path).is_object_store:
         data_plane = client_from_settings()
         entries = data_plane.list_prefixes(metadata_path)
         if entries:
@@ -211,12 +210,12 @@ async def upload_file(
             owner_id=owner_id,
         )
     except AppError, HTTPException, ValueError:
-        if is_object_store_url(file_path):
+        if client_from_settings().classify_object_url(file_path).is_managed:
             client_from_settings().delete_object(file_path)
         raise
     except Exception as e:
         logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
-        if is_object_store_url(file_path):
+        if client_from_settings().classify_object_url(file_path).is_managed:
             client_from_settings().delete_object(file_path)
         raise HTTPException(status_code=500, detail='Failed to create datasource') from e
 
@@ -315,19 +314,19 @@ async def upload_bulk(
             )
             results.append(schemas.BulkUploadResult(name=file.filename, success=True, datasource=datasource))
         except AppError as exc:
-            if is_object_store_url(file_path):
+            if client_from_settings().classify_object_url(file_path).is_managed:
                 client_from_settings().delete_object(file_path)
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=exc.message))
         except HTTPException as exc:
-            if is_object_store_url(file_path):
+            if client_from_settings().classify_object_url(file_path).is_managed:
                 client_from_settings().delete_object(file_path)
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=str(exc.detail)))
         except ValueError as exc:
-            if is_object_store_url(file_path):
+            if client_from_settings().classify_object_url(file_path).is_managed:
                 client_from_settings().delete_object(file_path)
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=str(exc)))
         except Exception as e:
-            if is_object_store_url(file_path):
+            if client_from_settings().classify_object_url(file_path).is_managed:
                 client_from_settings().delete_object(file_path)
             results.append(
                 schemas.BulkUploadResult(
