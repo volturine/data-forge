@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
+from google.protobuf import struct_pb2, timestamp_pb2
 from sqlmodel import Session
 
 from backend_core import build_jobs_service, build_runs_service, compute_requests_service, engine_instances_service, engine_runs_service
@@ -20,9 +21,20 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
 from backend_core.persistence.udfs.models import Udf
-from backend_grpc.codec import datetime_to_timestamp, dict_to_struct
 from backend_grpc.server import WorkerRuntimeServicer
 from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2
+
+
+def dict_to_struct(payload: dict[str, object]) -> struct_pb2.Struct:
+    value = struct_pb2.Struct()
+    value.update(payload)
+    return value
+
+
+def datetime_to_timestamp(value: datetime) -> timestamp_pb2.Timestamp:
+    timestamp = timestamp_pb2.Timestamp()
+    timestamp.FromDatetime(value)
+    return timestamp
 
 
 class FakeGrpcContext:

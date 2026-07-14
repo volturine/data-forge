@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from typing import TypeVar, cast
 
 import grpc
+from google.protobuf import json_format
 
 from backend_core.config import settings
-from backend_grpc.codec import struct_to_dict
 from dataforge_protocol import common_pb2, iceberg_pb2, iceberg_pb2_grpc, object_store_pb2, object_store_pb2_grpc
 
 _TOKEN_METADATA_KEY = 'x-internal-token'
@@ -179,7 +179,7 @@ class WorkerDataPlaneClient:
         if limit is not None:
             request.limit = limit
         response = self._call(lambda: self._iceberg.ScanSnapshot(request, timeout=self._timeout_seconds, metadata=self._metadata()))
-        rows = struct_to_dict(response.rows).get('rows')
+        rows = json_format.MessageToDict(response.rows, preserving_proto_field_name=True).get('rows')
         return cast(list[dict[str, object]], rows) if isinstance(rows, list) else []
 
     def sync_table_schema(self, *, metadata_path: str, schema_payload: dict[str, object]) -> None:

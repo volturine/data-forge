@@ -9,20 +9,53 @@ from datetime import datetime
 from typing import Any, TypeVar, cast
 
 import grpc
+from google.protobuf import json_format, struct_pb2, timestamp_pb2
 
 from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
-from worker_grpc.codec import (
-    datetime_to_timestamp,
-    dict_to_struct,
-    enum_to_proto_value,
-    optional_struct_to_dict,
-    optional_timestamp_to_datetime,
-    proto_value_to_enum_name,
-    struct_to_dict,
-)
 
 _TOKEN_METADATA_KEY = "x-internal-token"
 _T = TypeVar("_T")
+
+
+def dict_to_struct(payload: dict[str, object] | None) -> struct_pb2.Struct:
+    return json_format.ParseDict(payload or {}, struct_pb2.Struct())
+
+
+def struct_to_dict(payload: struct_pb2.Struct) -> dict[str, object]:
+    decoded = json_format.MessageToDict(payload, preserving_proto_field_name=True)
+    if not isinstance(decoded, dict):
+        raise ValueError("gRPC JSON payload must decode to an object")
+    return cast(dict[str, object], decoded)
+
+
+def optional_struct_to_dict(message: Any, field: str) -> dict[str, object] | None:
+    if not message.HasField(field):
+        return None
+    return struct_to_dict(getattr(message, field))
+
+
+def datetime_to_timestamp(value: datetime) -> timestamp_pb2.Timestamp:
+    timestamp = timestamp_pb2.Timestamp()
+    timestamp.FromDatetime(value)
+    return timestamp
+
+
+def optional_timestamp_to_datetime(message: Any, field: str) -> datetime | None:
+    if not message.HasField(field):
+        return None
+    return getattr(message, field).ToDatetime()
+
+
+def enum_to_proto_value(prefix: str, value: str) -> Any:
+    return getattr(enums_pb2, f"{prefix}_{value.upper()}")
+
+
+def proto_value_to_enum_name(enum_type: Any, prefix: str, value: int) -> str:
+    enum_name = enum_type.Name(value)
+    suffix = enum_name.removeprefix(f"{prefix}_")
+    if suffix == "UNSPECIFIED" or suffix == enum_name:
+        raise ValueError(f"Unsupported {prefix} enum value: {enum_name}")
+    return suffix.lower()
 
 
 @dataclass(frozen=True)

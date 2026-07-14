@@ -17,11 +17,11 @@ from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
 from runtime.domain.protocol_enums import protocol_token
+from runtime.json_values import dict_to_struct
 from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
 from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
-from worker_grpc.codec import dict_to_struct
 
 logger = logging.getLogger(__name__)
 

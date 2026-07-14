@@ -23,7 +23,7 @@ from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
 from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
-from worker_grpc.codec import struct_to_dict
+from google.protobuf import json_format
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -476,7 +476,7 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
     assert failed[0].error == "DataSource datasource-1 not found"
     assert failed[0].status_code == 404
     assert failed[0].error_code == errors_pb2.ERROR_CODE_DATASOURCE_NOT_FOUND
-    assert struct_to_dict(failed[0].details) == {"datasource_id": "datasource-1"}
+    assert json_format.MessageToDict(failed[0].details) == {"datasource_id": "datasource-1"}
     assert dispatched == [True]
     assert [(record.levelname, record.getMessage()) for record in caplog.records] == [
         ("INFO", "Compute request req-404 rejected: DataSource datasource-1 not found")

@@ -5,9 +5,10 @@ from decimal import Decimal
 from uuid import UUID
 
 import pyarrow as pa  # type: ignore[import-untyped]
+from google.protobuf import json_format
 
 from dataforge_protocol import iceberg_pb2
-from worker_grpc.codec import dict_to_struct, struct_to_dict
+from runtime.json_values import dict_to_struct
 from worker_grpc.data_plane_server import _arrow_schema_from_proto
 
 
@@ -25,7 +26,7 @@ def test_worker_grpc_json_payload_normalizes_json_boundary_values() -> None:
         ],
     }
 
-    decoded = struct_to_dict(dict_to_struct(payload))
+    decoded = json_format.MessageToDict(dict_to_struct(payload), preserving_proto_field_name=True)
 
     assert decoded == {
         "rows": [

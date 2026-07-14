@@ -17,7 +17,7 @@ from pyiceberg.table import StaticTable
 from dataforge_protocol import common_pb2, iceberg_pb2, iceberg_pb2_grpc, object_store_pb2, object_store_pb2_grpc
 from runtime import compute_service, iceberg_metadata, iceberg_snapshot_reader, object_store
 from runtime.config import settings
-from worker_grpc.codec import dict_to_struct
+from runtime.json_values import dict_to_struct
 
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"
