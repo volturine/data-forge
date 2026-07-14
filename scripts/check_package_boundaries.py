@@ -36,9 +36,11 @@ ROOT_TEST_RESIDUE = [
 ROOT_TEST_ARTIFACT_PREFIXES = ('test-results', 'playwright-report')
 
 FORBIDDEN_OWNER_DUPLICATES = [
+    Path('packages/backend/backend_grpc/codec.py'),
     Path('packages/backend/backend_core/contracts'),
     Path('packages/backend/backend_core/engine_identity.py'),
     Path('packages/backend/backend_core/object_store_paths.py'),
+    Path('packages/backend/backend_core/domain/protocol_enums.py'),
     Path('packages/backend/modules/analysis/models.py'),
     Path('packages/backend/modules/datasource/models.py'),
     Path('packages/backend/modules/health/models.py'),
@@ -47,9 +49,12 @@ FORBIDDEN_OWNER_DUPLICATES = [
     Path('packages/backend/modules/telegram/models.py'),
     Path('packages/backend/modules/udf/models.py'),
     Path('packages/worker/runtime/engine_identity.py'),
+    Path('packages/worker/runtime/domain/protocol_enums.py'),
+    Path('packages/worker/runtime/domain/step_config_enums.py'),
     Path('packages/worker/runtime/domain/compute_requests/models.py'),
     Path('packages/worker/datasources/datasource_schemas.py'),
     Path('packages/worker/runtime/models'),
+    Path('packages/worker/worker_grpc/codec.py'),
 ]
 
 PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
@@ -74,6 +79,11 @@ FORBIDDEN_SOURCE_TOKENS = {
     'backend_core.contracts': 'renamed backend-owned domain package',
     'runtime.models': 'renamed worker-owned domain package',
     'worker_models': 'deleted legacy worker model package',
+    'backend_grpc.codec': 'deleted mirrored protobuf codec module',
+    'worker_grpc.codec': 'deleted mirrored protobuf codec module',
+    'backend_core.domain.protocol_enums': 'deleted mirrored protocol enum runtime',
+    'runtime.domain.protocol_enums': 'deleted mirrored protocol enum runtime',
+    'runtime.domain.step_config_enums': 'worker operation enums are owned by operations.enums',
     '_grpc.generated': 'deleted generated gRPC compatibility import path',
     'JsonPayload': 'generic JSON-string protocol payload',
     '__preview__': 'engine identity prefix parsing',
@@ -111,6 +121,20 @@ SOURCE_SUFFIXES = {'.py', '.ts', '.svelte', '.proto'}
 WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
     'from runtime.domain.enums import DataForgeStrEnum': 'worker operation config enums must be generated-protocol-backed',
     '(DataForgeStrEnum)': 'worker operation config enums must not reintroduce copied StrEnum contracts',
+}
+PROTOCOL_ENUM_OWNER_REQUIREMENTS = {
+    Path('packages/backend/backend_core/domain/api_enums.py'): (
+        'class ApiEnumValue(str)',
+        'backend API enums must remain string-shaped boundary values',
+    ),
+    Path('packages/worker/runtime/domain/domain_enums.py'): (
+        'class DomainEnumValue(str)',
+        'worker lifecycle and event enums must remain string-shaped domain values',
+    ),
+    Path('packages/worker/operations/enums.py'): (
+        'class OperationEnumValue(int)',
+        'worker operation enums must remain generated protocol-number-backed values',
+    ),
 }
 FRONTEND_OPERATION_CONFIG_FORBIDDEN_TOKENS = {
     "export type CastMapType = 'Int64'": 'frontend cast-map type must be generated-protocol-backed',
@@ -414,12 +438,19 @@ def main() -> int:
         if path.exists():
             errors.append(f'neutral shared model duplicated in backend owner package: {rel_path}')
 
-    worker_step_config_enums = ROOT / 'packages/worker/runtime/domain/step_config_enums.py'
-    if worker_step_config_enums.exists():
-        content = worker_step_config_enums.read_text()
+    worker_operation_enums = ROOT / 'packages/worker/operations/enums.py'
+    if worker_operation_enums.exists():
+        content = worker_operation_enums.read_text()
         for token, reason in WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS.items():
             if token in content:
-                errors.append(f'{worker_step_config_enums.relative_to(ROOT)} contains {reason}: {token}')
+                errors.append(f'{worker_operation_enums.relative_to(ROOT)} contains {reason}: {token}')
+
+    for rel_path, (token, reason) in PROTOCOL_ENUM_OWNER_REQUIREMENTS.items():
+        path = ROOT / rel_path
+        if not path.exists():
+            errors.append(f'protocol enum owner is missing: {rel_path}')
+        elif token not in path.read_text():
+            errors.append(f'{rel_path} is missing {reason}: {token}')
 
     worker_operations = ROOT / 'packages/worker/operations'
     if worker_operations.exists():
