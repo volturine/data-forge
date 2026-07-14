@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from backend_core.migrations import _PUBLIC_REVISION, _TENANT_REVISION, _alembic_config, ensure_database_exists, migrate_runtime
+from backend_core.migrations import _PUBLIC_REVISION, _TENANT_BASE_REVISION, _TENANT_REVISION, _alembic_config, ensure_database_exists, migrate_runtime
 from backend_core.namespace import namespace_database_schema
 
 
@@ -33,6 +33,21 @@ def test_migrate_runtime_runs_public_then_each_tenant(monkeypatch) -> None:
     migrate_runtime(['alpha', 'beta'])
 
     assert calls == [('ensure_database', 'db'), ('public', f'public:{_PUBLIC_REVISION}'), ('tenant', f'alpha:{_TENANT_REVISION}')]
+
+
+def test_migrate_runtime_upgrades_previous_tenant_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_current_revision(schema: str) -> str | None:
+        return _PUBLIC_REVISION if schema == 'public' else _TENANT_BASE_REVISION
+
+    monkeypatch.setattr('backend_core.migrations._current_revision', fake_current_revision)
+    monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: None)
+    monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
+
+    migrate_runtime(['default'])
+
+    assert calls == [('tenant', f'default:{_TENANT_REVISION}')]
 
 
 def test_ensure_database_exists_creates_missing_database(monkeypatch: pytest.MonkeyPatch) -> None:
