@@ -2,7 +2,7 @@ import pytest
 from google.protobuf.message import Message
 from protovalidate import ValidationError, Validator
 
-from dataforge_protocol import compute_pb2, enums_pb2
+from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
 
 
 @pytest.mark.parametrize(
@@ -26,3 +26,12 @@ from dataforge_protocol import compute_pb2, enums_pb2
 def test_protocol_enums_reject_unspecified_values(message: Message) -> None:
     with pytest.raises(ValidationError):
         Validator().validate(message)
+
+
+def test_defaulted_operation_enum_is_optional_but_rejects_explicit_unspecified() -> None:
+    condition = analysis_pb2.FilterCondition(operator=enums_pb2.FILTER_OPERATOR_EQUAL)
+    Validator().validate(condition)
+
+    condition.value_type = enums_pb2.FILTER_VALUE_TYPE_UNSPECIFIED
+    with pytest.raises(ValidationError):
+        Validator().validate(condition)
