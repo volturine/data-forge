@@ -6,92 +6,8 @@ from operations.step_converter import (
     BackendStep,
     FrontendStep,
     convert_config_to_params,
-    convert_filter_config,
-    convert_groupby_config,
-    convert_rename_config,
     convert_step_format,
 )
-
-
-def test_convert_groupby_config_uses_group_by() -> None:
-    result = convert_groupby_config(
-        {
-            "group_by": ["team"],
-            "aggregations": [{"column": "score", "function": "sum", "alias": "total"}],
-        },
-    )
-    assert result["group_by"] == ["team"]
-    assert result["aggregations"] == [{"column": "score", "function": "sum", "alias": "total"}]
-
-
-def test_convert_groupby_config_defaults_group_by_to_empty() -> None:
-    result = convert_groupby_config(
-        {
-            "aggregations": [{"column": "score", "function": "sum"}],
-        },
-    )
-    assert result["group_by"] == []
-    assert result["aggregations"] == [{"column": "score", "function": "sum", "alias": None}]
-
-
-def test_convert_rename_config_accepts_column_mapping_and_mapping() -> None:
-    by_column_mapping = convert_rename_config({"column_mapping": {"old": "new"}})
-    by_mapping = convert_rename_config({"mapping": {"old": "new"}})
-
-    assert by_column_mapping == {"mapping": {"old": "new"}}
-    assert by_mapping == {"mapping": {"old": "new"}}
-
-
-def test_convert_filter_config_ignores_blank_placeholder_conditions() -> None:
-    result = convert_filter_config(
-        {
-            "conditions": [
-                {
-                    "column": "",
-                    "operator": "=",
-                    "value": "",
-                    "value_type": "string",
-                },
-            ],
-            "logic": "AND",
-        },
-    )
-
-    assert result == {"conditions": [], "logic": "AND"}
-
-
-def test_convert_filter_config_keeps_valid_conditions_when_placeholders_present() -> None:
-    result = convert_filter_config(
-        {
-            "conditions": [
-                {
-                    "column": "",
-                    "operator": "=",
-                    "value": "",
-                    "value_type": "string",
-                },
-                {
-                    "column": "age",
-                    "operator": ">",
-                    "value": 30,
-                    "value_type": "number",
-                },
-            ],
-            "logic": "AND",
-        },
-    )
-
-    assert result == {
-        "conditions": [
-            {
-                "column": "age",
-                "operator": ">",
-                "value": 30,
-                "value_type": "number",
-            },
-        ],
-        "logic": "AND",
-    }
 
 
 def test_convert_config_to_params_rejects_unregistered_operations() -> None:
@@ -188,11 +104,6 @@ def test_convert_step_format_preserves_explicit_protocol_default_values() -> Non
 
     assert step.operation == "union_by_name"
     assert step.params == {"sources": ["step-0"], "allow_missing": False}
-
-
-def test_frontend_step_from_mapping_rejects_protocol_validation_failures() -> None:
-    with pytest.raises(ValueError, match="greater than or equal to 1"):
-        FrontendStep.from_mapping({"id": "step-1", "type": "limit", "config": {"n": 0}})
 
 
 def test_frontend_step_from_mapping_rejects_mismatched_step_config_oneof() -> None:

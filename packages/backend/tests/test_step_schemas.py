@@ -1,11 +1,15 @@
 import pytest
+from google.protobuf import json_format
 
+from dataforge_protocol import analysis_pb2, enums_pb2
 from modules.analysis.step_schemas import (
     SelectConfig,
     StringTransformConfig,
     TimeSeriesConfig,
     WithColumnsExprSchema,
     get_step_catalog,
+    normalize_pipeline_step_configs_for_protocol,
+    normalize_step_config_for_protocol,
     validate_step,
 )
 
@@ -161,3 +165,69 @@ def test_validate_step_rejects_flat_groupby_config() -> None:
 def test_validate_step_rejects_flat_join_config() -> None:
     with pytest.raises(ValueError, match='Extra inputs are not permitted'):
         validate_step('join', {'right': 'orders', 'on': 'customer_id'})
+
+
+def test_pipeline_protocol_normalization_removes_http_aliases() -> None:
+    pipeline = normalize_pipeline_step_configs_for_protocol(
+        {
+            'analysis_id': 'analysis-1',
+            'tabs': [
+                {
+                    'id': 'tab-1',
+                    'steps': [
+                        {
+                            'id': 'view-1',
+                            'type': 'view',
+                            'config': {'rowLimit': 100},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert pipeline == {
+        'analysis_id': 'analysis-1',
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'steps': [
+                    {
+                        'id': 'view-1',
+                        'type': 'view',
+                        'config': {'row_limit': 100},
+                    }
+                ],
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ('step_type', 'config', 'field_name', 'expected_format'),
+    [
+        (
+            'export',
+            {'format': 'parquet', 'filename': 'result', 'destination': 'download'},
+            'export',
+            enums_pb2.EXPORT_FORMAT_PARQUET,
+        ),
+        (
+            'download',
+            {'format': 'json', 'filename': 'result'},
+            'download',
+            enums_pb2.EXPORT_FORMAT_JSON,
+        ),
+    ],
+)
+def test_export_configs_normalize_into_generated_step_config(
+    step_type: str,
+    config: dict[str, object],
+    field_name: str,
+    expected_format: int,
+) -> None:
+    normalized = normalize_step_config_for_protocol(step_type, config)
+
+    message = json_format.ParseDict({field_name: normalized}, analysis_pb2.StepConfig())
+
+    assert getattr(message, field_name).format == expected_format

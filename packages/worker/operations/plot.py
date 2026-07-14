@@ -11,6 +11,8 @@ from runtime.domain.compute.base import OperationHandler, OperationParams
 from runtime.domain.step_config_enums import (
     AxisScale,
     ChartAggregation,
+    ChartHeight,
+    ChartWidth,
     DateBucket,
     DateOrdinal,
     DisplayUnits,
@@ -76,6 +78,8 @@ class ChartParams(OperationParams):
     series_colors: list[str] = Field(default_factory=list)
     overlays: list[OverlayConfig] = Field(default_factory=list)
     reference_lines: list[ReferenceLine] = Field(default_factory=list)
+    chart_height: ChartHeight = ChartHeight.MEDIUM
+    chart_width: ChartWidth = ChartWidth.NORMAL
     pan_zoom_enabled: bool = False
     selection_enabled: bool = False
     area_selection_enabled: bool = False

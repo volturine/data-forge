@@ -8,7 +8,6 @@ from pydantic import ValidationError
 
 from dataforge_protocol import enums_pb2
 from operations.ai import AIError, AIHandler, AIParams, InternalAIClient, get_ai_client, parse_ai_provider, parse_request_options
-from operations.step_converter import convert_ai_config
 
 # ---------------------------------------------------------------------------
 # parse_request_options
@@ -438,81 +437,3 @@ class TestAIHandler:
                     "batch_size": 5,
                 },
             )
-
-
-# ---------------------------------------------------------------------------
-# convert_ai_config (step converter)
-# ---------------------------------------------------------------------------
-
-
-class TestConvertAIConfig:
-    def test_basic_conversion(self):
-        config = {
-            "provider": "openai",
-            "model": "gpt-4o",
-            "input_columns": ["text"],
-            "output_column": "result",
-            "prompt_template": "Classify: {{text}}",
-            "batch_size": 5,
-            "endpoint_url": "https://api.openai.com",
-            "api_key": "sk-test",
-            "request_options": '{"temperature": 0.2}',
-        }
-        result = convert_ai_config(config)
-        assert result["provider"] == "openai"
-        assert result["model"] == "gpt-4o"
-        assert result["input_columns"] == ["text"]
-        assert result["output_column"] == "result"
-        assert result["batch_size"] == 5
-        assert result["request_options"] == '{"temperature": 0.2}'
-
-    def test_camelcase_fields_are_ignored(self):
-        config = {
-            "inputColumn": "text",
-            "outputColumn": "result",
-            "promptTemplate": "Hello {{text}}",
-            "requestOptions": '{"temperature": 0.5}',
-        }
-        result = convert_ai_config(config)
-        assert result["input_columns"] == []
-        assert result["output_column"] == "ai_result"
-        assert result["prompt_template"] == "Classify this text: {{text}}"
-        assert result["request_options"] is None
-
-    def test_multi_column_conversion(self):
-        config = {
-            "input_columns": ["title", "body"],
-            "output_column": "result",
-            "prompt_template": "Title: {{title}} Body: {{body}}",
-        }
-        result = convert_ai_config(config)
-        assert result["input_columns"] == ["title", "body"]
-
-    def test_input_columns_preserved_when_present(self):
-        config = {
-            "input_columns": ["title", "body"],
-            "output_column": "result",
-        }
-        result = convert_ai_config(config)
-        assert result["input_columns"] == ["title", "body"]
-
-    def test_empty_request_options(self):
-        config = {
-            "input_columns": ["text"],
-            "output_column": "result",
-            "request_options": "",
-        }
-        result = convert_ai_config(config)
-        assert result["request_options"] is None
-
-    def test_defaults(self):
-        result = convert_ai_config({})
-        assert result["provider"] == "ollama"
-        assert result["model"] == "llama2"
-        assert result["output_column"] == "ai_result"
-        assert result["batch_size"] == 10
-
-    def test_none_request_options(self):
-        config = {"input_columns": ["text"], "request_options": None}
-        result = convert_ai_config(config)
-        assert result["request_options"] is None

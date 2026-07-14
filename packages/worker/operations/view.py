@@ -6,7 +6,7 @@ from runtime.domain.compute.base import OperationHandler, OperationParams
 
 
 class ViewParams(OperationParams):
-    rowLimit: int | None = None
+    row_limit: int | None = None
 
 
 class ViewHandler(OperationHandler):

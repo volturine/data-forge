@@ -29,11 +29,8 @@ def test_step_catalog_matches_public_step_types() -> None:
     assert set(STEP_CATALOG) == set(iter_step_types(include_plot_aliases=True))
 
 
-def test_worker_converter_and_handler_registries_cover_catalog() -> None:
-    converter = _load_worker_module('step_converter_registry_test', WORKER_ROOT / 'operations' / 'step_converter.py')
+def test_worker_handler_and_parameter_registries_cover_catalog() -> None:
     operations = {normalize_step_type(step_type) for step_type in STEP_CATALOG}
-    assert set(converter._CONVERTERS) == operations
-
     compute_operations = _load_worker_module(
         'compute_operations_registry_test',
         WORKER_ROOT / 'operations' / '__init__.py',

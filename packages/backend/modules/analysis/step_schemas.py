@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from typing import cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from backend_core.ai_clients import ai_provider_name, require_ai_provider
 from backend_core.domain.analysis.step_types import (
     STEP_TYPES,
     ChartType,
     is_step_type,
     iter_step_types,
 )
+from backend_core.domain.compute.schemas import ExportDestination, ExportFormat
 from backend_core.domain.step_config_enums import (
+    AIProvider,
     AxisScale,
     CastMapType,
     ChartAggregation,
@@ -45,12 +46,13 @@ from backend_core.domain.step_config_enums import (
     WithColumnsExprType,
     YAxisPosition,
 )
-from dataforge_protocol import enums_pb2
 
 __all__ = [
     'get_config_model',
     'get_step_catalog',
     'normalize_step_config',
+    'normalize_step_config_for_protocol',
+    'normalize_pipeline_step_configs_for_protocol',
     'validate_step',
 ]
 
@@ -299,15 +301,15 @@ class ViewConfig(BaseModel):
 class ExportConfig(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    format: str = Field('csv', description='Output format: csv, parquet, json')
+    format: ExportFormat = Field(ExportFormat.CSV, description='Output format')
     filename: str = 'export'
-    destination: str = 'download'
+    destination: ExportDestination = ExportDestination.DOWNLOAD
 
 
 class DownloadConfig(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    format: str = Field('csv', description='Output format: csv, parquet, json')
+    format: ExportFormat = Field(ExportFormat.CSV, description='Output format')
     filename: str = 'download'
 
 
@@ -389,7 +391,7 @@ class NotificationConfig(BaseModel):
 class AIConfig(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    provider: str = ai_provider_name(enums_pb2.AI_PROVIDER_OLLAMA)
+    provider: AIProvider = AIProvider.OLLAMA
     model: str = 'llama2'
     input_columns: list[str] = Field(
         default_factory=list,
@@ -406,11 +408,6 @@ class AIConfig(BaseModel):
     temperature: float = 0.7
     max_tokens: int | None = None
     request_options: dict | None = None
-
-    @field_validator('provider')
-    @classmethod
-    def _validate_provider(cls, value: str) -> str:
-        return ai_provider_name(require_ai_provider(value))
 
 
 class DatasourceConfig(BaseModel):
@@ -682,6 +679,83 @@ def normalize_step_config(step_type: str, config: dict) -> dict[str, object]:
         raise ValueError(f"Unknown step type '{step_type}'")
     model = cast(type[BaseModel], STEP_CATALOG[step_type]['config'])
     return model.model_validate(config).model_dump(mode='json', by_alias=True)
+
+
+def _filter_value_for_protocol(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return {'bool_value': value}
+    if isinstance(value, int | float):
+        return {'number_value': value}
+    if isinstance(value, str):
+        return {'string_value': value}
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return {'string_values': {'values': value}}
+    raise ValueError(f'Unsupported protocol filter value: {value!r}')
+
+
+def normalize_step_config_for_protocol(step_type: str, config: dict) -> dict[str, object]:
+    """Validate an HTTP operation config and serialize its typed protocol fields."""
+    if not is_step_type(step_type):
+        raise ValueError(f"Unknown step type '{step_type}'")
+    model = cast(type[BaseModel], STEP_CATALOG[step_type]['config'])
+    payload = cast(
+        dict[str, object],
+        model.model_validate(config).model_dump(
+            mode='python',
+            by_alias=False,
+            context={'protocol_enum_numbers': True},
+        ),
+    )
+    normalized_type = STEP_TYPES.normalized(step_type)
+    if normalized_type == STEP_TYPES.filter.value:
+        for condition in cast(list[dict[str, object]], payload.get('conditions', [])):
+            if 'value' in condition:
+                condition['value'] = _filter_value_for_protocol(condition['value'])
+    elif normalized_type == STEP_TYPES.with_columns.value:
+        for expression in cast(list[dict[str, object]], payload.get('expressions', [])):
+            if 'value' in expression:
+                expression['value'] = _filter_value_for_protocol(expression['value'])
+    elif normalized_type == STEP_TYPES.fill_null.value and 'value' in payload:
+        payload['value'] = _filter_value_for_protocol(payload['value'])
+    elif normalized_type == STEP_TYPES.select.value:
+        # SelectConfig.cast_map is intentionally a string map in the wire schema.
+        cast_map = model.model_validate(config).model_dump(mode='json', by_alias=True).get('cast_map')
+        if isinstance(cast_map, dict):
+            payload['cast_map'] = cast_map
+    return payload
+
+
+def normalize_pipeline_step_configs_for_protocol(pipeline: dict[str, object]) -> dict[str, object]:
+    """Canonicalize HTTP step configs before protocol transport or persistence."""
+    normalized = dict(pipeline)
+    raw_tabs = pipeline.get('tabs')
+    if not isinstance(raw_tabs, list):
+        return normalized
+    tabs: list[object] = []
+    for raw_tab in raw_tabs:
+        if not isinstance(raw_tab, dict):
+            tabs.append(raw_tab)
+            continue
+        tab = dict(raw_tab)
+        raw_steps = raw_tab.get('steps')
+        if isinstance(raw_steps, list):
+            steps: list[object] = []
+            for raw_step in raw_steps:
+                if not isinstance(raw_step, dict):
+                    steps.append(raw_step)
+                    continue
+                step = dict(raw_step)
+                step_type = step.get('type')
+                config = step.get('config')
+                if isinstance(step_type, str) and isinstance(config, dict):
+                    step['config'] = normalize_step_config_for_protocol(step_type, config)
+                steps.append(step)
+            tab['steps'] = steps
+        tabs.append(tab)
+    normalized['tabs'] = tabs
+    return normalized
 
 
 def validate_step(step_type: str, config: dict) -> None:

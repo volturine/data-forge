@@ -13,6 +13,8 @@ from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
 from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2, errors_pb2
+from operations.download import DownloadParams
+from operations.export import ExportParams
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, internal_api
@@ -46,6 +48,30 @@ def test_engine_run_execution_entry_proto_uses_typed_fields() -> None:
     assert entry.step_type == enums_pb2.STEP_TYPE_FILTER
     assert entry.duration_ms == 12.5
     assert entry.share_pct == 100.0
+
+
+def test_export_operation_params_accept_generated_enum_numbers() -> None:
+    params = ExportParams.model_validate(
+        {
+            "format": enums_pb2.EXPORT_FORMAT_PARQUET,
+            "filename": "result",
+            "destination": enums_pb2.EXPORT_DESTINATION_DOWNLOAD,
+        }
+    )
+
+    assert params.format == enums_pb2.EXPORT_FORMAT_PARQUET
+    assert params.destination == enums_pb2.EXPORT_DESTINATION_DOWNLOAD
+
+
+def test_download_operation_params_accept_generated_enum_numbers() -> None:
+    params = DownloadParams.model_validate(
+        {
+            "format": enums_pb2.EXPORT_FORMAT_JSON,
+            "filename": "result",
+        }
+    )
+
+    assert params.format == enums_pb2.EXPORT_FORMAT_JSON
 
 
 def test_engine_run_update_proto_uses_typed_patch_fields() -> None:
@@ -228,7 +254,7 @@ def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> Non
     tabs = cast(list[dict[str, object]], payload["tabs"])
     steps = cast(list[dict[str, object]], tabs[0]["steps"])
     step_config = steps[0]["config"]
-    assert step_config == {"rowLimit": 100}
+    assert step_config == {"row_limit": 100}
 
 
 def test_analysis_pipeline_protocol_step_type_drives_service_step_type() -> None:
@@ -265,7 +291,7 @@ def test_analysis_pipeline_protocol_step_type_drives_service_step_type() -> None
     step = steps[0]
     assert step["type"] == "plot_scatter"
     assert "step_type" not in step
-    assert step["config"] == {"chart_type": "scatter"}
+    assert step["config"] == {"chart_type": enums_pb2.CHART_TYPE_SCATTER}
 
 
 def test_analysis_pipeline_protocol_deduplicate_absent_subset_is_not_null() -> None:
@@ -301,7 +327,7 @@ def test_analysis_pipeline_protocol_deduplicate_absent_subset_is_not_null() -> N
     steps = cast(list[dict[str, object]], tabs[0]["steps"])
     step_config = cast(dict[str, object], steps[0]["config"])
     assert "subset" not in step_config
-    assert step_config == {"keep": "first"}
+    assert step_config == {"keep": enums_pb2.DEDUPLICATE_KEEP_FIRST}
 
 
 def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypatch) -> None:
@@ -846,6 +872,19 @@ class TestChartParams:
         assert params.pan_zoom_enabled is False
         assert params.selection_enabled is False
         assert params.area_selection_enabled is False
+
+    def test_protocol_chart_dimensions_are_declared(self):
+        params = ChartParams.model_validate(
+            {
+                "chart_type": "bar",
+                "x_column": "category",
+                "chart_height": 2,
+                "chart_width": 1,
+            },
+        )
+
+        assert params.chart_height == "medium"
+        assert params.chart_width == "normal"
 
 
 class TestChartHandlerPassThrough:

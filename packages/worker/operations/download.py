@@ -2,11 +2,12 @@
 
 import polars as pl
 
+from dataforge_protocol import enums_pb2
 from runtime.domain.compute.base import OperationHandler, OperationParams
 
 
 class DownloadParams(OperationParams):
-    format: str = "csv"
+    format: int = enums_pb2.EXPORT_FORMAT_CSV
     filename: str = "download"
 
 

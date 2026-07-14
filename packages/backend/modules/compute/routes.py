@@ -52,6 +52,7 @@ from backend_core.websocket import (
     websocket_disconnected,
 )
 from dataforge_protocol import compute_pb2, enums_pb2
+from modules.analysis.step_schemas import normalize_pipeline_step_configs_for_protocol
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.compute import executor_client
@@ -621,7 +622,7 @@ async def start_active_build(
     if not runtime_probe.available(kind=RuntimeWorkerKind.BUILD_MANAGER):
         raise HTTPException(status_code=503, detail='Compute runtime unavailable')
 
-    pipeline = request.pipeline_payload()
+    pipeline = normalize_pipeline_step_configs_for_protocol(request.pipeline_payload())
     analysis_id = str(pipeline.get('analysis_id') or '')
     analysis_name = await run_in_threadpool(_build_analysis_name, pipeline)
     namespace = get_namespace()
@@ -701,7 +702,13 @@ async def start_active_build(
             namespace=namespace,
             analysis_id=analysis_id,
             analysis_name=analysis_name,
-            request_json=request.model_dump(mode='json'),
+            request_json={
+                'analysis_pipeline': {
+                    'analysis_id': pipeline['analysis_id'],
+                    'tabs': pipeline['tabs'],
+                },
+                'tab_id': request.tab_id,
+            },
             starter_json=starter.model_dump(mode='json'),
             status=build_run_service.BuildRunStatus.QUEUED,
             current_kind=current_kind,

@@ -94,6 +94,12 @@ class ProtocolEnumValue(str):
     def __reduce__(self) -> tuple[object, tuple[str]]:
         return (type(self).require, (str(self),))
 
+    @staticmethod
+    def _serialize(value: ProtocolEnumValue, info: core_schema.SerializationInfo) -> str | int:
+        if info.context is not None and info.context.get('protocol_enum_numbers') is True:
+            return value.number
+        return value.value
+
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -102,7 +108,7 @@ class ProtocolEnumValue(str):
     ) -> core_schema.CoreSchema:
         return core_schema.no_info_plain_validator_function(
             cls.require,
-            serialization=core_schema.plain_serializer_function_ser_schema(lambda value: value.value, when_used='json'),
+            serialization=core_schema.plain_serializer_function_ser_schema(cls._serialize, info_arg=True),
         )
 
     @classmethod

@@ -6,7 +6,7 @@ from runtime.domain.compute.base import OperationHandler, OperationParams
 
 
 class RenameParams(OperationParams):
-    mapping: dict[str, str]
+    column_mapping: dict[str, str]
 
 
 class RenameHandler(OperationHandler):
@@ -17,4 +17,4 @@ class RenameHandler(OperationHandler):
         **_,
     ) -> pl.LazyFrame:
         validated = RenameParams.model_validate(params)
-        return lf.rename(validated.mapping)
+        return lf.rename(validated.column_mapping)

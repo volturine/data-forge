@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from operations.notification import NotificationHandler, NotificationParams
-from operations.step_converter import convert_notification_config
 from operations.template_placeholders import render_template_placeholders
 from runtime.compute_service import _send_pipeline_notifications
 from runtime.exceptions import PipelineExecutionError
@@ -498,73 +497,6 @@ class TestNotificationHandler:
         sent_ids = [c.kwargs["chat_id"] for c in mock_svc.send_telegram.call_args_list]
         assert sent_ids == ["aaa", "bbb"]
         assert all(c.kwargs["bot_token"] == "tok123" for c in mock_svc.send_telegram.call_args_list)
-
-
-class TestConvertNotificationConfig:
-    def test_basic(self):
-        result = convert_notification_config(
-            {
-                "method": "telegram",
-                "recipient": "12345",
-                "input_columns": ["col1", "col2"],
-                "output_column": "status",
-                "message_template": "{{col1}} — {{col2}}",
-            },
-        )
-        assert result["method"] == "telegram"
-        assert result["recipient"] == "12345"
-        assert result["input_columns"] == ["col1", "col2"]
-        assert result["output_column"] == "status"
-
-    def test_defaults(self):
-        result = convert_notification_config({})
-        assert result["method"] == "email"
-        assert result["recipient"] == ""
-        assert result["subscriber_ids"] == []
-        assert result["input_columns"] == []
-        assert result["output_column"] == "notification_status"
-        assert result["message_template"] == "{{message}}"
-        assert result["subject_template"] == "Notification"
-        assert result["batch_size"] == 10
-
-    def test_subscriber_ids_fallback(self):
-        result = convert_notification_config({"subscriber_ids": ["111", "222"]})
-        assert result["recipient"] == "111,222"
-        assert result["subscriber_ids"] == ["111", "222"]
-
-    def test_camelcase_fields_are_ignored(self):
-        result = convert_notification_config(
-            {
-                "inputColumns": ["a", "b"],
-                "outputColumn": "stat",
-                "messageTemplate": "tpl",
-                "subjectTemplate": "sub",
-            },
-        )
-        assert result["input_columns"] == []
-        assert result["output_column"] == "notification_status"
-        assert result["message_template"] == "{{message}}"
-        assert result["subject_template"] == "Notification"
-
-    def test_recipient_column_passthrough(self):
-        result = convert_notification_config({"recipient_column": "chat"})
-        assert result["recipient_column"] == "chat"
-
-    def test_bot_token_passthrough(self):
-        result = convert_notification_config(
-            {
-                "method": "telegram",
-                "recipient": "123, 456",
-                "bot_token": "my-token",
-                "input_columns": ["col"],
-            },
-        )
-        assert result["bot_token"] == "my-token"
-        assert result["recipient"] == "123, 456"
-
-    def test_bot_token_default_empty(self):
-        result = convert_notification_config({"method": "telegram"})
-        assert result["bot_token"] == ""
 
 
 class TestSendPipelineNotifications:

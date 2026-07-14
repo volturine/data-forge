@@ -32,10 +32,22 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
 from backend_core.sqlmodel_typing import col
 from backend_core.time import utc_now as _utcnow
+from modules.analysis.step_schemas import normalize_pipeline_step_configs_for_protocol
 
 logger = logging.getLogger(__name__)
 
 _SCHEDULE_TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
+
+
+def _build_request_json(request: compute_schemas.BuildRequest) -> dict[str, object]:
+    pipeline = normalize_pipeline_step_configs_for_protocol(request.pipeline_payload())
+    return {
+        'analysis_pipeline': {
+            'analysis_id': pipeline['analysis_id'],
+            'tabs': pipeline['tabs'],
+        },
+        'tab_id': request.tab_id,
+    }
 
 
 def _naive_utc(value: datetime) -> datetime:
@@ -252,7 +264,7 @@ def _enqueue_schedule_ingest_build(
         schedule_id=schedule.id,
         analysis_id=schedule.id,
         analysis_name=analysis_name,
-        request_json=_build_ingest_request(schedule).model_dump(mode='json'),
+        request_json=_build_request_json(_build_ingest_request(schedule)),
         starter_json=compute_schemas.BuildStarter.for_schedule(schedule.id).model_dump(mode='json'),
         status=BuildRunStatus.QUEUED,
         current_kind=target_kind,
@@ -291,7 +303,7 @@ def _enqueue_schedule_analysis_build(
         schedule_id=schedule.id,
         analysis_id=analysis_id,
         analysis_name=analysis_name,
-        request_json=request.model_dump(mode='json'),
+        request_json=_build_request_json(request),
         starter_json=compute_schemas.BuildStarter.for_schedule(schedule.id).model_dump(mode='json'),
         status=BuildRunStatus.QUEUED,
         current_kind=EngineRunKind.BUILD.value,

@@ -104,6 +104,8 @@ FORBIDDEN_SOURCE_TOKENS = {
     'envelope_to_json': 'compute envelopes must not round-trip through JSON persistence',
     'def _compute_response(kind': 'worker compute results must be constructed as generated response variants',
     'def _compute_command_payload': 'worker compute commands must be consumed as generated command variants',
+    'def _tokens_to_proto_json': 'protocol boundaries must not recursively reinterpret generated message descriptors',
+    'def _proto_json_to_tokens': 'protocol boundaries must not recursively reinterpret generated message descriptors',
 }
 SOURCE_SUFFIXES = {'.py', '.ts', '.svelte', '.proto'}
 WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
@@ -170,9 +172,7 @@ WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class StepRowCountRequest(': 'worker must consume generated row-count command messages instead of mirrored HTTP request models',
 }
 WORKER_STEP_CONVERTER_REQUIRED_TOKENS = {
-    'analysis_pb2.AnalysisPipelineStep': 'worker step conversion must parse generated protocol step contracts',
-    'analysis_pb2.StepConfig.DESCRIPTOR': 'worker step conversion must unwrap generated StepConfig oneof contracts',
-    'json_format.ParseDict': 'worker step conversion must reject shapes that do not parse as generated protocol messages',
+    'analysis_pb2.StepConfig.DESCRIPTOR': 'worker execution conversion must unwrap the generated StepConfig oneof',
 }
 BACKEND_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'backend compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',

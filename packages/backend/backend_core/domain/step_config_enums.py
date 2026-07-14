@@ -8,6 +8,19 @@ from backend_core.domain.protocol_enums import ProtocolEnumValue, protocol_token
 from dataforge_protocol import enums_pb2
 
 
+class AIProvider(ProtocolEnumValue):
+    OLLAMA: ClassVar[Self]
+    OPENAI: ClassVar[Self]
+    OPENROUTER: ClassVar[Self]
+    HUGGINGFACE: ClassVar[Self]
+
+
+AIProvider.OLLAMA = AIProvider(enums_pb2.AI_PROVIDER_OLLAMA, protocol_token('AIProvider', enums_pb2.AI_PROVIDER_OLLAMA))
+AIProvider.OPENAI = AIProvider(enums_pb2.AI_PROVIDER_OPENAI, protocol_token('AIProvider', enums_pb2.AI_PROVIDER_OPENAI))
+AIProvider.OPENROUTER = AIProvider(enums_pb2.AI_PROVIDER_OPENROUTER, protocol_token('AIProvider', enums_pb2.AI_PROVIDER_OPENROUTER))
+AIProvider.HUGGINGFACE = AIProvider(enums_pb2.AI_PROVIDER_HUGGINGFACE, protocol_token('AIProvider', enums_pb2.AI_PROVIDER_HUGGINGFACE))
+
+
 class FilterValueType(ProtocolEnumValue):
     STRING: ClassVar[Self]
     NUMBER: ClassVar[Self]
