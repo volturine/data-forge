@@ -98,6 +98,9 @@ FORBIDDEN_SOURCE_TOKENS = {
     'class AIProvider(DataForgeStrEnum)': 'hand-written AI provider enum; use dataforge_protocol.enums_pb2',
     'class ComputeRequestKind(': 'hand-written compute request kind enum; use dataforge_protocol.enums_pb2',
     'class ComputeRequestStatus(': 'hand-written compute request status enum; use dataforge_protocol.enums_pb2',
+    'command_envelope_from_json': 'compute command envelopes must be persisted and transported as protobuf bytes',
+    'response_envelope_from_json': 'compute response envelopes must be persisted and transported as protobuf bytes',
+    'envelope_to_json': 'compute envelopes must not round-trip through JSON persistence',
 }
 SOURCE_SUFFIXES = {'.py', '.ts', '.svelte', '.proto'}
 WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {

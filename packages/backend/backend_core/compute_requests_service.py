@@ -9,14 +9,10 @@ from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_loc
 from backend_core.config import settings
 from backend_core.domain.compute_requests.models import (
     command_envelope,
-    command_envelope_from_json,
     command_payload as proto_command_payload,
     compute_request_kind_name,
     compute_request_status_name,
-    envelope_to_json,
     kind_from_proto,
-    response_envelope,
-    response_envelope_from_json,
     response_payload as proto_response_payload,
     status_from_proto,
 )
@@ -78,7 +74,7 @@ def create_request(
         namespace=namespace,
         kind=kind,
         status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
-        request_json=envelope_to_json(envelope),
+        command_envelope=envelope.SerializeToString(),
         created_at=now,
         updated_at=now,
     )
@@ -92,7 +88,7 @@ def create_request(
 
 
 def command_payload(request: ComputeRequest) -> dict[str, object]:
-    envelope = command_envelope_from_json(request.request_json)
+    envelope = compute_pb2.ComputeCommandEnvelope.FromString(request.command_envelope)
     row_kind = kind_from_proto(request.kind)
     if kind_from_proto(envelope.kind) != row_kind:
         raise ValueError(
@@ -105,7 +101,7 @@ def command_payload(request: ComputeRequest) -> dict[str, object]:
 
 
 def command_envelope_for_request(request: ComputeRequest):
-    envelope = command_envelope_from_json(request.request_json)
+    envelope = compute_pb2.ComputeCommandEnvelope.FromString(request.command_envelope)
     row_kind = kind_from_proto(request.kind)
     if kind_from_proto(envelope.kind) != row_kind:
         raise ValueError(
@@ -118,9 +114,9 @@ def command_envelope_for_request(request: ComputeRequest):
 
 
 def response_payload(request: ComputeRequest) -> dict[str, object]:
-    if request.response_json is None:
+    if request.response_envelope is None:
         raise ValueError(f'Compute request {request.id} has no response envelope')
-    envelope = response_envelope_from_json(request.response_json)
+    envelope = compute_pb2.ComputeResponseEnvelope.FromString(request.response_envelope)
     row_kind = kind_from_proto(request.kind)
     if kind_from_proto(envelope.kind) != row_kind:
         raise ValueError(
@@ -184,7 +180,7 @@ def mark_request_completed(
     session: Session,
     request_id: str,
     *,
-    response_json: dict[str, object] | None = None,
+    response_envelope: compute_pb2.ComputeResponseEnvelope,
     artifact_path: str | None = None,
     artifact_name: str | None = None,
     artifact_content_type: str | None = None,
@@ -193,14 +189,8 @@ def mark_request_completed(
     if request is None:
         raise ValueError(f'Compute request {request_id} not found')
     request.status = enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
-    request.response_json = envelope_to_json(
-        response_envelope(
-            kind=kind_from_proto(request.kind),
-            status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
-            payload=response_json or {},
-            request_id=request.id,
-        )
-    )
+    _validate_response_envelope(request, response_envelope, enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED)
+    request.response_envelope = response_envelope.SerializeToString()
     request.error_message = None
     request.artifact_path = artifact_path
     request.artifact_name = artifact_name
@@ -216,22 +206,21 @@ def mark_request_completed(
     return request
 
 
-def mark_request_failed(session: Session, request_id: str, *, error_message: str, response_json: dict[str, object] | None = None) -> ComputeRequest:
+def mark_request_failed(
+    session: Session,
+    request_id: str,
+    *,
+    error_message: str,
+    response_envelope: compute_pb2.ComputeResponseEnvelope,
+) -> ComputeRequest:
     session.rollback()
     request = session.get(ComputeRequest, request_id)
     if request is None:
         raise ValueError(f'Compute request {request_id} not found')
     request.status = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
     request.error_message = error_message
-    request.response_json = envelope_to_json(
-        response_envelope(
-            kind=kind_from_proto(request.kind),
-            status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
-            payload=response_json or {},
-            request_id=request.id,
-            error_message=error_message,
-        )
-    )
+    _validate_response_envelope(request, response_envelope, enums_pb2.COMPUTE_REQUEST_STATUS_FAILED)
+    request.response_envelope = response_envelope.SerializeToString()
     request.completed_at = _utcnow()
     request.updated_at = request.completed_at
     request.lease_owner = None
@@ -241,6 +230,19 @@ def mark_request_failed(session: Session, request_id: str, *, error_message: str
     session.commit()
     session.refresh(request)
     return request
+
+
+def _validate_response_envelope(
+    request: ComputeRequest,
+    envelope: compute_pb2.ComputeResponseEnvelope,
+    expected_status: enums_pb2.ComputeRequestStatus,
+) -> None:
+    if kind_from_proto(envelope.kind) != kind_from_proto(request.kind):
+        raise ValueError(f'Compute request {request.id} response kind does not match request kind')
+    if status_from_proto(envelope.status) != expected_status:
+        raise ValueError(f'Compute request {request.id} response status does not match completion status')
+    if envelope.correlation_id != request.id:
+        raise ValueError(f'Compute request {request.id} response correlation id does not match request id')
 
 
 def queued_request_count(session: Session) -> int:

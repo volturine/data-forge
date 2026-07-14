@@ -6,11 +6,11 @@ from sqlmodel import select
 
 from backend_core import compute_requests_service
 from backend_core.domain.compute_requests.models import (
-    command_envelope_from_json,
     command_from_payload,
     command_payload,
     datasource_result_from_payload,
-    response_envelope_from_json,
+    kind_from_proto,
+    response_envelope,
     response_payload,
 )
 from backend_core.domain.runtime.events import RuntimePayloadKind
@@ -54,6 +54,26 @@ def _create_request(
         command=command_from_payload(kind, request_json),
         commit=commit,
     )
+
+
+def _stored_command(request: ComputeRequest) -> compute_pb2.ComputeCommandEnvelope:
+    return compute_pb2.ComputeCommandEnvelope.FromString(request.command_envelope)
+
+
+def _stored_response(request: ComputeRequest) -> compute_pb2.ComputeResponseEnvelope:
+    if request.response_envelope is None:
+        raise AssertionError('expected a stored response envelope')
+    return compute_pb2.ComputeResponseEnvelope.FromString(request.response_envelope)
+
+
+def _response(
+    request: ComputeRequest,
+    payload: dict[str, object],
+    *,
+    status: enums_pb2.ComputeRequestStatus = enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+    error_message: str | None = None,
+) -> compute_pb2.ComputeResponseEnvelope:
+    return response_envelope(kind=kind_from_proto(request.kind), request_id=request.id, status=status, payload=payload, error_message=error_message)
 
 
 def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_db_session) -> None:
@@ -119,7 +139,7 @@ def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> 
             namespace='default',
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
-            request_json={'duplicate': True},
+            command_envelope=b'duplicate',
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
@@ -129,19 +149,26 @@ def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> 
         test_db_session.commit()
 
     failed = compute_requests_service.mark_request_failed(
-        test_db_session, request_id, error_message='boom', response_json={'error': 'boom', 'status_code': 500}
+        test_db_session,
+        request_id,
+        error_message='boom',
+        response_envelope=_response(
+            request,
+            {'error': 'boom', 'status_code': 500},
+            status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
+            error_message='boom',
+        ),
     )
 
     assert failed.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
     assert failed.error_message == 'boom'
-    assert failed.response_json is not None
-    assert failed.response_json['kind'] == 'COMPUTE_REQUEST_KIND_PREVIEW'
-    assert failed.response_json['version'] == 1
-    assert failed.response_json['correlation_id'] == request_id
-    assert failed.response_json['status'] == 'COMPUTE_REQUEST_STATUS_FAILED'
-    assert failed.response_json['error_message'] == 'boom'
-    response_envelope = response_envelope_from_json(failed.response_json)
-    assert response_envelope.response.WhichOneof('response') == 'error'
+    stored_response = _stored_response(failed)
+    assert stored_response.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW
+    assert stored_response.version == 1
+    assert stored_response.correlation_id == request_id
+    assert stored_response.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+    assert stored_response.error_message == 'boom'
+    assert stored_response.response.WhichOneof('response') == 'error'
     assert compute_requests_service.response_payload(failed) == {'error': 'boom', 'status_code': 500}
     outbox_event = test_db_session.execute(select(RuntimeOutboxEvent)).scalars().one()
     assert outbox_event.kind == RuntimePayloadKind.COMPUTE_RESPONSE.value
@@ -166,17 +193,17 @@ def test_create_request_stores_typed_command_envelope(test_db_session) -> None:
         },
     )
 
-    assert request.request_json['kind'] == 'COMPUTE_REQUEST_KIND_SPAWN_ENGINE'
-    assert request.request_json['version'] == 1
-    assert request.request_json['idempotency_key'] == request.id
-    assert request.request_json['correlation_id'] == request.id
+    envelope = _stored_command(request)
+    assert envelope.kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE
+    assert envelope.version == 1
+    assert envelope.idempotency_key == request.id
+    assert envelope.correlation_id == request.id
     assert compute_requests_service.command_payload(request)['engine_identity'] == {
         'analysis_id': 'analysis-1',
         'resource_id': 'analysis-1',
         'reuse_policy': 'shared',
         'scope': 'analysis_interactive',
     }
-    envelope = command_envelope_from_json(request.request_json)
     assert envelope.command.WhichOneof('command') == 'spawn_engine'
     assert envelope.command.spawn_engine.engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
     assert envelope.command.spawn_engine.engine_identity.resource_id == 'analysis-1'
@@ -191,7 +218,7 @@ def test_create_preview_request_stores_typed_command_envelope(test_db_session) -
         request_json=_preview_payload(),
     )
 
-    envelope = command_envelope_from_json(request.request_json)
+    envelope = _stored_command(request)
 
     assert envelope.command.WhichOneof('command') == 'preview'
     assert envelope.command.preview.target_step_id == 'source'
@@ -267,7 +294,7 @@ def test_create_preview_request_converts_ai_provider_token(test_db_session) -> N
         request_json=payload,
     )
 
-    envelope = command_envelope_from_json(request.request_json)
+    envelope = _stored_command(request)
 
     assert envelope.command.preview.analysis_pipeline.tabs[0].steps[0].config.ai.provider == enums_pb2.AI_PROVIDER_OLLAMA
 
@@ -297,7 +324,7 @@ def test_create_preview_request_populates_protocol_step_type(test_db_session) ->
         request_json=payload,
     )
 
-    envelope = command_envelope_from_json(request.request_json)
+    envelope = _stored_command(request)
     step = envelope.command.preview.analysis_pipeline.tabs[0].steps[0]
 
     assert step.step_type == enums_pb2.STEP_TYPE_PLOT_SCATTER
@@ -341,7 +368,7 @@ def test_create_preview_request_omits_null_repeated_fields(test_db_session) -> N
         request_json=payload,
     )
 
-    envelope = command_envelope_from_json(request.request_json)
+    envelope = _stored_command(request)
 
     deduplicate = envelope.command.preview.analysis_pipeline.tabs[0].steps[0].config.deduplicate
     assert list(deduplicate.subset) == []
@@ -359,26 +386,28 @@ def test_mark_request_completed_stores_typed_response_envelope(test_db_session) 
     completed = compute_requests_service.mark_request_completed(
         test_db_session,
         request.id,
-        response_json={
-            'step_id': 'source',
-            'columns': ['id'],
-            'column_types': {'id': 'Int64'},
-            'data': [{'id': 1}],
-            'total_rows': 1,
-            'page': 1,
-            'page_size': 100,
-        },
+        response_envelope=_response(
+            request,
+            {
+                'step_id': 'source',
+                'columns': ['id'],
+                'column_types': {'id': 'Int64'},
+                'data': [{'id': 1}],
+                'total_rows': 1,
+                'page': 1,
+                'page_size': 100,
+            },
+        ),
     )
 
     assert completed.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
-    assert completed.response_json is not None
-    assert completed.response_json['kind'] == 'COMPUTE_REQUEST_KIND_PREVIEW'
-    assert completed.response_json['version'] == 1
-    assert completed.response_json['correlation_id'] == request.id
-    assert completed.response_json['status'] == 'COMPUTE_REQUEST_STATUS_COMPLETED'
-    assert 'error_message' not in completed.response_json
-    response_envelope = response_envelope_from_json(completed.response_json)
-    assert response_envelope.response.WhichOneof('response') == 'preview'
+    stored_response = _stored_response(completed)
+    assert stored_response.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW
+    assert stored_response.version == 1
+    assert stored_response.correlation_id == request.id
+    assert stored_response.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
+    assert not stored_response.HasField('error_message')
+    assert stored_response.response.WhichOneof('response') == 'preview'
     assert compute_requests_service.response_payload(completed) == {
         'step_id': 'source',
         'columns': ['id'],
@@ -402,7 +431,11 @@ def test_row_count_response_preserves_zero_count(test_db_session) -> None:
         request_json=_preview_payload(),
     )
 
-    completed = compute_requests_service.mark_request_completed(test_db_session, request.id, response_json={'step_id': 'filter-1', 'row_count': 0})
+    completed = compute_requests_service.mark_request_completed(
+        test_db_session,
+        request.id,
+        response_envelope=_response(request, {'step_id': 'filter-1', 'row_count': 0}),
+    )
 
     assert compute_requests_service.response_payload(completed) == {'step_id': 'filter-1', 'row_count': 0}
 
@@ -419,12 +452,17 @@ def test_failed_response_preserves_integral_status_code(test_db_session) -> None
         test_db_session,
         request.id,
         error_message='Datasource output is not available',
-        response_json={
-            'error': 'Datasource output is not available',
-            'status_code': 409,
-            'error_code': 'DATASOURCE_NOT_FOUND',
-            'details': {'datasource_id': 'datasource-1'},
-        },
+        response_envelope=_response(
+            request,
+            {
+                'error': 'Datasource output is not available',
+                'status_code': 409,
+                'error_code': 'DATASOURCE_NOT_FOUND',
+                'details': {'datasource_id': 'datasource-1'},
+            },
+            status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
+            error_message='Datasource output is not available',
+        ),
     )
 
     assert compute_requests_service.response_payload(failed) == {
@@ -433,9 +471,9 @@ def test_failed_response_preserves_integral_status_code(test_db_session) -> None
         'error_code': 'DATASOURCE_NOT_FOUND',
         'details': {'datasource_id': 'datasource-1'},
     }
-    response_envelope = response_envelope_from_json(failed.response_json or {})
-    assert response_envelope.response.WhichOneof('response') == 'error'
-    assert response_envelope.response.error.error_code == errors_pb2.ERROR_CODE_DATASOURCE_NOT_FOUND
+    stored_response = _stored_response(failed)
+    assert stored_response.response.WhichOneof('response') == 'error'
+    assert stored_response.response.error.error_code == errors_pb2.ERROR_CODE_DATASOURCE_NOT_FOUND
 
 
 def test_datasource_error_result_shape_uses_typed_compute_error_message(test_db_session) -> None:
@@ -449,16 +487,16 @@ def test_datasource_error_result_shape_uses_typed_compute_error_message(test_db_
     completed = compute_requests_service.mark_request_completed(
         test_db_session,
         request.id,
-        response_json={'error': 'datasource_not_found', 'message': 'DataSource missing not found'},
+        response_envelope=_response(request, {'error': 'datasource_not_found', 'message': 'DataSource missing not found'}),
     )
 
     assert compute_requests_service.response_payload(completed) == {
         'error': 'datasource_not_found',
         'message': 'DataSource missing not found',
     }
-    response_envelope = response_envelope_from_json(completed.response_json or {})
-    assert response_envelope.response.WhichOneof('response') == 'error'
-    assert response_envelope.response.error.message == 'DataSource missing not found'
+    stored_response = _stored_response(completed)
+    assert stored_response.response.WhichOneof('response') == 'error'
+    assert stored_response.response.error.message == 'DataSource missing not found'
 
 
 def test_compute_envelope_payload_helpers_reject_missing_typed_messages() -> None:
@@ -498,14 +536,17 @@ def test_column_stats_response_preserves_required_zero_defaults(test_db_session)
     completed = compute_requests_service.mark_request_completed(
         test_db_session,
         request.id,
-        response_json={
-            'column': 'city',
-            'dtype': 'String',
-            'count': 2,
-            'null_count': 0,
-            'null_percentage': 0.0,
-            'histogram': [{'start': 0.0, 'end': 1.0, 'count': 0}, {'start': 1.0, 'end': 2.0, 'count': 2}],
-        },
+        response_envelope=_response(
+            request,
+            {
+                'column': 'city',
+                'dtype': 'String',
+                'count': 2,
+                'null_count': 0,
+                'null_percentage': 0.0,
+                'histogram': [{'start': 0.0, 'end': 1.0, 'count': 0}, {'start': 1.0, 'end': 2.0, 'count': 2}],
+            },
+        ),
     )
 
     assert compute_requests_service.response_payload(completed) == {

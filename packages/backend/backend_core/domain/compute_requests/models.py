@@ -681,19 +681,6 @@ def response_envelope(
     return envelope
 
 
-def envelope_to_json(envelope: compute_pb2.ComputeCommandEnvelope | compute_pb2.ComputeResponseEnvelope) -> dict[str, object]:
-    decoded = json_format.MessageToDict(envelope, preserving_proto_field_name=True)
-    return cast(dict[str, object], decoded)
-
-
-def command_envelope_from_json(payload: dict[str, object]) -> compute_pb2.ComputeCommandEnvelope:
-    return cast(compute_pb2.ComputeCommandEnvelope, json_format.ParseDict(payload, compute_pb2.ComputeCommandEnvelope()))
-
-
-def response_envelope_from_json(payload: dict[str, object]) -> compute_pb2.ComputeResponseEnvelope:
-    return cast(compute_pb2.ComputeResponseEnvelope, json_format.ParseDict(payload, compute_pb2.ComputeResponseEnvelope()))
-
-
 def command_payload(envelope: compute_pb2.ComputeCommandEnvelope) -> dict[str, object]:
     command = envelope.command
     selected = command.WhichOneof('command')
