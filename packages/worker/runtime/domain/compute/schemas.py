@@ -3,7 +3,7 @@ from typing import Annotated, ClassVar, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, field_validator
 
-from dataforge_protocol import compute_pb2, enums_pb2
+from dataforge_protocol import enums_pb2
 from runtime.domain.analysis.step_types import is_step_type
 from runtime.domain.engine_runs.schemas import EngineRunKind
 from runtime.domain.protocol_enums import ProtocolEnumValue, protocol_token
@@ -199,43 +199,6 @@ class EngineStatusSchema(BaseModel):
     current_engine_run_id: str | None = None
 
 
-class EngineListSnapshotMessage(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    type: Literal["snapshot"] = "snapshot"
-    engines: list[EngineStatusSchema]
-    total: int
-
-
-class EngineWebsocketErrorMessage(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    type: Literal["error"] = "error"
-    error: str
-    status_code: int = 500
-
-
-class SpawnEngineRequest(BaseModel):
-    """Request body for spawning an engine with optional resource config."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    resource_config: EngineResourceConfig | None = None
-
-
-class StepPreviewRequest(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True, from_attributes=True)
-
-    analysis_id: str | None = None
-    engine_identity: compute_pb2.EngineIdentity | None = None
-    target_step_id: str
-    analysis_pipeline: AnalysisPipelinePayload
-    tab_id: str | None = None
-    row_limit: int = Field(default=1000, ge=1, le=5000)
-    page: int = Field(default=1, ge=1)
-    resource_config: EngineResourceConfig | None = None
-
-
 class StepPreviewResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -247,102 +210,6 @@ class StepPreviewResponse(BaseModel):
     page: int
     page_size: int
     metadata: dict | None = None
-
-
-StepPreviewRequest.model_rebuild()
-
-
-class ExportFormat(ProtocolEnumValue):
-    CSV: ClassVar[Self]
-    PARQUET: ClassVar[Self]
-    JSON: ClassVar[Self]
-    NDJSON: ClassVar[Self]
-    DUCKDB: ClassVar[Self]
-    EXCEL: ClassVar[Self]
-
-
-ExportFormat.CSV = ExportFormat(enums_pb2.EXPORT_FORMAT_CSV, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_CSV))
-ExportFormat.PARQUET = ExportFormat(enums_pb2.EXPORT_FORMAT_PARQUET, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_PARQUET))
-ExportFormat.JSON = ExportFormat(enums_pb2.EXPORT_FORMAT_JSON, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_JSON))
-ExportFormat.NDJSON = ExportFormat(enums_pb2.EXPORT_FORMAT_NDJSON, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_NDJSON))
-ExportFormat.DUCKDB = ExportFormat(enums_pb2.EXPORT_FORMAT_DUCKDB, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_DUCKDB))
-ExportFormat.EXCEL = ExportFormat(enums_pb2.EXPORT_FORMAT_EXCEL, protocol_token("ExportFormat", enums_pb2.EXPORT_FORMAT_EXCEL))
-
-
-class ExportDestination(ProtocolEnumValue):
-    DOWNLOAD: ClassVar[Self]
-    DATASOURCE: ClassVar[Self]
-
-
-ExportDestination.DOWNLOAD = ExportDestination(
-    enums_pb2.EXPORT_DESTINATION_DOWNLOAD, protocol_token("ExportDestination", enums_pb2.EXPORT_DESTINATION_DOWNLOAD)
-)
-ExportDestination.DATASOURCE = ExportDestination(
-    enums_pb2.EXPORT_DESTINATION_DATASOURCE, protocol_token("ExportDestination", enums_pb2.EXPORT_DESTINATION_DATASOURCE)
-)
-
-
-class IcebergExportOptions(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    table_name: str = "exported_data"
-    namespace: str = "outputs"
-    branch: str = "master"
-
-
-class ExportRequest(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    analysis_id: str | None = None
-    target_step_id: str
-    analysis_pipeline: AnalysisPipelinePayload
-    tab_id: str | None = None
-    format: ExportFormat = ExportFormat.CSV
-    filename: str = "export"
-    destination: ExportDestination = ExportDestination.DOWNLOAD
-    iceberg_options: IcebergExportOptions | None = None
-    result_id: str | None = None
-
-    @field_validator("result_id")
-    @classmethod
-    def validate_result_id(cls, value: str | None, info):
-        if not info.data:
-            return value
-        destination = info.data.get("destination")
-        if destination == ExportDestination.DATASOURCE and (not isinstance(value, str) or not value.strip()):
-            raise ValueError("Output exports require result_id")
-        return value
-
-
-class DownloadRequest(BaseModel):
-    """Request to download the result of a pipeline step in a specific format."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    analysis_id: str | None = None
-    target_step_id: str
-    analysis_pipeline: AnalysisPipelinePayload
-    tab_id: str | None = None
-    format: ExportFormat = ExportFormat.CSV
-    filename: str = "download"
-
-
-class StepSchemaRequest(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    analysis_id: str | None = None
-    target_step_id: str
-    analysis_pipeline: AnalysisPipelinePayload
-    tab_id: str | None = None
-
-
-class StepRowCountRequest(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    analysis_id: str | None = None
-    target_step_id: str
-    analysis_pipeline: AnalysisPipelinePayload
-    tab_id: str | None = None
 
 
 class IcebergSnapshotInfo(BaseModel):
@@ -649,13 +516,6 @@ class ActiveBuildDetail(ActiveBuildSummary):
         )
 
 
-class ActiveBuildListResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    builds: list[ActiveBuildSummary]
-    total: int
-
-
 class BuildEventType(ProtocolEnumValue):
     PLAN: ClassVar[Self]
     STEP_START: ClassVar[Self]
@@ -860,34 +720,8 @@ BuildEvent = Annotated[
 BuildEventAdapter: TypeAdapter[BuildEvent] = TypeAdapter(BuildEvent)
 
 
-class CancelBuildResponse(BaseModel):
-    id: str
-    build_id: str | None = None
-    engine_run_id: str | None = None
-    status: Literal["cancelled"] = "cancelled"
-    duration_ms: int | None = None
-    cancelled_at: datetime
-    cancelled_by: str | None = None
-
-
-class BuildSnapshotMessage(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    type: Literal["snapshot"] = "snapshot"
-    build: ActiveBuildDetail
-    last_sequence: int = 0
-
-
 class BuildListSnapshotMessage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     type: Literal["snapshot"] = "snapshot"
     builds: list[ActiveBuildSummary]
-
-
-class BuildWebsocketErrorMessage(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    type: Literal["error"] = "error"
-    error: str
-    status_code: int = 500

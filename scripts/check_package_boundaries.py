@@ -160,6 +160,12 @@ PROTOCOL_COMPUTE_REQUIRED_TOKENS = {
 }
 WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
+    'class SpawnEngineRequest(': 'worker must consume generated engine command messages instead of mirrored HTTP request models',
+    'class StepPreviewRequest(': 'worker must consume generated preview command messages instead of mirrored HTTP request models',
+    'class ExportRequest(': 'worker must consume generated export command messages instead of mirrored HTTP request models',
+    'class DownloadRequest(': 'worker must consume generated download command messages instead of mirrored HTTP request models',
+    'class StepSchemaRequest(': 'worker must consume generated schema command messages instead of mirrored HTTP request models',
+    'class StepRowCountRequest(': 'worker must consume generated row-count command messages instead of mirrored HTTP request models',
 }
 WORKER_STEP_CONVERTER_REQUIRED_TOKENS = {
     'analysis_pb2.AnalysisPipelineStep': 'worker step conversion must parse generated protocol step contracts',
