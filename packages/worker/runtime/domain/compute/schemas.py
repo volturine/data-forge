@@ -314,18 +314,6 @@ class ExportRequest(BaseModel):
         return value
 
 
-class ExportResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    success: bool
-    filename: str
-    format: str
-    destination: str
-    message: str | None = None
-    datasource_id: str | None = None
-    datasource_name: str | None = None
-
-
 class DownloadRequest(BaseModel):
     """Request to download the result of a pipeline step in a specific format."""
 

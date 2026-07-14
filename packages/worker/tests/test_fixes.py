@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
-from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2
+from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2, errors_pb2
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, internal_api
@@ -21,6 +21,7 @@ from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
 from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
+from worker_grpc.codec import struct_to_dict
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -304,15 +305,10 @@ def test_analysis_pipeline_protocol_deduplicate_absent_subset_is_not_null() -> N
 
 
 def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypatch) -> None:
-    completed: list[dict[str, object]] = []
+    completed: list[compute_pb2.ComputeResponse] = []
 
     monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
     monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
-
-    class _PreviewResponse:
-        def model_dump(self, *, mode: str) -> dict[str, object]:
-            assert mode == "json"
-            return {"step_id": "source", "data": []}
 
     def fake_preview_step(**kwargs):
         assert kwargs["analysis_id"] == "analysis-from-proto"
@@ -322,11 +318,18 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         assert kwargs["analysis_pipeline"]["analysis_id"] == "analysis-from-proto"
         assert kwargs["request_json"]["analysis_id"] == "analysis-from-proto"
         assert "legacy_payload" not in kwargs["request_json"]
-        return _PreviewResponse()
+        return compute_schemas.StepPreviewResponse(
+            step_id="source",
+            columns=[],
+            data=[],
+            total_rows=0,
+            page=2,
+            page_size=25,
+        )
 
     class _Client:
         def complete_compute_request(self, **kwargs):
-            completed.append(kwargs["response_json"])
+            completed.append(kwargs["response"])
 
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
@@ -341,17 +344,18 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         id="req-preview",
         namespace="default",
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        request_json={"legacy_payload": True},
         command_envelope=_preview_command_envelope(request_id="req-preview"),
     )
 
     compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
 
-    assert completed == [{"step_id": "source", "data": []}]
+    assert len(completed) == 1
+    assert completed[0].WhichOneof("response") == "preview"
+    assert completed[0].preview.step_id == "source"
 
 
 def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) -> None:
-    completed: list[dict[str, object]] = []
+    completed: list[compute_pb2.ComputeResponse] = []
     dispatched: list[bool] = []
 
     engine = SimpleNamespace(current_job_id="job-1", is_process_alive=lambda: True)
@@ -367,7 +371,7 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
 
     class _Client:
         def complete_compute_request(self, **kwargs):
-            completed.append(kwargs["response_json"])
+            completed.append(kwargs["response"])
 
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
@@ -386,7 +390,6 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
         id="req-1",
         namespace="default",
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
-        request_json={"engine_identity": _engine_identity_payload(identity)},
         command_envelope=_command_envelope(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
             request_id="req-1",
@@ -398,12 +401,14 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
     compute_request_runtime._execute_request_sync(claimed, cast(Any, manager))
 
     assert shutdown_calls == [identity]
-    assert completed == [{"success": True}]
+    assert len(completed) == 1
+    assert completed[0].WhichOneof("response") == "ack"
+    assert completed[0].ack.success is True
     assert dispatched == [True]
 
 
 def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
-    failed: list[dict[str, object]] = []
+    failed: list[compute_pb2.ComputeErrorResult] = []
     dispatched: list[bool] = []
 
     monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
@@ -419,7 +424,7 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
             )
 
         def fail_compute_request(self, **kwargs):
-            failed.append(kwargs["response_json"])
+            failed.append(kwargs["error"])
 
         def dispatch_runtime_outbox(self):
             dispatched.append(True)
@@ -431,7 +436,6 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
         id="req-404",
         namespace="default",
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
-        request_json={"datasource_id": "datasource-1"},
         command_envelope=_command_envelope(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
             request_id="req-404",
@@ -442,14 +446,11 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
     with caplog.at_level("INFO"):
         compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
 
-    assert failed == [
-        {
-            "error": "DataSource datasource-1 not found",
-            "status_code": 404,
-            "error_code": "DATASOURCE_NOT_FOUND",
-            "details": {"datasource_id": "datasource-1"},
-        }
-    ]
+    assert len(failed) == 1
+    assert failed[0].error == "DataSource datasource-1 not found"
+    assert failed[0].status_code == 404
+    assert failed[0].error_code == errors_pb2.ERROR_CODE_DATASOURCE_NOT_FOUND
+    assert struct_to_dict(failed[0].details) == {"datasource_id": "datasource-1"}
     assert dispatched == [True]
     assert [(record.levelname, record.getMessage()) for record in caplog.records] == [
         ("INFO", "Compute request req-404 rejected: DataSource datasource-1 not found")

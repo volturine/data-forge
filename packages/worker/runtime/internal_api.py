@@ -90,7 +90,6 @@ class ClaimedComputeRequest:
     id: str
     namespace: str
     kind: enums_pb2.ComputeRequestKind
-    request_json: dict[str, object]
     command_envelope: compute_pb2.ComputeCommandEnvelope
 
 
@@ -154,7 +153,6 @@ class WorkerInternalApiClient:
             id=response.request.id,
             namespace=response.request.namespace,
             kind=command.kind,
-            request_json=_compute_command_payload(command),
             command_envelope=command,
         )
 
@@ -164,7 +162,7 @@ class WorkerInternalApiClient:
         namespace: str,
         request_id: str,
         kind: enums_pb2.ComputeRequestKind,
-        response_json: dict[str, object] | None = None,
+        response: compute_pb2.ComputeResponse,
         artifact_path: str | None = None,
         artifact_name: str | None = None,
         artifact_content_type: str | None = None,
@@ -176,7 +174,7 @@ class WorkerInternalApiClient:
                 kind=kind,
                 request_id=request_id,
                 status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
-                response_json=response_json or {},
+                response=response,
             ),
         )
         if artifact_path is not None:
@@ -194,7 +192,7 @@ class WorkerInternalApiClient:
         request_id: str,
         kind: enums_pb2.ComputeRequestKind,
         error_message: str,
-        response_json: dict[str, object],
+        error: compute_pb2.ComputeErrorResult,
     ) -> None:
         self._call(
             lambda: self._stub.FailComputeRequest(
@@ -206,7 +204,7 @@ class WorkerInternalApiClient:
                         kind=kind,
                         request_id=request_id,
                         status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
-                        response_json=response_json,
+                        response=compute_pb2.ComputeResponse(error=error),
                         error_message=error_message,
                     ),
                 ),
@@ -218,7 +216,13 @@ class WorkerInternalApiClient:
     def release_compute_requests(self, *, worker_id: str) -> int:
         return int(self._call(lambda: self._stub.ReleaseComputeRequests(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata())).count)
 
-    def execute_datasource_request(self, *, namespace: str, kind: enums_pb2.ComputeRequestKind, command: datasource_pb2.DatasourceCommand) -> dict[str, object]:
+    def execute_datasource_request(
+        self,
+        *,
+        namespace: str,
+        kind: enums_pb2.ComputeRequestKind,
+        command: datasource_pb2.DatasourceCommand,
+    ) -> datasource_pb2.DatasourceResult:
         response = self._call(
             lambda: self._stub.ExecuteDatasourceRequest(
                 worker_runtime_pb2.WorkerExecuteDatasourceRequest(
@@ -230,7 +234,7 @@ class WorkerInternalApiClient:
                 metadata=self._metadata(),
             )
         )
-        return _datasource_result_payload(response.result)
+        return response.result
 
     def schedule_ingest_datasource(self, *, namespace: str, datasource_id: str) -> dict[str, object]:
         response = self._call(
@@ -1111,33 +1115,6 @@ def _schema_info_payload(value: datasource_pb2.SchemaInfo) -> dict[str, object]:
     return payload
 
 
-def _compute_command_payload(envelope: compute_pb2.ComputeCommandEnvelope) -> dict[str, object]:
-    command = envelope.command
-    selected = command.WhichOneof("command")
-    if selected is None:
-        raise ValueError("Compute command envelope is missing typed command")
-    if selected == "datasource":
-        datasource_command = command.datasource
-        datasource_field = datasource_command.WhichOneof("command")
-        if datasource_field is None:
-            return {}
-        return _message_to_payload(getattr(datasource_command, datasource_field))
-    return _message_to_payload(getattr(command, selected))
-
-
-def _datasource_result_payload(result: datasource_pb2.DatasourceResult) -> dict[str, object]:
-    selected = result.WhichOneof("result")
-    if selected is None:
-        return {}
-    payload = _message_to_payload(getattr(result, selected))
-    if selected == "schema":
-        return _schema_info_payload(result.schema)
-    if selected == "datasource":
-        payload.pop("schema_info", None)
-        payload["schema_cache"] = _schema_info_payload(result.datasource.schema_info) if result.datasource.HasField("schema_info") else None
-    return payload
-
-
 def _required_event_str(payload: Mapping[str, object], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -1338,82 +1315,12 @@ def _build_event_proto(namespace: str, payload: Mapping[str, object]) -> compute
     return message
 
 
-def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
-    result = datasource_pb2.DatasourceResult()
-    if "error" in payload:
-        result.error.CopyFrom(_parse_proto_message(datasource_pb2.DatasourceErrorResult, payload))
-    elif kind in {
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
-    }:
-        result.datasource.CopyFrom(_parse_proto_message(datasource_pb2.DataSourceRecord, _datasource_record_payload_for_proto(payload)))
-    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
-        result.schema.CopyFrom(_parse_proto_message(datasource_pb2.SchemaInfo, payload))
-    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
-        result.column_stats.CopyFrom(_parse_proto_message(datasource_pb2.ColumnStatsResult, payload))
-    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS:
-        result.snapshot_compare.CopyFrom(_parse_proto_message(datasource_pb2.SnapshotCompareResult, payload))
-    else:
-        raise ValueError(f"Unsupported datasource response kind: {kind}")
-    return result
-
-
-def _datasource_record_payload_for_proto(payload: dict[str, object]) -> dict[str, object]:
-    proto_payload = dict(payload)
-    schema_cache = proto_payload.pop("schema_cache", None)
-    if isinstance(schema_cache, Mapping):
-        proto_payload["schema_info"] = dict(schema_cache)
-    return proto_payload
-
-
-def _compute_response(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeResponse:
-    response = compute_pb2.ComputeResponse()
-    if "error" in payload:
-        response.error.CopyFrom(_parse_proto_message(compute_pb2.ComputeErrorResult, payload))
-    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
-        preview_payload = dict(payload)
-        rows = preview_payload.pop("data", [])
-        preview_payload["rows"] = rows
-        response.preview.CopyFrom(_parse_proto_message(compute_pb2.StepPreviewResult, preview_payload))
-    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
-        response.schema.CopyFrom(_parse_proto_message(compute_pb2.StepSchemaResult, payload))
-    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
-        response.row_count.CopyFrom(_parse_proto_message(compute_pb2.StepRowCountResult, payload))
-    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
-        response.export.CopyFrom(_parse_proto_message(compute_pb2.ExportResult, payload))
-    elif kind in {
-        enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
-        enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
-    }:
-        response.engine_status.CopyFrom(_parse_proto_message(compute_pb2.EngineStatusResult, payload))
-    elif kind in {
-        enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
-        enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
-    }:
-        response.ack.CopyFrom(_parse_proto_message(compute_pb2.ComputeAckResult, payload or {"success": True}))
-    elif kind in {
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
-        enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
-        enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
-    }:
-        response.datasource.CopyFrom(_datasource_result(kind, payload))
-    else:
-        raise ValueError(f"Unsupported compute response kind: {kind}")
-    return response
-
-
 def _compute_response_envelope(
     *,
     kind: enums_pb2.ComputeRequestKind,
     request_id: str,
     status: enums_pb2.ComputeRequestStatus,
-    response_json: dict[str, object],
+    response: compute_pb2.ComputeResponse,
     error_message: str | None = None,
 ) -> compute_pb2.ComputeResponseEnvelope:
     envelope = compute_pb2.ComputeResponseEnvelope(
@@ -1422,7 +1329,7 @@ def _compute_response_envelope(
         correlation_id=request_id,
         status=status,
     )
-    envelope.response.CopyFrom(_compute_response(kind, response_json or ({"error": error_message} if error_message is not None else {})))
+    envelope.response.CopyFrom(response)
     if error_message is not None:
         envelope.error_message = error_message
     return envelope

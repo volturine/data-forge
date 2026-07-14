@@ -101,6 +101,8 @@ FORBIDDEN_SOURCE_TOKENS = {
     'command_envelope_from_json': 'compute command envelopes must be persisted and transported as protobuf bytes',
     'response_envelope_from_json': 'compute response envelopes must be persisted and transported as protobuf bytes',
     'envelope_to_json': 'compute envelopes must not round-trip through JSON persistence',
+    'def _compute_response(kind': 'worker compute results must be constructed as generated response variants',
+    'def _compute_command_payload': 'worker compute commands must be consumed as generated command variants',
 }
 SOURCE_SUFFIXES = {'.py', '.ts', '.svelte', '.proto'}
 WORKER_PROTOCOL_ADAPTER_FORBIDDEN_TOKENS = {
@@ -513,7 +515,7 @@ def main() -> int:
 
     for rel_path in (
         Path('packages/backend/backend_core/domain/compute_requests/models.py'),
-        Path('packages/worker/runtime/internal_api.py'),
+        Path('packages/worker/runtime/compute_request_runtime.py'),
     ):
         path = ROOT / rel_path
         if not path.exists():

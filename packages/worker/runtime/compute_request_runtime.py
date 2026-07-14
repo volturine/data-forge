@@ -12,7 +12,7 @@ from typing import Any, cast
 from google.protobuf import descriptor as proto_descriptor
 from google.protobuf import json_format, message
 
-from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
+from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2, errors_pb2
 from dataforge_protocol.enums_pb2 import dataforge_token
 from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager
@@ -21,9 +21,9 @@ from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
 from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
 from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
-from runtime.json_utils import copy_json_object
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
+from worker_grpc.codec import dict_to_struct
 
 logger = logging.getLogger(__name__)
 
@@ -67,19 +67,7 @@ class ClaimedComputeRequest:
     id: str
     namespace: str
     kind: enums_pb2.ComputeRequestKind
-    request_json: dict[str, object]
     command_envelope: compute_pb2.ComputeCommandEnvelope
-
-    def read_int(self, key: str) -> int | None:
-        value = self.request_json.get(key)
-        return int(value) if value is not None and isinstance(value, (str, int)) else None
-
-    def read_str(self, key: str) -> str | None:
-        value = self.request_json.get(key)
-        return str(value) if value is not None else None
-
-    def read_dict(self, key: str) -> dict[str, object] | None:
-        return copy_json_object(self.request_json.get(key))
 
 
 def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:
@@ -90,7 +78,6 @@ def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:
         id=claimed.id,
         namespace=claimed.namespace,
         kind=claimed.kind,
-        request_json=claimed.request_json,
         command_envelope=claimed.command_envelope,
     )
 
@@ -160,8 +147,8 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             if claimed.command_envelope.command.WhichOneof("command") != "datasource":
                 raise ValueError("compute command envelope must contain datasource")
             datasource_command = claimed.command_envelope.command.datasource
-            response_json = client.execute_datasource_request(namespace=claimed.namespace, kind=claimed.kind, command=datasource_command)
-            _complete_request(client, claimed, response_json=response_json)
+            result = client.execute_datasource_request(namespace=claimed.namespace, kind=claimed.kind, command=datasource_command)
+            _complete_request(client, claimed, response=compute_pb2.ComputeResponse(datasource=result))
             return
 
         if claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
@@ -181,7 +168,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 tab_id=preview_request.tab_id if preview_request.HasField("tab_id") else None,
                 request_json=request_json,
             )
-            _complete_request(client, claimed, response_json=preview_response.model_dump(mode="json"))
+            _complete_request(client, claimed, response=_preview_result(preview_response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
             schema_request = cast(compute_pb2.StepSchemaCommand, _compute_command_from_claimed(claimed, "schema"))
             if not schema_request.HasField("analysis_id"):
@@ -194,7 +181,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 analysis_pipeline=_analysis_pipeline_to_service_payload(schema_request.analysis_pipeline),
                 tab_id=schema_request.tab_id if schema_request.HasField("tab_id") else None,
             )
-            _complete_request(client, claimed, response_json=schema_response.model_dump(mode="json"))
+            _complete_request(client, claimed, response=_schema_result(schema_response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
             row_count_request = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
             if not row_count_request.HasField("analysis_id"):
@@ -209,7 +196,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 tab_id=row_count_request.tab_id if row_count_request.HasField("tab_id") else None,
                 request_json=request_json,
             )
-            _complete_request(client, claimed, response_json=row_count_response.model_dump(mode="json"))
+            _complete_request(client, claimed, response=_row_count_result(row_count_response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
             download_request = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
             file_bytes, filename, content_type = service.download_step(
@@ -223,11 +210,18 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 tab_id=download_request.tab_id if download_request.HasField("tab_id") else None,
             )
             artifact_path = _write_artifact(claimed.id, filename, file_bytes)
-            _complete_request(client, claimed, artifact_path=artifact_path, artifact_name=filename, artifact_content_type=content_type)
+            _complete_request(
+                client,
+                claimed,
+                response=compute_pb2.ComputeResponse(ack=compute_pb2.ComputeAckResult(success=True)),
+                artifact_path=artifact_path,
+                artifact_name=filename,
+                artifact_content_type=content_type,
+            )
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
             export_request = cast(compute_pb2.ExportCommand, _compute_command_from_claimed(claimed, "export"))
             request_json = _export_request_json(export_request)
-            result = service.export_data(
+            export_operation_result = service.export_data(
                 session=None,
                 manager=manager,
                 target_step_id=export_request.target_step_id,
@@ -239,16 +233,20 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 request_json=request_json,
                 result_id=export_request.result_id if export_request.HasField("result_id") else None,
             )
-            export_response = compute_schemas.ExportResponse(
+            export_result = compute_pb2.ExportResult(
                 success=True,
-                filename=result.datasource_name,
-                format="iceberg",
-                destination=_enum_token(enums_pb2.ExportDestination.DESCRIPTOR, export_request.destination),
-                message=f"Created datasource {result.datasource_name}",
-                datasource_id=result.datasource_id,
-                datasource_name=result.result_meta.get("datasource_name") if isinstance(result.result_meta, dict) else None,
+                filename=export_operation_result.datasource_name,
+                format=export_request.format,
+                destination=export_request.destination,
+                message=f"Created datasource {export_operation_result.datasource_name}",
+                datasource_id=export_operation_result.datasource_id,
             )
-            _complete_request(client, claimed, response_json=export_response.model_dump(mode="json"))
+            datasource_name = (
+                export_operation_result.result_meta.get("datasource_name") if isinstance(export_operation_result.result_meta, dict) else None
+            )
+            if isinstance(datasource_name, str):
+                export_result.datasource_name = datasource_name
+            _complete_request(client, claimed, response=compute_pb2.ComputeResponse(export=export_result))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "spawn_engine")
             identity = command.engine_identity
@@ -258,7 +256,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 resource_config=resource_config,
             )
             response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(identity))
-            _complete_request(client, claimed, response_json=response.model_dump(mode="json"))
+            _complete_request(client, claimed, response=_engine_status_result(response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "configure_engine")
             identity = command.engine_identity
@@ -267,7 +265,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 raise ValueError("resource_config is required")
             manager.restart_engine_with_config(identity, resource_config)
             response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(identity))
-            _complete_request(client, claimed, response_json=response.model_dump(mode="json"))
+            _complete_request(client, claimed, response=_engine_status_result(response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "shutdown_engine")
             identity = command.engine_identity
@@ -280,21 +278,19 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             if engine.current_job_id and engine.is_process_alive():
                 raise EngineBusyError(identity.resource_id)
             manager.shutdown_engine(identity)
-            _complete_request(client, claimed, response_json={"success": True})
+            _complete_request(client, claimed, response=compute_pb2.ComputeResponse(ack=compute_pb2.ComputeAckResult(success=True)))
         else:
             raise ValueError(f"Unsupported compute request kind: {_compute_request_kind_name(claimed.kind)}")
     except Exception as exc:
-        payload = _error_payload(exc)
-        status_code = payload.get("status_code")
-        if isinstance(status_code, int) and status_code >= 500:
+        error = _error_result(exc)
+        status_code = error.status_code if error.HasField("status_code") else None
+        if status_code is not None and status_code >= 500:
             logger.error("Compute request %s failed: %s", claimed.id, exc, exc_info=True)
-        elif isinstance(status_code, int) and status_code >= 400:
+        elif status_code is not None and status_code >= 400:
             logger.info("Compute request %s rejected: %s", claimed.id, exc)
         else:
             logger.warning("Compute request %s failed: %s", claimed.id, exc)
-        client.fail_compute_request(
-            namespace=claimed.namespace, request_id=claimed.id, kind=claimed.kind, error_message=_error_message(exc), response_json=payload
-        )
+        client.fail_compute_request(namespace=claimed.namespace, request_id=claimed.id, kind=claimed.kind, error_message=_error_message(exc), error=error)
     finally:
         try:
             client.dispatch_runtime_outbox()
@@ -478,11 +474,86 @@ def _write_artifact(request_id: str, filename: str, content: bytes) -> str:
     return artifact_url
 
 
+def _preview_result(value: compute_schemas.StepPreviewResponse) -> compute_pb2.ComputeResponse:
+    result = compute_pb2.StepPreviewResult(
+        step_id=value.step_id,
+        columns=value.columns,
+        column_types=value.column_types or {},
+        rows=[dict_to_struct(row) for row in value.data],
+        total_rows=value.total_rows,
+        page=value.page,
+        page_size=value.page_size,
+    )
+    if value.metadata is not None:
+        result.metadata.CopyFrom(dict_to_struct(value.metadata))
+    return compute_pb2.ComputeResponse(preview=result)
+
+
+def _schema_result(value: compute_schemas.StepSchemaResponse) -> compute_pb2.ComputeResponse:
+    return compute_pb2.ComputeResponse(
+        schema=compute_pb2.StepSchemaResult(step_id=value.step_id, columns=value.columns, column_types=value.column_types)
+    )
+
+
+def _row_count_result(value: compute_schemas.StepRowCountResponse) -> compute_pb2.ComputeResponse:
+    return compute_pb2.ComputeResponse(row_count=compute_pb2.StepRowCountResult(step_id=value.step_id, row_count=value.row_count))
+
+
+def _resource_config_proto(value: compute_schemas.EngineResourceConfig | None) -> compute_pb2.EngineResourceConfig | None:
+    if value is None:
+        return None
+    result = compute_pb2.EngineResourceConfig()
+    if value.max_threads is not None:
+        result.max_threads = value.max_threads
+    if value.max_memory_mb is not None:
+        result.max_memory_mb = value.max_memory_mb
+    if value.streaming_chunk_size is not None:
+        result.streaming_chunk_size = value.streaming_chunk_size
+    return result
+
+
+def _engine_status_result(value: compute_schemas.EngineStatusSchema) -> compute_pb2.ComputeResponse:
+    result = compute_pb2.EngineStatusResult(
+        analysis_id=value.analysis_id,
+        resource_id=value.resource_id,
+        status=cast(enums_pb2.EngineStatus, value.status.number),
+    )
+    optional_scalars = {
+        "process_id": value.process_id,
+        "last_activity": value.last_activity,
+        "current_job_id": value.current_job_id,
+        "datasource_id": value.datasource_id,
+        "build_id": value.build_id,
+        "current_build_id": value.current_build_id,
+        "current_engine_run_id": value.current_engine_run_id,
+    }
+    for field_name, field_value in optional_scalars.items():
+        if field_value is not None:
+            setattr(result, field_name, field_value)
+    if value.scope is not None:
+        result.scope = cast(enums_pb2.EngineScope, value.scope.number)
+    if value.reuse_policy is not None:
+        result.reuse_policy = cast(enums_pb2.EngineReusePolicy, value.reuse_policy.number)
+    for field_name, config in (("resource_config", value.resource_config), ("effective_resources", value.effective_resources)):
+        proto_config = _resource_config_proto(config)
+        if proto_config is not None:
+            getattr(result, field_name).CopyFrom(proto_config)
+    if value.defaults is not None:
+        result.defaults.CopyFrom(
+            compute_pb2.EngineDefaults(
+                max_threads=value.defaults.max_threads,
+                max_memory_mb=value.defaults.max_memory_mb,
+                streaming_chunk_size=value.defaults.streaming_chunk_size,
+            )
+        )
+    return compute_pb2.ComputeResponse(engine_status=result)
+
+
 def _complete_request(
     client: WorkerInternalApiClient,
     claimed: ClaimedComputeRequest,
     *,
-    response_json: dict[str, object] | None = None,
+    response: compute_pb2.ComputeResponse,
     artifact_path: str | None = None,
     artifact_name: str | None = None,
     artifact_content_type: str | None = None,
@@ -491,7 +562,7 @@ def _complete_request(
         namespace=claimed.namespace,
         request_id=claimed.id,
         kind=claimed.kind,
-        response_json=response_json,
+        response=response,
         artifact_path=artifact_path,
         artifact_name=artifact_name,
         artifact_content_type=artifact_content_type,
@@ -506,24 +577,23 @@ def _error_message(exc: Exception) -> str:
     return str(exc)
 
 
-def _error_payload(exc: Exception) -> dict[str, object]:
+def _error_result(exc: Exception) -> compute_pb2.ComputeErrorResult:
     if isinstance(exc, BackendWorkerRpcError):
-        payload: dict[str, object] = {
-            "error": exc.error,
-            "status_code": exc.status_code,
-        }
+        result = compute_pb2.ComputeErrorResult(error=exc.error, status_code=exc.status_code)
         if exc.error_code is not None:
-            payload["error_code"] = exc.error_code
+            result.error_code = cast(errors_pb2.ErrorCode, errors_pb2.ErrorCode.Value(f"ERROR_CODE_{exc.error_code}"))
         if exc.details:
-            payload["details"] = exc.details
-        return payload
+            result.details.CopyFrom(dict_to_struct(exc.details))
+        return result
     if isinstance(exc, AppError):
-        return {
-            "error": exc.message,
-            "status_code": status_for_app_error(exc),
-            "error_code": exc.error_code,
-            "details": exc.details or {},
-        }
+        result = compute_pb2.ComputeErrorResult(
+            error=exc.message,
+            status_code=status_for_app_error(exc),
+            error_code=cast(errors_pb2.ErrorCode, exc.error_code_value),
+        )
+        if exc.details:
+            result.details.CopyFrom(dict_to_struct(exc.details))
+        return result
     if isinstance(exc, ValueError):
-        return {"error": str(exc), "status_code": 400}
-    return {"error": "An internal error occurred", "status_code": 500}
+        return compute_pb2.ComputeErrorResult(error=str(exc), status_code=400)
+    return compute_pb2.ComputeErrorResult(error="An internal error occurred", status_code=500)
