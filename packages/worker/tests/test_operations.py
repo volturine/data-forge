@@ -808,6 +808,28 @@ def test_expression_rejects_dunder_escape() -> None:
         parse_expression('pl.col("age").__class__')
 
 
+def test_expression_ast_evaluator_supports_polars_chains() -> None:
+    frame = pl.DataFrame({"age": [10, 20]}).lazy()
+
+    result = frame.select(parse_expression('pl.when(pl.col("age") >= 18).then(pl.col("age").cast(pl.Float64) * 2).otherwise(0)').alias("score")).collect()
+
+    assert result["score"].to_list() == [0.0, 40.0]
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        'open("/tmp/data")',
+        '(lambda value: value)(pl.col("age"))',
+        '[value for value in [pl.col("age")]]',
+        'pl.read_csv("/tmp/data.csv")',
+    ],
+)
+def test_expression_ast_evaluator_rejects_non_expression_capabilities(expression: str) -> None:
+    with pytest.raises(ValueError, match="not allowed|Failed to parse expression"):
+        parse_expression(expression)
+
+
 def test_with_columns_rejects_reflection_escape() -> None:
     handler = WithColumnsHandler()
     with pytest.raises(ValueError, match="forbidden pattern"):
