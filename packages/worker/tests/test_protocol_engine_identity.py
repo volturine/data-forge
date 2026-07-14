@@ -32,3 +32,33 @@ def test_step_preview_request_rejects_invalid_engine_identity_payload() -> None:
 
     with pytest.raises(ValidationError):
         Validator().validate(identity)
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            datasource_id="datasource-1",
+            resource_id="other",
+        ),
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+            analysis_id="analysis-1",
+            resource_id="analysis-1",
+        ),
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_BUILD,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+            analysis_id="analysis-1",
+            build_id="build-1",
+            resource_id="build-1",
+        ),
+    ],
+    ids=["mismatched-resource-id", "invalid-reuse-policy", "multiple-scoped-ids"],
+)
+def test_engine_identity_rejects_scope_invariant_violations(identity: compute_pb2.EngineIdentity) -> None:
+    with pytest.raises(ValidationError):
+        Validator().validate(identity)

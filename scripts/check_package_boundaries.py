@@ -158,6 +158,7 @@ PROTOCOL_COMPUTE_REQUIRED_TOKENS = {
     'message BuildSnapshotMessage': 'protocol must own build snapshot websocket DTOs',
     'message BuildWebsocketErrorMessage': 'protocol must own build websocket error DTOs',
     'string resource_id = 6': 'protocol EngineIdentity must explicitly carry resource_id',
+    'id: "engine_identity.scope_resource"': 'protocol EngineIdentity must enforce scope, reuse policy, and resource ID consistency',
 }
 WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
     'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',

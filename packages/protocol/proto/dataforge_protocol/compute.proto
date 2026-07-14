@@ -11,8 +11,20 @@ import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
 message EngineIdentity {
-  EngineScope scope = 1 [(buf.validate.field).enum.defined_only = true];
-  EngineReusePolicy reuse_policy = 2 [(buf.validate.field).enum.defined_only = true];
+  option (buf.validate.message).cel = {
+    id: "engine_identity.scope_resource"
+    message: "engine identity must carry exactly the resource ID and reuse policy required by its scope"
+    expression: "(this.scope == 1 && this.reuse_policy == 1 && has(this.datasource_id) && this.resource_id == this.datasource_id && !has(this.analysis_id) && !has(this.build_id)) || (this.scope == 2 && this.reuse_policy == 1 && has(this.analysis_id) && this.resource_id == this.analysis_id && !has(this.datasource_id) && !has(this.build_id)) || (this.scope == 3 && this.reuse_policy == 2 && has(this.build_id) && this.resource_id == this.build_id && !has(this.analysis_id) && !has(this.datasource_id))"
+  };
+
+  EngineScope scope = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  EngineReusePolicy reuse_policy = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string analysis_id = 3 [(buf.validate.field).string.min_len = 1];
   optional string datasource_id = 4 [(buf.validate.field).string.min_len = 1];
   optional string build_id = 5 [(buf.validate.field).string.min_len = 1];
