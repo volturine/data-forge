@@ -189,6 +189,7 @@ COMPUTE_ENVELOPE_REQUIRED_TOKENS = {
 }
 PROTOCOL_FORBIDDEN_TOKENS = {
     'deprecated = true': 'deprecated protocol compatibility fields must be removed, not carried forward',
+    'enum.defined_only = true': 'protocol enums must reject UNSPECIFIED zero values in addition to unknown values',
     'google.protobuf.Struct datasource_request': 'compute commands must use typed DatasourceCommand, not generic datasource_request payloads',
     'google.protobuf.Struct dynamic_response': 'compute responses must use typed oneof variants, not generic dynamic_response payloads',
     'google.protobuf.Struct raw': 'runtime events must use typed protocol event payloads',

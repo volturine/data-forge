@@ -59,7 +59,10 @@ service WorkerRuntimeService {
 
 message RuntimeWorkerRegisterRequest {
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
-  RuntimeWorkerKind kind = 2 [(buf.validate.field).enum.defined_only = true];
+  RuntimeWorkerKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string hostname = 3 [(buf.validate.field).string.min_len = 1];
   int32 pid = 4 [(buf.validate.field).int32.gt = 0];
   int32 capacity = 5 [(buf.validate.field).int32.gte = 1];
@@ -87,7 +90,10 @@ message WorkerClaimedComputeRequest {
 
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  ComputeRequestKind kind = 3 [(buf.validate.field).enum.defined_only = true];
+  ComputeRequestKind kind = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   ComputeCommandEnvelope command = 5 [(buf.validate.field).required = true];
 }
 
@@ -122,7 +128,10 @@ message WorkerExecuteDatasourceRequest {
   reserved "request";
 
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  ComputeRequestKind kind = 2 [(buf.validate.field).enum.defined_only = true];
+  ComputeRequestKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   DatasourceCommand command = 4 [(buf.validate.field).required = true];
 }
 
@@ -151,7 +160,10 @@ message WorkerDatasourceMetadataResponse {
   bool found = 1;
   optional string id = 2;
   optional string name = 3;
-  optional DataSourceType source_type = 4 [(buf.validate.field).enum.defined_only = true];
+  optional DataSourceType source_type = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional google.protobuf.Struct config = 5;
   optional bool is_hidden = 7;
   SchemaInfo schema_info = 8;
@@ -200,7 +212,10 @@ message WorkerUpsertOutputDatasourceRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string result_id = 2 [(buf.validate.field).string.min_len = 1];
   string name = 3 [(buf.validate.field).string.min_len = 1];
-  DataSourceType source_type = 4 [(buf.validate.field).enum.defined_only = true];
+  DataSourceType source_type = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   google.protobuf.Struct config = 5;
   optional string analysis_id = 7 [(buf.validate.field).string.min_len = 1];
   optional bool is_hidden = 8;
@@ -217,7 +232,10 @@ message WorkerUpsertOutputDatasourceResponse {
 message WorkerHealthCheckSpec {
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string name = 2 [(buf.validate.field).string.min_len = 1];
-  HealthCheckType check_type = 3 [(buf.validate.field).enum.defined_only = true];
+  HealthCheckType check_type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   google.protobuf.Struct config = 4;
   bool critical = 5;
 }
@@ -251,8 +269,14 @@ message WorkerCreateEngineRunRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   optional string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
   string datasource_id = 3 [(buf.validate.field).string.min_len = 1];
-  EngineRunKind kind = 4 [(buf.validate.field).enum.defined_only = true];
-  EngineRunStatus status = 5 [(buf.validate.field).enum.defined_only = true];
+  EngineRunKind kind = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  EngineRunStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   google.protobuf.Struct request = 6;
   optional google.protobuf.Struct result = 7;
   optional string error_message = 8 [(buf.validate.field).string.min_len = 1];
@@ -281,8 +305,14 @@ message EngineRunExecutionEntryList {
 message WorkerEngineRunUpdateFields {
   optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
   optional string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
-  optional EngineRunKind kind = 3 [(buf.validate.field).enum.defined_only = true];
-  optional EngineRunStatus status = 4 [(buf.validate.field).enum.defined_only = true];
+  optional EngineRunKind kind = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional EngineRunStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   google.protobuf.Struct request_json = 5;
   google.protobuf.Struct result_json = 6;
   optional string error_message = 7 [(buf.validate.field).string.min_len = 1];
@@ -317,7 +347,10 @@ message WorkerEngineRunStateRequest {
 
 message WorkerEngineRunStateResponse {
   bool found = 1;
-  optional EngineRunStatus status = 2 [(buf.validate.field).enum.defined_only = true];
+  optional EngineRunStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional google.protobuf.Struct result = 3;
   optional google.protobuf.Timestamp cancelled_at = 4;
   optional string cancelled_by = 5;
@@ -366,7 +399,10 @@ message WorkerBuildRunPayload {
   string analysis_id = 3 [(buf.validate.field).string.min_len = 1];
   string analysis_name = 4 [(buf.validate.field).string.min_len = 1];
   google.protobuf.Struct request = 5;
-  optional EngineRunKind current_kind = 8 [(buf.validate.field).enum.defined_only = true];
+  optional EngineRunKind current_kind = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string current_datasource_id = 9 [(buf.validate.field).string.min_len = 1];
   optional string current_tab_id = 10 [(buf.validate.field).string.min_len = 1];
   optional string current_tab_name = 11 [(buf.validate.field).string.min_len = 1];
@@ -433,7 +469,10 @@ message WorkerSendTelegramRequest {
 }
 
 message WorkerGenerateAIRequest {
-  AIProvider provider = 1 [(buf.validate.field).enum.defined_only = true];
+  AIProvider provider = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   repeated string prompts = 2 [(buf.validate.field).repeated.min_items = 1];
   string model = 3 [(buf.validate.field).string.min_len = 1];
   optional string endpoint_url = 4 [(buf.validate.field).string.uri = true];

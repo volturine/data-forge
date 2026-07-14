@@ -9,7 +9,10 @@ import "google/protobuf/struct.proto";
 message AnalysisPipelineDatasource {
   string id = 1 [(buf.validate.field).string.min_len = 1];
   optional string analysis_tab_id = 2;
-  optional DataSourceType source_type = 3 [(buf.validate.field).enum.defined_only = true];
+  optional DataSourceType source_type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   google.protobuf.Struct config = 4;
 }
 
@@ -21,7 +24,10 @@ message AnalysisPipelineStep {
   StepConfig config = 3;
   repeated string depends_on = 4;
   optional bool is_applied = 5;
-  StepType step_type = 6 [(buf.validate.field).enum.defined_only = true];
+  StepType step_type = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
 }
 
 message AnalysisPipelineIcebergOutput {
@@ -31,7 +37,10 @@ message AnalysisPipelineIcebergOutput {
 }
 
 message AnalysisPipelineOutputNotification {
-  NotificationMethod method = 1 [(buf.validate.field).enum.defined_only = true];
+  NotificationMethod method = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string recipient = 2;
   string subject_template = 3;
   string body_template = 4;
@@ -42,10 +51,19 @@ message AnalysisPipelineOutputNotification {
 message AnalysisPipelineOutput {
   string result_id = 1 [(buf.validate.field).string.min_len = 1];
   string filename = 2 [(buf.validate.field).string.min_len = 1];
-  ExportFormat format = 3 [(buf.validate.field).enum.defined_only = true];
+  ExportFormat format = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   google.protobuf.Struct options = 4;
-  optional DataSourceType datasource_type = 5 [(buf.validate.field).enum.defined_only = true];
-  optional BuildMode build_mode = 6 [(buf.validate.field).enum.defined_only = true];
+  optional DataSourceType datasource_type = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional BuildMode build_mode = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional AnalysisPipelineIcebergOutput iceberg = 7;
   optional AnalysisPipelineOutputNotification notification = 8;
 }
@@ -91,20 +109,32 @@ message FilterValue {
 
 message FilterCondition {
   string column = 1;
-  FilterOperator operator = 2 [(buf.validate.field).enum.defined_only = true];
+  FilterOperator operator = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional FilterValue value = 3;
-  FilterValueType value_type = 4 [(buf.validate.field).enum.defined_only = true];
+  FilterValueType value_type = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string compare_column = 5;
 }
 
 message FilterConfig {
   repeated FilterCondition conditions = 1;
-  FilterLogic logic = 2 [(buf.validate.field).enum.defined_only = true];
+  FilterLogic logic = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
 }
 
 message Aggregation {
   string column = 1;
-  GroupByAggregationFunction function = 2 [(buf.validate.field).enum.defined_only = true];
+  GroupByAggregationFunction function = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string alias = 3;
 }
 
@@ -130,7 +160,10 @@ message ExpressionConfig {
 
 message WithColumnsExpr {
   string name = 1;
-  WithColumnsExprType type = 2 [(buf.validate.field).enum.defined_only = true];
+  WithColumnsExprType type = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional FilterValue value = 3;
   optional string column = 4;
   repeated string args = 5;
@@ -168,11 +201,17 @@ message TopKConfig {
 
 message DeduplicateConfig {
   repeated string subset = 1;
-  DeduplicateKeep keep = 2 [(buf.validate.field).enum.defined_only = true];
+  DeduplicateKeep keep = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
 }
 
 message FillNullConfig {
-  FillNullStrategy strategy = 1 [(buf.validate.field).enum.defined_only = true];
+  FillNullStrategy strategy = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   repeated string columns = 2;
   optional FilterValue value = 3;
   optional string value_type = 4;
@@ -193,7 +232,10 @@ message PivotConfig {
   repeated string index = 1;
   string columns = 2;
   optional string values = 3;
-  PivotAggregateFunction aggregate_function = 4 [(buf.validate.field).enum.defined_only = true];
+  PivotAggregateFunction aggregate_function = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
 }
 
 message UnionByNameConfig {
@@ -208,7 +250,10 @@ message JoinColumn {
 }
 
 message JoinConfig {
-  JoinHow how = 1 [(buf.validate.field).enum.defined_only = true];
+  JoinHow how = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string right_source = 2;
   repeated JoinColumn join_columns = 3;
   repeated string right_columns = 4;
@@ -223,75 +268,144 @@ message ViewConfig {
 }
 
 message ExportConfig {
-  ExportFormat format = 1 [(buf.validate.field).enum.defined_only = true];
+  ExportFormat format = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string filename = 2;
-  ExportDestination destination = 3 [(buf.validate.field).enum.defined_only = true];
+  ExportDestination destination = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
 }
 
 message DownloadConfig {
-  ExportFormat format = 1 [(buf.validate.field).enum.defined_only = true];
+  ExportFormat format = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string filename = 2;
 }
 
 message Overlay {
-  OverlayChartType chart_type = 1 [(buf.validate.field).enum.defined_only = true];
+  OverlayChartType chart_type = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string y_column = 2;
-  ChartAggregation aggregation = 3 [(buf.validate.field).enum.defined_only = true];
-  YAxisPosition y_axis_position = 4 [(buf.validate.field).enum.defined_only = true];
+  ChartAggregation aggregation = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  YAxisPosition y_axis_position = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
 }
 
 message ReferenceLine {
-  ReferenceAxis axis = 1 [(buf.validate.field).enum.defined_only = true];
+  ReferenceAxis axis = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional double value = 2;
   string label = 3;
   string color = 4;
 }
 
 message ChartConfig {
-  ChartType chart_type = 1 [(buf.validate.field).enum.defined_only = true];
+  ChartType chart_type = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string x_column = 2;
   string y_column = 3;
   int32 bins = 4 [(buf.validate.field).int32.gte = 1];
-  ChartAggregation aggregation = 5 [(buf.validate.field).enum.defined_only = true];
+  ChartAggregation aggregation = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string group_column = 6;
-  optional GroupSortBy group_sort_by = 7 [(buf.validate.field).enum.defined_only = true];
-  SortDirection group_sort_order = 8 [(buf.validate.field).enum.defined_only = true];
+  optional GroupSortBy group_sort_by = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  SortDirection group_sort_order = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string group_sort_column = 9;
-  StackMode stack_mode = 10 [(buf.validate.field).enum.defined_only = true];
+  StackMode stack_mode = 10 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   double area_opacity = 11 [(buf.validate.field).double = {
     gte: 0
     lte: 1
   }];
-  optional DateBucket date_bucket = 12 [(buf.validate.field).enum.defined_only = true];
-  optional DateOrdinal date_ordinal = 13 [(buf.validate.field).enum.defined_only = true];
+  optional DateBucket date_bucket = 12 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional DateOrdinal date_ordinal = 13 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   bool pan_zoom_enabled = 14;
   bool selection_enabled = 15;
   bool area_selection_enabled = 16;
-  optional SortBy sort_by = 17 [(buf.validate.field).enum.defined_only = true];
-  SortDirection sort_order = 18 [(buf.validate.field).enum.defined_only = true];
+  optional SortBy sort_by = 17 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  SortDirection sort_order = 18 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string sort_column = 19;
   optional string x_axis_label = 20;
   optional string y_axis_label = 21;
-  AxisScale y_axis_scale = 22 [(buf.validate.field).enum.defined_only = true];
+  AxisScale y_axis_scale = 22 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional double y_axis_min = 23;
   optional double y_axis_max = 24;
-  DisplayUnits display_units = 25 [(buf.validate.field).enum.defined_only = true];
+  DisplayUnits display_units = 25 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   int32 decimal_places = 26 [(buf.validate.field).int32.gte = 0];
-  LegendPosition legend_position = 27 [(buf.validate.field).enum.defined_only = true];
+  LegendPosition legend_position = 27 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string title = 28;
   repeated string series_colors = 29;
   repeated Overlay overlays = 30;
   repeated ReferenceLine reference_lines = 31;
-  ChartHeight chart_height = 32 [(buf.validate.field).enum.defined_only = true];
-  ChartWidth chart_width = 33 [(buf.validate.field).enum.defined_only = true];
+  ChartHeight chart_height = 32 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  ChartWidth chart_width = 33 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
 }
 
 message NotificationConfig {
-  NotificationMethod method = 1 [(buf.validate.field).enum.defined_only = true];
+  NotificationMethod method = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string recipient = 2;
   repeated string subscriber_ids = 3;
   string bot_token = 4;
-  RecipientSource recipient_source = 5 [(buf.validate.field).enum.defined_only = true];
+  RecipientSource recipient_source = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string recipient_column = 6;
   repeated string input_columns = 7;
   string output_column = 8;
@@ -301,7 +415,10 @@ message NotificationConfig {
 }
 
 message AIConfig {
-  AIProvider provider = 1 [(buf.validate.field).enum.defined_only = true];
+  AIProvider provider = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string model = 2;
   repeated string input_columns = 3;
   string output_column = 4;
@@ -324,18 +441,33 @@ message DatasourceConfig {}
 
 message TimeSeriesConfig {
   string column = 1;
-  TimeseriesOperationType operation_type = 2 [(buf.validate.field).enum.defined_only = true];
+  TimeseriesOperationType operation_type = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string new_column = 3;
-  optional TimeComponent component = 4 [(buf.validate.field).enum.defined_only = true];
+  optional TimeComponent component = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional int32 value = 5;
-  optional DurationUnit unit = 6 [(buf.validate.field).enum.defined_only = true];
-  optional TimeDirection direction = 7 [(buf.validate.field).enum.defined_only = true];
+  optional DurationUnit unit = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional TimeDirection direction = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string column2 = 8;
 }
 
 message StringTransformConfig {
   string column = 1;
-  StringTransformMethod method = 2 [(buf.validate.field).enum.defined_only = true];
+  StringTransformMethod method = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string new_column = 3;
   optional int32 start = 4;
   optional int32 end = 5;

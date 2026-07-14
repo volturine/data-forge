@@ -80,7 +80,10 @@ message DownloadCommand {
   string target_step_id = 2 [(buf.validate.field).string.min_len = 1];
   AnalysisPipelinePayload analysis_pipeline = 3 [(buf.validate.field).required = true];
   optional string tab_id = 4;
-  ExportFormat format = 5 [(buf.validate.field).enum.defined_only = true];
+  ExportFormat format = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string filename = 6 [(buf.validate.field).string.min_len = 1];
 }
 
@@ -95,9 +98,15 @@ message ExportCommand {
   string target_step_id = 2 [(buf.validate.field).string.min_len = 1];
   AnalysisPipelinePayload analysis_pipeline = 3 [(buf.validate.field).required = true];
   optional string tab_id = 4;
-  ExportFormat format = 5 [(buf.validate.field).enum.defined_only = true];
+  ExportFormat format = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string filename = 6 [(buf.validate.field).string.min_len = 1];
-  ExportDestination destination = 7 [(buf.validate.field).enum.defined_only = true];
+  ExportDestination destination = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional IcebergExportOptions iceberg_options = 8;
   optional string result_id = 9 [(buf.validate.field).string.min_len = 1];
 }
@@ -149,8 +158,14 @@ message StepRowCountResult {
 message ExportResult {
   bool success = 1;
   string filename = 2 [(buf.validate.field).string.min_len = 1];
-  ExportFormat format = 3 [(buf.validate.field).enum.defined_only = true];
-  ExportDestination destination = 4 [(buf.validate.field).enum.defined_only = true];
+  ExportFormat format = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  ExportDestination destination = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string message = 5;
   optional string datasource_id = 6 [(buf.validate.field).string.min_len = 1];
   optional string datasource_name = 7 [(buf.validate.field).string.min_len = 1];
@@ -165,15 +180,24 @@ message EngineDefaults {
 message EngineStatusResult {
   string analysis_id = 1;
   string resource_id = 2 [(buf.validate.field).string.min_len = 1];
-  EngineStatus status = 3 [(buf.validate.field).enum.defined_only = true];
+  EngineStatus status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional int32 process_id = 4 [(buf.validate.field).int32.gte = 0];
   optional string last_activity = 5;
   optional string current_job_id = 6;
   optional EngineResourceConfig resource_config = 7;
   optional EngineResourceConfig effective_resources = 8;
   optional EngineDefaults defaults = 9;
-  optional EngineScope scope = 10 [(buf.validate.field).enum.defined_only = true];
-  optional EngineReusePolicy reuse_policy = 11 [(buf.validate.field).enum.defined_only = true];
+  optional EngineScope scope = 10 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional EngineReusePolicy reuse_policy = 11 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string datasource_id = 12 [(buf.validate.field).string.min_len = 1];
   optional string build_id = 13 [(buf.validate.field).string.min_len = 1];
   optional string current_build_id = 14 [(buf.validate.field).string.min_len = 1];
@@ -190,7 +214,10 @@ message ComputeErrorResult {
     gte: 100
     lte: 599
   }];
-  optional ErrorCode error_code = 3 [(buf.validate.field).enum.defined_only = true];
+  optional ErrorCode error_code = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional google.protobuf.Struct details = 4;
   optional string message = 5 [(buf.validate.field).string.min_len = 1];
 }
@@ -215,7 +242,10 @@ message ComputeCommandEnvelope {
   reserved 5;
   reserved "payload";
 
-  ComputeRequestKind kind = 1 [(buf.validate.field).enum.defined_only = true];
+  ComputeRequestKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   int32 version = 2 [(buf.validate.field).int32.gte = 1];
   string idempotency_key = 3 [(buf.validate.field).string.min_len = 1];
   string correlation_id = 4 [(buf.validate.field).string.min_len = 1];
@@ -226,10 +256,16 @@ message ComputeResponseEnvelope {
   reserved 5;
   reserved "payload";
 
-  ComputeRequestKind kind = 1 [(buf.validate.field).enum.defined_only = true];
+  ComputeRequestKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   int32 version = 2 [(buf.validate.field).int32.gte = 1];
   string correlation_id = 3 [(buf.validate.field).string.min_len = 1];
-  ComputeRequestStatus status = 4 [(buf.validate.field).enum.defined_only = true];
+  ComputeRequestStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string error_message = 6;
   ComputeResponse response = 7;
 }
@@ -239,7 +275,10 @@ message BuildEventContext {
   string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
   google.protobuf.Timestamp emitted_at = 3;
   optional int32 sequence = 4 [(buf.validate.field).int32.gte = 0];
-  optional EngineRunKind current_kind = 5 [(buf.validate.field).enum.defined_only = true];
+  optional EngineRunKind current_kind = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string current_datasource_id = 6;
   optional string tab_id = 7;
   optional string tab_name = 8;
@@ -251,7 +290,10 @@ message BuildEventContext {
 message BuildTabResult {
   string tab_id = 1 [(buf.validate.field).string.min_len = 1];
   string tab_name = 2;
-  BuildTabStatus status = 3 [(buf.validate.field).enum.defined_only = true];
+  BuildTabStatus status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string output_id = 4;
   optional string output_name = 5;
   optional string error = 6;
@@ -272,7 +314,10 @@ message BuildStepKind {
 message EngineRunExecutionEntry {
   string key = 1 [(buf.validate.field).string.min_len = 1];
   string label = 2 [(buf.validate.field).string.min_len = 1];
-  EngineRunExecutionCategory category = 3 [(buf.validate.field).enum.defined_only = true];
+  EngineRunExecutionCategory category = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   int32 order = 4 [(buf.validate.field).int32.gte = 0];
   optional double duration_ms = 5 [(buf.validate.field).double.gte = 0];
   optional double share_pct = 6 [(buf.validate.field).double = {
@@ -281,7 +326,10 @@ message EngineRunExecutionEntry {
   }];
   optional string optimized_plan = 7;
   optional string unoptimized_plan = 8;
-  optional StepType step_type = 9 [(buf.validate.field).enum.defined_only = true];
+  optional StepType step_type = 9 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
 }
 
 message BuildStepStartedEvent {
@@ -344,7 +392,10 @@ message BuildResourceEvent {
 }
 
 message BuildLogEvent {
-  BuildLogLevel level = 1 [(buf.validate.field).enum.defined_only = true];
+  BuildLogLevel level = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string message = 2 [(buf.validate.field).string.min_len = 1];
   optional string step_name = 3;
   optional string step_id = 4;
@@ -408,7 +459,10 @@ message BuildStepSnapshot {
   string step_name = 4;
   optional string tab_id = 6;
   optional string tab_name = 7;
-  BuildStepState state = 8 [(buf.validate.field).enum.defined_only = true];
+  BuildStepState state = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional int32 duration_ms = 9 [(buf.validate.field).int32.gte = 0];
   optional int64 row_count = 10 [(buf.validate.field).int64.gte = 0];
   optional string error = 11;
@@ -433,7 +487,10 @@ message BuildResourceSnapshot {
 
 message BuildLogEntry {
   google.protobuf.Timestamp timestamp = 1;
-  BuildLogLevel level = 2 [(buf.validate.field).enum.defined_only = true];
+  BuildLogLevel level = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   string message = 3 [(buf.validate.field).string.min_len = 1];
   optional string step_name = 4;
   optional string step_id = 5;
@@ -446,7 +503,10 @@ message ActiveBuildSummary {
   string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
   string analysis_name = 3;
   string namespace = 4 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  ActiveBuildStatus status = 5 [(buf.validate.field).enum.defined_only = true];
+  ActiveBuildStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   google.protobuf.Timestamp started_at = 6;
   BuildStarter starter = 7 [(buf.validate.field).required = true];
   optional BuildResourceConfigSummary resource_config = 8;
@@ -459,7 +519,10 @@ message ActiveBuildSummary {
   optional string current_step = 12;
   optional int32 current_step_index = 13 [(buf.validate.field).int32.gte = 0];
   int32 total_steps = 14 [(buf.validate.field).int32.gte = 0];
-  optional EngineRunKind current_kind = 15 [(buf.validate.field).enum.defined_only = true];
+  optional EngineRunKind current_kind = 15 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
   optional string current_datasource_id = 16;
   optional string current_tab_id = 17;
   optional string current_tab_name = 18;
