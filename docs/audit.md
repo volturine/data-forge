@@ -2,13 +2,13 @@
 
 The initial audit analyzed **605 source files** across the four main packages (`backend` 223 files, `frontend` 269 files, `worker` 97 files, `scheduler` 3 files, plus config/scripts). A follow-up scan on 2026-07-04 covered **793 package/script source files** after the protocol rewrite and subsequent cleanup commits, excluding virtualenvs, `node_modules`, package-local generated `dataforge_protocol`, Svelte build output, and other build artifacts.
 
-The original mirrored contract packages and the remaining mirrored protocol runtime support are removed. The completion checkpoint below records the final local evidence; remote CI and code-scanning evidence remains required before closing the overall P0 checkpoint.
+The original mirrored contract packages and the remaining mirrored protocol runtime support are removed. The completion checkpoint below records the final local and remote evidence closing the contract-synchronization P0.
 
 ---
 
 ## 2026-07-14 Completion Checkpoint
 
-Status: **in progress**. The old `backend_contracts` and `worker_models` packages remain deleted, generated protocol trees remain package-local and ignored, and the current remote CI baseline is green. The remaining work is architectural rather than a rollback of the protocol rewrite.
+Status: **complete**. The old `backend_contracts` and `worker_models` packages remain deleted, generated protocol trees remain package-local and ignored, and all required local and remote gates pass. C7 remains separate maintainability work.
 
 | # | Completion item | Acceptance evidence |
 | --- | --- | --- |
@@ -30,11 +30,11 @@ This ledger prevents "generated protobuf exists" from being mistaken for complet
 | ✅ P0-R2: mirrored protocol runtime support | deleted backend/worker `*_grpc/codec.py` and `domain/protocol_enums.py`; backend `domain/api_enums.py`; worker `domain/domain_enums.py` and `operations/enums.py` | Resolved without a shared runtime package. Protobuf conversion is local to real RPC/execution boundaries, backend API enums remain string-shaped, worker lifecycle enums remain domain strings, and worker operation enums are generated protocol-number-backed. Boundary checks reject reintroducing the deleted paths. |
 | ✅ P0-R3: frontend protocol translation ownership | `types/protocol-enum-tokens.ts`, `types/protocol-build-stream.ts` | Token tables derive from generated enum descriptors and an exhaustive test checks every exported table against `dataforge_token`. Build-stream conversion is retained only as the frontend websocket-to-UI boundary adapter. |
 | ✅ P0-R4: operation-config ownership | backend HTTP step schemas, protocol `StepConfig`, worker execution validation, frontend operation config types | Backend canonicalizes OpenAPI models into generated `StepConfig`; worker validates only canonical execution fields with no frontend compatibility registry or aliases. Generated enum numbers and config oneofs are exercised through backend, worker, and E2E tests. |
-| P0-R5: final evidence | local gates and GitHub checks | Local gates pass after all P0 implementation work. Commits still need to be pushed and required GitHub CI/code-scanning checks must pass. |
+| ✅ P0-R5: final evidence | local gates and GitHub checks | Local `just verify`, `just test`, and `just test-e2e` pass. Implementation SHA `71abf8c7` passes PR CI run `29359360105`, push CI and image-build run `29359355367`, and Python plus JavaScript/TypeScript CodeQL run `29359356201`. All 19 review threads are resolved. |
 
 Large UI components and unrelated maintainability work remain valid audit findings, but they are not part of the original contract-synchronization P0 unless they contain one of the protocol ownership violations above. They must not be used to keep the P0 permanently open after P0-R1 through P0-R5 are complete.
 
-Local gate on 2026-07-14: `just verify`, `just test`, and `just test-e2e` pass for the current working tree (949 backend unit, 91 backend integration with 2 skips, 330 worker, 3 scheduler, 1,191 frontend unit, and 350 E2E tests). This validates P0-R1 through P0-R4 locally. GitHub CI and code scanning still need to pass after the issue commits are pushed before P0-R5 and the overall P0 checkpoint close.
+Local gate on 2026-07-14: `just verify`, `just test`, and `just test-e2e` pass (949 backend unit, 91 backend integration with 2 skips, 330 worker, 3 scheduler, 1,191 frontend unit, and 350 E2E tests). GitHub PR CI, push CI and image builds, remote E2E, and both CodeQL languages pass for implementation SHA `71abf8c7`. This completes P0-R1 through P0-R5 and closes the overall P0 checkpoint.
 
 ---
 
@@ -42,7 +42,7 @@ Local gate on 2026-07-14: `just verify`, `just test`, and `just test-e2e` pass f
 
 ### 🟡 **P0 — Protocol-First Contract Unification**
 
-Status: **remote verification pending**. The protocol-first rewrite and remaining runtime-ownership cleanup are locally complete. P0 closes when P0-R5 has green GitHub CI and code-scanning evidence; C7 is separate maintainability work and does not block this contract-synchronization P0.
+Status: **complete**. The protocol-first rewrite, runtime-ownership cleanup, package-boundary enforcement, local gates, GitHub CI, remote E2E, and CodeQL checks all pass. C7 is separate maintainability work and does not block this completed contract-synchronization P0.
 
 | #   | Task                                     | Files Affected                                                                                                                         | Notes                                                                                                                                                                           |
 | --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
