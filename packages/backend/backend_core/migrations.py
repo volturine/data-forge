@@ -121,8 +121,7 @@ def migrate_runtime(namespaces: list[str]) -> None:
         revision = _current_revision(tenant_schema)
         if revision is not None and revision not in {_TENANT_BASE_REVISION, _TENANT_REVISION}:
             raise RuntimeError(
-                f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. '
-                f'Expected {_TENANT_BASE_REVISION} or {_TENANT_REVISION}.'
+                f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected {_TENANT_BASE_REVISION} or {_TENANT_REVISION}.'
             )
         if revision == _TENANT_REVISION:
             continue
