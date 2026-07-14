@@ -9,8 +9,6 @@ from datetime import datetime
 from typing import Any, TypeVar, cast
 
 import grpc
-from google.protobuf import descriptor as proto_descriptor
-from google.protobuf import json_format, message
 
 from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
 from worker_grpc.codec import (
@@ -236,7 +234,7 @@ class WorkerInternalApiClient:
         )
         return response.result
 
-    def schedule_ingest_datasource(self, *, namespace: str, datasource_id: str) -> dict[str, object]:
+    def schedule_ingest_datasource(self, *, namespace: str, datasource_id: str) -> datasource_pb2.DataSourceRecord:
         response = self._call(
             lambda: self._stub.ScheduleIngestDatasource(
                 worker_runtime_pb2.WorkerScheduleIngestDatasourceRequest(namespace=namespace, datasource_id=datasource_id),
@@ -244,7 +242,7 @@ class WorkerInternalApiClient:
                 metadata=self._metadata(),
             )
         )
-        return _message_to_payload(response.datasource)
+        return response.datasource
 
     def datasource_metadata(self, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
         response = self._call(
@@ -324,7 +322,7 @@ class WorkerInternalApiClient:
             name=name,
             source_type=enum_to_proto_value("DATA_SOURCE_TYPE", source_type),
             config=dict_to_struct(config),
-            schema_info=_parse_proto_message(datasource_pb2.SchemaInfo, schema_cache),
+            schema_info=_schema_info_proto(schema_cache),
             keep_schema_cache=keep_schema_cache,
         )
         if analysis_id is not None:
@@ -517,7 +515,7 @@ class WorkerInternalApiClient:
     ) -> int | None:
         request = worker_runtime_pb2.WorkerPersistBuildEventRequest(namespace=namespace, build_id=build_id, build_event=_build_event_proto(namespace, event))
         if resource_config_json is not None:
-            request.build_resource_config.CopyFrom(_parse_proto_message(compute_pb2.BuildResourceConfigSummary, resource_config_json))
+            request.build_resource_config.CopyFrom(_build_resource_config_proto(resource_config_json))
         response = self._call(lambda: self._stub.PersistBuildEvent(request, timeout=self._timeout_seconds, metadata=self._metadata()))
         return int(response.sequence) if response.HasField("sequence") else None
 
@@ -538,8 +536,8 @@ class WorkerInternalApiClient:
             analysis_id=run.analysis_id,
             analysis_name=run.analysis_name,
             request_json=struct_to_dict(run.request),
-            starter_json=_message_to_payload(run.build_starter),
-            resource_config_json=_message_to_payload(run.build_resource_config) if run.HasField("build_resource_config") else None,
+            starter_json=_build_starter_payload(run.build_starter),
+            resource_config_json=_build_resource_config_payload(run.build_resource_config) if run.HasField("build_resource_config") else None,
             current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.EngineRunKind, "ENGINE_RUN_KIND"),
             current_datasource_id=_optional_str(run, "current_datasource_id"),
             current_tab_id=_optional_str(run, "current_tab_id"),
@@ -989,106 +987,70 @@ def _enum_number_from_token(enum_descriptor: Any, value: object, *, field_name: 
         raise ValueError(f"{field_name} is invalid") from exc
 
 
-def _enum_token(enum_descriptor: Any, value: int) -> str:
-    value_descriptor = enum_descriptor.values_by_number[value]
-    options = value_descriptor.GetOptions()
-    if options.HasExtension(cast(Any, enums_pb2.dataforge_token)):
-        return cast(str, options.Extensions[cast(Any, enums_pb2.dataforge_token)])
-    return value_descriptor.name.removeprefix(f"{_enum_prefix(enum_descriptor)}_")
+def _optional_payload_int(payload: Mapping[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key} must be an integer")
+    return value
 
 
-def _tokens_to_proto_json(value: object, message_descriptor: Any) -> object:
-    if message_descriptor.full_name == "google.protobuf.Struct":
-        return value
-    if isinstance(value, list):
-        return [_tokens_to_proto_json(item, message_descriptor) for item in value]
-    if not isinstance(value, Mapping):
-        return value
-
-    result: dict[str, object] = {}
-    for raw_key, raw_item in value.items():
-        key = str(raw_key)
-        field = message_descriptor.fields_by_name.get(key)
-        if field is None:
-            result[key] = raw_item
-            continue
-        is_map_field = field.message_type is not None and field.message_type.GetOptions().map_entry
-        if field.is_repeated and not is_map_field:
-            if raw_item is None:
-                continue
-            if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
-                result[key] = [_tokens_to_proto_json(item, field.message_type) for item in cast(list[object], raw_item)]
-            elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
-                result[key] = [_enum_name_from_token(field.enum_type, item) for item in cast(list[object], raw_item)]
-            else:
-                result[key] = raw_item
-            continue
-        if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
-            if raw_item is not None:
-                result[key] = _tokens_to_proto_json(raw_item, field.message_type)
-        elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
-            result[key] = _enum_name_from_token(field.enum_type, raw_item)
-        else:
-            result[key] = raw_item
-    return result
+def _build_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.BuildResourceConfigSummary:
+    config = compute_pb2.BuildResourceConfigSummary()
+    for key in ("max_threads", "max_memory_mb", "streaming_chunk_size"):
+        value = _optional_payload_int(payload, key)
+        if value is not None:
+            setattr(config, key, value)
+    return config
 
 
-def _proto_json_to_tokens(value: object, message_descriptor: Any) -> object:
-    if message_descriptor.full_name == "google.protobuf.Struct":
-        return value
-    if isinstance(value, list):
-        return [_proto_json_to_tokens(item, message_descriptor) for item in value]
-    if not isinstance(value, Mapping):
-        return value
-
-    result: dict[str, object] = {}
-    for raw_key, raw_item in value.items():
-        key = str(raw_key)
-        field = message_descriptor.fields_by_name.get(key)
-        if field is None:
-            result[key] = raw_item
-            continue
-        is_map_field = field.message_type is not None and field.message_type.GetOptions().map_entry
-        if field.is_repeated and not is_map_field:
-            if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
-                result[key] = [_proto_json_to_tokens(item, field.message_type) for item in cast(list[object], raw_item)]
-            elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
-                result[key] = [
-                    _enum_token(field.enum_type, field.enum_type.values_by_name[item].number)
-                    if isinstance(item, str) and item in field.enum_type.values_by_name
-                    else _enum_token(field.enum_type, item)
-                    if isinstance(item, int)
-                    else item
-                    for item in cast(list[object], raw_item)
-                ]
-            else:
-                result[key] = raw_item
-            continue
-        if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
-            result[key] = _proto_json_to_tokens(raw_item, field.message_type)
-        elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
-            if isinstance(raw_item, str) and raw_item in field.enum_type.values_by_name:
-                result[key] = _enum_token(field.enum_type, field.enum_type.values_by_name[raw_item].number)
-            elif isinstance(raw_item, int):
-                result[key] = _enum_token(field.enum_type, raw_item)
-            else:
-                result[key] = raw_item
-        else:
-            result[key] = raw_item
-    return result
+def _build_resource_config_payload(config: compute_pb2.BuildResourceConfigSummary) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for key in ("max_threads", "max_memory_mb", "streaming_chunk_size"):
+        if config.HasField(key):
+            payload[key] = getattr(config, key)
+    return payload
 
 
-def _parse_proto_message[ProtoMessageT: message.Message](message_type: type[ProtoMessageT], payload: dict[str, object]) -> ProtoMessageT:
-    proto_json = _tokens_to_proto_json(payload, message_type.DESCRIPTOR)
-    return cast(ProtoMessageT, json_format.ParseDict(cast(dict[str, object], proto_json), message_type()))
+def _build_starter_payload(starter: compute_pb2.BuildStarter) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for key in ("user_id", "display_name", "email", "triggered_by"):
+        if starter.HasField(key):
+            payload[key] = getattr(starter, key)
+    return payload
 
 
-def _message_to_payload(value: message.Message) -> dict[str, object]:
-    decoded = json_format.MessageToDict(value, preserving_proto_field_name=True)
-    tokenized = _proto_json_to_tokens(decoded, value.DESCRIPTOR)
-    if not isinstance(tokenized, dict):
-        raise ValueError(f"{value.DESCRIPTOR.full_name} must decode to an object")
-    return cast(dict[str, object], tokenized)
+def _schema_info_proto(payload: Mapping[str, object]) -> datasource_pb2.SchemaInfo:
+    schema = datasource_pb2.SchemaInfo()
+    raw_columns = payload.get("columns")
+    if raw_columns is not None:
+        if not isinstance(raw_columns, list):
+            raise ValueError("schema columns must be a list")
+        for raw_column in raw_columns:
+            if not isinstance(raw_column, Mapping):
+                raise ValueError("schema column must be an object")
+            name = raw_column.get("name")
+            dtype = raw_column.get("dtype")
+            nullable = raw_column.get("nullable")
+            if not isinstance(name, str) or not isinstance(dtype, str) or not isinstance(nullable, bool):
+                raise ValueError("schema column requires name, dtype, and nullable")
+            column = schema.columns.add(name=name, dtype=dtype, nullable=nullable)
+            for key in ("sample_value", "description"):
+                value = raw_column.get(key)
+                if value is not None:
+                    if not isinstance(value, str):
+                        raise ValueError(f"schema column {key} must be a string")
+                    setattr(column, key, value)
+    row_count = _optional_payload_int(payload, "row_count")
+    if row_count is not None:
+        schema.row_count = row_count
+    raw_sheet_names = payload.get("sheet_names")
+    if raw_sheet_names is not None:
+        if not isinstance(raw_sheet_names, list) or not all(isinstance(item, str) for item in raw_sheet_names):
+            raise ValueError("schema sheet_names must be a list of strings")
+        schema.sheet_names.extend(raw_sheet_names)
+    return schema
 
 
 def _schema_info_payload(value: datasource_pb2.SchemaInfo) -> dict[str, object]:

@@ -130,7 +130,7 @@ async def run_queued_build_job(*, manager: ProcessManager, build_id: str, namesp
             raise ValueError(f"Queued schedule build {build.build_id} missing datasource id")
         try:
             refreshed = await asyncio.to_thread(worker_internal_api_client().schedule_ingest_datasource, namespace=build.namespace, datasource_id=datasource_id)
-            refreshed_name = str(refreshed.get("name") or datasource_id)
+            refreshed_name = refreshed.name or datasource_id
             await _emit_active_build_event(
                 build.namespace,
                 build.build_id,

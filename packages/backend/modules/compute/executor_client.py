@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from pathlib import Path
+from typing import cast
 
 from fastapi import HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session
 
 from backend_core import compute_requests_service, runtime_outbox_service
@@ -17,9 +19,34 @@ from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import PipelineExecutionError
 from backend_core.namespace import get_namespace
 from dataforge_protocol import compute_pb2, enums_pb2
+from modules.analysis.step_schemas import normalize_step_config_for_protocol
 from modules.datasource import schemas as datasource_schemas
 
 EngineIdentity = compute_pb2.EngineIdentity
+
+
+def _protocol_request_payload(request: BaseModel) -> dict[str, object]:
+    payload = cast(dict[str, object], request.model_dump(mode='json'))
+    pipeline = payload.get('analysis_pipeline')
+    if not isinstance(pipeline, dict):
+        return payload
+    tabs = pipeline.get('tabs')
+    if not isinstance(tabs, list):
+        return payload
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        steps = tab.get('steps')
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            step_type = step.get('type')
+            config = step.get('config')
+            if isinstance(step_type, str) and isinstance(config, dict):
+                step['config'] = normalize_step_config_for_protocol(step_type, config)
+    return payload
 
 
 def _ensure_runtime_available(runtime_probe: RuntimeAvailabilityProbe) -> None:
@@ -103,7 +130,7 @@ async def preview_step(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, request.model_dump(mode='json')),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
     )
     return compute_schemas.StepPreviewResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -118,7 +145,7 @@ async def get_step_schema(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
-        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA, request.model_dump(mode='json')),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
     )
     return compute_schemas.StepSchemaResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -133,7 +160,7 @@ async def get_step_row_count(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
-        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT, request.model_dump(mode='json')),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
     )
     return compute_schemas.StepRowCountResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -148,7 +175,7 @@ async def download_step(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
-        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD, request.model_dump(mode='json')),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
     )
     if not completed.artifact_path or not completed.artifact_name or not completed.artifact_content_type:
@@ -173,7 +200,7 @@ async def export_data(
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
-        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_EXPORT, request.model_dump(mode='json')),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_EXPORT, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
     )
     return compute_schemas.ExportResponse.model_validate(compute_requests_service.response_payload(completed))

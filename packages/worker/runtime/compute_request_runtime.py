@@ -4,21 +4,19 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, cast
 
-from google.protobuf import descriptor as proto_descriptor
 from google.protobuf import json_format, message
 
 from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2, errors_pb2
-from dataforge_protocol.enums_pb2 import dataforge_token
 from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager
 from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
+from runtime.domain.protocol_enums import protocol_token
 from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
 from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
 from runtime.namespace import reset_namespace, set_namespace_context
@@ -204,7 +202,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 manager=manager,
                 target_step_id=download_request.target_step_id,
                 analysis_pipeline=_analysis_pipeline_to_service_payload(download_request.analysis_pipeline),
-                export_format=_enum_token(enums_pb2.ExportFormat.DESCRIPTOR, download_request.format),
+                export_format=protocol_token("ExportFormat", download_request.format),
                 filename=download_request.filename,
                 analysis_id=download_request.analysis_id if download_request.HasField("analysis_id") else None,
                 tab_id=download_request.tab_id if download_request.HasField("tab_id") else None,
@@ -311,89 +309,24 @@ def _compute_command_from_claimed(claimed: ClaimedComputeRequest, field_name: st
     return cast(message.Message, getattr(command, field_name))
 
 
-def _enum_token(enum_descriptor: Any, value: int) -> str:
-    value_descriptor = enum_descriptor.values_by_number[value]
-    return cast(str, value_descriptor.GetOptions().Extensions[cast(Any, dataforge_token)])
-
-
-def _proto_json_to_tokens(value: object, message_descriptor: Any) -> object:
-    if message_descriptor.full_name == "google.protobuf.Struct":
-        return value
-    if isinstance(value, list):
-        return [_proto_json_to_tokens(item, message_descriptor) for item in value]
-    if not isinstance(value, Mapping):
-        return value
-
-    result: dict[str, object] = {}
-    for raw_key, raw_item in value.items():
-        key = str(raw_key)
-        field = message_descriptor.fields_by_name.get(key)
-        if field is None:
-            result[key] = raw_item
-            continue
-        is_map_field = field.message_type is not None and field.message_type.GetOptions().map_entry
-        if field.is_repeated and not is_map_field:
-            if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
-                result[key] = [_proto_json_to_tokens(item, field.message_type) for item in cast(list[object], raw_item)]
-            elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
-                result[key] = [
-                    _enum_token(field.enum_type, field.enum_type.values_by_name[item].number)
-                    if isinstance(item, str) and item in field.enum_type.values_by_name
-                    else _enum_token(field.enum_type, item)
-                    if isinstance(item, int)
-                    else item
-                    for item in cast(list[object], raw_item)
-                ]
-            else:
-                result[key] = raw_item
-            continue
-        if field.type == proto_descriptor.FieldDescriptor.TYPE_MESSAGE:
-            result[key] = _proto_json_to_tokens(raw_item, field.message_type)
-        elif field.type == proto_descriptor.FieldDescriptor.TYPE_ENUM:
-            if isinstance(raw_item, str) and raw_item in field.enum_type.values_by_name:
-                result[key] = _enum_token(field.enum_type, field.enum_type.values_by_name[raw_item].number)
-            elif isinstance(raw_item, int):
-                result[key] = _enum_token(field.enum_type, raw_item)
-            else:
-                result[key] = raw_item
-        else:
-            result[key] = raw_item
-    return result
-
-
 def _message_to_service_payload(value: message.Message) -> dict[str, object]:
-    decoded = json_format.MessageToDict(value, preserving_proto_field_name=True)
-    tokenized = _proto_json_to_tokens(decoded, value.DESCRIPTOR)
-    if not isinstance(tokenized, dict):
+    decoded = json_format.MessageToDict(
+        value,
+        preserving_proto_field_name=True,
+        use_integers_for_enums=True,
+    )
+    if not isinstance(decoded, dict):
         raise ValueError(f"{value.DESCRIPTOR.full_name} must decode to an object")
-    return tokenized
+    return cast(dict[str, object], decoded)
 
 
 def _unwrap_step_config(config: object) -> object:
     if not isinstance(config, dict) or len(config) != 1:
-        return _unwrap_protocol_value_shapes(config)
+        return config
     field_name = next(iter(config))
     if field_name in analysis_pb2.StepConfig.DESCRIPTOR.fields_by_name:
-        return _unwrap_protocol_value_shapes(config[field_name])
-    return _unwrap_protocol_value_shapes(config)
-
-
-def _unwrap_protocol_value_shapes(value: object) -> object:
-    if isinstance(value, list):
-        return [_unwrap_protocol_value_shapes(item) for item in value]
-    if not isinstance(value, dict):
-        return value
-    if set(value) == {"string_value"}:
-        return value["string_value"]
-    if set(value) == {"number_value"}:
-        return value["number_value"]
-    if set(value) == {"bool_value"}:
-        return value["bool_value"]
-    if set(value) == {"string_values"}:
-        string_values = value["string_values"]
-        if isinstance(string_values, dict) and isinstance(string_values.get("values"), list):
-            return [_unwrap_protocol_value_shapes(item) for item in string_values["values"]]
-    return {key: _unwrap_protocol_value_shapes(item) for key, item in value.items()}
+        return config[field_name]
+    return config
 
 
 def _analysis_pipeline_to_service_payload(pipeline: analysis_pb2.AnalysisPipelinePayload) -> dict[str, object]:
@@ -408,18 +341,10 @@ def _analysis_pipeline_to_service_payload(pipeline: analysis_pb2.AnalysisPipelin
                 for step in steps:
                     if isinstance(step, dict):
                         protocol_step_type = step.pop("step_type", None)
-                        if isinstance(protocol_step_type, str):
-                            step["type"] = protocol_step_type
+                        if isinstance(protocol_step_type, int):
+                            step["type"] = protocol_token("StepType", protocol_step_type)
                         step["config"] = _unwrap_step_config(step.get("config"))
-                        if step.get("type") == "view" and isinstance(step.get("config"), dict):
-                            _restore_view_service_config(cast(dict[str, object], step["config"]))
     return payload
-
-
-def _restore_view_service_config(config: dict[str, object]) -> None:
-    row_limit = config.pop("row_limit", None)
-    if row_limit is not None:
-        config["rowLimit"] = row_limit
 
 
 def _step_request_json(command: message.Message) -> dict[str, object]:

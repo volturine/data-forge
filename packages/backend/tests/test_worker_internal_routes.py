@@ -246,7 +246,13 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
     class _Response:
         def model_dump(self, *, mode: str) -> dict[str, object]:
             assert mode == 'json'
-            return {'id': 'ds-1', 'name': 'Created'}
+            return {
+                'id': 'ds-1',
+                'name': 'Created',
+                'source_type': 'database',
+                'created_by': 'import',
+                'config': {},
+            }
 
     def fake_create_database_datasource(**kwargs):
         assert kwargs['name'] == 'Created'

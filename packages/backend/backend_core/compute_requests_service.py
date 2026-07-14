@@ -9,7 +9,6 @@ from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_loc
 from backend_core.config import settings
 from backend_core.domain.compute_requests.models import (
     command_envelope,
-    command_payload as proto_command_payload,
     compute_request_kind_name,
     compute_request_status_name,
     kind_from_proto,
@@ -85,19 +84,6 @@ def create_request(
     else:
         session.flush()
     return request
-
-
-def command_payload(request: ComputeRequest) -> dict[str, object]:
-    envelope = compute_pb2.ComputeCommandEnvelope.FromString(request.command_envelope)
-    row_kind = kind_from_proto(request.kind)
-    if kind_from_proto(envelope.kind) != row_kind:
-        raise ValueError(
-            f'Compute request {request.id} envelope kind {compute_request_kind_name(kind_from_proto(envelope.kind))!r} '
-            f'does not match row kind {compute_request_kind_name(row_kind)!r}'
-        )
-    if envelope.correlation_id != request.id:
-        raise ValueError(f'Compute request {request.id} envelope correlation id {envelope.correlation_id!r} does not match request id')
-    return proto_command_payload(envelope)
 
 
 def command_envelope_for_request(request: ComputeRequest):

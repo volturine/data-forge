@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -7,7 +8,6 @@ from sqlmodel import select
 from backend_core import compute_requests_service
 from backend_core.domain.compute_requests.models import (
     command_from_payload,
-    command_payload,
     datasource_result_from_payload,
     kind_from_proto,
     response_envelope,
@@ -17,6 +17,7 @@ from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
 from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2, errors_pb2
+from modules.analysis.step_schemas import normalize_step_config_for_protocol
 
 
 def _preview_payload() -> dict[str, object]:
@@ -47,6 +48,18 @@ def _create_request(
     request_json: dict[str, object],
     commit: bool = True,
 ) -> ComputeRequest:
+    pipeline = request_json.get('analysis_pipeline')
+    if isinstance(pipeline, dict):
+        for tab in pipeline.get('tabs', []):
+            if not isinstance(tab, dict):
+                continue
+            for step in tab.get('steps', []):
+                if not isinstance(step, dict):
+                    continue
+                step_type = step.get('type')
+                config = step.get('config')
+                if isinstance(step_type, str) and isinstance(config, dict):
+                    step['config'] = normalize_step_config_for_protocol(step_type, config)
     return compute_requests_service.create_request(
         test_db_session,
         namespace=namespace,
@@ -74,6 +87,27 @@ def _response(
     error_message: str | None = None,
 ) -> compute_pb2.ComputeResponseEnvelope:
     return response_envelope(kind=kind_from_proto(request.kind), request_id=request.id, status=status, payload=payload, error_message=error_message)
+
+
+def test_preview_command_converts_all_pipeline_output_enums() -> None:
+    payload = _preview_payload()
+    pipeline = cast(dict[str, object], payload['analysis_pipeline'])
+    tabs = cast(list[dict[str, object]], pipeline['tabs'])
+    output = cast(dict[str, object], tabs[0]['output'])
+    output.update(
+        {
+            'datasource_type': 'iceberg',
+            'build_mode': 'full',
+            'notification': {'method': 'email'},
+        }
+    )
+
+    command = command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, payload).preview
+
+    protocol_output = command.analysis_pipeline.tabs[0].output
+    assert protocol_output.datasource_type == enums_pb2.DATA_SOURCE_TYPE_ICEBERG
+    assert protocol_output.build_mode == enums_pb2.BUILD_MODE_FULL
+    assert protocol_output.notification.method == enums_pb2.NOTIFICATION_METHOD_EMAIL
 
 
 def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_db_session) -> None:
@@ -198,12 +232,6 @@ def test_create_request_stores_typed_command_envelope(test_db_session) -> None:
     assert envelope.version == 1
     assert envelope.idempotency_key == request.id
     assert envelope.correlation_id == request.id
-    assert compute_requests_service.command_payload(request)['engine_identity'] == {
-        'analysis_id': 'analysis-1',
-        'resource_id': 'analysis-1',
-        'reuse_policy': 'shared',
-        'scope': 'analysis_interactive',
-    }
     assert envelope.command.WhichOneof('command') == 'spawn_engine'
     assert envelope.command.spawn_engine.engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
     assert envelope.command.spawn_engine.engine_identity.resource_id == 'analysis-1'
@@ -329,18 +357,6 @@ def test_create_preview_request_populates_protocol_step_type(test_db_session) ->
 
     assert step.step_type == enums_pb2.STEP_TYPE_PLOT_SCATTER
     assert step.config.WhichOneof('config') == 'chart'
-    command_payload = compute_requests_service.command_payload(request)
-    command_pipeline = command_payload['analysis_pipeline']
-    assert isinstance(command_pipeline, dict)
-    command_tabs = command_pipeline['tabs']
-    assert isinstance(command_tabs, list)
-    command_tab = command_tabs[0]
-    assert isinstance(command_tab, dict)
-    command_steps = command_tab['steps']
-    assert isinstance(command_steps, list)
-    command_step = command_steps[0]
-    assert isinstance(command_step, dict)
-    assert command_step['step_type'] == 'plot_scatter'
 
 
 def test_create_preview_request_omits_null_repeated_fields(test_db_session) -> None:
@@ -500,12 +516,6 @@ def test_datasource_error_result_shape_uses_typed_compute_error_message(test_db_
 
 
 def test_compute_envelope_payload_helpers_reject_missing_typed_messages() -> None:
-    command_envelope = compute_pb2.ComputeCommandEnvelope(
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        version=1,
-        idempotency_key='request-1',
-        correlation_id='request-1',
-    )
     response_envelope = compute_pb2.ComputeResponseEnvelope(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         version=1,
@@ -513,8 +523,6 @@ def test_compute_envelope_payload_helpers_reject_missing_typed_messages() -> Non
         status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
     )
 
-    with pytest.raises(ValueError, match='missing typed command'):
-        command_payload(command_envelope)
     with pytest.raises(ValueError, match='missing typed response'):
         response_payload(response_envelope)
 
