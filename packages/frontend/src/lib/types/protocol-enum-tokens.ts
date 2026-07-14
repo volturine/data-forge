@@ -3,8 +3,10 @@ import {
 	ActiveBuildStatus as ProtocolActiveBuildStatus,
 	AxisScale as ProtocolAxisScale,
 	BuildLogLevel as ProtocolBuildLogLevel,
+	BuildLogLevelSchema as ProtocolBuildLogLevelSchema,
 	BuildStepState as ProtocolBuildStepState,
 	BuildTabStatus as ProtocolBuildTabStatus,
+	BuildTabStatusSchema as ProtocolBuildTabStatusSchema,
 	CastMapType as ProtocolCastMapType,
 	ChartAggregation as ProtocolChartAggregation,
 	ChartHeight as ProtocolChartHeight,
@@ -17,7 +19,9 @@ import {
 	DurationUnit as ProtocolDurationUnit,
 	EngineReusePolicy as ProtocolEngineReusePolicy,
 	EngineRunExecutionCategory as ProtocolEngineRunExecutionCategory,
+	EngineRunExecutionCategorySchema as ProtocolEngineRunExecutionCategorySchema,
 	EngineRunKind as ProtocolEngineRunKind,
+	EngineRunKindSchema as ProtocolEngineRunKindSchema,
 	EngineScope as ProtocolEngineScope,
 	EngineStatus as ProtocolEngineStatus,
 	ExportDestination as ProtocolExportDestination,
@@ -39,6 +43,7 @@ import {
 	SortDirection as ProtocolSortDirection,
 	StackMode as ProtocolStackMode,
 	StepType as ProtocolStepType,
+	StepTypeSchema as ProtocolStepTypeSchema,
 	StringTransformMethod as ProtocolStringTransformMethod,
 	TimeComponent as ProtocolTimeComponent,
 	TimeDirection as ProtocolTimeDirection,
@@ -454,76 +459,39 @@ export const ENGINE_RUN_EXECUTION_CATEGORY_TOKENS = {
 	[ProtocolEngineRunExecutionCategory.WRITE]: 'write'
 } as const satisfies Partial<Record<ProtocolEngineRunExecutionCategory, string>>;
 
-export const ENGINE_RUN_KIND_JSON_TOKENS = {
-	ENGINE_RUN_KIND_UNSPECIFIED: null,
-	ENGINE_RUN_KIND_BUILD: 'build',
-	ENGINE_RUN_KIND_PREVIEW: 'preview',
-	ENGINE_RUN_KIND_ROW_COUNT: 'row_count',
-	ENGINE_RUN_KIND_DOWNLOAD: 'download',
-	ENGINE_RUN_KIND_INGEST: 'ingest'
-} as const satisfies Record<ProtocolEngineRunKindJson, string | null>;
+function protocolJsonTokens<JsonName extends string, Token extends string>(
+	schema: { values: readonly { name: string; number: number }[] },
+	tokens: Partial<Record<number, Token>>
+): Record<JsonName, Token | null> {
+	return Object.fromEntries(
+		schema.values.map((value) => [value.name, tokens[value.number] ?? null])
+	) as Record<JsonName, Token | null>;
+}
 
-export const BUILD_TAB_STATUS_JSON_TOKENS = {
-	BUILD_TAB_STATUS_UNSPECIFIED: null,
-	BUILD_TAB_STATUS_SUCCESS: 'success',
-	BUILD_TAB_STATUS_FAILED: 'failed'
-} as const satisfies Record<ProtocolBuildTabStatusJson, string | null>;
+export const ENGINE_RUN_KIND_JSON_TOKENS = protocolJsonTokens<
+	ProtocolEngineRunKindJson,
+	EngineRunKind
+>(ProtocolEngineRunKindSchema, ENGINE_RUN_KIND_TOKENS);
 
-export const BUILD_LOG_LEVEL_JSON_TOKENS = {
-	BUILD_LOG_LEVEL_UNSPECIFIED: null,
-	BUILD_LOG_LEVEL_INFO: 'info',
-	BUILD_LOG_LEVEL_WARNING: 'warning',
-	BUILD_LOG_LEVEL_ERROR: 'error'
-} as const satisfies Record<ProtocolBuildLogLevelJson, string | null>;
+export const BUILD_TAB_STATUS_JSON_TOKENS = protocolJsonTokens<
+	ProtocolBuildTabStatusJson,
+	BuildTabStatus
+>(ProtocolBuildTabStatusSchema, BUILD_TAB_STATUS_TOKENS);
 
-export const STEP_TYPE_JSON_TOKENS = {
-	STEP_TYPE_UNSPECIFIED: null,
-	STEP_TYPE_SELECT: 'select',
-	STEP_TYPE_DROP: 'drop',
-	STEP_TYPE_FILTER: 'filter',
-	STEP_TYPE_GROUPBY: 'groupby',
-	STEP_TYPE_JOIN: 'join',
-	STEP_TYPE_UNION_BY_NAME: 'union_by_name',
-	STEP_TYPE_UNPIVOT: 'unpivot',
-	STEP_TYPE_EXPLODE: 'explode',
-	STEP_TYPE_PIVOT: 'pivot',
-	STEP_TYPE_SAMPLE: 'sample',
-	STEP_TYPE_LIMIT: 'limit',
-	STEP_TYPE_TOPK: 'topk',
-	STEP_TYPE_VIEW: 'view',
-	STEP_TYPE_EXPORT: 'export',
-	STEP_TYPE_DOWNLOAD: 'download',
-	STEP_TYPE_CHART: 'chart',
-	STEP_TYPE_NOTIFICATION: 'notification',
-	STEP_TYPE_AI: 'ai',
-	STEP_TYPE_DATASOURCE: 'datasource',
-	STEP_TYPE_SORT: 'sort',
-	STEP_TYPE_RENAME: 'rename',
-	STEP_TYPE_EXPRESSION: 'expression',
-	STEP_TYPE_WITH_COLUMNS: 'with_columns',
-	STEP_TYPE_FILL_NULL: 'fill_null',
-	STEP_TYPE_DEDUPLICATE: 'deduplicate',
-	STEP_TYPE_STRING_TRANSFORM: 'string_transform',
-	STEP_TYPE_TIMESERIES: 'timeseries',
-	STEP_TYPE_PLOT_BAR: 'plot_bar',
-	STEP_TYPE_PLOT_HORIZONTAL_BAR: 'plot_horizontal_bar',
-	STEP_TYPE_PLOT_AREA: 'plot_area',
-	STEP_TYPE_PLOT_HEATGRID: 'plot_heatgrid',
-	STEP_TYPE_PLOT_HISTOGRAM: 'plot_histogram',
-	STEP_TYPE_PLOT_SCATTER: 'plot_scatter',
-	STEP_TYPE_PLOT_LINE: 'plot_line',
-	STEP_TYPE_PLOT_PIE: 'plot_pie',
-	STEP_TYPE_PLOT_BOXPLOT: 'plot_boxplot'
-} as const satisfies Record<ProtocolStepTypeJson, string | null>;
+export const BUILD_LOG_LEVEL_JSON_TOKENS = protocolJsonTokens<
+	ProtocolBuildLogLevelJson,
+	BuildLogLevel
+>(ProtocolBuildLogLevelSchema, BUILD_LOG_LEVEL_TOKENS);
 
-export const ENGINE_RUN_EXECUTION_CATEGORY_JSON_TOKENS = {
-	ENGINE_RUN_EXECUTION_CATEGORY_UNSPECIFIED: null,
-	ENGINE_RUN_EXECUTION_CATEGORY_READ: 'read',
-	ENGINE_RUN_EXECUTION_CATEGORY_STEP: 'step',
-	ENGINE_RUN_EXECUTION_CATEGORY_PLAN: 'plan',
-	ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE: 'compute',
-	ENGINE_RUN_EXECUTION_CATEGORY_WRITE: 'write'
-} as const satisfies Record<ProtocolEngineRunExecutionCategoryJson, string | null>;
+export const STEP_TYPE_JSON_TOKENS = protocolJsonTokens<
+	ProtocolStepTypeJson,
+	ProtocolPipelineStepType
+>(ProtocolStepTypeSchema, STEP_TYPE_TOKENS);
+
+export const ENGINE_RUN_EXECUTION_CATEGORY_JSON_TOKENS = protocolJsonTokens<
+	ProtocolEngineRunExecutionCategoryJson,
+	EngineRunExecutionCategory
+>(ProtocolEngineRunExecutionCategorySchema, ENGINE_RUN_EXECUTION_CATEGORY_TOKENS);
 
 export type FilterOperator = EnumToken<typeof FILTER_OPERATOR_TOKENS>;
 export type FilterValueType = EnumToken<typeof FILTER_VALUE_TYPE_TOKENS>;
