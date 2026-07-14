@@ -4,12 +4,15 @@ import asyncio
 import base64
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from typing import Any, cast
 
 import grpc
 from google.protobuf import json_format
+from google.protobuf.message import Message
+from protovalidate import ValidationError, Validator
 from sqlalchemy import select
 
 from backend_core import (
@@ -57,7 +60,6 @@ from backend_grpc.codec import (
     struct_to_dict,
     timestamp_to_datetime,
 )
-from backend_grpc.validation import ProtovalidateAioInterceptor
 from dataforge_protocol import (
     common_pb2,
     compute_pb2,
@@ -74,6 +76,34 @@ from modules.scheduler import service as scheduler_service
 logger = logging.getLogger(__name__)
 _TELEGRAM_BASE_URL = 'https://api.telegram.org'
 _TOKEN_METADATA_KEY = 'x-internal-token'
+
+
+class _BackendRequestValidationInterceptor(grpc.aio.ServerInterceptor):
+    def __init__(self) -> None:
+        self._validator = Validator()
+
+    async def intercept_service(
+        self,
+        continuation: Callable[[grpc.HandlerCallDetails], Awaitable[grpc.RpcMethodHandler | None]],
+        handler_call_details: grpc.HandlerCallDetails,
+    ) -> grpc.RpcMethodHandler | None:
+        handler = await continuation(handler_call_details)
+        if handler is None or handler.unary_unary is None:
+            return handler
+        unary_unary = cast(Callable[[Message, grpc.aio.ServicerContext], Awaitable[Any]], handler.unary_unary)
+
+        async def validate_request(request: Message, context: grpc.aio.ServicerContext) -> Any:
+            try:
+                self._validator.validate(request)
+            except ValidationError as exc:
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+            return await unary_unary(request, context)
+
+        return grpc.unary_unary_rpc_method_handler(
+            validate_request,
+            request_deserializer=handler.request_deserializer,
+            response_serializer=handler.response_serializer,
+        )
 
 
 async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
@@ -1416,7 +1446,7 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
 
 
 async def start_runtime_grpc_server() -> grpc.aio.Server:
-    server = grpc.aio.server(interceptors=(ProtovalidateAioInterceptor(),))
+    server = grpc.aio.server(interceptors=(_BackendRequestValidationInterceptor(),))
     worker_runtime_pb2_grpc.add_WorkerRuntimeServiceServicer_to_server(WorkerRuntimeServicer(), server)
     scheduler_runtime_pb2_grpc.add_SchedulerRuntimeServiceServicer_to_server(SchedulerRuntimeServicer(), server)
     server.add_insecure_port(f'{settings.internal_grpc_host}:{settings.internal_grpc_port}')

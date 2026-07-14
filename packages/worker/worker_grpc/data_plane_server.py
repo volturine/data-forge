@@ -3,23 +3,53 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, cast
 
 import grpc
 import pyarrow as pa  # type: ignore[import-untyped]
+from google.protobuf.message import Message
 from google.protobuf.timestamp_pb2 import Timestamp
+from protovalidate import ValidationError, Validator
 from pyiceberg.table import StaticTable
 
 from dataforge_protocol import common_pb2, iceberg_pb2, iceberg_pb2_grpc, object_store_pb2, object_store_pb2_grpc
 from runtime import compute_service, iceberg_metadata, iceberg_snapshot_reader, object_store
 from runtime.config import settings
 from worker_grpc.codec import dict_to_struct
-from worker_grpc.validation import ProtovalidateAioInterceptor
 
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"
 _MAX_DATA_PLANE_MESSAGE_BYTES = 128 * 1024 * 1024
+
+
+class _WorkerRequestValidationInterceptor(grpc.aio.ServerInterceptor):
+    def __init__(self) -> None:
+        self._validator = Validator()
+
+    async def intercept_service(
+        self,
+        continuation: Callable[[grpc.HandlerCallDetails], Awaitable[grpc.RpcMethodHandler | None]],
+        handler_call_details: grpc.HandlerCallDetails,
+    ) -> grpc.RpcMethodHandler | None:
+        handler = await continuation(handler_call_details)
+        if handler is None or handler.unary_unary is None:
+            return handler
+        unary_unary = cast(Callable[[Message, grpc.aio.ServicerContext], Awaitable[Any]], handler.unary_unary)
+
+        async def validate_request(request: Message, context: grpc.aio.ServicerContext) -> Any:
+            try:
+                self._validator.validate(request)
+            except ValidationError as exc:
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+            return await unary_unary(request, context)
+
+        return grpc.unary_unary_rpc_method_handler(
+            validate_request,
+            request_deserializer=handler.request_deserializer,
+            response_serializer=handler.response_serializer,
+        )
 
 
 def _object_store_storage_options_proto(payload: dict[str, object]) -> object_store_pb2.ObjectStoreStorageOptions:
@@ -270,7 +300,7 @@ def _arrow_schema_from_proto(payload: iceberg_pb2.ArrowSchemaIpc) -> pa.Schema:
 
 async def start_data_plane_grpc_server() -> grpc.aio.Server:
     server = grpc.aio.server(
-        interceptors=(ProtovalidateAioInterceptor(),),
+        interceptors=(_WorkerRequestValidationInterceptor(),),
         options=(
             ("grpc.max_send_message_length", _MAX_DATA_PLANE_MESSAGE_BYTES),
             ("grpc.max_receive_message_length", _MAX_DATA_PLANE_MESSAGE_BYTES),
