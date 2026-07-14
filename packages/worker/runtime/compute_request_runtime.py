@@ -241,9 +241,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 message=f"Created datasource {export_operation_result.datasource_name}",
                 datasource_id=export_operation_result.datasource_id,
             )
-            datasource_name = (
-                export_operation_result.result_meta.get("datasource_name") if isinstance(export_operation_result.result_meta, dict) else None
-            )
+            datasource_name = export_operation_result.result_meta.get("datasource_name") if isinstance(export_operation_result.result_meta, dict) else None
             if isinstance(datasource_name, str):
                 export_result.datasource_name = datasource_name
             _complete_request(client, claimed, response=compute_pb2.ComputeResponse(export=export_result))
@@ -490,9 +488,7 @@ def _preview_result(value: compute_schemas.StepPreviewResponse) -> compute_pb2.C
 
 
 def _schema_result(value: compute_schemas.StepSchemaResponse) -> compute_pb2.ComputeResponse:
-    return compute_pb2.ComputeResponse(
-        schema=compute_pb2.StepSchemaResult(step_id=value.step_id, columns=value.columns, column_types=value.column_types)
-    )
+    return compute_pb2.ComputeResponse(schema=compute_pb2.StepSchemaResult(step_id=value.step_id, columns=value.columns, column_types=value.column_types))
 
 
 def _row_count_result(value: compute_schemas.StepRowCountResponse) -> compute_pb2.ComputeResponse:
