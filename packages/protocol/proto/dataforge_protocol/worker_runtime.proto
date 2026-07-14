@@ -3,6 +3,7 @@ syntax = "proto3";
 package dataforge.runtime;
 
 import "buf/validate/validate.proto";
+import "dataforge_protocol/analysis.proto";
 import "dataforge_protocol/common.proto";
 import "dataforge_protocol/compute.proto";
 import "dataforge_protocol/datasource.proto";
@@ -391,14 +392,13 @@ message WorkerPersistBuildEventResponse {
 }
 
 message WorkerBuildRunPayload {
-  reserved 6, 7;
-  reserved "starter", "resource_config";
+  reserved 5, 6, 7;
+  reserved "request", "starter", "resource_config";
 
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string analysis_id = 3 [(buf.validate.field).string.min_len = 1];
   string analysis_name = 4 [(buf.validate.field).string.min_len = 1];
-  google.protobuf.Struct request = 5;
   optional EngineRunKind current_kind = 8 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
@@ -412,6 +412,8 @@ message WorkerBuildRunPayload {
   int32 total_tabs = 15 [(buf.validate.field).int32.gte = 1];
   BuildStarter build_starter = 16 [(buf.validate.field).required = true];
   optional BuildResourceConfigSummary build_resource_config = 17;
+  AnalysisPipelinePayload analysis_pipeline = 18 [(buf.validate.field).required = true];
+  optional string tab_id = 19 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerStartBuildRunRequest {

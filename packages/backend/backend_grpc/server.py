@@ -35,7 +35,12 @@ from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute.base import EngineStatusInfo
-from backend_core.domain.compute_requests.models import compute_request_kind_name, datasource_result_from_payload, kind_from_proto
+from backend_core.domain.compute_requests.models import (
+    analysis_pipeline_from_payload,
+    compute_request_kind_name,
+    datasource_result_from_payload,
+    kind_from_proto,
+)
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
@@ -1181,7 +1186,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 namespace=run.namespace,
                 analysis_id=run.analysis_id,
                 analysis_name=run.analysis_name,
-                request=dict_to_struct(dict(run.request_json)),
+                analysis_pipeline=analysis_pipeline_from_payload(dict(run.request_json)),
                 build_starter=_build_starter_proto(dict(run.starter_json)),
                 current_datasource_id=run.current_datasource_id,
                 current_tab_id=run.current_tab_id,
@@ -1190,6 +1195,9 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 current_output_name=run.current_output_name,
                 total_tabs=run.total_tabs,
             )
+            tab_id = run.request_json.get('tab_id')
+            if isinstance(tab_id, str) and tab_id:
+                payload.tab_id = tab_id
             if isinstance(run.current_kind, str):
                 payload.current_kind = _proto_value('ENGINE_RUN_KIND', run.current_kind)
             payload.started_at.CopyFrom(datetime_to_timestamp(run.started_at))

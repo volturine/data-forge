@@ -4,6 +4,8 @@ import asyncio
 import logging
 
 from builds.build_live import ActiveBuild
+from dataforge_protocol import enums_pb2
+from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager
 from runtime.domain.compute import schemas
@@ -96,12 +98,10 @@ async def run_queued_build_job(*, manager: ProcessManager, build_id: str, namesp
     build: ActiveBuild | None = None
     pipeline: dict | None = None
     starter: schemas.BuildStarter | None = None
-    request_payload: schemas.BuildRequest | None = None
     run = await asyncio.to_thread(worker_internal_api_client().start_build_run, namespace=namespace, build_id=build_id)
     if run is None:
         return
-    request_payload = schemas.BuildRequest.model_validate(run.request_json)
-    pipeline = request_payload.pipeline_payload()
+    pipeline = {**analysis_pipeline_to_execution_payload(run.analysis_pipeline), "tab_id": run.tab_id}
     starter = schemas.BuildStarter.model_validate(run.starter_json)
     build = ActiveBuild(
         build_id=run.id,
@@ -119,11 +119,16 @@ async def run_queued_build_job(*, manager: ProcessManager, build_id: str, namesp
         started_at=run.started_at,
         status=schemas.ActiveBuildStatus.RUNNING,
     )
-    if build is None or pipeline is None or starter is None or request_payload is None:
+    if build is None or pipeline is None or starter is None:
         return
     current_kind = build.current_kind or ""
     engine_run_kind = EngineRunKind.parse(build.current_kind)
-    is_schedule_ingest = engine_run_kind == EngineRunKind.BUILD and starter.is_schedule_trigger() and request_payload.is_schedule_ingest_request()
+    is_schedule_ingest = (
+        engine_run_kind == EngineRunKind.BUILD
+        and starter.is_schedule_trigger()
+        and len(run.analysis_pipeline.tabs) == 1
+        and run.analysis_pipeline.tabs[0].datasource.source_type == enums_pb2.DATA_SOURCE_TYPE_SCHEDULE
+    )
     if current_kind == DataSourceTargetKind.RAW.value or is_schedule_ingest:
         datasource_id = build.current_datasource_id
         if datasource_id is None:

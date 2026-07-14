@@ -102,6 +102,7 @@ class DataSourceType(ApiEnumValue):
     DATABASE: ClassVar[Self]
     ICEBERG: ClassVar[Self]
     ANALYSIS: ClassVar[Self]
+    SCHEDULE: ClassVar[Self]
 
     @property
     def category(self) -> DataSourceCategory:
@@ -123,6 +124,8 @@ class DataSourceType(ApiEnumValue):
     def connect_api_error_message(self) -> str | None:
         if self == DataSourceType.ANALYSIS:
             return 'Direct creation of analysis datasources is no longer supported. Use analysis tabs with analysis_tab_id.'
+        if self == DataSourceType.SCHEDULE:
+            return 'Direct creation of schedule datasources is not supported.'
         return None
 
     @property
@@ -138,6 +141,7 @@ DataSourceType.FILE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_FILE, api_token(
 DataSourceType.DATABASE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_DATABASE, api_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_DATABASE))
 DataSourceType.ICEBERG = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ICEBERG, api_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_ICEBERG))
 DataSourceType.ANALYSIS = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ANALYSIS, api_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_ANALYSIS))
+DataSourceType.SCHEDULE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_SCHEDULE, api_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_SCHEDULE))
 
 
 class DataSourceLoadType(ApiEnumValue):

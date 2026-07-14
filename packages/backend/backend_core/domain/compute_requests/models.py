@@ -326,7 +326,7 @@ def _parse_proto_message[ProtoMessageT: message.Message](message_type: type[Prot
     return cast(ProtoMessageT, json_format.ParseDict(payload, message_type()))
 
 
-def _analysis_pipeline_from_payload(payload: dict[str, object]) -> analysis_pb2.AnalysisPipelinePayload:
+def analysis_pipeline_from_payload(payload: dict[str, object]) -> analysis_pb2.AnalysisPipelinePayload:
     return _parse_proto_message(analysis_pb2.AnalysisPipelinePayload, _pipeline_payload_for_proto(_required_payload_dict(payload, 'analysis_pipeline')))
 
 
@@ -358,7 +358,7 @@ def _set_optional_string(message_value: message.Message, field_name: str, value:
 def _step_preview_command(payload: dict[str, object]) -> compute_pb2.StepPreviewCommand:
     command = compute_pb2.StepPreviewCommand(
         target_step_id=_required_payload_str(payload, 'target_step_id'),
-        analysis_pipeline=_analysis_pipeline_from_payload(payload),
+        analysis_pipeline=analysis_pipeline_from_payload(payload),
         row_limit=_required_int(payload, 'row_limit'),
         page=_required_int(payload, 'page'),
     )
@@ -375,7 +375,7 @@ def _step_preview_command(payload: dict[str, object]) -> compute_pb2.StepPreview
 def _step_schema_command(payload: dict[str, object]) -> compute_pb2.StepSchemaCommand:
     command = compute_pb2.StepSchemaCommand(
         target_step_id=_required_payload_str(payload, 'target_step_id'),
-        analysis_pipeline=_analysis_pipeline_from_payload(payload),
+        analysis_pipeline=analysis_pipeline_from_payload(payload),
     )
     _set_optional_string(command, 'analysis_id', _optional_str(payload, 'analysis_id'))
     _set_optional_string(command, 'tab_id', _optional_str(payload, 'tab_id'))
@@ -385,7 +385,7 @@ def _step_schema_command(payload: dict[str, object]) -> compute_pb2.StepSchemaCo
 def _step_row_count_command(payload: dict[str, object]) -> compute_pb2.StepRowCountCommand:
     command = compute_pb2.StepRowCountCommand(
         target_step_id=_required_payload_str(payload, 'target_step_id'),
-        analysis_pipeline=_analysis_pipeline_from_payload(payload),
+        analysis_pipeline=analysis_pipeline_from_payload(payload),
     )
     _set_optional_string(command, 'analysis_id', _optional_str(payload, 'analysis_id'))
     _set_optional_string(command, 'tab_id', _optional_str(payload, 'tab_id'))
@@ -395,7 +395,7 @@ def _step_row_count_command(payload: dict[str, object]) -> compute_pb2.StepRowCo
 def _download_command(payload: dict[str, object]) -> compute_pb2.DownloadCommand:
     command = compute_pb2.DownloadCommand(
         target_step_id=_required_payload_str(payload, 'target_step_id'),
-        analysis_pipeline=_analysis_pipeline_from_payload(payload),
+        analysis_pipeline=analysis_pipeline_from_payload(payload),
         format=_required_proto_enum(enums_pb2.ExportFormat.DESCRIPTOR, payload, 'format'),
         filename=_required_payload_str(payload, 'filename'),
     )
@@ -407,7 +407,7 @@ def _download_command(payload: dict[str, object]) -> compute_pb2.DownloadCommand
 def _export_command(payload: dict[str, object]) -> compute_pb2.ExportCommand:
     command = compute_pb2.ExportCommand(
         target_step_id=_required_payload_str(payload, 'target_step_id'),
-        analysis_pipeline=_analysis_pipeline_from_payload(payload),
+        analysis_pipeline=analysis_pipeline_from_payload(payload),
         format=_required_proto_enum(enums_pb2.ExportFormat.DESCRIPTOR, payload, 'format'),
         filename=_required_payload_str(payload, 'filename'),
         destination=_required_proto_enum(enums_pb2.ExportDestination.DESCRIPTOR, payload, 'destination'),

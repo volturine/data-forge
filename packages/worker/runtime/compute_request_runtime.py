@@ -10,16 +10,17 @@ from typing import Any, cast
 
 from google.protobuf import json_format, message
 
-from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2, errors_pb2
+from dataforge_protocol import compute_pb2, enums_pb2, errors_pb2
+from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager
 from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
 from runtime.domain.domain_enums import domain_token
-from runtime.json_values import dict_to_struct
 from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
 from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
+from runtime.json_values import dict_to_struct
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
 
@@ -151,7 +152,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
 
         if claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
             preview_request = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
-            analysis_pipeline = _analysis_pipeline_to_service_payload(preview_request.analysis_pipeline)
+            analysis_pipeline = analysis_pipeline_to_execution_payload(preview_request.analysis_pipeline)
             request_json = _step_preview_request_json(preview_request)
             preview_response = service.preview_step(
                 session=None,
@@ -176,7 +177,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 manager=manager,
                 target_step_id=schema_request.target_step_id,
                 analysis_id=schema_request.analysis_id,
-                analysis_pipeline=_analysis_pipeline_to_service_payload(schema_request.analysis_pipeline),
+                analysis_pipeline=analysis_pipeline_to_execution_payload(schema_request.analysis_pipeline),
                 tab_id=schema_request.tab_id if schema_request.HasField("tab_id") else None,
             )
             _complete_request(client, claimed, response=_schema_result(schema_response))
@@ -190,7 +191,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 manager=manager,
                 target_step_id=row_count_request.target_step_id,
                 analysis_id=row_count_request.analysis_id,
-                analysis_pipeline=_analysis_pipeline_to_service_payload(row_count_request.analysis_pipeline),
+                analysis_pipeline=analysis_pipeline_to_execution_payload(row_count_request.analysis_pipeline),
                 tab_id=row_count_request.tab_id if row_count_request.HasField("tab_id") else None,
                 request_json=request_json,
             )
@@ -201,7 +202,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 session=None,
                 manager=manager,
                 target_step_id=download_request.target_step_id,
-                analysis_pipeline=_analysis_pipeline_to_service_payload(download_request.analysis_pipeline),
+                analysis_pipeline=analysis_pipeline_to_execution_payload(download_request.analysis_pipeline),
                 export_format=domain_token("ExportFormat", download_request.format),
                 filename=download_request.filename,
                 analysis_id=download_request.analysis_id if download_request.HasField("analysis_id") else None,
@@ -223,7 +224,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 session=None,
                 manager=manager,
                 target_step_id=export_request.target_step_id,
-                analysis_pipeline=_analysis_pipeline_to_service_payload(export_request.analysis_pipeline),
+                analysis_pipeline=analysis_pipeline_to_execution_payload(export_request.analysis_pipeline),
                 filename=export_request.filename,
                 iceberg_options=_message_to_service_payload(export_request.iceberg_options) if export_request.HasField("iceberg_options") else None,
                 analysis_id=export_request.analysis_id if export_request.HasField("analysis_id") else None,
@@ -320,38 +321,11 @@ def _message_to_service_payload(value: message.Message) -> dict[str, object]:
     return cast(dict[str, object], decoded)
 
 
-def _unwrap_step_config(config: object) -> object:
-    if not isinstance(config, dict) or len(config) != 1:
-        return config
-    field_name = next(iter(config))
-    if field_name in analysis_pb2.StepConfig.DESCRIPTOR.fields_by_name:
-        return config[field_name]
-    return config
-
-
-def _analysis_pipeline_to_service_payload(pipeline: analysis_pb2.AnalysisPipelinePayload) -> dict[str, object]:
-    payload = _message_to_service_payload(pipeline)
-    tabs = payload.get("tabs")
-    if isinstance(tabs, list):
-        for tab in tabs:
-            if not isinstance(tab, dict):
-                continue
-            steps = tab.get("steps")
-            if isinstance(steps, list):
-                for step in steps:
-                    if isinstance(step, dict):
-                        protocol_step_type = step.pop("step_type", None)
-                        if isinstance(protocol_step_type, int):
-                            step["type"] = domain_token("StepType", protocol_step_type)
-                        step["config"] = _unwrap_step_config(step.get("config"))
-    return payload
-
-
 def _step_request_json(command: message.Message) -> dict[str, object]:
     request_json = _message_to_service_payload(command)
     pipeline = request_json.get("analysis_pipeline")
     if isinstance(pipeline, dict):
-        request_json["analysis_pipeline"] = _analysis_pipeline_to_service_payload(cast(Any, command).analysis_pipeline)
+        request_json["analysis_pipeline"] = analysis_pipeline_to_execution_payload(cast(Any, command).analysis_pipeline)
     return request_json
 
 

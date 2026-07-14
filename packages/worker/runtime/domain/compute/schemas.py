@@ -5,8 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapte
 
 from dataforge_protocol import enums_pb2
 from runtime.domain.analysis.step_types import is_step_type
-from runtime.domain.engine_runs.schemas import EngineRunKind
 from runtime.domain.domain_enums import DomainEnumValue, domain_token
+from runtime.domain.engine_runs.schemas import EngineRunKind
 
 
 class EngineStatus(DomainEnumValue):
@@ -24,9 +24,7 @@ class EngineScope(DomainEnumValue):
     BUILD: ClassVar[Self]
 
 
-EngineScope.DATASOURCE_PREVIEW = EngineScope(
-    enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, domain_token("EngineScope", enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW)
-)
+EngineScope.DATASOURCE_PREVIEW = EngineScope(enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, domain_token("EngineScope", enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW))
 EngineScope.ANALYSIS_INTERACTIVE = EngineScope(
     enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE, domain_token("EngineScope", enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE)
 )
@@ -292,24 +290,6 @@ class BuildTabResult(BaseModel):
     output_id: str | None = None
     output_name: str | None = None
     error: str | None = None
-
-
-class BuildRequest(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    analysis_pipeline: AnalysisPipelinePayload
-    tab_id: str | None = None
-
-    def pipeline_payload(self) -> dict[str, object]:
-        pipeline = self.analysis_pipeline.model_dump(mode="json")
-        if not isinstance(pipeline, dict):
-            raise ValueError("analysis_pipeline is required")
-        return {**pipeline, "tab_id": self.tab_id}
-
-    def is_schedule_ingest_request(self) -> bool:
-        if len(self.analysis_pipeline.tabs) != 1:
-            return False
-        return self.analysis_pipeline.tabs[0].datasource.source_type == "schedule"
 
 
 class ActiveBuildStatus(DomainEnumValue):

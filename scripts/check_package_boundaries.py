@@ -222,6 +222,7 @@ PROTOCOL_FORBIDDEN_TOKENS = {
     'google.protobuf.Struct event = 3': 'build-event RPCs must use typed BuildEvent messages, not generic Struct payloads',
     'optional google.protobuf.Struct resource_config = 4': 'build-event RPCs must use typed BuildResourceConfigSummary messages',
     'google.protobuf.Struct starter = 6': 'build-run payloads must use typed BuildStarter messages',
+    'google.protobuf.Struct request = 5': 'build-run payloads must use typed AnalysisPipelinePayload and tab_id fields',
     'optional google.protobuf.Struct resource_config = 7': 'build-run payloads must use typed BuildResourceConfigSummary messages',
     'google.protobuf.Struct options = 1': 'object-store storage options must use typed ObjectStoreStorageOptions messages',
     'google.protobuf.Struct schema = 2': 'Iceberg schema sync must use typed ArrowSchemaIpc messages',
@@ -265,7 +266,6 @@ PROTO_STRUCT_ALLOWLIST = {
     'proto/dataforge_protocol/worker_runtime.proto:WorkerEngineRunUpdateFields.request_json': 'engine-run request updates write persisted runtime JSON at the database boundary',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerEngineRunUpdateFields.result_json': 'engine-run result updates write persisted runtime JSON at the database boundary',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerEngineRunStateResponse.result': 'engine-run state exposes persisted runtime result JSON',
-    'proto/dataforge_protocol/worker_runtime.proto:WorkerBuildRunPayload.request': 'build-run start payload exposes persisted runtime request JSON',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerGenerateAIRequest.options': 'AI generation options are provider-specific JSON',
 }
 WORKER_RUNTIME_RPC_FORBIDDEN_TOKENS = {

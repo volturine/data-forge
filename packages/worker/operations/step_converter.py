@@ -19,6 +19,9 @@ Backend format:
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import cast
+
+from google.protobuf import json_format
 
 from dataforge_protocol import analysis_pb2
 from runtime.domain.analysis.step_types import (
@@ -29,6 +32,48 @@ from runtime.domain.analysis.step_types import (
     is_step_type,
     normalize_step_type,
 )
+from runtime.domain.domain_enums import domain_token
+
+
+def analysis_pipeline_to_execution_payload(pipeline: analysis_pb2.AnalysisPipelinePayload) -> dict[str, object]:
+    decoded = json_format.MessageToDict(pipeline, preserving_proto_field_name=True, use_integers_for_enums=True)
+    if not isinstance(decoded, dict):
+        raise ValueError("analysis pipeline must decode to an object")
+    payload = cast(dict[str, object], decoded)
+    tabs = payload.get("tabs")
+    if not isinstance(tabs, list):
+        return payload
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        datasource = tab.get("datasource")
+        if isinstance(datasource, dict) and isinstance(datasource.get("source_type"), int):
+            datasource["source_type"] = domain_token("DataSourceType", datasource["source_type"])
+        output = tab.get("output")
+        if isinstance(output, dict):
+            for field, enum_name in (
+                ("format", "ExportFormat"),
+                ("datasource_type", "DataSourceType"),
+                ("build_mode", "BuildMode"),
+            ):
+                number = output.get(field)
+                if isinstance(number, int):
+                    output[field] = domain_token(enum_name, number)
+            notification = output.get("notification")
+            if isinstance(notification, dict) and isinstance(notification.get("method"), int):
+                notification["method"] = domain_token("NotificationMethod", notification["method"])
+        steps = tab.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            step_type = step.pop("step_type", None)
+            if isinstance(step_type, int):
+                token = domain_token("StepType", step_type)
+                step["type"] = token
+                step["config"] = _unwrap_step_config(token, step.get("config"))
+    return payload
 
 
 def _filter_value_payload(value: object) -> object:

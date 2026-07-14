@@ -250,6 +250,7 @@ enum DataSourceType {
   DATA_SOURCE_TYPE_DATABASE = 2 [(dataforge_token) = "database"];
   DATA_SOURCE_TYPE_ICEBERG = 3 [(dataforge_token) = "iceberg"];
   DATA_SOURCE_TYPE_ANALYSIS = 4 [(dataforge_token) = "analysis"];
+  DATA_SOURCE_TYPE_SCHEDULE = 5 [(dataforge_token) = "schedule"];
 }
 
 enum DataSourceLoadType {

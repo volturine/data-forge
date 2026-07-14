@@ -11,7 +11,7 @@ from typing import Any, TypeVar, cast
 import grpc
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
 
-from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
+from dataforge_protocol import analysis_pb2, common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
 
 _TOKEN_METADATA_KEY = "x-internal-token"
 _T = TypeVar("_T")
@@ -71,7 +71,8 @@ class StartedBuildRun:
     namespace: str
     analysis_id: str
     analysis_name: str
-    request_json: dict[str, object]
+    analysis_pipeline: analysis_pb2.AnalysisPipelinePayload
+    tab_id: str | None
     starter_json: dict[str, object]
     resource_config_json: dict[str, object] | None
     current_kind: str | None
@@ -568,7 +569,8 @@ class WorkerInternalApiClient:
             namespace=run.namespace,
             analysis_id=run.analysis_id,
             analysis_name=run.analysis_name,
-            request_json=struct_to_dict(run.request),
+            analysis_pipeline=run.analysis_pipeline,
+            tab_id=_optional_str(run, "tab_id"),
             starter_json=_build_starter_payload(run.build_starter),
             resource_config_json=_build_resource_config_payload(run.build_resource_config) if run.HasField("build_resource_config") else None,
             current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.EngineRunKind, "ENGINE_RUN_KIND"),

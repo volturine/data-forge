@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
-from google.protobuf import struct_pb2, timestamp_pb2
+from google.protobuf import json_format, struct_pb2, timestamp_pb2
 from sqlmodel import Session
 
 from backend_core import build_jobs_service, build_runs_service, compute_requests_service, engine_instances_service, engine_runs_service
@@ -26,9 +26,7 @@ from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb
 
 
 def dict_to_struct(payload: dict[str, object]) -> struct_pb2.Struct:
-    value = struct_pb2.Struct()
-    value.update(payload)
-    return value
+    return json_format.ParseDict(cast(Any, payload), struct_pb2.Struct())
 
 
 def datetime_to_timestamp(value: datetime) -> timestamp_pb2.Timestamp:
@@ -629,7 +627,25 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
         namespace='default',
         analysis_id=analysis_id,
         analysis_name='Start gRPC boundary test',
-        request_json={'analysis_pipeline': {'analysis_id': analysis_id, 'tabs': []}, 'tab_id': 'tab-1'},
+        request_json={
+            'analysis_pipeline': {
+                'analysis_id': analysis_id,
+                'tabs': [
+                    {
+                        'id': 'tab-1',
+                        'datasource': {
+                            'id': 'datasource-1',
+                            'analysis_tab_id': 'tab-1',
+                            'source_type': 'schedule',
+                            'config': {'branch': 'main'},
+                        },
+                        'output': {'result_id': 'result-1', 'filename': 'result.parquet', 'format': 'parquet'},
+                        'steps': [],
+                    }
+                ],
+            },
+            'tab_id': 'tab-1',
+        },
         starter_json={'triggered_by': 'test'},
         resource_config_json={'max_threads': 4, 'max_memory_mb': 1024, 'streaming_chunk_size': 500},
         status=BuildRunStatus.QUEUED,
@@ -645,6 +661,9 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
     assert response.HasField('run')
     assert response.run.id == build_id
     assert response.run.analysis_id == analysis_id
+    assert response.run.analysis_pipeline.analysis_id == analysis_id
+    assert response.run.analysis_pipeline.tabs[0].datasource.source_type == enums_pb2.DATA_SOURCE_TYPE_SCHEDULE
+    assert response.run.tab_id == 'tab-1'
     assert response.run.current_kind == enums_pb2.ENGINE_RUN_KIND_BUILD
     assert response.run.build_starter.triggered_by == 'test'
     assert response.run.build_resource_config.max_threads == 4

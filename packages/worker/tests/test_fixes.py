@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import polars as pl
 import pytest
+from google.protobuf import json_format
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
@@ -17,13 +18,13 @@ from operations.download import DownloadParams
 from operations.export import ExportParams
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
+from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, internal_api
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
 from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
-from google.protobuf import json_format
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -249,7 +250,7 @@ def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> Non
         ],
     )
 
-    payload = compute_request_runtime._analysis_pipeline_to_service_payload(pipeline)
+    payload = analysis_pipeline_to_execution_payload(pipeline)
 
     tabs = cast(list[dict[str, object]], payload["tabs"])
     steps = cast(list[dict[str, object]], tabs[0]["steps"])
@@ -284,7 +285,7 @@ def test_analysis_pipeline_protocol_step_type_drives_service_step_type() -> None
         ],
     )
 
-    payload = compute_request_runtime._analysis_pipeline_to_service_payload(pipeline)
+    payload = analysis_pipeline_to_execution_payload(pipeline)
 
     tabs = cast(list[dict[str, object]], payload["tabs"])
     steps = cast(list[dict[str, object]], tabs[0]["steps"])
@@ -321,7 +322,7 @@ def test_analysis_pipeline_protocol_deduplicate_absent_subset_is_not_null() -> N
         ],
     )
 
-    payload = compute_request_runtime._analysis_pipeline_to_service_payload(pipeline)
+    payload = analysis_pipeline_to_execution_payload(pipeline)
 
     tabs = cast(list[dict[str, object]], payload["tabs"])
     steps = cast(list[dict[str, object]], tabs[0]["steps"])
