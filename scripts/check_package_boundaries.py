@@ -48,6 +48,7 @@ FORBIDDEN_OWNER_DUPLICATES = [
     Path('packages/backend/modules/udf/models.py'),
     Path('packages/worker/runtime/engine_identity.py'),
     Path('packages/worker/runtime/domain/compute_requests/models.py'),
+    Path('packages/worker/datasources/datasource_schemas.py'),
     Path('packages/worker/runtime/models'),
 ]
 
@@ -282,7 +283,6 @@ PROTOCOL_BACKED_ENUM_FILES = [
     Path('packages/backend/modules/datasource/runtime_loading.py'),
     Path('packages/backend/modules/datasource/schemas.py'),
     Path('packages/worker/datasources/datasource_loading.py'),
-    Path('packages/worker/datasources/datasource_schemas.py'),
     Path('packages/worker/operations/datasource.py'),
     Path('packages/worker/runtime/domain/analysis/models.py'),
     Path('packages/worker/runtime/domain/analysis/step_types.py'),

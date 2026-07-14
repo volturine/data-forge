@@ -6,19 +6,6 @@ from dataforge_protocol import enums_pb2
 from runtime.domain.protocol_enums import ProtocolEnumValue, protocol_token
 
 
-class DataSourceCreatedBy(ProtocolEnumValue):
-    IMPORT: ClassVar[Self]
-    ANALYSIS: ClassVar[Self]
-
-
-DataSourceCreatedBy.IMPORT = DataSourceCreatedBy(
-    enums_pb2.DATA_SOURCE_CREATED_BY_IMPORT, protocol_token("DataSourceCreatedBy", enums_pb2.DATA_SOURCE_CREATED_BY_IMPORT)
-)
-DataSourceCreatedBy.ANALYSIS = DataSourceCreatedBy(
-    enums_pb2.DATA_SOURCE_CREATED_BY_ANALYSIS, protocol_token("DataSourceCreatedBy", enums_pb2.DATA_SOURCE_CREATED_BY_ANALYSIS)
-)
-
-
 class DataSourceTargetKind(ProtocolEnumValue):
     ANALYSIS: ClassVar[Self]
     RAW: ClassVar[Self]
