@@ -13,14 +13,14 @@ Status: **in progress**. The old `backend_contracts` and `worker_models` package
 | # | Completion item | Acceptance evidence |
 | --- | --- | --- |
 | C1 | Remove mirrored backend/worker compute and datasource schemas | Worker runtime consumes generated protocol messages or worker-owned execution objects; backend alone owns HTTP/OpenAPI Pydantic schemas; package-boundary checks reject reintroduction. |
-| C2 | Make worker the sole owner of object-store and Iceberg data-plane policy | Backend has no object-store URL/prefix implementation and performs all data-plane policy and operations through typed worker RPCs. |
+| C2 | ✅ Make worker the sole owner of object-store and Iceberg data-plane policy | Completed in `13016643`: backend object-store parsing/policy was deleted; typed worker RPCs classify URLs and enforce managed deletion; package-boundary checks prevent reintroduction. |
 | C3 | Remove handwritten descriptor-walking protocol bridges | Runtime communication constructs and reads generated messages directly; JSON conversion remains only at explicit HTTP and database boundaries with one owner per boundary. |
 | C4 | Make local protocol generation declarative and deterministic | `packages/protocol` owns the complete local toolchain and generation configuration; generation does not use remote plugins, compatibility wrappers, or scattered package scripts. |
 | C5 | Replace stable `Struct` fields and justify dynamic escape hatches | Every remaining `Struct` is an intentionally dynamic row, provider option, persisted JSON, or diagnostic field; stable shapes use messages, enums, optional fields, and oneofs. |
 | C6 | Remove duplicated protocol support and frontend protocol tables | Enum-token handling, validation, codecs, and build-event decoding have a single generated or package-owned implementation without mirrored source files. |
-| C7 | Complete maintainability cleanup | Shared frontend recipes replace repeated control styles, oversized modules are split by ownership, suppression debt is removed or precisely justified, and dead package scaffolding is deleted. |
+| C7 | Complete maintainability cleanup | In progress. `6ce32584` removed the worker expression `eval`/S307 suppression with a constrained AST evaluator; frontend recipe duplication, oversized modules, and remaining justified suppressions still need separate review. |
 
-Final gate: `just verify`, `just test`, and `just test-e2e` pass locally; GitHub CI and CodeQL pass for the final commit; package-boundary checks cover every deleted or forbidden architecture path.
+Local gate on 2026-07-14: `just verify`, `just test`, and `just test-e2e` pass for `13016643` + `6ce32584` (946 backend unit, 91 backend integration with 2 skips, 340 worker, 3 scheduler, 1,190 frontend unit, and 350 E2E tests). GitHub CI and CodeQL still need to pass after these commits are pushed. This evidence validates the completed items only; it does not close the remaining P0 checkpoint.
 
 ---
 
@@ -138,5 +138,7 @@ Status: **in progress**. The protocol-first rewrite removed the original mirrore
 | 55  | ✅ **Type MCP test monkeypatch fixtures** | `tests/test_mcp.py` | Added `pytest.MonkeyPatch` annotations to four MCP tests, removing local `no-untyped-def` suppressions while preserving their registry and startup behavior coverage. |
 | 56  | ✅ **Remove unused auth-settings reload API** | `backend_core/auth_config.py` | Removed the unreferenced reloader that rebound a module-global settings object, eliminating its global-state lint suppression without changing configuration consumers. |
 | 57  | ✅ **Type Alembic include-object callback** | `database/alembic/env.py` | Replaced the migration callback's untyped-function suppression with an explicit opaque-object and primitive-argument contract. |
+| 58  | ✅ **Move object-store policy behind worker RPC** | `object_store.proto`, `worker/runtime/object_store.py`, `worker_grpc/data_plane_server.py`, `backend_core/data_plane_client.py`, deleted `backend_core/object_store_paths.py` | Worker now owns URL classification and managed-prefix enforcement. Backend callers use typed data-plane RPCs, HTTP URL validation uses the generated Protovalidate contract, and package-boundary checks reject a backend policy implementation. |
+| 59  | ✅ **Remove expression `eval` suppression** | `worker/operations/expression.py`, `worker/tests/test_operations.py` | Replaced suppressed Python `eval` with an AST-based Polars expression evaluator that permits explicit expression constructors, data types, chaining, arithmetic, and comparisons while structurally rejecting arbitrary names, lambdas, comprehensions, reflection, and I/O entry points. |
 
 The remaining work is tracked by the completion checkpoint at the top of this document. Resolved items below remain historical evidence and must not be read as overriding an open checkpoint item.
