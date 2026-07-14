@@ -5,11 +5,11 @@ from typing import Any, ClassVar, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from backend_core.domain.protocol_enums import ProtocolEnumValue, protocol_token
+from backend_core.domain.api_enums import ApiEnumValue, api_token
 from dataforge_protocol import enums_pb2
 
 
-class EngineRunKind(ProtocolEnumValue):
+class EngineRunKind(ApiEnumValue):
     BUILD: ClassVar[Self]
     PREVIEW: ClassVar[Self]
     ROW_COUNT: ClassVar[Self]
@@ -17,14 +17,14 @@ class EngineRunKind(ProtocolEnumValue):
     INGEST: ClassVar[Self]
 
 
-EngineRunKind.BUILD = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_BUILD, protocol_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_BUILD))
-EngineRunKind.PREVIEW = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_PREVIEW, protocol_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_PREVIEW))
-EngineRunKind.ROW_COUNT = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_ROW_COUNT, protocol_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_ROW_COUNT))
-EngineRunKind.DOWNLOAD = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_DOWNLOAD, protocol_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_DOWNLOAD))
-EngineRunKind.INGEST = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_INGEST, protocol_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_INGEST))
+EngineRunKind.BUILD = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_BUILD, api_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_BUILD))
+EngineRunKind.PREVIEW = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_PREVIEW, api_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_PREVIEW))
+EngineRunKind.ROW_COUNT = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_ROW_COUNT, api_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_ROW_COUNT))
+EngineRunKind.DOWNLOAD = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_DOWNLOAD, api_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_DOWNLOAD))
+EngineRunKind.INGEST = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_INGEST, api_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_INGEST))
 
 
-class EngineRunStatus(ProtocolEnumValue):
+class EngineRunStatus(ApiEnumValue):
     RUNNING: ClassVar[Self]
     SUCCESS: ClassVar[Self]
     FAILED: ClassVar[Self]
@@ -38,13 +38,13 @@ class EngineRunStatus(ProtocolEnumValue):
         return self.is_terminal and next_status != self
 
 
-EngineRunStatus.RUNNING = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_RUNNING, protocol_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_RUNNING))
-EngineRunStatus.SUCCESS = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_SUCCESS, protocol_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_SUCCESS))
-EngineRunStatus.FAILED = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_FAILED, protocol_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_FAILED))
-EngineRunStatus.CANCELLED = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_CANCELLED, protocol_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_CANCELLED))
+EngineRunStatus.RUNNING = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_RUNNING, api_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_RUNNING))
+EngineRunStatus.SUCCESS = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_SUCCESS, api_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_SUCCESS))
+EngineRunStatus.FAILED = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_FAILED, api_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_FAILED))
+EngineRunStatus.CANCELLED = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_CANCELLED, api_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_CANCELLED))
 
 
-class EngineRunExecutionCategory(ProtocolEnumValue):
+class EngineRunExecutionCategory(ApiEnumValue):
     READ: ClassVar[Self]
     STEP: ClassVar[Self]
     PLAN: ClassVar[Self]
@@ -65,32 +65,32 @@ class EngineRunExecutionCategory(ProtocolEnumValue):
 
 
 EngineRunExecutionCategory.READ = EngineRunExecutionCategory(
-    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_READ, protocol_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_READ)
+    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_READ, api_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_READ)
 )
 EngineRunExecutionCategory.STEP = EngineRunExecutionCategory(
-    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP, protocol_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP)
+    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP, api_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP)
 )
 EngineRunExecutionCategory.PLAN = EngineRunExecutionCategory(
-    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_PLAN, protocol_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_PLAN)
+    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_PLAN, api_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_PLAN)
 )
 EngineRunExecutionCategory.COMPUTE = EngineRunExecutionCategory(
-    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE, protocol_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE)
+    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE, api_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE)
 )
 EngineRunExecutionCategory.WRITE = EngineRunExecutionCategory(
-    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_WRITE, protocol_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_WRITE)
+    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_WRITE, api_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_WRITE)
 )
 
 
-class SchemaDiffStatus(ProtocolEnumValue):
+class SchemaDiffStatus(ApiEnumValue):
     ADDED: ClassVar[Self]
     REMOVED: ClassVar[Self]
     TYPE_CHANGED: ClassVar[Self]
 
 
-SchemaDiffStatus.ADDED = SchemaDiffStatus(enums_pb2.SCHEMA_DIFF_STATUS_ADDED, protocol_token('SchemaDiffStatus', enums_pb2.SCHEMA_DIFF_STATUS_ADDED))
-SchemaDiffStatus.REMOVED = SchemaDiffStatus(enums_pb2.SCHEMA_DIFF_STATUS_REMOVED, protocol_token('SchemaDiffStatus', enums_pb2.SCHEMA_DIFF_STATUS_REMOVED))
+SchemaDiffStatus.ADDED = SchemaDiffStatus(enums_pb2.SCHEMA_DIFF_STATUS_ADDED, api_token('SchemaDiffStatus', enums_pb2.SCHEMA_DIFF_STATUS_ADDED))
+SchemaDiffStatus.REMOVED = SchemaDiffStatus(enums_pb2.SCHEMA_DIFF_STATUS_REMOVED, api_token('SchemaDiffStatus', enums_pb2.SCHEMA_DIFF_STATUS_REMOVED))
 SchemaDiffStatus.TYPE_CHANGED = SchemaDiffStatus(
-    enums_pb2.SCHEMA_DIFF_STATUS_TYPE_CHANGED, protocol_token('SchemaDiffStatus', enums_pb2.SCHEMA_DIFF_STATUS_TYPE_CHANGED)
+    enums_pb2.SCHEMA_DIFF_STATUS_TYPE_CHANGED, api_token('SchemaDiffStatus', enums_pb2.SCHEMA_DIFF_STATUS_TYPE_CHANGED)
 )
 
 

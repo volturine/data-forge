@@ -9,9 +9,9 @@ from typing import Any, cast
 import polars as pl
 from pydantic import BaseModel, ConfigDict, Field
 
+from operations.enums import WithColumnsExprType
 from operations.validation import validate_no_reflection_escape
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.step_config_enums import WithColumnsExprType
 
 # Builtins allowed inside UDF code.
 # Keep this as a narrow allowlist so aliased introspection helpers cannot escape the sandbox.

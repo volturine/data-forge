@@ -4,43 +4,41 @@ from typing import Annotated, ClassVar, Literal, Self
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, StringConstraints, TypeAdapter, WithJsonSchema, field_validator
 
 from backend_core.domain.analysis.step_types import is_step_type
+from backend_core.domain.api_enums import ApiEnumValue, api_token
 from backend_core.domain.engine_runs.schemas import EngineRunKind
-from backend_core.domain.protocol_enums import ProtocolEnumValue, protocol_token
 from dataforge_protocol import compute_pb2, enums_pb2
 
 
-class EngineStatus(ProtocolEnumValue):
+class EngineStatus(ApiEnumValue):
     HEALTHY: ClassVar[Self]
     TERMINATED: ClassVar[Self]
 
 
-EngineStatus.HEALTHY = EngineStatus(enums_pb2.ENGINE_STATUS_HEALTHY, protocol_token('EngineStatus', enums_pb2.ENGINE_STATUS_HEALTHY))
-EngineStatus.TERMINATED = EngineStatus(enums_pb2.ENGINE_STATUS_TERMINATED, protocol_token('EngineStatus', enums_pb2.ENGINE_STATUS_TERMINATED))
+EngineStatus.HEALTHY = EngineStatus(enums_pb2.ENGINE_STATUS_HEALTHY, api_token('EngineStatus', enums_pb2.ENGINE_STATUS_HEALTHY))
+EngineStatus.TERMINATED = EngineStatus(enums_pb2.ENGINE_STATUS_TERMINATED, api_token('EngineStatus', enums_pb2.ENGINE_STATUS_TERMINATED))
 
 
-class EngineScope(ProtocolEnumValue):
+class EngineScope(ApiEnumValue):
     DATASOURCE_PREVIEW: ClassVar[Self]
     ANALYSIS_INTERACTIVE: ClassVar[Self]
     BUILD: ClassVar[Self]
 
 
-EngineScope.DATASOURCE_PREVIEW = EngineScope(
-    enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, protocol_token('EngineScope', enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW)
-)
+EngineScope.DATASOURCE_PREVIEW = EngineScope(enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, api_token('EngineScope', enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW))
 EngineScope.ANALYSIS_INTERACTIVE = EngineScope(
-    enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE, protocol_token('EngineScope', enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE)
+    enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE, api_token('EngineScope', enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE)
 )
-EngineScope.BUILD = EngineScope(enums_pb2.ENGINE_SCOPE_BUILD, protocol_token('EngineScope', enums_pb2.ENGINE_SCOPE_BUILD))
+EngineScope.BUILD = EngineScope(enums_pb2.ENGINE_SCOPE_BUILD, api_token('EngineScope', enums_pb2.ENGINE_SCOPE_BUILD))
 
 
-class EngineReusePolicy(ProtocolEnumValue):
+class EngineReusePolicy(ApiEnumValue):
     SHARED: ClassVar[Self]
     EXCLUSIVE: ClassVar[Self]
 
 
-EngineReusePolicy.SHARED = EngineReusePolicy(enums_pb2.ENGINE_REUSE_POLICY_SHARED, protocol_token('EngineReusePolicy', enums_pb2.ENGINE_REUSE_POLICY_SHARED))
+EngineReusePolicy.SHARED = EngineReusePolicy(enums_pb2.ENGINE_REUSE_POLICY_SHARED, api_token('EngineReusePolicy', enums_pb2.ENGINE_REUSE_POLICY_SHARED))
 EngineReusePolicy.EXCLUSIVE = EngineReusePolicy(
-    enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE, protocol_token('EngineReusePolicy', enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE)
+    enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE, api_token('EngineReusePolicy', enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE)
 )
 
 
@@ -346,7 +344,7 @@ class StepPreviewResponse(BaseModel):
 StepPreviewRequest.model_rebuild()
 
 
-class ExportFormat(ProtocolEnumValue):
+class ExportFormat(ApiEnumValue):
     CSV: ClassVar[Self]
     PARQUET: ClassVar[Self]
     JSON: ClassVar[Self]
@@ -355,24 +353,22 @@ class ExportFormat(ProtocolEnumValue):
     EXCEL: ClassVar[Self]
 
 
-ExportFormat.CSV = ExportFormat(enums_pb2.EXPORT_FORMAT_CSV, protocol_token('ExportFormat', enums_pb2.EXPORT_FORMAT_CSV))
-ExportFormat.PARQUET = ExportFormat(enums_pb2.EXPORT_FORMAT_PARQUET, protocol_token('ExportFormat', enums_pb2.EXPORT_FORMAT_PARQUET))
-ExportFormat.JSON = ExportFormat(enums_pb2.EXPORT_FORMAT_JSON, protocol_token('ExportFormat', enums_pb2.EXPORT_FORMAT_JSON))
-ExportFormat.NDJSON = ExportFormat(enums_pb2.EXPORT_FORMAT_NDJSON, protocol_token('ExportFormat', enums_pb2.EXPORT_FORMAT_NDJSON))
-ExportFormat.DUCKDB = ExportFormat(enums_pb2.EXPORT_FORMAT_DUCKDB, protocol_token('ExportFormat', enums_pb2.EXPORT_FORMAT_DUCKDB))
-ExportFormat.EXCEL = ExportFormat(enums_pb2.EXPORT_FORMAT_EXCEL, protocol_token('ExportFormat', enums_pb2.EXPORT_FORMAT_EXCEL))
+ExportFormat.CSV = ExportFormat(enums_pb2.EXPORT_FORMAT_CSV, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_CSV))
+ExportFormat.PARQUET = ExportFormat(enums_pb2.EXPORT_FORMAT_PARQUET, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_PARQUET))
+ExportFormat.JSON = ExportFormat(enums_pb2.EXPORT_FORMAT_JSON, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_JSON))
+ExportFormat.NDJSON = ExportFormat(enums_pb2.EXPORT_FORMAT_NDJSON, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_NDJSON))
+ExportFormat.DUCKDB = ExportFormat(enums_pb2.EXPORT_FORMAT_DUCKDB, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_DUCKDB))
+ExportFormat.EXCEL = ExportFormat(enums_pb2.EXPORT_FORMAT_EXCEL, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_EXCEL))
 
 
-class ExportDestination(ProtocolEnumValue):
+class ExportDestination(ApiEnumValue):
     DOWNLOAD: ClassVar[Self]
     DATASOURCE: ClassVar[Self]
 
 
-ExportDestination.DOWNLOAD = ExportDestination(
-    enums_pb2.EXPORT_DESTINATION_DOWNLOAD, protocol_token('ExportDestination', enums_pb2.EXPORT_DESTINATION_DOWNLOAD)
-)
+ExportDestination.DOWNLOAD = ExportDestination(enums_pb2.EXPORT_DESTINATION_DOWNLOAD, api_token('ExportDestination', enums_pb2.EXPORT_DESTINATION_DOWNLOAD))
 ExportDestination.DATASOURCE = ExportDestination(
-    enums_pb2.EXPORT_DESTINATION_DATASOURCE, protocol_token('ExportDestination', enums_pb2.EXPORT_DESTINATION_DATASOURCE)
+    enums_pb2.EXPORT_DESTINATION_DATASOURCE, api_token('ExportDestination', enums_pb2.EXPORT_DESTINATION_DATASOURCE)
 )
 
 
@@ -491,7 +487,7 @@ class StepRowCountResponse(BaseModel):
     row_count: int
 
 
-class BuildStatus(ProtocolEnumValue):
+class BuildStatus(ApiEnumValue):
     SUCCESS: ClassVar[Self]
     WARNING: ClassVar[Self]
 
@@ -500,26 +496,26 @@ class BuildStatus(ProtocolEnumValue):
         return cls.read(value, default=cls.SUCCESS) or cls.SUCCESS
 
 
-BuildStatus.SUCCESS = BuildStatus(enums_pb2.BUILD_STATUS_SUCCESS, protocol_token('BuildStatus', enums_pb2.BUILD_STATUS_SUCCESS))
-BuildStatus.WARNING = BuildStatus(enums_pb2.BUILD_STATUS_WARNING, protocol_token('BuildStatus', enums_pb2.BUILD_STATUS_WARNING))
+BuildStatus.SUCCESS = BuildStatus(enums_pb2.BUILD_STATUS_SUCCESS, api_token('BuildStatus', enums_pb2.BUILD_STATUS_SUCCESS))
+BuildStatus.WARNING = BuildStatus(enums_pb2.BUILD_STATUS_WARNING, api_token('BuildStatus', enums_pb2.BUILD_STATUS_WARNING))
 
 
-class BuildTabStatus(ProtocolEnumValue):
+class BuildTabStatus(ApiEnumValue):
     SUCCESS: ClassVar[Self]
     FAILED: ClassVar[Self]
 
 
-BuildTabStatus.SUCCESS = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_SUCCESS, protocol_token('BuildTabStatus', enums_pb2.BUILD_TAB_STATUS_SUCCESS))
-BuildTabStatus.FAILED = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_FAILED, protocol_token('BuildTabStatus', enums_pb2.BUILD_TAB_STATUS_FAILED))
+BuildTabStatus.SUCCESS = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_SUCCESS, api_token('BuildTabStatus', enums_pb2.BUILD_TAB_STATUS_SUCCESS))
+BuildTabStatus.FAILED = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_FAILED, api_token('BuildTabStatus', enums_pb2.BUILD_TAB_STATUS_FAILED))
 
 
-class ComputeRunStatus(ProtocolEnumValue):
+class ComputeRunStatus(ApiEnumValue):
     SUCCESS: ClassVar[Self]
     FAILED: ClassVar[Self]
 
 
-ComputeRunStatus.SUCCESS = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_SUCCESS, protocol_token('ComputeRunStatus', enums_pb2.COMPUTE_RUN_STATUS_SUCCESS))
-ComputeRunStatus.FAILED = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_FAILED, protocol_token('ComputeRunStatus', enums_pb2.COMPUTE_RUN_STATUS_FAILED))
+ComputeRunStatus.SUCCESS = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_SUCCESS, api_token('ComputeRunStatus', enums_pb2.COMPUTE_RUN_STATUS_SUCCESS))
+ComputeRunStatus.FAILED = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_FAILED, api_token('ComputeRunStatus', enums_pb2.COMPUTE_RUN_STATUS_FAILED))
 
 
 class BuildTabResult(BaseModel):
@@ -551,7 +547,7 @@ class BuildRequest(BaseModel):
         return self.analysis_pipeline.tabs[0].datasource.source_type == 'schedule'
 
 
-class ActiveBuildStatus(ProtocolEnumValue):
+class ActiveBuildStatus(ApiEnumValue):
     QUEUED: ClassVar[Self]
     RUNNING: ClassVar[Self]
     COMPLETED: ClassVar[Self]
@@ -567,18 +563,18 @@ class ActiveBuildStatus(ProtocolEnumValue):
         return cls.read(value, default=cls.QUEUED) or cls.QUEUED
 
 
-ActiveBuildStatus.QUEUED = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_QUEUED, protocol_token('ActiveBuildStatus', enums_pb2.ACTIVE_BUILD_STATUS_QUEUED))
-ActiveBuildStatus.RUNNING = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_RUNNING, protocol_token('ActiveBuildStatus', enums_pb2.ACTIVE_BUILD_STATUS_RUNNING))
+ActiveBuildStatus.QUEUED = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_QUEUED, api_token('ActiveBuildStatus', enums_pb2.ACTIVE_BUILD_STATUS_QUEUED))
+ActiveBuildStatus.RUNNING = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_RUNNING, api_token('ActiveBuildStatus', enums_pb2.ACTIVE_BUILD_STATUS_RUNNING))
 ActiveBuildStatus.COMPLETED = ActiveBuildStatus(
-    enums_pb2.ACTIVE_BUILD_STATUS_COMPLETED, protocol_token('ActiveBuildStatus', enums_pb2.ACTIVE_BUILD_STATUS_COMPLETED)
+    enums_pb2.ACTIVE_BUILD_STATUS_COMPLETED, api_token('ActiveBuildStatus', enums_pb2.ACTIVE_BUILD_STATUS_COMPLETED)
 )
-ActiveBuildStatus.FAILED = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_FAILED, protocol_token('ActiveBuildStatus', enums_pb2.ACTIVE_BUILD_STATUS_FAILED))
+ActiveBuildStatus.FAILED = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_FAILED, api_token('ActiveBuildStatus', enums_pb2.ACTIVE_BUILD_STATUS_FAILED))
 ActiveBuildStatus.CANCELLED = ActiveBuildStatus(
-    enums_pb2.ACTIVE_BUILD_STATUS_CANCELLED, protocol_token('ActiveBuildStatus', enums_pb2.ACTIVE_BUILD_STATUS_CANCELLED)
+    enums_pb2.ACTIVE_BUILD_STATUS_CANCELLED, api_token('ActiveBuildStatus', enums_pb2.ACTIVE_BUILD_STATUS_CANCELLED)
 )
 
 
-class BuildStepState(ProtocolEnumValue):
+class BuildStepState(ApiEnumValue):
     PENDING: ClassVar[Self]
     RUNNING: ClassVar[Self]
     COMPLETED: ClassVar[Self]
@@ -586,14 +582,14 @@ class BuildStepState(ProtocolEnumValue):
     SKIPPED: ClassVar[Self]
 
 
-BuildStepState.PENDING = BuildStepState(enums_pb2.BUILD_STEP_STATE_PENDING, protocol_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_PENDING))
-BuildStepState.RUNNING = BuildStepState(enums_pb2.BUILD_STEP_STATE_RUNNING, protocol_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_RUNNING))
-BuildStepState.COMPLETED = BuildStepState(enums_pb2.BUILD_STEP_STATE_COMPLETED, protocol_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_COMPLETED))
-BuildStepState.FAILED = BuildStepState(enums_pb2.BUILD_STEP_STATE_FAILED, protocol_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_FAILED))
-BuildStepState.SKIPPED = BuildStepState(enums_pb2.BUILD_STEP_STATE_SKIPPED, protocol_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_SKIPPED))
+BuildStepState.PENDING = BuildStepState(enums_pb2.BUILD_STEP_STATE_PENDING, api_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_PENDING))
+BuildStepState.RUNNING = BuildStepState(enums_pb2.BUILD_STEP_STATE_RUNNING, api_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_RUNNING))
+BuildStepState.COMPLETED = BuildStepState(enums_pb2.BUILD_STEP_STATE_COMPLETED, api_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_COMPLETED))
+BuildStepState.FAILED = BuildStepState(enums_pb2.BUILD_STEP_STATE_FAILED, api_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_FAILED))
+BuildStepState.SKIPPED = BuildStepState(enums_pb2.BUILD_STEP_STATE_SKIPPED, api_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_SKIPPED))
 
 
-class BuildLogLevel(ProtocolEnumValue):
+class BuildLogLevel(ApiEnumValue):
     INFO: ClassVar[Self]
     WARNING: ClassVar[Self]
     ERROR: ClassVar[Self]
@@ -603,9 +599,9 @@ class BuildLogLevel(ProtocolEnumValue):
         return cls.read(value, default=cls.INFO) or cls.INFO
 
 
-BuildLogLevel.INFO = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_INFO, protocol_token('BuildLogLevel', enums_pb2.BUILD_LOG_LEVEL_INFO))
-BuildLogLevel.WARNING = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_WARNING, protocol_token('BuildLogLevel', enums_pb2.BUILD_LOG_LEVEL_WARNING))
-BuildLogLevel.ERROR = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_ERROR, protocol_token('BuildLogLevel', enums_pb2.BUILD_LOG_LEVEL_ERROR))
+BuildLogLevel.INFO = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_INFO, api_token('BuildLogLevel', enums_pb2.BUILD_LOG_LEVEL_INFO))
+BuildLogLevel.WARNING = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_WARNING, api_token('BuildLogLevel', enums_pb2.BUILD_LOG_LEVEL_WARNING))
+BuildLogLevel.ERROR = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_ERROR, api_token('BuildLogLevel', enums_pb2.BUILD_LOG_LEVEL_ERROR))
 
 
 class BuildStarter(BaseModel):
@@ -762,7 +758,7 @@ class ActiveBuildListResponse(BaseModel):
     total: int
 
 
-class BuildEventType(ProtocolEnumValue):
+class BuildEventType(ApiEnumValue):
     PLAN: ClassVar[Self]
     STEP_START: ClassVar[Self]
     STEP_COMPLETE: ClassVar[Self]
@@ -819,18 +815,16 @@ class BuildEventType(ProtocolEnumValue):
         return None
 
 
-BuildEventType.PLAN = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PLAN, protocol_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_PLAN))
-BuildEventType.STEP_START = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_START, protocol_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_STEP_START))
-BuildEventType.STEP_COMPLETE = BuildEventType(
-    enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE, protocol_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE)
-)
-BuildEventType.STEP_FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED, protocol_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED))
-BuildEventType.PROGRESS = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PROGRESS, protocol_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_PROGRESS))
-BuildEventType.RESOURCES = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_RESOURCES, protocol_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_RESOURCES))
-BuildEventType.LOG = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_LOG, protocol_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_LOG))
-BuildEventType.COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_COMPLETE, protocol_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_COMPLETE))
-BuildEventType.FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_FAILED, protocol_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_FAILED))
-BuildEventType.CANCELLED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_CANCELLED, protocol_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_CANCELLED))
+BuildEventType.PLAN = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PLAN, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_PLAN))
+BuildEventType.STEP_START = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_START, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_STEP_START))
+BuildEventType.STEP_COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE))
+BuildEventType.STEP_FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED))
+BuildEventType.PROGRESS = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PROGRESS, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_PROGRESS))
+BuildEventType.RESOURCES = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_RESOURCES, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_RESOURCES))
+BuildEventType.LOG = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_LOG, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_LOG))
+BuildEventType.COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_COMPLETE, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_COMPLETE))
+BuildEventType.FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_FAILED, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_FAILED))
+BuildEventType.CANCELLED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_CANCELLED, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_CANCELLED))
 
 
 class BuildStreamEvent(BaseModel):

@@ -4,10 +4,10 @@ from pathlib import Path
 from typing import ClassVar, Self
 
 from dataforge_protocol import enums_pb2
-from runtime.domain.protocol_enums import ProtocolEnumValue, protocol_token
+from runtime.domain.domain_enums import DomainEnumValue, domain_token
 
 
-class DataSourceCategory(ProtocolEnumValue):
+class DataSourceCategory(DomainEnumValue):
     FILE: ClassVar[Self]
     DATABASE: ClassVar[Self]
     ANALYSIS: ClassVar[Self]
@@ -17,16 +17,16 @@ class DataSourceCategory(ProtocolEnumValue):
         return self == DataSourceCategory.FILE
 
 
-DataSourceCategory.FILE = DataSourceCategory(enums_pb2.DATA_SOURCE_CATEGORY_FILE, protocol_token("DataSourceCategory", enums_pb2.DATA_SOURCE_CATEGORY_FILE))
+DataSourceCategory.FILE = DataSourceCategory(enums_pb2.DATA_SOURCE_CATEGORY_FILE, domain_token("DataSourceCategory", enums_pb2.DATA_SOURCE_CATEGORY_FILE))
 DataSourceCategory.DATABASE = DataSourceCategory(
-    enums_pb2.DATA_SOURCE_CATEGORY_DATABASE, protocol_token("DataSourceCategory", enums_pb2.DATA_SOURCE_CATEGORY_DATABASE)
+    enums_pb2.DATA_SOURCE_CATEGORY_DATABASE, domain_token("DataSourceCategory", enums_pb2.DATA_SOURCE_CATEGORY_DATABASE)
 )
 DataSourceCategory.ANALYSIS = DataSourceCategory(
-    enums_pb2.DATA_SOURCE_CATEGORY_ANALYSIS, protocol_token("DataSourceCategory", enums_pb2.DATA_SOURCE_CATEGORY_ANALYSIS)
+    enums_pb2.DATA_SOURCE_CATEGORY_ANALYSIS, domain_token("DataSourceCategory", enums_pb2.DATA_SOURCE_CATEGORY_ANALYSIS)
 )
 
 
-class DataSourceFileType(ProtocolEnumValue):
+class DataSourceFileType(DomainEnumValue):
     CSV: ClassVar[Self]
     PARQUET: ClassVar[Self]
     JSON: ClassVar[Self]
@@ -88,20 +88,18 @@ class DataSourceFileType(ProtocolEnumValue):
             raise ValueError("Parquet path must be a file or directory")
 
 
-DataSourceFileType.CSV = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_CSV, protocol_token("DataSourceFileType", enums_pb2.DATA_SOURCE_FILE_TYPE_CSV))
+DataSourceFileType.CSV = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_CSV, domain_token("DataSourceFileType", enums_pb2.DATA_SOURCE_FILE_TYPE_CSV))
 DataSourceFileType.PARQUET = DataSourceFileType(
-    enums_pb2.DATA_SOURCE_FILE_TYPE_PARQUET, protocol_token("DataSourceFileType", enums_pb2.DATA_SOURCE_FILE_TYPE_PARQUET)
+    enums_pb2.DATA_SOURCE_FILE_TYPE_PARQUET, domain_token("DataSourceFileType", enums_pb2.DATA_SOURCE_FILE_TYPE_PARQUET)
 )
-DataSourceFileType.JSON = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_JSON, protocol_token("DataSourceFileType", enums_pb2.DATA_SOURCE_FILE_TYPE_JSON))
+DataSourceFileType.JSON = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_JSON, domain_token("DataSourceFileType", enums_pb2.DATA_SOURCE_FILE_TYPE_JSON))
 DataSourceFileType.NDJSON = DataSourceFileType(
-    enums_pb2.DATA_SOURCE_FILE_TYPE_NDJSON, protocol_token("DataSourceFileType", enums_pb2.DATA_SOURCE_FILE_TYPE_NDJSON)
+    enums_pb2.DATA_SOURCE_FILE_TYPE_NDJSON, domain_token("DataSourceFileType", enums_pb2.DATA_SOURCE_FILE_TYPE_NDJSON)
 )
-DataSourceFileType.EXCEL = DataSourceFileType(
-    enums_pb2.DATA_SOURCE_FILE_TYPE_EXCEL, protocol_token("DataSourceFileType", enums_pb2.DATA_SOURCE_FILE_TYPE_EXCEL)
-)
+DataSourceFileType.EXCEL = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_EXCEL, domain_token("DataSourceFileType", enums_pb2.DATA_SOURCE_FILE_TYPE_EXCEL))
 
 
-class DataSourceType(ProtocolEnumValue):
+class DataSourceType(DomainEnumValue):
     FILE: ClassVar[Self]
     DATABASE: ClassVar[Self]
     ICEBERG: ClassVar[Self]
@@ -138,35 +136,35 @@ class DataSourceType(ProtocolEnumValue):
         raise ValueError(f"Datasource type {self.value} does not define an ingestion error message")
 
 
-DataSourceType.FILE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_FILE, protocol_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_FILE))
-DataSourceType.DATABASE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_DATABASE, protocol_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_DATABASE))
-DataSourceType.ICEBERG = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ICEBERG, protocol_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_ICEBERG))
-DataSourceType.ANALYSIS = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ANALYSIS, protocol_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_ANALYSIS))
+DataSourceType.FILE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_FILE, domain_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_FILE))
+DataSourceType.DATABASE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_DATABASE, domain_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_DATABASE))
+DataSourceType.ICEBERG = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ICEBERG, domain_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_ICEBERG))
+DataSourceType.ANALYSIS = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ANALYSIS, domain_token("DataSourceType", enums_pb2.DATA_SOURCE_TYPE_ANALYSIS))
 
 
-class DataSourceLoadType(ProtocolEnumValue):
+class DataSourceLoadType(DomainEnumValue):
     FILE: ClassVar[Self]
     DATABASE: ClassVar[Self]
     DUCKDB: ClassVar[Self]
     ICEBERG: ClassVar[Self]
 
 
-DataSourceLoadType.FILE = DataSourceLoadType(enums_pb2.DATA_SOURCE_LOAD_TYPE_FILE, protocol_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_FILE))
+DataSourceLoadType.FILE = DataSourceLoadType(enums_pb2.DATA_SOURCE_LOAD_TYPE_FILE, domain_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_FILE))
 DataSourceLoadType.DATABASE = DataSourceLoadType(
-    enums_pb2.DATA_SOURCE_LOAD_TYPE_DATABASE, protocol_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_DATABASE)
+    enums_pb2.DATA_SOURCE_LOAD_TYPE_DATABASE, domain_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_DATABASE)
 )
 DataSourceLoadType.DUCKDB = DataSourceLoadType(
-    enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB, protocol_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB)
+    enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB, domain_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB)
 )
 DataSourceLoadType.ICEBERG = DataSourceLoadType(
-    enums_pb2.DATA_SOURCE_LOAD_TYPE_ICEBERG, protocol_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_ICEBERG)
+    enums_pb2.DATA_SOURCE_LOAD_TYPE_ICEBERG, domain_token("DataSourceLoadType", enums_pb2.DATA_SOURCE_LOAD_TYPE_ICEBERG)
 )
 
 
-class IcebergReader(ProtocolEnumValue):
+class IcebergReader(DomainEnumValue):
     NATIVE: ClassVar[Self]
     PYICEBERG: ClassVar[Self]
 
 
-IcebergReader.NATIVE = IcebergReader(enums_pb2.ICEBERG_READER_NATIVE, protocol_token("IcebergReader", enums_pb2.ICEBERG_READER_NATIVE))
-IcebergReader.PYICEBERG = IcebergReader(enums_pb2.ICEBERG_READER_PYICEBERG, protocol_token("IcebergReader", enums_pb2.ICEBERG_READER_PYICEBERG))
+IcebergReader.NATIVE = IcebergReader(enums_pb2.ICEBERG_READER_NATIVE, domain_token("IcebergReader", enums_pb2.ICEBERG_READER_NATIVE))
+IcebergReader.PYICEBERG = IcebergReader(enums_pb2.ICEBERG_READER_PYICEBERG, domain_token("IcebergReader", enums_pb2.ICEBERG_READER_PYICEBERG))

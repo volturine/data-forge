@@ -779,17 +779,17 @@ class TestChartParams:
                 "x_column": "category",
             },
         )
-        assert params.aggregation == "sum"
+        assert params.aggregation == enums_pb2.CHART_AGGREGATION_SUM
         assert params.bins == 10
         assert params.y_column is None
         assert params.group_column is None
         assert params.sort_by is None
-        assert params.sort_order == "asc"
-        assert params.legend_position == "right"
+        assert params.sort_order == enums_pb2.SORT_DIRECTION_ASC
+        assert params.legend_position == enums_pb2.LEGEND_POSITION_RIGHT
         assert params.decimal_places == 2
-        assert params.stack_mode == "grouped"
+        assert params.stack_mode == enums_pb2.STACK_MODE_GROUPED
         assert params.group_sort_by is None
-        assert params.group_sort_order == "asc"
+        assert params.group_sort_order == enums_pb2.SORT_DIRECTION_ASC
 
     def test_extra_forbidden(self):
         with pytest.raises(ValidationError):
@@ -811,8 +811,8 @@ class TestChartParams:
                 "group_sort_order": "desc",
             },
         )
-        assert params.group_sort_by == "value"
-        assert params.group_sort_order == "desc"
+        assert params.group_sort_by == enums_pb2.GROUP_SORT_BY_VALUE
+        assert params.group_sort_order == enums_pb2.SORT_DIRECTION_DESC
 
     def test_overlay_validation(self):
         with pytest.raises(ValidationError):
@@ -883,8 +883,8 @@ class TestChartParams:
             },
         )
 
-        assert params.chart_height == "medium"
-        assert params.chart_width == "normal"
+        assert params.chart_height == enums_pb2.CHART_HEIGHT_MEDIUM
+        assert params.chart_width == enums_pb2.CHART_WIDTH_NORMAL
 
 
 class TestChartHandlerPassThrough:
@@ -1555,11 +1555,11 @@ class TestChartParamsSortByCoercion:
 
     def test_valid_sort_by_preserved(self):
         params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": "y"})
-        assert params.sort_by == "y"
+        assert params.sort_by == enums_pb2.SORT_BY_Y
 
     def test_valid_group_sort_by_preserved(self):
         params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "group_sort_by": "value"})
-        assert params.group_sort_by == "value"
+        assert params.group_sort_by == enums_pb2.GROUP_SORT_BY_VALUE
 
     def test_invalid_sort_by_does_not_raise_in_compute(self):
         lf = pl.DataFrame({"cat": ["A", "B"], "val": [1.0, 2.0]}).lazy()

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import ClassVar, Self
 
-from backend_core.domain.protocol_enums import ProtocolEnumValue, protocol_token
+from backend_core.domain.api_enums import ApiEnumValue, api_token
 from dataforge_protocol import enums_pb2
 
 
-class BuildJobStatus(ProtocolEnumValue):
+class BuildJobStatus(ApiEnumValue):
     QUEUED: ClassVar[Self]
     LEASED: ClassVar[Self]
     RUNNING: ClassVar[Self]
@@ -23,9 +23,9 @@ class BuildJobStatus(ProtocolEnumValue):
         return self.is_active
 
 
-BuildJobStatus.QUEUED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_QUEUED, protocol_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_QUEUED))
-BuildJobStatus.LEASED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_LEASED, protocol_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_LEASED))
-BuildJobStatus.RUNNING = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_RUNNING, protocol_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_RUNNING))
-BuildJobStatus.COMPLETED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_COMPLETED, protocol_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_COMPLETED))
-BuildJobStatus.FAILED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_FAILED, protocol_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_FAILED))
-BuildJobStatus.CANCELLED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_CANCELLED, protocol_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_CANCELLED))
+BuildJobStatus.QUEUED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_QUEUED, api_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_QUEUED))
+BuildJobStatus.LEASED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_LEASED, api_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_LEASED))
+BuildJobStatus.RUNNING = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_RUNNING, api_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_RUNNING))
+BuildJobStatus.COMPLETED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_COMPLETED, api_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_COMPLETED))
+BuildJobStatus.FAILED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_FAILED, api_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_FAILED))
+BuildJobStatus.CANCELLED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_CANCELLED, api_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_CANCELLED))

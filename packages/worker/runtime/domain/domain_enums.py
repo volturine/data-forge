@@ -7,13 +7,13 @@ from pydantic_core import core_schema
 from dataforge_protocol import enums_pb2
 
 
-def protocol_token(enum_name: str, number: int) -> str:
+def domain_token(enum_name: str, number: int) -> str:
     enum_descriptor = enums_pb2.DESCRIPTOR.enum_types_by_name[enum_name]
     value_descriptor = enum_descriptor.values_by_number[number]
     return cast(str, value_descriptor.GetOptions().Extensions[cast(Any, enums_pb2.dataforge_token)])
 
 
-class ProtocolEnumValue(str):
+class DomainEnumValue(str):
     _token_by_number: ClassVar[dict[int, str]]
     _number_by_token: ClassVar[dict[str, int]]
     _value_by_number: ClassVar[dict[int, Self]]
@@ -38,8 +38,6 @@ class ProtocolEnumValue(str):
         return str.__str__(self)
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, str):
-            return False
         return str.__eq__(self, other)
 
     def __hash__(self) -> int:
@@ -77,7 +75,7 @@ class ProtocolEnumValue(str):
                 return cls._value_by_number[value]
             except KeyError:
                 pass
-        raise ValueError(f'Unsupported {cls.__name__}: {value!r}')
+        raise ValueError(f"Unsupported {cls.__name__}: {value!r}")
 
     @classmethod
     def read(cls, value: object, *, default: Self | None = None) -> Self | None:
@@ -94,12 +92,6 @@ class ProtocolEnumValue(str):
     def __reduce__(self) -> tuple[object, tuple[str]]:
         return (type(self).require, (str(self),))
 
-    @staticmethod
-    def _serialize(value: ProtocolEnumValue, info: core_schema.SerializationInfo) -> str | int:
-        if info.context is not None and info.context.get('protocol_enum_numbers') is True:
-            return value.number
-        return value.value
-
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -108,7 +100,7 @@ class ProtocolEnumValue(str):
     ) -> core_schema.CoreSchema:
         return core_schema.no_info_plain_validator_function(
             cls.require,
-            serialization=core_schema.plain_serializer_function_ser_schema(cls._serialize, info_arg=True),
+            serialization=core_schema.plain_serializer_function_ser_schema(lambda value: value.value, when_used="json"),
         )
 
     @classmethod
@@ -117,4 +109,4 @@ class ProtocolEnumValue(str):
         _core_schema: core_schema.CoreSchema,
         _handler: object,
     ) -> dict[str, object]:
-        return {'type': 'string', 'enum': cls.values()}
+        return {"type": "string", "enum": cls.values()}

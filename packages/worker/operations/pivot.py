@@ -1,7 +1,7 @@
 import polars as pl
 
+from operations.enums import PivotAggregateFunction
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.step_config_enums import PivotAggregateFunction
 
 _MAX_AUTO_PIVOT_VALUES = 200
 

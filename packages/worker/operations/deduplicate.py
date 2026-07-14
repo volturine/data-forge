@@ -2,8 +2,8 @@
 
 import polars as pl
 
+from operations.enums import DeduplicateKeep
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.step_config_enums import DeduplicateKeep
 
 
 class DeduplicateParams(OperationParams):

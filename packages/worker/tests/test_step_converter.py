@@ -2,6 +2,7 @@ import dataclasses
 
 import pytest
 
+from dataforge_protocol import enums_pb2
 from operations.step_converter import (
     BackendStep,
     FrontendStep,
@@ -60,12 +61,12 @@ def test_convert_step_format_parses_config_through_protocol_step_config() -> Non
         "conditions": [
             {
                 "column": "age",
-                "operator": ">",
+                "operator": enums_pb2.FILTER_OPERATOR_GREATER_THAN,
                 "value": 30,
-                "value_type": "number",
+                "value_type": enums_pb2.FILTER_VALUE_TYPE_NUMBER,
             }
         ],
-        "logic": "AND",
+        "logic": enums_pb2.FILTER_LOGIC_AND,
     }
 
 

@@ -16,7 +16,7 @@ from runtime.compute_manager import ProcessManager
 from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
-from runtime.domain.protocol_enums import protocol_token
+from runtime.domain.domain_enums import domain_token
 from runtime.json_values import dict_to_struct
 from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
 from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
@@ -202,7 +202,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
                 manager=manager,
                 target_step_id=download_request.target_step_id,
                 analysis_pipeline=_analysis_pipeline_to_service_payload(download_request.analysis_pipeline),
-                export_format=protocol_token("ExportFormat", download_request.format),
+                export_format=domain_token("ExportFormat", download_request.format),
                 filename=download_request.filename,
                 analysis_id=download_request.analysis_id if download_request.HasField("analysis_id") else None,
                 tab_id=download_request.tab_id if download_request.HasField("tab_id") else None,
@@ -342,7 +342,7 @@ def _analysis_pipeline_to_service_payload(pipeline: analysis_pb2.AnalysisPipelin
                     if isinstance(step, dict):
                         protocol_step_type = step.pop("step_type", None)
                         if isinstance(protocol_step_type, int):
-                            step["type"] = protocol_token("StepType", protocol_step_type)
+                            step["type"] = domain_token("StepType", protocol_step_type)
                         step["config"] = _unwrap_step_config(step.get("config"))
     return payload
 

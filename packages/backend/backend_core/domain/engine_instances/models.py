@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import ClassVar, Self
 
+from backend_core.domain.api_enums import ApiEnumValue, api_token
 from backend_core.domain.compute.schemas import EngineStatus
-from backend_core.domain.protocol_enums import ProtocolEnumValue, protocol_token
 from dataforge_protocol import enums_pb2
 
 
-class EngineInstanceStatus(ProtocolEnumValue):
+class EngineInstanceStatus(ApiEnumValue):
     STARTING: ClassVar[Self]
     IDLE: ClassVar[Self]
     RUNNING: ClassVar[Self]
@@ -36,20 +36,20 @@ class EngineInstanceStatus(ProtocolEnumValue):
 
 
 EngineInstanceStatus.STARTING = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_STARTING, protocol_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_STARTING)
+    enums_pb2.ENGINE_INSTANCE_STATUS_STARTING, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_STARTING)
 )
 EngineInstanceStatus.IDLE = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_IDLE, protocol_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_IDLE)
+    enums_pb2.ENGINE_INSTANCE_STATUS_IDLE, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_IDLE)
 )
 EngineInstanceStatus.RUNNING = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_RUNNING, protocol_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_RUNNING)
+    enums_pb2.ENGINE_INSTANCE_STATUS_RUNNING, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_RUNNING)
 )
 EngineInstanceStatus.STOPPING = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_STOPPING, protocol_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_STOPPING)
+    enums_pb2.ENGINE_INSTANCE_STATUS_STOPPING, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_STOPPING)
 )
 EngineInstanceStatus.STOPPED = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_STOPPED, protocol_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_STOPPED)
+    enums_pb2.ENGINE_INSTANCE_STATUS_STOPPED, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_STOPPED)
 )
 EngineInstanceStatus.FAILED = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_FAILED, protocol_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_FAILED)
+    enums_pb2.ENGINE_INSTANCE_STATUS_FAILED, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_FAILED)
 )

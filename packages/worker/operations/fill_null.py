@@ -2,9 +2,9 @@ from collections.abc import Callable
 
 import polars as pl
 
+from operations.enums import FillNullStrategy
 from operations.type_casting import cast_value, get_polars_type
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.step_config_enums import FillNullStrategy
 
 
 class FillNullParams(OperationParams):

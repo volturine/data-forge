@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import ClassVar, Self
 
+from backend_core.domain.api_enums import ApiEnumValue, api_token
 from backend_core.domain.compute import schemas as compute_schemas
-from backend_core.domain.protocol_enums import ProtocolEnumValue, protocol_token
 from dataforge_protocol import enums_pb2
 
 
-class BuildRunStatus(ProtocolEnumValue):
+class BuildRunStatus(ApiEnumValue):
     QUEUED: ClassVar[Self]
     RUNNING: ClassVar[Self]
     COMPLETED: ClassVar[Self]
@@ -33,9 +33,9 @@ class BuildRunStatus(ProtocolEnumValue):
         return compute_schemas.ActiveBuildStatus.FAILED, 'Build orphaned during startup recovery'
 
 
-BuildRunStatus.QUEUED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_QUEUED, protocol_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_QUEUED))
-BuildRunStatus.RUNNING = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_RUNNING, protocol_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_RUNNING))
-BuildRunStatus.COMPLETED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_COMPLETED, protocol_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_COMPLETED))
-BuildRunStatus.FAILED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_FAILED, protocol_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_FAILED))
-BuildRunStatus.CANCELLED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_CANCELLED, protocol_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_CANCELLED))
-BuildRunStatus.ORPHANED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_ORPHANED, protocol_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_ORPHANED))
+BuildRunStatus.QUEUED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_QUEUED, api_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_QUEUED))
+BuildRunStatus.RUNNING = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_RUNNING, api_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_RUNNING))
+BuildRunStatus.COMPLETED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_COMPLETED, api_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_COMPLETED))
+BuildRunStatus.FAILED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_FAILED, api_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_FAILED))
+BuildRunStatus.CANCELLED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_CANCELLED, api_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_CANCELLED))
+BuildRunStatus.ORPHANED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_ORPHANED, api_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_ORPHANED))

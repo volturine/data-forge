@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import ClassVar, Self
 
 from dataforge_protocol import enums_pb2
-from runtime.domain.protocol_enums import ProtocolEnumValue, protocol_token
+from runtime.domain.domain_enums import DomainEnumValue, domain_token
 
 
-class HealthCheckType(ProtocolEnumValue):
+class HealthCheckType(DomainEnumValue):
     ROW_COUNT: ClassVar[Self]
     COLUMN_NULL: ClassVar[Self]
     COLUMN_UNIQUE: ClassVar[Self]
@@ -24,22 +24,20 @@ class HealthCheckType(ProtocolEnumValue):
         return self in {HealthCheckType.COLUMN_NULL, HealthCheckType.COLUMN_UNIQUE, HealthCheckType.COLUMN_RANGE}
 
 
-HealthCheckType.ROW_COUNT = HealthCheckType(enums_pb2.HEALTH_CHECK_TYPE_ROW_COUNT, protocol_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_ROW_COUNT))
-HealthCheckType.COLUMN_NULL = HealthCheckType(
-    enums_pb2.HEALTH_CHECK_TYPE_COLUMN_NULL, protocol_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_COLUMN_NULL)
-)
+HealthCheckType.ROW_COUNT = HealthCheckType(enums_pb2.HEALTH_CHECK_TYPE_ROW_COUNT, domain_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_ROW_COUNT))
+HealthCheckType.COLUMN_NULL = HealthCheckType(enums_pb2.HEALTH_CHECK_TYPE_COLUMN_NULL, domain_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_COLUMN_NULL))
 HealthCheckType.COLUMN_UNIQUE = HealthCheckType(
-    enums_pb2.HEALTH_CHECK_TYPE_COLUMN_UNIQUE, protocol_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_COLUMN_UNIQUE)
+    enums_pb2.HEALTH_CHECK_TYPE_COLUMN_UNIQUE, domain_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_COLUMN_UNIQUE)
 )
 HealthCheckType.COLUMN_RANGE = HealthCheckType(
-    enums_pb2.HEALTH_CHECK_TYPE_COLUMN_RANGE, protocol_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_COLUMN_RANGE)
+    enums_pb2.HEALTH_CHECK_TYPE_COLUMN_RANGE, domain_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_COLUMN_RANGE)
 )
 HealthCheckType.COLUMN_COUNT = HealthCheckType(
-    enums_pb2.HEALTH_CHECK_TYPE_COLUMN_COUNT, protocol_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_COLUMN_COUNT)
+    enums_pb2.HEALTH_CHECK_TYPE_COLUMN_COUNT, domain_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_COLUMN_COUNT)
 )
 HealthCheckType.NULL_PERCENTAGE = HealthCheckType(
-    enums_pb2.HEALTH_CHECK_TYPE_NULL_PERCENTAGE, protocol_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_NULL_PERCENTAGE)
+    enums_pb2.HEALTH_CHECK_TYPE_NULL_PERCENTAGE, domain_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_NULL_PERCENTAGE)
 )
 HealthCheckType.DUPLICATE_PERCENTAGE = HealthCheckType(
-    enums_pb2.HEALTH_CHECK_TYPE_DUPLICATE_PERCENTAGE, protocol_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_DUPLICATE_PERCENTAGE)
+    enums_pb2.HEALTH_CHECK_TYPE_DUPLICATE_PERCENTAGE, domain_token("HealthCheckType", enums_pb2.HEALTH_CHECK_TYPE_DUPLICATE_PERCENTAGE)
 )

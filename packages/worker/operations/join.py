@@ -1,8 +1,8 @@
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
+from operations.enums import JoinHow
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.step_config_enums import JoinHow
 
 
 class JoinColumn(BaseModel):

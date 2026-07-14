@@ -5,6 +5,7 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
+from dataforge_protocol import enums_pb2
 from operations.notification import NotificationHandler, NotificationParams
 from operations.template_placeholders import render_template_placeholders
 from runtime.compute_service import _send_pipeline_notifications
@@ -28,7 +29,7 @@ class TestNotificationParams:
                 "input_columns": ["body"],
             },
         )
-        assert params.method == "email"
+        assert params.method == enums_pb2.NOTIFICATION_METHOD_EMAIL
         assert params.recipient == "user@example.com"
         assert params.input_columns == ["body"]
         assert params.output_column == "notification_status"
@@ -44,7 +45,7 @@ class TestNotificationParams:
                 "input_columns": ["col"],
             },
         )
-        assert params.method == "telegram"
+        assert params.method == enums_pb2.NOTIFICATION_METHOD_TELEGRAM
 
     def test_invalid_method_rejected(self):
         with pytest.raises(ValidationError):

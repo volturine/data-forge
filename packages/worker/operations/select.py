@@ -3,9 +3,9 @@
 import polars as pl
 from pydantic import Field
 
+from operations.enums import CastMapType
 from operations.type_casting import require_polars_type
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.step_config_enums import CastMapType
 
 
 class SelectParams(OperationParams):

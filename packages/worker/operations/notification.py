@@ -3,9 +3,9 @@ import logging
 import polars as pl
 from pydantic import ConfigDict, Field, model_validator
 
+from operations.enums import NotificationMethod
 from operations.template_placeholders import render_template_placeholders
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.step_config_enums import NotificationMethod
 from runtime.notification_delivery import notification_service
 
 logger = logging.getLogger(__name__)

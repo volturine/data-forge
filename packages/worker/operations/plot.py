@@ -6,9 +6,7 @@ from typing import cast
 import polars as pl
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from runtime.domain.analysis.step_types import ChartType
-from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.step_config_enums import (
+from operations.enums import (
     AxisScale,
     ChartAggregation,
     ChartHeight,
@@ -25,6 +23,8 @@ from runtime.domain.step_config_enums import (
     StackMode,
     YAxisPosition,
 )
+from runtime.domain.analysis.step_types import ChartType
+from runtime.domain.compute.base import OperationHandler, OperationParams
 
 logger = logging.getLogger(__name__)
 

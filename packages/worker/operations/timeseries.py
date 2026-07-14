@@ -1,12 +1,12 @@
 import polars as pl
 
-from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.domain.step_config_enums import (
+from operations.enums import (
     DurationUnit,
     TimeComponent,
     TimeDirection,
     TimeseriesOperationType,
 )
+from runtime.domain.compute.base import OperationHandler, OperationParams
 
 
 class TimeseriesParams(OperationParams):

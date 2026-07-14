@@ -5,6 +5,7 @@ import polars as pl
 import pytest
 
 from dataforge_protocol import enums_pb2
+from operations.enums import FilterOperator, TimeComponent
 from operations.fill_null import cast_value, get_fill_strategy, get_polars_type
 from operations.filter import FilterOperatorDefinition
 from operations.groupby import GroupByAggregationDefinition
@@ -12,7 +13,6 @@ from operations.plot import ChartAggregationDefinition
 from operations.template_placeholders import render_template_placeholders
 from operations.timeseries import TimeseriesParams
 from runtime.config import settings
-from runtime.domain.step_config_enums import FilterOperator, TimeComponent
 from runtime.export_formats import get_export_format
 from runtime.iceberg_metadata import (
     IcebergMetadataPathNotFoundError,
