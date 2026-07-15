@@ -9,10 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SOURCE_ROOT = ROOT / 'packages/frontend/src'
 PYTHON_SOURCE_ROOTS = [
     ROOT / 'packages/backend',
-    ROOT / 'packages/worker-manager',
+    ROOT / 'packages/worker',
     ROOT / 'packages/scheduler',
-    ROOT / 'packages/shared/core',
-    ROOT / 'packages/shared/contracts',
 ]
 
 TODO_PATTERN = re.compile(r'\b(TODO|FIXME|HACK)\b')
@@ -29,6 +27,9 @@ EXCLUDED_DIR_NAMES = {
     '.venv',
     '.venv311',
     'build',
+    'buf',
+    'dataforge_protocol',
+    'generated',
     'node_modules',
     'styled-system',
     'tests',
@@ -36,14 +37,31 @@ EXCLUDED_DIR_NAMES = {
 }
 
 
-class _PrintCallVisitor(ast.NodeVisitor):
-    def __init__(self) -> None:
-        self.lines: list[int] = []
-
-    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+def _print_call_lines(tree: ast.AST) -> list[int]:
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
         if isinstance(node.func, ast.Name) and node.func.id == 'print':
-            self.lines.append(node.lineno)
-        self.generic_visit(node)
+            lines.append(node.lineno)
+    return lines
+
+
+def _private_all_exports(tree: ast.AST) -> list[tuple[int, str]]:
+    exports: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == '__all__' for target in node.targets):
+            continue
+        if not isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
+            continue
+        for element in node.value.elts:
+            if not isinstance(element, ast.Constant) or not isinstance(element.value, str):
+                continue
+            if element.value.startswith('_'):
+                exports.append((element.lineno, element.value))
+    return exports
 
 
 def _iter_files(root: Path, suffixes: set[str]):
@@ -74,12 +92,11 @@ def _check_python_sources(errors: list[str]) -> None:
             for line_number, line in enumerate(content.splitlines(), start=1):
                 if TODO_PATTERN.search(line):
                     errors.append(f'{path.relative_to(ROOT)}:{line_number}: TODO/FIXME/HACK marker is not allowed in source files')
-
             tree = ast.parse(content, filename=str(path))
-            visitor = _PrintCallVisitor()
-            visitor.visit(tree)
-            for line_number in visitor.lines:
+            for line_number in _print_call_lines(tree):
                 errors.append(f'{path.relative_to(ROOT)}:{line_number}: print(...) is not allowed in source files')
+            for line_number, name in _private_all_exports(tree):
+                errors.append(f'{path.relative_to(ROOT)}:{line_number}: __all__ must not export private name {name}')
 
 
 def main() -> int:

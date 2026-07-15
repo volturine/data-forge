@@ -3,20 +3,21 @@ from __future__ import annotations
 import socket
 from datetime import UTC, datetime
 
-from contracts.build_jobs.models import BuildJob, BuildJobStatus
-from contracts.engine_instances.models import EngineInstance
-from contracts.runtime_workers.models import RuntimeWorker, RuntimeWorkerKind
-from core import runtime_workers_service
-from core.config import settings
-from core.database import run_db, run_settings_db, supports_distributed_runtime
-from core.namespace import list_namespaces, reset_namespace, set_namespace_context
 from sqlmodel import Session, select
 
+from backend_core import runtime_workers_service
+from backend_core.config import settings
+from backend_core.database import run_db, run_settings_db, supports_distributed_runtime
+from backend_core.domain.build_jobs.models import BuildJobStatus
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
+from backend_core.namespace import list_namespaces, reset_namespace, set_namespace_context
+from backend_core.persistence.build_jobs.models import BuildJob
+from backend_core.persistence.engine_instances.models import EngineInstance
+from backend_core.persistence.runtime_workers.models import RuntimeWorker
+from backend_core.sqlmodel_typing import sa
+from backend_core.time import utc_now as _utcnow
+
 from . import schemas
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -32,16 +33,16 @@ def _age_seconds(value: datetime, *, now: datetime | None = None) -> float:
 
 def runtime_mode() -> schemas.RuntimeMode:
     if supports_distributed_runtime():
-        return "distributed"
+        return 'distributed'
     if settings.embedded_build_worker_enabled:
-        return "single_process"
-    return "durable_single_node"
+        return 'single_process'
+    return 'durable_single_node'
 
 
 def api_process(worker_id: str | None) -> schemas.ApiProcessSummary:
     return schemas.ApiProcessSummary(
         worker_id=worker_id,
-        pid=0 if worker_id is None else int(worker_id.split(":")[-1]),
+        pid=0 if worker_id is None else int(worker_id.split(':')[-1]),
         hostname=socket.gethostname(),
         version=settings.app_version,
     )
@@ -49,7 +50,7 @@ def api_process(worker_id: str | None) -> schemas.ApiProcessSummary:
 
 def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary]:
     now = _utcnow()
-    stmt = select(RuntimeWorker).order_by(RuntimeWorker.kind, RuntimeWorker.started_at)  # type: ignore[arg-type]
+    stmt = select(RuntimeWorker).order_by(sa(RuntimeWorker.kind), sa(RuntimeWorker.started_at))
     rows = list(session.execute(stmt).scalars().all())
     return [
         schemas.RuntimeWorkerSummary(
@@ -69,24 +70,39 @@ def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary
 
 
 def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummary]:
-    stmt = select(EngineInstance).order_by(EngineInstance.namespace, EngineInstance.analysis_id)  # type: ignore[arg-type]
+    stmt = select(EngineInstance).order_by(EngineInstance.namespace, EngineInstance.analysis_id)
     rows = list(session.execute(stmt).scalars().all())
-    return [
-        schemas.EngineInstanceSummary(
-            id=row.id,
-            worker_id=row.worker_id,
-            namespace=row.namespace,
-            analysis_id=row.analysis_id,
-            process_id=row.process_id,
-            status=row.status,
-            current_job_id=row.current_job_id,
-            current_build_id=row.current_build_id,
-            current_engine_run_id=row.current_engine_run_id,
-            last_activity_at=row.last_activity_at,
-            last_seen_at=row.last_seen_at,
+    items: list[schemas.EngineInstanceSummary] = []
+    for row in rows:
+        items.append(
+            schemas.EngineInstanceSummary(
+                id=row.id,
+                worker_id=row.worker_id,
+                namespace=row.namespace,
+                analysis_id=row.analysis_id,
+                resource_id=_engine_resource_id(row),
+                process_id=row.process_id,
+                status=row.status,
+                current_job_id=row.current_job_id,
+                current_build_id=row.current_build_id,
+                current_engine_run_id=row.current_engine_run_id,
+                last_activity_at=row.last_activity_at,
+                last_seen_at=row.last_seen_at,
+                scope=schemas.EngineScope.require(row.engine_scope),
+                reuse_policy=schemas.EngineReusePolicy.require(row.engine_reuse_policy),
+                datasource_id=row.datasource_id,
+                build_id=row.build_id,
+            )
         )
-        for row in rows
-    ]
+    return items
+
+
+def _engine_resource_id(row: EngineInstance) -> str:
+    if row.engine_scope == 'datasource_preview' and row.datasource_id:
+        return row.datasource_id
+    if row.engine_scope == 'build' and row.build_id:
+        return row.build_id
+    return row.analysis_id
 
 
 def queue_summary() -> schemas.QueueSummary:
@@ -128,11 +144,11 @@ def _read_queue_namespace_summary(
     reclaimable_worker_ids: set[str],
 ) -> schemas.QueueNamespaceSummary:
     now = _utcnow()
-    stmt = select(BuildJob).where(BuildJob.namespace == namespace)  # type: ignore[arg-type]
+    stmt = select(BuildJob).where(sa(BuildJob.namespace == namespace))
     rows = list(session.execute(stmt).scalars().all())
     queued = [row for row in rows if row.status == BuildJobStatus.QUEUED]
     oldest = min(queued, key=lambda row: row.created_at, default=None)
-    active_rows = [row for row in rows if row.status.is_active]
+    active_rows = [row for row in rows if row.status_kind().is_active]
     orphaned = [row for row in active_rows if row.is_orphaned(reclaimable_worker_ids)]
     age = None if oldest is None else oldest.age_seconds(now=now)
     return schemas.QueueNamespaceSummary(

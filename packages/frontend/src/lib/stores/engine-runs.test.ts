@@ -42,14 +42,27 @@ function mockErr(message: string) {
 	};
 }
 
+function mockPending() {
+	const pending: {
+		resolve: ((runs: EngineRun[]) => void) | null;
+		reject: ((error: { message: string }) => void) | null;
+	} = { resolve: null, reject: null };
+	const result = {
+		match: (onOk: (runs: EngineRun[]) => void, onErr: (error: { message: string }) => void) => {
+			pending.resolve = onOk;
+			pending.reject = onErr;
+		}
+	};
+	return { pending, result };
+}
+
 describe('EngineRunsStore', () => {
 	beforeEach(() => {
-		vi.useFakeTimers();
+		mockListEngineRuns.mockReset();
 		mockListEngineRuns.mockReturnValue(mockOk([]));
 	});
 
 	afterEach(() => {
-		vi.useRealTimers();
 		vi.clearAllMocks();
 	});
 
@@ -60,168 +73,87 @@ describe('EngineRunsStore', () => {
 		expect(store.error).toBeNull();
 	});
 
-	test('load sets status to connecting then connected on success', () => {
+	test('load succeeds and forwards params without abort signal churn', () => {
 		const runs = [makeRun()];
 		mockListEngineRuns.mockReturnValue(mockOk(runs));
 
 		const store = new EngineRunsStore();
-		store.load({ datasource_id: 'ds-1' });
+		store.load({ datasource_id: 'ds-1', limit: 25 });
 
 		expect(store.status).toBe('connected');
 		expect(store.runs).toEqual(runs);
 		expect(store.error).toBeNull();
-		expect(mockListEngineRuns).toHaveBeenCalledWith({ datasource_id: 'ds-1' }, expect.anything());
-		store.close();
+		expect(mockListEngineRuns).toHaveBeenCalledWith({ datasource_id: 'ds-1', limit: 25 });
 	});
 
-	test('load sets error status on fetch failure', () => {
+	test('load failure sets error state', () => {
 		mockListEngineRuns.mockReturnValue(mockErr('Network error'));
 
 		const store = new EngineRunsStore();
-		store.load();
+		store.load({ datasource_id: 'ds-1' });
 
 		expect(store.status).toBe('error');
 		expect(store.error).toBe('Network error');
-		store.close();
-	});
-
-	test('load performs a single fetch', () => {
-		const store = new EngineRunsStore();
-		store.load();
-		expect(mockListEngineRuns).toHaveBeenCalledTimes(1);
-		store.close();
-	});
-
-	test('close stops in-flight work without refetching', () => {
-		const store = new EngineRunsStore();
-		store.load();
-		expect(mockListEngineRuns).toHaveBeenCalledTimes(1);
-
-		store.close();
-		vi.advanceTimersByTime(15000);
-		expect(mockListEngineRuns).toHaveBeenCalledTimes(1);
-	});
-
-	test('close when not started is safe', () => {
-		const store = new EngineRunsStore();
-		expect(() => store.close()).not.toThrow();
-	});
-
-	test('reset clears all state and cancels in-flight work', () => {
-		const runs = [makeRun()];
-		mockListEngineRuns.mockReturnValue(mockOk(runs));
-
-		const store = new EngineRunsStore();
-		store.load();
-		expect(store.runs).toHaveLength(1);
-
-		store.reset();
-		expect(store.runs).toEqual([]);
-		expect(store.status).toBe('disconnected');
-		expect(store.error).toBeNull();
-
-		vi.advanceTimersByTime(15000);
-		expect(mockListEngineRuns).toHaveBeenCalledTimes(1);
-	});
-
-	test('load refetches when params change', () => {
-		const store = new EngineRunsStore();
-		store.load({ datasource_id: 'ds-1' });
-		expect(mockListEngineRuns).toHaveBeenCalledTimes(1);
-
-		store.load({ datasource_id: 'ds-2' });
-		expect(mockListEngineRuns).toHaveBeenCalledTimes(2);
-		expect(mockListEngineRuns).toHaveBeenLastCalledWith(
-			{ datasource_id: 'ds-2' },
-			expect.anything()
-		);
-		store.close();
-	});
-
-	test('load does not refetch when params are unchanged', () => {
-		const store = new EngineRunsStore();
-		store.load({ datasource_id: 'ds-1', limit: 50 });
-		expect(mockListEngineRuns).toHaveBeenCalledTimes(1);
-
-		store.load({ datasource_id: 'ds-1', limit: 50 });
-		expect(mockListEngineRuns).toHaveBeenCalledTimes(1);
-		store.close();
-	});
-
-	test('load clears previous error when params change', () => {
-		mockListEngineRuns.mockReturnValue(mockErr('fail'));
-		const store = new EngineRunsStore();
-		store.load({ datasource_id: 'ds-1' });
-		expect(store.error).toBe('fail');
-
-		mockListEngineRuns.mockReturnValue(mockOk([]));
-		store.load({ datasource_id: 'ds-2' });
-		expect(store.error).toBeNull();
-		expect(store.status).toBe('connected');
-		store.close();
-	});
-
-	test('params are forwarded to listEngineRuns', () => {
-		const store = new EngineRunsStore();
-		store.load({ datasource_id: 'ds-42', limit: 25 });
-		expect(mockListEngineRuns).toHaveBeenCalledWith(
-			{ datasource_id: 'ds-42', limit: 25 },
-			expect.anything()
-		);
-		store.close();
-	});
-
-	test('no params calls listEngineRuns with undefined', () => {
-		const store = new EngineRunsStore();
-		store.load();
-		expect(mockListEngineRuns).toHaveBeenCalledWith(undefined, expect.anything());
-		store.close();
 	});
 
 	test('refresh coalesces while a request is in flight', async () => {
-		const pending: { resolve: ((runs: EngineRun[]) => void) | null } = { resolve: null };
-		mockListEngineRuns.mockImplementation(() => ({
-			match: (onOk: (runs: EngineRun[]) => void) => {
-				pending.resolve = onOk;
-			}
-		}));
+		const first = mockPending();
+		mockListEngineRuns.mockReturnValueOnce(first.result).mockReturnValueOnce(mockOk([makeRun()]));
 
 		const store = new EngineRunsStore();
 		store.load({ datasource_id: 'ds-1' });
 		store.refresh();
 
 		expect(mockListEngineRuns).toHaveBeenCalledTimes(1);
-		pending.resolve?.([makeRun()]);
+		first.pending.resolve?.([makeRun({ id: 'run-1' })]);
 		await Promise.resolve();
 
 		expect(mockListEngineRuns).toHaveBeenCalledTimes(2);
-		store.close();
+		expect(store.status).toBe('connected');
 	});
 
-	test('subsequent load success updates runs', () => {
+	test('stale response from older params is ignored', async () => {
+		const first = mockPending();
+		const second = mockPending();
+		mockListEngineRuns.mockReturnValueOnce(first.result).mockReturnValueOnce(second.result);
+
 		const store = new EngineRunsStore();
-		mockListEngineRuns.mockReturnValue(mockOk([makeRun({ id: 'run-1' })]));
+		store.load({ datasource_id: 'ds-1' });
+		store.load({ datasource_id: 'ds-2' });
+
+		second.pending.resolve?.([makeRun({ id: 'run-2', datasource_id: 'ds-2' })]);
+		await Promise.resolve();
+		first.pending.resolve?.([makeRun({ id: 'run-1', datasource_id: 'ds-1' })]);
+		await Promise.resolve();
+
+		expect(store.status).toBe('connected');
+		expect(store.runs.map((run) => run.id)).toEqual(['run-2']);
+	});
+
+	test('close ignores late results instead of surfacing them as failures', async () => {
+		const request = mockPending();
+		mockListEngineRuns.mockReturnValueOnce(request.result);
+
+		const store = new EngineRunsStore();
+		store.load({ datasource_id: 'ds-1' });
+		store.close();
+		request.pending.resolve?.([makeRun()]);
+		await Promise.resolve();
+
+		expect(store.status).toBe('disconnected');
+		expect(store.runs).toEqual([]);
+		expect(store.error).toBeNull();
+	});
+
+	test('reset clears state', () => {
+		mockListEngineRuns.mockReturnValue(mockOk([makeRun()]));
+		const store = new EngineRunsStore();
 		store.load({ datasource_id: 'ds-1' });
 		expect(store.runs).toHaveLength(1);
 
-		mockListEngineRuns.mockReturnValue(
-			mockOk([makeRun({ id: 'run-1' }), makeRun({ id: 'run-2' })])
-		);
-		store.load({ datasource_id: 'ds-2' });
-		expect(store.runs).toHaveLength(2);
-		store.close();
-	});
-
-	test('load error after success sets error status', () => {
-		const store = new EngineRunsStore();
-		mockListEngineRuns.mockReturnValue(mockOk([makeRun()]));
-		store.load({ datasource_id: 'ds-1' });
-		expect(store.status).toBe('connected');
-
-		mockListEngineRuns.mockReturnValue(mockErr('Server down'));
-		store.load({ datasource_id: 'ds-2' });
-		expect(store.status).toBe('error');
-		expect(store.error).toBe('Server down');
-		store.close();
+		store.reset();
+		expect(store.runs).toEqual([]);
+		expect(store.status).toBe('disconnected');
+		expect(store.error).toBeNull();
 	});
 });

@@ -1,24 +1,22 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { resolve } from '$app/paths';
 	import {
 		getDatasource,
 		getDatasourceSchema,
-		refreshDatasource,
+		ingestDatasource,
 		updateDatasource,
 		updateDatasourceColumnDescriptions
 	} from '$lib/api/datasource';
-	import { type EngineRun } from '$lib/api/engine-runs';
 	import { BuildsStore } from '$lib/stores/builds.svelte';
-	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
 	import type { ActiveBuildSummary } from '$lib/types/build-stream';
 	import {
 		activeBuildStatusLabel,
 		activeBuildStatusTone,
-		engineRunStatusToActiveBuildStatus,
-		readActiveBuildStatus
+		engineRunDisplayKind,
+		engineRunKindLabel
 	} from '$lib/types/build-stream';
-	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
 	import {
 		Save,
 		Loader,
@@ -32,7 +30,7 @@
 		CircleX,
 		Upload,
 		GitBranch
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import type {
 		DataSource,
 		DatabaseDataSource,
@@ -42,6 +40,8 @@
 		ColumnSchema
 	} from '$lib/types/datasource';
 	import {
+		datasourceExternalSourceConfig,
+		datasourceExternalSourceType,
 		datasourceFileConfig,
 		datasourceIsAnalysisOutput,
 		datasourceIsCsv,
@@ -50,7 +50,7 @@
 		datasourceIsFile,
 		datasourceIsIceberg,
 		datasourceIsSchedulableRaw,
-		datasourceNeedsExternalRefresh,
+		datasourceNeedsExternalIngest,
 		datasourceSupportsSchemaRefresh
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
@@ -60,9 +60,10 @@
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { formatDateDisplay } from '$lib/utils/datetime';
+	import { formatDateDisplay, toEpochDisplay } from '$lib/utils/datetime';
 	import { resolveColumnType } from '$lib/utils/column-types';
 	import { css, input, tabButton, chip, emptyText } from '$lib/styles/panda';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
 
 	interface Props {
 		datasource: DataSource;
@@ -72,15 +73,17 @@
 	let { datasource, onSave }: Props = $props();
 
 	const queryClient = useQueryClient();
+	const ns = useNamespace();
 
 	const datasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', datasource.id],
+		queryKey: ['datasource', ns.value, datasource.id],
 		queryFn: async () => {
 			const result = await getDatasource(datasource.id);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		initialData: datasource
+		initialData: datasource,
+		refetchOnMount: false
 	}));
 
 	const schemaQuery = createQuery(() => ({
@@ -95,47 +98,25 @@
 	}));
 
 	const buildRunsStore = new BuildsStore();
-	const engineRunsStore = new EngineRunsStore();
-	// Network: fetch datasource build history when the datasource changes.
-	$effect(() => {
-		if (!datasource.id) return;
-		buildRunsStore.load({ datasource_id: datasource.id, limit: 50 });
-		return () => buildRunsStore.close();
-	});
-	// Network: fetch non-build engine runs when the datasource changes.
-	$effect(() => {
-		if (!datasource.id) return;
-		engineRunsStore.load({ datasource_id: datasource.id, limit: 50 });
-		return () => engineRunsStore.close();
-	});
+	let runsRequested = false;
 
-	// Network: switching to the Runs tab is an explicit user refresh point, so reload once
-	// to pick up runs that may have been persisted just after the datasource was selected.
+	// Network: keep run history dormant until the user opens the Runs tab.
 	$effect(() => {
 		if (activeTab !== 'runs' || !datasource.id) return;
+		if (!untrack(() => runsRequested)) {
+			buildRunsStore.load({ datasource_id: datasource.id, limit: 50 });
+			runsRequested = true;
+			return;
+		}
 		buildRunsStore.refresh();
-		engineRunsStore.refresh();
 	});
 
-	const healthChecksQuery = createQuery(() => ({
-		queryKey: ['datasource-healthchecks-count', datasource.id],
-		queryFn: async () => {
-			const result = await listHealthChecks(datasource.id);
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		enabled: !!datasource.id
-	}));
-
-	const healthResultsQuery = createQuery(() => ({
-		queryKey: ['healthcheck-results', datasource.id],
-		queryFn: async () => {
-			const result = await listHealthCheckResults(datasource.id, 50);
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		enabled: !!datasource.id
-	}));
+	// Subscription: keep any in-flight runs requests alive during normal tab switches.
+	$effect(() => {
+		return () => {
+			buildRunsStore.close();
+		};
+	});
 
 	const updateMutation = createMutation(() => ({
 		mutationFn: async (update: {
@@ -148,7 +129,7 @@
 			return result.value;
 		},
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ['datasource', datasource.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, datasource.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasources'] });
 			onSave?.();
@@ -201,6 +182,8 @@
 		if (!ds) return;
 		if (currentDatasourceId === ds.id) return;
 		currentDatasourceId = ds.id;
+		buildRunsStore.reset();
+		runsRequested = false;
 
 		// Reset all state for new datasource
 		name = ds.name;
@@ -363,6 +346,14 @@
 		return datasourceFileConfig(ds);
 	}
 
+	function getExternalSource(ds: DataSource) {
+		return datasourceExternalSourceConfig(ds);
+	}
+
+	function getExternalSourceType(ds: DataSource) {
+		return datasourceExternalSourceType(ds);
+	}
+
 	function isCsv(ds: DataSource): boolean {
 		return datasourceIsCsv(ds);
 	}
@@ -505,20 +496,20 @@
 		hasChanges = false;
 		configDirty = false;
 
-		if (update.config && datasourceNeedsExternalRefresh(ds)) {
-			const refreshResult = await refreshDatasource(ds.id);
-			if (refreshResult.isErr()) {
-				refreshError = refreshResult.error.message || 'Failed to re-ingest datasource';
+		if (update.config && datasourceNeedsExternalIngest(ds)) {
+			const ingestResult = await ingestDatasource(ds.id);
+			if (ingestResult.isErr()) {
+				refreshError = ingestResult.error.message || 'Failed to re-ingest datasource';
 				return;
 			}
-			queryClient.invalidateQueries({ queryKey: ['datasource', ds.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, ds.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ds.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasources'] });
 		}
 	}
 
-	async function handleRefresh() {
+	async function handleIngest() {
 		refreshError = null;
 		isRefreshing = true;
 		const previousColumns = new Map(columns.map((col) => [col.name, col.dtype]));
@@ -529,11 +520,11 @@
 			return;
 		}
 		try {
-			const reingested = datasourceNeedsExternalRefresh(datasource);
+			const reingested = datasourceNeedsExternalIngest(datasource);
 			if (reingested) {
-				const refreshResult = await refreshDatasource(datasource.id);
-				if (refreshResult.isErr()) {
-					throw new Error(refreshResult.error.message);
+				const ingestResult = await ingestDatasource(datasource.id);
+				if (ingestResult.isErr()) {
+					throw new Error(ingestResult.error.message);
 				}
 			}
 			const result = await getDatasourceSchema(datasource.id, { refresh: !reingested });
@@ -561,33 +552,16 @@
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-preview', datasource.id] });
 		} catch (error) {
-			refreshError = error instanceof Error ? error.message : 'Failed to refresh schema';
+			refreshError = error instanceof Error ? error.message : 'Failed to ingest datasource schema';
 		} finally {
 			isRefreshing = false;
 		}
 	}
 
-	const healthChecks = $derived(healthChecksQuery.data ?? []);
-	const activeHealthChecks = $derived(healthChecks.filter((hc) => hc.enabled));
-	const healthStatus = $derived.by(() => {
-		const results = healthResultsQuery.data ?? [];
-		if (activeHealthChecks.length === 0 || results.length === 0) return 'none';
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local Map for computation, not reactive state
-		const latestPerCheck = new Map<string, boolean>();
-		for (const r of results) {
-			if (!latestPerCheck.has(r.healthcheck_id)) {
-				latestPerCheck.set(r.healthcheck_id, r.passed);
-			}
-		}
-		for (const passed of latestPerCheck.values()) {
-			if (!passed) return 'failing';
-		}
-		return 'passing';
-	});
 	type DatasourceRunRow = {
 		id: string;
 		kind: string;
-		status: EngineRun['status'] | ActiveBuildSummary['status'];
+		status: ActiveBuildSummary['status'];
 		durationMs: number | null;
 		createdAt: string;
 		builtTag: boolean;
@@ -606,20 +580,10 @@
 			builtTag:
 				run.current_output_id === datasource.id || run.result_json?.datasource_id === datasource.id
 		}));
-		const engineRows = engineRunsStore.runs
-			.filter((run: EngineRun) => run.kind !== 'build')
-			.map((run: EngineRun) => ({
-				id: run.id,
-				kind: run.kind,
-				status: run.status,
-				durationMs: run.duration_ms,
-				createdAt: run.created_at,
-				builtTag: false
-			}));
-		const rows = [...buildRows, ...engineRows].filter(
-			(run) => showPreviews || run.kind !== 'preview'
+		const rows = buildRows.filter((run) => showPreviews || run.kind !== 'preview');
+		return rows.sort(
+			(left, right) => toEpochDisplay(right.createdAt) - toEpochDisplay(left.createdAt)
 		);
-		return rows.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 	});
 	const isOutputDatasource = $derived(datasourceIsAnalysisOutput(ds));
 	const scheduleAnalysisId = $derived(
@@ -628,6 +592,12 @@
 			: null
 	);
 	const rawSchedulable = $derived(datasourceIsSchedulableRaw(ds));
+	const refreshActionLabel = $derived(
+		datasourceNeedsExternalIngest(ds) ? 'Re-ingest from source' : 'Refresh schema'
+	);
+	const refreshBusyLabel = $derived(
+		datasourceNeedsExternalIngest(ds) ? 'Re-ingesting...' : 'Refreshing schema...'
+	);
 
 	function formatDuration(ms: number | null): string {
 		if (ms === null) return '-';
@@ -636,19 +606,13 @@
 	}
 
 	function runStatusLabel(status: DatasourceRunRow['status']): string {
-		const activeStatus = readActiveBuildStatus(status);
-		if (activeStatus !== null) return activeBuildStatusLabel(activeStatus);
-		return activeBuildStatusLabel(
-			engineRunStatusToActiveBuildStatus(status as EngineRun['status'])
-		);
+		return activeBuildStatusLabel(status);
 	}
 
 	function runStatusTone(
 		status: DatasourceRunRow['status']
 	): 'success' | 'active' | 'warning' | 'error' {
-		const activeStatus = readActiveBuildStatus(status);
-		if (activeStatus !== null) return activeBuildStatusTone(activeStatus);
-		return activeBuildStatusTone(engineRunStatusToActiveBuildStatus(status as EngineRun['status']));
+		return activeBuildStatusTone(status);
 	}
 </script>
 
@@ -745,9 +709,6 @@
 			aria-selected={activeTab === 'runs'}
 		>
 			Runs
-			{#if filteredRuns.length > 0}
-				<span class={css({ marginLeft: '1', color: 'fg.tertiary' })}>({filteredRuns.length})</span>
-			{/if}
 		</button>
 		<button
 			class={tabButton({ active: activeTab === 'health' })}
@@ -756,45 +717,6 @@
 			aria-selected={activeTab === 'health'}
 		>
 			Health Checks
-			{#if activeHealthChecks.length > 0}
-				<span class={css({ marginLeft: '1', color: 'fg.tertiary' })}
-					>({activeHealthChecks.length})</span
-				>
-				{#if healthStatus === 'passing'}
-					<span
-						class={css({
-							marginLeft: '1',
-							display: 'inline-block',
-							height: 'dot',
-							width: 'dot',
-							backgroundColor: 'fg.success'
-						})}
-						title="All checks passing"
-					></span>
-				{:else if healthStatus === 'failing'}
-					<span
-						class={css({
-							marginLeft: '1',
-							display: 'inline-block',
-							height: 'dot',
-							width: 'dot',
-							backgroundColor: 'fg.error'
-						})}
-						title="Some checks failing"
-					></span>
-				{:else}
-					<span
-						class={css({
-							marginLeft: '1',
-							display: 'inline-block',
-							height: 'dot',
-							width: 'dot',
-							backgroundColor: 'bg.indicator'
-						})}
-						title="No results yet"
-					></span>
-				{/if}
-			{/if}
 		</button>
 		{#if scheduleAnalysisId || rawSchedulable}
 			<button
@@ -854,24 +776,7 @@
 						placeholder="Add context about what this dataset represents, when to use it, and any caveats."
 						rows="5"
 						maxlength="4000"
-						class={css({
-							width: 'full',
-							fontSize: 'sm2',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							paddingX: '3.5',
-							paddingY: '2.25',
-							resize: 'vertical',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focus: { outline: 'none' },
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' }
-						})}
+						class={input({ variant: 'textarea' })}
 					></textarea>
 					{#if description.trim().length === 0}
 						<p class={emptyText({ size: 'inline' })}>No description added yet.</p>
@@ -1039,8 +944,9 @@
 									})}>{config.metadata_path}</span
 								>
 							</div>
-							{#if config.source}
-								{@const fileSource = config.source as Record<string, unknown>}
+							{#if getExternalSource(ds)}
+								{@const externalSource = getExternalSource(ds)}
+								{@const externalSourceType = getExternalSourceType(ds)}
 								<div
 									class={css({
 										paddingTop: '2',
@@ -1068,11 +974,14 @@
 											})}>Type</span
 										>
 										<FileTypeBadge
-											path={typeof fileSource.file_path === 'string' ? fileSource.file_path : ''}
+											sourceType={externalSourceType ?? undefined}
+											path={typeof externalSource?.file_path === 'string'
+												? externalSource.file_path
+												: undefined}
 											size="sm"
 										/>
 									</div>
-									{#if typeof fileSource.file_path === 'string'}
+									{#if typeof externalSource?.file_path === 'string'}
 										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 											<span
 												class={css({
@@ -1086,7 +995,43 @@
 													wordBreak: 'break-all',
 													color: 'fg.secondary',
 													fontFamily: 'mono'
-												})}>{fileSource.file_path}</span
+												})}>{externalSource.file_path}</span
+											>
+										</div>
+									{/if}
+									{#if typeof externalSource?.connection_string === 'string'}
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+											<span
+												class={css({
+													textTransform: 'uppercase',
+													letterSpacing: 'wide',
+													color: 'fg.muted'
+												})}>Connection</span
+											>
+											<span
+												class={css({
+													wordBreak: 'break-all',
+													color: 'fg.secondary',
+													fontFamily: 'mono'
+												})}>{externalSource.connection_string}</span
+											>
+										</div>
+									{/if}
+									{#if typeof externalSource?.query === 'string'}
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+											<span
+												class={css({
+													textTransform: 'uppercase',
+													letterSpacing: 'wide',
+													color: 'fg.muted'
+												})}>Query</span
+											>
+											<span
+												class={css({
+													wordBreak: 'break-all',
+													color: 'fg.secondary',
+													fontFamily: 'mono'
+												})}>{externalSource.query}</span
 											>
 										</div>
 									{/if}
@@ -1155,15 +1100,15 @@
 							alignItems: 'center',
 							gap: '2'
 						})}
-						onclick={handleRefresh}
+						onclick={handleIngest}
 						disabled={isRefreshing || updateMutation.isPending}
 					>
 						{#if isRefreshing}
 							<Loader size={16} class={css({ animation: 'spin 1s linear infinite' })} />
-							Refreshing...
+							{refreshBusyLabel}
 						{:else}
 							<RefreshCw size={16} />
-							Refresh
+							{refreshActionLabel}
 						{/if}
 					</button>
 					{#if hasChanges}
@@ -1198,7 +1143,7 @@
 						<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
 							<CircleAlert size={20} />
 							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-								<p class={css({ margin: '0', fontWeight: 'semibold' })}>Refresh failed</p>
+								<p class={css({ margin: '0', fontWeight: 'semibold' })}>Ingest failed</p>
 								<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>{refreshError}</p>
 							</div>
 						</div>
@@ -1673,7 +1618,7 @@
 						Show previews
 					{/if}
 				</button>
-				{#if buildRunsStore.status === 'connecting' || engineRunsStore.status === 'connecting'}
+				{#if buildRunsStore.status === 'connecting'}
 					<div
 						class={css({
 							display: 'flex',
@@ -1688,14 +1633,14 @@
 						<Loader size={24} class={css({ animation: 'spin 1s linear infinite' })} />
 						<p class={css({ fontSize: 'sm' })}>Loading runs...</p>
 					</div>
-				{:else if buildRunsStore.status === 'error' || engineRunsStore.status === 'error'}
+				{:else if buildRunsStore.status === 'error'}
 					<Callout tone="error">
 						<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
 							<CircleAlert size={20} />
 							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 								<p class={css({ margin: '0', fontWeight: 'semibold' })}>Failed to load runs</p>
 								<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>
-									{buildRunsStore.error ?? engineRunsStore.error ?? 'Unknown error'}
+									{buildRunsStore.error ?? 'Unknown error'}
 								</p>
 							</div>
 						</div>
@@ -1704,7 +1649,8 @@
 					<div class={emptyText({ size: 'panel' })}>
 						<p class={css({ margin: '0' })}>No runs associated with this datasource.</p>
 						<p class={css({ margin: '0', marginTop: '1', color: 'fg.tertiary' })}>
-							Runs will appear here when this datasource is used in analyses.
+							Runs will appear here when this datasource is onboarded, rebuilt from source, or used
+							in analyses.
 						</p>
 					</div>
 				{:else}
@@ -1736,6 +1682,7 @@
 							<span>Created</span>
 						</div>
 						{#each filteredRuns as run, index (run.id)}
+							{@const displayKind = engineRunDisplayKind(run.kind)}
 							<div
 								class={css(
 									{
@@ -1752,19 +1699,16 @@
 								<div
 									class={css({ display: 'flex', alignItems: 'center', gap: '2', fontSize: 'xs' })}
 								>
-									{#if run.kind === 'preview'}
+									{#if displayKind === 'preview'}
 										<Eye size={14} class={css({ flexShrink: '0', color: 'accent.primary' })} />
-										<span>Preview</span>
-									{:else if run.kind === 'build'}
+									{:else if displayKind === 'build'}
 										<Save size={14} class={css({ flexShrink: '0', color: 'accent.primary' })} />
-										<span>Build</span>
-									{:else if run.kind === 'row_count'}
+									{:else if displayKind === 'row_count'}
 										<RefreshCw size={14} class={css({ flexShrink: '0', color: 'fg.secondary' })} />
-										<span>Row Count</span>
 									{:else}
 										<Download size={14} class={css({ flexShrink: '0', color: 'fg.success' })} />
-										<span>Export</span>
 									{/if}
+									<span>{engineRunKindLabel(run.kind)}</span>
 									{#if run.builtTag}
 										<span
 											class={chip({ tone: 'accent' })}

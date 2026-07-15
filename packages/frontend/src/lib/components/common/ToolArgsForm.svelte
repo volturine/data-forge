@@ -662,15 +662,7 @@
 							})}
 						>
 							<input
-								class={css({
-									flex: '1',
-									fontSize: 'xs',
-									padding: '1',
-									borderWidth: '1',
-									borderRadius: 'sm',
-									backgroundColor: 'bg.secondary',
-									color: 'fg.primary'
-								})}
+								class={input({ variant: 'entry' })}
 								type="text"
 								value={rowKey}
 								oninput={(e) =>
@@ -691,15 +683,7 @@
 								</select>
 							{:else}
 								<input
-									class={css({
-										flex: '1',
-										fontSize: 'xs',
-										padding: '1',
-										borderWidth: '1',
-										borderRadius: 'sm',
-										backgroundColor: 'bg.secondary',
-										color: 'fg.primary'
-									})}
+									class={input({ variant: 'entry' })}
 									type="text"
 									value={rowVal}
 									oninput={(e) =>
@@ -875,15 +859,7 @@
 								>[{idx}]</span
 							>
 							<input
-								class={css({
-									flex: '1',
-									fontSize: 'xs',
-									padding: '1',
-									borderWidth: '1',
-									borderRadius: 'sm',
-									backgroundColor: 'bg.secondary',
-									color: 'fg.primary'
-								})}
+								class={input({ variant: 'entry' })}
 								type="text"
 								value={subraw}
 								oninput={(e) => setNestedArrayItem(key, idx, (e.target as HTMLInputElement).value)}
@@ -959,15 +935,7 @@
 									})}
 								>
 									<input
-										class={css({
-											flex: '1',
-											fontSize: 'xs',
-											padding: '1',
-											borderWidth: '1',
-											borderRadius: 'sm',
-											backgroundColor: 'bg.secondary',
-											color: 'fg.primary'
-										})}
+										class={input({ variant: 'entry' })}
 										type="text"
 										value={rk}
 										oninput={(e) =>
@@ -988,15 +956,7 @@
 										</select>
 									{:else}
 										<input
-											class={css({
-												flex: '1',
-												fontSize: 'xs',
-												padding: '1',
-												borderWidth: '1',
-												borderRadius: 'sm',
-												backgroundColor: 'bg.secondary',
-												color: 'fg.primary'
-											})}
+											class={input({ variant: 'entry' })}
 											type="text"
 											value={String(rv ?? '')}
 											oninput={(e) =>
@@ -1050,15 +1010,7 @@
 							})}
 						>
 							<input
-								class={css({
-									flex: '1',
-									fontSize: 'xs',
-									padding: '1',
-									borderWidth: '1',
-									borderRadius: 'sm',
-									backgroundColor: 'bg.secondary',
-									color: 'fg.primary'
-								})}
+								class={input({ variant: 'entry' })}
 								type="text"
 								value={rk}
 								oninput={(e) =>
@@ -1079,15 +1031,7 @@
 								</select>
 							{:else}
 								<input
-									class={css({
-										flex: '1',
-										fontSize: 'xs',
-										padding: '1',
-										borderWidth: '1',
-										borderRadius: 'sm',
-										backgroundColor: 'bg.secondary',
-										color: 'fg.primary'
-									})}
+									class={input({ variant: 'entry' })}
 									type="text"
 									value={String(rv ?? '')}
 									oninput={(e) =>

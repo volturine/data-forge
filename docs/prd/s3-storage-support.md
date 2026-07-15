@@ -1,5 +1,10 @@
 # PRD: S3 Storage Support
 
+> **Status (2026-05-28): Partially implemented.**
+> **Current truth:** Object-store support exists for Iceberg/runtime paths, but full S3-backed DATA_DIR semantics described here are not the current shipped default.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Status
 
 Draft, updated for the current Postgres-only runtime.

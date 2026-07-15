@@ -1,37 +1,28 @@
 import { configStore } from '$lib/stores/config.svelte';
+import { localTimeZone, parseInstantWithZone } from '$lib/utils/temporal';
 
-type DateInput = string | number | Date;
+type DateInput = string | number | Temporal.Instant;
 
-function toDate(value: DateInput): Date | null {
-	const date = value instanceof Date ? value : new Date(value);
-	return Number.isNaN(date.getTime()) ? null : date;
+const DATE_TIME_INPUT_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/;
+
+function instantFor(
+	value: DateInput,
+	timezone: string,
+	normalize: boolean
+): Temporal.Instant | null {
+	return parseInstantWithZone(value, timezone, normalize);
 }
 
-function hasTimezone(value: string): boolean {
-	return /[zZ]|[+-]\d{2}:?\d{2}$/.test(value);
-}
-
-function parseIsoParts(value: string): {
-	year: number;
-	month: number;
-	day: number;
-	hour: number;
-	minute: number;
-	second: number;
-	millisecond: number;
-} | null {
-	const match =
-		/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/.exec(value);
-	if (!match) return null;
-	const year = Number(match[1]);
-	const month = Number(match[2]);
-	const day = Number(match[3]);
-	const hour = Number(match[4] ?? 0);
-	const minute = Number(match[5] ?? 0);
-	const second = Number(match[6] ?? 0);
-	const millisecond = Number(match[7] ?? 0);
-	if (!year || !month || !day) return null;
-	return { year, month, day, hour, minute, second, millisecond };
+function formatInstant(
+	value: DateInput,
+	timezone: string,
+	normalize: boolean,
+	options: Intl.DateTimeFormatOptions
+): string {
+	const instant = instantFor(value, timezone, normalize);
+	if (!instant) return String(value);
+	const next = normalize ? { ...options, timeZone: timezone } : options;
+	return new Intl.DateTimeFormat(undefined, next).format(instant.epochMilliseconds);
 }
 
 export function formatDateValue(
@@ -40,15 +31,26 @@ export function formatDateValue(
 	normalize: boolean,
 	options?: Intl.DateTimeFormatOptions
 ): string {
-	const date = toDate(value);
-	if (!date) return String(value);
-	if (!normalize) {
-		if (!options) return date.toLocaleDateString();
-		return new Intl.DateTimeFormat(undefined, options).format(date);
-	}
-	const nextOptions = options ?? { year: 'numeric', month: 'short', day: 'numeric' };
-	const format = new Intl.DateTimeFormat(undefined, { ...nextOptions, timeZone: timezone });
-	return format.format(date);
+	return formatInstant(
+		value,
+		timezone,
+		normalize,
+		options ?? { year: 'numeric', month: 'short', day: 'numeric' }
+	);
+}
+
+export function formatTimeValue(
+	value: DateInput,
+	timezone: string,
+	normalize: boolean,
+	options?: Intl.DateTimeFormatOptions
+): string {
+	return formatInstant(
+		value,
+		timezone,
+		normalize,
+		options ?? { hour: '2-digit', minute: '2-digit' }
+	);
 }
 
 export function getTimezoneSettings(): { timezone: string; normalize: boolean } {
@@ -63,6 +65,11 @@ export function formatDateDisplay(value: DateInput, options?: Intl.DateTimeForma
 export function formatDateTimeDisplay(value: DateInput): string {
 	const { timezone, normalize } = getTimezoneSettings();
 	return formatDateTimeValue(value, timezone, normalize);
+}
+
+export function formatTimeDisplay(value: DateInput, options?: Intl.DateTimeFormatOptions): string {
+	const { timezone, normalize } = getTimezoneSettings();
+	return formatTimeValue(value, timezone, normalize, options);
 }
 
 export function formatDateInput(value: DateInput): string {
@@ -95,11 +102,7 @@ export function formatDateTimeValue(
 	timezone: string,
 	normalize: boolean
 ): string {
-	const date = toDate(value);
-	if (!date) return String(value);
-	if (!normalize) return date.toLocaleString();
-	const format = new Intl.DateTimeFormat(undefined, {
-		timeZone: timezone,
+	return formatInstant(value, timezone, normalize, {
 		year: 'numeric',
 		month: 'short',
 		day: 'numeric',
@@ -107,92 +110,36 @@ export function formatDateTimeValue(
 		minute: '2-digit',
 		hour12: false
 	});
-	return format.format(date);
 }
 
-function parseDateTimeInput(value: string): {
-	year: number;
-	month: number;
-	day: number;
-	hour: number;
-	minute: number;
-} | null {
-	const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+function parseDateTimeInput(value: string): Temporal.PlainDateTime | null {
+	const match = DATE_TIME_INPUT_RE.exec(value);
 	if (!match) return null;
-	const year = Number(match[1]);
-	const month = Number(match[2]);
-	const day = Number(match[3]);
-	const hour = Number(match[4]);
-	const minute = Number(match[5]);
-	if (!year || !month || !day || Number.isNaN(hour) || Number.isNaN(minute)) return null;
-	return { year, month, day, hour, minute };
-}
-
-function partsMap(format: Intl.DateTimeFormat, date: Date): Record<string, string> {
-	const parts = Object.fromEntries(format.formatToParts(date).map((p) => [p.type, p.value]));
-	// Some CI/runtime combinations emit midnight as "24" instead of "00" for 24-hour clocks.
-	if (parts.hour === '24') parts.hour = '00';
-	return parts;
-}
-
-function getTimeZoneOffsetMinutes(date: Date, timezone: string): number {
-	const format = new Intl.DateTimeFormat('en-CA', {
-		timeZone: timezone,
-		year: 'numeric',
-		month: '2-digit',
-		day: '2-digit',
-		hour: '2-digit',
-		minute: '2-digit',
-		second: '2-digit',
-		hour12: false
-	});
-	const map = partsMap(format, date);
-	const asUtc = Date.UTC(
-		Number(map.year),
-		Number(map.month) - 1,
-		Number(map.day),
-		Number(map.hour),
-		Number(map.minute),
-		Number(map.second)
-	);
-	return (asUtc - date.getTime()) / 60000;
+	try {
+		return Temporal.PlainDateTime.from({
+			year: Number(match[1].slice(0, 4)),
+			month: Number(match[1].slice(5, 7)),
+			day: Number(match[1].slice(8, 10)),
+			hour: Number(match[2]),
+			minute: Number(match[3])
+		});
+	} catch {
+		return null;
+	}
 }
 
 export function toEpoch(value: DateInput, timezone: string, normalize: boolean): number {
-	if (value instanceof Date) return value.getTime();
-	const input = String(value);
-	if (!normalize) return new Date(input).getTime();
-	if (hasTimezone(input)) return new Date(input).getTime();
-	const parts = parseIsoParts(input);
-	if (!parts) return new Date(input).getTime();
-	const base = new Date(
-		Date.UTC(
-			parts.year,
-			parts.month - 1,
-			parts.day,
-			parts.hour,
-			parts.minute,
-			parts.second,
-			parts.millisecond
-		)
-	);
-	const offsetMinutes = getTimeZoneOffsetMinutes(base, timezone);
-	return base.getTime() - offsetMinutes * 60000;
+	const instant = instantFor(value, timezone, normalize);
+	if (!instant) return Number.NaN;
+	return instant.epochMilliseconds;
 }
 
 export function formatDateForInput(value: DateInput, timezone: string, normalize: boolean): string {
 	if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-	const date = toDate(value);
-	if (!date) return '';
-	if (!normalize) return date.toISOString().slice(0, 10);
-	const format = new Intl.DateTimeFormat('en-CA', {
-		timeZone: timezone,
-		year: 'numeric',
-		month: '2-digit',
-		day: '2-digit'
-	});
-	const map = partsMap(format, date);
-	return `${map.year}-${map.month}-${map.day}`;
+	const instant = instantFor(value, timezone, normalize);
+	if (!instant) return '';
+	if (!normalize) return instant.toString().slice(0, 10);
+	return instant.toZonedDateTimeISO(timezone).toPlainDate().toString();
 }
 
 export function formatDateTimeForInput(
@@ -200,20 +147,11 @@ export function formatDateTimeForInput(
 	timezone: string,
 	normalize: boolean
 ): string {
-	const date = toDate(value);
-	if (!date) return '';
-	if (!normalize) return date.toISOString().slice(0, 16);
-	const format = new Intl.DateTimeFormat('en-CA', {
-		timeZone: timezone,
-		year: 'numeric',
-		month: '2-digit',
-		day: '2-digit',
-		hour: '2-digit',
-		minute: '2-digit',
-		hour12: false
-	});
-	const map = partsMap(format, date);
-	return `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}`;
+	const instant = instantFor(value, timezone, normalize);
+	if (!instant) return '';
+	if (!normalize) return instant.toString().slice(0, 16);
+	const zoned = instant.toZonedDateTimeISO(timezone);
+	return `${zoned.toPlainDate().toString()}T${String(zoned.hour).padStart(2, '0')}:${String(zoned.minute).padStart(2, '0')}`;
 }
 
 export function parseDateTimeInputToIso(
@@ -222,15 +160,13 @@ export function parseDateTimeInputToIso(
 	normalize: boolean
 ): string {
 	if (!value) return '';
-	if (!normalize) return new Date(value).toISOString();
+	if (!normalize) {
+		const instant = instantFor(value, timezone, false);
+		return instant?.toString() ?? '';
+	}
 	const parsed = parseDateTimeInput(value);
 	if (!parsed) return '';
-	const base = new Date(
-		Date.UTC(parsed.year, parsed.month - 1, parsed.day, parsed.hour, parsed.minute, 0)
-	);
-	const offsetMinutes = getTimeZoneOffsetMinutes(base, timezone);
-	const utc = new Date(base.getTime() - offsetMinutes * 60000);
-	return utc.toISOString();
+	return parsed.toZonedDateTime(timezone).toInstant().toString();
 }
 
 export function getYearInZone(
@@ -238,11 +174,8 @@ export function getYearInZone(
 	timezone: string,
 	normalize: boolean
 ): number | null {
-	const date = toDate(value);
-	if (!date) return null;
-	if (!normalize) return date.getFullYear();
-	const format = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric' });
-	const year = Number(format.format(date));
-	if (Number.isNaN(year)) return date.getFullYear();
-	return year;
+	const instant = instantFor(value, timezone, normalize);
+	if (!instant) return null;
+	const zone = normalize ? timezone : localTimeZone();
+	return instant.toZonedDateTimeISO(zone).year;
 }

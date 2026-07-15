@@ -1,5 +1,10 @@
 # Build Preview PRD Checklist
 
+> **Status (2026-05-28): Historical companion.**
+> **Current truth:** The checklist reflects the original build-preview rollout. Use docs/prd/README.md and docs/prd/build-preview.md for current status.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 Source: `docs/prd/build-preview.md`
 
 ## Status legend

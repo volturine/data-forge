@@ -1,5 +1,10 @@
 # PRD: Duplicate Analysis Tab
 
+> **Status (2026-05-28): Implemented.**
+> **Current truth:** Tab duplication exists in the backend and frontend analysis editor state flow.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Add first-class tab duplication inside an existing analysis. A duplicated tab keeps the same input source and transformation logic as the source tab, but receives a new tab identity and a new output identity so it can evolve independently without overlapping outputs.

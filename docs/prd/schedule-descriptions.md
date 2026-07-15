@@ -1,5 +1,10 @@
 # PRD: Schedule Descriptions
 
+> **Status (2026-05-28): Not implemented.**
+> **Current truth:** Schedule descriptions are still backlog, not a shipped feature.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Add a first-class schedule description field so users and AI agents can store why a schedule exists, what it is intended to accomplish, and any operational caveats that are not captured by trigger mechanics alone.

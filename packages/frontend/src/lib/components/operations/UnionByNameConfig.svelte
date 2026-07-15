@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { UnionByNameConfigData } from '$lib/types/operation-config';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
@@ -7,11 +8,7 @@
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, stepConfig, label } from '$lib/styles/panda';
-
-	interface UnionByNameConfigData {
-		sources: string[];
-		allow_missing: boolean;
-	}
+	import { SvelteSet } from 'svelte/reactivity';
 
 	const defaultConfig: UnionByNameConfigData = {
 		sources: [],
@@ -32,8 +29,7 @@
 	const datasourceOptions = $derived(datasourceStore.datasources);
 	const ready = $derived(datasourceStore.loaded);
 
-	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- bookkeeping only, never read by template
-	const loaded = new Set<string>();
+	const loaded = new SvelteSet<string>();
 	let pending = $state(0);
 	const loading = $derived(pending > 0);
 

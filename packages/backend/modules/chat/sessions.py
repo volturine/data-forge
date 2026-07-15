@@ -5,21 +5,38 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import secrets
 import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-from core.secrets import decrypt_secret, encrypt_secret
-from sqlmodel import Session as DbSession
-from sqlmodel import select
+from sqlmodel import Session as DbSession, select
 
+from backend_core.secrets import decrypt_secret, encrypt_secret
+from backend_core.sqlmodel_typing import sa
 from modules.chat.models import ChatSession
 
 logger = logging.getLogger(__name__)
 
 MAX_EVENTS = 500
 MAX_MESSAGES = 100
+SECOND_EPOCH_THRESHOLD = 10_000_000_000
+
+
+def _normalize_epoch_milliseconds(value: Any) -> int | None:
+    if not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    epoch_ms = value * 1000 if abs(value) < SECOND_EPOCH_THRESHOLD else value
+    return int(round(epoch_ms))
+
+
+def _normalize_event(event: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(event)
+    ts = _normalize_epoch_milliseconds(normalized.get('ts'))
+    if ts is not None:
+        normalized['ts'] = ts
+    return normalized
 
 
 class LiveSession:
@@ -84,13 +101,13 @@ class LiveSession:
     def _trim_messages(self) -> None:
         if len(self.messages) <= MAX_MESSAGES:
             return
-        system = [m for m in self.messages if m.get("role") == "system"]
-        non_system = [m for m in self.messages if m.get("role") != "system"]
+        system = [m for m in self.messages if m.get('role') == 'system']
+        non_system = [m for m in self.messages if m.get('role') != 'system']
         self.messages = system + non_system[-(MAX_MESSAGES - len(system)) :]
 
     def add_message(self, role: str, content: str) -> None:
         self.last_activity = time.time()
-        self.messages.append({"role": role, "content": content})
+        self.messages.append({'role': role, 'content': content})
         self._trim_messages()
 
     def append_message(self, msg: dict[str, Any]) -> None:
@@ -100,8 +117,8 @@ class LiveSession:
 
     def push_event(self, event: dict) -> None:
         self.last_activity = time.time()
-        if "ts" not in event:
-            event = {**event, "ts": time.time() * 1000}
+        ts = _normalize_epoch_milliseconds(event.get('ts'))
+        event = {**event, 'ts': ts if ts is not None else int(round(time.time() * 1000))}
         self._history.append(event)
         if len(self._history) > MAX_EVENTS:
             self._history = self._history[-MAX_EVENTS:]
@@ -126,7 +143,7 @@ class LiveSession:
             self._queue.put_nowait(item)
 
     def get_history(self) -> list[dict[str, Any]]:
-        return list(self._history)
+        return [_normalize_event(event) for event in self._history]
 
     async def events(self) -> AsyncIterator[dict]:
         while True:
@@ -145,16 +162,16 @@ class SessionStore:
         self._live: dict[str, LiveSession] = {}
 
     def _db(self) -> DbSession:
-        from core.database import get_settings_engine
+        from backend_core.database import get_settings_engine
 
         return DbSession(get_settings_engine())
 
-    def create(self, provider: str, model: str, api_key: str, system_prompt: str = "") -> LiveSession:
+    def create(self, provider: str, model: str, api_key: str, system_prompt: str = '') -> LiveSession:
         sid = secrets.token_urlsafe(16)
         now = time.time()
         initial_messages: list[dict[str, Any]] = []
         if system_prompt:
-            initial_messages.append({"role": "system", "content": system_prompt})
+            initial_messages.append({'role': 'system', 'content': system_prompt})
         row = ChatSession(
             id=sid,
             provider=provider,
@@ -162,7 +179,7 @@ class SessionStore:
             api_key=encrypt_secret(api_key),
             system_prompt=system_prompt,
             messages_json=json.dumps(initial_messages),
-            history_json="[]",
+            history_json='[]',
             created_at=now,
         )
         with self._db() as db:
@@ -178,7 +195,7 @@ class SessionStore:
         if live:
             return live
         with self._db() as db:
-            row = db.exec(select(ChatSession).where(ChatSession.id == session_id)).first()
+            row = db.exec(select(ChatSession).where(sa(ChatSession.id == session_id))).first()
             if not row:
                 return None
             live = LiveSession(row)
@@ -220,21 +237,21 @@ class SessionStore:
             rows = db.exec(select(ChatSession)).all()
             for row in rows:
                 messages: list[dict[str, Any]] = json.loads(row.messages_json)
-                preview = ""
+                preview = ''
                 for m in messages:
-                    if m.get("role") == "user":
-                        preview = m.get("content", "")[:100]
+                    if m.get('role') == 'user':
+                        preview = m.get('content', '')[:100]
                         break
                 sessions.append(
                     {
-                        "id": row.id,
-                        "model": row.model,
-                        "provider": row.provider,
-                        "created_at": row.created_at,
-                        "preview": preview,
+                        'id': row.id,
+                        'model': row.model,
+                        'provider': row.provider,
+                        'created_at': _normalize_epoch_milliseconds(row.created_at) or 0,
+                        'preview': preview,
                     },
                 )
-        return sorted(sessions, key=lambda s: s["created_at"], reverse=True)
+        return sorted(sessions, key=lambda s: s['created_at'], reverse=True)
 
     def sweep(self) -> None:
         """Evict idle in-memory wrappers to free resources. DB rows are preserved."""

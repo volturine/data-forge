@@ -62,7 +62,7 @@ export interface IcebergDataSourceConfig {
 	namespace?: string | null;
 	table?: string | null;
 	source?: Record<string, unknown> | null;
-	refresh?: Record<string, unknown> | null;
+	ingest?: Record<string, unknown> | null;
 }
 
 export interface AnalysisDataSourceConfig {
@@ -198,23 +198,33 @@ export function datasourceIsExcel(datasource: DataSource): boolean {
 	return datasourceFileType(datasource) === 'excel';
 }
 
-export function datasourceIsRefreshableExternal(datasource: DataSource): boolean {
+export function datasourceIsIngestableExternal(datasource: DataSource): boolean {
 	const sourceType = datasourceExternalSourceType(datasource);
 	return sourceType === 'file' || sourceType === 'database';
 }
 
-export function datasourceNeedsExternalRefresh(datasource: DataSource): boolean {
-	return datasourceIsIceberg(datasource) && datasourceIsRefreshableExternal(datasource);
+export function datasourceNeedsExternalIngest(datasource: DataSource): boolean {
+	return datasourceIsIceberg(datasource) && datasourceIsIngestableExternal(datasource);
+}
+
+export function datasourceHasMaterializedSnapshot(datasource: DataSource): boolean {
+	if (!datasourceIsIceberg(datasource)) return true;
+	if (!datasourceIsAnalysisOutput(datasource)) return true;
+	return !!(
+		datasource.config.snapshot_id ||
+		(typeof datasource.config.snapshot_timestamp_ms === 'number' &&
+			Number.isFinite(datasource.config.snapshot_timestamp_ms))
+	);
 }
 
 export function datasourceSupportsSchemaRefresh(datasource: DataSource): boolean {
-	return !datasourceIsAnalysis(datasource);
+	return !datasourceIsAnalysis(datasource) && datasourceHasMaterializedSnapshot(datasource);
 }
 
 export function datasourceIsSchedulableRaw(datasource: DataSource): boolean {
 	return (
 		datasourceIsIceberg(datasource) &&
 		!datasourceIsAnalysisOutput(datasource) &&
-		datasourceIsRefreshableExternal(datasource)
+		datasourceIsIngestableExternal(datasource)
 	);
 }

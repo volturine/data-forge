@@ -1,5 +1,10 @@
 # PRD: Mobile-First UI
 
+> **Status (2026-05-28): Not implemented.**
+> **Current truth:** The repository does not currently ship the mobile-first redesign described here.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Implement a mobile-first interface for Data-Forge based on the `mobile-design-concept.html` mockup. The mobile UI is AI-first, designed for phone-sized screens (320–428px), and provides a streamlined workflow: pick/create analysis → chat with AI → review pipeline → inspect data → fine-tune manually.

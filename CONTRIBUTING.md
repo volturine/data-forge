@@ -19,7 +19,7 @@ First off, thank you for considering contributing to Data-Forge! It's people lik
 
 Before you begin, ensure you have the following installed:
 
-- **Python 3.11+** — Backend runtime
+- **Python 3.14+** — Backend runtime
 - **Bun** — Frontend runtime and package manager
 - **uv** — Python package manager ([install](https://github.com/astral-sh/uv))
 - **just** — Command runner ([install](https://github.com/casey/just))
@@ -42,7 +42,7 @@ cd data-forge
 just install
 
 # Review local environment settings
-# packages/shared/dev.env covers the shared local runtime configuration
+# config/env/dev.env covers the shared local runtime configuration
 
 # Start development servers
 just dev
@@ -192,7 +192,7 @@ just test-e2e   # End-to-end tests with the managed local runtime
 
 ### Writing Tests
 
-- Backend: Write pytest tests in `packages/backend/tests/`, `packages/scheduler/tests/`, or `packages/worker-manager/tests/` as appropriate
+- Backend: Write pytest tests in `packages/backend/tests/`, `packages/scheduler/tests/`, or `packages/worker/tests/` as appropriate
 - Shared Python logic: Write tests in `packages/shared/tests/`
 - Frontend: Write Vitest tests as `*.test.ts` under `packages/frontend/src/`
 - E2E: Write Playwright tests under `packages/frontend/tests/`

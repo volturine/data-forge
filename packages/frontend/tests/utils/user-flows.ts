@@ -1,5 +1,13 @@
 import { expect, type Page } from '@playwright/test';
-import { gotoNewAnalysis, waitForLayoutReady, waitForUdfList } from './readiness.js';
+import { waitForCurrentAnalysisEditor } from './analysis.js';
+import {
+	gotoAuthedRoute,
+	gotoMonitoringTab,
+	gotoNewAnalysis,
+	waitForDatasourceList,
+	waitForLayoutReady,
+	waitForUdfList
+} from './readiness.js';
 
 export const E2E_PASSWORD = 'E2eTestPw12345';
 
@@ -22,7 +30,7 @@ function generateLargeCsv(rows: number): string {
 export async function registerViaUi(page: Page, email: string, name: string): Promise<void> {
 	await page.goto('/register');
 	await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({
-		timeout: 15_000
+		timeout: 5_000
 	});
 	const nameInput = page.locator('#name');
 	const emailInput = page.locator('#email');
@@ -37,20 +45,20 @@ export async function registerViaUi(page: Page, email: string, name: string): Pr
 	await expect(passwordInput).toHaveValue(E2E_PASSWORD);
 	await expect(confirmInput).toHaveValue(E2E_PASSWORD);
 	const createButton = page.getByRole('button', { name: 'Create account', exact: true });
-	await expect(createButton).toBeEnabled({ timeout: 15_000 });
+	await expect(createButton).toBeEnabled({ timeout: 5_000 });
 	await createButton.click();
 	const continueLink = page.getByRole('link', { name: /Continue/i });
 	await Promise.race([
-		continueLink.waitFor({ state: 'visible', timeout: 15_000 }),
-		page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 15_000 }),
-		page.getByText(/Account created\./i).waitFor({ state: 'visible', timeout: 15_000 })
+		continueLink.waitFor({ state: 'visible', timeout: 5_000 }),
+		page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 5_000 }),
+		page.getByText(/Account created\./i).waitFor({ state: 'visible', timeout: 5_000 })
 	]).catch(() => undefined);
 	if (await continueLink.isVisible().catch(() => false)) {
 		await continueLink.click();
 	} else {
 		await page.goto('/', { waitUntil: 'domcontentloaded' });
 	}
-	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 15_000 });
+	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 5_000 });
 }
 
 export async function uploadDatasourceViaUi(
@@ -62,9 +70,9 @@ export async function uploadDatasourceViaUi(
 		csv?: string;
 	}
 ): Promise<{ id: string }> {
-	await page.goto('/datasources/new');
-	await waitForLayoutReady(page);
+	await gotoAuthedRoute(page, '/datasources/new');
 	const fileInput = page.locator('#file-input');
+	await expect(fileInput).toBeVisible({ timeout: 5_000 });
 	await fileInput.setInputFiles({
 		name: `${name}.csv`,
 		mimeType: 'text/csv',
@@ -76,17 +84,40 @@ export async function uploadDatasourceViaUi(
 		await page.locator('#file-description').fill(options.description);
 	}
 	const uploadBtn = page.getByRole('button', { name: 'Upload', exact: true });
-	await expect(uploadBtn).toBeEnabled({ timeout: 10_000 });
+	await expect(uploadBtn).toBeEnabled({ timeout: 5_000 });
+	const uploadResponse = page.waitForResponse(
+		(response) =>
+			response.url().includes('/api/v1/datasource/upload') &&
+			!response.url().includes('/bulk') &&
+			response.status() === 200
+	);
 	await uploadBtn.click();
-	await expect(page).toHaveURL((url) => url.pathname === '/datasources', { timeout: 30_000 });
-	const row = page.locator(`[data-ds-row="${name}"]`);
-	await expect(row).toBeVisible({ timeout: 30_000 });
-	await row.click();
-	await expect(page).toHaveURL(/id=/, { timeout: 15_000 });
-	const datasourceId = new URL(page.url()).searchParams.get('id');
-	if (!datasourceId) {
-		throw new Error(`Could not extract datasource id after uploading ${name}`);
+	await uploadResponse;
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			await expect(
+				page,
+				`Upload did not redirect to the created datasource list for ${name}`
+			).toHaveURL(
+				(url) =>
+					url.pathname === '/datasources' &&
+					(url.searchParams.has('created_id') || url.searchParams.has('id')),
+				{ timeout: 5_000 }
+			);
+			break;
+		} catch (error) {
+			if (attempt === 2) throw error;
+		}
 	}
+	const currentUrl = new URL(page.url());
+	const datasourceId =
+		currentUrl.searchParams.get('created_id') ?? currentUrl.searchParams.get('id');
+	if (!datasourceId) {
+		throw new Error(`Could not extract browser-visible datasource id after upload for ${name}`);
+	}
+	await waitForDatasourceList(page, 5_000);
+	const row = page.locator(`[data-ds-row="${name}"]`);
+	await expect(row).toBeVisible({ timeout: 5_000 });
 	return { id: datasourceId };
 }
 
@@ -116,15 +147,7 @@ export async function createAnalysisViaUi(
 	await page.getByRole('button', { name: /Next/i }).click();
 	await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
 	await page.getByRole('button', { name: /Create Analysis/i }).click();
-	await expect(page).toHaveURL(
-		(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-		{ timeout: 20_000 }
-	);
-	const match = page.url().match(/\/analysis\/([^/?#]+)/);
-	if (!match || match[1] === 'new') {
-		throw new Error(`Could not extract analysis id from URL: ${page.url()}`);
-	}
-	return match[1];
+	return waitForCurrentAnalysisEditor(page);
 }
 
 export async function importAnalysisViaUi(
@@ -161,20 +184,11 @@ export async function importAnalysisViaUi(
 	await page.getByRole('button', { name: /Next/i }).click();
 	await expect(page.getByRole('heading', { name: /Review Import/i })).toBeVisible();
 	await page.getByRole('button', { name: /Create Analysis/i }).click();
-	await expect(page).toHaveURL(
-		(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-		{ timeout: 30_000 }
-	);
-	const match = page.url().match(/\/analysis\/([^/?#]+)/);
-	if (!match || match[1] === 'new') {
-		throw new Error(`Could not extract imported analysis id from URL: ${page.url()}`);
-	}
-	return match[1];
+	return waitForCurrentAnalysisEditor(page);
 }
 
 export async function createUdfViaUi(page: Page, name: string): Promise<string> {
-	await page.goto('/udfs/new');
-	await waitForLayoutReady(page);
+	await gotoAuthedRoute(page, '/udfs/new');
 	await page.locator('#udf-name').fill(name);
 	await page.locator('#udf-description').fill(`Test UDF: ${name}`);
 	await page.locator('#udf-tags').fill('test');
@@ -185,7 +199,7 @@ export async function createUdfViaUi(page: Page, name: string): Promise<string> 
 		page.getByTestId('udf-save-button').click()
 	]);
 	const payload = (await response.json()) as { id: string };
-	await expect(page).toHaveURL(new RegExp(`/udfs/${payload.id}$`), { timeout: 15_000 });
+	await expect(page).toHaveURL(new RegExp(`/udfs/${payload.id}$`), { timeout: 5_000 });
 	return payload.id;
 }
 
@@ -194,8 +208,7 @@ export async function createScheduleViaUi(
 	datasourceId: string,
 	cron = '0 9 * * *'
 ): Promise<string> {
-	await page.goto('/monitoring?tab=schedules');
-	await waitForLayoutReady(page);
+	await gotoMonitoringTab(page, 'schedules');
 	await page.getByRole('button', { name: /New Schedule/i }).click();
 	const select = page.locator('#schedule-datasource');
 	await expect(select).toBeVisible({ timeout: 5_000 });
@@ -221,8 +234,7 @@ export async function createHealthCheckViaUi(
 	datasourceId: string,
 	name: string
 ): Promise<string> {
-	await page.goto('/monitoring?tab=health');
-	await waitForLayoutReady(page);
+	await gotoMonitoringTab(page, 'health');
 	await page.getByRole('button', { name: /New Check/i }).click();
 	const select = page.locator('#hc-target');
 	await expect(select).toBeVisible({ timeout: 5_000 });
@@ -242,5 +254,41 @@ export async function createHealthCheckViaUi(
 export async function waitForUdfVisible(page: Page, name: string): Promise<void> {
 	await page.goto('/udfs');
 	await waitForUdfList(page);
-	await expect(page.locator(`[data-udf-card="${name}"]`)).toBeVisible({ timeout: 10_000 });
+	await expect(page.locator(`[data-udf-card="${name}"]`)).toBeVisible({ timeout: 5_000 });
+}
+
+export async function shutdownEngineViaUi(
+	page: Page,
+	analysisId: string,
+	options?: { timeoutMs?: number }
+): Promise<void> {
+	const timeoutMs = options?.timeoutMs ?? 5_000;
+	await page.goto('/', { waitUntil: 'domcontentloaded' });
+	await waitForLayoutReady(page, timeoutMs);
+
+	const engineButton = page.getByRole('button', { name: 'Engine Monitor' });
+	await expect(engineButton).toBeVisible({ timeout: timeoutMs });
+	await engineButton.click();
+
+	const popup = page.locator('[data-engines-popup="true"]');
+	await expect(popup).toBeVisible({ timeout: timeoutMs });
+
+	const identityKey = `analysis_interactive:${analysisId}`;
+	const row = popup.locator(`[data-engine-row="${identityKey}"]`);
+	const shutdownButton = popup.locator(`[data-engine-shutdown="${identityKey}"]`);
+	const started = Date.now();
+	while (Date.now() - started < timeoutMs) {
+		if (await row.isVisible().catch(() => false)) {
+			await expect(shutdownButton).toBeEnabled({ timeout: 1_000 });
+			await shutdownButton.click();
+			await expect(row).toBeHidden({
+				timeout: Math.max(timeoutMs - (Date.now() - started), 1_000)
+			});
+			await page.keyboard.press('Escape').catch(() => undefined);
+			return;
+		}
+		await page.waitForTimeout(250);
+	}
+
+	await page.keyboard.press('Escape').catch(() => undefined);
 }

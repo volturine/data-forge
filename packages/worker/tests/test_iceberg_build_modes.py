@@ -1,0 +1,405 @@
+import uuid
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pyarrow as pa  # type: ignore[import-untyped]
+from pyiceberg.schema import Schema as IcebergSchema
+from pyiceberg.types import NestedField, StringType
+
+from runtime.compute_service import _schema_cache_payload_from_arrow, _sync_iceberg_schema, export_data
+from runtime.domain.compute.base import EngineResult
+from runtime.namespace import namespace_paths
+
+
+class TestSyncIcebergSchema:
+    def _make_table(self, iceberg_fields: list[NestedField]) -> tuple[MagicMock, MagicMock]:
+        schema = IcebergSchema(*iceberg_fields)
+        mock_table = MagicMock()
+        mock_table.schema.return_value = schema
+        mock_update = MagicMock()
+        mock_table.update_schema.return_value = mock_update
+        return mock_table, mock_update
+
+    def test_no_changes_returns_false(self):
+        table, update = self._make_table(
+            [
+                NestedField(1, "a", StringType()),
+                NestedField(2, "b", StringType()),
+            ],
+        )
+        new_schema = pa.schema([pa.field("a", pa.string()), pa.field("b", pa.string())])
+
+        result = _sync_iceberg_schema(table, new_schema)
+
+        assert result is False
+        table.update_schema.assert_not_called()
+
+    def test_delete_removed_columns(self):
+        table, update = self._make_table(
+            [
+                NestedField(1, "a", StringType()),
+                NestedField(2, "b", StringType()),
+                NestedField(3, "c", StringType()),
+            ],
+        )
+        new_schema = pa.schema([pa.field("a", pa.string())])
+
+        result = _sync_iceberg_schema(table, new_schema)
+
+        assert result is True
+        update.delete_column.assert_any_call("b")
+        update.delete_column.assert_any_call("c")
+        assert update.delete_column.call_count == 2
+        update.commit.assert_called_once()
+
+    def test_add_new_columns(self):
+        table, update = self._make_table(
+            [
+                NestedField(1, "a", StringType()),
+            ],
+        )
+        new_schema = pa.schema(
+            [
+                pa.field("a", pa.string()),
+                pa.field("b", pa.int64()),
+                pa.field("c", pa.float64()),
+            ]
+        )
+
+        result = _sync_iceberg_schema(table, new_schema)
+
+        assert result is True
+        update.union_by_name.assert_called_once_with(new_schema)
+        update.commit.assert_called_once()
+
+    def test_delete_and_add_combined(self):
+        table, update = self._make_table(
+            [
+                NestedField(1, "keep", StringType()),
+                NestedField(2, "remove", StringType()),
+            ],
+        )
+        new_schema = pa.schema(
+            [
+                pa.field("keep", pa.string()),
+                pa.field("new_col", pa.float64()),
+            ],
+        )
+
+        result = _sync_iceberg_schema(table, new_schema)
+
+        assert result is True
+        update.delete_column.assert_called_once_with("remove")
+        update.union_by_name.assert_called_once_with(new_schema)
+        update.commit.assert_called_once()
+
+    def test_only_deletions_no_union_call(self):
+        table, update = self._make_table(
+            [
+                NestedField(1, "a", StringType()),
+                NestedField(2, "b", StringType()),
+            ],
+        )
+        new_schema = pa.schema([pa.field("a", pa.string())])
+
+        _sync_iceberg_schema(table, new_schema)
+
+        update.delete_column.assert_called_once_with("b")
+        update.union_by_name.assert_not_called()
+        update.commit.assert_called_once()
+
+
+class TestBuildModeWiring:
+    def test_schema_cache_payload_from_arrow_preserves_engine_dtype_and_nullable(self):
+        payload = _schema_cache_payload_from_arrow(
+            pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("name", pa.string(), nullable=True)]),
+            {"schema": {"id": "Int64", "name": {"dtype": "Utf8", "nullable": False}}, "row_count": 2},
+        )
+
+        assert payload == {
+            "columns": [
+                {"name": "id", "dtype": "Int64", "nullable": False},
+                {"name": "name", "dtype": "Utf8", "nullable": False},
+            ],
+            "row_count": 2,
+        }
+
+    def _make_pipeline(self, datasource: SimpleNamespace, output_ds_id: str, build_mode: str = "full") -> dict:
+        return {
+            "analysis_id": str(uuid.uuid4()),
+            "tabs": [
+                {
+                    "id": "tab1",
+                    "name": "Test Tab",
+                    "parent_id": None,
+                    "datasource": {
+                        "id": datasource.id,
+                        "analysis_tab_id": None,
+                        "source_type": datasource.source_type,
+                        "config": {**datasource.config, "branch": "master"},
+                    },
+                    "output": {
+                        "result_id": output_ds_id,
+                        "format": "parquet",
+                        "filename": "test_out",
+                        "iceberg": {"namespace": "ns", "table_name": "tbl"},
+                        "build_mode": build_mode,
+                    },
+                    "steps": [],
+                },
+            ],
+        }
+
+    def _make_engine_mock(self) -> MagicMock:
+        engine = MagicMock()
+        engine.is_process_alive.return_value = True
+        engine.export.return_value = "job-1"
+        engine.get_result.return_value = EngineResult(
+            job_id="job-1",
+            data={"row_count": 1},
+            error=None,
+        )
+        return engine
+
+    def _make_manager_mock(self) -> MagicMock:
+        manager = MagicMock()
+        engine = self._make_engine_mock()
+        manager.get_engine.return_value = engine
+        manager.get_or_create_engine.return_value = engine
+        return manager
+
+    def _make_internal_client_mock(self, output_ds_id: str) -> MagicMock:
+        client = MagicMock()
+        client.create_engine_run.return_value = "run-1"
+        client.engine_run_state.return_value = {"result_json": {}}
+        client.list_healthchecks.return_value = []
+        client.analysis_name.return_value = "Test Analysis"
+        client.telegram_targets.return_value = []
+        client.upsert_output_datasource.return_value = MagicMock(id=output_ds_id, name="test_out")
+        return client
+
+    def _setup_mocks(self, table_exists: bool = True):
+        mock_catalog = MagicMock()
+        mock_table = MagicMock()
+        mock_catalog.table_exists.return_value = table_exists
+        mock_catalog.load_table.return_value = mock_table
+        mock_catalog.create_table.return_value = mock_table
+        mock_table.current_snapshot.return_value = MagicMock(snapshot_id=123, timestamp_ms=1000)
+        mock_table.metadata_location = str(namespace_paths().exports_dir / "ns" / "tbl" / "metadata" / "v1.metadata.json")
+        mock_arrow = MagicMock(schema=pa.schema([pa.field("id", pa.int64())]))
+        return mock_catalog, mock_table, mock_arrow
+
+    def test_full_mode_calls_overwrite(self, sample_datasource: SimpleNamespace):
+        output_ds_id = str(uuid.uuid4())
+        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="full")
+        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
+
+        with (
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service._sync_iceberg_schema", return_value=False) as mock_sync,
+            patch("runtime.compute_service.os.path.getsize", return_value=100),
+            patch("runtime.compute_service.ensure_bucket_exists"),
+            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
+        ):
+            export_data(
+                session=None,
+                manager=self._make_manager_mock(),
+                target_step_id="source",
+                analysis_pipeline=pipeline,
+                request_json={
+                    "analysis_pipeline": pipeline,
+                    "target_step_id": "source",
+                },
+                filename="test_out",
+                iceberg_options={
+                    "namespace": "ns",
+                    "table_name": "tbl",
+                    "branch": "master",
+                },
+                result_id=output_ds_id,
+                build_mode="full",
+            )
+
+        mock_sync.assert_called_once_with(mock_table, mock_arrow.schema)
+        mock_table.overwrite.assert_called_once_with(mock_arrow)
+        mock_table.append.assert_not_called()
+
+    def test_incremental_mode_calls_append(self, sample_datasource: SimpleNamespace):
+        output_ds_id = str(uuid.uuid4())
+        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="incremental")
+        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
+
+        with (
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service._sync_iceberg_schema") as mock_sync,
+            patch("runtime.compute_service.os.path.getsize", return_value=100),
+            patch("runtime.compute_service.ensure_bucket_exists"),
+            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
+        ):
+            export_data(
+                session=None,
+                manager=self._make_manager_mock(),
+                target_step_id="source",
+                analysis_pipeline=pipeline,
+                request_json={
+                    "analysis_pipeline": pipeline,
+                    "target_step_id": "source",
+                },
+                filename="test_out",
+                iceberg_options={
+                    "namespace": "ns",
+                    "table_name": "tbl",
+                    "branch": "master",
+                },
+                result_id=output_ds_id,
+                build_mode="incremental",
+            )
+
+        mock_sync.assert_not_called()
+        mock_table.append.assert_called_once_with(mock_arrow)
+        mock_table.overwrite.assert_not_called()
+
+    def test_new_table_always_creates_and_appends(self, sample_datasource: SimpleNamespace):
+        output_ds_id = str(uuid.uuid4())
+        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="full")
+        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=False)
+
+        with (
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.os.path.getsize", return_value=100),
+            patch("runtime.compute_service.ensure_bucket_exists"),
+            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
+        ):
+            export_data(
+                session=None,
+                manager=self._make_manager_mock(),
+                target_step_id="source",
+                analysis_pipeline=pipeline,
+                request_json={
+                    "analysis_pipeline": pipeline,
+                    "target_step_id": "source",
+                },
+                filename="test_out",
+                iceberg_options={
+                    "namespace": "ns",
+                    "table_name": "tbl",
+                    "branch": "master",
+                },
+                result_id=output_ds_id,
+                build_mode="full",
+            )
+
+        mock_catalog.create_table.assert_called_once()
+        mock_table.append.assert_called_once_with(mock_arrow)
+
+    def test_recreate_mode_drops_and_creates(self, sample_datasource: SimpleNamespace):
+        output_ds_id = str(uuid.uuid4())
+        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="recreate")
+        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
+        with (
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.os.path.getsize", return_value=100),
+            patch("runtime.compute_service.ensure_bucket_exists"),
+            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
+        ):
+            export_data(
+                session=None,
+                manager=self._make_manager_mock(),
+                target_step_id="source",
+                analysis_pipeline=pipeline,
+                request_json={
+                    "analysis_pipeline": pipeline,
+                    "target_step_id": "source",
+                },
+                filename="test_out",
+                iceberg_options={
+                    "namespace": "ns",
+                    "table_name": "tbl",
+                    "branch": "master",
+                },
+                result_id=output_ds_id,
+                build_mode="recreate",
+            )
+
+        mock_catalog.drop_table.assert_called_once_with(f"ns.{output_ds_id}_master")
+        mock_catalog.create_table.assert_called_once()
+        mock_table.append.assert_called_once_with(mock_arrow)
+        mock_table.overwrite.assert_not_called()
+
+    def test_recreate_mode_no_table_skips_drop(self, sample_datasource: SimpleNamespace):
+        output_ds_id = str(uuid.uuid4())
+        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="recreate")
+        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=False)
+
+        with (
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.os.path.getsize", return_value=100),
+            patch("runtime.compute_service.ensure_bucket_exists"),
+            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
+        ):
+            export_data(
+                session=None,
+                manager=self._make_manager_mock(),
+                target_step_id="source",
+                analysis_pipeline=pipeline,
+                request_json={
+                    "analysis_pipeline": pipeline,
+                    "target_step_id": "source",
+                },
+                filename="test_out",
+                iceberg_options={
+                    "namespace": "ns",
+                    "table_name": "tbl",
+                    "branch": "master",
+                },
+                result_id=output_ds_id,
+                build_mode="recreate",
+            )
+
+        mock_catalog.drop_table.assert_not_called()
+        mock_catalog.create_table.assert_called_once()
+        mock_table.append.assert_called_once_with(mock_arrow)
+
+    def test_default_build_mode_is_full(self, sample_datasource: SimpleNamespace):
+        output_ds_id = str(uuid.uuid4())
+        pipeline = self._make_pipeline(sample_datasource, output_ds_id)
+        del pipeline["tabs"][0]["output"]["build_mode"]
+        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
+
+        with (
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch(
+                "runtime.compute_service.resolve_iceberg_metadata_path",
+                return_value="/tmp/iceberg/warehouse/ns/tbl/metadata/v1.metadata.json",
+            ),
+            patch("runtime.compute_service._sync_iceberg_schema", return_value=False) as mock_sync,
+            patch("runtime.compute_service.os.path.getsize", return_value=100),
+            patch("runtime.compute_service.ensure_bucket_exists"),
+            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
+        ):
+            export_data(
+                session=None,
+                manager=self._make_manager_mock(),
+                target_step_id="source",
+                analysis_pipeline=pipeline,
+                request_json={
+                    "analysis_pipeline": pipeline,
+                    "target_step_id": "source",
+                },
+                filename="test_out",
+                iceberg_options={
+                    "namespace": "ns",
+                    "table_name": "tbl",
+                    "branch": "master",
+                },
+                result_id=output_ds_id,
+            )
+
+        mock_sync.assert_called_once()
+        mock_table.overwrite.assert_called_once()

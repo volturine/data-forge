@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { Debounced } from 'runed';
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import type { DataSource } from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { SourceType } from '$lib/utils/file-types';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import { css } from '$lib/styles/panda';
+	import { css, iconButton } from '$lib/styles/panda';
 
 	interface Props {
 		show: boolean;
@@ -107,17 +107,7 @@
 			{mode === 'change' ? 'Change Datasource' : 'Add Datasource'}
 		</h2>
 		<button
-			class={css({
-				display: 'flex',
-				cursor: 'pointer',
-				alignItems: 'center',
-				justifyContent: 'center',
-				border: 'none',
-				backgroundColor: 'transparent',
-				padding: '1',
-				color: 'fg.muted',
-				_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-			})}
+			class={iconButton({ variant: 'ghost' })}
 			onclick={handleClose}
 			aria-label="Close"
 			type="button"

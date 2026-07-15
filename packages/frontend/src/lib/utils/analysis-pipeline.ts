@@ -59,6 +59,7 @@ export function normalizeSnapshotConfig(
 		time_travel_snapshot_id,
 		time_travel_snapshot_timestamp_ms,
 		time_travel_ui: _ui,
+		branches: _branches,
 		...rest
 	} = typedConfig;
 	const normalized: AnalysisTabDatasourceConfig = { ...rest, branch: rest.branch };
@@ -71,35 +72,12 @@ export function normalizeSnapshotConfig(
 	return normalized;
 }
 
-function collectTabSourceIds(tab: AnalysisTab): Set<string> {
-	const ids = new Set<string>([tab.datasource.id]);
-	for (const step of applySteps(tab.steps ?? [])) {
-		const config = step.config ?? {};
-		if (!isRecord(config)) continue;
-		const cfg = config;
-		const rightSource = cfg.right_source;
-		if (typeof rightSource === 'string' && rightSource) ids.add(rightSource);
-		const sources = cfg.sources;
-		if (typeof sources === 'string' && sources) ids.add(sources);
-		if (Array.isArray(sources)) {
-			for (const source of sources) {
-				if (typeof source === 'string' && source) ids.add(source);
-			}
-		}
-	}
-	return ids;
-}
-
-function collectSourceIds(tabs: AnalysisTab[]): Set<string> {
-	return new Set(tabs.flatMap((tab) => [...collectTabSourceIds(tab)]));
-}
-
 function toPipelineDatasource(args: {
 	analysisId: string;
 	datasource: AnalysisTab['datasource'];
 	datasourceMap: Map<string, DataSource>;
 	outputById: Map<string, string>;
-}): PipelineDatasource | null {
+}): PipelineDatasource {
 	const config = normalizeSnapshotConfig(args.datasource.config);
 	if (args.datasource.analysis_tab_id) {
 		return {
@@ -119,7 +97,9 @@ function toPipelineDatasource(args: {
 		};
 	}
 	const ds = args.datasourceMap.get(args.datasource.id);
-	if (!ds) return null;
+	if (!ds) {
+		throw new Error(`datasource ${args.datasource.id} metadata is required`);
+	}
 	if (!isRecord(ds.config)) {
 		throw new Error(`datasource ${ds.id} config is invalid`);
 	}
@@ -139,7 +119,6 @@ export function buildAnalysisPipelinePayload(
 	if (!analysisId) return null;
 	if (!tabs.length) return null;
 
-	const sourceIds = collectSourceIds(tabs);
 	const datasourceMap = new Map(datasources.map((ds) => [ds.id, ds]));
 	const missing: string[] = [];
 	const outputByTabId = new Map<string, string>();
@@ -154,26 +133,24 @@ export function buildAnalysisPipelinePayload(
 		outputByTabId.set(tab.id, outputId);
 		outputById.set(outputId, tab.id);
 	}
-	for (const id of sourceIds) {
-		if (outputById.has(id)) continue;
-		const ds = datasourceMap.get(id);
-		if (!ds) {
-			missing.push(id);
-		}
-	}
 	if (missing.length) {
 		return null;
 	}
 
 	const pipelineTabs = tabs.map((tab) => {
 		const outputId = outputByTabId.get(tab.id);
-		const datasource = toPipelineDatasource({
-			analysisId,
-			datasource: tab.datasource,
-			datasourceMap,
-			outputById
-		});
-		if (!datasource || !outputId) return null;
+		let datasource: PipelineDatasource;
+		try {
+			datasource = toPipelineDatasource({
+				analysisId,
+				datasource: tab.datasource,
+				datasourceMap,
+				outputById
+			});
+		} catch {
+			return null;
+		}
+		if (!outputId) return null;
 		return {
 			id: tab.id,
 			name: tab.name,
@@ -225,6 +202,7 @@ export function buildDatasourcePipelinePayload(args: {
 		throw new Error('datasource.name is required');
 	}
 	const filename = datasource.name.trim().replace(/\s+/g, '_').toLowerCase();
+	const previewOutputId = `datasource-preview-${datasource.id}`;
 	const tabs: PipelineTab[] = [
 		{
 			id: `datasource-${datasource.id}`,
@@ -236,7 +214,7 @@ export function buildDatasourcePipelinePayload(args: {
 				config: normalizedConfig
 			},
 			output: {
-				result_id: datasource.id,
+				result_id: previewOutputId,
 				format: 'parquet',
 				filename: datasource.name,
 				build_mode: 'full',
@@ -249,4 +227,15 @@ export function buildDatasourcePipelinePayload(args: {
 		analysis_id: datasource.id,
 		tabs
 	};
+}
+
+export function buildDatasourcePreviewPipelinePayload(args: {
+	datasource: DataSource;
+	datasourceConfig: Record<string, unknown>;
+}): AnalysisPipelinePayload {
+	const persistedConfig = isRecord(args.datasource.config) ? args.datasource.config : {};
+	return buildDatasourcePipelinePayload({
+		datasource: args.datasource,
+		datasourceConfig: { ...persistedConfig, ...args.datasourceConfig }
+	});
 }

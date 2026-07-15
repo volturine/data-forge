@@ -18,12 +18,12 @@
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
-	import { Plus } from 'lucide-svelte';
+	import { Plus } from '@lucide/svelte';
 	import type { SortOption } from '$lib/components/gallery/AnalysisFilters.svelte';
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { toEpochDisplay } from '$lib/utils/datetime';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, spinner } from '$lib/styles/panda';
+	import { button, css, input, spinner } from '$lib/styles/panda';
 	import { favoriteStore } from '$lib/stores/favorites.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 
@@ -130,6 +130,16 @@
 		deleteConfirmId = id;
 	}
 
+	function removeAnalysesFromCaches(ids: Iterable<string>) {
+		const idSet = new Set(ids);
+		queryClient.setQueryData<AnalysisGalleryItem[]>(['analyses', ns.value], (current) =>
+			current?.filter((analysis) => !idSet.has(analysis.id))
+		);
+		queryClient.setQueryData<AnalysisGalleryItem[]>(['favorite-analyses', ns.value], (current) =>
+			current?.filter((analysis) => !idSet.has(analysis.id))
+		);
+	}
+
 	async function toggleFavorite(id: string) {
 		const next = !favoriteStore.isFavorite(id);
 		const result = next ? await favoriteAnalysis(id) : await unfavoriteAnalysis(id);
@@ -158,7 +168,9 @@
 
 		const result = await deleteAnalysis(id);
 		if (result.isOk()) {
+			removeAnalysesFromCaches([id]);
 			queryClient.invalidateQueries({ queryKey: ['analyses', ns.value] });
+			queryClient.invalidateQueries({ queryKey: ['favorite-analyses', ns.value] });
 			selectedIds.delete(id);
 			deleteConfirmId = null;
 		} else {
@@ -185,7 +197,9 @@
 			if (result.isErr()) failed++;
 		}
 
+		removeAnalysesFromCaches(idsToDelete);
 		queryClient.invalidateQueries({ queryKey: ['analyses', ns.value] });
+		queryClient.invalidateQueries({ queryKey: ['favorite-analyses', ns.value] });
 		selectedIds.clear();
 		bulkDeleteConfirm = false;
 
@@ -339,16 +353,7 @@
 				<p class={css({ margin: '0', marginBottom: '6', maxWidth: 'panel', fontSize: 'sm' })}>
 					{query.error.message}
 				</p>
-				<button
-					class={css({
-						backgroundColor: 'accent.primary',
-						color: 'fg.inverse',
-						borderWidth: '1',
-						paddingX: '4',
-						paddingY: '2'
-					})}
-					onclick={() => query.refetch()}
-				>
+				<button class={button({ variant: 'primary' })} onclick={() => query.refetch()}>
 					Try again
 				</button>
 			</div>
@@ -460,26 +465,13 @@
 		{/if}
 		<label class={css({ display: 'grid', gap: '1' })}>
 			<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Name</span>
-			<input
-				class={css({
-					borderWidth: '1',
-					backgroundColor: 'bg.primary',
-					paddingX: '3',
-					paddingY: '2'
-				})}
-				bind:value={duplicateName}
-			/>
+			<input class={input({ variant: 'dialog' })} bind:value={duplicateName} />
 		</label>
 		<label class={css({ display: 'grid', gap: '1' })}>
 			<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Description</span>
 			<textarea
 				rows="4"
-				class={css({
-					borderWidth: '1',
-					backgroundColor: 'bg.primary',
-					paddingX: '3',
-					paddingY: '2'
-				})}
+				class={input({ variant: 'dialog' })}
 				bind:value={duplicateDescription}
 				placeholder="Optional override. Leave empty to reuse the source description."
 			></textarea>
@@ -487,27 +479,12 @@
 	</div>
 
 	<PanelFooter>
-		<button
-			type="button"
-			class={css({
-				borderWidth: '1',
-				backgroundColor: 'transparent',
-				paddingX: '4',
-				paddingY: '2'
-			})}
-			onclick={closeDuplicate}
-		>
+		<button type="button" class={button({ variant: 'secondary' })} onclick={closeDuplicate}>
 			Cancel
 		</button>
 		<button
 			type="button"
-			class={css({
-				borderWidth: '1',
-				backgroundColor: 'accent.primary',
-				color: 'fg.inverse',
-				paddingX: '4',
-				paddingY: '2'
-			})}
+			class={button({ variant: 'primary' })}
 			disabled={duplicating || !duplicateName.trim()}
 			onclick={confirmDuplicate}
 		>

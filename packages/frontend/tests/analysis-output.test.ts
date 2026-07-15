@@ -1,24 +1,71 @@
+import type { Locator, Page } from '@playwright/test';
+
 import { test, expect } from './fixtures.js';
-import { createDatasource, createAnalysis, shutdownEngine } from './utils/api.js';
-import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { createDatasource, createAnalysis } from './utils/api.js';
+import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
+
+let sharedDatasourceId = '';
+let sharedDatasourceName = '';
+
+test.beforeAll(async ({ request }) => {
+	sharedDatasourceName = `e2e-output-shared-ds-${uid()}`;
+	sharedDatasourceId = await createDatasource(request, sharedDatasourceName);
+});
+
+test.afterAll(async ({ browser, workerAuth }) => {
+	const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+	await deleteDatasourceViaUI(page, sharedDatasourceName);
+	await page.close();
+	await context.close();
+});
+
 // ── Output visibility toggle ────────────────────────────────────────────────
+
+async function expectCompletedEventually(locator: Locator) {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			await expect(locator).toContainText(/Completed/i, { timeout: 5_000 });
+			return;
+		} catch (error) {
+			lastError = error;
+		}
+	}
+	throw lastError;
+}
+
+async function deleteBestEffort(
+	page: Page,
+	endpoint: string,
+	expectedStatuses: Set<number>
+): Promise<void> {
+	const response = await page.request.delete(endpoint, { timeout: 5_000 }).catch(() => null);
+	if (!response || expectedStatuses.has(response.status())) return;
+	throw new Error(`Cleanup DELETE ${endpoint} returned HTTP ${response.status()}`);
+}
+
+async function cleanupAnalysis(page: Page, analysisId: string): Promise<void> {
+	await deleteBestEffort(
+		page,
+		`/api/v1/compute/engine/analysis/${analysisId}`,
+		new Set([204, 404, 409])
+	);
+	await deleteBestEffort(page, `/api/v1/analysis/${analysisId}`, new Set([204, 404]));
+}
 
 test.describe('Analyses – output visibility toggle', () => {
 	test('OutputNode: visibility toggle button shows initial state', async ({ page, request }) => {
-		test.setTimeout(60_000);
-		const dsName = `e2e-vis-toggle-ds-${uid()}`;
 		const aName = `E2E Vis Toggle ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
 			// Toggle button should be visible on the output node
 			const toggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
-			await expect(toggleBtn).toBeVisible({ timeout: 8_000 });
+			await expect(toggleBtn).toBeVisible({ timeout: 5_000 });
 
 			// Without a saved/built output datasource, toggle shows "hidden" (default)
 			// The toggle button is present but not functional until the output datasource exists
@@ -26,9 +73,82 @@ test.describe('Analyses – output visibility toggle', () => {
 
 			await screenshot(page, 'analysis/output', 'output-visibility-toggle');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
+		}
+	});
+
+	test('OutputNode: visibility toggle updates after the output datasource exists', async ({
+		page,
+		request
+	}) => {
+		const aName = `E2E Vis Build ${uid()}`;
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
+		try {
+			await gotoAnalysisEditor(page, aId);
+
+			const buildBtn = page.locator('[data-testid="output-build-button"]');
+			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
+			await buildBtn.click();
+			const buildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(buildTrigger).toBeVisible({ timeout: 5_000 });
+			await expectCompletedEventually(buildTrigger);
+
+			const toggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
+			await expect(toggleBtn).toBeEnabled({ timeout: 5_000 });
+			await expect(toggleBtn).toContainText('hidden');
+
+			await toggleBtn.click();
+			await expect(toggleBtn).toContainText('visible', { timeout: 5_000 });
+
+			await toggleBtn.click();
+			await expect(toggleBtn).toContainText('hidden', { timeout: 5_000 });
+		} finally {
+			await cleanupAnalysis(page, aId);
+		}
+	});
+
+	test('OutputNode: rebuilding recreates a deleted output datasource', async ({
+		page,
+		request
+	}) => {
+		const aName = `E2E Output Rebuild ${uid()}`;
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
+		try {
+			await gotoAnalysisEditor(page, aId);
+			const outputName = (
+				await page.locator('[data-testid="output-table-name-card"]').textContent()
+			)?.trim();
+			expect(outputName).toBeTruthy();
+			const outputId = await page
+				.locator('[data-testid="output-visibility-toggle"]')
+				.getAttribute('data-output-datasource-id');
+			expect(outputId).toBeTruthy();
+
+			const buildBtn = page.locator('[data-testid="output-build-button"]');
+			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
+			await buildBtn.click();
+			const initialBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(initialBuildTrigger).toBeVisible({ timeout: 5_000 });
+			await expectCompletedEventually(initialBuildTrigger);
+
+			await deleteDatasourceViaUI(page, outputName!, { id: outputId! });
+			await gotoAnalysisEditor(page, aId);
+
+			const rebuiltBuildBtn = page.locator('[data-testid="output-build-button"]');
+			await expect(rebuiltBuildBtn).toBeVisible({ timeout: 5_000 });
+			await rebuiltBuildBtn.click();
+			const rebuiltBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(rebuiltBuildTrigger).toBeVisible({ timeout: 5_000 });
+			await expectCompletedEventually(rebuiltBuildTrigger);
+
+			const rebuiltToggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
+			await expect(rebuiltToggleBtn).toBeEnabled({ timeout: 5_000 });
+			await rebuiltToggleBtn.click();
+			await expect(rebuiltToggleBtn).toContainText('visible', { timeout: 5_000 });
+			await rebuiltToggleBtn.click();
+			await expect(rebuiltToggleBtn).toContainText('hidden', { timeout: 5_000 });
+		} finally {
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
@@ -37,17 +157,14 @@ test.describe('Analyses – output visibility toggle', () => {
 
 test.describe('Analyses – output node interactions', () => {
 	test('output node build button and mode selector are visible', async ({ page, request }) => {
-		test.setTimeout(60_000);
-		const dsName = `e2e-output-ds-${uid()}`;
 		const aName = `E2E Output Node ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
 			// Build button should be visible
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
 
 			// Mode trigger should be visible
 			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
@@ -67,26 +184,21 @@ test.describe('Analyses – output node interactions', () => {
 
 			await screenshot(page, 'analysis/output', 'output-node-mode-dropdown');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
 	test('selecting a mode updates the trigger text', async ({ page, request }) => {
-		test.setTimeout(60_000);
-		const dsName = `e2e-output-mode-ds-${uid()}`;
 		const aName = `E2E Output Mode ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
 
 			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
-			await expect(modeTrigger).toBeVisible({ timeout: 10_000 });
+			await expect(modeTrigger).toBeVisible({ timeout: 5_000 });
 
 			// Default should be "full"
 			await expect(modeTrigger).toContainText('full');
@@ -112,18 +224,13 @@ test.describe('Analyses – output node interactions', () => {
 
 			await screenshot(page, 'analysis/output', 'output-mode-recreate');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
 	test('collapsible sections toggle open and closed', async ({ page, request }) => {
-		test.setTimeout(60_000);
-		const dsName = `e2e-output-sections-ds-${uid()}`;
 		const aName = `E2E Output Sections ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -132,7 +239,7 @@ test.describe('Analyses – output node interactions', () => {
 			const healthToggle = page.locator('[data-testid="output-health-toggle"]');
 			const scheduleToggle = page.locator('[data-testid="output-schedule-toggle"]');
 
-			await expect(notifyToggle).toBeVisible({ timeout: 10_000 });
+			await expect(notifyToggle).toBeVisible({ timeout: 5_000 });
 			await expect(healthToggle).toBeVisible();
 			await expect(scheduleToggle).toBeVisible();
 
@@ -165,24 +272,88 @@ test.describe('Analyses – output node interactions', () => {
 			await healthToggle.click();
 			await expect(healthEmptyState).not.toBeVisible({ timeout: 3_000 });
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
+		}
+	});
+
+	test('notification toggle enable and disable updates chip', async ({ page, request }) => {
+		const aName = `E2E Notify Toggle ${uid()}`;
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
+		try {
+			await gotoAnalysisEditor(page, aId);
+
+			// Expand notification section
+			const notifyToggle = page.locator('[data-testid="output-notify-toggle"]');
+			await expect(notifyToggle).toBeVisible({ timeout: 5_000 });
+			await notifyToggle.click();
+
+			const notifyPanel = page.locator('[data-testid="output-notify-panel"]');
+			await expect(notifyPanel).toBeVisible({ timeout: 3_000 });
+
+			// Check the "Notify subscribers on build" checkbox
+			const checkbox = notifyPanel.locator('input[name="notify_enabled"]');
+			await checkbox.check();
+
+			// Chip showing subscriber count should appear in the toggle button
+			await expect(notifyToggle).toContainText('/');
+
+			// Uncheck
+			await checkbox.uncheck();
+
+			// Chip should disappear
+			await expect(notifyToggle).not.toContainText('/', { timeout: 3_000 });
+		} finally {
+			await cleanupAnalysis(page, aId);
+		}
+	});
+
+	test('schedule section toggle opens and shows empty state', async ({ page, request }) => {
+		const aName = `E2E Schedule Toggle ${uid()}`;
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
+		try {
+			await gotoAnalysisEditor(page, aId);
+
+			const scheduleToggle = page.locator('[data-testid="output-schedule-toggle"]');
+			await expect(scheduleToggle).toBeVisible({ timeout: 5_000 });
+
+			// Schedule section should start collapsed
+			await expect(
+				page.getByText(/Save this analysis to create an output datasource/i)
+			).not.toBeVisible();
+
+			// Open schedule section
+			await scheduleToggle.click();
+			await expect(
+				page.getByText(
+					/Build this output once to materialize its datasource before adding schedules/i
+				)
+			).toBeVisible({
+				timeout: 5_000
+			});
+
+			// Close it
+			await scheduleToggle.click();
+			await expect(
+				page.getByText(
+					/Build this output once to materialize its datasource before adding schedules/i
+				)
+			).not.toBeVisible({
+				timeout: 3_000
+			});
+		} finally {
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
 	test('table name inline edit', async ({ page, request }) => {
-		test.setTimeout(60_000);
-		const dsName = `e2e-output-rename-ds-${uid()}`;
 		const aName = `E2E Output Rename ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
 			// Click the edit pencil button (aria-label="Edit export name")
 			const editBtn = page.locator('[data-testid="output-table-name-inline-edit"]');
-			await expect(editBtn).toBeVisible({ timeout: 10_000 });
+			await expect(editBtn).toBeVisible({ timeout: 5_000 });
 			await editBtn.click();
 
 			// Input should appear
@@ -201,9 +372,7 @@ test.describe('Analyses – output node interactions', () => {
 
 			await screenshot(page, 'analysis/output', 'output-table-renamed');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
@@ -212,11 +381,8 @@ test.describe('Analyses – output node interactions', () => {
 
 test.describe('Analyses – output node table name edit', () => {
 	test('OutputNode: edit table name, save, verify updated', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const dsName = `e2e-output-name-ds-${uid()}`;
 		const aName = `E2E Output Name ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -238,9 +404,7 @@ test.describe('Analyses – output node table name edit', () => {
 
 			await screenshot(page, 'analysis/output', 'output-name-edited');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
@@ -249,16 +413,13 @@ test.describe('Analyses – output node table name edit', () => {
 
 test.describe('Analyses – output node persistence', () => {
 	test('build mode persists after save and reload', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const dsName = `e2e-mode-persist-ds-${uid()}`;
 		const aName = `E2E Mode Persist ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
 			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
-			await expect(modeTrigger).toBeVisible({ timeout: 10_000 });
+			await expect(modeTrigger).toBeVisible({ timeout: 5_000 });
 
 			// Select incremental mode
 			await modeTrigger.click();
@@ -269,36 +430,34 @@ test.describe('Analyses – output node persistence', () => {
 
 			// Save the analysis
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+
+			// Verify mode is still correct immediately after save (before reload)
+			await expect(modeTrigger).toContainText('incremental');
 
 			// Reload and verify mode persisted
 			await page.reload();
 			await waitForEditorReload(page);
 
 			const modeTriggerAfter = page.locator('[data-testid="output-mode-trigger"]');
-			await expect(modeTriggerAfter).toBeVisible({ timeout: 10_000 });
+			await expect(modeTriggerAfter).toBeVisible({ timeout: 5_000 });
 			await expect(modeTriggerAfter).toContainText('incremental');
 
 			await screenshot(page, 'analysis/output', 'output-mode-persisted');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
 	test('table name persists after save and reload', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const dsName = `e2e-tablename-persist-ds-${uid()}`;
 		const aName = `E2E TableName Persist ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
 			// Edit the table name
 			const editBtn = page.locator('[data-testid="output-table-name-inline-edit"]');
-			await expect(editBtn).toBeVisible({ timeout: 10_000 });
+			await expect(editBtn).toBeVisible({ timeout: 5_000 });
 			await editBtn.click();
 
 			const nameInput = page.locator('#output-node-name');
@@ -314,21 +473,25 @@ test.describe('Analyses – output node persistence', () => {
 
 			// Save
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+
+			// Verify table name is still correct immediately after save (before reload)
+			await expect(page.locator('[data-testid="output-table-name-inline"]')).toHaveText(
+				'persisted_table',
+				{ timeout: 3_000 }
+			);
 
 			// Reload and verify table name persisted
 			await page.reload();
 			await waitForEditorReload(page);
 			await expect(page.locator('[data-testid="output-table-name-inline"]')).toHaveText(
 				'persisted_table',
-				{ timeout: 10_000 }
+				{ timeout: 5_000 }
 			);
 
 			await screenshot(page, 'analysis/output', 'output-tablename-persisted');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
@@ -337,42 +500,34 @@ test.describe('Analyses – output node persistence', () => {
 
 test.describe('Analyses – row count action', () => {
 	test('count-rows: success shows row count badge', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const dsName = `e2e-rowcount-ds-${uid()}`;
 		const aName = `E2E Row Count ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
 			const viewNode = page.locator('[data-step-type="view"]');
-			await expect(viewNode).toHaveCount(1, { timeout: 15_000 });
+			await expect(viewNode).toHaveCount(1, { timeout: 5_000 });
 			const countBtn = viewNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(countBtn).toBeEnabled({ timeout: 5_000 });
 
 			await countBtn.click();
 
 			await expect(viewNode.locator('[data-testid="step-row-count"]')).toBeVisible({
-				timeout: 15_000
+				timeout: 5_000
 			});
 			await expect(viewNode.locator('[data-testid="step-row-count"]')).toContainText('rows');
 
 			await screenshot(page, 'analysis/output', 'row-count-success');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });
 
 test.describe('Analyses – row count on non-view steps', () => {
 	test('count-rows works on a filter step', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const dsName = `e2e-rowcount-filter-ds-${uid()}`;
 		const aName = `E2E Row Count Filter ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'filter');
 			const filterNode = page.locator('[data-step-type="filter"]');
@@ -393,40 +548,31 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			// Click count-rows on the filter node
 			const countBtn = filterNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(countBtn).toBeEnabled({ timeout: 5_000 });
 			await countBtn.click();
 
 			await expect(filterNode.locator('[data-testid="step-row-count"]')).toBeVisible({
-				timeout: 15_000
+				timeout: 5_000
 			});
 			await expect(filterNode.locator('[data-testid="step-row-count"]')).toContainText('rows');
 
 			await screenshot(page, 'analysis/output', 'row-count-filter-step');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 
 	test('count-rows works on a limit step', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const dsName = `e2e-rowcount-limit-ds-${uid()}`;
 		const aName = `E2E Row Count Limit ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
-			await gotoAnalysisEditor(page, aId);
-
-			await page.locator('button[data-step="limit"]').click();
+			const configPanel = await addStepAndOpenConfig(page, aId, 'limit');
 			const limitNode = page.locator('[data-step-type="limit"]');
 			await expect(limitNode).toHaveCount(1, { timeout: 5_000 });
 			await expect(limitNode).toBeVisible({ timeout: 5_000 });
 
 			// Apply the step
-			await limitNode.locator('[data-action="edit"]').click();
-			const configPanel = page.locator('[data-step-config="limit"]');
-			await expect(configPanel).toBeVisible({ timeout: 8_000 });
+			await expect(configPanel).toBeVisible({ timeout: 5_000 });
 			await configPanel.locator('[data-testid="limit-rows-input"]').fill('2');
 			await configPanel.getByRole('button', { name: 'Apply' }).click();
 			await expect(configPanel.getByRole('button', { name: 'Apply' })).toBeDisabled({
@@ -435,19 +581,17 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			// Click count-rows on the limit node
 			const countBtn = limitNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(countBtn).toBeEnabled({ timeout: 5_000 });
 			await countBtn.click();
 
 			await expect(limitNode.locator('[data-testid="step-row-count"]')).toBeVisible({
-				timeout: 15_000
+				timeout: 5_000
 			});
 			await expect(limitNode.locator('[data-testid="step-row-count"]')).toContainText('rows');
 
 			await screenshot(page, 'analysis/output', 'row-count-limit-step');
 		} finally {
-			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await cleanupAnalysis(page, aId);
 		}
 	});
 });

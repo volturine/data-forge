@@ -60,16 +60,6 @@
 			snapshot_timestamp_ms: time_travel_snapshot_timestamp_ms ?? null
 		});
 	});
-	const snapshotKey = $derived.by(() => {
-		const config = datasourceConfig as Record<string, unknown>;
-		const snapshotId = (config.time_travel_snapshot_id as string | null | undefined) ?? null;
-		const snapshotMs =
-			(config.time_travel_snapshot_timestamp_ms as number | null | undefined) ?? null;
-		return `${snapshotId ?? 'latest'}:${snapshotMs ?? 0}`;
-	});
-	const runKey = $derived(`${analysisId}:${datasourceId}:${snapshotKey}:${rowLimit}:${stepId}`);
-	const hasRun = $derived(analysisStore.previewRuns.get(runKey) ?? false);
-
 	const analysisPipeline = $derived.by(() => {
 		if (!analysisId) return null;
 		return buildAnalysisPipelinePayload(
@@ -108,12 +98,22 @@
 		gcTime: Infinity,
 		refetchOnMount: false,
 		retry: false,
-		enabled: hasRun && isActiveStep && !!analysisPipeline && !analysisStore.previewPaused
+		enabled: isActiveStep && !!analysisPipeline && !analysisStore.previewPaused
 	}));
 
-	const data = $derived(isActiveStep && hasRun ? query.data : null);
-	const isLoading = $derived(isActiveStep && hasRun ? query.isFetching : false);
-	const error = $derived(isActiveStep && hasRun ? query.error : null);
+	const data = $derived(isActiveStep ? query.data : null);
+	const isLoading = $derived(isActiveStep ? query.isFetching : false);
+	const error = $derived(isActiveStep ? query.error : null);
+	const errorMessage = $derived(error instanceof Error ? error.message : '');
+	const previewState = $derived.by(() => {
+		if (!isActiveStep) return 'inactive';
+		if (!analysisPipeline) return 'waiting-for-payload';
+		if (analysisStore.previewPaused) return 'paused';
+		if (isLoading) return 'loading';
+		if (error) return 'error';
+		if (data) return 'ready';
+		return 'idle';
+	});
 	const pageSize = $derived(data?.data?.length ?? 0);
 	const canPrev = $derived(currentPage > 1);
 	const canNext = $derived(pageSize === rowLimit);
@@ -127,12 +127,6 @@
 		currentPage = 1;
 	});
 
-	// Network: $derived can't persist preview run state.
-	$effect(() => {
-		if (!isActiveStep || hasRun || !analysisPipeline || analysisStore.previewPaused) return;
-		analysisStore.setPreviewRun(runKey, true);
-	});
-
 	// Schema sync: $derived can't write to an external store reactively.
 	$effect(() => {
 		const response = query.data;
@@ -142,7 +136,6 @@
 
 	function runPreview() {
 		if (!isActiveStep || analysisStore.previewPaused) return;
-		if (!hasRun) analysisStore.setPreviewRun(runKey, true);
 		query.refetch();
 	}
 
@@ -160,6 +153,10 @@
 <div
 	class={css({ contain: 'content', width: 'full', height: 'panel', overflow: 'hidden' })}
 	data-testid="inline-data-table"
+	data-preview-ready={data && !isLoading && !error && data.columns.length > 0 ? 'true' : undefined}
+	data-preview-state={previewState}
+	data-preview-columns={data?.columns.length ?? 0}
+	data-preview-error={errorMessage || undefined}
 >
 	<DataTable
 		columns={data?.columns ?? []}

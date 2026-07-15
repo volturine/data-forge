@@ -1,5 +1,13 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+export function readyTimeoutMs(): number {
+	return 15_000;
+}
+
+function coldStartTimeoutMs(timeout: number): number {
+	return Math.max(timeout, 15_000);
+}
+
 async function waitForAnyVisible(locator: Locator, timeout: number): Promise<void> {
 	await expect
 		.poll(
@@ -22,6 +30,23 @@ async function waitForAnyVisible(locator: Locator, timeout: number): Promise<voi
 		.toBe(true);
 }
 
+function mainNavigation(page: Page): Locator {
+	return page.locator('[aria-label="Main navigation"]').first();
+}
+
+async function shellIsInteractive(page: Page): Promise<boolean> {
+	const navigationVisible = await mainNavigation(page)
+		.isVisible()
+		.catch(() => false);
+	if (!navigationVisible) return false;
+	return page
+		.locator('[data-shell-interactive="true"]')
+		.isVisible()
+		.catch(() => false);
+}
+
+type MonitoringTabKey = 'builds' | 'schedules' | 'health';
+
 /**
  * Wait for the app shell to finish hydrating by confirming the main
  * navigation sidebar is visible. The sidebar only renders once the layout
@@ -31,8 +56,8 @@ async function waitForAnyVisible(locator: Locator, timeout: number): Promise<voi
  * Call before any interaction with shell-level UI (profile, theme toggle,
  * nav links) that lives outside page-specific content.
  */
-export async function waitForAppShell(page: Page, timeout = 15_000): Promise<void> {
-	await expect(page.getByLabel('Main navigation')).toBeVisible({ timeout });
+export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await expect(mainNavigation(page)).toBeVisible({ timeout });
 	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
 }
 
@@ -45,17 +70,57 @@ export async function waitForAppShell(page: Page, timeout = 15_000): Promise<voi
  * assertions. This guarantees the layout `ready` flag resolved, auth
  * completed, and the Svelte page component has started rendering.
  */
-export async function waitForLayoutReady(page: Page, timeout = 30_000): Promise<void> {
-	await expect(page.getByLabel('Main navigation')).toBeVisible({ timeout });
+export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await expect(mainNavigation(page)).toBeVisible({ timeout });
 	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
 	await waitForAnyVisible(page.locator('main'), timeout);
+}
+
+async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		try {
+			await page.goto(path, { waitUntil: 'domcontentloaded' });
+			await waitForLayoutReady(page, timeout);
+			return;
+		} catch (error) {
+			lastError = error;
+			if (attempt === 1) break;
+			await page.waitForTimeout(250);
+		}
+	}
+	throw lastError;
+}
+
+/**
+ * Navigate to an authenticated route reliably on a fresh Playwright page.
+ *
+ * Some cold-page deep links can race the app-shell hydration and land on a
+ * blank document or the default route before the shell is ready. Warming the
+ * shell on `/` first makes subsequent route transitions deterministic while
+ * still preserving direct-route coverage for the actual page under test.
+ */
+export async function gotoAuthedRoute(
+	page: Page,
+	path: string,
+	timeout = readyTimeoutMs()
+): Promise<void> {
+	const shellReady = await shellIsInteractive(page);
+	const routeTimeout = shellReady ? timeout : coldStartTimeoutMs(timeout);
+
+	if (!shellReady) {
+		await gotoAndWaitForLayout(page, '/', routeTimeout);
+		if (path === '/') return;
+	}
+
+	await gotoAndWaitForLayout(page, path, routeTimeout);
 }
 
 /**
  * Wait for the lineage page toolbar to finish rendering by confirming
  * the layout buttons are visible. Call after `page.goto('/lineage')`.
  */
-export async function waitForLineageToolbar(page: Page, timeout = 15_000): Promise<void> {
+export async function waitForLineageToolbar(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	await expect(page.locator('button[title="Horizontal tree layout"]')).toBeVisible({ timeout });
 }
 
@@ -64,11 +129,136 @@ export async function waitForLineageToolbar(page: Page, timeout = 15_000): Promi
  * Terminal states: at least one `[data-ds-row]`, the empty-state text,
  * the filtered-empty text, or an error callout.
  */
-export async function waitForDatasourceList(page: Page, timeout = 15_000): Promise<void> {
+export async function waitForDatasourceList(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await waitForLayoutReady(page, timeout);
 	const terminal = page.locator(
 		'[data-ds-row], :text("No data sources yet"), :text("No datasources match"), [aria-live="polite"]'
 	);
 	await waitForAnyVisible(terminal, timeout);
+}
+
+export async function gotoDatasourcesPage(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await gotoAuthedRoute(page, '/datasources', timeout);
+	await waitForDatasourceList(page, timeout);
+}
+
+/**
+ * Wait for datasource preview to finish loading.
+ *
+ * Terminal outcomes:
+ *  - ready state: `[data-preview-ready="true"]` becomes visible
+ *  - failed state: a visible preview error appears
+ *
+ * Throws immediately on failed state so tests don't keep waiting on a preview
+ * that will never become ready.
+ */
+export async function waitForDatasourcePreviewReady(
+	page: Page,
+	timeout = readyTimeoutMs()
+): Promise<void> {
+	await waitForLayoutReady(page, timeout);
+	await expect(page.locator('[data-ds-config]')).toBeVisible({ timeout });
+
+	const ready = page.locator('[data-preview-ready="true"]');
+	const failure = page.locator(':text("Failed to fetch"), :text("Preview failed")');
+	const started = Date.now();
+
+	for (let attempt = 0; attempt < 6; attempt += 1) {
+		const windowStarted = Date.now();
+		while (Date.now() - windowStarted < timeout) {
+			if (await ready.isVisible().catch(() => false)) return;
+			if (
+				await failure
+					.first()
+					.isVisible()
+					.catch(() => false)
+			) {
+				const message =
+					(await failure
+						.first()
+						.textContent()
+						.catch(() => null)) ?? 'Preview failed';
+				throw new Error(`Datasource preview failed before ready: ${message}`);
+			}
+			await page.waitForTimeout(100);
+		}
+	}
+
+	throw new Error(
+		`Timed out waiting for datasource preview readiness after ${Date.now() - started}ms`
+	);
+}
+
+/**
+ * Wait for an analysis inline preview to finish loading.
+ *
+ * Terminal outcomes:
+ *  - ready state: the inline table advertises `[data-preview-ready="true"]`
+ *  - failed state: a visible preview error appears
+ *
+ * The inline table can mount before its TanStack query has resolved, so tests
+ * must wait on the preview readiness contract before asserting cell content.
+ */
+export async function waitForInlinePreviewReady(
+	page: Page,
+	timeout = readyTimeoutMs()
+): Promise<void> {
+	await waitForLayoutReady(page, timeout);
+	const table = page.locator('[data-testid="inline-data-table"]');
+	await expect(table).toBeVisible({ timeout });
+
+	const failure = page.locator(':text("Preview failed")');
+	const started = Date.now();
+	let lastTableState = 'no table state captured';
+
+	for (let attempt = 0; attempt < 6; attempt += 1) {
+		const windowStarted = Date.now();
+		while (Date.now() - windowStarted < timeout) {
+			const count = await table.count();
+			for (let index = 0; index < count; index += 1) {
+				const candidate = table.nth(index);
+				const visible = await candidate.isVisible().catch(() => false);
+				const ready = await candidate.getAttribute('data-preview-ready').catch(() => null);
+				const state = await candidate.getAttribute('data-preview-state').catch(() => null);
+				const columns = await candidate.getAttribute('data-preview-columns').catch(() => null);
+				const error = await candidate.getAttribute('data-preview-error').catch(() => null);
+				if (visible) {
+					lastTableState = `state=${state ?? 'unknown'} columns=${columns ?? 'unknown'} ready=${ready ?? 'false'} error=${error ?? 'none'}`;
+				}
+				if (visible && ready === 'true') return;
+				if (visible && state === 'error') {
+					throw new Error(`Inline preview failed before ready: ${error ?? 'unknown error'}`);
+				}
+			}
+			if (
+				await failure
+					.first()
+					.isVisible()
+					.catch(() => false)
+			) {
+				const message =
+					(await failure
+						.first()
+						.textContent()
+						.catch(() => null)) ?? 'Preview failed';
+				throw new Error(`Inline preview failed before ready: ${message}`);
+			}
+			await page.waitForTimeout(100);
+		}
+	}
+
+	throw new Error(
+		`Timed out waiting for inline preview readiness after ${Date.now() - started}ms (${lastTableState})`
+	);
+}
+
+export async function waitForAnalysisLoadError(
+	page: Page,
+	timeout = readyTimeoutMs()
+): Promise<void> {
+	await waitForLayoutReady(page, timeout);
+	await expect(page.locator('[data-testid="analysis-load-error"]')).toBeVisible({ timeout });
+	await expect(page.getByText('Error loading analysis')).toBeVisible({ timeout });
 }
 
 /**
@@ -82,9 +272,8 @@ export async function waitForDatasourceList(page: Page, timeout = 15_000): Promi
  *  3. IndexedDB search state settled — clear stale filter if present so
  *     the full card list is visible for subsequent assertions.
  */
-export async function gotoAnalysesGallery(page: Page, timeout = 15_000): Promise<void> {
-	await page.goto('/');
-	await waitForLayoutReady(page, timeout);
+export async function gotoAnalysesGallery(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await gotoAuthedRoute(page, '/', timeout);
 
 	// The analyses page hydrates the search box from IndexedDB asynchronously.
 	// A prior test may leave a non-empty filter (e.g. "ZZZNOMATCH") that hides
@@ -137,7 +326,7 @@ export async function gotoAnalysesGallery(page: Page, timeout = 15_000): Promise
 export async function selectDatasourceAndWaitForConfig(
 	page: Page,
 	name: string,
-	timeout = 15_000
+	timeout = readyTimeoutMs()
 ): Promise<void> {
 	await waitForDatasourceList(page, timeout);
 
@@ -159,10 +348,35 @@ export async function selectDatasourceAndWaitForConfig(
  *     step 1 rendered its form. This is a stronger gate than the heading
  *     alone because the input is the interactable element tests need next.
  */
-export async function gotoNewAnalysis(page: Page, timeout = 15_000): Promise<void> {
-	await page.goto('/analysis/new');
-	await waitForLayoutReady(page, timeout);
+export async function gotoNewAnalysis(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await gotoAuthedRoute(page, '/analysis/new', timeout);
 	await expect(page.locator('#name')).toBeVisible({ timeout });
+}
+
+export async function gotoMonitoringTab(
+	page: Page,
+	tab: MonitoringTabKey,
+	timeout = readyTimeoutMs()
+): Promise<Locator> {
+	await gotoAuthedRoute(page, `/monitoring?tab=${tab}`, timeout);
+
+	const labels = {
+		builds: 'Builds',
+		schedules: 'Schedules',
+		health: 'Health Checks'
+	} satisfies Record<MonitoringTabKey, string>;
+	const panelIds = {
+		builds: '#panel-builds',
+		schedules: '#panel-schedules',
+		health: '#panel-health'
+	} satisfies Record<MonitoringTabKey, string>;
+
+	const activeTab = page.getByRole('tab', { name: labels[tab] });
+	await expect(activeTab).toHaveAttribute('aria-selected', 'true', { timeout });
+
+	const panel = page.locator(panelIds[tab]);
+	await expect(panel).toBeVisible({ timeout });
+	return panel;
 }
 
 /**
@@ -172,11 +386,22 @@ export async function gotoNewAnalysis(page: Page, timeout = 15_000): Promise<voi
  * waits for the query's terminal state: at least one `[data-udf-card]`,
  * the empty-state text, or an error callout.
  */
-export async function waitForUdfList(page: Page, timeout = 15_000): Promise<void> {
+export async function waitForUdfList(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await waitForLayoutReady(page, timeout);
 	await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible({ timeout });
 
 	const terminal = page.locator('[data-udf-card], :text("No UDFs yet"), [aria-live="polite"]');
 	await waitForAnyVisible(terminal, timeout);
+}
+
+export async function gotoUdfLibrary(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await gotoAuthedRoute(page, '/udfs', timeout);
+	await waitForUdfList(page, timeout);
+}
+
+export async function gotoNewUdfPage(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await gotoAuthedRoute(page, '/udfs/new', timeout);
+	await expect(page.locator('#udf-name')).toBeVisible({ timeout });
 }
 
 /**
@@ -187,9 +412,12 @@ export async function waitForUdfList(page: Page, timeout = 15_000): Promise<void
  *  2. The `#udf-name` input is visible — proving the UDF query resolved
  *     and the editor form rendered.
  */
-export async function gotoUdfEditor(page: Page, udfId: string, timeout = 15_000): Promise<void> {
-	await page.goto(`/udfs/${udfId}`);
-	await waitForLayoutReady(page, timeout);
+export async function gotoUdfEditor(
+	page: Page,
+	udfId: string,
+	timeout = readyTimeoutMs()
+): Promise<void> {
+	await gotoAuthedRoute(page, `/udfs/${udfId}`, timeout);
 	await expect(page.locator('#udf-name')).toBeVisible({ timeout });
 }
 
@@ -201,7 +429,7 @@ export async function gotoUdfEditor(page: Page, udfId: string, timeout = 15_000)
  * Readiness signal: a `[data-schema-column]` element or the "No schema"
  * empty state becomes visible inside the config panel.
  */
-export async function openSchemaTabAndWait(page: Page, timeout = 15_000): Promise<void> {
+export async function openSchemaTabAndWait(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	const config = page.locator('[data-ds-config]');
 	await config.getByRole('tab', { name: 'Schema' }).click();
 
@@ -229,7 +457,10 @@ export async function openSchemaTabAndWait(page: Page, timeout = 15_000): Promis
  * @deprecated Settings now live under the profile page tabs. Use
  * {@link waitForProfileTab} instead.
  */
-export async function waitForSettingsForm(dialog: Locator, timeout = 10_000): Promise<void> {
+export async function waitForSettingsForm(
+	dialog: Locator,
+	timeout = readyTimeoutMs()
+): Promise<void> {
 	await expect(dialog.getByRole('button', { name: 'Save' })).toBeVisible({ timeout });
 }
 
@@ -239,7 +470,7 @@ export async function waitForSettingsForm(dialog: Locator, timeout = 10_000): Pr
  * Readiness signal: the tab list renders and at least one tab is selected.
  * Call after `page.goto('/profile')` or navigating to a specific hash tab.
  */
-export async function waitForProfileTabs(page: Page, timeout = 15_000): Promise<void> {
+export async function waitForProfileTabs(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	await expect(page.getByRole('tablist', { name: 'Profile sections' })).toBeVisible({ timeout });
 	await expect(page.getByRole('tab', { selected: true })).toBeVisible({ timeout });
 }
@@ -254,7 +485,7 @@ export async function waitForProfileTabs(page: Page, timeout = 15_000): Promise<
 export async function waitForProfileTab(
 	page: Page,
 	tabName: string,
-	timeout = 15_000
+	timeout = readyTimeoutMs()
 ): Promise<void> {
 	const tab = page.getByRole('tab', { name: tabName });
 	await expect(tab).toBeVisible({ timeout });

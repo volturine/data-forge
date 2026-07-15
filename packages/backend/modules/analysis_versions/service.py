@@ -2,30 +2,27 @@ import uuid
 from datetime import UTC, datetime
 from typing import cast
 
-from contracts.analysis.models import Analysis, AnalysisDataSource
-from contracts.analysis_versions.models import AnalysisVersion
-from contracts.datasource.models import DataSource
-from core.analysis_cycles import assert_no_analysis_cycle
-from core.exceptions import (
-    AnalysisNotFoundError,
-    AnalysisValidationError,
-    AnalysisVersionNotFoundError,
-    DataSourceNotFoundError,
-)
 from sqlalchemy import delete, desc, func, insert, select
-from sqlmodel import Session, col
+from sqlmodel import Session
 
+from backend_core.analysis_cycles import assert_no_analysis_cycle
+from backend_core.exceptions import (
+    AnalysisValidationError,
+    analysis_not_found,
+    analysis_version_not_found,
+    datasource_not_found,
+)
+from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
+from backend_core.persistence.analysis_versions.models import AnalysisVersion
+from backend_core.persistence.datasource.models import DataSource
+from backend_core.sqlmodel_typing import col
 from modules.analysis import service as analysis_service
 
 
 def create_version(session: Session, analysis: Analysis, *, commit: bool = True) -> AnalysisVersion:
     version_id = str(uuid.uuid4())
     now = datetime.now(UTC).replace(tzinfo=None)
-    next_version = (
-        select(func.coalesce(func.max(AnalysisVersion.version), 0) + 1)
-        .where(col(AnalysisVersion.analysis_id) == analysis.id)  # type: ignore[arg-type]
-        .scalar_subquery()
-    )
+    next_version = select(func.coalesce(func.max(AnalysisVersion.version), 0) + 1).where(col(AnalysisVersion.analysis_id) == analysis.id).scalar_subquery()
     stmt = insert(AnalysisVersion).values(
         id=version_id,
         analysis_id=analysis.id,
@@ -42,19 +39,19 @@ def create_version(session: Session, analysis: Analysis, *, commit: bool = True)
         session.flush()
     version = session.get(AnalysisVersion, version_id)
     if not version:
-        raise AnalysisValidationError("Failed to create analysis version")
+        raise AnalysisValidationError('Failed to create analysis version')
     return version
 
 
 def list_versions(session: Session, analysis_id: str) -> list[AnalysisVersion]:
-    stmt = select(AnalysisVersion).where(col(AnalysisVersion.analysis_id) == analysis_id)  # type: ignore[arg-type]
-    stmt = stmt.order_by(desc(col(AnalysisVersion.version)))  # type: ignore[arg-type]
+    stmt = select(AnalysisVersion).where(col(AnalysisVersion.analysis_id) == analysis_id)
+    stmt = stmt.order_by(desc(col(AnalysisVersion.version)))
     result = session.execute(stmt)
     return cast(list[AnalysisVersion], list(result.scalars().all()))
 
 
 def get_version(session: Session, analysis_id: str, version: int) -> AnalysisVersion | None:
-    stmt = select(AnalysisVersion).where(  # type: ignore[arg-type]
+    stmt = select(AnalysisVersion).where(
         col(AnalysisVersion.analysis_id) == analysis_id,
         col(AnalysisVersion.version) == version,
     )
@@ -65,7 +62,7 @@ def get_version(session: Session, analysis_id: str, version: int) -> AnalysisVer
 def delete_version(session: Session, analysis_id: str, version: int) -> None:
     target = get_version(session, analysis_id, version)
     if not target:
-        raise AnalysisVersionNotFoundError(analysis_id, version)
+        raise analysis_version_not_found(analysis_id, version)
     session.delete(target)
     session.commit()
 
@@ -73,7 +70,7 @@ def delete_version(session: Session, analysis_id: str, version: int) -> None:
 def rename_version(session: Session, analysis_id: str, version: int, name: str) -> AnalysisVersion:
     target = get_version(session, analysis_id, version)
     if not target:
-        raise AnalysisVersionNotFoundError(analysis_id, version)
+        raise analysis_version_not_found(analysis_id, version)
     target.name = name
     session.commit()
     session.refresh(target)
@@ -83,11 +80,11 @@ def rename_version(session: Session, analysis_id: str, version: int, name: str) 
 def restore_version(session: Session, analysis_id: str, version: int) -> Analysis:
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     target = get_version(session, analysis_id, version)
     if not target:
-        raise AnalysisVersionNotFoundError(analysis_id, version)
+        raise analysis_version_not_found(analysis_id, version)
 
     create_version(session, analysis, commit=False)
 
@@ -98,26 +95,26 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
 
     pipeline_definition = analysis.pipeline_definition
     analysis_service.validate_stored_pipeline_definition(session, pipeline_definition, analysis_id)
-    tabs = pipeline_definition.get("tabs", [])
+    tabs = pipeline_definition.get('tabs', [])
 
-    stmt = delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id)  # type: ignore[arg-type]
+    stmt = delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id)
     session.execute(stmt)
     datasource_ids: list[str] = []
     for tab in tabs:
         if not isinstance(tab, dict):
             continue
-        datasource = tab.get("datasource")
+        datasource = tab.get('datasource')
         if not isinstance(datasource, dict):
             continue
-        if datasource.get("analysis_tab_id") is not None:
+        if datasource.get('analysis_tab_id') is not None:
             continue
-        datasource_id = datasource.get("id")
+        datasource_id = datasource.get('id')
         if datasource_id:
             datasource_ids.append(str(datasource_id))
     for datasource_id in set(datasource_ids):
         ds: DataSource | None = session.get(DataSource, datasource_id)
         if not ds:
-            raise DataSourceNotFoundError(datasource_id)
+            raise datasource_not_found(datasource_id)
         if ds.is_analysis_source:
             source_id = ds.analysis_source_id()
             assert_no_analysis_cycle(session, analysis_id, source_id)

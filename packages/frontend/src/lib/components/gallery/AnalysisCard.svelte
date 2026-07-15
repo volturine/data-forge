@@ -2,8 +2,9 @@
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { ChartBar, Copy, Star, Trash2 } from 'lucide-svelte';
+	import { ChartBar, Copy, Star, Trash2 } from '@lucide/svelte';
 	import { formatDateDisplay, getYearDisplay } from '$lib/utils/datetime';
+	import { nowEpochMs } from '$lib/utils/temporal';
 	import { css } from '$lib/styles/panda';
 
 	interface Props {
@@ -48,9 +49,8 @@
 	}
 
 	function formatDate(date: string): string {
-		const now = new Date();
 		const year = getYearDisplay(date);
-		const currentYear = getYearDisplay(now);
+		const currentYear = getYearDisplay(nowEpochMs());
 		const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
 		if (year !== null && currentYear !== null && year !== currentYear) {
 			opts.year = 'numeric';

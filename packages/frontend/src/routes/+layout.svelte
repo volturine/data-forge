@@ -6,8 +6,7 @@
 	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import favicon from '$lib/assets/favicon.svg';
 	import { css, spinner } from '$lib/styles/panda';
-	import { PanelLeftClose } from 'lucide-svelte';
-	// SettingsPopup removed — settings now live under /profile tabs
+	import { PanelLeftClose } from '@lucide/svelte';
 	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
 	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
 	import Sidebar from '$lib/components/shell/Sidebar.svelte';
@@ -226,8 +225,17 @@
 	const namespaceDraft = $derived(namespaceState.value);
 
 	async function handleNamespaceSelect(value: string) {
+		namespaceOpen = false;
 		await switchNamespace(value, {
 			async beforeCommit() {
+				if (currentPath === '/datasources' && page.url.searchParams.has('id')) {
+					await goto(resolve('/datasources'), {
+						replaceState: true,
+						invalidateAll: false,
+						keepFocus: true,
+						noScroll: true
+					});
+				}
 				await queryClient.cancelQueries();
 				computeActivityStore.reset();
 				enginesStore.reset();
@@ -238,14 +246,17 @@
 				schemaStore.reset();
 			},
 			async afterCommit() {
-				await goto(resolve(currentPath as '/'), {
+				const nextUrl = new URL(page.url);
+				if (nextUrl.pathname === '/datasources') {
+					nextUrl.searchParams.delete('id');
+				}
+				await goto(resolve(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}` as '/'), {
 					invalidateAll: true,
 					replaceState: true
 				});
-				await queryClient.resetQueries();
+				queryClient.clear();
 			}
 		});
-		namespaceOpen = false;
 	}
 
 	function openNamespace() {
@@ -312,7 +323,7 @@
 			>
 				<Sidebar
 					collapsed={sidebarCollapsed}
-					interactive={shellInteractive}
+					interactive={shellInteractive && !namespaceState.switching}
 					onToggle={toggleSidebar}
 					{theme}
 					onToggleTheme={toggleTheme}

@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { X, Power, LoaderCircle } from 'lucide-svelte';
+	import { X, Power, LoaderCircle } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { enginesStore } from '$lib/stores/engines.svelte';
-	import type { EngineStatus } from '$lib/types/compute';
+	import type { EngineStatus, EngineStatusResponse } from '$lib/types/compute';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import { css } from '$lib/styles/panda';
+	import { css, iconButton } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
@@ -29,12 +29,17 @@
 		return 'Terminated';
 	}
 
-	async function handleShutdown(analysisId: string) {
-		shuttingDown.add(analysisId);
+	function engineKey(engine: EngineStatusResponse): string {
+		return `${engine.scope ?? 'analysis_interactive'}:${engine.resource_id}`;
+	}
+
+	async function handleShutdown(engine: EngineStatusResponse) {
+		const key = engineKey(engine);
+		shuttingDown.add(key);
 		try {
-			await enginesStore.shutdownEngine(analysisId);
+			await enginesStore.shutdownEngine(engine);
 		} finally {
-			shuttingDown.delete(analysisId);
+			shuttingDown.delete(key);
 		}
 	}
 
@@ -86,17 +91,7 @@
 			{/snippet}
 			{#snippet actions()}
 				<button
-					class={css({
-						display: 'flex',
-						cursor: 'pointer',
-						alignItems: 'center',
-						justifyContent: 'center',
-						border: 'none',
-						backgroundColor: 'transparent',
-						padding: '1',
-						color: 'fg.muted',
-						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-					})}
+					class={iconButton({ variant: 'ghost' })}
 					onclick={handleClose}
 					aria-label="Close engines"
 					type="button"
@@ -136,9 +131,9 @@
 			</div>
 		{:else}
 			<div class={css({ display: 'flex', flexDirection: 'column' })}>
-				{#each enginesStore.engines as engine (engine.analysis_id)}
+				{#each enginesStore.engines as engine (engineKey(engine))}
 					<div
-						data-engine-row={engine.analysis_id}
+						data-engine-row={engineKey(engine)}
 						class={css({
 							display: 'flex',
 							alignItems: 'center',
@@ -167,16 +162,16 @@
 									textOverflow: 'ellipsis',
 									whiteSpace: 'nowrap'
 								})}
-								title={engine.analysis_id}
+								title={engine.resource_id}
 							>
-								{engine.analysis_id}
+								{engine.resource_id}
 							</span>
 							<span class={css({ color: 'fg.tertiary', flexShrink: '0' })}>
 								{statusLabel(engine.status)}
 							</span>
 						</div>
 						<button
-							data-engine-shutdown={engine.analysis_id}
+							data-engine-shutdown={engineKey(engine)}
 							class={css({
 								display: 'flex',
 								cursor: 'pointer',
@@ -190,12 +185,12 @@
 								_hover: { color: 'error' },
 								_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 							})}
-							onclick={() => handleShutdown(engine.analysis_id)}
-							disabled={shuttingDown.has(engine.analysis_id)}
+							onclick={() => handleShutdown(engine)}
+							disabled={shuttingDown.has(engineKey(engine))}
 							type="button"
 							title="Shutdown engine"
 						>
-							{#if shuttingDown.has(engine.analysis_id)}
+							{#if shuttingDown.has(engineKey(engine))}
 								<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 							{:else}
 								<Power size={14} />

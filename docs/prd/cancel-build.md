@@ -1,12 +1,17 @@
 # PRD: Cancel Build in Progress
 
+> **Status (2026-05-28): Implemented.**
+> **Current truth:** Build cancellation is shipped, but the current API/runtime shape differs from this original design doc. Treat the detailed endpoint/process wording below as historical.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
-Allow users to cancel a running build, immediately stopping the compute engine process and freeing resources. The cancelled build is recorded with a `CANCELLED` status for auditability.
+Allow users to cancel a running build and record the cancellation durably for auditability. In the current runtime, cancellation is coordinated through durable build/build-run state rather than only by killing an in-process engine.
 
 ## Problem Statement
 
-Once a build starts, there is no way to stop it. Users must wait for it to complete or fail, even if:
+Historically, builds could not be stopped once started. That is no longer true in the current product, but the original problem statement is kept here as the motivation for the shipped feature:
 
 - They realize the pipeline configuration is wrong.
 - The build is taking much longer than expected.
@@ -21,20 +26,20 @@ The compute engine runs as a spawned Python process managed by `ProcessManager`.
 |-----------|--------|
 | Start a build | ✅ `POST /compute/build` |
 | Monitor build progress | ✅ `progress` field on EngineRun, SSE updates |
-| Stop a build | ❌ Not possible |
-| Kill engine process | ⚠️ `terminate_engine()` exists but not exposed for builds |
-| Build status values | `pending`, `running`, `completed`, `error` |
-| `CANCELLED` status | ❌ Not defined |
+| Stop a build | ✅ Supported via active-build cancellation endpoints and UI |
+| Runtime cancellation | ✅ Durable cancellation state propagates through worker/runtime lifecycle |
+| Build status values | `queued`, `running`, `completed`, `failed`, `cancelled` |
+| `cancelled` status | ✅ Shipped |
 
-### Target State
+### Shipped State / Remaining Design Notes
 
 | Capability | Status |
 |-----------|--------|
-| Start a build | ✅ Unchanged |
-| Monitor build progress | ✅ Unchanged |
-| Cancel a running build | ✅ New endpoint + UI button |
-| Build status values | `pending`, `running`, `completed`, `error`, **`cancelled`** |
-| Partial results cleanup | ✅ Incomplete Iceberg writes rolled back |
+| Start a build | ✅ Shipped |
+| Monitor build progress | ✅ Shipped |
+| Cancel a running build | ✅ Shipped |
+| Build status values | `queued`, `running`, `completed`, `failed`, `cancelled` |
+| Partial results cleanup | ⚠️ This doc describes the intended cleanup model; current runtime semantics should be verified against the implementation rather than assumed from this historical design section |
 
 ## Goals
 
@@ -93,7 +98,7 @@ The compute engine runs as a spawned Python process managed by `ProcessManager`.
 ### Backend: Cancel Endpoint
 
 ```
-POST /api/v1/compute/cancel/{engine_run_id}
+POST /api/v1/compute/builds/active/{build_id}/cancel
 Response: { status: "cancelled", cancelled_at: "2026-04-08T..." }
 ```
 
@@ -193,7 +198,7 @@ class EngineRunStatus(str, Enum):
 ### API Contract
 
 ```
-POST /api/v1/compute/cancel/{engine_run_id}
+POST /api/v1/compute/builds/active/{build_id}/cancel
 Authorization: Bearer <token>
 
 Response 200:

@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
-	import { LayoutGrid, Plus } from 'lucide-svelte';
+	import { LayoutGrid, Plus } from '@lucide/svelte';
 	import { css } from '$lib/styles/panda';
 
-	function createNew() {
-		goto(resolve('/analysis/new'), { invalidateAll: true });
+	interface Props {
+		onCreate?: () => void;
 	}
+
+	let { onCreate }: Props = $props();
 </script>
 
 <div
@@ -51,6 +51,7 @@
 	</p>
 
 	<button
+		type="button"
 		class={css({
 			backgroundColor: 'accent.primary',
 			color: 'fg.inverse',
@@ -61,7 +62,7 @@
 			alignItems: 'center',
 			gap: '2'
 		})}
-		onclick={createNew}
+		onclick={() => onCreate?.()}
 	>
 		<Plus size={16} />
 		Create Analysis

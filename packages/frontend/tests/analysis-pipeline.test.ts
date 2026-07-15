@@ -1,9 +1,11 @@
 import { test, expect } from './fixtures.js';
-import type { Page, APIRequestContext } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import {
 	createDatasource,
+	createLargeDatasource,
 	createDatasourceWithDates,
-	createImportedAnalysis
+	createImportedAnalysis,
+	type E2ERequest
 } from './utils/api.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import {
@@ -11,6 +13,7 @@ import {
 	deleteAnalysisViaUI,
 	deleteDatasourceViaUI
 } from './utils/ui-cleanup.js';
+import { waitForInlinePreviewReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -40,7 +43,7 @@ interface PipelineAnalysisResult {
  * A view step is always appended so the inline preview auto-triggers.
  */
 async function createPipelineAnalysis(
-	request: APIRequestContext,
+	request: E2ERequest,
 	name: string,
 	dsId: string,
 	steps: Array<{ type: string; config: Record<string, unknown> }>
@@ -53,10 +56,14 @@ async function createPipelineAnalysis(
 	let prevId: string | null = null;
 	for (const s of steps) {
 		const stepId = crypto.randomUUID();
+		const config = structuredClone(s.config);
+		if (config.right_source === dsId) {
+			config.right_source = datasourceRef;
+		}
 		pipelineSteps.push({
 			id: stepId,
 			type: s.type,
-			config: s.config,
+			config,
 			depends_on: prevId ? [prevId] : [],
 			is_applied: true
 		});
@@ -124,8 +131,7 @@ async function leaveAnalysisPage(page: Page): Promise<void> {
  */
 async function navigateAndWaitForTable(page: Page, analysisId: string): Promise<void> {
 	await gotoAnalysisEditor(page, analysisId);
-	const table = page.locator('[data-testid="inline-data-table"]');
-	await expect(table).toBeVisible({ timeout: 30_000 });
+	await waitForInlinePreviewReady(page);
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -143,8 +149,6 @@ async function navigateAndWaitForTable(page: Page, analysisId: string): Promise<
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Pipeline data verification', () => {
-	test.setTimeout(60_000);
-
 	let dsId: string;
 	let dsName: string;
 
@@ -286,6 +290,27 @@ test.describe('Pipeline data verification', () => {
 		} finally {
 			await leaveAnalysisPage(page);
 			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
+		}
+	});
+
+	test('sample with fraction 0.6 returns a real subset of rows', async ({ page, request }) => {
+		const dsName = `e2e-pipe-sample-large-${uid()}`;
+		const largeDsId = await createLargeDatasource(request, dsName, 100);
+		const aName = `E2E Pipe Sample Subset ${uid()}`;
+		const info = await createPipelineAnalysis(request, aName, largeDsId, [
+			{ type: 'sample', config: { fraction: 0.6, seed: 7 } }
+		]);
+		try {
+			await navigateAndWaitForTable(page, info.analysisId);
+			const rows = page.locator('[data-testid="inline-data-table"] tbody tr');
+
+			await expect(rows).toHaveCount(55);
+
+			await screenshot(page, 'analysis/pipeline', 'sample-subset');
+		} finally {
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
+			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
@@ -490,6 +515,34 @@ test.describe('Pipeline data verification', () => {
 		}
 	});
 
+	test('string_transform slice treats end as an ending index', async ({ page, request }) => {
+		const aName = `E2E Pipe StrSlice ${uid()}`;
+		const info = await createPipelineAnalysis(request, aName, dsId, [
+			{
+				type: 'string_transform',
+				config: { column: 'name', method: 'slice', start: 1, end: 3, new_column: 'name_slice' }
+			}
+		]);
+		try {
+			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="name_slice"]')).toBeVisible();
+
+			const rows = table.locator('tbody tr');
+			await expect(rows).toHaveCount(3);
+			await expect(rows.nth(0)).toContainText('li');
+			await expect(rows.nth(1)).toContainText('ob');
+			await expect(rows.nth(2)).toContainText('ha');
+			await expect(table.getByText('lic', { exact: true })).toHaveCount(0);
+
+			await screenshot(page, 'analysis/pipeline', 'string-transform-slice');
+		} finally {
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
+		}
+	});
+
 	test('groupby aggregates data by group', async ({ page, request }) => {
 		const aName = `E2E Pipe GroupBy ${uid()}`;
 		const info = await createPipelineAnalysis(request, aName, dsId, [
@@ -682,8 +735,6 @@ test.describe('Pipeline data verification', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Pipeline data – pass-through operations', () => {
-	test.setTimeout(60_000);
-
 	let dsId: string;
 	let dsName: string;
 
@@ -754,8 +805,8 @@ test.describe('Pipeline data – pass-through operations', () => {
 		try {
 			await gotoAnalysisEditor(page, aId);
 			const chart = page.locator('[data-testid="chart-preview"]');
-			await expect(chart).toBeVisible({ timeout: 30_000 });
-			await expect(chart.locator('svg')).toBeVisible({ timeout: 10_000 });
+			await expect(chart).toBeVisible({ timeout: 5_000 });
+			await expect(chart.locator('svg')).toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/pipeline', 'chart-plot-bar');
 		} finally {
@@ -869,8 +920,6 @@ test.describe('Pipeline data – pass-through operations', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Pipeline data – timeseries', () => {
-	test.setTimeout(60_000);
-
 	let dateDsId: string;
 	let dateDsName: string;
 
@@ -923,6 +972,49 @@ test.describe('Pipeline data – timeseries', () => {
 			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
+
+	test('fill_null mean without selected columns targets numeric columns in mixed schemas', async ({
+		page,
+		request
+	}) => {
+		const aName = `E2E Pipe FillNull Mean Mixed ${uid()}`;
+		const info = await createPipelineAnalysis(request, aName, dateDsId, [
+			{
+				type: 'with_columns',
+				config: {
+					expressions: [
+						{
+							name: 'amount_nullable',
+							type: 'udf',
+							args: ['amount'],
+							code: 'def udf(value):\n    return None if value == 250 else value'
+						}
+					]
+				}
+			},
+			{
+				type: 'fill_null',
+				config: {
+					strategy: 'mean',
+					columns: []
+				}
+			}
+		]);
+		try {
+			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="amount_nullable"]')).toBeVisible();
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+			await expect(table.locator('tbody tr', { hasText: 'Bob' })).toContainText('87.5');
+			await expect(page.getByText('Preview failed')).toHaveCount(0);
+
+			await screenshot(page, 'analysis/pipeline', 'fill-null-mean-mixed');
+		} finally {
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
+		}
+	});
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -930,8 +1022,6 @@ test.describe('Pipeline data – timeseries', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Pipeline data – union by name', () => {
-	test.setTimeout(60_000);
-
 	let dsId1: string;
 	let dsId2: string;
 	let dsName1: string;

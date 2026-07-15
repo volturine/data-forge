@@ -17,7 +17,7 @@
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, spinner } from '$lib/styles/panda';
+	import { button, css, input, spinner } from '$lib/styles/panda';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import type {
@@ -27,7 +27,11 @@
 		AnalysisTemplateDetail,
 		PipelineStep
 	} from '$lib/types/analysis';
-	import type { DataSource } from '$lib/types/datasource';
+	import {
+		datasourceIsAnalysisOutput,
+		datasourceNeedsExternalIngest,
+		type DataSource
+	} from '$lib/types/datasource';
 	import {
 		validatePipelineTabs,
 		formatPipelineErrors,
@@ -766,12 +770,7 @@
 							<input
 								id="name"
 								bind:value={name}
-								class={css({
-									borderWidth: '1',
-									backgroundColor: 'bg.primary',
-									paddingX: '3',
-									paddingY: '2'
-								})}
+								class={input({ variant: 'dialog' })}
 								placeholder={mode === 'clone'
 									? 'A copy name will be suggested after you pick a source'
 									: 'Sales ETL'}
@@ -783,12 +782,7 @@
 								id="description"
 								rows="4"
 								bind:value={description}
-								class={css({
-									borderWidth: '1',
-									backgroundColor: 'bg.primary',
-									paddingX: '3',
-									paddingY: '2'
-								})}
+								class={input({ variant: 'dialog' })}
 								placeholder="Optional context for collaborators and AI generation."
 							></textarea>
 						</label>
@@ -853,11 +847,7 @@
 											<label class={css({ display: 'grid', gap: '1' })}>
 												<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Branch</span>
 												<select
-													class={css({
-														borderWidth: '1',
-														backgroundColor: 'bg.primary',
-														padding: '2'
-													})}
+													class={input({ variant: 'dense' })}
 													value={currentConfig.branch}
 													onchange={(event) => {
 														datasourceConfigs[datasource.id] = {
@@ -892,6 +882,8 @@
 												datasourceConfig={currentConfig}
 												branch={currentConfig.branch}
 												label="Snapshot"
+												showBuildPreviews={datasourceIsAnalysisOutput(datasource) ||
+													datasourceNeedsExternalIngest(datasource)}
 												onConfigChange={(config) => {
 													datasourceConfigs[datasource.id] = {
 														...currentConfig,
@@ -1075,10 +1067,7 @@
 								>
 									<label class={css({ display: 'grid', gap: '1' })}>
 										<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Provider</span>
-										<select
-											class={css({ borderWidth: '1', backgroundColor: 'bg.primary', padding: '2' })}
-											bind:value={aiProvider}
-										>
+										<select class={input({ variant: 'dense' })} bind:value={aiProvider}>
 											{#each configuredProviders as provider (provider.provider)}
 												<option value={provider.provider}>{provider.provider}</option>
 											{/each}
@@ -1086,22 +1075,12 @@
 									</label>
 									<label class={css({ display: 'grid', gap: '1' })}>
 										<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Model</span>
-										<input
-											class={css({ borderWidth: '1', backgroundColor: 'bg.primary', padding: '2' })}
-											bind:value={aiModel}
-										/>
+										<input class={input({ variant: 'dense' })} bind:value={aiModel} />
 									</label>
 								</div>
 								<button
 									type="button"
-									class={css({
-										borderWidth: '1',
-										backgroundColor: 'accent.primary',
-										color: 'fg.inverse',
-										paddingX: '4',
-										paddingY: '2',
-										width: 'fit-content'
-									})}
+									class={button({ variant: 'primary' })}
 									onclick={handleGenerate}
 									disabled={generating ||
 										!aiPrompt.trim() ||
@@ -1141,23 +1120,12 @@
 									>
 										<label class={css({ display: 'grid', gap: '1' })}>
 											<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Output name</span>
-											<input
-												class={css({
-													borderWidth: '1',
-													backgroundColor: 'bg.primary',
-													padding: '2'
-												})}
-												bind:value={tab.output.filename}
-											/>
+											<input class={input({ variant: 'dense' })} bind:value={tab.output.filename} />
 										</label>
 										<label class={css({ display: 'grid', gap: '1' })}>
 											<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Namespace</span>
 											<input
-												class={css({
-													borderWidth: '1',
-													backgroundColor: 'bg.primary',
-													padding: '2'
-												})}
+												class={input({ variant: 'dense' })}
 												value={tab.output.iceberg?.namespace ?? ''}
 												oninput={(event) =>
 													updateOutput(
@@ -1170,11 +1138,7 @@
 										<label class={css({ display: 'grid', gap: '1' })}>
 											<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Table name</span>
 											<input
-												class={css({
-													borderWidth: '1',
-													backgroundColor: 'bg.primary',
-													padding: '2'
-												})}
+												class={input({ variant: 'dense' })}
 												value={tab.output.iceberg?.table_name ?? ''}
 												oninput={(event) =>
 													updateOutput(
@@ -1187,11 +1151,7 @@
 										<label class={css({ display: 'grid', gap: '1' })}>
 											<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Build mode</span>
 											<select
-												class={css({
-													borderWidth: '1',
-													backgroundColor: 'bg.primary',
-													padding: '2'
-												})}
+												class={input({ variant: 'dense' })}
 												value={tab.output.build_mode ?? 'full'}
 												onchange={(event) =>
 													updateOutput(
@@ -1398,7 +1358,7 @@
 											Remap {missingId}
 										</span>
 										<select
-											class={css({ borderWidth: '1', backgroundColor: 'bg.primary', padding: '2' })}
+											class={input({ variant: 'dense' })}
 											bind:value={datasourceRemap[missingId]}
 										>
 											<option value="">Select datasource</option>
@@ -1471,16 +1431,7 @@
 	>
 		<div class={css({ display: 'flex', gap: '3' })}>
 			{#if step > 1}
-				<button
-					type="button"
-					class={css({
-						borderWidth: '1',
-						paddingX: '4',
-						paddingY: '2',
-						backgroundColor: 'bg.primary'
-					})}
-					onclick={prevStep}
-				>
+				<button type="button" class={button({ variant: 'secondary' })} onclick={prevStep}>
 					Back
 				</button>
 			{/if}
@@ -1502,13 +1453,7 @@
 			{#if step < steps.length}
 				<button
 					type="button"
-					class={css({
-						borderWidth: '1',
-						paddingX: '4',
-						paddingY: '2',
-						backgroundColor: 'accent.primary',
-						color: 'fg.inverse'
-					})}
+					class={button({ variant: 'primary' })}
 					disabled={!canProceed()}
 					onclick={nextStep}
 				>
@@ -1517,13 +1462,7 @@
 			{:else}
 				<button
 					type="button"
-					class={css({
-						borderWidth: '1',
-						paddingX: '4',
-						paddingY: '2',
-						backgroundColor: 'accent.primary',
-						color: 'fg.inverse'
-					})}
+					class={button({ variant: 'primary' })}
 					disabled={creating ||
 						(mode !== 'clone' &&
 							mode !== 'import' &&

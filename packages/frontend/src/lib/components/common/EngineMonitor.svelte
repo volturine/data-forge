@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { Cpu, X, ChevronDown, LoaderCircle } from 'lucide-svelte';
+	import { Cpu, X, ChevronDown, LoaderCircle } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import { toEpochDisplay } from '$lib/utils/datetime';
-	import { css, emptyText } from '$lib/styles/panda';
+	import { nowEpochMs } from '$lib/utils/temporal';
+	import { css, emptyText, iconButton } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
+	import type { EngineStatusResponse } from '$lib/types/compute';
 
 	let expanded = $state(false);
 	let killing = $state<string | null>(null);
@@ -16,10 +18,15 @@
 		return () => enginesStore.stopStream();
 	});
 
-	async function handleKill(analysisId: string) {
-		killing = analysisId;
+	function engineKey(engine: EngineStatusResponse): string {
+		return `${engine.scope ?? 'analysis_interactive'}:${engine.resource_id}`;
+	}
+
+	async function handleKill(engine: EngineStatusResponse) {
+		const key = engineKey(engine);
+		killing = key;
 		try {
-			await enginesStore.shutdownEngine(analysisId);
+			await enginesStore.shutdownEngine(engine);
 		} finally {
 			killing = null;
 		}
@@ -28,7 +35,7 @@
 	function formatTime(isoString: string | null): string {
 		if (!isoString) return 'N/A';
 		const dateMs = toEpochDisplay(isoString);
-		const nowMs = Date.now();
+		const nowMs = nowEpochMs();
 		const diff = Math.floor((nowMs - dateMs) / 1000);
 
 		if (diff < 60) return `${diff}s ago`;
@@ -139,20 +146,7 @@
 				})}
 			>
 				<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}> Active Engines </span>
-				<button
-					class={css({
-						display: 'flex',
-						cursor: 'pointer',
-						alignItems: 'center',
-						justifyContent: 'center',
-						border: 'none',
-						backgroundColor: 'transparent',
-						padding: '1',
-						color: 'fg.muted',
-						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-					})}
-					onclick={() => (expanded = false)}
-				>
+				<button class={iconButton({ variant: 'ghost' })} onclick={() => (expanded = false)}>
 					<X size={14} />
 				</button>
 			</div>
@@ -182,7 +176,7 @@
 					{/if}
 				{:else}
 					<ul class={css({ margin: '0', listStyle: 'none', padding: '0' })}>
-						{#each enginesStore.engines as engine (engine.analysis_id)}
+						{#each enginesStore.engines as engine (engineKey(engine))}
 							<li
 								class={css({
 									display: 'flex',
@@ -199,9 +193,9 @@
 												fontFamily: 'mono',
 												fontSize: 'xs'
 											})}
-											title={engine.analysis_id}
+											title={engine.resource_id}
 										>
-											{engine.analysis_id.slice(0, 8)}...
+											{engine.resource_id.slice(0, 8)}...
 										</span>
 										<span
 											class={css({
@@ -251,11 +245,11 @@
 										},
 										_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 									})}
-									onclick={() => handleKill(engine.analysis_id)}
-									disabled={killing === engine.analysis_id}
+									onclick={() => handleKill(engine)}
+									disabled={killing === engineKey(engine)}
 									title="Shutdown engine"
 								>
-									{#if killing === engine.analysis_id}
+									{#if killing === engineKey(engine)}
 										<LoaderCircle size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 									{:else}
 										<X size={12} />

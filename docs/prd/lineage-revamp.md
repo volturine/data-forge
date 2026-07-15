@@ -1,5 +1,10 @@
 # PRD: Lineage Revamp
 
+> **Status (2026-05-28): Partially implemented.**
+> **Current truth:** Lineage exists and is tested, but the broader semantic/UX revamp in this PRD is not complete.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Redesign the lineage system to provide accurate, semantically meaningful dependency graphs that distinguish between dataset-level lineage (inter-analysis data flow) and code-level lineage (intra-analysis step flow), with an improved UX for exploration, filtering, and impact analysis.

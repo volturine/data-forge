@@ -123,17 +123,13 @@ export interface StreamHandle {
 	close: () => void;
 }
 
-function isErrorMessage(msg: { type: string }): msg is { type: 'error'; error: string } {
-	if (msg.type !== 'error') return false;
+function isErrorMessage(msg: unknown): msg is { type: 'error'; error: string } {
+	if (msg === null || typeof msg !== 'object') return false;
 	const value = msg as Record<string, unknown>;
-	return typeof value.error === 'string';
+	return value.type === 'error' && typeof value.error === 'string';
 }
 
-export function createStream<
-	TSnapshot,
-	TEvent = never,
-	TMessage extends { type: string } = { type: string }
->(
+export function createStream<TSnapshot, TEvent = never, TMessage extends object = { type: string }>(
 	endpoint: string,
 	options: {
 		parse: (data: string) => TMessage | null;

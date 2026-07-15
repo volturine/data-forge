@@ -3,6 +3,7 @@ import { ResultAsync, errAsync, okAsync } from 'neverthrow';
 import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
 import { configStore } from '$lib/stores/config.svelte';
 import { idbGet, idbSet } from '$lib/utils/indexeddb';
+import { nowEpochMs } from '$lib/utils/temporal';
 
 export type AuditField = {
 	name: string;
@@ -45,7 +46,7 @@ if (browser) {
 function ensureSessionId(): string {
 	if (!browser) return '';
 	if (state.session) return state.session;
-	state.session = `s-${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
+	state.session = `s-${Math.random().toString(16).slice(2)}-${nowEpochMs().toString(16)}`;
 	void idbSet('audit_session', state.session);
 	return state.session;
 }
@@ -120,7 +121,7 @@ function pushLog(item: AuditLogItem) {
 	const config = configStore.config;
 	if (!config) return;
 	buffer.push(payload);
-	const now = Date.now();
+	const now = nowEpochMs();
 	const key = `${payload.event}:${payload.action ?? ''}:${payload.target ?? ''}`;
 	const last = dedupe.get(key);
 	const dedupeWindowMs = config.log_client_dedupe_window_ms;
@@ -143,7 +144,7 @@ function recordFlushFailure(error: string, payload: AuditLogItem[]) {
 	const config = configStore.config;
 	if (!config) return;
 	const last = flushFailures.get(error);
-	const now = Date.now();
+	const now = nowEpochMs();
 	const flushCooldownMs = config.log_client_flush_cooldown_ms;
 	if (last && now - last < flushCooldownMs) return;
 	flushFailures.set(error, now);

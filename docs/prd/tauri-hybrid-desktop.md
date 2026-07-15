@@ -1,5 +1,10 @@
 # PRD: Tauri Hybrid Desktop App
 
+> **Status (2026-05-28): Not implemented.**
+> **Current truth:** The Tauri desktop app is not a shipped product surface in the current repository.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Ship a desktop version of Data-Forge using Tauri while preserving the existing FastAPI + Svelte architecture. The desktop app must support hybrid backend connectivity:

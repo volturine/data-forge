@@ -21,10 +21,12 @@
 		CircleQuestionMark,
 		ChartColumn,
 		Search
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { formatDateTimeDisplay } from '$lib/utils/datetime';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { css, spinner, emptyText, label } from '$lib/styles/panda';
+	import { button, css, emptyText, input, label, spinner } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId?: string;
@@ -35,6 +37,7 @@
 	let { datasourceId, compact = false, searchQuery: externalSearch }: Props = $props();
 
 	const queryClient = useQueryClient();
+	const ns = useNamespace();
 	const defaultCron = '0 * * * *';
 
 	let creating = $state(false);
@@ -50,35 +53,52 @@
 	let editCronValue = $state('');
 	let searchQuery = $state('');
 	const effectiveSearch = $derived(externalSearch ?? searchQuery);
+	let schedPage = $state(1);
+	const schedLimit = 50;
 
 	const schedulesQuery = createQuery(() => ({
-		queryKey: ['schedules', datasourceId ?? 'all'],
+		queryKey: [
+			'schedules',
+			ns.value,
+			datasourceId ?? 'all',
+			effectiveSearch.trim(),
+			schedPage,
+			schedLimit
+		],
 		queryFn: async () => {
-			const result = await listSchedules(datasourceId);
+			const result = await listSchedules({
+				datasourceId,
+				search: effectiveSearch.trim() || undefined,
+				limit: schedLimit,
+				offset: (schedPage - 1) * schedLimit
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
-		}
+		},
+		enabled: !ns.switching
 	}));
 
 	const allSchedulesQuery = createQuery(() => ({
-		queryKey: ['schedules', 'all'],
+		queryKey: ['schedules', ns.value, 'all'],
 		queryFn: async () => {
 			const result = await listSchedules();
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		staleTime: 30_000
+		staleTime: 30_000,
+		enabled: !ns.switching
 	}));
 
 	const datasourcesQuery = createQuery(() => ({
-		queryKey: ['datasources-lookup', 'include-hidden'],
+		queryKey: ['datasources-lookup', ns.value, 'include-hidden'],
 		queryFn: async () => {
 			const result = await listDatasources(true, { cache: 'no-store' });
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		staleTime: 0,
-		refetchOnMount: 'always'
+		refetchOnMount: 'always',
+		enabled: !ns.switching
 	}));
 
 	const datasourceMap = $derived(
@@ -90,30 +110,7 @@
 	const schedules = $derived(schedulesQuery.data ?? []);
 	const allSchedules = $derived(allSchedulesQuery.data ?? []);
 	const hasSearch = $derived(effectiveSearch.trim().length > 0);
-	const visibleSchedules = $derived.by(() => {
-		const q = effectiveSearch.trim().toLowerCase();
-		if (!q) return schedules;
-		return schedules.filter((schedule) => {
-			const dsName = (datasourceMap.get(schedule.datasource_id)?.name ?? '').toLowerCase();
-			const triggerDs = schedule.trigger_on_datasource_id
-				? (datasourceMap.get(schedule.trigger_on_datasource_id)?.name ?? '')
-				: '';
-			const dep = schedule.depends_on
-				? (allSchedules.find((s) => s.id === schedule.depends_on)?.analysis_name ?? '')
-				: '';
-			return (
-				schedule.id.toLowerCase().includes(q) ||
-				schedule.datasource_id.toLowerCase().includes(q) ||
-				dsName.includes(q) ||
-				(schedule.analysis_id ?? '').toLowerCase().includes(q) ||
-				(schedule.analysis_name ?? '').toLowerCase().includes(q) ||
-				(schedule.tab_name ?? '').toLowerCase().includes(q) ||
-				triggerDs.toLowerCase().includes(q) ||
-				dep.toLowerCase().includes(q) ||
-				schedule.cron_expression.toLowerCase().includes(q)
-			);
-		});
-	});
+	const visibleSchedules = $derived(schedules);
 
 	const targetDatasource = $derived(
 		datasourceId ? (datasourceMap.get(datasourceId) ?? null) : null
@@ -353,7 +350,7 @@
 	function openCreate() {
 		void listDatasources(true, { cache: 'no-store' }).match(
 			(datasources) => {
-				queryClient.setQueryData(['datasources-lookup', 'include-hidden'], datasources);
+				queryClient.setQueryData(['datasources-lookup', ns.value, 'include-hidden'], datasources);
 				createDatasources = datasources;
 				creating = true;
 			},
@@ -370,7 +367,7 @@
 
 	function formatDate(iso: string | null): string {
 		if (!iso) return '-';
-		return new Date(iso).toLocaleString();
+		return formatDateTimeDisplay(iso);
 	}
 
 	function getProvenanceDisplay(schedule: Schedule): string {
@@ -1059,7 +1056,7 @@
 						? schedulesQuery.error.message
 						: 'Error loading schedules.'}
 		</div>
-	{:else if schedules.length === 0 && !creating}
+	{:else if schedules.length === 0 && !creating && !hasSearch}
 		<div
 			class={css(
 				{
@@ -1217,26 +1214,7 @@
 												<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 													<input
 														type="text"
-														class={css({
-															width: 'full',
-															color: 'fg.primary',
-															borderWidth: '1',
-															borderRadius: '0',
-															transitionProperty: 'border-color',
-															transitionDuration: '160ms',
-															transitionTimingFunction: 'ease',
-															_focus: { outline: 'none' },
-															_focusVisible: { borderColor: 'border.accent' },
-															_disabled: {
-																opacity: '0.5',
-																cursor: 'not-allowed'
-															},
-															_placeholder: { color: 'fg.muted' },
-															backgroundColor: 'transparent',
-															paddingX: '1.5',
-															paddingY: '0.5',
-															fontSize: '2xs'
-														})}
+														class={input({ variant: 'micro' })}
 														id="sched-{schedule.id}-cron"
 														aria-label="Cron expression"
 														bind:value={editCronValue}
@@ -1306,26 +1284,7 @@
 										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Depends On</span>
 											<select
-												class={css({
-													width: 'full',
-													color: 'fg.primary',
-													borderWidth: '1',
-													borderRadius: '0',
-													transitionProperty: 'border-color',
-													transitionDuration: '160ms',
-													transitionTimingFunction: 'ease',
-													_focus: { outline: 'none' },
-													_focusVisible: { borderColor: 'border.accent' },
-													_disabled: {
-														opacity: '0.5',
-														cursor: 'not-allowed'
-													},
-													_placeholder: { color: 'fg.muted' },
-													backgroundColor: 'transparent',
-													paddingX: '1.5',
-													paddingY: '0.5',
-													fontSize: '2xs'
-												})}
+												class={input({ variant: 'micro' })}
 												id="sched-{schedule.id}-depends"
 												aria-label="Depends on schedule"
 												value={schedule.depends_on ?? ''}
@@ -1344,26 +1303,7 @@
 												>On Datasource Update</span
 											>
 											<select
-												class={css({
-													width: 'full',
-													color: 'fg.primary',
-													borderWidth: '1',
-													borderRadius: '0',
-													transitionProperty: 'border-color',
-													transitionDuration: '160ms',
-													transitionTimingFunction: 'ease',
-													_focus: { outline: 'none' },
-													_focusVisible: { borderColor: 'border.accent' },
-													_disabled: {
-														opacity: '0.5',
-														cursor: 'not-allowed'
-													},
-													_placeholder: { color: 'fg.muted' },
-													backgroundColor: 'transparent',
-													paddingX: '1.5',
-													paddingY: '0.5',
-													fontSize: '2xs'
-												})}
+												class={input({ variant: 'micro' })}
 												id="sched-{schedule.id}-trigger"
 												aria-label="Trigger datasource"
 												value={schedule.trigger_on_datasource_id ?? ''}
@@ -1827,26 +1767,7 @@
 													>
 													<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 														<select
-															class={css({
-																width: 'full',
-																color: 'fg.primary',
-																borderWidth: '1',
-																borderRadius: '0',
-																transitionProperty: 'border-color',
-																transitionDuration: '160ms',
-																transitionTimingFunction: 'ease',
-																_focus: { outline: 'none' },
-																_focusVisible: { borderColor: 'border.accent' },
-																_disabled: {
-																	opacity: '0.5',
-																	cursor: 'not-allowed'
-																},
-																_placeholder: { color: 'fg.muted' },
-																backgroundColor: 'transparent',
-																paddingX: '1.5',
-																paddingY: '0.5',
-																fontSize: '2xs'
-															})}
+															class={input({ variant: 'micro' })}
 															id="sched-{schedule.id}-depends"
 															aria-label="Depends on schedule"
 															value={schedule.depends_on ?? ''}
@@ -1870,26 +1791,7 @@
 													>
 													<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 														<select
-															class={css({
-																width: 'full',
-																color: 'fg.primary',
-																borderWidth: '1',
-																borderRadius: '0',
-																transitionProperty: 'border-color',
-																transitionDuration: '160ms',
-																transitionTimingFunction: 'ease',
-																_focus: { outline: 'none' },
-																_focusVisible: { borderColor: 'border.accent' },
-																_disabled: {
-																	opacity: '0.5',
-																	cursor: 'not-allowed'
-																},
-																_placeholder: { color: 'fg.muted' },
-																backgroundColor: 'transparent',
-																paddingX: '1.5',
-																paddingY: '0.5',
-																fontSize: '2xs'
-															})}
+															class={input({ variant: 'micro' })}
 															id="sched-{schedule.id}-trigger"
 															aria-label="Trigger datasource"
 															value={schedule.trigger_on_datasource_id ?? ''}
@@ -1935,5 +1837,40 @@
 				</table>
 			</div>
 		{/if}
+	{/if}
+
+	{#if !compact && schedules.length > 0}
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				marginTop: '4',
+				justifyContent: 'space-between'
+			})}
+		>
+			<span class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
+				Page {schedPage}
+			</span>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+				<button
+					class={button({ variant: 'secondary', size: 'compact' })}
+					onclick={() => {
+						if (schedPage > 1) schedPage--;
+					}}
+					disabled={schedPage === 1}
+				>
+					Previous
+				</button>
+				<button
+					class={button({ variant: 'secondary', size: 'compact' })}
+					onclick={() => {
+						schedPage++;
+					}}
+					disabled={schedules.length < schedLimit}
+				>
+					Next
+				</button>
+			</div>
+		</div>
 	{/if}
 </div>

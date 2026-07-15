@@ -650,6 +650,7 @@ export class AnalysisStore {
 		this.lastSaved = null;
 		this.loading = false;
 		this.error = null;
+		this.previewPaused = false;
 	}
 
 	buildTabs(datasourceIds: string[]): AnalysisTab[] {

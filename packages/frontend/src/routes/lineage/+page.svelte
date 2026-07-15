@@ -23,7 +23,7 @@
 		ZoomOut,
 		Layers,
 		GitBranch
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { css, button, toggleButton, chip } from '$lib/styles/panda';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';

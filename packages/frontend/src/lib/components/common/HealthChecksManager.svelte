@@ -29,10 +29,12 @@
 		Search,
 		Power,
 		PowerOff
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import { css, emptyText, input, label } from '$lib/styles/panda';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { formatDateTimeDisplay } from '$lib/utils/datetime';
+	import { button, css, emptyText, input, label } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId?: string;
@@ -44,16 +46,18 @@
 
 	let { datasourceId, compact = false, searchQuery }: Props = $props();
 	const queryClient = useQueryClient();
+	const ns = useNamespace();
 
 	const datasourcesQuery = createQuery(() => ({
-		queryKey: ['datasources-lookup', 'include-hidden'],
+		queryKey: ['datasources-lookup', ns.value, 'include-hidden'],
 		queryFn: async () => {
 			const result = await listDatasources(true, { cache: 'no-store' });
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		staleTime: 0,
-		refetchOnMount: 'always'
+		refetchOnMount: 'always',
+		enabled: !ns.switching
 	}));
 
 	const datasourceMap = $derived.by(() => {
@@ -70,25 +74,39 @@
 		return `${id.slice(0, 8)}...`;
 	}
 
+	let search = $state('');
+	let hcPage = $state(1);
+	const hcLimit = 50;
+	const effectiveSearch = $derived(searchQuery ?? search);
+
 	const listQuery = createQuery(() => ({
-		queryKey: ['healthchecks', datasourceId ?? 'all'],
+		queryKey: [
+			'healthchecks',
+			ns.value,
+			datasourceId ?? 'all',
+			effectiveSearch.trim(),
+			hcPage,
+			hcLimit
+		],
 		queryFn: async (): Promise<HealthCheckItem[]> => {
+			const search = effectiveSearch.trim() || undefined;
+			const offset = (hcPage - 1) * hcLimit;
 			const result = datasourceId
-				? await listHealthChecks(datasourceId)
-				: await listAllHealthChecks();
+				? await listHealthChecks({ datasourceId, search, limit: hcLimit, offset })
+				: await listAllHealthChecks({ search, limit: hcLimit, offset });
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value.map((check) => ({
 				...check,
 				critical: !!(check as { critical?: boolean }).critical
 			}));
 		},
-		enabled: true
+		enabled: !ns.switching
 	}));
 
 	const showInitialLoading = $derived(listQuery.isLoading && listQuery.data === undefined);
 
 	const resultsQuery = createQuery(() => ({
-		queryKey: ['healthcheck-results', datasourceId ?? 'all'],
+		queryKey: ['healthcheck-results', ns.value, datasourceId ?? 'all'],
 		queryFn: async () => {
 			const result = datasourceId
 				? await listHealthCheckResults(datasourceId, 50)
@@ -96,7 +114,7 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: true
+		enabled: !ns.switching
 	}));
 
 	const latestResults = $derived.by(() => {
@@ -117,7 +135,7 @@
 			return result.value;
 		},
 		onSuccess: (created) => {
-			const listKey = ['healthchecks', datasourceId ?? 'all'];
+			const listKey = ['healthchecks', ns.value, datasourceId ?? 'all'];
 			queryClient.setQueryData<HealthCheckItem[]>(listKey, (current) => {
 				const next = current ?? [];
 				return [...next, { ...created, critical: !!(created as { critical?: boolean }).critical }];
@@ -138,7 +156,7 @@
 		},
 		onMutate: async (payload) => {
 			await queryClient.cancelQueries({ queryKey: ['healthchecks'] });
-			const listKey = ['healthchecks', datasourceId ?? 'all'];
+			const listKey = ['healthchecks', ns.value, datasourceId ?? 'all'];
 			const previous = queryClient.getQueryData<HealthCheckItem[]>(listKey);
 			if (previous) {
 				queryClient.setQueryData<HealthCheckItem[]>(
@@ -190,7 +208,6 @@
 
 	let creating = $state(false);
 	let createDatasources = $state.raw<DataSource[]>([]);
-	let search = $state('');
 	let name = $state('');
 	let checkType = $state<CheckType>('row_count');
 	let config = $state<Record<string, unknown>>({});
@@ -198,7 +215,6 @@
 	let duplicateColumns = $state('');
 	let targetDatasourceId = $state('');
 	let expandedId = $state<string | null>(null);
-	const effectiveSearch = $derived(searchQuery ?? search);
 	const effectiveDatasourceId = $derived(datasourceId ?? targetDatasourceId);
 	const targetChecks = $derived.by(() => {
 		const id = effectiveDatasourceId;
@@ -207,21 +223,7 @@
 	});
 	const rowCountExists = $derived(targetChecks.some((check) => check.check_type === 'row_count'));
 	const hasSearch = $derived(effectiveSearch.trim().length > 0);
-	const visibleChecks = $derived.by(() => {
-		let result = checks;
-		const q = effectiveSearch.trim().toLowerCase();
-		if (!q) return result;
-		return result.filter((check) => {
-			const dsName = (datasourceMap.get(check.datasource_id)?.name ?? '').toLowerCase();
-			return (
-				check.name.toLowerCase().includes(q) ||
-				check.id.toLowerCase().includes(q) ||
-				check.datasource_id.toLowerCase().includes(q) ||
-				dsName.includes(q) ||
-				check.check_type.toLowerCase().includes(q)
-			);
-		});
-	});
+	const visibleChecks = $derived(checks);
 
 	function toggleExpand(id: string): void {
 		expandedId = expandedId === id ? null : id;
@@ -250,7 +252,7 @@
 	async function openCreateForm(): Promise<void> {
 		const result = await listDatasources(true, { cache: 'no-store' });
 		if (result.isErr()) throw new Error(result.error.message);
-		queryClient.setQueryData(['datasources-lookup', 'include-hidden'], result.value);
+		queryClient.setQueryData(['datasources-lookup', ns.value, 'include-hidden'], result.value);
 		createDatasources = result.value;
 		if (
 			!datasourceId &&
@@ -362,24 +364,7 @@
 				<label for="hc-target" class={label({ variant: 'compact' })}>Datasource</label>
 				<select
 					id="hc-target"
-					class={css({
-						width: 'full',
-						color: 'fg.primary',
-						backgroundColor: 'bg.primary',
-						borderWidth: '1',
-						borderRadius: '0',
-						transitionProperty: 'border-color',
-						transitionDuration: '160ms',
-						transitionTimingFunction: 'ease',
-						_focusVisible: { borderColor: 'border.accent' },
-						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-						_placeholder: { color: 'fg.muted' },
-						appearance: 'none',
-						paddingX: '2',
-						paddingY: '1.5',
-						fontSize: 'xs',
-						_focus: { borderColor: 'border.accent' }
-					})}
+					class={input({ variant: 'panelSelect' })}
 					bind:value={targetDatasourceId}
 				>
 					<option value="">Select datasource...</option>
@@ -403,23 +388,7 @@
 				<input
 					id="hc-name"
 					type="text"
-					class={css({
-						width: 'full',
-						color: 'fg.primary',
-						backgroundColor: 'bg.primary',
-						borderWidth: '1',
-						borderRadius: '0',
-						transitionProperty: 'border-color',
-						transitionDuration: '160ms',
-						transitionTimingFunction: 'ease',
-						_focusVisible: { borderColor: 'border.accent' },
-						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-						_placeholder: { color: 'fg.muted' },
-						paddingX: '2',
-						paddingY: '1.5',
-						fontSize: 'xs',
-						_focus: { borderColor: 'border.accent' }
-					})}
+					class={input({ variant: 'panelForm' })}
 					bind:value={name}
 					placeholder="e.g. Row count guard"
 				/>
@@ -430,24 +399,7 @@
 				<div class={css({ position: 'relative' })}>
 					<select
 						id="hc-type"
-						class={css({
-							width: 'full',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' },
-							appearance: 'none',
-							paddingX: '2',
-							paddingY: '1.5',
-							fontSize: 'xs',
-							_focus: { borderColor: 'border.accent' }
-						})}
+						class={input({ variant: 'panelSelect' })}
 						bind:value={checkType}
 						onchange={() => {
 							config = {};
@@ -495,26 +447,7 @@
 						<input
 							id="hc-min-rows"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('min_rows', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -523,26 +456,7 @@
 						<input
 							id="hc-max-rows"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('max_rows', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -563,26 +477,7 @@
 						<input
 							id="hc-min-cols"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('min_columns', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -591,26 +486,7 @@
 						<input
 							id="hc-max-cols"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('max_columns', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -628,23 +504,7 @@
 					<input
 						id="hc-null-threshold"
 						type="number"
-						class={css({
-							width: 'full',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' },
-							paddingX: '2',
-							paddingY: '1.5',
-							fontSize: 'xs',
-							_focus: { borderColor: 'border.accent' }
-						})}
+						class={input({ variant: 'panelForm' })}
 						oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 					/>
 				</div>
@@ -665,26 +525,7 @@
 						<input
 							id="hc-dup-threshold"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -695,26 +536,7 @@
 						<input
 							id="hc-dup-cols"
 							type="text"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							value={duplicateColumns}
 							placeholder="col_a, col_b"
 							oninput={(e) => updateDuplicateColumns(e.currentTarget.value)}
@@ -737,26 +559,7 @@
 						<input
 							id="hc-column"
 							type="text"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -765,26 +568,7 @@
 						<input
 							id="hc-threshold"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -805,26 +589,7 @@
 						<input
 							id="hc-unique-column"
 							type="text"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -835,26 +600,7 @@
 						<input
 							id="hc-expected"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('expected_unique', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -875,26 +621,7 @@
 						<input
 							id="hc-range-column"
 							type="text"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -903,26 +630,7 @@
 						<input
 							id="hc-min"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('min', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -931,26 +639,7 @@
 						<input
 							id="hc-max"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('max', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -1233,7 +922,7 @@
 						? resultsQuery.error.message
 						: 'Failed to load health checks.'}
 		</div>
-	{:else if checks.length === 0 && !creating}
+	{:else if checks.length === 0 && !creating && !hasSearch}
 		<div
 			class={css({
 				display: 'flex',
@@ -1643,7 +1332,7 @@
 											<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Created</span>
 												<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
-													{new Date(check.created_at).toLocaleString()}
+													{formatDateTimeDisplay(check.created_at)}
 												</span>
 											</div>
 											<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
@@ -1801,5 +1490,40 @@
 
 	{#if compact && creating}
 		{@render createForm()}
+	{/if}
+
+	{#if !compact && checks.length > 0}
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				marginTop: '4',
+				justifyContent: 'space-between'
+			})}
+		>
+			<span class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
+				Page {hcPage}
+			</span>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+				<button
+					class={button({ variant: 'secondary', size: 'compact' })}
+					onclick={() => {
+						if (hcPage > 1) hcPage--;
+					}}
+					disabled={hcPage === 1}
+				>
+					Previous
+				</button>
+				<button
+					class={button({ variant: 'secondary', size: 'compact' })}
+					onclick={() => {
+						hcPage++;
+					}}
+					disabled={checks.length < hcLimit}
+				>
+					Next
+				</button>
+			</div>
+		</div>
 	{/if}
 </div>

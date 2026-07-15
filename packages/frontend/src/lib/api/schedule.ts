@@ -34,10 +34,20 @@ export interface ScheduleUpdate {
 	trigger_on_datasource_id?: string | null;
 }
 
-export function listSchedules(datasourceId?: string): ResultAsync<Schedule[], ApiError> {
-	const params = new URLSearchParams();
-	if (datasourceId) params.set('datasource_id', datasourceId);
-	const qs = params.toString();
+export interface ListSchedulesParams {
+	datasourceId?: string;
+	search?: string;
+	limit?: number;
+	offset?: number;
+}
+
+export function listSchedules(params?: ListSchedulesParams): ResultAsync<Schedule[], ApiError> {
+	const query = new URLSearchParams();
+	if (params?.datasourceId) query.set('datasource_id', params.datasourceId);
+	if (params?.search) query.set('search', params.search);
+	if (params?.limit !== undefined) query.set('limit', String(params.limit));
+	if (params?.offset !== undefined) query.set('offset', String(params.offset));
+	const qs = query.toString();
 	return apiRequest<Schedule[]>(`/v1/schedules${qs ? `?${qs}` : ''}`);
 }
 

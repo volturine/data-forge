@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from contracts.engine_instances.models import EngineInstanceStatus
-from contracts.runtime_workers.models import RuntimeWorkerKind
 from pydantic import BaseModel
 
-RuntimeMode = Literal["single_process", "durable_single_node", "distributed"]
+from backend_core.domain.compute.schemas import EngineReusePolicy, EngineScope
+from backend_core.domain.engine_instances.models import EngineInstanceStatus
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
+
+RuntimeMode = Literal['single_process', 'durable_single_node', 'distributed']
 
 
 class ApiProcessSummary(BaseModel):
@@ -35,6 +37,7 @@ class EngineInstanceSummary(BaseModel):
     worker_id: str
     namespace: str
     analysis_id: str
+    resource_id: str
     process_id: int | None
     status: EngineInstanceStatus
     current_job_id: str | None
@@ -42,6 +45,10 @@ class EngineInstanceSummary(BaseModel):
     current_engine_run_id: str | None
     last_activity_at: datetime | None
     last_seen_at: datetime
+    scope: EngineScope | None = None
+    reuse_policy: EngineReusePolicy | None = None
+    datasource_id: str | None = None
+    build_id: str | None = None
 
 
 class QueueNamespaceSummary(BaseModel):

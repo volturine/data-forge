@@ -1,5 +1,4 @@
-from core.logging import get_log_writer
-
+from backend_core.logging import get_log_writer
 from modules.logs.schemas import ClientLogItem
 
 

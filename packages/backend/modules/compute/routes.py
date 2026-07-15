@@ -1,52 +1,47 @@
 import asyncio
 import concurrent.futures
 import logging
+import os
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
-from contracts.analysis.models import Analysis
-from contracts.build_runs.live import BuildNotification
-from contracts.build_runs.live import hub as build_hub
-from contracts.compute import schemas
-from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
-from contracts.runtime import ipc as runtime_ipc
-from contracts.runtime_workers.models import RuntimeWorkerKind
-from core import (
-    build_event_service,
-)
-from core import (
-    build_jobs_service as build_job_service,
-)
-from core import (
-    build_runs_service as build_run_service,
-)
-from core import (
-    engine_runs_service as engine_run_service,
-)
-from core.config import settings
-from core.database import get_db, get_settings_db
-from core.exceptions import EngineNotFoundError
-from core.namespace import get_namespace, reset_namespace, set_namespace_context
 from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from sqlmodel import Session
 
+from backend_core import (
+    build_event_service,
+    build_jobs_service as build_job_service,
+    build_runs_service as build_run_service,
+    engine_runs_service as engine_run_service,
+    runtime_outbox_service,
+)
 from backend_core.auth_config import settings as auth_settings
+from backend_core.config import settings
+from backend_core.data_plane_client import client_from_settings
+from backend_core.database import get_db, get_settings_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
     get_manager,
     get_runtime_availability_probe,
 )
-from backend_core.engine_live import load_engine_snapshot
-from backend_core.engine_live import registry as engine_registry
+from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
+from backend_core.domain.compute import schemas
+from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
+from backend_core.engine_live import load_engine_snapshot, registry as engine_registry
 from backend_core.error_handlers import handle_errors
+from backend_core.exceptions import engine_not_found
+from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
+from backend_core.persistence.analysis.models import Analysis
+from backend_core.time import utc_now as _utcnow
 from backend_core.validation import (
     AnalysisId,
     DataSourceId,
-    parse_analysis_id,
     parse_datasource_id,
 )
 from backend_core.websocket import (
@@ -56,20 +51,125 @@ from backend_core.websocket import (
     safe_send_json,
     websocket_disconnected,
 )
+from dataforge_protocol import compute_pb2, enums_pb2
+from modules.analysis.step_schemas import normalize_pipeline_step_configs_for_protocol
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.compute import executor_client
 from modules.compute.iceberg_service import (
     delete_iceberg_snapshot as delete_iceberg_snapshot_info,
-)
-from modules.compute.iceberg_service import (
     list_iceberg_snapshots as list_iceberg_snapshots_info,
 )
+from modules.datasource import service as datasource_service
 from modules.mcp.router import MCPRouter
 
 logger = logging.getLogger(__name__)
 
-router = MCPRouter(prefix="/compute", tags=["compute"])
+router = MCPRouter(prefix='/compute', tags=['compute'])
+
+
+def _engine_run_active_status(status: EngineRunStatus) -> schemas.ActiveBuildStatus:
+    match status:
+        case EngineRunStatus.RUNNING:
+            return schemas.ActiveBuildStatus.RUNNING
+        case EngineRunStatus.SUCCESS:
+            return schemas.ActiveBuildStatus.COMPLETED
+        case EngineRunStatus.FAILED:
+            return schemas.ActiveBuildStatus.FAILED
+        case EngineRunStatus.CANCELLED:
+            return schemas.ActiveBuildStatus.CANCELLED
+    raise ValueError(f'Unsupported engine run status: {status!r}')
+
+
+def _engine_run_status_filter(status: schemas.ActiveBuildStatus | None) -> EngineRunStatus | None:
+    match status:
+        case None:
+            return None
+        case schemas.ActiveBuildStatus.RUNNING:
+            return EngineRunStatus.RUNNING
+        case schemas.ActiveBuildStatus.COMPLETED:
+            return EngineRunStatus.SUCCESS
+        case schemas.ActiveBuildStatus.FAILED:
+            return EngineRunStatus.FAILED
+        case schemas.ActiveBuildStatus.CANCELLED:
+            return EngineRunStatus.CANCELLED
+        case schemas.ActiveBuildStatus.QUEUED:
+            return EngineRunStatus.RUNNING
+    raise ValueError(f'Unsupported active build status: {status!r}')
+
+
+def _engine_run_kind_filter(kind: str | None) -> EngineRunKind | str | None:
+    if kind == 'build':
+        return EngineRunKind.INGEST
+    return kind
+
+
+def _elapsed_ms_for_engine_run(run) -> int:
+    if run.duration_ms is not None:
+        return run.duration_ms
+    if run.status != EngineRunStatus.RUNNING:
+        return 0
+    started_at = run.created_at if run.created_at.tzinfo is not None else run.created_at.replace(tzinfo=UTC)
+    return max(int((datetime.now(UTC) - started_at).total_seconds() * 1000), 0)
+
+
+def _engine_run_result_dict(run) -> dict[str, object]:
+    return dict(run.result_json) if isinstance(run.result_json, dict) else {}
+
+
+def _optional_result_str(result_json: dict[str, object], key: str) -> str | None:
+    value = result_json.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _engine_run_summary(run, *, namespace: str) -> schemas.ActiveBuildSummary:
+    result_json = _engine_run_result_dict(run)
+    return schemas.ActiveBuildSummary(
+        build_id=run.id,
+        analysis_id=run.analysis_id or '',
+        analysis_name=run.analysis_id or '',
+        namespace=namespace,
+        status=_engine_run_active_status(run.status),
+        started_at=run.created_at,
+        starter=schemas.BuildStarter(user_id=None, display_name=None, email=None, triggered_by=run.triggered_by),
+        resource_config=None,
+        progress=run.progress,
+        elapsed_ms=_elapsed_ms_for_engine_run(run),
+        estimated_remaining_ms=None,
+        current_step=run.current_step,
+        current_step_index=None,
+        total_steps=0,
+        current_kind=run.kind,
+        current_datasource_id=run.datasource_id,
+        current_tab_id=_optional_result_str(result_json, 'current_tab_id'),
+        current_tab_name=_optional_result_str(result_json, 'current_tab_name'),
+        current_output_id=_optional_result_str(result_json, 'current_output_id'),
+        current_output_name=_optional_result_str(result_json, 'current_output_name'),
+        current_engine_run_id=run.id,
+        total_tabs=0,
+        cancelled_at=run.completed_at if run.status == EngineRunStatus.CANCELLED else None,
+        cancelled_by=None,
+        result_json=result_json,
+    )
+
+
+def _engine_run_detail(run, *, namespace: str) -> schemas.ActiveBuildDetail:
+    summary = _engine_run_summary(run, namespace=namespace)
+    summary_payload = summary.model_dump()
+    summary_payload.pop('result_json', None)
+    return schemas.ActiveBuildDetail(
+        **summary_payload,
+        steps=[],
+        query_plans=[],
+        latest_resources=None,
+        resources=[],
+        logs=[],
+        results=[],
+        duration_ms=run.duration_ms,
+        error=run.error_message,
+        request_json=dict(run.request_json),
+        result_json=_engine_run_result_dict(run),
+    )
 
 
 async def _wait_for_websocket_disconnect(websocket: WebSocket) -> None:
@@ -82,12 +182,12 @@ async def _wait_for_websocket_disconnect(websocket: WebSocket) -> None:
             if websocket_disconnected(websocket) or is_disconnect_runtime_error(exc):
                 return
             raise
-        if message.get("type") == "websocket.disconnect":
+        if message.get('type') == 'websocket.disconnect':
             return
 
 
 def _override_manager(container) -> Any | None:
-    overrides = getattr(container.app, "dependency_overrides", None)
+    overrides = getattr(container.app, 'dependency_overrides', None)
     if not isinstance(overrides, dict):
         return None
     override = overrides.get(get_manager)
@@ -97,7 +197,7 @@ def _override_manager(container) -> Any | None:
 
 
 def _override_compute_executor(container) -> Any | None:
-    return getattr(container.app.state, "compute_override_executor", None)
+    return getattr(container.app.state, 'compute_override_executor', None)
 
 
 def _resolve_websocket_user(websocket: WebSocket) -> User | None:
@@ -105,8 +205,7 @@ def _resolve_websocket_user(websocket: WebSocket) -> User | None:
     if override is not None:
         return override()
 
-    from core.database import run_settings_db
-
+    from backend_core.database import run_settings_db
     from modules.auth.service import ensure_default_user, validate_session
 
     token = resolve_websocket_session_token(websocket)
@@ -240,17 +339,13 @@ def _get_durable_build_detail_by_engine_run(session: Session, engine_run_id: str
 async def _require_websocket_user(websocket: WebSocket) -> User:
     user = await run_in_threadpool(_resolve_websocket_user, websocket)
     if user is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        raise HTTPException(status_code=401, detail='Not authenticated')
     return user
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _analysis_name(session: Session, analysis_id: str | None) -> str:
     if not analysis_id:
-        return "Build"
+        return 'Build'
     analysis = session.get(Analysis, analysis_id)
     if analysis and analysis.name:
         return analysis.name
@@ -258,9 +353,9 @@ def _analysis_name(session: Session, analysis_id: str | None) -> str:
 
 
 def _build_analysis_name(pipeline: dict) -> str:
-    analysis_id = pipeline.get("analysis_id")
+    analysis_id = pipeline.get('analysis_id')
     if not isinstance(analysis_id, str) or not analysis_id:
-        return "Build"
+        return 'Build'
     session_gen = get_db()
     session = next(session_gen)
     try:
@@ -272,7 +367,7 @@ def _build_analysis_name(pipeline: dict) -> str:
 
 def _build_triggered_by(user: User | None) -> str:
     if user is None:
-        return "user"
+        return 'user'
     return user.id
 
 
@@ -285,8 +380,8 @@ async def _send_build_snapshot(websocket: WebSocket, build_id: str) -> None:
         session.close()
         session_gen.close()
     if message is None:
-        raise HTTPException(status_code=404, detail="Active build not found")
-    await safe_send_json(websocket, message.model_dump(mode="json"))
+        raise HTTPException(status_code=404, detail='Active build not found')
+    await safe_send_json(websocket, message.model_dump(mode='json'))
 
 
 async def _send_build_list_snapshot(websocket: WebSocket, namespace: str) -> None:
@@ -297,7 +392,7 @@ async def _send_build_list_snapshot(websocket: WebSocket, namespace: str) -> Non
     finally:
         session.close()
         session_gen.close()
-    await safe_send_json(websocket, message.model_dump(mode="json"))
+    await safe_send_json(websocket, message.model_dump(mode='json'))
 
 
 def _get_latest_build_namespace_update(namespace: str) -> str | None:
@@ -307,20 +402,46 @@ def _get_latest_build_namespace_update(namespace: str) -> str | None:
     return str(latest)
 
 
+def _resolved_default_max_threads() -> int:
+    if settings.polars_max_threads > 0:
+        return settings.polars_max_threads
+    return os.cpu_count() or 1
+
+
+def _resolved_system_memory_mb() -> int:
+    try:
+        pages = os.sysconf('SC_PHYS_PAGES')
+        page_size = os.sysconf('SC_PAGE_SIZE')
+    except AttributeError, OSError, ValueError:
+        return 0
+    if not isinstance(pages, int) or not isinstance(page_size, int):
+        return 0
+    total_bytes = pages * page_size
+    if total_bytes <= 0:
+        return 0
+    return total_bytes // (1024 * 1024)
+
+
+def _resolved_default_max_memory_mb() -> int:
+    if settings.polars_max_memory_mb > 0:
+        return settings.polars_max_memory_mb
+    return _resolved_system_memory_mb()
+
+
 async def _send_engine_snapshot(websocket: WebSocket) -> None:
     session_gen = get_settings_db()
     session = next(session_gen)
     try:
         defaults: dict[str, object] = {
-            "max_threads": settings.polars_max_threads,
-            "max_memory_mb": settings.polars_max_memory_mb,
-            "streaming_chunk_size": settings.polars_streaming_chunk_size,
+            'max_threads': settings.polars_max_threads,
+            'max_memory_mb': settings.polars_max_memory_mb,
+            'streaming_chunk_size': settings.polars_streaming_chunk_size,
         }
         message = load_engine_snapshot(session, namespace=get_namespace(), defaults=defaults)
     finally:
         session.close()
         session_gen.close()
-    await safe_send_json(websocket, message.model_dump(mode="json"))
+    await safe_send_json(websocket, message.model_dump(mode='json'))
 
 
 async def _wait_for_engine_notification(websocket: WebSocket, namespace: str, last_seen: str | None) -> str | None:
@@ -336,8 +457,8 @@ async def _wait_for_engine_notification(websocket: WebSocket, namespace: str, la
     return await notify_task
 
 
-@router.post("/preview", response_model=schemas.StepPreviewResponse, mcp=True)
-@handle_errors(operation="preview step")
+@router.post('/preview', response_model=schemas.StepPreviewResponse, mcp=True)
+@handle_errors(operation='preview step')
 async def preview_step(
     request: schemas.StepPreviewRequest,
     http_request: Request,
@@ -351,30 +472,41 @@ async def preview_step(
     and total row count. Use row_limit and page for pagination.
     """
     analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
-    normalized = request.model_copy(update={"analysis_id": analysis_id})
+    normalized = request.model_copy(update={'analysis_id': analysis_id})
+    engine_identity = (
+        normalized.engine_identity
+        if normalized.engine_identity is not None
+        else compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=analysis_id,
+            resource_id=analysis_id,
+        )
+    )
     manager = _override_manager(http_request)
     if manager is not None:
         executor = _override_compute_executor(http_request)
         if executor is None:
-            raise RuntimeError("Missing compute override executor for manager override")
+            raise RuntimeError('Missing compute override executor for manager override')
 
         return executor.preview_step(
             session=session,
             manager=manager,
             target_step_id=normalized.target_step_id,
-            analysis_pipeline=normalized.analysis_pipeline.model_dump(mode="json"),
+            analysis_pipeline=normalized.analysis_pipeline.model_dump(mode='json'),
             row_limit=normalized.row_limit,
             page=normalized.page,
             analysis_id=analysis_id,
+            engine_identity=engine_identity,
             resource_config=normalized.resource_config.model_dump() if normalized.resource_config else None,
             tab_id=normalized.tab_id,
-            request_json=normalized.model_dump(mode="json"),
+            request_json=normalized.model_dump(mode='json'),
         )
     return await executor_client.preview_step(session, normalized, runtime_probe=runtime_probe)
 
 
-@router.post("/schema", response_model=schemas.StepSchemaResponse, mcp=True)
-@handle_errors(operation="get step schema")
+@router.post('/schema', response_model=schemas.StepSchemaResponse, mcp=True)
+@handle_errors(operation='get step schema')
 async def get_step_schema(
     request: schemas.StepSchemaRequest,
     http_request: Request,
@@ -387,26 +519,26 @@ async def get_step_schema(
     (e.g., pivot, unpivot, select). Returns column names and their Polars dtypes.
     """
     analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
-    normalized = request.model_copy(update={"analysis_id": analysis_id})
+    normalized = request.model_copy(update={'analysis_id': analysis_id})
     manager = _override_manager(http_request)
     if manager is not None:
         executor = _override_compute_executor(http_request)
         if executor is None:
-            raise RuntimeError("Missing compute override executor for manager override")
+            raise RuntimeError('Missing compute override executor for manager override')
 
         return executor.get_step_schema(
             session=session,
             manager=manager,
             target_step_id=normalized.target_step_id,
             analysis_id=analysis_id,
-            analysis_pipeline=normalized.analysis_pipeline.model_dump(mode="json"),
+            analysis_pipeline=normalized.analysis_pipeline.model_dump(mode='json'),
             tab_id=normalized.tab_id,
         )
     return await executor_client.get_step_schema(session, normalized, runtime_probe=runtime_probe)
 
 
-@router.post("/row-count", response_model=schemas.StepRowCountResponse, mcp=True)
-@handle_errors(operation="get step row count")
+@router.post('/row-count', response_model=schemas.StepRowCountResponse, mcp=True)
+@handle_errors(operation='get step row count')
 async def get_step_row_count(
     request: schemas.StepRowCountRequest,
     http_request: Request,
@@ -415,50 +547,57 @@ async def get_step_row_count(
 ):
     """Get the row count of a pipeline step result without fetching data. Faster than a full preview."""
     analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
-    normalized = request.model_copy(update={"analysis_id": analysis_id})
+    normalized = request.model_copy(update={'analysis_id': analysis_id})
     manager = _override_manager(http_request)
     if manager is not None:
         executor = _override_compute_executor(http_request)
         if executor is None:
-            raise RuntimeError("Missing compute override executor for manager override")
+            raise RuntimeError('Missing compute override executor for manager override')
 
         return executor.get_step_row_count(
             session=session,
             manager=manager,
             target_step_id=normalized.target_step_id,
             analysis_id=analysis_id,
-            analysis_pipeline=normalized.analysis_pipeline.model_dump(mode="json"),
+            analysis_pipeline=normalized.analysis_pipeline.model_dump(mode='json'),
             tab_id=normalized.tab_id,
-            request_json=normalized.model_dump(mode="json"),
+            request_json=normalized.model_dump(mode='json'),
         )
     return await executor_client.get_step_row_count(session, normalized, runtime_probe=runtime_probe)
 
 
 @router.get(
-    "/iceberg/{datasource_id}/snapshots",
+    '/iceberg/{datasource_id}/snapshots',
     response_model=schemas.IcebergSnapshotsResponse,
     mcp=True,
 )
-@handle_errors(operation="list iceberg snapshots")
+@handle_errors(operation='list iceberg snapshots')
 def list_iceberg_snapshots(
     datasource_id: DataSourceId,
     branch: str | None = None,
+    build_results_only: bool = False,
     session: Session = Depends(get_db),
 ):
     """List Iceberg table snapshots for time-travel selection.
 
     Each snapshot has a snapshot_id, timestamp, and operation type.
-    Optionally filter by branch. Use snapshot_id with compare-snapshots.
+    Optionally filter by branch. Set build_results_only=true to return only
+    snapshots produced by completed builds for this datasource.
     """
-    return list_iceberg_snapshots_info(session, parse_datasource_id(datasource_id), branch=branch)
+    return list_iceberg_snapshots_info(
+        session,
+        parse_datasource_id(datasource_id),
+        branch=branch,
+        build_results_only=build_results_only,
+    )
 
 
 @router.delete(
-    "/iceberg/{datasource_id}/snapshots/{snapshot_id}",
+    '/iceberg/{datasource_id}/snapshots/{snapshot_id}',
     response_model=schemas.IcebergSnapshotDeleteResponse,
     mcp=True,
 )
-@handle_errors(operation="delete iceberg snapshot")
+@handle_errors(operation='delete iceberg snapshot')
 def delete_iceberg_snapshot(
     datasource_id: DataSourceId,
     snapshot_id: int,
@@ -471,9 +610,9 @@ def delete_iceberg_snapshot(
     return delete_iceberg_snapshot_info(session, parse_datasource_id(datasource_id), str(snapshot_id))
 
 
-@router.post("/builds", response_model=schemas.ActiveBuildDetail)
-@router.post("/builds/active", response_model=schemas.ActiveBuildDetail)
-@handle_errors(operation="start active build")
+@router.post('/builds', response_model=schemas.ActiveBuildDetail)
+@router.post('/builds/active', response_model=schemas.ActiveBuildDetail)
+@handle_errors(operation='start active build')
 async def start_active_build(
     request: schemas.BuildRequest,
     session: Session = Depends(get_db),
@@ -481,18 +620,18 @@ async def start_active_build(
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if not runtime_probe.available(kind=RuntimeWorkerKind.BUILD_MANAGER):
-        raise HTTPException(status_code=503, detail="Compute runtime unavailable")
+        raise HTTPException(status_code=503, detail='Compute runtime unavailable')
 
-    pipeline = request.pipeline_payload()
-    analysis_id = str(pipeline.get("analysis_id") or "")
+    pipeline = normalize_pipeline_step_configs_for_protocol(request.pipeline_payload())
+    analysis_id = str(pipeline.get('analysis_id') or '')
     analysis_name = await run_in_threadpool(_build_analysis_name, pipeline)
     namespace = get_namespace()
     started_at = _utcnow()
     build_id = str(uuid.uuid4())
-    raw_tabs = pipeline.get("tabs")
+    raw_tabs = pipeline.get('tabs')
     tabs = raw_tabs if isinstance(raw_tabs, list) else []
     selected_tab = next(
-        (tab for tab in tabs if isinstance(tab, dict) and isinstance(tab.get("id"), str) and tab.get("id") == request.tab_id),
+        (tab for tab in tabs if isinstance(tab, dict) and isinstance(tab.get('id'), str) and tab.get('id') == request.tab_id),
         None,
     )
     active_tab = selected_tab if isinstance(selected_tab, dict) else next((tab for tab in tabs if isinstance(tab, dict)), None)
@@ -503,56 +642,116 @@ async def start_active_build(
     current_output_id: str | None = None
     current_output_name: str | None = None
     if isinstance(active_tab, dict):
-        datasource = active_tab.get("datasource")
-        if isinstance(datasource, dict) and isinstance(datasource.get("id"), str):
-            current_datasource_id = datasource.get("id")
-        if isinstance(active_tab.get("id"), str):
-            current_tab_id = active_tab.get("id")
-        if isinstance(active_tab.get("name"), str):
-            current_tab_name = active_tab.get("name")
+        datasource = active_tab.get('datasource')
+        if isinstance(datasource, dict) and isinstance(datasource.get('id'), str):
+            current_datasource_id = datasource.get('id')
+        if isinstance(active_tab.get('id'), str):
+            current_tab_id = active_tab.get('id')
+        if isinstance(active_tab.get('name'), str):
+            current_tab_name = active_tab.get('name')
     starter = schemas.BuildStarter.for_user(user)
-    build_run_service.create_build_run(
-        session,
-        build_id=build_id,
-        namespace=namespace,
-        analysis_id=analysis_id,
-        analysis_name=analysis_name,
-        request_json=request.model_dump(mode="json"),
-        starter_json=starter.model_dump(mode="json"),
-        status=build_run_service.BuildRunStatus.QUEUED,
-        current_kind=current_kind,
-        current_datasource_id=current_datasource_id,
-        current_tab_id=current_tab_id,
-        current_tab_name=current_tab_name,
-        current_output_id=current_output_id,
-        current_output_name=current_output_name,
-        total_tabs=len(tabs),
-        created_at=started_at,
-        started_at=started_at,
-    )
-    build_job_service.create_job(
-        session,
-        build_id=build_id,
-        namespace=namespace,
-    )
+    try:
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            tab_id = tab.get('id')
+            output = tab.get('output')
+            if not isinstance(tab_id, str) or not isinstance(output, dict):
+                continue
+            result_id = output.get('result_id')
+            if not isinstance(result_id, str):
+                continue
+            iceberg = output.get('iceberg')
+            table_name = iceberg.get('table_name') if isinstance(iceberg, dict) else None
+            filename = output.get('filename')
+            output_name = table_name if isinstance(table_name, str) and table_name.strip() else filename
+            branch_name = iceberg.get('branch') if isinstance(iceberg, dict) else None
+            namespace_name = iceberg.get('namespace') if isinstance(iceberg, dict) else None
+            placeholder_config: dict[str, Any] | None = None
+            placeholder_source_type = datasource_service.DataSourceType.ANALYSIS
+            if isinstance(branch_name, str) and branch_name.strip():
+                safe_branch = re.sub(r'[^a-zA-Z0-9_]+', '_', branch_name).strip('_')
+                table_name = f'{result_id}_{safe_branch}'
+                data_plane = client_from_settings()
+                warehouse_path = data_plane.build_object_url('namespaces', get_namespace(), 'exports')
+                placeholder_source_type = datasource_service.DataSourceType.ICEBERG
+                placeholder_config = {
+                    'catalog_type': 'sql',
+                    'catalog_uri': settings.database_url,
+                    'warehouse': warehouse_path,
+                    'namespace': namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else 'outputs',
+                    'table': table_name,
+                    'table_name': output_name if isinstance(output_name, str) and output_name.strip() else table_name,
+                    'metadata_path': data_plane.build_object_url('namespaces', get_namespace(), 'exports', str(result_id)),
+                    'branch': branch_name,
+                    'namespace_name': get_namespace(),
+                    'reader': 'native',
+                }
+            datasource_service.create_placeholder_output_datasource(
+                session,
+                result_id=result_id,
+                analysis_id=analysis_id,
+                analysis_tab_id=tab_id,
+                name=output_name if isinstance(output_name, str) else None,
+                source_type=placeholder_source_type,
+                config=placeholder_config,
+            )
+        build_run_service.create_build_run(
+            session,
+            build_id=build_id,
+            namespace=namespace,
+            analysis_id=analysis_id,
+            analysis_name=analysis_name,
+            request_json={
+                'analysis_pipeline': {
+                    'analysis_id': pipeline['analysis_id'],
+                    'tabs': pipeline['tabs'],
+                },
+                'tab_id': request.tab_id,
+            },
+            starter_json=starter.model_dump(mode='json'),
+            status=build_run_service.BuildRunStatus.QUEUED,
+            current_kind=current_kind,
+            current_datasource_id=current_datasource_id,
+            current_tab_id=current_tab_id,
+            current_tab_name=current_tab_name,
+            current_output_id=current_output_id,
+            current_output_name=current_output_name,
+            total_tabs=len(tabs),
+            created_at=started_at,
+            started_at=started_at,
+            commit=False,
+        )
+        build_job_service.create_job(
+            session,
+            build_id=build_id,
+            namespace=namespace,
+            commit=False,
+        )
+        runtime_outbox_service.enqueue_api_build_notification(session, namespace=namespace, build_id=build_id, latest_sequence=0, commit=False)
+        runtime_outbox_service.enqueue_build_job_notification(session, commit=False)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     detail = _get_durable_build_detail(session, build_id)
     if detail is None:
-        raise HTTPException(status_code=500, detail="Failed to create build")
-    await build_event_service.publish_build_notification(namespace, build_id, latest_sequence=0)
-    from contracts.build_jobs.live import hub as build_job_hub
+        raise HTTPException(status_code=500, detail='Failed to create build')
+    await build_hub.publish(BuildNotification(namespace=namespace, build_id=build_id, latest_sequence=0))
+    from backend_core.domain.build_jobs.live import hub as build_job_hub
 
     build_job_hub.publish()
-    await asyncio.to_thread(runtime_ipc.notify_build_job)
+    runtime_outbox_service.dispatch_pending_events(session)
     return detail
 
 
-@router.post("/builds/{build_id}/cancel", response_model=schemas.CancelBuildResponse, mcp=True)
+@router.post('/builds/{build_id}/cancel', response_model=schemas.CancelBuildResponse, mcp=True)
 @router.post(
-    "/builds/active/{build_id}/cancel",
+    '/builds/active/{build_id}/cancel',
     response_model=schemas.CancelBuildResponse,
     mcp=True,
 )
-@handle_errors(operation="cancel build")
+@handle_errors(operation='cancel build')
 async def cancel_build(
     build_id: str,
     session: Session = Depends(get_db),
@@ -560,12 +759,12 @@ async def cancel_build(
 ):
     detail = _get_durable_build_detail(session, build_id)
     if detail is None:
-        raise HTTPException(status_code=404, detail="Build not found")
+        raise HTTPException(status_code=404, detail='Build not found')
     if detail.status not in {
         schemas.ActiveBuildStatus.QUEUED,
         schemas.ActiveBuildStatus.RUNNING,
     }:
-        raise HTTPException(status_code=400, detail="Only active builds can be cancelled")
+        raise HTTPException(status_code=400, detail='Only active builds can be cancelled')
 
     cancelled_by = user.email or user.display_name or user.id
     cancelled_at = _utcnow()
@@ -596,49 +795,68 @@ async def cancel_build(
             emitted_at=_utcnow(),
         ),
         namespace=detail.namespace,
-        resource_config_json=detail.resource_config.model_dump(mode="json") if detail.resource_config is not None else None,
+        resource_config_json=detail.resource_config.model_dump(mode='json') if detail.resource_config is not None else None,
     )
 
     return schemas.CancelBuildResponse(
         id=detail.build_id,
         build_id=detail.build_id,
         engine_run_id=detail.current_engine_run_id,
-        status="cancelled",
+        status='cancelled',
         duration_ms=duration_ms,
         cancelled_at=cancelled_at,
         cancelled_by=cancelled_by,
     )
 
 
-@router.get("/builds", response_model=schemas.ActiveBuildListResponse, mcp=True)
-@handle_errors(operation="list builds")
+@router.get('/builds', response_model=schemas.ActiveBuildListResponse, mcp=True)
+@handle_errors(operation='list builds')
 async def list_builds(
     request: Request,
     analysis_id: str | None = None,
     datasource_id: str | None = None,
     kind: str | None = None,
     status: schemas.ActiveBuildStatus | None = None,
+    search: str | None = None,
     limit: int = 100,
     offset: int = 0,
     session: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     del request
+    namespace = get_namespace()
+    fetch_limit = limit + offset
     runs = build_run_service.list_build_runs(
         session,
         analysis_id=analysis_id.strip() if analysis_id else None,
         datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
         kind=kind,
         status=status,
-        limit=limit,
-        offset=offset,
+        search=search,
+        limit=fetch_limit,
+        offset=0,
     )
-    visible = [build_run_service.build_summary(run) for run in runs if run.namespace == get_namespace()]
-    return schemas.ActiveBuildListResponse(builds=visible, total=len(visible))
+    build_rows = [build_run_service.build_summary(run) for run in runs if run.namespace == namespace]
+    engine_rows: list[schemas.ActiveBuildSummary] = []
+    if status != schemas.ActiveBuildStatus.QUEUED:
+        engine_runs = engine_run_service.list_engine_runs(
+            session,
+            analysis_id=analysis_id.strip() if analysis_id else None,
+            datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
+            kind=_engine_run_kind_filter(kind),
+            status=_engine_run_status_filter(status),
+            search=search,
+            limit=fetch_limit,
+            offset=0,
+        )
+        engine_rows = [_engine_run_summary(run, namespace=namespace) for run in engine_runs]
+    visible = sorted([*build_rows, *engine_rows], key=lambda run: run.started_at, reverse=True)
+    paged = visible[offset : offset + limit]
+    return schemas.ActiveBuildListResponse(builds=paged, total=len(visible))
 
 
-@router.get("/builds/active", response_model=schemas.ActiveBuildListResponse, mcp=True)
-@handle_errors(operation="list active builds")
+@router.get('/builds/active', response_model=schemas.ActiveBuildListResponse, mcp=True)
+@handle_errors(operation='list active builds')
 async def list_active_builds(
     request: Request,
     status: schemas.ActiveBuildStatus | None = None,
@@ -666,107 +884,245 @@ async def list_active_builds(
     return schemas.ActiveBuildListResponse(builds=visible, total=len(visible))
 
 
-@router.get("/builds/{build_id}", response_model=schemas.ActiveBuildDetail, mcp=True)
-@router.get("/builds/active/{build_id}", response_model=schemas.ActiveBuildDetail, mcp=True)
-@handle_errors(operation="get active build")
+@router.get('/builds/{build_id}', response_model=schemas.ActiveBuildDetail, mcp=True)
+@router.get('/builds/active/{build_id}', response_model=schemas.ActiveBuildDetail, mcp=True)
+@handle_errors(operation='get active build')
 async def get_active_build(
     build_id: str,
     session: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     detail = _get_durable_build_detail(session, build_id)
-    if detail is None:
-        raise HTTPException(status_code=404, detail="Active build not found")
-    return detail
+    if detail is not None:
+        return detail
+    engine_run = engine_run_service.get_engine_run(session, build_id)
+    if engine_run is not None:
+        return _engine_run_detail(engine_run, namespace=get_namespace())
+    raise HTTPException(status_code=404, detail='Active build not found')
 
 
 # Engine lifecycle endpoints
 
 
-@router.post("/engine/spawn/{analysis_id}", response_model=schemas.EngineStatusSchema, mcp=True)
-@handle_errors(operation="spawn engine")
-async def spawn_engine(
+async def _spawn_engine_identity(
+    identity,
+    http_request: Request,
+    request: schemas.SpawnEngineRequest | None,
+    session: Session,
+    runtime_probe: RuntimeAvailabilityProbe,
+):
+    resource_config = request.resource_config.model_dump() if request and request.resource_config else None
+    manager = _override_manager(http_request)
+    if manager is not None:
+        manager.spawn_engine(identity, resource_config=resource_config)
+        return manager.get_engine_status(identity)
+    return await executor_client.spawn_engine(
+        session,
+        identity=identity,
+        resource_config=resource_config,
+        runtime_probe=runtime_probe,
+    )
+
+
+async def _configure_engine_identity(
+    identity,
+    request: schemas.EngineResourceConfig,
+    http_request: Request,
+    session: Session,
+    runtime_probe: RuntimeAvailabilityProbe,
+):
+    resource_config = request.model_dump()
+    manager = _override_manager(http_request)
+    if manager is not None:
+        manager.restart_engine_with_config(identity, resource_config)
+        return manager.get_engine_status(identity)
+    return await executor_client.configure_engine(
+        session,
+        identity=identity,
+        resource_config=resource_config,
+        runtime_probe=runtime_probe,
+    )
+
+
+async def _shutdown_engine_identity(
+    identity,
+    http_request: Request,
+    session: Session,
+    runtime_probe: RuntimeAvailabilityProbe,
+) -> None:
+    manager = _override_manager(http_request)
+    if manager is not None:
+        engine = manager.get_engine(identity)
+        if not engine:
+            raise engine_not_found(identity.resource_id)
+        if engine.current_job_id and engine.is_process_alive():
+            raise HTTPException(status_code=409, detail='Engine has an active job')
+        manager.shutdown_engine(identity)
+        return
+    await executor_client.shutdown_engine(session, identity=identity, runtime_probe=runtime_probe)
+
+
+@router.post('/engine/spawn/analysis/{analysis_id}', response_model=schemas.EngineStatusSchema, mcp=True)
+@handle_errors(operation='spawn analysis engine')
+async def spawn_analysis_engine(
     analysis_id: AnalysisId,
     http_request: Request,
     request: schemas.SpawnEngineRequest | None = None,
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    """Spawn a compute engine for an analysis (called when analysis page opens).
-
-    Optionally accepts resource configuration overrides.
-    """
-    resource_config = request.resource_config.model_dump() if request and request.resource_config else None
-    analysis_id_value = parse_analysis_id(analysis_id)
-    manager = _override_manager(http_request)
-    if manager is not None:
-        manager.spawn_engine(analysis_id_value, resource_config=resource_config)
-        return manager.get_engine_status(analysis_id_value)
-    return await executor_client.spawn_engine(
+    return await _spawn_engine_identity(
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=analysis_id,
+            resource_id=analysis_id,
+        ),
+        http_request,
+        request,
         session,
-        analysis_id=analysis_id_value,
-        resource_config=resource_config,
-        runtime_probe=runtime_probe,
+        runtime_probe,
     )
 
 
-@router.post(
-    "/engine/configure/{analysis_id}",
-    response_model=schemas.EngineStatusSchema,
-    mcp=True,
-)
-@handle_errors(operation="configure engine")
-async def configure_engine(
+@router.post('/engine/spawn/datasource-preview/{datasource_id}', response_model=schemas.EngineStatusSchema, mcp=True)
+@handle_errors(operation='spawn datasource preview engine')
+async def spawn_datasource_preview_engine(
+    datasource_id: DataSourceId,
+    http_request: Request,
+    request: schemas.SpawnEngineRequest | None = None,
+    session: Session = Depends(get_db),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
+):
+    datasource_id_value = parse_datasource_id(datasource_id)
+    return await _spawn_engine_identity(
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            datasource_id=datasource_id_value,
+            resource_id=datasource_id_value,
+        ),
+        http_request,
+        request,
+        session,
+        runtime_probe,
+    )
+
+
+@router.post('/engine/configure/analysis/{analysis_id}', response_model=schemas.EngineStatusSchema, mcp=True)
+@handle_errors(operation='configure analysis engine')
+async def configure_analysis_engine(
     analysis_id: AnalysisId,
     request: schemas.EngineResourceConfig,
     http_request: Request,
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    """Update engine resource configuration (restarts the engine).
-
-    This will terminate any running jobs and restart the engine with the new
-    resource configuration. Values set to null will use the default from settings.
-    """
-    resource_config = request.model_dump()
-    analysis_id_value = parse_analysis_id(analysis_id)
-    manager = _override_manager(http_request)
-    if manager is not None:
-        manager.restart_engine_with_config(analysis_id_value, resource_config)
-        return manager.get_engine_status(analysis_id_value)
-    return await executor_client.configure_engine(
+    return await _configure_engine_identity(
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=analysis_id,
+            resource_id=analysis_id,
+        ),
+        request,
+        http_request,
         session,
-        analysis_id=analysis_id_value,
-        resource_config=resource_config,
-        runtime_probe=runtime_probe,
+        runtime_probe,
     )
 
 
-@router.delete("/engine/{analysis_id}", status_code=204, mcp=True)
-@handle_errors(operation="shutdown engine")
-async def shutdown_engine(
+@router.post('/engine/configure/datasource-preview/{datasource_id}', response_model=schemas.EngineStatusSchema, mcp=True)
+@handle_errors(operation='configure datasource preview engine')
+async def configure_datasource_preview_engine(
+    datasource_id: DataSourceId,
+    request: schemas.EngineResourceConfig,
+    http_request: Request,
+    session: Session = Depends(get_db),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
+):
+    datasource_id_value = parse_datasource_id(datasource_id)
+    return await _configure_engine_identity(
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            datasource_id=datasource_id_value,
+            resource_id=datasource_id_value,
+        ),
+        request,
+        http_request,
+        session,
+        runtime_probe,
+    )
+
+
+@router.delete('/engine/analysis/{analysis_id}', status_code=204, mcp=True, mcp_confirm_required=True)
+@handle_errors(operation='shutdown analysis engine')
+async def shutdown_analysis_engine(
     analysis_id: AnalysisId,
     http_request: Request,
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    """Shutdown an analysis engine."""
-    analysis_id_value = parse_analysis_id(analysis_id)
-    manager = _override_manager(http_request)
-    if manager is not None:
-        engine = manager.get_engine(analysis_id_value)
-        if not engine:
-            raise EngineNotFoundError(analysis_id_value)
-        if engine.current_job_id and engine.is_process_alive():
-            raise HTTPException(status_code=409, detail="Engine has an active job")
-        manager.shutdown_engine(analysis_id_value)
-        return
-    await executor_client.shutdown_engine(session, analysis_id=analysis_id_value, runtime_probe=runtime_probe)
+    await _shutdown_engine_identity(
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=analysis_id,
+            resource_id=analysis_id,
+        ),
+        http_request,
+        session,
+        runtime_probe,
+    )
 
 
-@router.websocket("/ws/engines")
+@router.delete('/engine/datasource-preview/{datasource_id}', status_code=204, mcp=True, mcp_confirm_required=True)
+@handle_errors(operation='shutdown datasource preview engine')
+async def shutdown_datasource_preview_engine(
+    datasource_id: DataSourceId,
+    http_request: Request,
+    session: Session = Depends(get_db),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
+):
+    datasource_id_value = parse_datasource_id(datasource_id)
+    await _shutdown_engine_identity(
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            datasource_id=datasource_id_value,
+            resource_id=datasource_id_value,
+        ),
+        http_request,
+        session,
+        runtime_probe,
+    )
+
+
+@router.delete('/engine/build/{build_id}', status_code=204, mcp=True, mcp_confirm_required=True)
+@handle_errors(operation='shutdown build engine')
+async def shutdown_build_engine(
+    build_id: str,
+    http_request: Request,
+    session: Session = Depends(get_db),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
+):
+    await _shutdown_engine_identity(
+        compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_BUILD,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+            build_id=build_id,
+            resource_id=build_id,
+        ),
+        http_request,
+        session,
+        runtime_probe,
+    )
+
+
+@router.websocket('/ws/engines')
 async def engine_list_stream(websocket: WebSocket) -> None:
-    token = set_namespace_context(websocket.headers.get("X-Namespace") or websocket.query_params.get("namespace"))
+    token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
     namespace = get_namespace()
     await websocket.accept()
     try:
@@ -781,26 +1137,26 @@ async def engine_list_stream(websocket: WebSocket) -> None:
             last_seen = updated
     except WebSocketDisconnect:
         return
-    except (asyncio.CancelledError, concurrent.futures.CancelledError):
+    except asyncio.CancelledError, concurrent.futures.CancelledError:
         return
     except HTTPException as exc:
         await safe_send_json(
             websocket,
-            schemas.EngineWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode="json"),
+            schemas.EngineWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode='json'),
         )
     except RuntimeError as exc:
         if is_disconnect_runtime_error(exc):
             return
-        logger.error("Engine websocket error: %s", exc, exc_info=True)
+        logger.error('Engine websocket error: %s', exc, exc_info=True)
         await safe_send_json(
             websocket,
-            schemas.EngineWebsocketErrorMessage(error="An internal error occurred").model_dump(mode="json"),
+            schemas.EngineWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     except Exception as exc:
-        logger.error("Engine websocket error: %s", exc, exc_info=True)
+        logger.error('Engine websocket error: %s', exc, exc_info=True)
         await safe_send_json(
             websocket,
-            schemas.EngineWebsocketErrorMessage(error="An internal error occurred").model_dump(mode="json"),
+            schemas.EngineWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     finally:
         await engine_registry.remove_watcher(namespace, websocket)
@@ -808,9 +1164,9 @@ async def engine_list_stream(websocket: WebSocket) -> None:
         await safe_close_websocket(websocket)
 
 
-@router.websocket("/ws/builds")
+@router.websocket('/ws/builds')
 async def build_list_stream(websocket: WebSocket) -> None:
-    token = set_namespace_context(websocket.headers.get("X-Namespace") or websocket.query_params.get("namespace"))
+    token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
     namespace = get_namespace()
     await websocket.accept()
     try:
@@ -824,7 +1180,7 @@ async def build_list_stream(websocket: WebSocket) -> None:
             session_gen = get_db()
             session = next(session_gen)
             try:
-                payload = _build_list_snapshot_message(session, namespace).model_dump(mode="json")
+                payload = _build_list_snapshot_message(session, namespace).model_dump(mode='json')
             finally:
                 session.close()
                 session_gen.close()
@@ -834,36 +1190,36 @@ async def build_list_stream(websocket: WebSocket) -> None:
             last_seen = updated
     except WebSocketDisconnect:
         return
-    except (asyncio.CancelledError, concurrent.futures.CancelledError):
+    except asyncio.CancelledError, concurrent.futures.CancelledError:
         return
     except HTTPException as exc:
         await safe_send_json(
             websocket,
-            schemas.BuildWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode="json"),
+            schemas.BuildWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode='json'),
         )
     except RuntimeError as exc:
         if is_disconnect_runtime_error(exc):
             return
-        logger.error("Build list websocket error: %s", exc, exc_info=True)
+        logger.error('Build list websocket error: %s', exc, exc_info=True)
         await safe_send_json(
             websocket,
-            schemas.BuildWebsocketErrorMessage(error="An internal error occurred").model_dump(mode="json"),
+            schemas.BuildWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     except Exception as exc:
-        logger.error("Build list websocket error: %s", exc, exc_info=True)
+        logger.error('Build list websocket error: %s', exc, exc_info=True)
         await safe_send_json(
             websocket,
-            schemas.BuildWebsocketErrorMessage(error="An internal error occurred").model_dump(mode="json"),
+            schemas.BuildWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     finally:
         reset_namespace(token)
         await safe_close_websocket(websocket)
 
 
-@router.websocket("/ws/builds/{build_id}")
+@router.websocket('/ws/builds/{build_id}')
 async def active_build_stream(websocket: WebSocket, build_id: str) -> None:
-    token = set_namespace_context(websocket.headers.get("X-Namespace") or websocket.query_params.get("namespace"))
-    raw_last_sequence = websocket.query_params.get("last_sequence")
+    token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
+    raw_last_sequence = websocket.query_params.get('last_sequence')
     last_sequence = int(raw_last_sequence) if raw_last_sequence and raw_last_sequence.isdigit() else 0
     await websocket.accept()
     try:
@@ -877,7 +1233,7 @@ async def active_build_stream(websocket: WebSocket, build_id: str) -> None:
                 session.close()
                 session_gen.close()
             if message is None or message.build.namespace != get_namespace():
-                raise HTTPException(status_code=404, detail="Active build not found")
+                raise HTTPException(status_code=404, detail='Active build not found')
             if message.last_sequence <= last_sequence:
                 break
             if last_sequence > 0:
@@ -887,7 +1243,7 @@ async def active_build_stream(websocket: WebSocket, build_id: str) -> None:
                 last_sequence = replayed_sequence
                 continue
             break
-        sent = await safe_send_json(websocket, message.model_dump(mode="json"))
+        sent = await safe_send_json(websocket, message.model_dump(mode='json'))
         if not sent:
             return
         last_sequence = max(last_sequence, message.last_sequence)
@@ -901,47 +1257,45 @@ async def active_build_stream(websocket: WebSocket, build_id: str) -> None:
             last_sequence = max(replayed_sequence, notification.latest_sequence)
     except WebSocketDisconnect:
         return
-    except (asyncio.CancelledError, concurrent.futures.CancelledError):
+    except asyncio.CancelledError, concurrent.futures.CancelledError:
         return
     except HTTPException as exc:
         await safe_send_json(
             websocket,
-            schemas.BuildWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode="json"),
+            schemas.BuildWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode='json'),
         )
     except RuntimeError as exc:
         if is_disconnect_runtime_error(exc):
             return
-        logger.error("Active build websocket error: %s", exc, exc_info=True)
+        logger.error('Active build websocket error: %s', exc, exc_info=True)
         await safe_send_json(
             websocket,
-            schemas.BuildWebsocketErrorMessage(error="An internal error occurred").model_dump(mode="json"),
+            schemas.BuildWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     except Exception as exc:
-        logger.error("Active build websocket error: %s", exc, exc_info=True)
+        logger.error('Active build websocket error: %s', exc, exc_info=True)
         await safe_send_json(
             websocket,
-            schemas.BuildWebsocketErrorMessage(error="An internal error occurred").model_dump(mode="json"),
+            schemas.BuildWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     finally:
         reset_namespace(token)
         await safe_close_websocket(websocket)
 
 
-@router.get("/defaults", response_model=schemas.EngineDefaults, mcp=True)
-@handle_errors(operation="get engine defaults")
+@router.get('/defaults', response_model=schemas.EngineDefaults, mcp=True)
+@handle_errors(operation='get engine defaults')
 def get_engine_defaults():
-    """Get default engine resource settings from environment configuration."""
-    from core.config import settings
-
+    """Get resolved default engine resource settings for the UI."""
     return schemas.EngineDefaults(
-        max_threads=settings.polars_max_threads,
-        max_memory_mb=settings.polars_max_memory_mb,
+        max_threads=_resolved_default_max_threads(),
+        max_memory_mb=_resolved_default_max_memory_mb(),
         streaming_chunk_size=settings.polars_streaming_chunk_size,
     )
 
 
-@router.post("/export", mcp=True)
-@handle_errors(operation="export data")
+@router.post('/export', mcp=True)
+@handle_errors(operation='export data')
 async def export_data(
     request: schemas.ExportRequest,
     http_request: Request,
@@ -966,13 +1320,13 @@ async def export_data(
         if manager is not None:
             executor = _override_compute_executor(http_request)
             if executor is None:
-                raise RuntimeError("Missing compute override executor for manager override")
+                raise RuntimeError('Missing compute override executor for manager override')
 
             file_bytes, filename, content_type = executor.download_step(
                 session=session,
                 manager=manager,
                 target_step_id=download_request.target_step_id,
-                analysis_pipeline=download_request.analysis_pipeline.model_dump(mode="json"),
+                analysis_pipeline=download_request.analysis_pipeline.model_dump(mode='json'),
                 export_format=download_request.format.value,
                 filename=download_request.filename,
                 analysis_id=download_request.analysis_id,
@@ -988,41 +1342,41 @@ async def export_data(
         return Response(
             content=file_bytes,
             media_type=content_type,
-            headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+            headers={'Content-Disposition': f'attachment; filename="{safe_name}"'},
         )
 
     manager = _override_manager(http_request)
     if manager is not None:
         executor = _override_compute_executor(http_request)
         if executor is None:
-            raise RuntimeError("Missing compute override executor for manager override")
+            raise RuntimeError('Missing compute override executor for manager override')
 
         result = executor.export_data(
             session=session,
             manager=manager,
             target_step_id=request.target_step_id,
-            analysis_pipeline=request.analysis_pipeline.model_dump(mode="json"),
+            analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
             filename=request.filename,
             iceberg_options=request.iceberg_options.model_dump() if request.iceberg_options else None,
             analysis_id=request.analysis_id,
             tab_id=request.tab_id,
-            request_json=request.model_dump(mode="json"),
+            request_json=request.model_dump(mode='json'),
             result_id=request.result_id,
         )
         return schemas.ExportResponse(
             success=True,
             filename=result.datasource_name,
-            format="iceberg",
+            format='iceberg',
             destination=request.destination.value,
-            message=f"Created datasource {result.datasource_name}",
+            message=f'Created datasource {result.datasource_name}',
             datasource_id=result.datasource_id,
-            datasource_name=result.result_meta.get("datasource_name") if isinstance(result.result_meta, dict) else None,
+            datasource_name=result.result_meta.get('datasource_name') if isinstance(result.result_meta, dict) else None,
         )
     return await executor_client.export_data(session, request, runtime_probe=runtime_probe)
 
 
-@router.post("/download", mcp=True)
-@handle_errors(operation="download step")
+@router.post('/download', mcp=True)
+@handle_errors(operation='download step')
 async def download_step(
     request: schemas.DownloadRequest,
     http_request: Request,
@@ -1038,13 +1392,13 @@ async def download_step(
     if manager is not None:
         executor = _override_compute_executor(http_request)
         if executor is None:
-            raise RuntimeError("Missing compute override executor for manager override")
+            raise RuntimeError('Missing compute override executor for manager override')
 
         file_bytes, filename, content_type = executor.download_step(
             session=session,
             manager=manager,
             target_step_id=request.target_step_id,
-            analysis_pipeline=request.analysis_pipeline.model_dump(mode="json"),
+            analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
             export_format=request.format.value,
             filename=request.filename,
             analysis_id=request.analysis_id,
@@ -1060,11 +1414,11 @@ async def download_step(
     if file_bytes is None or filename is None or content_type is None:
         from fastapi import HTTPException
 
-        raise HTTPException(status_code=500, detail="Download file content not available")
+        raise HTTPException(status_code=500, detail='Download file content not available')
 
     safe_name = quote(filename)
     return Response(
         content=file_bytes,
         media_type=content_type,
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        headers={'Content-Disposition': f'attachment; filename="{safe_name}"'},
     )

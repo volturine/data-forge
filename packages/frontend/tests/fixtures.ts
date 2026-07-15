@@ -2,7 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Browser, Page } from '@playwright/test';
 import { expect, test as base } from '@playwright/test';
-import { E2E_PASSWORD, E2E_RUN_STAMP, type E2ERequest, workerAuthFile } from './utils/api.js';
+import {
+	disposeWorkerSetupContexts,
+	E2E_PASSWORD,
+	E2E_RUN_STAMP,
+	type E2ERequest,
+	workerAuthFile
+} from './utils/api.js';
 
 export { expect } from '@playwright/test';
 
@@ -17,7 +23,25 @@ interface WorkerAuth {
 }
 
 async function expectSignedIn(page: Page): Promise<void> {
-	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 15_000 });
+	// Under CI load the shell can take longer to hydrate after navigation,
+	// and the Vite dev server can occasionally reload a route module while
+	// auth bootstrap is still warming a fresh worker session.
+	const timeout = process.env.CI ? 15_000 : 5_000;
+	let lastError: unknown;
+
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout });
+			return;
+		} catch (error) {
+			lastError = error;
+			if (attempt === 2) break;
+			await page.goto('/', { waitUntil: 'domcontentloaded' }).catch(() => undefined);
+			await page.waitForLoadState('networkidle', { timeout }).catch(() => undefined);
+		}
+	}
+
+	throw lastError;
 }
 
 async function authFileIsValid(browser: Browser, workerAuth: WorkerAuth): Promise<boolean> {
@@ -28,7 +52,7 @@ async function authFileIsValid(browser: Browser, workerAuth: WorkerAuth): Promis
 	});
 	const page = await context.newPage();
 	try {
-		await page.goto('/', { waitUntil: 'domcontentloaded' });
+		await page.goto('/', { waitUntil: 'networkidle' });
 		if (
 			await page
 				.getByLabel('Main navigation')
@@ -62,6 +86,10 @@ async function createAuthFile(browser: Browser, workerAuth: WorkerAuth): Promise
 		if (authRequired) {
 			const email = `e2e-ui-${E2E_RUN_STAMP}-w${workerAuth.workerIndex}@example.com`;
 			await page.goto('/register', { waitUntil: 'domcontentloaded' });
+			// Wait for SvelteKit hydration to complete before interacting;
+			// under CI load hydration can lag behind DOMContentLoaded.
+			await page.waitForLoadState('networkidle');
+			await page.locator('[data-auth-form-ready="true"]').waitFor({ timeout: 10_000 });
 			const nameInput = page.locator('#name');
 			const emailInput = page.locator('#email');
 			const passwordInput = page.locator('#password');
@@ -75,18 +103,18 @@ async function createAuthFile(browser: Browser, workerAuth: WorkerAuth): Promise
 			await expect(passwordInput).toHaveValue(E2E_PASSWORD);
 			await expect(confirmInput).toHaveValue(E2E_PASSWORD);
 			const createButton = page.getByRole('button', { name: 'Create account', exact: true });
-			await expect(createButton).toBeEnabled({ timeout: 15_000 });
+			await expect(createButton).toBeEnabled({ timeout: 5_000 });
 			await createButton.click();
 			const continueLink = page.getByRole('link', { name: /Continue/i });
 			await Promise.race([
-				continueLink.waitFor({ state: 'visible', timeout: 15_000 }),
-				page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 15_000 }),
-				page.getByText(/Account created\./i).waitFor({ state: 'visible', timeout: 15_000 })
+				continueLink.waitFor({ state: 'visible', timeout: 5_000 }),
+				page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 5_000 }),
+				page.getByText(/Account created\./i).waitFor({ state: 'visible', timeout: 5_000 })
 			]).catch(() => undefined);
 			if (await continueLink.isVisible().catch(() => false)) {
 				await continueLink.click();
 			} else {
-				await page.goto('/', { waitUntil: 'domcontentloaded' });
+				await page.goto('/', { waitUntil: 'networkidle' });
 			}
 			await expectSignedIn(page);
 		}
@@ -115,6 +143,7 @@ export const test = base.extend<{ page: Page; request: E2ERequest }, { workerAut
 			const workerAuth = { authFile, workerIndex: workerInfo.workerIndex };
 			await ensureAuthFileReady(browser, workerAuth);
 			await use(workerAuth);
+			await disposeWorkerSetupContexts(authFile);
 			try {
 				fs.unlinkSync(authFile);
 			} catch {
@@ -142,6 +171,6 @@ export const test = base.extend<{ page: Page; request: E2ERequest }, { workerAut
 			authFile: workerAuth.authFile,
 			workerIndex: workerAuth.workerIndex,
 			baseURL
-		} as unknown as import('@playwright/test').APIRequestContext);
+		} as unknown as E2ERequest);
 	}
 });

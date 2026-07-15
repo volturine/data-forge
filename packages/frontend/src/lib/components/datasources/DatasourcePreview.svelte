@@ -7,14 +7,10 @@
 	} from '$lib/api/compute';
 	import DataTable from '$lib/components/common/DataTable.svelte';
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
-	import type { DataSource } from '$lib/types/datasource';
-	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { datasourceHasMaterializedSnapshot, type DataSource } from '$lib/types/datasource';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import {
-		buildAnalysisPipelinePayload,
-		type AnalysisPipelinePayload,
-		buildDatasourcePipelinePayload,
+		buildDatasourcePreviewPipelinePayload,
 		normalizeSnapshotConfig
 	} from '$lib/utils/analysis-pipeline';
 	import { css } from '$lib/styles/panda';
@@ -45,80 +41,20 @@
 	}
 
 	const resolvedDatasource = $derived(datasource ?? null);
-	const analysisSourceId = $derived.by(() => {
-		return (
-			resolvedDatasource?.created_by_analysis_id ??
-			(datasourceConfig?.analysis_id as string | null | undefined) ??
-			((resolvedDatasource?.config as Record<string, unknown> | null)?.analysis_id as
-				| string
-				| null
-				| undefined) ??
-			null
-		);
-	});
+	const canPreviewDatasource = $derived(
+		!!resolvedDatasource && datasourceHasMaterializedSnapshot(resolvedDatasource)
+	);
 	const analysisPipeline = $derived.by(() => {
-		const activeId = analysisStore.current?.id ?? null;
-		if (analysisSourceId && activeId === analysisSourceId) {
-			return buildAnalysisPipelinePayload(
-				activeId,
-				analysisStore.tabs,
-				datasourceStore.datasources
-			);
-		}
 		if (!resolvedDatasource) return null;
 		if (!datasourceConfig) return null;
-		if (analysisSourceId) {
-			const outputTabId = resolvedDatasource.output_of_tab_id ?? null;
-			const normalizedConfig = normalizeSnapshotConfig(datasourceConfig);
-			const branchRaw = normalizedConfig.branch;
-			if (typeof branchRaw !== 'string' || !branchRaw.trim()) return null;
-			const filename = resolvedDatasource.name.trim().replace(/\s+/g, '_').toLowerCase();
-			return {
-				analysis_id: analysisSourceId,
-				tabs: [
-					{
-						id: `datasource-${resolvedDatasource.id}`,
-						name: resolvedDatasource.name,
-						datasource: {
-							id: resolvedDatasource.id,
-							analysis_tab_id: outputTabId,
-							source_type: 'analysis',
-							config: normalizedConfig
-						},
-						output: {
-							result_id: resolvedDatasource.id,
-							format: 'parquet',
-							filename: resolvedDatasource.name,
-							build_mode: 'full',
-							iceberg: {
-								namespace: 'outputs',
-								table_name: filename,
-								branch: branchRaw.trim()
-							}
-						},
-						steps: []
-					}
-				]
-			} satisfies AnalysisPipelinePayload;
-		}
-		return buildDatasourcePipelinePayload({
+		return buildDatasourcePreviewPipelinePayload({
 			datasource: resolvedDatasource,
 			datasourceConfig
 		});
 	});
 
-	const configKey = $derived(JSON.stringify(datasourceConfig));
+	const configKey = $derived(JSON.stringify(normalizeSnapshotConfig(datasourceConfig)));
 	const pipelineKey = $derived(JSON.stringify(analysisPipeline));
-	const resetKey = $derived(`${datasourceId}:${configKey}:${pipelineKey}`);
-
-	// Subscription: $derived can't reset pagination/state.
-	$effect(() => {
-		if (!datasourceId) return;
-		void resetKey;
-		page = 1;
-		statsOpen = false;
-		statsColumn = null;
-	});
 
 	const query = createQuery(() => ({
 		queryKey: [
@@ -133,8 +69,13 @@
 		queryFn: async (): Promise<StepPreviewResponse> => {
 			const pipeline = analysisPipeline!;
 			const request = {
-				analysis_id: '',
 				target_step_id: 'source',
+				engine_identity: {
+					scope: 'datasource_preview',
+					reuse_policy: 'shared',
+					resource_id: datasourceId,
+					datasource_id: datasourceId
+				},
 				analysis_pipeline: pipeline,
 				row_limit: rowLimit,
 				page
@@ -146,7 +87,9 @@
 			return result.value;
 		},
 		staleTime: 30000,
-		enabled: !!datasourceId && !!analysisPipeline && !ns.switching
+		refetchOnMount: false,
+		retry: false,
+		enabled: !!datasourceId && !!analysisPipeline && !ns.switching && canPreviewDatasource
 	}));
 
 	const data = $derived(query.data);
@@ -177,33 +120,49 @@
 	})}
 	data-preview-ready={data && !isLoading ? 'true' : undefined}
 >
-	<div class={css({ overflow: 'hidden', height: 'full' })}>
-		<DataTable
-			columns={data?.columns ?? []}
-			data={data?.data ?? []}
-			columnTypes={data?.column_types ?? {}}
-			loading={isLoading}
-			{error}
-			fillContainer
-			bind:columnSearch
-			showHeader
-			showPagination
-			pagination={{
-				page,
-				canPrev,
-				canNext,
-				onPrev: goPrev,
-				onNext: goNext
-			}}
-			showTypeBadges
-			onColumnStats={handleColumnStats}
+	{#if !canPreviewDatasource}
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				height: 'full',
+				padding: '6',
+				textAlign: 'center',
+				color: 'fg.muted'
+			})}
+		>
+			Build this output before previewing or refreshing its schema.
+		</div>
+	{:else}
+		<div class={css({ overflow: 'hidden', height: 'full' })}>
+			<DataTable
+				columns={data?.columns ?? []}
+				data={data?.data ?? []}
+				columnTypes={data?.column_types ?? {}}
+				loading={isLoading}
+				{error}
+				fillContainer
+				bind:columnSearch
+				showHeader
+				showPagination
+				pagination={{
+					page,
+					canPrev,
+					canNext,
+					onPrev: goPrev,
+					onNext: goNext
+				}}
+				showTypeBadges
+				onColumnStats={handleColumnStats}
+			/>
+		</div>
+		<ColumnStatsPanel
+			{datasourceId}
+			columnName={statsColumn}
+			open={statsOpen}
+			{datasourceConfig}
+			onClose={handleStatsClose}
 		/>
-	</div>
-	<ColumnStatsPanel
-		{datasourceId}
-		columnName={statsColumn}
-		open={statsOpen}
-		{datasourceConfig}
-		onClose={handleStatsClose}
-	/>
+	{/if}
 </div>

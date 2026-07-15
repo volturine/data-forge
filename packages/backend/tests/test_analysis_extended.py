@@ -3,8 +3,21 @@
 import uuid
 from typing import Any
 
-from contracts.analysis.models import Analysis
-from contracts.datasource.models import DataSource
+from backend_core.persistence.analysis.models import Analysis
+from backend_core.persistence.datasource.models import DataSource
+
+
+def _filter_config(column: str, operator: str, value: object) -> dict[str, object]:
+    return {
+        'conditions': [
+            {
+                'column': column,
+                'operator': operator,
+                'value': value,
+            }
+        ],
+        'logic': 'AND',
+    }
 
 
 class TestAnalysisValidation:
@@ -13,89 +26,89 @@ class TestAnalysisValidation:
     def test_create_analysis_missing_name(self, client, sample_datasource: DataSource):
         """Test creating analysis without a name."""
         payload = {
-            "description": "Test analysis",
-            "tabs": [
+            'description': 'Test analysis',
+            'tabs': [
                 {
-                    "id": "tab1",
-                    "name": "Source",
-                    "parent_id": None,
-                    "datasource": {
-                        "id": sample_datasource.id,
-                        "analysis_tab_id": None,
-                        "config": {"branch": "master"},
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
                     },
-                    "output": {
-                        "result_id": str(uuid.uuid4()),
-                        "datasource_type": "iceberg",
-                        "format": "parquet",
-                        "filename": "source_a",
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_a',
                     },
-                    "steps": [],
+                    'steps': [],
                 },
             ],
         }
 
-        response = client.post("/api/v1/analysis", json=payload)
+        response = client.post('/api/v1/analysis', json=payload)
 
         assert response.status_code == 422
 
     def test_create_analysis_empty_name(self, client, sample_datasource: DataSource):
         """Test creating analysis with empty name."""
         payload = {
-            "name": "",
-            "description": "Test",
-            "tabs": [
+            'name': '',
+            'description': 'Test',
+            'tabs': [
                 {
-                    "id": "tab1",
-                    "name": "Source",
-                    "parent_id": None,
-                    "datasource": {
-                        "id": sample_datasource.id,
-                        "analysis_tab_id": None,
-                        "config": {"branch": "master"},
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
                     },
-                    "output": {
-                        "result_id": str(uuid.uuid4()),
-                        "datasource_type": "iceberg",
-                        "format": "parquet",
-                        "filename": "source_b",
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_b',
                     },
-                    "steps": [],
+                    'steps': [],
                 },
             ],
         }
 
-        response = client.post("/api/v1/analysis", json=payload)
+        response = client.post('/api/v1/analysis', json=payload)
 
         assert response.status_code in [400, 422]
 
     def test_create_analysis_with_long_name(self, client, sample_datasource: DataSource):
         """Test creating analysis with very long name."""
         payload = {
-            "name": "A" * 1000,
-            "description": "Test",
-            "tabs": [
+            'name': 'A' * 1000,
+            'description': 'Test',
+            'tabs': [
                 {
-                    "id": "tab1",
-                    "name": "Source",
-                    "parent_id": None,
-                    "datasource": {
-                        "id": sample_datasource.id,
-                        "analysis_tab_id": None,
-                        "config": {"branch": "master"},
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
                     },
-                    "output": {
-                        "result_id": str(uuid.uuid4()),
-                        "datasource_type": "iceberg",
-                        "format": "parquet",
-                        "filename": "source_c",
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_c',
                     },
-                    "steps": [],
+                    'steps': [],
                 },
             ],
         }
 
-        response = client.post("/api/v1/analysis", json=payload)
+        response = client.post('/api/v1/analysis', json=payload)
 
         # Should succeed or fail with validation error
         assert response.status_code in [200, 201, 422]
@@ -103,63 +116,63 @@ class TestAnalysisValidation:
     def test_create_analysis_with_special_characters(self, client, sample_datasource: DataSource):
         """Test creating analysis with special characters in name."""
         payload = {
-            "name": 'Test <script>alert("xss")</script>',
-            "description": "Test",
-            "tabs": [
+            'name': 'Test <script>alert("xss")</script>',
+            'description': 'Test',
+            'tabs': [
                 {
-                    "id": "tab1",
-                    "name": "Source",
-                    "parent_id": None,
-                    "datasource": {
-                        "id": sample_datasource.id,
-                        "analysis_tab_id": None,
-                        "config": {"branch": "master"},
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
                     },
-                    "output": {
-                        "result_id": str(uuid.uuid4()),
-                        "datasource_type": "iceberg",
-                        "format": "parquet",
-                        "filename": "source_d",
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_d',
                     },
-                    "steps": [],
+                    'steps': [],
                 },
             ],
         }
 
-        response = client.post("/api/v1/analysis", json=payload)
+        response = client.post('/api/v1/analysis', json=payload)
 
         # Should succeed and escape special characters
         if response.status_code in [200, 201]:
             data = response.json()
-            assert "id" in data
+            assert 'id' in data
 
     def test_update_nonexistent_analysis(self, client):
         """Test updating analysis that doesn't exist."""
         fake_id = str(uuid.uuid4())
         payload = {
-            "name": "Updated",
-            "tabs": [
+            'name': 'Updated',
+            'tabs': [
                 {
-                    "id": "tab1",
-                    "name": "Source",
-                    "parent_id": None,
-                    "datasource": {
-                        "id": str(uuid.uuid4()),
-                        "analysis_tab_id": None,
-                        "config": {"branch": "master"},
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': str(uuid.uuid4()),
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
                     },
-                    "output": {
-                        "result_id": str(uuid.uuid4()),
-                        "datasource_type": "iceberg",
-                        "format": "parquet",
-                        "filename": "source_e",
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_e',
                     },
-                    "steps": [],
+                    'steps': [],
                 },
             ],
         }
 
-        response = client.put(f"/api/v1/analysis/{fake_id}", json=payload)
+        response = client.put(f'/api/v1/analysis/{fake_id}', json=payload)
 
         assert response.status_code == 404
 
@@ -167,7 +180,7 @@ class TestAnalysisValidation:
         """Test deleting analysis that doesn't exist."""
         fake_id = str(uuid.uuid4())
 
-        response = client.delete(f"/api/v1/analysis/{fake_id}")
+        response = client.delete(f'/api/v1/analysis/{fake_id}')
 
         assert response.status_code == 404
 
@@ -175,7 +188,7 @@ class TestAnalysisValidation:
         """Test getting analysis that doesn't exist."""
         fake_id = str(uuid.uuid4())
 
-        response = client.get(f"/api/v1/analysis/{fake_id}")
+        response = client.get(f'/api/v1/analysis/{fake_id}')
 
         assert response.status_code == 404
 
@@ -186,144 +199,144 @@ class TestAnalysisPipeline:
     def test_create_analysis_with_empty_pipeline(self, client, sample_datasource: DataSource):
         """Test creating analysis with empty pipeline."""
         payload = {
-            "name": "Empty Pipeline Analysis",
-            "tabs": [
+            'name': 'Empty Pipeline Analysis',
+            'tabs': [
                 {
-                    "id": "tab1",
-                    "name": "Source",
-                    "parent_id": None,
-                    "datasource": {
-                        "id": sample_datasource.id,
-                        "analysis_tab_id": None,
-                        "config": {"branch": "master"},
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
                     },
-                    "output": {
-                        "result_id": str(uuid.uuid4()),
-                        "datasource_type": "iceberg",
-                        "format": "parquet",
-                        "filename": "source_f",
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_f',
                     },
-                    "steps": [],
+                    'steps': [],
                 },
             ],
         }
 
-        response = client.post("/api/v1/analysis", json=payload)
+        response = client.post('/api/v1/analysis', json=payload)
 
         assert response.status_code in [200, 201]
 
     def test_create_analysis_with_complex_pipeline(self, client, sample_datasource: DataSource):
         """Test creating analysis with complex pipeline."""
         payload = {
-            "name": "Complex Pipeline",
-            "tabs": [
+            'name': 'Complex Pipeline',
+            'tabs': [
                 {
-                    "id": "tab1",
-                    "name": "Source",
-                    "parent_id": None,
-                    "datasource": {
-                        "id": sample_datasource.id,
-                        "analysis_tab_id": None,
-                        "config": {"branch": "master"},
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
                     },
-                    "output": {
-                        "result_id": str(uuid.uuid4()),
-                        "datasource_type": "iceberg",
-                        "format": "parquet",
-                        "filename": "source_g",
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_g',
                     },
-                    "steps": [
+                    'steps': [
                         {
-                            "id": "step1",
-                            "type": "filter",
-                            "config": {"column": "age", "operator": ">", "value": 30},
-                            "depends_on": [],
+                            'id': 'step1',
+                            'type': 'filter',
+                            'config': _filter_config('age', '>', 30),
+                            'depends_on': [],
                         },
                         {
-                            "id": "step2",
-                            "type": "select",
-                            "config": {"columns": ["name", "age"]},
-                            "depends_on": ["step1"],
+                            'id': 'step2',
+                            'type': 'select',
+                            'config': {'columns': ['name', 'age']},
+                            'depends_on': ['step1'],
                         },
                         {
-                            "id": "step3",
-                            "type": "sort",
-                            "config": {"columns": ["age"], "descending": [True]},
-                            "depends_on": ["step2"],
+                            'id': 'step3',
+                            'type': 'sort',
+                            'config': {'columns': ['age'], 'descending': [True]},
+                            'depends_on': ['step2'],
                         },
                     ],
                 },
             ],
         }
 
-        response = client.post("/api/v1/analysis", json=payload)
+        response = client.post('/api/v1/analysis', json=payload)
 
         assert response.status_code in [200, 201]
         data = response.json()
-        assert len(data["pipeline_definition"]["tabs"][0]["steps"]) == 3
+        assert len(data['pipeline_definition']['tabs'][0]['steps']) == 3
 
     def test_update_analysis_pipeline(self, client, sample_analysis: Analysis):
         """Test updating analysis pipeline."""
         new_steps: list[dict[str, Any]] = [
             {
-                "id": "new_step",
-                "type": "filter",
-                "config": {"column": "id", "operator": "=", "value": 1},
-                "depends_on": [],
+                'id': 'new_step',
+                'type': 'filter',
+                'config': _filter_config('id', '=', 1),
+                'depends_on': [],
             },
         ]
-        tabs = sample_analysis.pipeline_definition["tabs"]
-        tabs[0]["steps"] = new_steps
+        tabs = sample_analysis.pipeline_definition['tabs']
+        tabs[0]['steps'] = new_steps
 
         payload = {
-            "tabs": tabs,
+            'tabs': tabs,
         }
 
-        response = client.put(f"/api/v1/analysis/{sample_analysis.id}", json=payload)
+        response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 
         assert response.status_code == 200
         data = response.json()
-        assert len(data["pipeline_definition"]["tabs"][0]["steps"]) >= 1
+        assert len(data['pipeline_definition']['tabs'][0]['steps']) >= 1
 
     def test_analysis_with_circular_dependencies(self, client, sample_datasource: DataSource):
         """Test creating analysis with circular dependencies."""
         payload = {
-            "name": "Circular Deps",
-            "tabs": [
+            'name': 'Circular Deps',
+            'tabs': [
                 {
-                    "id": "tab1",
-                    "name": "Source",
-                    "parent_id": None,
-                    "datasource": {
-                        "id": sample_datasource.id,
-                        "analysis_tab_id": None,
-                        "config": {"branch": "master"},
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
                     },
-                    "output": {
-                        "result_id": str(uuid.uuid4()),
-                        "datasource_type": "iceberg",
-                        "format": "parquet",
-                        "filename": "source_h",
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_h',
                     },
-                    "steps": [
+                    'steps': [
                         {
-                            "id": "step1",
-                            "type": "filter",
-                            "config": {},
-                            "depends_on": ["step2"],
+                            'id': 'step1',
+                            'type': 'filter',
+                            'config': {},
+                            'depends_on': ['step2'],
                         },
                         {
-                            "id": "step2",
-                            "type": "filter",
-                            "config": {},
-                            "depends_on": ["step1"],
+                            'id': 'step2',
+                            'type': 'filter',
+                            'config': {},
+                            'depends_on': ['step1'],
                         },
                     ],
                 },
             ],
         }
 
-        response = client.post("/api/v1/analysis", json=payload)
+        response = client.post('/api/v1/analysis', json=payload)
 
         # Should either reject or accept (validation depends on implementation)
         assert response.status_code in [200, 201, 400, 422]
@@ -334,40 +347,40 @@ class TestAnalysisPayloadContracts:
 
     def test_update_analysis_rejects_status_field(self, client, sample_analysis: Analysis):
         payload = {
-            "status": "running",
-            "tabs": sample_analysis.pipeline_definition["tabs"],
+            'status': 'running',
+            'tabs': sample_analysis.pipeline_definition['tabs'],
         }
 
-        response = client.put(f"/api/v1/analysis/{sample_analysis.id}", json=payload)
+        response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 
         assert response.status_code == 422
 
     def test_create_analysis_rejects_status_field(self, client, sample_datasource: DataSource):
         payload = {
-            "name": "Status Should Fail",
-            "status": "draft",
-            "tabs": [
+            'name': 'Status Should Fail',
+            'status': 'draft',
+            'tabs': [
                 {
-                    "id": "tab1",
-                    "name": "Source",
-                    "parent_id": None,
-                    "datasource": {
-                        "id": sample_datasource.id,
-                        "analysis_tab_id": None,
-                        "config": {"branch": "master"},
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
                     },
-                    "output": {
-                        "result_id": "11111111-1111-4111-8111-111111111111",
-                        "datasource_type": "iceberg",
-                        "format": "parquet",
-                        "filename": "source_1",
+                    'output': {
+                        'result_id': '11111111-1111-4111-8111-111111111111',
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_1',
                     },
-                    "steps": [],
+                    'steps': [],
                 },
             ],
         }
 
-        response = client.post("/api/v1/analysis", json=payload)
+        response = client.post('/api/v1/analysis', json=payload)
 
         assert response.status_code == 422
 
@@ -377,7 +390,7 @@ class TestAnalysisListing:
 
     def test_list_empty_analyses(self, client):
         """Test listing when no analyses exist."""
-        response = client.get("/api/v1/analysis")
+        response = client.get('/api/v1/analysis')
 
         assert response.status_code == 200
         data = response.json()
@@ -385,7 +398,7 @@ class TestAnalysisListing:
 
     def test_list_multiple_analyses(self, client, sample_analyses: list[Analysis]):
         """Test listing multiple analyses."""
-        response = client.get("/api/v1/analysis")
+        response = client.get('/api/v1/analysis')
 
         assert response.status_code == 200
         data = response.json()
@@ -393,7 +406,7 @@ class TestAnalysisListing:
 
     def test_list_analyses_ordering(self, client, sample_analyses: list[Analysis]):
         """Test that analyses are ordered consistently."""
-        response = client.get("/api/v1/analysis")
+        response = client.get('/api/v1/analysis')
 
         assert response.status_code == 200
         data = response.json()
@@ -408,84 +421,84 @@ class TestAnalysisMetadata:
     def test_update_analysis_description(self, client, sample_analysis: Analysis):
         """Test updating analysis description."""
         payload = {
-            "description": "Updated description",
-            "tabs": sample_analysis.pipeline_definition["tabs"],
+            'description': 'Updated description',
+            'tabs': sample_analysis.pipeline_definition['tabs'],
         }
 
-        response = client.put(f"/api/v1/analysis/{sample_analysis.id}", json=payload)
+        response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 
         assert response.status_code == 200
         data = response.json()
-        assert data["description"] == "Updated description"
+        assert data['description'] == 'Updated description'
 
     def test_update_analysis_thumbnail(self, client, sample_analysis: Analysis):
         """Test updating analysis thumbnail."""
-        thumbnail = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        thumbnail = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
         payload = {
-            "thumbnail": thumbnail,
-            "tabs": sample_analysis.pipeline_definition["tabs"],
+            'thumbnail': thumbnail,
+            'tabs': sample_analysis.pipeline_definition['tabs'],
         }
 
-        response = client.put(f"/api/v1/analysis/{sample_analysis.id}", json=payload)
+        response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 
         assert response.status_code == 200
         data = response.json()
-        assert "thumbnail" in data
+        assert 'thumbnail' in data
 
     def test_analysis_timestamps(self, client, sample_datasource: DataSource):
         """Test that analysis has proper timestamps."""
         payload = {
-            "name": "Timestamp Test",
-            "tabs": [
+            'name': 'Timestamp Test',
+            'tabs': [
                 {
-                    "id": "tab1",
-                    "name": "Source",
-                    "parent_id": None,
-                    "datasource": {
-                        "id": sample_datasource.id,
-                        "analysis_tab_id": None,
-                        "config": {"branch": "master"},
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
                     },
-                    "output": {
-                        "result_id": str(uuid.uuid4()),
-                        "datasource_type": "iceberg",
-                        "format": "parquet",
-                        "filename": "source_i",
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_i',
                     },
-                    "steps": [],
+                    'steps': [],
                 },
             ],
         }
 
-        response = client.post("/api/v1/analysis", json=payload)
+        response = client.post('/api/v1/analysis', json=payload)
 
         assert response.status_code in [200, 201]
         data = response.json()
-        assert "created_at" in data
-        assert "updated_at" in data
+        assert 'created_at' in data
+        assert 'updated_at' in data
 
     def test_updated_at_changes_on_update(self, client, sample_analysis: Analysis):
         """Test that updated_at changes when analysis is updated."""
         # Get original
-        response1 = client.get(f"/api/v1/analysis/{sample_analysis.id}")
+        response1 = client.get(f'/api/v1/analysis/{sample_analysis.id}')
         response1.json()
 
         # Update
         client.put(
-            f"/api/v1/analysis/{sample_analysis.id}",
+            f'/api/v1/analysis/{sample_analysis.id}',
             json={
-                "name": "Updated",
-                "tabs": sample_analysis.pipeline_definition["tabs"],
+                'name': 'Updated',
+                'tabs': sample_analysis.pipeline_definition['tabs'],
             },
         )
 
         # Get updated
-        response2 = client.get(f"/api/v1/analysis/{sample_analysis.id}")
+        response2 = client.get(f'/api/v1/analysis/{sample_analysis.id}')
         updated = response2.json()
 
         # updated_at should change (if granular enough)
         # This might fail if updates happen too quickly
-        assert "updated_at" in updated
+        assert 'updated_at' in updated
 
 
 class TestDeriveTab:
@@ -493,72 +506,72 @@ class TestDeriveTab:
 
     def test_derive_tab_creates_new_tab(self, client, sample_analysis: Analysis):
         """Derive creates a new tab chaining from the source tab's result_id."""
-        tab_id = "tab1"
-        response = client.post(f"/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/derive", json={})
+        tab_id = 'tab1'
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/derive', json={})
 
         assert response.status_code == 200
         data = response.json()
-        assert data["id"] != tab_id
-        assert data["parent_id"] == tab_id
-        assert data["datasource"]["analysis_tab_id"] == tab_id
-        assert len(data["steps"]) == 1
-        assert data["steps"][0]["type"] == "view"
+        assert data['id'] != tab_id
+        assert data['parent_id'] == tab_id
+        assert data['datasource']['analysis_tab_id'] == tab_id
+        assert len(data['steps']) == 1
+        assert data['steps'][0]['type'] == 'view'
 
     def test_derive_tab_datasource_is_source_result_id(self, client, sample_analysis: Analysis):
         """Derived tab's datasource.id equals source tab's output.result_id."""
-        tab_id = "tab1"
-        source_result_id = sample_analysis.pipeline_definition["tabs"][0]["output"]["result_id"]
+        tab_id = 'tab1'
+        source_result_id = sample_analysis.pipeline_definition['tabs'][0]['output']['result_id']
 
-        response = client.post(f"/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/derive", json={})
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/derive', json={})
 
         assert response.status_code == 200
         data = response.json()
-        assert data["datasource"]["id"] == source_result_id
+        assert data['datasource']['id'] == source_result_id
 
     def test_derive_tab_custom_name(self, client, sample_analysis: Analysis):
         """Derived tab uses the provided name."""
         response = client.post(
-            f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive",
-            json={"name": "My Derived Tab"},
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
+            json={'name': 'My Derived Tab'},
         )
 
         assert response.status_code == 200
         data = response.json()
-        assert data["name"] == "My Derived Tab"
+        assert data['name'] == 'My Derived Tab'
 
     def test_derive_tab_default_name(self, client, sample_analysis: Analysis):
         """Derived tab gets a default name when none is provided."""
         response = client.post(
-            f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive",
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
             json={},
         )
 
         assert response.status_code == 200
         data = response.json()
-        assert data["name"].startswith("Derived")
+        assert data['name'].startswith('Derived')
 
     def test_derive_tab_appears_in_analysis(self, client, sample_analysis: Analysis):
         """Derived tab is persisted and appears in GET /analysis/{id}."""
         client.post(
-            f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive",
-            json={"name": "D1"},
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
+            json={'name': 'D1'},
         )
 
-        response = client.get(f"/api/v1/analysis/{sample_analysis.id}")
+        response = client.get(f'/api/v1/analysis/{sample_analysis.id}')
         assert response.status_code == 200
-        tabs = response.json()["pipeline_definition"]["tabs"]
-        assert any(t["name"] == "D1" for t in tabs)
+        tabs = response.json()['pipeline_definition']['tabs']
+        assert any(t['name'] == 'D1' for t in tabs)
 
     def test_derive_tab_nonexistent_analysis(self, client):
         """Returns 404 for nonexistent analysis."""
-        response = client.post(f"/api/v1/analysis/{uuid.uuid4()}/tabs/tab1/derive", json={})
+        response = client.post(f'/api/v1/analysis/{uuid.uuid4()}/tabs/tab1/derive', json={})
 
         assert response.status_code == 404
 
     def test_derive_tab_nonexistent_tab(self, client, sample_analysis: Analysis):
         """Returns 400 for nonexistent tab_id."""
         response = client.post(
-            f"/api/v1/analysis/{sample_analysis.id}/tabs/nonexistent/derive",
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/nonexistent/derive',
             json={},
         )
 
@@ -566,36 +579,36 @@ class TestDeriveTab:
 
     def test_derive_tab_output_has_new_result_id(self, client, sample_analysis: Analysis):
         """Derived tab gets a fresh result_id distinct from source."""
-        source_result_id = sample_analysis.pipeline_definition["tabs"][0]["output"]["result_id"]
+        source_result_id = sample_analysis.pipeline_definition['tabs'][0]['output']['result_id']
 
         response = client.post(
-            f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive",
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
             json={},
         )
 
         assert response.status_code == 200
         data = response.json()
-        assert data["output"]["result_id"] != source_result_id
+        assert data['output']['result_id'] != source_result_id
 
     def test_update_analysis_with_derived_tab(self, client, sample_analysis: Analysis):
         """Updating an analysis that has a derived tab (intra-analysis chain) should succeed."""
         # First derive a tab
         derive_resp = client.post(
-            f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive",
-            json={"name": "Derived"},
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
+            json={'name': 'Derived'},
         )
         assert derive_resp.status_code == 200
 
         # Get full analysis with both tabs
-        get_resp = client.get(f"/api/v1/analysis/{sample_analysis.id}")
+        get_resp = client.get(f'/api/v1/analysis/{sample_analysis.id}')
         analysis_data = get_resp.json()
-        tabs = analysis_data["pipeline_definition"]["tabs"]
+        tabs = analysis_data['pipeline_definition']['tabs']
         assert len(tabs) == 2
 
         # Update with both tabs (derived tab references same analysis)
         update_resp = client.put(
-            f"/api/v1/analysis/{sample_analysis.id}",
-            json={"tabs": tabs},
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json={'tabs': tabs},
         )
         assert update_resp.status_code == 200
 
@@ -604,90 +617,90 @@ class TestDuplicateTab:
     """Tests for POST /api/v1/analysis/{id}/tabs/{tab_id}/duplicate."""
 
     def test_duplicate_tab_inserts_adjacent_and_generates_copy_name(self, client, sample_analysis: Analysis):
-        response = client.post(f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate", json={})
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate', json={})
         assert response.status_code == 200
         duplicated = response.json()
-        assert duplicated["name"] == "Source Copy"
-        assert duplicated["id"] != "tab1"
-        assert duplicated["output"]["result_id"] != sample_analysis.pipeline_definition["tabs"][0]["output"]["result_id"]
+        assert duplicated['name'] == 'Source Copy'
+        assert duplicated['id'] != 'tab1'
+        assert duplicated['output']['result_id'] != sample_analysis.pipeline_definition['tabs'][0]['output']['result_id']
 
-        read_back = client.get(f"/api/v1/analysis/{sample_analysis.id}")
+        read_back = client.get(f'/api/v1/analysis/{sample_analysis.id}')
         assert read_back.status_code == 200
-        tabs = read_back.json()["pipeline_definition"]["tabs"]
-        source_idx = next(i for i, tab in enumerate(tabs) if tab["id"] == "tab1")
-        duplicate_idx = next(i for i, tab in enumerate(tabs) if tab["id"] == duplicated["id"])
+        tabs = read_back.json()['pipeline_definition']['tabs']
+        source_idx = next(i for i, tab in enumerate(tabs) if tab['id'] == 'tab1')
+        duplicate_idx = next(i for i, tab in enumerate(tabs) if tab['id'] == duplicated['id'])
         assert duplicate_idx == source_idx + 1
 
-        second_response = client.post(f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate", json={})
+        second_response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate', json={})
         assert second_response.status_code == 200
-        assert second_response.json()["name"] == "Source Copy 2"
+        assert second_response.json()['name'] == 'Source Copy 2'
 
     def test_duplicate_tab_rewrites_step_ids_and_dependencies(self, client, sample_analysis: Analysis):
-        current = client.get(f"/api/v1/analysis/{sample_analysis.id}")
+        current = client.get(f'/api/v1/analysis/{sample_analysis.id}')
         assert current.status_code == 200
-        tabs = current.json()["pipeline_definition"]["tabs"]
-        tabs[0]["steps"].append(
+        tabs = current.json()['pipeline_definition']['tabs']
+        tabs[0]['steps'].append(
             {
-                "id": "step2",
-                "type": "filter",
-                "config": {"column": "age", "operator": ">", "value": 40},
-                "depends_on": ["step1"],
+                'id': 'step2',
+                'type': 'filter',
+                'config': _filter_config('age', '>', 40),
+                'depends_on': ['step1'],
             }
         )
-        update = client.put(f"/api/v1/analysis/{sample_analysis.id}", json={"tabs": tabs})
+        update = client.put(f'/api/v1/analysis/{sample_analysis.id}', json={'tabs': tabs})
         assert update.status_code == 200
 
-        response = client.post(f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate", json={})
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate', json={})
         assert response.status_code == 200
         duplicated = response.json()
-        assert len(duplicated["steps"]) == 2
+        assert len(duplicated['steps']) == 2
 
-        first_step = duplicated["steps"][0]
-        second_step = duplicated["steps"][1]
-        assert first_step["id"] != "step1"
-        assert second_step["id"] != "step2"
-        assert second_step["depends_on"] == [first_step["id"]]
+        first_step = duplicated['steps'][0]
+        second_step = duplicated['steps'][1]
+        assert first_step['id'] != 'step1'
+        assert second_step['id'] != 'step2'
+        assert second_step['depends_on'] == [first_step['id']]
 
     def test_duplicate_derived_tab_preserves_upstream_reference(self, client, sample_analysis: Analysis):
         derived_response = client.post(
-            f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive",
-            json={"name": "Derived 1"},
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
+            json={'name': 'Derived 1'},
         )
         assert derived_response.status_code == 200
         derived = derived_response.json()
 
-        source_result_id = sample_analysis.pipeline_definition["tabs"][0]["output"]["result_id"]
+        source_result_id = sample_analysis.pipeline_definition['tabs'][0]['output']['result_id']
 
         response = client.post(
-            f"/api/v1/analysis/{sample_analysis.id}/tabs/{derived['id']}/duplicate",
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/{derived["id"]}/duplicate',
             json={},
         )
         assert response.status_code == 200
         duplicated = response.json()
-        assert duplicated["datasource"]["analysis_tab_id"] == "tab1"
-        assert duplicated["datasource"]["id"] == source_result_id
-        assert duplicated["output"]["result_id"] != derived["output"]["result_id"]
+        assert duplicated['datasource']['analysis_tab_id'] == 'tab1'
+        assert duplicated['datasource']['id'] == source_result_id
+        assert duplicated['output']['result_id'] != derived['output']['result_id']
 
     def test_duplicate_does_not_rewire_existing_dependents(self, client, sample_analysis: Analysis):
         derived_response = client.post(
-            f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive",
-            json={"name": "D1"},
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
+            json={'name': 'D1'},
         )
         assert derived_response.status_code == 200
         derived = derived_response.json()
 
-        duplicate_response = client.post(f"/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate", json={})
+        duplicate_response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate', json={})
         assert duplicate_response.status_code == 200
 
-        read_back = client.get(f"/api/v1/analysis/{sample_analysis.id}")
+        read_back = client.get(f'/api/v1/analysis/{sample_analysis.id}')
         assert read_back.status_code == 200
-        tabs = read_back.json()["pipeline_definition"]["tabs"]
-        dependent = next(tab for tab in tabs if tab["id"] == derived["id"])
-        assert dependent["datasource"]["analysis_tab_id"] == "tab1"
+        tabs = read_back.json()['pipeline_definition']['tabs']
+        dependent = next(tab for tab in tabs if tab['id'] == derived['id'])
+        assert dependent['datasource']['analysis_tab_id'] == 'tab1'
 
     def test_duplicate_tab_nonexistent_tab(self, client, sample_analysis: Analysis):
         response = client.post(
-            f"/api/v1/analysis/{sample_analysis.id}/tabs/nonexistent/duplicate",
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/nonexistent/duplicate',
             json={},
         )
         assert response.status_code == 400

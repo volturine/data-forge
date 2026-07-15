@@ -1,21 +1,26 @@
 # PRD: AI Chat API Support
 
+> **Status (2026-05-28): Partially implemented.**
+> **Current truth:** Provider settings and multi-provider chat support exist today, but this PRD still overstates missing baseline support and should be read as backlog/reference for deeper unification work.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Expand Data-Forge's AI capabilities to support multiple LLM providers for both in-app chat and per-row pipeline transformations. Add support for OpenRouter (remote), OpenAI (local/self-hosted and remote), Ollama (local/self-hosted and remote), and Hugging Face Inference API (remote) as unified AI providers.
 
 ## Problem Statement
 
-Data-Forge currently has partial AI integration: Ollama and OpenAI are supported in the AI pipeline operation, and OpenRouter is used for the chat module. However, these integrations are fragmented — each has its own client, configuration, and error handling patterns. Users cannot easily switch providers, there is no unified provider abstraction, and some combinations (e.g., using Ollama for chat, or OpenAI self-hosted for pipeline transforms) are not supported.
+Data-Forge now has broader AI provider support than this original baseline described: chat/provider settings already expose OpenRouter, OpenAI, Ollama, and Hugging Face paths, while deeper unification work remains. However, these integrations are fragmented — each has its own client, configuration, and error handling patterns. Users cannot easily switch providers, there is no unified provider abstraction, and some combinations (e.g., using Ollama for chat, or OpenAI self-hosted for pipeline transforms) are not supported.
 
 ### Current State
 
 | Provider | Chat | Pipeline AI Step | Configuration |
 |----------|------|-----------------|---------------|
-| OpenRouter | ✅ (`chat/openrouter.py`) | ❌ | `AppSettings.openrouter_api_key` |
-| OpenAI | ❌ | ✅ (`operations/ai.py`) | Per-step config |
-| Ollama | ❌ | ✅ (`operations/ai.py`) | Per-step config |
-| Hugging Face | ❌ | ❌ | Not integrated |
+| OpenRouter | ✅ | ✅ | Global settings + provider selection exist |
+| OpenAI | ✅ | ✅ | Global settings + provider selection exist |
+| Ollama | ✅ | ✅ | Global settings + provider selection exist |
+| Hugging Face | ✅ | ✅ | Global settings + provider selection exist |
 
 ### Target State
 

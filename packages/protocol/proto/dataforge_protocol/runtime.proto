@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/compute.proto";
+import "dataforge_protocol/errors.proto";
+
+message RuntimeEvent {
+  reserved 6;
+  reserved "raw";
+
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  oneof payload {
+    BuildEvent build = 2;
+    ComputeCommandEnvelope compute_command = 3;
+    ComputeResponseEnvelope compute_response = 4;
+    ErrorInfo error = 5;
+  }
+}

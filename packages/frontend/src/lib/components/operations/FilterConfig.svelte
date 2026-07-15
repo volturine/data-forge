@@ -1,6 +1,12 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import { X, Plus } from 'lucide-svelte';
+	import type {
+		FilterCondition as Condition,
+		FilterConfigData,
+		FilterValueType as ValueType
+	} from '$lib/types/operation-config';
+	import type { FilterOperator } from '$lib/types/protocol-enum-tokens';
+	import { X, Plus } from '@lucide/svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import DateTimeInput from '$lib/components/common/DateTimeInput.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
@@ -8,21 +14,6 @@
 	import { css, input } from '$lib/styles/panda';
 
 	const uid = $props.id();
-
-	type ValueType = 'string' | 'number' | 'date' | 'datetime' | 'column' | 'boolean';
-
-	interface Condition {
-		column: string;
-		operator: string;
-		value: string | number | boolean | string[] | null;
-		value_type: ValueType;
-		compare_column?: string;
-	}
-
-	interface FilterConfigData {
-		conditions: Condition[];
-		logic: 'AND' | 'OR';
-	}
 
 	interface Props {
 		schema: Schema;
@@ -167,7 +158,7 @@
 		});
 	}
 
-	function handleOperatorChange(idx: number, op: string) {
+	function handleOperatorChange(idx: number, op: FilterOperator) {
 		const updates: Partial<Condition> = { operator: op };
 		if (isNullOperator(op)) {
 			updates.value = '';
@@ -177,6 +168,10 @@
 			updates.value = '';
 		}
 		updateCondition(idx, updates);
+	}
+
+	function handleOperatorSelect(idx: number, event: Event): void {
+		handleOperatorChange(idx, (event.currentTarget as HTMLSelectElement).value as FilterOperator);
 	}
 
 	function formatDatetimeForInput(val: string | number | boolean | string[] | null): string {
@@ -406,7 +401,7 @@
 									data-testid={`filter-operator-select-${i}`}
 									class={input()}
 									value={cond.operator}
-									onchange={(e) => handleOperatorChange(i, e.currentTarget.value)}
+									onchange={(e) => handleOperatorSelect(i, e)}
 								>
 									{#each ops as op (op)}
 										<option value={op}>{OPERATOR_LABELS[op]}</option>

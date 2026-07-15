@@ -1,13 +1,9 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { ExpressionConfigData } from '$lib/types/operation-config';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import { css, label, stepConfig, input } from '$lib/styles/panda';
-
-	interface ExpressionConfigData {
-		expression: string;
-		column_name: string;
-	}
 
 	interface Props {
 		schema: Schema;

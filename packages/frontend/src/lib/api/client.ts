@@ -105,13 +105,18 @@ function handleErrorResponse(
 	});
 }
 
+function requestCacheMode(options: RequestInit | undefined): RequestCache | undefined {
+	if (options?.cache !== undefined) return options.cache;
+	return 'no-store';
+}
+
 function apiFetch<T>(
 	endpoint: string,
 	options: RequestInit | undefined,
 	parse: (response: Response) => ResultAsync<T, ApiError>
 ): ResultAsync<T, ApiError> {
 	const headers = buildHeaders(options);
-	const request = { ...options, headers } satisfies RequestInit;
+	const request = { ...options, headers, cache: requestCacheMode(options) } satisfies RequestInit;
 	return ResultAsync.fromPromise(
 		fetch(buildApiUrl(endpoint), request),
 		(error): ApiError =>

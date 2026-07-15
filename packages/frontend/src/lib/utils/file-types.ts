@@ -13,7 +13,7 @@
  * ```
  */
 
-import type { ComponentType } from 'svelte';
+import type { LucideIcon } from '@lucide/svelte';
 import {
 	FileSpreadsheet,
 	FileType as FileTypeIcon,
@@ -25,7 +25,7 @@ import {
 	Snowflake,
 	Folder as FolderIcon,
 	File
-} from 'lucide-svelte';
+} from '@lucide/svelte';
 
 /**
  * Supported file types
@@ -70,7 +70,7 @@ export interface FileTypeConfig {
 	/** File extensions (including the dot) */
 	extensions: string[];
 	/** Lucide icon component */
-	icon: ComponentType;
+	icon: LucideIcon;
 	/** Human-readable description */
 	description: string;
 }

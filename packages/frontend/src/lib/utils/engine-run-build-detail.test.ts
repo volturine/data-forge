@@ -166,6 +166,13 @@ describe('engineRunBuildDetail', () => {
 		expect(detail.cancelled_by).toBe('test@example.com');
 	});
 
+	it('leaves analysis fields blank for datasource-only runs', () => {
+		const detail = engineRunBuildDetail(makeRun({ analysis_id: null }));
+
+		expect(detail.analysis_id).toBe('');
+		expect(detail.analysis_name).toBe('');
+	});
+
 	it('uses persisted latest_resources when full resource history is absent', () => {
 		const run = makeRun({
 			status: 'success',

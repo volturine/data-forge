@@ -17,6 +17,7 @@ import type { MCPTool } from '$lib/api/mcp';
 import { analysisStore } from '$lib/stores/analysis.svelte';
 import { schemaStore } from '$lib/stores/schema.svelte';
 import type { Schema } from '$lib/types/schema';
+import { nowEpochMs } from '$lib/utils/temporal';
 import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 
 const SESSION_KEY = 'chat_session_id';
@@ -24,6 +25,8 @@ const PREFS_KEY = 'chat_prefs';
 const MAX_BACKOFF = 30_000;
 const BASE_BACKOFF = 1_000;
 const MAX_RETRIES = 10;
+
+export type ChatProvider = 'openrouter' | 'openai' | 'ollama' | 'huggingface';
 
 export type AgentMode = 'plan' | 'execute';
 
@@ -85,7 +88,7 @@ export interface ToolDraft {
 export class ChatStore {
 	open = $state(false);
 	sessionId = $state<string | null>(null);
-	provider = $state('openrouter');
+	provider = $state<ChatProvider>('openrouter');
 	model = $state('openai/gpt-4o-mini');
 	apiKey = $state('');
 	endpointUrl = $state('');
@@ -346,9 +349,18 @@ export class ChatStore {
 
 	async configure(apiKey: string): Promise<void> {
 		this.apiKey = apiKey;
-		this._refreshConfigured();
 		this.error = null;
 		this._savePrefs();
+		if (this.settings) {
+			if (this.provider === 'openrouter') {
+				this.settings.openrouter_api_key = apiKey;
+			} else if (this.provider === 'openai') {
+				this.settings.openai_api_key = apiKey;
+			} else if (this.provider === 'huggingface') {
+				this.settings.huggingface_api_token = apiKey;
+			}
+		}
+		this._refreshConfigured();
 		if (this.provider === 'openrouter') {
 			await updateSettings({ openrouter_api_key: apiKey });
 		} else if (this.provider === 'openai') {
@@ -358,7 +370,7 @@ export class ChatStore {
 		}
 	}
 
-	setProvider(provider: 'openrouter' | 'openai' | 'ollama' | 'huggingface'): void {
+	setProvider(provider: ChatProvider): void {
 		this.provider = provider;
 		this.models = [];
 		this._applyProviderDefaults();
@@ -371,13 +383,50 @@ export class ChatStore {
 		}
 	}
 
+	private _hasStoredProviderKey(provider: ChatProvider = this.provider): boolean {
+		if (!this.settings) return false;
+		if (provider === 'openrouter') return this.settings.openrouter_api_key.length > 0;
+		if (provider === 'openai') return this.settings.openai_api_key.length > 0;
+		if (provider === 'huggingface') return this.settings.huggingface_api_token.length > 0;
+		return provider === 'ollama';
+	}
+
+	private _providerCanStart(provider: ChatProvider): boolean {
+		if (!this.settings) return provider === 'openai' || provider === 'ollama';
+		if (provider === 'openrouter' || provider === 'huggingface') {
+			return this._hasStoredProviderKey(provider);
+		}
+		if (provider === 'openai') {
+			return this._hasStoredProviderKey(provider) || this.settings.openai_endpoint_url.length > 0;
+		}
+		return (this.settings.ollama_endpoint_url || 'http://localhost:11434').length > 0;
+	}
+
+	private _pickPreferredProvider(): ChatProvider {
+		const candidates: ChatProvider[] = [
+			this.provider,
+			'openrouter',
+			'openai',
+			'ollama',
+			'huggingface'
+		];
+		for (const candidate of candidates) {
+			if (this._providerCanStart(candidate)) return candidate;
+		}
+		return 'openai';
+	}
+
 	private _refreshConfigured(): void {
+		if (this.sessionId) {
+			this.configured = true;
+			return;
+		}
 		if (this.provider === 'openrouter') {
-			this.configured = this.apiKey.length > 0;
+			this.configured = this.apiKey.length > 0 || this._hasStoredProviderKey();
 			return;
 		}
 		if (this.provider === 'huggingface') {
-			this.configured = this.apiKey.length > 0;
+			this.configured = this.apiKey.length > 0 || this._hasStoredProviderKey();
 			return;
 		}
 		// OpenAI can be self-hosted without key; Ollama requires no key.
@@ -429,6 +478,7 @@ export class ChatStore {
 		result.match(
 			(s) => {
 				this.sessionId = s.session_id;
+				this._refreshConfigured();
 				if (typeof window !== 'undefined') {
 					localStorage.setItem(SESSION_KEY, s.session_id);
 				}
@@ -446,6 +496,7 @@ export class ChatStore {
 		return result.match(
 			(data) => {
 				this.sessionId = sessionId;
+				this._refreshConfigured();
 				this.messages = [];
 				this.toolCalls = [];
 				this.timeline = [];
@@ -472,17 +523,26 @@ export class ChatStore {
 		this.open = true;
 		await this.loadContext();
 		void this.loadSessions();
+		if (this.sessionId) return;
+		const stored = typeof window !== 'undefined' ? localStorage.getItem(SESSION_KEY) : null;
+		if (stored) {
+			const resumed = await this.resumeSession(stored);
+			if (resumed) {
+				if (this.configured && this.models.length === 0) {
+					void this.loadModels();
+				}
+				return;
+			}
+		}
+		if (!this.configured) {
+			this.setProvider(this._pickPreferredProvider());
+		}
 		if (this.configured && this.models.length === 0) {
 			void this.loadModels();
 		}
-		if (this.sessionId) return;
 		if (!this.configured) {
 			if (typeof window !== 'undefined') localStorage.removeItem(SESSION_KEY);
 			return;
-		}
-		const stored = typeof window !== 'undefined' ? localStorage.getItem(SESSION_KEY) : null;
-		if (stored) {
-			await this.resumeSession(stored);
 		}
 	}
 
@@ -547,7 +607,7 @@ export class ChatStore {
 					id: this._id(),
 					role: event.role,
 					content: displayContent,
-					ts: event.ts ?? Date.now()
+					ts: event.ts ?? nowEpochMs()
 				};
 				this.messages.push(msg);
 				this.timeline.push({ kind: 'message', item: msg });
@@ -580,7 +640,7 @@ export class ChatStore {
 					id: this._id(),
 					role: 'tool',
 					content: summary,
-					ts: event.ts ?? Date.now()
+					ts: event.ts ?? nowEpochMs()
 				};
 				this.messages.push(errMsg);
 				this.timeline.push({ kind: 'message', item: errMsg });
@@ -597,7 +657,7 @@ export class ChatStore {
 					(t) => t.tool_id === event.tool_id && t.status === 'running'
 				);
 				if (startTc) {
-					startTc.startedAt = Date.now();
+					startTc.startedAt = nowEpochMs();
 				}
 				for (let i = this.timeline.length - 1; i >= 0; i--) {
 					const entry = this.timeline[i];
@@ -606,7 +666,7 @@ export class ChatStore {
 						entry.item.tool_id === event.tool_id &&
 						entry.item.status === 'running'
 					) {
-						entry.item.startedAt = Date.now();
+						entry.item.startedAt = nowEpochMs();
 						break;
 					}
 				}
@@ -893,6 +953,10 @@ export class ChatStore {
 		this.currentTurn = 0;
 		this.maxTurns = null;
 		this.pendingConfirm = null;
+		this._refreshConfigured();
+		if (!this.configured && this.settings) {
+			this.setProvider(this._pickPreferredProvider());
+		}
 		if (typeof window !== 'undefined') {
 			localStorage.removeItem(SESSION_KEY);
 		}

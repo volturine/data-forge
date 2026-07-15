@@ -1,5 +1,10 @@
 # PRD: Kaggle Connection
 
+> **Status (2026-05-28): Not implemented.**
+> **Current truth:** Kaggle ingestion/search is not a shipped product surface in the current repository.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Integrate Kaggle as a first-class data source in Data-Forge, enabling users to browse, search, and ingest Kaggle datasets directly into the platform as managed datasources.

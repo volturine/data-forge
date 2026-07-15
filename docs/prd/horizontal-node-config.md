@@ -1,5 +1,10 @@
 # PRD: Horizontal Node Config Revamp
 
+> **Status (2026-05-28): Not implemented.**
+> **Current truth:** The dedicated horizontal config-layout revamp described here is not the current shipped panel architecture.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Redesign the step configuration panel so that it has two isolated layout implementations — vertical and horizontal — each optimized for its available space. The current implementation uses a single vertical column layout regardless of where the panel is docked (right or bottom). When the panel is docked at the bottom (horizontal space available, limited vertical space), the config should use a horizontal-optimized layout that makes effective use of wide, short space. Both layouts must be implemented as isolated plugin files.

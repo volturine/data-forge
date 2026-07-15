@@ -25,7 +25,7 @@ import {
 	ListChecks,
 	Trash2,
 	Bell
-} from 'lucide-svelte';
+} from '@lucide/svelte';
 import {
 	isChartStepType,
 	normalizePipelineStepType,
@@ -230,13 +230,14 @@ const stepTypes = {
 			const value = c.value as number;
 			const unit = c.unit as string;
 			if (!col || !op) return 'not configured';
-			const detail = component
-				? `.${component}`
-				: value && unit
-					? `(${value} ${unit})`
-					: unit
-						? `(${unit})`
-						: '';
+			const detail =
+				op === 'extract' && component
+					? `.${component}`
+					: value !== undefined && unit
+						? `(${value} ${unit})`
+						: unit
+							? `(${unit})`
+							: '';
 			return `${col}.${op}${detail} → ${newCol}`;
 		}
 	},

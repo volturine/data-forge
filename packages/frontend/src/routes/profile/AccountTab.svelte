@@ -3,7 +3,7 @@
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { updateProfile, changePassword, unlinkProvider, getMe } from '$lib/api/auth';
-	import { GitBranch } from 'lucide-svelte';
+	import { GitBranch } from '@lucide/svelte';
 
 	const editable = $derived(configStore.authRequired);
 

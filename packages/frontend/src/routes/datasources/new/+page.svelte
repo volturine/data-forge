@@ -9,7 +9,7 @@
 	import type { BulkUploadResult } from '$lib/api/datasource';
 
 	import { SvelteSet } from 'svelte/reactivity';
-	import { Check, X } from 'lucide-svelte';
+	import { Check, X } from '@lucide/svelte';
 	import { css, button, input, tabButton, label } from '$lib/styles/panda';
 
 	type Tab = 'file' | 'database';
@@ -188,6 +188,12 @@
 		}
 	}
 
+	async function gotoCreatedDatasource(datasourceId: string) {
+		queryClient.invalidateQueries({ queryKey: ['datasources'] });
+		queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
+		await goto(resolve(`/datasources?created_id=${datasourceId}` as '/'), { invalidateAll: true });
+	}
+
 	async function handleFileUpload() {
 		if (!file || !fileName) {
 			error = 'Please select a file and provide a name';
@@ -221,21 +227,21 @@
 					loading = false;
 					return;
 				}
-				queryClient.invalidateQueries({ queryKey: ['datasources'] });
-				queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
-				goto(resolve('/datasources'), { invalidateAll: true });
+				await gotoCreatedDatasource(result.value.id);
 				return;
 			}
-			await uploadFile(file, fileName, fileDescription, {
+			const result = await uploadFile(file, fileName, fileDescription, {
 				delimiter: csvDelimiter,
 				quote_char: csvQuoteChar,
 				has_header: csvHasHeader,
 				skip_rows: csvSkipRows,
 				encoding: csvEncoding
 			});
-			queryClient.invalidateQueries({ queryKey: ['datasources'] });
-			queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
-			goto(resolve('/datasources'), { invalidateAll: true });
+			if (result.isErr()) {
+				error = result.error.message || 'Upload failed';
+				return;
+			}
+			await gotoCreatedDatasource(result.value.id);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Upload failed';
 		} finally {
@@ -253,10 +259,12 @@
 		error = null;
 
 		try {
-			await connectDatabase(dbName, dbDescription, connectionString, query);
-			queryClient.invalidateQueries({ queryKey: ['datasources'] });
-			queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
-			goto(resolve('/datasources'), { invalidateAll: true });
+			const result = await connectDatabase(dbName, dbDescription, connectionString, query);
+			if (result.isErr()) {
+				error = result.error.message || 'Connection failed';
+				return;
+			}
+			await gotoCreatedDatasource(result.value.id);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Connection failed';
 		} finally {
@@ -483,28 +491,7 @@
 							rows="4"
 							maxlength="4000"
 							disabled={loading}
-							class={css({
-								width: 'full',
-								fontSize: 'sm2',
-								color: 'fg.primary',
-								backgroundColor: 'bg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								paddingX: '3.5',
-								paddingY: '2.25',
-								resize: 'vertical',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focus: { outline: 'none' },
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' }
-							})}
+							class={input({ variant: 'textarea' })}
 						></textarea>
 						<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
 							Optional. Plain text only, up to 4,000 characters.
@@ -774,24 +761,7 @@
 						rows="4"
 						maxlength="4000"
 						disabled={loading}
-						class={css({
-							width: 'full',
-							fontSize: 'sm2',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							paddingX: '3.5',
-							paddingY: '2.25',
-							resize: 'vertical',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focus: { outline: 'none' },
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' }
-						})}
+						class={input({ variant: 'textarea' })}
 					></textarea>
 					<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
 						Optional. Plain text only, up to 4,000 characters.
@@ -823,24 +793,7 @@
 						placeholder="SELECT * FROM table"
 						rows="5"
 						disabled={loading}
-						class={css({
-							width: 'full',
-							fontSize: 'sm2',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							paddingX: '3.5',
-							paddingY: '2.25',
-							resize: 'vertical',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focus: { outline: 'none' },
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' }
-						})}
+						class={input({ variant: 'textarea' })}
 					></textarea>
 				</div>
 

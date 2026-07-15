@@ -18,23 +18,23 @@ class AnalysisTemplate:
 
     def to_summary(self) -> dict[str, Any]:
         return {
-            "id": self.id,
-            "name": self.name,
-            "description": self.description,
-            "icon": self.icon,
-            "step_count": len(self.steps),
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'icon': self.icon,
+            'step_count': len(self.steps),
         }
 
     def to_detail(self) -> dict[str, Any]:
         return {
             **self.to_summary(),
-            "required_input_columns": list(self.required_input_columns),
-            "steps": [dict(step) for step in self.steps],
+            'required_input_columns': list(self.required_input_columns),
+            'steps': [dict(step) for step in self.steps],
         }
 
 
 def _template_file() -> Path:
-    return Path(__file__).with_name("builtin_templates.json")
+    return Path(__file__).with_name('builtin_templates.json')
 
 
 @lru_cache(maxsize=1)
@@ -42,14 +42,14 @@ def load_builtin_templates() -> tuple[AnalysisTemplate, ...]:
     payload = json.loads(_template_file().read_text())
     templates: list[AnalysisTemplate] = []
     for item in payload:
-        steps = tuple(item.get("steps", []))
+        steps = tuple(item.get('steps', []))
         templates.append(
             AnalysisTemplate(
-                id=str(item["id"]),
-                name=str(item["name"]),
-                description=str(item["description"]),
-                icon=str(item.get("icon", "file")),
-                required_input_columns=tuple(str(value) for value in item.get("required_input_columns", [])),
+                id=str(item['id']),
+                name=str(item['name']),
+                description=str(item['description']),
+                icon=str(item.get('icon', 'file')),
+                required_input_columns=tuple(str(value) for value in item.get('required_input_columns', [])),
                 steps=steps,
             ),
         )

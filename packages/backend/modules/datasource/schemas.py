@@ -1,8 +1,22 @@
 from datetime import datetime
 
-from contracts.datasource.source_types import DataSourceFileType, DataSourceType
-from contracts.enums import DataForgeStrEnum
+from protovalidate import ValidationError, Validator
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
+from backend_core.domain.engine_runs.schemas import SchemaDiffStatus
+from dataforge_protocol import object_store_pb2
+
+_PROTOCOL_VALIDATOR = Validator()
+
+
+def _validated_object_store_url(value: str) -> str:
+    normalized = value.strip()
+    try:
+        _PROTOCOL_VALIDATOR.validate(object_store_pb2.ObjectStoreUrl(url=normalized))
+    except ValidationError as exc:
+        raise ValueError('file_path must be an s3:// URL') from exc
+    return normalized
 
 
 class ColumnSchema(BaseModel):
@@ -35,7 +49,7 @@ class ColumnDescriptionPatch(BaseModel):
         if not cleaned:
             return None
         if len(cleaned) > 2000:
-            raise ValueError("Column descriptions must be 2,000 characters or fewer")
+            raise ValueError('Column descriptions must be 2,000 characters or fewer')
         return cleaned
 
 
@@ -63,12 +77,6 @@ class ColumnStats(BaseModel):
     unique_count: int | None = None
     min: object | None = None
     max: object | None = None
-
-
-class SchemaDiffStatus(DataForgeStrEnum):
-    ADDED = "added"
-    REMOVED = "removed"
-    TYPE_CHANGED = "type_changed"
 
 
 class SchemaDiff(BaseModel):
@@ -141,6 +149,11 @@ class ExcelPreflightPathRequest(BaseModel):
     named_range: str | None = None
     cell_range: str | None = None
 
+    @field_validator('file_path')
+    @classmethod
+    def _validate_file_path(cls, value: str) -> str:
+        return _validated_object_store_url(value)
+
 
 class ExcelPreflightResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -169,11 +182,11 @@ class ExcelPreflightPreviewResponse(BaseModel):
 
 
 class CSVOptions(BaseModel):
-    delimiter: str = ","
+    delimiter: str = ','
     quote_char: str = '"'
     has_header: bool = True
     skip_rows: int = 0
-    encoding: str = "utf8"
+    encoding: str = 'utf8'
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -193,17 +206,22 @@ class FileDataSourceConfig(BaseModel):
     named_range: str | None = None
     cell_range: str | None = None
 
+    @field_validator('file_path')
+    @classmethod
+    def _validate_file_path(cls, value: str) -> str:
+        return _validated_object_store_url(value)
+
 
 class DatabaseDataSourceConfig(BaseModel):
     connection_string: str
     query: str
-    branch: str = "master"
+    branch: str = 'master'
 
 
 class IcebergDataSourceConfig(BaseModel):
-    branch: str = "master"
+    branch: str = 'master'
     source: dict
-    refresh: dict | None = None
+    ingest: dict | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -213,7 +231,7 @@ class DataSourceDescriptionModel(BaseModel):
     def normalize_description(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        if value.strip() == "":
+        if value.strip() == '':
             return None
         return value
 
@@ -224,10 +242,22 @@ class DataSourceCreate(DataSourceDescriptionModel):
     source_type: DataSourceType
     config: dict
 
-    @field_validator("description")
+    @field_validator('description')
     @classmethod
     def _normalize_description(cls, value: str | None) -> str | None:
         return cls.normalize_description(value)
+
+
+class InternalPostgresTable(BaseModel):
+    schema_name: str
+    table_name: str
+    is_onboarded: bool = False
+
+
+class InternalPostgresToggleRequest(BaseModel):
+    schema_name: str
+    table_name: str
+    enabled: bool
 
 
 class DataSourceResponse(BaseModel):
@@ -240,7 +270,7 @@ class DataSourceResponse(BaseModel):
     config: dict
     schema_cache: dict | None
     created_by_analysis_id: str | None = None
-    created_by: str = "import"
+    created_by: str = 'import'
     is_hidden: bool = False
     created_at: datetime
     output_of_tab_id: str | None = None
@@ -257,7 +287,7 @@ class DataSourceListItem(BaseModel):
     source_type: DataSourceType
     config: dict
     created_by_analysis_id: str | None = None
-    created_by: str = "import"
+    created_by: str = 'import'
     is_hidden: bool = False
     created_at: datetime
     output_of_tab_id: str | None = None
@@ -271,21 +301,10 @@ class DataSourceUpdate(DataSourceDescriptionModel):
     config: dict | None = None
     is_hidden: bool | None = None
 
-    @field_validator("description")
+    @field_validator('description')
     @classmethod
     def _normalize_description(cls, value: str | None) -> str | None:
         return cls.normalize_description(value)
-
-
-class FileListItem(BaseModel):
-    name: str
-    path: str
-    is_dir: bool
-
-
-class FileListResponse(BaseModel):
-    base_path: str
-    entries: list[FileListItem]
 
 
 class BulkUploadResult(BaseModel):

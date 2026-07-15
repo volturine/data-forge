@@ -145,9 +145,23 @@ export const callout = defineRecipe({
 export const button = defineRecipe({
 	className: 'btn',
 	base: {
-		// display, alignItems, justifyContent, gap, cursor, fontFamily, fontSize,
-		// fontWeight, transition, and _disabled are all set by globalCss body button
-		borderWidth: '1'
+		display: 'inline-flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		gap: '2',
+		cursor: 'pointer',
+		fontFamily: 'mono',
+		fontSize: 'sm',
+		fontWeight: 'medium',
+		textDecoration: 'none',
+		borderWidth: '1',
+		borderRadius: '0',
+		paddingX: '4',
+		paddingY: '2',
+		transitionProperty: 'color, background-color, border-color, opacity',
+		transitionDuration: '160ms',
+		transitionTimingFunction: 'ease',
+		_disabled: { opacity: '0.5', cursor: 'not-allowed' }
 	},
 	variants: {
 		variant: {
@@ -172,14 +186,26 @@ export const button = defineRecipe({
 				color: 'fg.error',
 				borderColor: 'border.error',
 				_hover: { _notDisabled: { opacity: '0.85' } }
+			},
+			primaryBare: {
+				backgroundColor: 'accent.primary',
+				color: 'fg.inverse',
+				border: 'none',
+				_hover: { _notDisabled: { opacity: '0.9' } }
 			}
 		},
 		size: {
 			default: {},
-			sm: { fontSize: 'xs', paddingX: '2', paddingY: '1' }
+			sm: { fontSize: 'xs', paddingX: '2', paddingY: '1' },
+			compact: { fontSize: 'xs', paddingX: '3', paddingY: '1.5' }
+		},
+		width: {
+			auto: {},
+			grow: { flex: '1' },
+			full: { width: 'full' }
 		}
 	},
-	defaultVariants: { variant: 'secondary', size: 'default' }
+	defaultVariants: { variant: 'secondary', size: 'default', width: 'auto' }
 });
 
 export const spinner = defineRecipe({
@@ -217,7 +243,18 @@ export const iconButton = defineRecipe({
 			backgroundColor: 'bg.hover',
 			color: 'fg.primary'
 		}
-	}
+	},
+	variants: {
+		variant: {
+			default: {},
+			ghost: {
+				border: 'none',
+				backgroundColor: 'transparent',
+				padding: '1'
+			}
+		}
+	},
+	defaultVariants: { variant: 'default' }
 });
 
 export const tabButton = defineRecipe({
@@ -339,6 +376,62 @@ export const input = defineRecipe({
 				paddingRight: '10',
 				backgroundColor: 'bg.primary',
 				fontSize: 'sm'
+			},
+			plotSelect: {
+				backgroundColor: 'transparent'
+			},
+			secondary: {
+				backgroundColor: 'bg.secondary'
+			},
+			compactForm: {
+				backgroundColor: 'transparent',
+				paddingX: '2',
+				paddingY: '1.5',
+				fontSize: 'xs',
+				_focus: { outline: 'none', borderColor: 'border.accent' }
+			},
+			panelForm: {
+				backgroundColor: 'bg.primary',
+				paddingX: '2',
+				paddingY: '1.5',
+				fontSize: 'xs',
+				_focus: { outline: 'none', borderColor: 'border.accent' }
+			},
+			panelSelect: {
+				appearance: 'none',
+				backgroundColor: 'bg.primary',
+				paddingX: '2',
+				paddingY: '1.5',
+				fontSize: 'xs',
+				_focus: { outline: 'none', borderColor: 'border.accent' }
+			},
+			dialog: {
+				paddingX: '3',
+				paddingY: '2'
+			},
+			dense: {
+				padding: '2'
+			},
+			field: {
+				fontSize: 'sm',
+				paddingX: '3',
+				paddingY: '2'
+			},
+			textarea: {
+				resize: 'vertical'
+			},
+			entry: {
+				flex: '1',
+				fontSize: 'xs',
+				padding: '1',
+				borderRadius: 'sm',
+				backgroundColor: 'bg.secondary'
+			},
+			micro: {
+				backgroundColor: 'transparent',
+				paddingX: '1.5',
+				paddingY: '0.5',
+				fontSize: '2xs'
 			}
 		}
 	},

@@ -2,11 +2,10 @@
 	import BuildsManager from '$lib/components/common/BuildsManager.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
-	import { Search } from 'lucide-svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { css, tabButton, input } from '$lib/styles/panda';
+	import { css, tabButton } from '$lib/styles/panda';
 
 	const tabs = [
 		{ key: 'builds', label: 'Builds' },
@@ -24,7 +23,6 @@
 	}
 
 	const activeTab = $derived(resolveTab(page.url.searchParams.get('tab')));
-	let search = $state('');
 
 	function selectTab(key: TabKey) {
 		goto(resolve(`/monitoring?tab=${key}` as '/'), {
@@ -72,26 +70,6 @@
 			paddingBottom: '3'
 		})}
 	>
-		<div class={css({ position: 'relative', maxWidth: 'modalSm' })}>
-			<Search
-				size={14}
-				class={css({
-					position: 'absolute',
-					left: '2.5',
-					top: '50%',
-					transform: 'translateY(-50%)',
-					color: 'fg.muted'
-				})}
-			/>
-			<input
-				type="text"
-				id="monitor-search"
-				aria-label="Search builds, schedules, or health checks"
-				placeholder="Search builds, schedules, or health checks..."
-				class={input({ variant: 'search' })}
-				bind:value={search}
-			/>
-		</div>
 		<div
 			role="tablist"
 			aria-label="Monitoring sections"
@@ -125,7 +103,7 @@
 			aria-labelledby="tab-builds"
 			class={css({ marginTop: '4', display: 'flex', flexDirection: 'column', gap: '4' })}
 		>
-			<BuildsManager searchQuery={search} embedded />
+			<BuildsManager embedded />
 		</div>
 	{:else if activeTab === 'schedules'}
 		<div
@@ -134,7 +112,7 @@
 			aria-labelledby="tab-schedules"
 			class={css({ marginTop: '4' })}
 		>
-			<ScheduleManager searchQuery={search} />
+			<ScheduleManager />
 		</div>
 	{:else if activeTab === 'health'}
 		<div
@@ -143,7 +121,7 @@
 			aria-labelledby="tab-health"
 			class={css({ marginTop: '4', display: 'flex', flexDirection: 'column', gap: '3' })}
 		>
-			<HealthChecksManager searchQuery={search} />
+			<HealthChecksManager />
 		</div>
 	{/if}
 </div>

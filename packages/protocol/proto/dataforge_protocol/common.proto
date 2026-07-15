@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+
+message EmptyRequest {}
+
+message RuntimeWorkerRequest {
+  string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message RuntimeWorkerResponse {
+  string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message NotificationAttachment {
+  string filename = 1 [(buf.validate.field).string.min_len = 1];
+  string content_base64 = 2 [(buf.validate.field).string.min_len = 1];
+  string content_type = 3 [(buf.validate.field).string.min_len = 1];
+}

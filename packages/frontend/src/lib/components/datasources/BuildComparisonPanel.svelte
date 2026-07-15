@@ -1,21 +1,27 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
 	import { compareDatasourceSnapshots, listIcebergSnapshots } from '$lib/api/datasource';
-	import type { SnapshotCompareResponse } from '$lib/api/datasource';
-	import type { DataSource } from '$lib/types/datasource';
+	import type { IcebergSnapshotInfo, SnapshotCompareResponse } from '$lib/api/datasource';
+	import {
+		datasourceIsAnalysisOutput,
+		datasourceNeedsExternalIngest,
+		type DataSource
+	} from '$lib/types/datasource';
 	import type { ActiveBuildSummary } from '$lib/types/build-stream';
 	import DataTable from '$lib/components/common/DataTable.svelte';
-	import { GitCompareArrows, RefreshCw, X, Plus, Minus, Search } from 'lucide-svelte';
+	import { GitCompareArrows, RefreshCw, X, Plus, Minus, Search } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { BuildsStore } from '$lib/stores/builds.svelte';
+	import { formatDateTimeDisplay } from '$lib/utils/datetime';
 	import { css, button } from '$lib/styles/panda';
 
 	interface Props {
 		datasource: DataSource;
+		branch?: string | null;
 	}
 
-	let { datasource }: Props = $props();
+	let { datasource, branch = null }: Props = $props();
 
 	const selected = new SvelteSet<string>();
 	let comparison = $state<SnapshotCompareResponse | null>(null);
@@ -24,17 +30,33 @@
 	let runSearch = $state('');
 	let rowLimit = $state(100);
 
+	const logicalBuildMode = $derived(
+		datasourceIsAnalysisOutput(datasource) || datasourceNeedsExternalIngest(datasource)
+	);
+	const resolvedBranch = $derived.by(() => {
+		if (branch) return branch;
+		const config = datasource.config as Record<string, unknown>;
+		return typeof config.branch === 'string' ? config.branch : null;
+	});
+
 	const engineRunsStore = new BuildsStore();
-	// Network: fetch datasource build history when the datasource changes.
+	// Network: fetch datasource build history only when run history is the comparison source.
 	$effect(() => {
+		if (logicalBuildMode) {
+			engineRunsStore.close();
+			return;
+		}
 		engineRunsStore.load({ datasource_id: datasource.id, limit: 50 });
 		return () => engineRunsStore.close();
 	});
 
 	const snapshotsQuery = createQuery(() => ({
-		queryKey: ['iceberg-snapshots', datasource.id],
+		queryKey: ['iceberg-snapshots', datasource.id, resolvedBranch, logicalBuildMode],
 		queryFn: async () => {
-			const result = await listIcebergSnapshots(datasource.id);
+			const result = await listIcebergSnapshots(datasource.id, {
+				branch: resolvedBranch,
+				buildResultsOnly: logicalBuildMode
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value.snapshots;
 		},
@@ -46,6 +68,16 @@
 			(run) => run.current_kind === 'build' && run.status === 'completed'
 		)
 	);
+	const snapshots = $derived(snapshotsQuery.data ?? []);
+
+	const visibleSnapshots = $derived.by(() => {
+		const q = runSearch.trim().toLowerCase();
+		if (!q) return snapshots;
+		return snapshots.filter((snapshot) => {
+			const created = formatSnapshotDate(snapshot.timestamp_ms).toLowerCase();
+			return snapshot.snapshot_id.toLowerCase().includes(q) || created.includes(q);
+		});
+	});
 
 	const visibleRuns = $derived.by(() => {
 		const q = runSearch.trim().toLowerCase();
@@ -64,16 +96,26 @@
 		const list = Array.from(selected).map((id) => runs.find((run) => run.build_id === id) ?? null);
 		return list.filter((run): run is ActiveBuildSummary => run !== null);
 	});
+	const selectedSnapshots = $derived.by(() => {
+		const list = Array.from(selected).map(
+			(id) => snapshots.find((snapshot) => snapshot.snapshot_id === id) ?? null
+		);
+		return list.filter((snapshot): snapshot is IcebergSnapshotInfo => snapshot !== null);
+	});
 
 	const runA = $derived(selectedRuns[0] ?? null);
 	const runB = $derived(selectedRuns[1] ?? null);
 	const canCompare = $derived(selected.size === 2);
 
-	const snapshots = $derived(snapshotsQuery.data ?? []);
-
 	const runSnapshotMap = $derived(buildSnapshotMap(runs, snapshots));
-	const snapshotA = $derived(runA ? (runSnapshotMap.get(runA.build_id) ?? null) : null);
-	const snapshotB = $derived(runB ? (runSnapshotMap.get(runB.build_id) ?? null) : null);
+	const snapshotA = $derived.by(() => {
+		if (logicalBuildMode) return selectedSnapshots[0]?.snapshot_id ?? null;
+		return runA ? (runSnapshotMap.get(runA.build_id) ?? null) : null;
+	});
+	const snapshotB = $derived.by(() => {
+		if (logicalBuildMode) return selectedSnapshots[1]?.snapshot_id ?? null;
+		return runB ? (runSnapshotMap.get(runB.build_id) ?? null) : null;
+	});
 
 	function toggleSelect(id: string) {
 		if (selected.has(id)) {
@@ -113,8 +155,11 @@
 	}
 
 	function formatDate(isoDate: string): string {
-		const date = new Date(isoDate);
-		return date.toLocaleString();
+		return formatDateTimeDisplay(isoDate);
+	}
+
+	function formatSnapshotDate(timestampMs: number): string {
+		return formatDateTimeDisplay(timestampMs);
 	}
 
 	function formatDelta(val: number): string {
@@ -278,13 +323,17 @@
 					>
 						Select builds
 					</div>
-					{#if engineRunsStore.status === 'connecting'}
-						<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>Loading runs...</div>
-					{:else if engineRunsStore.status === 'error'}
+					{#if logicalBuildMode ? snapshotsQuery.isLoading : engineRunsStore.status === 'connecting'}
+						<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>Loading builds...</div>
+					{:else if logicalBuildMode ? snapshotsQuery.isError : engineRunsStore.status === 'error'}
 						<div class={css({ fontSize: 'sm', color: 'fg.error' })}>
-							{engineRunsStore.error ?? 'Failed to load runs'}
+							{logicalBuildMode
+								? snapshotsQuery.error instanceof Error
+									? snapshotsQuery.error.message
+									: 'Failed to load builds'
+								: (engineRunsStore.error ?? 'Failed to load runs')}
 						</div>
-					{:else if runs.length === 0}
+					{:else if logicalBuildMode ? snapshots.length === 0 : runs.length === 0}
 						<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
 							No successful datasource builds recorded.
 						</p>
@@ -330,7 +379,7 @@
 									bind:value={runSearch}
 								/>
 							</div>
-							{#if visibleRuns.length === 0}
+							{#if logicalBuildMode ? visibleSnapshots.length === 0 : visibleRuns.length === 0}
 								<p class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
 									No builds match your search.
 								</p>
@@ -348,47 +397,94 @@
 										'datasource-comparison-scroll'
 									]}
 								>
-									{#each visibleRuns as run (run.build_id)}
-										<button
-											class={css(
-												{
-													display: 'flex',
-													width: '100%',
-													alignItems: 'flex-start',
-													justifyContent: 'space-between',
-													borderWidth: '1',
-													backgroundColor: 'transparent',
-													paddingX: '3',
-													paddingY: '2',
-													textAlign: 'left',
-													fontSize: 'sm',
-													_hover: { backgroundColor: 'bg.hover' }
-												},
-												selected.has(run.build_id) && {
-													backgroundColor: 'bg.accent',
-													color: 'accent.primary'
-												}
-											)}
-											onclick={() => toggleSelect(run.build_id)}
-										>
-											<div class={css({ minWidth: '0' })}>
-												<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-													<span class={css({ fontFamily: 'mono', fontSize: 'xs' })}
-														>{run.build_id.slice(0, 8)}...</span
+									{#if logicalBuildMode}
+										{#each visibleSnapshots as snapshot (snapshot.snapshot_id)}
+											<button
+												class={css(
+													{
+														display: 'flex',
+														width: '100%',
+														alignItems: 'flex-start',
+														justifyContent: 'space-between',
+														borderWidth: '1',
+														backgroundColor: 'transparent',
+														paddingX: '3',
+														paddingY: '2',
+														textAlign: 'left',
+														fontSize: 'sm',
+														_hover: { backgroundColor: 'bg.hover' }
+													},
+													selected.has(snapshot.snapshot_id) && {
+														backgroundColor: 'bg.accent',
+														color: 'accent.primary'
+													}
+												)}
+												onclick={() => toggleSelect(snapshot.snapshot_id)}
+											>
+												<div class={css({ minWidth: '0' })}>
+													<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+														{formatSnapshotDate(snapshot.timestamp_ms)}
+													</div>
+													<div
+														class={css({
+															fontFamily: 'mono',
+															fontSize: '2xs',
+															color: 'fg.tertiary'
+														})}
 													>
-													<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}
-														>{run.current_kind ?? ''}</span
-													>
+														{snapshot.snapshot_id}
+													</div>
 												</div>
-												<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
-													{formatDate(run.started_at)}
+												<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
+													build snapshot
 												</div>
-											</div>
-											<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
-												{runSnapshotMap.get(run.build_id) ? 'snapshot mapped' : 'missing snapshot'}
-											</div>
-										</button>
-									{/each}
+											</button>
+										{/each}
+									{:else}
+										{#each visibleRuns as run (run.build_id)}
+											<button
+												class={css(
+													{
+														display: 'flex',
+														width: '100%',
+														alignItems: 'flex-start',
+														justifyContent: 'space-between',
+														borderWidth: '1',
+														backgroundColor: 'transparent',
+														paddingX: '3',
+														paddingY: '2',
+														textAlign: 'left',
+														fontSize: 'sm',
+														_hover: { backgroundColor: 'bg.hover' }
+													},
+													selected.has(run.build_id) && {
+														backgroundColor: 'bg.accent',
+														color: 'accent.primary'
+													}
+												)}
+												onclick={() => toggleSelect(run.build_id)}
+											>
+												<div class={css({ minWidth: '0' })}>
+													<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+														<span class={css({ fontFamily: 'mono', fontSize: 'xs' })}
+															>{run.build_id.slice(0, 8)}...</span
+														>
+														<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}
+															>{run.current_kind ?? ''}</span
+														>
+													</div>
+													<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+														{formatDate(run.started_at)}
+													</div>
+												</div>
+												<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
+													{runSnapshotMap.get(run.build_id)
+														? 'snapshot mapped'
+														: 'missing snapshot'}
+												</div>
+											</button>
+										{/each}
+									{/if}
 								</div>
 							{/if}
 						</div>
@@ -422,47 +518,94 @@
 							<GitCompareArrows size={14} class={css({ color: 'fg.muted' })} />
 							<span>{selected.size}/2 builds selected</span>
 						</div>
-						{#if selectedRuns.length === 0}
+						{#if logicalBuildMode ? selectedSnapshots.length === 0 : selectedRuns.length === 0}
 							<p class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
 								Select two builds to compare.
 							</p>
 						{:else}
 							<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
-								{#each selectedRuns as run (run.build_id)}
-									<div
-										class={css({
-											display: 'flex',
-											alignItems: 'center',
-											justifyContent: 'space-between',
-											borderWidth: '1',
-											backgroundColor: 'bg.secondary',
-											paddingX: '3',
-											paddingY: '2',
-											fontSize: 'xs'
-										})}
-									>
-										<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-											<span class={css({ fontFamily: 'mono' })}>{run.build_id.slice(0, 8)}...</span>
-											<span class={css({ color: 'fg.tertiary' })}>{run.current_kind ?? ''}</span>
-										</div>
-										<button
+								{#if logicalBuildMode}
+									{#each selectedSnapshots as snapshot (snapshot.snapshot_id)}
+										<div
 											class={css({
-												borderStyle: 'none',
-												backgroundColor: 'transparent',
-												color: 'fg.tertiary',
-												_hover: { color: 'fg.primary' }
+												display: 'flex',
+												alignItems: 'center',
+												justifyContent: 'space-between',
+												borderWidth: '1',
+												backgroundColor: 'bg.secondary',
+												paddingX: '3',
+												paddingY: '2',
+												fontSize: 'xs'
 											})}
-											onclick={() => toggleSelect(run.build_id)}
-											title="Remove selection"
 										>
-											<X size={12} />
-										</button>
-									</div>
-								{/each}
-								{#if selectedRuns.length < 2}
-									<p class={css({ fontSize: '2xs', color: 'fg.tertiary' })}>
-										Select one more build.
-									</p>
+											<div class={css({ minWidth: '0' })}>
+												<div class={css({ color: 'fg.muted' })}>
+													{formatSnapshotDate(snapshot.timestamp_ms)}
+												</div>
+												<div
+													class={css({ fontFamily: 'mono', fontSize: '2xs', color: 'fg.tertiary' })}
+												>
+													{snapshot.snapshot_id}
+												</div>
+											</div>
+											<button
+												class={css({
+													borderStyle: 'none',
+													backgroundColor: 'transparent',
+													color: 'fg.tertiary',
+													_hover: { color: 'fg.primary' }
+												})}
+												onclick={() => toggleSelect(snapshot.snapshot_id)}
+												title="Remove selection"
+											>
+												<X size={12} />
+											</button>
+										</div>
+									{/each}
+									{#if selectedSnapshots.length < 2}
+										<p class={css({ fontSize: '2xs', color: 'fg.tertiary' })}>
+											Select one more build.
+										</p>
+									{/if}
+								{:else}
+									{#each selectedRuns as run (run.build_id)}
+										<div
+											class={css({
+												display: 'flex',
+												alignItems: 'center',
+												justifyContent: 'space-between',
+												borderWidth: '1',
+												backgroundColor: 'bg.secondary',
+												paddingX: '3',
+												paddingY: '2',
+												fontSize: 'xs'
+											})}
+										>
+											<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+												<span class={css({ fontFamily: 'mono' })}
+													>{run.build_id.slice(0, 8)}...</span
+												>
+												<span class={css({ color: 'fg.tertiary' })}>{run.current_kind ?? ''}</span>
+											</div>
+											<button
+												class={css({
+													borderStyle: 'none',
+													backgroundColor: 'transparent',
+													color: 'fg.tertiary',
+													_hover: { color: 'fg.primary' }
+												})}
+												onclick={() => toggleSelect(run.build_id)}
+												title="Remove selection"
+											>
+												<X size={12} />
+											</button>
+										</div>
+									{/each}
+									{#if selectedRuns.length < 2}
+										<p class={css({ fontSize: '2xs', color: 'fg.tertiary' })}>
+											Select one more build.
+										</p>
+									{/if}
 								{/if}
 							</div>
 							<button
@@ -478,7 +621,7 @@
 							{#if compareError}
 								<div class={css({ fontSize: 'xs', color: 'fg.error' })}>{compareError}</div>
 							{/if}
-							{#if !snapshotA || !snapshotB}
+							{#if !logicalBuildMode && (!snapshotA || !snapshotB)}
 								<div class={css({ fontSize: 'xs', color: 'fg.warning' })}>
 									Snapshot mapping missing for one or both builds.
 								</div>

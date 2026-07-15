@@ -8,9 +8,9 @@ from typing import Any, TypeVar, overload
 
 from modules.mcp.router import build_inputs
 
-F = TypeVar("F", bound=Callable)
-MCP_TOOL_MARKER = "__mcp_tool__"
-MCP_TOOL_META = "__mcp_tool_meta__"
+F = TypeVar('F', bound=Callable)
+MCP_TOOL_MARKER = '__mcp_tool__'
+MCP_TOOL_META = '__mcp_tool_meta__'
 
 
 def _iter_wrapped(fn: Callable) -> list[Callable]:
@@ -23,20 +23,20 @@ def _iter_wrapped(fn: Callable) -> list[Callable]:
             break
         seen.add(obj_id)
         stack.append(current)
-        wrapped = getattr(current, "__wrapped__", None)
+        wrapped = getattr(current, '__wrapped__', None)
         current = wrapped if callable(wrapped) else None
     return stack
 
 
 def _build_meta(fn: Callable, confirm_required: bool | None) -> dict[str, Any]:
-    doc = inspect.getdoc(fn) or ""
+    doc = inspect.getdoc(fn) or ''
     meta: dict[str, Any] = {
-        "name": fn.__name__,
-        "docstring": doc,
-        "inputs": build_inputs(fn),
+        'name': fn.__name__,
+        'docstring': doc,
+        'inputs': build_inputs(fn),
     }
     if confirm_required is not None:
-        meta["confirm_required"] = confirm_required
+        meta['confirm_required'] = confirm_required
     return meta
 
 
@@ -52,14 +52,16 @@ def get_mcp_tool_meta(fn: Callable) -> dict[str, Any] | None:
 
 
 @overload
-def deterministic_tool(fn: F, /) -> F: ...
+def deterministic_tool[F: Callable](fn: F, /) -> F:
+    pass
 
 
 @overload
-def deterministic_tool(*, confirm_required: bool | None = None) -> Callable[[F], F]: ...
+def deterministic_tool(*, confirm_required: bool | None = None) -> Callable[[F], F]:
+    pass
 
 
-def deterministic_tool(fn: F | None = None, /, *, confirm_required: bool | None = None) -> F | Callable[[F], F]:
+def deterministic_tool[F: Callable](fn: F | None = None, /, *, confirm_required: bool | None = None) -> F | Callable[[F], F]:
     """Mark a route endpoint as deterministic and attach onboarding metadata."""
 
     def apply(target: F) -> F:

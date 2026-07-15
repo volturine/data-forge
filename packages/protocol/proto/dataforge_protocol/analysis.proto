@@ -1,0 +1,511 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/enums.proto";
+import "google/protobuf/struct.proto";
+
+message AnalysisPipelineDatasource {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string analysis_tab_id = 2;
+  optional DataSourceType source_type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  google.protobuf.Struct config = 4;
+}
+
+message AnalysisPipelineStep {
+  reserved 2;
+  reserved "type";
+
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  StepConfig config = 3;
+  repeated string depends_on = 4;
+  optional bool is_applied = 5;
+  StepType step_type = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+}
+
+message AnalysisPipelineIcebergOutput {
+  string namespace = 1 [(buf.validate.field).string.min_len = 1];
+  string table_name = 2 [(buf.validate.field).string.min_len = 1];
+  string branch = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+message AnalysisPipelineOutputNotification {
+  NotificationMethod method = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string recipient = 2;
+  string subject_template = 3;
+  string body_template = 4;
+  repeated string subscriber_ids = 5;
+  repeated string excluded_recipients = 6;
+}
+
+message AnalysisPipelineOutput {
+  string result_id = 1 [(buf.validate.field).string.min_len = 1];
+  string filename = 2 [(buf.validate.field).string.min_len = 1];
+  ExportFormat format = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  google.protobuf.Struct options = 4;
+  optional DataSourceType datasource_type = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional BuildMode build_mode = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional AnalysisPipelineIcebergOutput iceberg = 7;
+  optional AnalysisPipelineOutputNotification notification = 8;
+}
+
+message AnalysisPipelineTab {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string name = 2;
+  AnalysisPipelineDatasource datasource = 3 [(buf.validate.field).required = true];
+  AnalysisPipelineOutput output = 4 [(buf.validate.field).required = true];
+  repeated AnalysisPipelineStep steps = 5;
+}
+
+message AnalysisPipelinePayload {
+  string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated AnalysisPipelineTab tabs = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message StringList {
+  repeated string values = 1;
+}
+
+message NumericList {
+  repeated double values = 1;
+}
+
+message SelectConfig {
+  repeated string columns = 1;
+  map<string, string> cast_map = 2;
+}
+
+message DropConfig {
+  repeated string columns = 1;
+}
+
+message FilterValue {
+  oneof value {
+    string string_value = 1;
+    double number_value = 2;
+    bool bool_value = 3;
+    StringList string_values = 4;
+  }
+}
+
+message FilterCondition {
+  string column = 1;
+  FilterOperator operator = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional FilterValue value = 3;
+  optional FilterValueType value_type = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string compare_column = 5;
+}
+
+message FilterConfig {
+  repeated FilterCondition conditions = 1;
+  optional FilterLogic logic = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+}
+
+message Aggregation {
+  string column = 1;
+  GroupByAggregationFunction function = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string alias = 3;
+}
+
+message GroupByConfig {
+  repeated string group_by = 1;
+  repeated Aggregation aggregations = 2;
+}
+
+message SortConfig {
+  repeated string columns = 1;
+  repeated bool descending = 2;
+  optional bool descending_all = 3;
+}
+
+message RenameConfig {
+  map<string, string> column_mapping = 1;
+}
+
+message ExpressionConfig {
+  string expression = 1;
+  string column_name = 2;
+}
+
+message WithColumnsExpr {
+  string name = 1;
+  WithColumnsExprType type = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional FilterValue value = 3;
+  optional string column = 4;
+  repeated string args = 5;
+  optional string code = 6;
+  optional string udf_id = 7;
+}
+
+message WithColumnsConfig {
+  repeated WithColumnsExpr expressions = 1;
+}
+
+message LimitConfig {
+  int32 n = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 1000000
+  }];
+}
+
+message SampleConfig {
+  double fraction = 1 [(buf.validate.field).double = {
+    gte: 0
+    lte: 1
+  }];
+  optional int32 seed = 2;
+}
+
+message TopKConfig {
+  string column = 1;
+  int32 k = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 1000000
+  }];
+  bool descending = 3;
+}
+
+message DeduplicateConfig {
+  repeated string subset = 1;
+  DeduplicateKeep keep = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+}
+
+message FillNullConfig {
+  FillNullStrategy strategy = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  repeated string columns = 2;
+  optional FilterValue value = 3;
+  optional string value_type = 4;
+}
+
+message UnpivotConfig {
+  repeated string id_vars = 1;
+  repeated string value_vars = 2;
+  string variable_name = 3;
+  string value_name = 4;
+}
+
+message ExplodeConfig {
+  repeated string columns = 1;
+}
+
+message PivotConfig {
+  repeated string index = 1;
+  string columns = 2;
+  optional string values = 3;
+  PivotAggregateFunction aggregate_function = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+}
+
+message UnionByNameConfig {
+  repeated string sources = 1;
+  bool allow_missing = 2;
+}
+
+message JoinColumn {
+  string id = 1;
+  string left_column = 2;
+  string right_column = 3;
+}
+
+message JoinConfig {
+  JoinHow how = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string right_source = 2;
+  repeated JoinColumn join_columns = 3;
+  repeated string right_columns = 4;
+  string suffix = 5;
+}
+
+message ViewConfig {
+  optional int32 row_limit = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 5000
+  }];
+}
+
+message ExportConfig {
+  ExportFormat format = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string filename = 2;
+  ExportDestination destination = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+}
+
+message DownloadConfig {
+  ExportFormat format = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string filename = 2;
+}
+
+message Overlay {
+  OverlayChartType chart_type = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string y_column = 2;
+  ChartAggregation aggregation = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  YAxisPosition y_axis_position = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+}
+
+message ReferenceLine {
+  ReferenceAxis axis = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional double value = 2;
+  string label = 3;
+  string color = 4;
+}
+
+message ChartConfig {
+  ChartType chart_type = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string x_column = 2;
+  string y_column = 3;
+  int32 bins = 4 [(buf.validate.field).int32.gte = 1];
+  ChartAggregation aggregation = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string group_column = 6;
+  optional GroupSortBy group_sort_by = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  SortDirection group_sort_order = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string group_sort_column = 9;
+  StackMode stack_mode = 10 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  double area_opacity = 11 [(buf.validate.field).double = {
+    gte: 0
+    lte: 1
+  }];
+  optional DateBucket date_bucket = 12 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional DateOrdinal date_ordinal = 13 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  bool pan_zoom_enabled = 14;
+  bool selection_enabled = 15;
+  bool area_selection_enabled = 16;
+  optional SortBy sort_by = 17 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  SortDirection sort_order = 18 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string sort_column = 19;
+  optional string x_axis_label = 20;
+  optional string y_axis_label = 21;
+  AxisScale y_axis_scale = 22 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional double y_axis_min = 23;
+  optional double y_axis_max = 24;
+  DisplayUnits display_units = 25 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  int32 decimal_places = 26 [(buf.validate.field).int32.gte = 0];
+  LegendPosition legend_position = 27 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string title = 28;
+  repeated string series_colors = 29;
+  repeated Overlay overlays = 30;
+  repeated ReferenceLine reference_lines = 31;
+  optional ChartHeight chart_height = 32 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional ChartWidth chart_width = 33 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+}
+
+message NotificationConfig {
+  NotificationMethod method = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string recipient = 2;
+  repeated string subscriber_ids = 3;
+  string bot_token = 4;
+  optional RecipientSource recipient_source = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string recipient_column = 6;
+  repeated string input_columns = 7;
+  string output_column = 8;
+  string message_template = 9;
+  string subject_template = 10;
+  int32 batch_size = 11 [(buf.validate.field).int32.gte = 1];
+}
+
+message AIConfig {
+  AIProvider provider = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string model = 2;
+  repeated string input_columns = 3;
+  string output_column = 4;
+  string error_column = 5;
+  string prompt_template = 6;
+  int32 batch_size = 7 [(buf.validate.field).int32.gte = 1];
+  int32 max_retries = 8 [(buf.validate.field).int32.gte = 0];
+  optional int32 rate_limit_rpm = 9 [(buf.validate.field).int32.gte = 1];
+  string endpoint_url = 10;
+  string api_key = 11;
+  double temperature = 12 [(buf.validate.field).double = {
+    gte: 0
+    lte: 2
+  }];
+  optional int32 max_tokens = 13 [(buf.validate.field).int32.gte = 1];
+  google.protobuf.Struct request_options = 14;
+}
+
+message DatasourceConfig {}
+
+message TimeSeriesConfig {
+  string column = 1;
+  TimeseriesOperationType operation_type = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string new_column = 3;
+  optional TimeComponent component = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional int32 value = 5;
+  optional DurationUnit unit = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional TimeDirection direction = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string column2 = 8;
+}
+
+message StringTransformConfig {
+  string column = 1;
+  StringTransformMethod method = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string new_column = 3;
+  optional int32 start = 4;
+  optional int32 end = 5;
+  optional string pattern = 6;
+  optional string replacement = 7;
+  optional int32 group_index = 8;
+  optional string delimiter = 9;
+  optional int32 index = 10;
+}
+
+message StepConfig {
+  oneof config {
+    SelectConfig select = 1;
+    DropConfig drop = 2;
+    FilterConfig filter = 3;
+    GroupByConfig groupby = 4;
+    SortConfig sort = 5;
+    RenameConfig rename = 6;
+    ExpressionConfig expression = 7;
+    WithColumnsConfig with_columns = 8;
+    LimitConfig limit = 9;
+    SampleConfig sample = 10;
+    TopKConfig topk = 11;
+    DeduplicateConfig deduplicate = 12;
+    FillNullConfig fill_null = 13;
+    UnpivotConfig unpivot = 14;
+    ExplodeConfig explode = 15;
+    PivotConfig pivot = 16;
+    UnionByNameConfig union_by_name = 17;
+    JoinConfig join = 18;
+    ViewConfig view = 19;
+    ExportConfig export = 20;
+    DownloadConfig download = 21;
+    ChartConfig chart = 22;
+    NotificationConfig notification = 23;
+    AIConfig ai = 24;
+    DatasourceConfig datasource = 25;
+    TimeSeriesConfig timeseries = 26;
+    StringTransformConfig string_transform = 27;
+  }
+}

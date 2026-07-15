@@ -3,12 +3,60 @@ import {
 	createDatasource,
 	createDatasourceWithDates,
 	createAnalysis,
-	shutdownEngine
+	shutdownEngine,
+	type E2ERequest
 } from './utils/api.js';
-import { addStepAndOpenConfig } from './utils/analysis.js';
-import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { addStepAndOpenConfig, gotoAnalysisEditor } from './utils/analysis.js';
+import { createCleanupPage } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
+import type { Browser } from '@playwright/test';
+import { waitForInlinePreviewReady } from './utils/readiness.js';
+
+const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
+
+let sharedBaseDatasourceName = '';
+let sharedBaseDatasourceId = '';
+let sharedAuxDatasourceName = '';
+let sharedDateDatasourceName = '';
+let sharedDateDatasourceId = '';
+
+function workerRequest(
+	browser: Browser,
+	workerAuth: { authFile: string; workerIndex: number }
+): E2ERequest {
+	return {
+		browser,
+		authFile: workerAuth.authFile,
+		workerIndex: workerAuth.workerIndex,
+		baseURL
+	} as unknown as E2ERequest;
+}
+
+async function createTrackedAnalysis(
+	request: E2ERequest,
+	analysisName: string,
+	datasourceId: string
+): Promise<string> {
+	return createAnalysis(request, analysisName, datasourceId);
+}
+
+test.beforeAll(async ({ browser, workerAuth }) => {
+	const request = workerRequest(browser, workerAuth);
+	const id = uid();
+	sharedBaseDatasourceName = `e2e-ops-base-${id}`;
+	sharedAuxDatasourceName = `e2e-ops-aux-${id}`;
+	sharedDateDatasourceName = `e2e-ops-date-${id}`;
+	sharedBaseDatasourceId = await createDatasource(request, sharedBaseDatasourceName);
+	await createDatasource(request, sharedAuxDatasourceName);
+	sharedDateDatasourceId = await createDatasourceWithDates(request, sharedDateDatasourceName);
+});
+
+test.afterAll(async ({ browser, workerAuth }) => {
+	const { context } = await createCleanupPage(browser, workerAuth.workerIndex);
+	await context.close();
+});
 
 // ── Download format switching ───────────────────────────────────────────────
 
@@ -17,12 +65,9 @@ test.describe('Analyses – download config format switching', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-download-cfg-${id}`;
 		const analysis = `E2E Download Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'download');
 
@@ -59,8 +104,6 @@ test.describe('Analyses – download config format switching', () => {
 			await screenshot(page, 'analysis/operations', 'download-config-format-switch');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -69,12 +112,9 @@ test.describe('Analyses – download config format switching', () => {
 
 test.describe('Analyses – limit config editing', () => {
 	test('Limit: set row count, Apply, verify disabled buttons', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-limit-cfg-${id}`;
 		const analysis = `E2E Limit Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'limit');
 
@@ -95,20 +135,15 @@ test.describe('Analyses – limit config editing', () => {
 			await screenshot(page, 'analysis/operations', 'limit-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – expression config editing', () => {
 	test('Expression: fill expression + column name, Apply', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-expr-cfg-${id}`;
 		const analysis = `E2E Expr Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'expression');
 
@@ -131,8 +166,6 @@ test.describe('Analyses – expression config editing', () => {
 			await screenshot(page, 'analysis/operations', 'expression-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -142,12 +175,9 @@ test.describe('Analyses – sort config editing', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-sort-cfg-${id}`;
 		const analysis = `E2E Sort Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'sort');
 
@@ -189,8 +219,6 @@ test.describe('Analyses – sort config editing', () => {
 			await expect(applyBtn).toBeEnabled();
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -200,12 +228,9 @@ test.describe('Analyses – rename config editing', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-rename-cfg-${id}`;
 		const analysis = `E2E Rename Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'rename');
 
@@ -256,8 +281,6 @@ test.describe('Analyses – rename config editing', () => {
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -267,12 +290,9 @@ test.describe('Analyses – filter config editing', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-filter-cfg-${id}`;
 		const analysis = `E2E Filter Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'filter');
 
@@ -319,8 +339,6 @@ test.describe('Analyses – filter config editing', () => {
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -329,38 +347,25 @@ test.describe('Analyses – filter config editing', () => {
 
 test.describe('Analyses – view node inline preview', () => {
 	test('view step renders inline data table with preview data', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-view-preview-${id}`;
 		const analysis = `E2E View Preview ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
-			await page.goto(`/analysis/${aId}`);
-			await expect(page.locator('button[data-step="view"]')).toBeVisible({ timeout: 15_000 });
-
-			// The analysis already has a view step from createAnalysis — the inline table should render
-			await expect(page.locator('[data-testid="inline-data-table"]')).toBeVisible({
-				timeout: 15_000
-			});
+			await gotoAnalysisEditor(page, aId);
+			await waitForInlinePreviewReady(page);
 
 			await screenshot(page, 'analysis/operations', 'view-inline-preview');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – chart config and preview', () => {
 	test('chart step: configure x/y columns, apply, chart SVG renders', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-chart-cfg-${id}`;
 		const analysis = `E2E Chart Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'chart');
 
@@ -381,14 +386,12 @@ test.describe('Analyses – chart config and preview', () => {
 
 			// Chart preview should render (contains an SVG)
 			const chartPreview = page.locator('[data-testid="chart-preview"]');
-			await expect(chartPreview).toBeVisible({ timeout: 30_000 });
-			await expect(chartPreview.locator('svg')).toBeVisible({ timeout: 30_000 });
+			await expect(chartPreview).toBeVisible({ timeout: 5_000 });
+			await expect(chartPreview.locator('svg')).toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/operations', 'chart-preview-rendered');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -397,12 +400,9 @@ test.describe('Analyses – chart config and preview', () => {
 
 test.describe('Analyses – groupby config editing', () => {
 	test('GroupBy: select group column, add aggregation, Apply', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-groupby-cfg-${id}`;
 		const analysis = `E2E GroupBy Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'groupby');
 
@@ -451,20 +451,15 @@ test.describe('Analyses – groupby config editing', () => {
 			await expect(applyBtn).toBeEnabled();
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – sample config editing', () => {
 	test('Sample: set fraction + seed, Apply, buttons disable', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-sample-cfg-${id}`;
 		const analysis = `E2E Sample Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'sample');
 
@@ -484,20 +479,15 @@ test.describe('Analyses – sample config editing', () => {
 			await screenshot(page, 'analysis/operations', 'sample-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – topk config editing', () => {
 	test('TopK: select column, set k, toggle descending, Apply', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-topk-cfg-${id}`;
 		const analysis = `E2E TopK Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'topk');
 
@@ -524,8 +514,6 @@ test.describe('Analyses – topk config editing', () => {
 			await screenshot(page, 'analysis/operations', 'topk-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -534,12 +522,9 @@ test.describe('Analyses – topk config editing', () => {
 
 test.describe('Analyses – unpivot config editing', () => {
 	test('Unpivot: set variable/value names, Apply', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-unpivot-cfg-${id}`;
 		const analysis = `E2E Unpivot Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'unpivot');
 
@@ -564,20 +549,15 @@ test.describe('Analyses – unpivot config editing', () => {
 			await screenshot(page, 'analysis/operations', 'unpivot-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – fill null config editing', () => {
 	test('FillNull: change strategy, set value, Apply', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-fillnull-cfg-${id}`;
 		const analysis = `E2E FillNull Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'fill_null');
 
@@ -608,20 +588,15 @@ test.describe('Analyses – fill null config editing', () => {
 			await screenshot(page, 'analysis/operations', 'fillnull-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – pivot config editing', () => {
 	test('Pivot: pick pivot column, check index, set agg, Apply', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-pivot-cfg-${id}`;
 		const analysis = `E2E Pivot Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'pivot');
 
@@ -652,8 +627,6 @@ test.describe('Analyses – pivot config editing', () => {
 			await screenshot(page, 'analysis/operations', 'pivot-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -665,12 +638,9 @@ test.describe('Analyses – string transform config editing', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-str-cfg-${id}`;
 		const analysis = `E2E Str Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'string_transform');
 
@@ -702,8 +672,6 @@ test.describe('Analyses – string transform config editing', () => {
 			await screenshot(page, 'analysis/operations', 'string-transform-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -713,12 +681,9 @@ test.describe('Analyses – drop config editing', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-drop-cfg-${id}`;
 		const analysis = `E2E Drop Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'drop');
 
@@ -749,20 +714,15 @@ test.describe('Analyses – drop config editing', () => {
 			await screenshot(page, 'analysis/operations', 'drop-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – select config editing', () => {
 	test('Select: pick columns, verify callout count, Apply', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-select-cfg-${id}`;
 		const analysis = `E2E Select Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'select');
 
@@ -785,20 +745,15 @@ test.describe('Analyses – select config editing', () => {
 			await screenshot(page, 'analysis/operations', 'select-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – with_columns config editing', () => {
 	test('WithColumns: add literal expression, verify in list, Apply', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-wc-cfg-${id}`;
 		const analysis = `E2E WithCols Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'with_columns');
 
@@ -826,8 +781,6 @@ test.describe('Analyses – with_columns config editing', () => {
 			await screenshot(page, 'analysis/operations', 'with-columns-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -836,12 +789,9 @@ test.describe('Analyses – with_columns config editing', () => {
 
 test.describe('Analyses – download config editing', () => {
 	test('Download: set filename + format, Apply', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-download-edit-${id}`;
 		const analysis = `E2E Download Edit ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'download');
 
@@ -862,20 +812,15 @@ test.describe('Analyses – download config editing', () => {
 			await screenshot(page, 'analysis/operations', 'download-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – notification config editing', () => {
 	test('Notification: set email method + recipient, Apply', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-notify-cfg-${id}`;
 		const analysis = `E2E Notify Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'notification');
 
@@ -901,20 +846,15 @@ test.describe('Analyses – notification config editing', () => {
 			await screenshot(page, 'analysis/operations', 'notification-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – AI config editing', () => {
 	test('AI: set provider, model, output column, prompt, Apply', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-ai-cfg-${id}`;
 		const analysis = `E2E AI Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'ai');
 
@@ -947,8 +887,6 @@ test.describe('Analyses – AI config editing', () => {
 			await screenshot(page, 'analysis/operations', 'ai-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -957,17 +895,10 @@ test.describe('Analyses – AI config editing', () => {
 
 test.describe('Analyses – join config editing', () => {
 	test('Join: select right datasource, add join column pair, Apply', async ({ page, request }) => {
-		test.setTimeout(120_000);
 		const id = uid();
-		const dsLeft = `e2e-join-left-${id}`;
-		const dsRight = `e2e-join-right-${id}`;
+		const dsRight = sharedAuxDatasourceName;
 		const analysis = `E2E Join Config ${id}`;
-		const [dsId, rightDsId] = await Promise.all([
-			createDatasource(request, dsLeft),
-			createDatasource(request, dsRight)
-		]);
-		const aId = await createAnalysis(request, analysis, dsId);
-		void rightDsId;
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'join');
 
@@ -976,33 +907,29 @@ test.describe('Analyses – join config editing', () => {
 			const dsPickerInput = configPanel.locator('input[placeholder="Search datasources..."]');
 			await dsPickerInput.click();
 			await dsPickerInput.fill(dsRight);
-			await page.locator(`[data-picker-option="${dsRight}"]`).click({ timeout: 8_000 });
+			await page.locator(`[data-picker-option="${dsRight}"]`).click({ timeout: 5_000 });
 
-			await expect(configPanel.getByText(/columns available/)).toBeVisible({ timeout: 10_000 });
-
-			await configPanel.locator('[data-testid="join-add-column-button"]').click();
+			const addColumnButton = configPanel.locator('[data-testid="join-add-column-button"]');
+			await expect(addColumnButton).toBeEnabled({ timeout: 5_000 });
+			await addColumnButton.click();
 
 			const colGroup = configPanel.getByRole('group', { name: /Join column pair 1/ });
-			const leftDropdown = colGroup
-				.getByRole('group', { name: 'Left Column' })
-				.locator('button[aria-expanded]');
+			const leftGroup = colGroup.getByRole('group', { name: 'Left Column' });
+			const leftDropdown = leftGroup.locator('button[aria-expanded]');
 			await leftDropdown.click();
-			const leftListbox = page
-				.getByRole('listbox')
-				.filter({ has: page.locator('[data-column-option="id"]') })
-				.last();
-			await expect(leftListbox).toBeVisible({ timeout: 5_000 });
+			const leftListbox = leftGroup.getByRole('listbox');
+			await expect(leftListbox.locator('[data-column-option="id"]')).toBeVisible({
+				timeout: 10_000
+			});
 			await leftListbox.locator('[data-column-option="id"]').click({ timeout: 5_000 });
 
-			const rightDropdown = colGroup
-				.getByRole('group', { name: 'Right Column' })
-				.locator('button[aria-expanded]');
+			const rightGroup = colGroup.getByRole('group', { name: 'Right Column' });
+			const rightDropdown = rightGroup.locator('button[aria-expanded]');
 			await rightDropdown.click();
-			const rightListbox = page
-				.getByRole('listbox')
-				.filter({ has: page.locator('[data-column-option="id"]') })
-				.last();
-			await expect(rightListbox).toBeVisible({ timeout: 5_000 });
+			const rightListbox = rightGroup.getByRole('listbox');
+			await expect(rightListbox.locator('[data-column-option="id"]')).toBeVisible({
+				timeout: 10_000
+			});
 			await rightListbox.locator('[data-column-option="id"]').click({ timeout: 5_000 });
 
 			const suffixInput = configPanel.locator('[data-testid="join-suffix-input"]');
@@ -1016,41 +943,30 @@ test.describe('Analyses – join config editing', () => {
 			await screenshot(page, 'analysis/operations', 'join-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, dsRight);
-			await deleteDatasourceViaUI(page, dsLeft);
 		}
 	});
 });
 
 test.describe('Analyses – timeseries config editing', () => {
 	test('TimeSeries: no-date warning with standard CSV', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-ts-nodate-${id}`;
 		const analysis = `E2E TS NoDate ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'timeseries');
 			await expect(configPanel.locator('#ts-no-columns-warning')).toBeVisible({
-				timeout: 8_000
+				timeout: 5_000
 			});
 			await screenshot(page, 'analysis/operations', 'timeseries-no-date-warning');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('TimeSeries: extract month with date CSV', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-ts-date-${id}`;
 		const analysis = `E2E TS Extract ${id}`;
-		const dsId = await createDatasourceWithDates(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedDateDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'timeseries');
 
@@ -1074,20 +990,15 @@ test.describe('Analyses – timeseries config editing', () => {
 			await screenshot(page, 'analysis/operations', 'timeseries-extract-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – deduplicate config editing', () => {
 	test('Deduplicate: change keep strategy, verify callout, Apply', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-dedup-cfg-${id}`;
 		const analysis = `E2E Dedup Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'deduplicate');
 
@@ -1124,20 +1035,15 @@ test.describe('Analyses – deduplicate config editing', () => {
 			await screenshot(page, 'analysis/operations', 'deduplicate-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – explode config warning', () => {
 	test('Explode: shows warning when no list/array columns', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-explode-cfg-${id}`;
 		const analysis = `E2E Explode Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'explode');
 
@@ -1146,7 +1052,7 @@ test.describe('Analyses – explode config warning', () => {
 				configPanel.getByText(
 					'No list/array columns detected. This operation requires columns with list or array types.'
 				)
-			).toBeVisible({ timeout: 8_000 });
+			).toBeVisible({ timeout: 5_000 });
 
 			// Descriptive text should be visible
 			await expect(
@@ -1162,8 +1068,6 @@ test.describe('Analyses – explode config warning', () => {
 			await screenshot(page, 'analysis/operations', 'explode-config-warning');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -1173,23 +1077,17 @@ test.describe('Analyses – union_by_name config editing', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(120_000);
 		const id = uid();
-		const dsBase = `e2e-union-base-${id}`;
-		const dsSource = `e2e-union-source-${id}`;
+		const dsBase = sharedBaseDatasourceName;
+		const dsSource = sharedAuxDatasourceName;
 		const analysis = `E2E Union Config ${id}`;
-		const [dsId, unionDsId] = await Promise.all([
-			createDatasource(request, dsBase),
-			createDatasource(request, dsSource)
-		]);
-		const aId = await createAnalysis(request, analysis, dsId);
-		void unionDsId;
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'union_by_name');
 
 			// Warning: no sources selected
 			await expect(configPanel.getByText('Select at least one datasource to union.')).toBeVisible({
-				timeout: 8_000
+				timeout: 5_000
 			});
 
 			// Base datasource name should be shown
@@ -1203,7 +1101,7 @@ test.describe('Analyses – union_by_name config editing', () => {
 			const dsPickerInput = configPanel.locator('input[placeholder="Search datasources..."]');
 			await dsPickerInput.click();
 			await dsPickerInput.fill(dsSource);
-			await page.locator(`[data-picker-option="${dsSource}"]`).click({ timeout: 8_000 });
+			await page.locator(`[data-picker-option="${dsSource}"]`).click({ timeout: 5_000 });
 
 			// Close the dropdown by clicking outside it (mousedown on an element above the listbox)
 			await configPanel.getByText('Base Datasource').click();
@@ -1229,9 +1127,6 @@ test.describe('Analyses – union_by_name config editing', () => {
 			await screenshot(page, 'analysis/operations', 'union-config-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, dsSource);
-			await deleteDatasourceViaUI(page, dsBase);
 		}
 	});
 });
@@ -1241,12 +1136,9 @@ test.describe('Analyses – explode config positive path', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(120_000);
 		const id = uid();
-		const ds = `e2e-explode-pos-${id}`;
 		const analysis = `E2E Explode Positive ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			// Step 1: add a with_columns step that produces a list column via UDF expression
 			const withColPanel = await addStepAndOpenConfig(page, aId, 'with_columns');
@@ -1273,7 +1165,7 @@ test.describe('Analyses – explode config positive path', () => {
 			await explodeNode.locator('[data-action="edit"]').click();
 
 			const explodePanel = page.locator('[data-step-config="explode"]');
-			await expect(explodePanel).toBeVisible({ timeout: 8_000 });
+			await expect(explodePanel).toBeVisible({ timeout: 5_000 });
 
 			// Descriptive text should be visible
 			await expect(
@@ -1289,8 +1181,6 @@ test.describe('Analyses – explode config positive path', () => {
 			await screenshot(page, 'analysis/operations', 'explode-positive-applied');
 		} finally {
 			await shutdownEngine(request, aId);
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });

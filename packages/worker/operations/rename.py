@@ -1,0 +1,20 @@
+"""Rename columns operation."""
+
+import polars as pl
+
+from runtime.domain.compute.base import OperationHandler, OperationParams
+
+
+class RenameParams(OperationParams):
+    column_mapping: dict[str, str]
+
+
+class RenameHandler(OperationHandler):
+    def __call__(
+        self,
+        lf: pl.LazyFrame,
+        params: dict,
+        **_,
+    ) -> pl.LazyFrame:
+        validated = RenameParams.model_validate(params)
+        return lf.rename(validated.column_mapping)

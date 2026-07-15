@@ -8,9 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 RUNTIME_ENV_FILES = [
-    ROOT / 'packages/shared/dev.env',
-    ROOT / 'packages/shared/prod.env',
-    ROOT / 'packages/shared/e2e.env',
+    ROOT / 'config/env/dev.env',
+    ROOT / 'config/env/prod.env',
+    ROOT / 'config/env/e2e.env',
 ]
 
 DOCKER_ENV_TO_COMPOSE: dict[Path, tuple[Path, ...]] = {
@@ -30,10 +30,15 @@ EXTRA_RUNTIME_KEYS = {
     'E2E_PYTHON_VERSION',
     'E2E_TIMEOUT_SECONDS',
     'E2E_TIMEOUT_GRACE_SECONDS',
-    'E2E_HEARTBEAT_SECONDS',
     'E2E_LOG_DIR',
+    'PW_E2E_WORKERS',
     'DB_USERNAME',
     'DB_PASSWORD',
+    'INTERNAL_GRPC_TARGET',
+    'WORKER_DATA_PLANE_GRPC_HOST',
+    'WORKER_DATA_PLANE_GRPC_PORT',
+    'WORKER_DATA_PLANE_GRPC_TARGET',
+    'GRPC_ENABLE_FORK_SUPPORT',
 }
 
 ENV_KEY_RE = re.compile(r'^[A-Z][A-Z0-9_]*$')
@@ -129,10 +134,10 @@ def _compose_vars(paths: tuple[Path, ...]) -> tuple[set[str], set[str]]:
 def main() -> int:
     errors: list[str] = []
 
-    shared_config_path = ROOT / 'packages/shared/core/config.py'
+    runtime_config_path = ROOT / 'packages/backend/backend_core/config.py'
     auth_config_path = ROOT / 'packages/backend/backend_core/auth_config.py'
 
-    runtime_allowed = _collect_class_env_keys(shared_config_path, 'Settings')
+    runtime_allowed = _collect_class_env_keys(runtime_config_path, 'Settings')
     runtime_allowed.update(_collect_class_env_keys(auth_config_path, 'AuthSettings'))
     runtime_allowed.update(EXTRA_RUNTIME_KEYS)
 
@@ -142,8 +147,7 @@ def main() -> int:
         unknown = sorted(item for item in parsed if item.key not in runtime_allowed)
         for item in unknown:
             errors.append(
-                f'{env_path.relative_to(ROOT)}:{item.line}: unknown runtime env key: {item.key} '
-                f'(not defined by Settings/AuthSettings or approved extras)'
+                f'{env_path.relative_to(ROOT)}:{item.line}: unknown runtime env key: {item.key} (not defined by Settings/AuthSettings or approved extras)'
             )
 
     for env_path, compose_paths in DOCKER_ENV_TO_COMPOSE.items():

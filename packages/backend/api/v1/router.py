@@ -21,7 +21,7 @@ from modules.settings import router as settings_router
 from modules.telegram import router as telegram_router
 from modules.udf import router as udf_router
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix='/v1')
 
 
 router.include_router(ai_router)

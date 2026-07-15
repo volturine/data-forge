@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -6,14 +5,15 @@ import signal
 import subprocess
 import sys
 import time
-from typing import Sequence
+from collections.abc import Sequence
+
+from typing_extensions import Self
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Run a command with a timeout and heartbeat logs.')
+    parser = argparse.ArgumentParser(description='Run a command with a timeout.')
     parser.add_argument('--timeout-seconds', type=int, default=0)
     parser.add_argument('--grace-seconds', type=int, default=30)
-    parser.add_argument('--heartbeat-seconds', type=int, default=0)
     parser.add_argument('command', nargs=argparse.REMAINDER)
     return parser.parse_args()
 
@@ -32,7 +32,7 @@ class ForwardSignals:
         self.process = process
         self._previous: dict[int, object] = {}
 
-    def __enter__(self) -> 'ForwardSignals':
+    def __enter__(self) -> Self:
         for signum in (signal.SIGINT, signal.SIGTERM):
             self._previous[signum] = signal.getsignal(signum)
             signal.signal(signum, self._handle)
@@ -52,7 +52,6 @@ def main() -> int:
     command = normalize_command(args.command)
     process = subprocess.Popen(command)
     started = time.monotonic()
-    next_heartbeat = started + args.heartbeat_seconds if args.heartbeat_seconds > 0 else float('inf')
 
     with ForwardSignals(process):
         while True:
@@ -62,10 +61,6 @@ def main() -> int:
 
             now = time.monotonic()
             elapsed = int(now - started)
-            if args.heartbeat_seconds > 0 and now >= next_heartbeat:
-                print(f'[e2e] Playwright still running after {elapsed}s', flush=True)
-                next_heartbeat += args.heartbeat_seconds
-
             if args.timeout_seconds > 0 and elapsed >= args.timeout_seconds:
                 print(
                     f'[e2e] command hit timeout after {args.timeout_seconds}s',

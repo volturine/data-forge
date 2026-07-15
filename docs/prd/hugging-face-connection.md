@@ -1,5 +1,10 @@
 # PRD: Hugging Face Connection
 
+> **Status (2026-05-28): Partially implemented.**
+> **Current truth:** Hugging Face provider settings and API-backed AI integration exist, but model-hub pulls, GPU lifecycle, and dataset ingestion are not shipped.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Integrate Hugging Face as a first-class model and dataset hub in Data-Forge, enabling users to pull pre-trained models from the Hugging Face Model Hub, load them onto GPU for inference, and optionally ingest Hugging Face datasets as datasources.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState
+from fastapi.websockets import WebSocketState
 
 _DISCONNECT_RUNTIME_ERRORS = (
     'Cannot call "receive" once a disconnect message has been received',
@@ -46,10 +46,10 @@ async def safe_send_json(websocket: WebSocket, payload: dict) -> bool:
 
 
 def resolve_websocket_session_token(websocket: WebSocket) -> str | None:
-    cookie_token = websocket.cookies.get("session_token")
+    cookie_token = websocket.cookies.get('session_token')
     if cookie_token:
         return cookie_token
-    header_token = websocket.headers.get("X-Session-Token")
+    header_token = websocket.headers.get('X-Session-Token')
     if header_token:
         return header_token
     return None

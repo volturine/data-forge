@@ -1,7 +1,13 @@
 import { readFileSync } from 'fs';
 import { test, expect } from './fixtures.js';
 import { createUdf } from './utils/api.js';
-import { waitForLayoutReady, waitForUdfList, gotoUdfEditor } from './utils/readiness.js';
+import {
+	gotoNewUdfPage,
+	gotoUdfEditor,
+	gotoUdfLibrary,
+	waitForLayoutReady,
+	waitForUdfList
+} from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { deleteUdfViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
@@ -90,7 +96,7 @@ test.describe('UDFs – list & management', () => {
 		await row.getByRole('button', { name: /Confirm/i }).click();
 
 		await expect(page.locator(`[data-udf-card="${udf}"]`)).not.toBeVisible({
-			timeout: 8_000
+			timeout: 5_000
 		});
 	});
 
@@ -110,7 +116,6 @@ test.describe('UDFs – list & management', () => {
 	});
 
 	test('Clone button creates a copy of the UDF', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const udf = `e2e_clone_${uid()}`;
 		await createUdf(request, udf);
 		try {
@@ -124,7 +129,7 @@ test.describe('UDFs – list & management', () => {
 			// Clone gets the name "${udf} (copy)"
 			const cloneName = `${udf} (copy)`;
 			await expect(page.locator(`[data-udf-card="${cloneName}"]`)).toBeVisible({
-				timeout: 8_000
+				timeout: 5_000
 			});
 		} finally {
 			// Delete clone first (has " (copy)" suffix), then original
@@ -141,7 +146,7 @@ test.describe('UDFs – list & management', () => {
 			await waitForUdfList(page);
 			const row = page.locator(`[data-udf-card="${udf}"]`);
 			await row.getByRole('button', { name: /Edit/i }).click();
-			await expect(page).toHaveURL(new RegExp(`/udfs/${udfId}`), { timeout: 10_000 });
+			await expect(page).toHaveURL(new RegExp(`/udfs/${udfId}`), { timeout: 5_000 });
 		} finally {
 			await deleteUdfViaUI(page, udf);
 		}
@@ -170,7 +175,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import button opens the import dialog', async ({ page }) => {
-		await page.goto('/udfs');
+		await gotoUdfLibrary(page);
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -179,7 +184,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import dialog Cancel closes it', async ({ page }) => {
-		await page.goto('/udfs');
+		await gotoUdfLibrary(page);
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -192,7 +197,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import dialog: invalid JSON shows error', async ({ page }) => {
-		await page.goto('/udfs');
+		await gotoUdfLibrary(page);
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -204,7 +209,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import dialog: missing udfs array shows error', async ({ page }) => {
-		await page.goto('/udfs');
+		await gotoUdfLibrary(page);
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -216,11 +221,10 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('valid import roundtrip: export then import', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const udf = `e2e_roundtrip_${uid()}`;
 		await createUdf(request, udf);
 		try {
-			await page.goto('/udfs');
+			await gotoUdfLibrary(page);
 
 			// Export
 			const [download] = await Promise.all([
@@ -233,10 +237,11 @@ test.describe('UDFs – export & import', () => {
 			});
 
 			// Delete the UDF via UI first
-			await deleteUdfViaUI(page, udf);
-			await page.goto('/udfs');
-			await waitForUdfList(page);
-			await expect(page.locator(`[data-udf-card="${udf}"]`)).toHaveCount(0);
+			await deleteUdfViaUI(page, udf, { strict: true });
+			await gotoUdfLibrary(page, 10_000);
+			await expect(page.locator(`[data-udf-card="${udf}"]`)).toHaveCount(0, {
+				timeout: 10_000
+			});
 
 			// Import the exported UDF back via the UI import dialog
 			const importBtn = page.getByRole('button', { name: /Import/i });
@@ -246,10 +251,10 @@ test.describe('UDFs – export & import', () => {
 			await page.locator('#udf-import-json').fill(exportedJson);
 			await importDialog.getByRole('button', { name: /^Import$/i }).click();
 			await expect(importDialog.getByRole('heading', { name: /Import UDFs/i })).not.toBeVisible({
-				timeout: 10_000
+				timeout: 5_000
 			});
 
-			await expect(page.locator(`[data-udf-card="${udf}"]`)).toBeVisible({ timeout: 10_000 });
+			await expect(page.locator(`[data-udf-card="${udf}"]`)).toBeVisible({ timeout: 5_000 });
 		} finally {
 			await deleteUdfViaUI(page, udf);
 		}
@@ -258,20 +263,20 @@ test.describe('UDFs – export & import', () => {
 
 test.describe('UDFs – editor page', () => {
 	test('new UDF editor has name field', async ({ page }) => {
-		await page.goto('/udfs/new');
-		await expect(page.locator('#udf-name')).toBeVisible({ timeout: 8_000 });
+		await gotoNewUdfPage(page);
+		await expect(page.locator('#udf-name')).toBeVisible({ timeout: 5_000 });
 	});
 
 	test('new UDF editor has code editor', async ({ page }) => {
-		await page.goto('/udfs/new');
-		await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 8_000 });
+		await gotoNewUdfPage(page);
+		await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 5_000 });
 		await screenshot(page, 'udfs', 'editor-page');
 	});
 
 	test('new UDF editor has Save button', async ({ page }) => {
 		await page.goto('/udfs/new');
 		await waitForLayoutReady(page);
-		await expect(page.getByRole('button', { name: /Save/i })).toBeVisible({ timeout: 8_000 });
+		await expect(page.getByRole('button', { name: /Save/i })).toBeVisible({ timeout: 5_000 });
 	});
 
 	test('existing UDF editor shows UDF content', async ({ page, request }) => {
@@ -289,11 +294,10 @@ test.describe('UDFs – editor page', () => {
 
 test.describe('UDFs – editor functional flows', () => {
 	test('create UDF via editor and verify it appears in list', async ({ page }) => {
-		test.setTimeout(60_000);
 		const udf = `e2e_create_flow_${uid()}`;
 		try {
 			await page.goto('/udfs/new');
-			await expect(page.locator('#udf-name')).toBeVisible({ timeout: 8_000 });
+			await expect(page.locator('#udf-name')).toBeVisible({ timeout: 5_000 });
 
 			await page.locator('#udf-name').fill(udf);
 			await page.locator('#udf-description').fill('Created via editor E2E test');
@@ -304,20 +308,19 @@ test.describe('UDFs – editor functional flows', () => {
 			await saveBtn.click();
 
 			// After create, editor redirects to /udfs/<id>
-			await expect(page).toHaveURL(/\/udfs\/[0-9a-f-]+$/, { timeout: 15_000 });
+			await expect(page).toHaveURL(/\/udfs\/[0-9a-f-]+$/, { timeout: 5_000 });
 			await screenshot(page, 'udfs', 'editor-after-create');
 
 			// Navigate to list and verify the UDF appears
 			await page.goto('/udfs');
 			await waitForUdfList(page);
-			await expect(page.locator(`[data-udf-card="${udf}"]`)).toBeVisible({ timeout: 10_000 });
+			await expect(page.locator(`[data-udf-card="${udf}"]`)).toBeVisible({ timeout: 5_000 });
 		} finally {
 			await deleteUdfViaUI(page, udf);
 		}
 	});
 
 	test('edit existing UDF and save changes', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const udf = `e2e_edit_flow_${uid()}`;
 		const udfId = await createUdf(request, udf);
 		try {
@@ -331,10 +334,15 @@ test.describe('UDFs – editor functional flows', () => {
 			const saveBtn = page.locator('[data-testid="udf-save-button"]');
 			await saveBtn.click();
 
+			// Verify description is correct immediately after save (before reload)
+			await expect(page.locator('#udf-description')).toHaveValue('Updated description from E2E', {
+				timeout: 5_000
+			});
+
 			// Reload and verify the changes persisted
 			await page.reload();
 			await expect(page.locator('#udf-description')).toHaveValue('Updated description from E2E', {
-				timeout: 10_000
+				timeout: 5_000
 			});
 			await screenshot(page, 'udfs', 'editor-after-edit');
 		} finally {
@@ -344,7 +352,7 @@ test.describe('UDFs – editor functional flows', () => {
 
 	test('Save button is disabled when name is empty', async ({ page }) => {
 		await page.goto('/udfs/new');
-		await expect(page.locator('[data-testid="udf-save-button"]')).toBeVisible({ timeout: 8_000 });
+		await expect(page.locator('[data-testid="udf-save-button"]')).toBeVisible({ timeout: 5_000 });
 
 		// Name starts empty — Save should be disabled
 		const nameInput = page.locator('#udf-name');
@@ -362,6 +370,49 @@ test.describe('UDFs – editor functional flows', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
+// UDF code editor functional
+// ────────────────────────────────────────────────────────────────────────────────
+
+test.describe('UDFs – code editor functional', () => {
+	test('typing code in CodeMirror persists after save and reload', async ({ page, request }) => {
+		const udf = `e2e_code_${uid()}`;
+		const udfId = await createUdf(request, udf);
+		try {
+			await gotoUdfEditor(page, udfId);
+
+			// Focus the CodeMirror contenteditable and replace text
+			const cmContent = page.locator('.cm-content');
+			await expect(cmContent).toBeVisible({ timeout: 5_000 });
+			await cmContent.click();
+			await cmContent.fill('def udf(value):\n    return value * 2\n');
+
+			// Save
+			const saveBtn = page.locator('[data-testid="udf-save-button"]');
+			await saveBtn.click();
+
+			// Wait for save to complete
+			await expect(saveBtn).toBeEnabled({ timeout: 5_000 });
+
+			// Verify code is correct immediately after save (before reload)
+			await expect(page.locator('.cm-editor')).toContainText('return value * 2', {
+				timeout: 5_000
+			});
+
+			// Reload and verify code persisted
+			await page.reload();
+			await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 5_000 });
+
+			// CodeMirror content should contain the new code
+			await expect(page.locator('.cm-editor')).toContainText('return value * 2', {
+				timeout: 5_000
+			});
+		} finally {
+			await deleteUdfViaUI(page, udf);
+		}
+	});
+});
+
+// ────────────────────────────────────────────────────────────────────────────────
 // UDF error-state regression tests
 // ────────────────────────────────────────────────────────────────────────────────
 
@@ -371,7 +422,7 @@ test.describe('UDFs – error states', () => {
 	test('load error displays error state for bad UDF ID', async ({ page }) => {
 		await page.goto(`/udfs/${BAD_ID}`);
 
-		await expect(page.locator('[data-testid="udf-load-error"]')).toBeVisible({ timeout: 15_000 });
+		await expect(page.locator('[data-testid="udf-load-error"]')).toBeVisible({ timeout: 5_000 });
 		await expect(page.getByText('Failed to load UDF.')).toBeVisible();
 
 		await screenshot(page, 'udfs', 'load-error-state');
@@ -379,7 +430,7 @@ test.describe('UDFs – error states', () => {
 
 	test('load error does not crash navigation', async ({ page }) => {
 		await page.goto(`/udfs/${BAD_ID}`);
-		await expect(page.locator('[data-testid="udf-load-error"]')).toBeVisible({ timeout: 15_000 });
+		await expect(page.locator('[data-testid="udf-load-error"]')).toBeVisible({ timeout: 5_000 });
 
 		await page.locator('a[href="/udfs"]').click();
 		await expect(page).toHaveURL('/udfs');

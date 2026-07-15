@@ -6,7 +6,7 @@ const mockShutdownEngine = vi.fn();
 
 vi.mock('$lib/api/compute', () => ({
 	connectEnginesStream: (...args: unknown[]) => mockConnectEnginesStream(...args),
-	shutdownEngine: (...args: unknown[]) => mockShutdownEngine(...args)
+	shutdownEngineByIdentity: (...args: unknown[]) => mockShutdownEngine(...args)
 }));
 
 const { EnginesStore } = await import('./engines.svelte');
@@ -14,13 +14,20 @@ const { EnginesStore } = await import('./engines.svelte');
 function makeEngine(overrides: Partial<EngineStatusResponse> = {}): EngineStatusResponse {
 	return {
 		analysis_id: `analysis-${crypto.randomUUID().slice(0, 8)}`,
+		resource_id: overrides.analysis_id ?? `analysis-${crypto.randomUUID().slice(0, 8)}`,
 		status: 'healthy',
 		process_id: 1234,
-		last_activity: new Date().toISOString(),
+		last_activity: Temporal.Now.instant().toString(),
 		current_job_id: null,
 		resource_config: null,
 		effective_resources: null,
 		defaults: null,
+		scope: null,
+		reuse_policy: null,
+		datasource_id: null,
+		build_id: null,
+		current_build_id: null,
+		current_engine_run_id: null,
 		...overrides
 	};
 }
@@ -67,10 +74,10 @@ function mockShutdownSuccess() {
 	});
 }
 
-function mockShutdownError(message: string) {
+function mockShutdownError(message: string, status?: number) {
 	mockShutdownEngine.mockReturnValue({
-		match: (_onOk: unknown, onErr: (e: { message: string }) => void) => {
-			onErr({ message });
+		match: (_onOk: unknown, onErr: (e: { message: string; status?: number }) => void) => {
+			onErr({ message, status });
 			return Promise.resolve();
 		}
 	});
@@ -113,7 +120,10 @@ describe('EnginesStore', () => {
 
 	test('snapshot updates engines and connection state', () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1' }), makeEngine({ analysis_id: 'a-2' })];
+		const engines = [
+			makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' }),
+			makeEngine({ analysis_id: 'a-2', resource_id: 'a-2' })
+		];
 
 		store.startStream();
 		stream.emitSnapshot(engines);
@@ -197,7 +207,7 @@ describe('EnginesStore', () => {
 
 		store.startStream();
 		stream.emitSnapshot(engines);
-		await store.shutdownEngine('a-1');
+		await store.shutdownEngine(engines[0]!);
 
 		expect(store.engines).toHaveLength(1);
 		expect(store.engines[0]?.analysis_id).toBe('a-2');
@@ -205,18 +215,21 @@ describe('EnginesStore', () => {
 
 	test('shutdownEngine keeps a pending engine hidden across snapshots', async () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1' }), makeEngine({ analysis_id: 'a-2' })];
+		const engines = [
+			makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' }),
+			makeEngine({ analysis_id: 'a-2', resource_id: 'a-2' })
+		];
 		mockShutdownSuccess();
 
 		store.startStream();
 		stream.emitSnapshot(engines);
-		await store.shutdownEngine('a-1');
+		await store.shutdownEngine(engines[0]!);
 		stream.emitSnapshot(engines);
 
 		expect(store.engines).toHaveLength(1);
 		expect(store.engines[0]?.analysis_id).toBe('a-2');
 
-		stream.emitSnapshot([makeEngine({ analysis_id: 'a-2' })]);
+		stream.emitSnapshot([makeEngine({ analysis_id: 'a-2', resource_id: 'a-2' })]);
 		stream.emitSnapshot(engines);
 
 		expect(store.engines).toHaveLength(2);
@@ -224,17 +237,30 @@ describe('EnginesStore', () => {
 
 	test('shutdownEngine surfaces API failures', async () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1' })];
+		const engines = [makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' })];
 		mockShutdownError('Permission denied');
 
 		store.startStream();
 		stream.emitSnapshot(engines);
 
-		await expect(store.shutdownEngine('a-1')).rejects.toThrow('Permission denied');
+		await expect(store.shutdownEngine(engines[0]!)).rejects.toThrow('Permission denied');
 		expect(store.engines).toEqual([]);
 		expect(store.error).toBe('Permission denied');
 		stream.emitSnapshot(engines);
 		expect(store.engines).toEqual(engines);
+		expect(store.error).toBeNull();
+	});
+
+	test('shutdownEngine ignores not-found races', async () => {
+		const stream = mockStreamConnection();
+		const engines = [makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' })];
+		mockShutdownError('Engine not found', 404);
+
+		store.startStream();
+		stream.emitSnapshot(engines);
+
+		await expect(store.shutdownEngine(engines[0]!)).resolves.toBeUndefined();
+		expect(store.engines).toEqual([]);
 		expect(store.error).toBeNull();
 	});
 

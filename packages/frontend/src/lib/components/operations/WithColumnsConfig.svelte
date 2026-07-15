@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import type { Udf } from '$lib/types/udf';
+	import type { WithColumnsConfigData, WithColumnsExpr } from '$lib/types/operation-config';
 
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { listUdfs, createUdf } from '$lib/api/udf';
@@ -12,22 +13,8 @@
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
-	import { Pencil, X } from 'lucide-svelte';
+	import { Pencil, X } from '@lucide/svelte';
 	import { css, button, emptyText, input, label, stepConfig } from '$lib/styles/panda';
-
-	interface WithColumnsExpr {
-		name: string;
-		type: 'literal' | 'column' | 'udf';
-		value?: string | number | null;
-		column?: string | null;
-		args?: string[] | null;
-		code?: string | null;
-		udf_id?: string | null;
-	}
-
-	interface WithColumnsConfigData {
-		expressions: WithColumnsExpr[];
-	}
 
 	interface Props {
 		schema: Schema;

@@ -14,9 +14,14 @@ const mockConfigStore = {
 	fetch: vi.fn(),
 	config: null as { default_namespace?: string } | null
 };
+const mockRegisterNamespace = vi.fn();
 
 vi.mock('$lib/stores/config.svelte', () => ({
 	configStore: mockConfigStore
+}));
+
+vi.mock('$lib/api/namespaces', () => ({
+	registerNamespace: (...args: unknown[]) => mockRegisterNamespace(...args)
 }));
 
 const {
@@ -37,6 +42,11 @@ describe('namespace store', () => {
 		mockIdbDelete.mockResolvedValue(undefined);
 		mockConfigStore.config = null;
 		mockConfigStore.fetch.mockResolvedValue(undefined);
+		mockRegisterNamespace.mockResolvedValue({
+			isErr: () => false,
+			isOk: () => true,
+			value: { name: 'ok' }
+		});
 		await setNamespace('');
 	});
 
@@ -284,6 +294,7 @@ describe('namespace store', () => {
 		test('calls beforeCommit hook', async () => {
 			const beforeCommit = vi.fn();
 			await switchNamespace('new-ns', { beforeCommit });
+			expect(mockRegisterNamespace).toHaveBeenCalledWith('new-ns');
 			expect(beforeCommit).toHaveBeenCalledOnce();
 		});
 
@@ -343,7 +354,17 @@ describe('namespace store', () => {
 			expect(isNamespaceSwitching()).toBe(false);
 		});
 
-		test('clears switching flag even on error', async () => {
+		test('throws when namespace registration fails', async () => {
+			mockRegisterNamespace.mockResolvedValueOnce({
+				isErr: () => true,
+				isOk: () => false,
+				error: { message: 'registration failed' }
+			});
+			await expect(switchNamespace('err-ns')).rejects.toThrow('registration failed');
+			expect(isNamespaceSwitching()).toBe(false);
+		});
+
+		test('clears switching flag even on hook error', async () => {
 			await expect(
 				switchNamespace('err-ns', {
 					beforeCommit() {

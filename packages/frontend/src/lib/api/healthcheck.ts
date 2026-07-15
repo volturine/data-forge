@@ -71,12 +71,33 @@ export interface HealthCheckUpdate {
 	critical?: boolean;
 }
 
-export function listHealthChecks(datasourceId: string): ResultAsync<HealthCheck[], ApiError> {
-	return apiRequest<HealthCheck[]>(`/v1/healthchecks?datasource_id=${datasourceId}`);
+export interface ListHealthChecksParams {
+	datasourceId?: string;
+	search?: string;
+	limit?: number;
+	offset?: number;
 }
 
-export function listAllHealthChecks(): ResultAsync<HealthCheck[], ApiError> {
-	return apiRequest<HealthCheck[]>('/v1/healthchecks/all');
+export function listHealthChecks(
+	params: ListHealthChecksParams
+): ResultAsync<HealthCheck[], ApiError> {
+	const query = new URLSearchParams();
+	if (params.datasourceId) query.set('datasource_id', params.datasourceId);
+	if (params.search) query.set('search', params.search);
+	if (params.limit !== undefined) query.set('limit', String(params.limit));
+	if (params.offset !== undefined) query.set('offset', String(params.offset));
+	return apiRequest<HealthCheck[]>(`/v1/healthchecks?${query.toString()}`);
+}
+
+export function listAllHealthChecks(
+	params?: ListHealthChecksParams
+): ResultAsync<HealthCheck[], ApiError> {
+	const query = new URLSearchParams();
+	if (params?.search) query.set('search', params.search);
+	if (params?.limit !== undefined) query.set('limit', String(params.limit));
+	if (params?.offset !== undefined) query.set('offset', String(params.offset));
+	const qs = query.toString();
+	return apiRequest<HealthCheck[]>(`/v1/healthchecks/all${qs ? `?${qs}` : ''}`);
 }
 
 export function createHealthCheck(payload: HealthCheckCreate): ResultAsync<HealthCheck, ApiError> {

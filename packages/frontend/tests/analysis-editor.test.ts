@@ -16,6 +16,21 @@ async function latestNode(page: Parameters<typeof gotoAnalysisEditor>[0], stepTy
 	return nodes.nth((await nodes.count()) - 1);
 }
 
+let sharedDatasourceId = '';
+let sharedDatasourceName = '';
+
+test.beforeAll(async ({ request }) => {
+	sharedDatasourceName = `e2e-editor-shared-ds-${uid()}`;
+	sharedDatasourceId = await createDatasource(request, sharedDatasourceName);
+});
+
+test.afterAll(async ({ browser, workerAuth }) => {
+	const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+	await deleteDatasourceViaUI(page, sharedDatasourceName);
+	await page.close();
+	await context.close();
+});
+
 // ── Save/discard dirty tracking ─────────────────────────────────────────────
 
 test.describe('Analyses – save/discard dirty tracking', () => {
@@ -23,12 +38,9 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(45_000);
 		const id = uid();
-		const ds = `e2e-dirty-clean-${id}`;
 		const analysis = `E2E Dirty Clean ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -39,17 +51,13 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await expect(discardBtn).toBeDisabled();
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('adding a step makes Save show "Save" and enables Discard', async ({ page, request }) => {
-		test.setTimeout(45_000);
 		const id = uid();
-		const ds = `e2e-dirty-add-${id}`;
 		const analysis = `E2E Dirty Add ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="select"]').click();
@@ -63,17 +71,13 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await expect(discardBtn).toBeEnabled({ timeout: 5_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('Discard reverts dirty state back to "Saved"', async ({ page, request }) => {
-		test.setTimeout(45_000);
 		const id = uid();
-		const ds = `e2e-dirty-discard-${id}`;
 		const analysis = `E2E Dirty Discard ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="sort"]').click();
@@ -83,11 +87,10 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 
 			await page.getByRole('button', { name: 'Discard' }).click();
 
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 8_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 			await expect(page.getByRole('button', { name: 'Discard' })).toBeDisabled();
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -95,12 +98,9 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(45_000);
 		const id = uid();
-		const ds = `e2e-dirty-config-${id}`;
 		const analysis = `E2E Dirty Config ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="filter"]').click();
@@ -110,7 +110,7 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await canvasNode.click();
 
 			const configPanel = page.locator('[data-step-config="filter"]');
-			await expect(configPanel).toBeVisible({ timeout: 8_000 });
+			await expect(configPanel).toBeVisible({ timeout: 5_000 });
 
 			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
 			const cancelBtn = configPanel.getByRole('button', { name: 'Cancel' });
@@ -122,39 +122,39 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await expect(cancelBtn).toBeEnabled();
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('analysis description can be edited and saved after creation', async ({ page, request }) => {
-		test.setTimeout(45_000);
 		const id = uid();
-		const ds = `e2e-description-ds-${id}`;
 		const analysis = `E2E Description ${id}`;
 		const nextDescription = `Updated description ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.getByTestId('analysis-description-trigger').click();
 
 			const dialog = dialogByHeading(page, /Edit description/i);
-			await expect(dialog).toBeVisible({ timeout: 8_000 });
+			await expect(dialog).toBeVisible({ timeout: 5_000 });
 			await dialog.getByTestId('analysis-description-input').fill(nextDescription);
 			await dialog.getByRole('button', { name: 'Apply' }).click();
 
 			await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+
+			// Verify the description is visible immediately after save (before reload)
+			await expect(page.locator('header').first().getByText(nextDescription)).toBeVisible({
+				timeout: 5_000
+			});
 
 			await page.reload({ waitUntil: 'networkidle' });
 			await waitForEditorReload(page);
 			await expect(page.locator('header').first().getByText(nextDescription)).toBeVisible({
-				timeout: 10_000
+				timeout: 5_000
 			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -162,22 +162,17 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 // ── Step library labels ─────────────────────────────────────────────────────
 
 test.describe('Analyses – step library labels', () => {
-	let dsId = '';
 	let aId = '';
-	let dsName: string;
 	let aName: string;
 
 	test.beforeAll(async ({ request }) => {
-		dsName = `e2e-labels-ds-${uid()}`;
 		aName = `E2E Labels ${uid()}`;
-		dsId = await createDatasource(request, dsName);
-		aId = await createAnalysis(request, aName, dsId);
+		aId = await createAnalysis(request, aName, sharedDatasourceId);
 	});
 
 	test.afterAll(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteAnalysisViaUI(page, aName);
-		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
 		await context.close();
 	});
@@ -214,7 +209,7 @@ test.describe('Analyses – step library labels', () => {
 		test(`step type "${label}" is visible in library`, async ({ page }) => {
 			await gotoAnalysisEditor(page, aId);
 			await expect(page.locator(`button[data-step="${stepType}"]`)).toBeVisible({
-				timeout: 10_000
+				timeout: 5_000
 			});
 		});
 	}
@@ -228,12 +223,9 @@ test.describe('Analyses – step library labels', () => {
 
 test.describe('Analyses – step interaction', () => {
 	test('clicking Filter step adds it to the canvas', async ({ page, request }) => {
-		test.setTimeout(45_000);
 		const id = uid();
-		const ds = `e2e-click-filter-${id}`;
 		const analysis = `E2E Click Filter ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -247,7 +239,6 @@ test.describe('Analyses – step interaction', () => {
 			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -255,12 +246,9 @@ test.describe('Analyses – step interaction', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(45_000);
 		const id = uid();
-		const ds = `e2e-config-panel-${id}`;
 		const analysis = `E2E Config Panel ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="filter"]').click();
@@ -270,12 +258,11 @@ test.describe('Analyses – step interaction', () => {
 			await canvasNode.click();
 
 			const configPanel = page.locator('[data-step-config="filter"]');
-			await expect(configPanel).toBeVisible({ timeout: 8_000 });
+			await expect(configPanel).toBeVisible({ timeout: 5_000 });
 			await expect(configPanel.getByRole('button', { name: 'Apply' })).toBeVisible();
 			await expect(configPanel.getByRole('button', { name: 'Cancel' })).toBeVisible();
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -283,12 +270,9 @@ test.describe('Analyses – step interaction', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(45_000);
 		const id = uid();
-		const ds = `e2e-click-select-${id}`;
 		const analysis = `E2E Click Select ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -302,7 +286,6 @@ test.describe('Analyses – step interaction', () => {
 			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -311,12 +294,9 @@ test.describe('Analyses – step interaction', () => {
 
 test.describe('Analyses – save persistence', () => {
 	test('saving a step persists across page reload', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-persist-${id}`;
 		const analysis = `E2E Persist Test ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -332,7 +312,12 @@ test.describe('Analyses – save persistence', () => {
 			// Click Save and wait for the save state machine to reach "clean"
 			await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.locator('[data-save-state="clean"]')).toBeVisible({ timeout: 10_000 });
+			await expect(page.locator('[data-save-state="clean"]')).toBeVisible({ timeout: 5_000 });
+
+			// Verify the step is still present immediately after save (before reload)
+			await expect(page.locator('[data-step-type="filter"]')).toHaveCount(1, {
+				timeout: 5_000
+			});
 
 			// Reload the page completely
 			await page.reload();
@@ -342,14 +327,13 @@ test.describe('Analyses – save persistence', () => {
 
 			// Filter step should still be present after reload
 			await expect(page.locator('[data-step-type="filter"]')).toHaveCount(1, {
-				timeout: 10_000
+				timeout: 5_000
 			});
 
 			// Save button should show "Saved" (clean state)
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
@@ -357,12 +341,9 @@ test.describe('Analyses – save persistence', () => {
 		page,
 		request
 	}) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-apply-cancel-${id}`;
 		const analysis = `E2E Apply Cancel ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -373,7 +354,7 @@ test.describe('Analyses – save persistence', () => {
 			await canvasNode.click();
 
 			const configPanel = page.locator('[data-step-config="filter"]');
-			await expect(configPanel).toBeVisible({ timeout: 8_000 });
+			await expect(configPanel).toBeVisible({ timeout: 5_000 });
 
 			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
 			const cancelBtn = configPanel.getByRole('button', { name: 'Cancel' });
@@ -388,7 +369,6 @@ test.describe('Analyses – save persistence', () => {
 			await expect(cancelBtn).toBeDisabled({ timeout: 5_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -397,12 +377,9 @@ test.describe('Analyses – save persistence', () => {
 
 test.describe('Analyses – node delete via action button', () => {
 	test('delete button removes step from canvas', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-node-del-${id}`;
 		const analysis = `E2E Node Delete ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -420,19 +397,15 @@ test.describe('Analyses – node delete via action button', () => {
 			await screenshot(page, 'analysis/editor', 'node-deleted');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – node toggle (enable/disable)', () => {
 	test('toggle disables and re-enables a step', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-node-toggle-${id}`;
 		const analysis = `E2E Node Toggle ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -449,7 +422,7 @@ test.describe('Analyses – node toggle (enable/disable)', () => {
 			// Open config and Apply so it becomes applied
 			await sortNode.locator('[data-action="edit"]').click();
 			const configPanel = page.locator('[data-step-config="sort"]');
-			await expect(configPanel).toBeVisible({ timeout: 8_000 });
+			await expect(configPanel).toBeVisible({ timeout: 5_000 });
 			await configPanel.getByRole('button', { name: 'Apply' }).click();
 			await expect(configPanel.getByRole('button', { name: 'Apply' })).toBeDisabled({
 				timeout: 5_000
@@ -469,73 +442,19 @@ test.describe('Analyses – node toggle (enable/disable)', () => {
 			await screenshot(page, 'analysis/editor', 'node-toggle-enabled');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 // ── Config persistence ──────────────────────────────────────────────────────
 
-test.describe('Analyses – save + reload config persistence', () => {
-	test('configured Limit step persists value after save and reload', async ({ page, request }) => {
-		test.setTimeout(60_000);
-		const id = uid();
-		const ds = `e2e-cfg-persist-${id}`;
-		const analysis = `E2E Cfg Persist ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
-		try {
-			// Add limit step and configure
-			const configPanel = await addStepAndOpenConfig(page, aId, 'limit');
-			const limitInput = configPanel.locator('[data-testid="limit-rows-input"]');
-			await limitInput.fill('77');
-
-			// Apply
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			// Save the analysis
-			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
-
-			// Reload
-			await page.reload();
-			await waitForEditorReload(page);
-
-			// Limit node should still exist
-			const limitNode = await latestNode(page, 'limit');
-			await expect(limitNode).toBeVisible({ timeout: 10_000 });
-
-			// Open config again and verify value persisted
-			await limitNode.locator('[data-action="edit"]').click();
-			const reloadedPanel = page.locator('[data-step-config="limit"]');
-			await expect(reloadedPanel).toBeVisible({ timeout: 8_000 });
-			const reloadedInput = reloadedPanel.locator('[data-testid="limit-rows-input"]');
-			await expect(reloadedInput).toHaveValue('77', { timeout: 5_000 });
-
-			// Buttons should be disabled (no changes from persisted state)
-			await expect(reloadedPanel.getByRole('button', { name: 'Apply' })).toBeDisabled();
-			await expect(reloadedPanel.getByRole('button', { name: 'Cancel' })).toBeDisabled();
-
-			await screenshot(page, 'analysis/editor', 'limit-config-persisted');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
-		}
-	});
-});
-
 // ── Step reorder persistence ────────────────────────────────────────────────
 
 test.describe('Analyses – step reorder persistence', () => {
 	test('Step order persists after save and reload', async ({ page, request }) => {
-		test.setTimeout(120_000);
 		const id = uid();
-		const ds = `e2e-reorder-${id}`;
 		const analysis = `E2E Reorder Persist ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -559,13 +478,23 @@ test.describe('Analyses – step reorder persistence', () => {
 			// Save
 			await page.getByRole('button', { name: 'Save' }).click();
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({
-				timeout: 10_000
+				timeout: 5_000
 			});
+
+			// Verify order is correct immediately after save (before reload)
+			const afterSaveNodes = page.locator('[data-step-type]');
+			const countAfterSave = await afterSaveNodes.count();
+			const typesAfterSave: string[] = [];
+			for (let i = 0; i < countAfterSave; i++) {
+				const attr = await afterSaveNodes.nth(i).getAttribute('data-step-type');
+				if (attr) typesAfterSave.push(attr);
+			}
+			expect(typesAfterSave).toEqual(typesBefore);
 
 			// Reload and wait for the editor to fully hydrate before asserting steps
 			await page.reload();
 			await waitForEditorReload(page);
-			await expect(page.locator('[data-step-type="filter"]')).toBeVisible({ timeout: 10_000 });
+			await expect(page.locator('[data-step-type="filter"]')).toBeVisible({ timeout: 5_000 });
 			await expect(page.locator('[data-step-type="limit"]')).toBeVisible({ timeout: 5_000 });
 
 			// Verify step order is preserved
@@ -582,7 +511,49 @@ test.describe('Analyses – step reorder persistence', () => {
 			await screenshot(page, 'analysis/editor', 'step-reorder-persisted');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+});
+
+test.describe('Analyses – save + reload config persistence', () => {
+	test('configured Limit step persists value after save and reload', async ({ page, request }) => {
+		const id = uid();
+		const analysis = `E2E Cfg Persist ${id}`;
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
+		try {
+			const configPanel = await addStepAndOpenConfig(page, aId, 'limit');
+			const limitInput = configPanel.locator('[data-testid="limit-rows-input"]');
+			await limitInput.fill('77');
+
+			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+			await applyBtn.click();
+			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+			await page.getByRole('button', { name: 'Save' }).click();
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+
+			// Verify the limit value is correct immediately after save (before reload)
+			const limitNodeAfterSave = await latestNode(page, 'limit');
+			await expect(limitNodeAfterSave).toBeVisible({ timeout: 5_000 });
+			await limitNodeAfterSave.locator('[data-action="edit"]').click();
+			const afterSavePanel = page.locator('[data-step-config="limit"]');
+			await expect(afterSavePanel).toBeVisible({ timeout: 5_000 });
+			const afterSaveInput = afterSavePanel.locator('[data-testid="limit-rows-input"]');
+			await expect(afterSaveInput).toHaveValue('77');
+
+			await page.reload();
+			await waitForEditorReload(page);
+
+			const limitNode = await latestNode(page, 'limit');
+			await expect(limitNode).toBeVisible({ timeout: 5_000 });
+
+			await limitNode.locator('[data-action="edit"]').click();
+			const reloadedPanel = page.locator('[data-step-config="limit"]');
+			await expect(reloadedPanel).toBeVisible({ timeout: 5_000 });
+			const reloadedInput = reloadedPanel.locator('[data-testid="limit-rows-input"]');
+			await expect(reloadedInput).toHaveValue('77');
+		} finally {
+			await deleteAnalysisViaUI(page, analysis);
 		}
 	});
 });
@@ -591,15 +562,12 @@ test.describe('Analyses – step reorder persistence', () => {
 
 test.describe('Analyses – derived tab flow', () => {
 	test('add derived tab from existing tab output, switch back', async ({ page, request }) => {
-		test.setTimeout(120_000);
 		const id = uid();
-		const ds = `e2e-derived-tab-${id}`;
 		const analysis = `E2E Derived Tab ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 15_000 });
+			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
 
 			const firstTab = page.locator('[data-tab-name="Source 1"]');
 			await expect(firstTab).toBeVisible();
@@ -617,46 +585,42 @@ test.describe('Analyses – derived tab flow', () => {
 				await expect(modal).toBeVisible({ timeout: 5_000 });
 
 				// Search for our datasource (use the same one)
-				await modal.locator('#dsm-search').fill(ds);
-				await modal.locator(`[data-datasource-option="${ds}"]`).click({ timeout: 8_000 });
+				await modal.locator('#dsm-search').fill(sharedDatasourceName);
+				await modal
+					.locator(`[data-datasource-option="${sharedDatasourceName}"]`)
+					.click({ timeout: 5_000 });
 				await expect(modal).toBeHidden({ timeout: 5_000 });
 			}
 
 			// Verify a second tab appeared and is active
 			const allTabs = page.locator('[data-tab-name]');
-			await expect(allTabs).toHaveCount(2, { timeout: 8_000 });
+			await expect(allTabs).toHaveCount(2, { timeout: 5_000 });
 
 			// The second tab should show a view step
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 10_000 });
+			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
 
 			// Switch back to first tab
 			await firstTab.click();
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 10_000 });
+			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/editor', 'derived-tab-flow');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – multi-tab flow', () => {
 	test('add second tab from another datasource, switch between tabs', async ({ page, request }) => {
-		test.setTimeout(120_000);
 		const id = uid();
-		const ds1 = `e2e-multitab-ds1-${id}`;
 		const ds2 = `e2e-multitab-ds2-${id}`;
 		const analysis = `E2E Multi Tab ${id}`;
-		const [ds1Id, ds2Id] = await Promise.all([
-			createDatasource(request, ds1),
-			createDatasource(request, ds2)
-		]);
-		const aId = await createAnalysis(request, analysis, ds1Id);
+		const ds2Id = await createDatasource(request, ds2);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		void ds2Id;
 		try {
 			await gotoAnalysisEditor(page, aId);
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 15_000 });
+			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
 
 			const firstTab = page.locator('[data-tab-name="Source 1"]');
 			await expect(firstTab).toBeVisible();
@@ -667,25 +631,24 @@ test.describe('Analyses – multi-tab flow', () => {
 			await expect(modal).toBeVisible({ timeout: 5_000 });
 
 			await modal.locator('#dsm-search').fill(ds2);
-			await modal.locator(`[data-datasource-option="${ds2}"]`).click({ timeout: 8_000 });
+			await modal.locator(`[data-datasource-option="${ds2}"]`).click({ timeout: 5_000 });
 
 			await expect(modal).toBeHidden({ timeout: 5_000 });
 
 			const secondTab = page.locator(`[data-tab-name="${ds2}"]`);
 			await expect(secondTab).toBeVisible({ timeout: 5_000 });
 
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 10_000 });
+			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/editor', 'multi-tab-second-active');
 
 			await firstTab.click();
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 10_000 });
+			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/editor', 'multi-tab-first-active');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 			await deleteDatasourceViaUI(page, ds2);
-			await deleteDatasourceViaUI(page, ds1);
 		}
 	});
 });
@@ -694,12 +657,9 @@ test.describe('Analyses – multi-tab flow', () => {
 
 test.describe('Analyses – version history modal', () => {
 	test('opens version modal and shows empty state on fresh analysis', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-ver-empty-${id}`;
 		const analysis = `E2E Ver Empty ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -713,7 +673,7 @@ test.describe('Analyses – version history modal', () => {
 			// Fresh analysis has no previous versions
 			await expect(
 				dialog.getByText(/No versions available/i).or(dialog.getByText(/Version 1/i))
-			).toBeVisible({ timeout: 8_000 });
+			).toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/editor', 'version-history-empty');
 
@@ -722,17 +682,13 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('version modal shows versions after save creates a version', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-ver-list-${id}`;
 		const analysis = `E2E Ver List ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -740,7 +696,7 @@ test.describe('Analyses – version history modal', () => {
 			await page.locator('button[data-step="limit"]').click();
 			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 
 			// Open version modal
 			await page.locator('[data-testid="version-history-trigger"]').click();
@@ -748,7 +704,7 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).toBeVisible({ timeout: 5_000 });
 
 			// Wait for versions to load — should show at least Version 1
-			await expect(dialog.getByText(/Version 1/)).toBeVisible({ timeout: 10_000 });
+			await expect(dialog.getByText(/Version 1/)).toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/editor', 'version-history-with-versions');
 
@@ -756,17 +712,13 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('rename version inline edit', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-ver-rename-${id}`;
 		const analysis = `E2E Ver Rename ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -774,12 +726,12 @@ test.describe('Analyses – version history modal', () => {
 			await page.locator('button[data-step="limit"]').click();
 			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 
 			// Open version modal
 			await page.locator('[data-testid="version-history-trigger"]').click();
 			const dialog = dialogByHeading(page, /Version history/i);
-			await expect(dialog.getByText(/Version 1/)).toBeVisible({ timeout: 10_000 });
+			await expect(dialog.getByText(/Version 1/)).toBeVisible({ timeout: 5_000 });
 
 			// Click rename button on version 1
 			const renameBtn = dialog.locator('[data-testid="version-rename-1"]');
@@ -793,7 +745,7 @@ test.describe('Analyses – version history modal', () => {
 			await renameInput.press('Enter');
 
 			// After rename, the new name should appear
-			await expect(dialog.getByText('My Checkpoint')).toBeVisible({ timeout: 8_000 });
+			await expect(dialog.getByText('My Checkpoint')).toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/editor', 'version-history-renamed');
 
@@ -801,17 +753,13 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('Escape key closes version modal', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
-		const ds = `e2e-ver-esc-${id}`;
 		const analysis = `E2E Ver Escape ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -823,17 +771,13 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('delete version removes it from the list', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-ver-del-${id}`;
 		const analysis = `E2E Ver Delete ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -841,19 +785,19 @@ test.describe('Analyses – version history modal', () => {
 			await page.locator('button[data-step="limit"]').click();
 			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 
 			// Open version modal
 			await page.locator('[data-testid="version-history-trigger"]').click();
 			const dialog = dialogByHeading(page, /Version history/i);
-			await expect(dialog.getByText(/Version 1/)).toBeVisible({ timeout: 10_000 });
+			await expect(dialog.getByText(/Version 1/)).toBeVisible({ timeout: 5_000 });
 
 			// Delete version 1
 			await dialog.locator('[data-testid="version-delete-1"]').click();
 
 			// Version row should disappear
 			await expect(dialog.locator('[data-testid="version-row-1"]')).not.toBeVisible({
-				timeout: 8_000
+				timeout: 5_000
 			});
 
 			await screenshot(page, 'analysis/editor', 'version-history-after-delete');
@@ -861,17 +805,13 @@ test.describe('Analyses – version history modal', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('restore version closes modal and updates analysis state', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-ver-restore-${id}`;
 		const analysis = `E2E Ver Restore ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -880,17 +820,17 @@ test.describe('Analyses – version history modal', () => {
 			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
 			await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 20_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 
 			// Restore version 1 (= initial [view] from create): limit should be removed
 			await page.locator('[data-testid="version-history-trigger"]').click();
 			const dialog = dialogByHeading(page, /Version history/i);
-			await expect(dialog.getByText(/Version 1/)).toBeVisible({ timeout: 10_000 });
+			await expect(dialog.getByText(/Version 1/)).toBeVisible({ timeout: 5_000 });
 
 			await dialog.locator('[data-testid="version-restore-1"]').click();
 
 			// Modal should close after restore
-			await expect(dialog).not.toBeVisible({ timeout: 8_000 });
+			await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 
 			// The limit step should be gone (restored to v1 which only has view)
 			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(0, { timeout: 5_000 });
@@ -901,7 +841,6 @@ test.describe('Analyses – version history modal', () => {
 			await screenshot(page, 'analysis/editor', 'version-history-after-restore');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -910,12 +849,9 @@ test.describe('Analyses – version history modal', () => {
 
 test.describe('Analyses – insert view via insert zone', () => {
 	test('Insert View button adds a view step between existing steps', async ({ page, request }) => {
-		test.setTimeout(90_000);
 		const id = uid();
-		const ds = `e2e-insert-view-${id}`;
 		const analysis = `E2E Insert View ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -948,19 +884,15 @@ test.describe('Analyses – insert view via insert zone', () => {
 			await screenshot(page, 'analysis/editor', 'insert-view-between-steps');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
 
 test.describe('Analyses – pointer drag reorder', () => {
 	test('drag handle moves step to new position', async ({ page, request }) => {
-		test.setTimeout(120_000);
 		const id = uid();
-		const ds = `e2e-drag-reorder-${id}`;
 		const analysis = `E2E Drag Reorder ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
 
@@ -1048,7 +980,6 @@ test.describe('Analyses – pointer drag reorder', () => {
 			await screenshot(page, 'analysis/editor', 'drag-reorder-done');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });

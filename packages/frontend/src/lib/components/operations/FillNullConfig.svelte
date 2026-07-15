@@ -1,17 +1,11 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import type { FillNullConfigData } from '$lib/types/operation-config';
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, stepConfig, label } from '$lib/styles/panda';
-
-	interface FillNullConfigData {
-		strategy: string;
-		columns: string[] | null;
-		value?: string | number;
-		value_type?: string;
-	}
 
 	interface Props {
 		schema: Schema;
@@ -20,7 +14,7 @@
 
 	let {
 		schema,
-		config = $bindable({ strategy: 'literal', columns: null, value: '', value_type: 'Utf8' })
+		config = $bindable({ strategy: 'literal', columns: [], value: '', value_type: 'Utf8' })
 	}: Props = $props();
 
 	const strategies = [
@@ -145,13 +139,13 @@
 		<span id="target-columns-heading"><SectionHeader>Target Columns</SectionHeader></span>
 		<MultiSelectColumnDropdown
 			{schema}
-			value={config.columns ?? []}
+			value={config.columns}
 			onChange={(val) => (config.columns = val)}
 			showSelectAll={true}
 			placeholder="Select target columns..."
 		/>
 
-		{#if !config.columns || config.columns.length === 0}
+		{#if config.columns.length === 0}
 			<Callout>No columns selected - will apply to all columns</Callout>
 		{/if}
 	</div>

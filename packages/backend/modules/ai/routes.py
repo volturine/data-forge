@@ -1,25 +1,25 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from contracts.step_config_enums import AIProvider
-from core.ai_clients import get_ai_client, resolve_ai_provider
 from pydantic import BaseModel
 
+from backend_core.ai_clients import ai_provider_name, get_ai_client, resolve_ai_provider
 from backend_core.error_handlers import handle_errors
+from dataforge_protocol import enums_pb2
 from modules.mcp.router import MCPRouter
 
-router = MCPRouter(prefix="/ai", tags=["ai"])
+router = MCPRouter(prefix='/ai', tags=['ai'])
 
 
 @dataclass(frozen=True, slots=True)
 class AIProviderStatusDefinition:
-    provider: AIProvider
-    resolve_status: Callable[[], "AIProviderStatus"]
+    provider: enums_pb2.AIProvider
+    resolve_status: Callable[[], AIProviderStatus]
 
 
 class AIModelResponse(BaseModel):
     name: str
-    detail: str = ""
+    detail: str = ''
 
 
 class AIConnectionResponse(BaseModel):
@@ -28,7 +28,7 @@ class AIConnectionResponse(BaseModel):
 
 
 class AIProviderRequest(BaseModel):
-    provider: str = "ollama"
+    provider: str = 'ollama'
     endpoint_url: str | None = None
     api_key: str | None = None
     organization_id: str | None = None
@@ -46,10 +46,10 @@ def resolve_openrouter_status() -> AIProviderStatus:
 
     openrouter_key = get_resolved_openrouter_key()
     return AIProviderStatus(
-        provider=AIProvider.OPENROUTER.value,
+        provider=ai_provider_name(enums_pb2.AI_PROVIDER_OPENROUTER),
         configured=bool(openrouter_key),
-        endpoint_url="https://openrouter.ai/api/v1",
-        default_model="",
+        endpoint_url='https://openrouter.ai/api/v1',
+        default_model='',
     )
 
 
@@ -58,10 +58,10 @@ def resolve_openai_status() -> AIProviderStatus:
 
     openai = get_resolved_openai_settings()
     return AIProviderStatus(
-        provider=AIProvider.OPENAI.value,
-        configured=bool(openai["endpoint_url"]),
-        endpoint_url=openai["endpoint_url"],
-        default_model=openai["default_model"],
+        provider=ai_provider_name(enums_pb2.AI_PROVIDER_OPENAI),
+        configured=bool(openai['endpoint_url']),
+        endpoint_url=openai['endpoint_url'],
+        default_model=openai['default_model'],
     )
 
 
@@ -70,10 +70,10 @@ def resolve_ollama_status() -> AIProviderStatus:
 
     ollama = get_resolved_ollama_settings()
     return AIProviderStatus(
-        provider=AIProvider.OLLAMA.value,
-        configured=bool(ollama["endpoint_url"]),
-        endpoint_url=ollama["endpoint_url"],
-        default_model=ollama["default_model"],
+        provider=ai_provider_name(enums_pb2.AI_PROVIDER_OLLAMA),
+        configured=bool(ollama['endpoint_url']),
+        endpoint_url=ollama['endpoint_url'],
+        default_model=ollama['default_model'],
     )
 
 
@@ -82,29 +82,29 @@ def resolve_huggingface_status() -> AIProviderStatus:
 
     huggingface = get_resolved_huggingface_settings()
     return AIProviderStatus(
-        provider=AIProvider.HUGGINGFACE.value,
-        configured=bool(huggingface["api_token"]),
-        endpoint_url="https://api-inference.huggingface.co",
-        default_model=huggingface["default_model"],
+        provider=ai_provider_name(enums_pb2.AI_PROVIDER_HUGGINGFACE),
+        configured=bool(huggingface['api_token']),
+        endpoint_url='https://api-inference.huggingface.co',
+        default_model=huggingface['default_model'],
     )
 
 
 AI_PROVIDER_STATUS_DEFINITIONS: tuple[AIProviderStatusDefinition, ...] = (
-    AIProviderStatusDefinition(AIProvider.OPENROUTER, resolve_openrouter_status),
-    AIProviderStatusDefinition(AIProvider.OPENAI, resolve_openai_status),
-    AIProviderStatusDefinition(AIProvider.OLLAMA, resolve_ollama_status),
-    AIProviderStatusDefinition(AIProvider.HUGGINGFACE, resolve_huggingface_status),
+    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OPENROUTER, resolve_openrouter_status),
+    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OPENAI, resolve_openai_status),
+    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OLLAMA, resolve_ollama_status),
+    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_HUGGINGFACE, resolve_huggingface_status),
 )
 
 
-@router.post("/providers", response_model=list[AIProviderStatus], mcp=True)
-@handle_errors(operation="list ai providers")
+@router.post('/providers', response_model=list[AIProviderStatus], mcp=True)
+@handle_errors(operation='list ai providers')
 def list_providers() -> list[AIProviderStatus]:
     return [definition.resolve_status() for definition in AI_PROVIDER_STATUS_DEFINITIONS]
 
 
-@router.post("/models", response_model=list[AIModelResponse], mcp=True)
-@handle_errors(operation="list ai models", value_error_status=400)
+@router.post('/models', response_model=list[AIModelResponse], mcp=True)
+@handle_errors(operation='list ai models', value_error_status=400)
 def list_models(body: AIProviderRequest) -> list[AIModelResponse]:
     """List available AI models from the configured provider.
 
@@ -120,15 +120,15 @@ def list_models(body: AIProviderRequest) -> list[AIModelResponse]:
     raw = client.list_models()
     return [
         AIModelResponse(
-            name=m.get("name", ""),
-            detail=str({k: v for k, v in m.items() if k != "name"}),
+            name=m.get('name', ''),
+            detail=str({k: v for k, v in m.items() if k != 'name'}),
         )
         for m in raw
     ]
 
 
-@router.post("/test", response_model=AIConnectionResponse, mcp=True)
-@handle_errors(operation="test ai connection", value_error_status=400)
+@router.post('/test', response_model=AIConnectionResponse, mcp=True)
+@handle_errors(operation='test ai connection', value_error_status=400)
 def test_connection(body: AIProviderRequest) -> AIConnectionResponse:
     """Test connectivity to an AI provider.
 

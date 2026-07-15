@@ -1,0 +1,514 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/analysis.proto";
+import "dataforge_protocol/common.proto";
+import "dataforge_protocol/compute.proto";
+import "dataforge_protocol/datasource.proto";
+import "dataforge_protocol/enums.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+service WorkerRuntimeService {
+  rpc RegisterWorker(RuntimeWorkerRegisterRequest) returns (RuntimeWorkerResponse);
+  rpc HeartbeatWorker(RuntimeWorkerHeartbeatRequest) returns (RuntimeWorkerResponse);
+  rpc StopWorker(RuntimeWorkerRequest) returns (RuntimeWorkerResponse);
+
+  rpc ClaimBuildJob(RuntimeWorkerRequest) returns (WorkerClaimBuildJobResponse);
+  rpc ClaimComputeRequest(RuntimeWorkerRequest) returns (WorkerClaimComputeRequestResponse);
+  rpc CompleteComputeRequest(WorkerCompleteComputeRequestRequest) returns (RuntimeWorkerResponse);
+  rpc FailComputeRequest(WorkerFailComputeRequestRequest) returns (RuntimeWorkerResponse);
+  rpc ReleaseComputeRequests(RuntimeWorkerRequest) returns (CountResponse);
+
+  rpc ExecuteDatasourceRequest(WorkerExecuteDatasourceRequest) returns (WorkerDatasourceCommandResponse);
+  rpc ScheduleIngestDatasource(WorkerScheduleIngestDatasourceRequest) returns (WorkerScheduleIngestDatasourceResponse);
+  rpc GetDatasourceMetadata(WorkerDatasourceMetadataRequest) returns (WorkerDatasourceMetadataResponse);
+  rpc GetUdfCodes(WorkerUdfCodesRequest) returns (WorkerUdfCodesResponse);
+  rpc GetAnalysisMetadata(WorkerAnalysisMetadataRequest) returns (WorkerAnalysisMetadataResponse);
+  rpc GetBuildCancelStatus(WorkerBuildCancelStatusRequest) returns (WorkerBuildCancelStatusResponse);
+  rpc UpdateBuildResult(WorkerUpdateBuildResultRequest) returns (RuntimeWorkerResponse);
+  rpc UpsertOutputDatasource(WorkerUpsertOutputDatasourceRequest) returns (WorkerUpsertOutputDatasourceResponse);
+
+  rpc ListHealthChecks(WorkerListHealthChecksRequest) returns (WorkerListHealthChecksResponse);
+  rpc RecordHealthCheckResults(WorkerRecordHealthCheckResultsRequest) returns (CountResponse);
+
+  rpc CreateEngineRun(WorkerCreateEngineRunRequest) returns (IdResponse);
+  rpc UpdateEngineRun(WorkerUpdateEngineRunRequest) returns (IdResponse);
+  rpc GetEngineRunState(WorkerEngineRunStateRequest) returns (WorkerEngineRunStateResponse);
+
+  rpc FailBuildJob(WorkerFailBuildJobRequest) returns (RuntimeWorkerResponse);
+  rpc FinalizeBuildJob(WorkerFinalizeBuildJobRequest) returns (RuntimeWorkerResponse);
+  rpc ReleaseBuildWorkerJobs(RuntimeWorkerRequest) returns (CountResponse);
+  rpc GetQueuedBuildJobCount(EmptyRequest) returns (CountResponse);
+  rpc DispatchRuntimeOutbox(EmptyRequest) returns (CountResponse);
+  rpc GetIdleBuildWorkerPids(EmptyRequest) returns (WorkerIdlePidsResponse);
+  rpc ListRuntimeNamespaces(EmptyRequest) returns (WorkerNamespacesResponse);
+  rpc PersistBuildEvent(WorkerPersistBuildEventRequest) returns (WorkerPersistBuildEventResponse);
+  rpc StartBuildRun(WorkerStartBuildRunRequest) returns (WorkerStartBuildRunResponse);
+  rpc PersistEngineSnapshot(WorkerPersistEngineSnapshotRequest) returns (CountResponse);
+  rpc ListPendingDatasourceDeletes(EmptyRequest) returns (WorkerPendingDatasourceDeletesResponse);
+  rpc FinalizeDatasourceDelete(WorkerFinalizeDatasourceDeleteRequest) returns (WorkerFinalizeDatasourceDeleteResponse);
+
+  rpc GetTelegramSettings(EmptyRequest) returns (WorkerTelegramSettingsResponse);
+  rpc SendEmail(WorkerSendEmailRequest) returns (BoolResponse);
+  rpc SendTelegram(WorkerSendTelegramRequest) returns (BoolResponse);
+  rpc GenerateAI(WorkerGenerateAIRequest) returns (WorkerGenerateAIResponse);
+  rpc GetTelegramTargets(WorkerTelegramTargetsRequest) returns (WorkerTelegramTargetsResponse);
+}
+
+message RuntimeWorkerRegisterRequest {
+  string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+  RuntimeWorkerKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string hostname = 3 [(buf.validate.field).string.min_len = 1];
+  int32 pid = 4 [(buf.validate.field).int32.gt = 0];
+  int32 capacity = 5 [(buf.validate.field).int32.gte = 1];
+  int32 active_jobs = 6 [(buf.validate.field).int32.gte = 0];
+}
+
+message RuntimeWorkerHeartbeatRequest {
+  string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional int32 active_jobs = 2 [(buf.validate.field).int32.gte = 0];
+}
+
+message WorkerClaimedBuildJob {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
+  string namespace = 3 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+}
+
+message WorkerClaimBuildJobResponse {
+  optional WorkerClaimedBuildJob job = 1;
+}
+
+message WorkerClaimedComputeRequest {
+  reserved 4;
+  reserved "request";
+
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  ComputeRequestKind kind = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  ComputeCommandEnvelope command = 5 [(buf.validate.field).required = true];
+}
+
+message WorkerClaimComputeRequestResponse {
+  optional WorkerClaimedComputeRequest request = 1;
+}
+
+message WorkerCompleteComputeRequestRequest {
+  reserved 3;
+  reserved "response";
+
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string request_id = 2 [(buf.validate.field).string.min_len = 1];
+  optional string artifact_path = 4 [(buf.validate.field).string.min_len = 1];
+  optional string artifact_name = 5 [(buf.validate.field).string.min_len = 1];
+  optional string artifact_content_type = 6 [(buf.validate.field).string.min_len = 1];
+  ComputeResponseEnvelope response_envelope = 7 [(buf.validate.field).required = true];
+}
+
+message WorkerFailComputeRequestRequest {
+  reserved 4;
+  reserved "response";
+
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string request_id = 2 [(buf.validate.field).string.min_len = 1];
+  string error_message = 3 [(buf.validate.field).string.min_len = 1];
+  ComputeResponseEnvelope response_envelope = 5 [(buf.validate.field).required = true];
+}
+
+message WorkerExecuteDatasourceRequest {
+  reserved 3;
+  reserved "request";
+
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  ComputeRequestKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  DatasourceCommand command = 4 [(buf.validate.field).required = true];
+}
+
+message WorkerScheduleIngestDatasourceRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerDatasourceCommandResponse {
+  DatasourceResult result = 1 [(buf.validate.field).required = true];
+}
+
+message WorkerScheduleIngestDatasourceResponse {
+  DataSourceRecord datasource = 1 [(buf.validate.field).required = true];
+}
+
+message WorkerDatasourceMetadataRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerDatasourceMetadataResponse {
+  reserved 6;
+  reserved "schema_cache";
+
+  bool found = 1;
+  optional string id = 2;
+  optional string name = 3;
+  optional DataSourceType source_type = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional google.protobuf.Struct config = 5;
+  optional bool is_hidden = 7;
+  SchemaInfo schema_info = 8;
+}
+
+message WorkerUdfCodesRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  repeated string udf_ids = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message WorkerUdfCodesResponse {
+  map<string, string> codes = 1;
+}
+
+message WorkerAnalysisMetadataRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerAnalysisMetadataResponse {
+  bool found = 1;
+  optional string name = 2;
+}
+
+message WorkerBuildCancelStatusRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerBuildCancelStatusResponse {
+  bool cancelled = 1;
+  optional google.protobuf.Timestamp cancelled_at = 2;
+  optional string cancelled_by = 3;
+}
+
+message WorkerUpdateBuildResultRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Struct result = 3;
+}
+
+message WorkerUpsertOutputDatasourceRequest {
+  reserved 6;
+  reserved "schema_cache";
+
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string result_id = 2 [(buf.validate.field).string.min_len = 1];
+  string name = 3 [(buf.validate.field).string.min_len = 1];
+  DataSourceType source_type = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  google.protobuf.Struct config = 5;
+  optional string analysis_id = 7 [(buf.validate.field).string.min_len = 1];
+  optional bool is_hidden = 8;
+  bool keep_schema_cache = 9;
+  SchemaInfo schema_info = 10 [(buf.validate.field).required = true];
+}
+
+message WorkerUpsertOutputDatasourceResponse {
+  string datasource_id = 1 [(buf.validate.field).string.min_len = 1];
+  string datasource_name = 2 [(buf.validate.field).string.min_len = 1];
+  bool is_hidden = 3;
+}
+
+message WorkerHealthCheckSpec {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+  HealthCheckType check_type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  google.protobuf.Struct config = 4;
+  bool critical = 5;
+}
+
+message WorkerListHealthChecksRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerListHealthChecksResponse {
+  repeated WorkerHealthCheckSpec checks = 1;
+}
+
+message WorkerHealthCheckResultPayload {
+  string healthcheck_id = 1 [(buf.validate.field).string.min_len = 1];
+  bool passed = 2;
+  string message = 3;
+  google.protobuf.Struct details = 4;
+  google.protobuf.Timestamp checked_at = 5;
+}
+
+message WorkerRecordHealthCheckResultsRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  repeated WorkerHealthCheckResultPayload results = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message WorkerCreateEngineRunRequest {
+  reserved 12, 14;
+  reserved "step_timings", "execution_entries";
+
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  optional string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
+  string datasource_id = 3 [(buf.validate.field).string.min_len = 1];
+  EngineRunKind kind = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  EngineRunStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  google.protobuf.Struct request = 6;
+  optional google.protobuf.Struct result = 7;
+  optional string error_message = 8 [(buf.validate.field).string.min_len = 1];
+  optional google.protobuf.Timestamp created_at = 9;
+  optional google.protobuf.Timestamp completed_at = 10;
+  optional int64 duration_ms = 11 [(buf.validate.field).int64.gte = 0];
+  optional string query_plan = 13 [(buf.validate.field).string.min_len = 1];
+  double progress = 15 [(buf.validate.field).double = {
+    gte: 0
+    lte: 1
+  }];
+  optional string current_step = 16 [(buf.validate.field).string.min_len = 1];
+  optional string triggered_by = 17 [(buf.validate.field).string.min_len = 1];
+  map<string, double> timing_by_key = 18;
+  repeated EngineRunExecutionEntry execution_entry = 19;
+}
+
+message EngineRunStepTimings {
+  map<string, double> values = 1;
+}
+
+message EngineRunExecutionEntryList {
+  repeated EngineRunExecutionEntry entries = 1;
+}
+
+message WorkerEngineRunUpdateFields {
+  optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+  optional EngineRunKind kind = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional EngineRunStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  google.protobuf.Struct request_json = 5;
+  google.protobuf.Struct result_json = 6;
+  optional string error_message = 7 [(buf.validate.field).string.min_len = 1];
+  optional google.protobuf.Timestamp completed_at = 8;
+  optional int64 duration_ms = 9 [(buf.validate.field).int64.gte = 0];
+  EngineRunStepTimings step_timings = 10;
+  optional string query_plan = 11 [(buf.validate.field).string.min_len = 1];
+  EngineRunExecutionEntryList execution_entries = 12;
+  optional double progress = 13 [(buf.validate.field).double = {
+    gte: 0
+    lte: 1
+  }];
+  optional string current_step = 14 [(buf.validate.field).string.min_len = 1];
+  optional string triggered_by = 15 [(buf.validate.field).string.min_len = 1];
+  bool clear_current_step = 16;
+}
+
+message WorkerUpdateEngineRunRequest {
+  reserved 3;
+  reserved "fields";
+
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
+  bool merge_result = 4;
+  WorkerEngineRunUpdateFields update = 5 [(buf.validate.field).required = true];
+}
+
+message WorkerEngineRunStateRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerEngineRunStateResponse {
+  bool found = 1;
+  optional EngineRunStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional google.protobuf.Struct result = 3;
+  optional google.protobuf.Timestamp cancelled_at = 4;
+  optional string cancelled_by = 5;
+}
+
+message WorkerFailBuildJobRequest {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string error = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerFinalizeBuildJobRequest {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
+  string namespace = 3 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+}
+
+message WorkerIdlePidsResponse {
+  repeated int32 pids = 1;
+}
+
+message WorkerNamespacesResponse {
+  repeated string namespaces = 1 [(buf.validate.field).repeated.items.string.pattern = "^[a-zA-Z0-9_-]+$"];
+}
+
+message WorkerPersistBuildEventRequest {
+  reserved 3, 4;
+  reserved "event", "resource_config";
+
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
+  BuildEvent build_event = 5 [(buf.validate.field).required = true];
+  optional BuildResourceConfigSummary build_resource_config = 6;
+}
+
+message WorkerPersistBuildEventResponse {
+  optional int64 sequence = 1;
+}
+
+message WorkerBuildRunPayload {
+  reserved 5, 6, 7;
+  reserved "request", "starter", "resource_config";
+
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string analysis_id = 3 [(buf.validate.field).string.min_len = 1];
+  string analysis_name = 4 [(buf.validate.field).string.min_len = 1];
+  optional EngineRunKind current_kind = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string current_datasource_id = 9 [(buf.validate.field).string.min_len = 1];
+  optional string current_tab_id = 10 [(buf.validate.field).string.min_len = 1];
+  optional string current_tab_name = 11 [(buf.validate.field).string.min_len = 1];
+  optional string current_output_id = 12 [(buf.validate.field).string.min_len = 1];
+  optional string current_output_name = 13 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Timestamp started_at = 14;
+  int32 total_tabs = 15 [(buf.validate.field).int32.gte = 1];
+  BuildStarter build_starter = 16 [(buf.validate.field).required = true];
+  optional BuildResourceConfigSummary build_resource_config = 17;
+  AnalysisPipelinePayload analysis_pipeline = 18 [(buf.validate.field).required = true];
+  optional string tab_id = 19 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerStartBuildRunRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string build_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerStartBuildRunResponse {
+  optional WorkerBuildRunPayload run = 1;
+}
+
+message WorkerPersistEngineSnapshotRequest {
+  reserved 3;
+  reserved "statuses";
+
+  string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  repeated EngineStatusResult engine_status = 4;
+}
+
+message WorkerPendingDatasourceDelete {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerPendingDatasourceDeletesResponse {
+  repeated WorkerPendingDatasourceDelete deletes = 1;
+}
+
+message WorkerFinalizeDatasourceDeleteRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerFinalizeDatasourceDeleteResponse {
+  bool deleted = 1;
+}
+
+message WorkerTelegramSettingsResponse {
+  bool enabled = 1;
+}
+
+message WorkerSendEmailRequest {
+  string to = 1 [(buf.validate.field).string.email = true];
+  string subject = 2 [(buf.validate.field).string.min_len = 1];
+  string body = 3;
+  repeated NotificationAttachment attachments = 4;
+}
+
+message WorkerSendTelegramRequest {
+  string chat_id = 1 [(buf.validate.field).string.min_len = 1];
+  string message = 2 [(buf.validate.field).string.min_len = 1];
+  optional string bot_token = 3 [(buf.validate.field).string.min_len = 1];
+  repeated NotificationAttachment attachments = 4;
+}
+
+message WorkerGenerateAIRequest {
+  AIProvider provider = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  repeated string prompts = 2 [(buf.validate.field).repeated.min_items = 1];
+  string model = 3 [(buf.validate.field).string.min_len = 1];
+  optional string endpoint_url = 4 [(buf.validate.field).string.uri = true];
+  optional string api_key = 5 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Struct options = 6;
+}
+
+message WorkerGenerateAIResponse {
+  repeated string outputs = 1;
+}
+
+message WorkerTelegramTargetsRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  optional string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+  bool active_subscribers = 3;
+}
+
+message WorkerTelegramTarget {
+  string chat_id = 1 [(buf.validate.field).string.min_len = 1];
+  string bot_token = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerTelegramTargetsResponse {
+  repeated WorkerTelegramTarget targets = 1;
+}
+
+message CountResponse {
+  int64 count = 1 [(buf.validate.field).int64.gte = 0];
+}
+
+message BoolResponse {
+  bool value = 1;
+}
+
+message IdResponse {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+}

@@ -1,34 +1,34 @@
-# Shared boundary cleanup checklist
+# Package boundary cleanup checklist
 
-Goal: `packages/shared` contains only neutral contracts, persistence primitives, infrastructure, and generic libraries. Owner-specific behavior lives in its owning package. Cross-package coordination happens through PostgreSQL-backed state/notifications, not package imports.
+Goal: no production package imports another owner package's internals. Owner-specific behavior lives in its owning package, and cross-package coordination happens through PostgreSQL-backed state, notifications, and internal HTTP/RPC boundaries.
 
 ## Rules
 
 - [x] `backend` owns HTTP/API concerns, auth/session wiring, route validation, response shaping, settings CRUD, Telegram CRUD, and websocket delivery state
-- [x] `worker-manager` owns execution/runtime behavior, datasource execution/loading, notification execution, and runtime-local build state
+- [x] `worker` owns execution/runtime behavior, datasource execution/loading, notification execution, and runtime-local build state
 - [x] `scheduler` owns schedule orchestration and scheduled-build request construction
-- [x] `shared` owns only neutral contracts, DB models, migrations, persistence primitives, runtime IPC transport, config/database/logging/http helpers, and generic libraries
+- [x] No standalone shared package remains; backend owns contracts, persistence, migrations, runtime IPC transport, config/database/logging/http helpers, and API schemas
 - [x] No production package imports another owner package's internals
 - [x] Cross-owner work handoff is persisted in Postgres and observed through DB rows / `pg_notify`
 
 ## Shared removals / relocations
 
-### Backend-owned code currently in shared
-- [x] Move `packages/shared/core/dependencies.py` into a backend-owned package
-- [x] Move `packages/shared/core/error_handlers.py` into a backend-owned package
-- [x] Move `packages/shared/core/validation.py` into a backend-owned package
-- [x] Move `packages/shared/core/proxy.py` into a backend-owned package
-- [x] Move `packages/shared/core/settings_store.py` into a backend-owned package
-- [x] Move `packages/shared/core/telegram_store.py` into a backend-owned package
+### Backend-owned code relocated from the former shared area
+- [x] Move dependencies helpers into a backend-owned package
+- [x] Move error handlers into a backend-owned package
+- [x] Move validation helpers into a backend-owned package
+- [x] Move proxy helpers into a backend-owned package
+- [x] Move settings store into a backend-owned package
+- [x] Move Telegram store into a backend-owned package
 
-### Worker-manager-owned code currently in shared
-- [x] Remove `packages/shared/core/build_live.py` from shared; keep build runtime state local to worker-manager or replace with durable DB-backed flow
-- [x] Remove `packages/shared/core/engine_live.py` from shared; backend websocket state must be backend-owned, worker snapshot persistence must be worker-owned
-- [x] Move `packages/shared/core/datasource_loading.py` into worker-manager ownership
-- [x] Move notification execution out of `packages/shared/core/notification_delivery.py`
+### Worker-owned code relocated from the former shared area
+- [x] Keep build runtime state local to worker or replace it with durable DB-backed flow
+- [x] Backend websocket state is backend-owned; worker snapshot persistence is worker-owned
+- [x] Move datasource loading into worker ownership
+- [x] Move notification execution into worker ownership
 
-### Scheduler-owned / orchestration code currently in shared
-- [x] Remove `packages/shared/core/analysis_pipeline_payloads.py` from shared and make scheduled payload construction scheduler-owned
+### Scheduler-owned orchestration code relocated from the former shared area
+- [x] Make scheduled payload construction scheduler-owned
 
 ## Architectural replacements
 
@@ -45,9 +45,9 @@ Goal: `packages/shared` contains only neutral contracts, persistence primitives,
 
 ### Datasource execution flow
 - [x] Backend no longer loads datasource frames directly
-- [x] Datasource schema extraction runs through worker-manager compute/datasource execution
-- [x] Datasource snapshot comparison runs through worker-manager compute/datasource execution
-- [x] Datasource column stats run through worker-manager compute/datasource execution
+- [x] Datasource schema extraction runs through worker compute/datasource execution
+- [x] Datasource snapshot comparison runs through worker compute/datasource execution
+- [x] Datasource column stats run through worker compute/datasource execution
 
 ### Settings / Telegram / notifications
 - [x] Backend owns settings CRUD/update/bootstrap logic
@@ -56,29 +56,29 @@ Goal: `packages/shared` contains only neutral contracts, persistence primitives,
 - [x] Notification sending is owned by a single package and does not rely on shared app-domain service code
 
 ## Dependency cleanup
-- [x] Remove `dataforge-worker-manager` dependency from `packages/backend/pyproject.toml`
-- [x] Remove `dataforge-worker-manager` dependency from `packages/scheduler/pyproject.toml`
+- [x] Remove `dataforge-worker` dependency from `packages/backend/pyproject.toml`
+- [x] Remove `dataforge-worker` dependency from `packages/scheduler/pyproject.toml`
 - [x] Ensure backend imports only backend-owned modules + shared neutral modules
 - [x] Ensure scheduler imports only scheduler-owned modules + shared neutral modules
-- [x] Ensure worker-manager imports only worker-manager-owned modules + shared neutral modules
+- [x] Ensure worker imports only worker-owned modules + shared neutral modules
 
 ## Remaining strict-separation tasks
 - [x] Remove `packages/backend/modules/compute/routes.py` test-support imports and replace them with a first-class owner-local test/runtime seam or real-runtime-only tests
 - [x] Delete `test_support_runtime_compute.py`
 - [x] Move/inline `test_support_scheduler.py` into owned test locations and delete the root helper
-- [x] Remove shared-owned auth settings from `packages/shared/core/config.py` and re-home them under backend ownership
-- [x] Remove auth-only exception classes from `packages/shared/core/exceptions.py` and re-home them under backend ownership
-- [x] Remove backend auth table definitions from `packages/shared/database/alembic/versions/0001_runtime_public.py`
+- [x] Remove shared-owned auth settings and re-home them under backend ownership
+- [x] Remove auth-only exception classes and re-home them under backend ownership
+- [x] Keep backend auth table definitions under backend-owned migrations
 - [x] Re-audit non-backend packages so they know nothing about auth/current-user/login/session semantics beyond inert attribution fields
 - [x] Re-audit tests so no remaining package test tree imports other owner-package internals except explicit cross-package integration coverage or owner-local runtime harness fixtures
 - [x] Remove remaining backwards-compat/legacy paths that are no longer required
 - [x] Remove unnecessary glue/support files after the redesign lands
 
 ## Verification
-- [x] Repo audit shows no owner-specific code left in `packages/shared`
-- [x] Repo audit shows no backend -> worker-manager production imports
-- [x] Repo audit shows no scheduler -> worker-manager production imports
-- [x] Repo audit shows backend-only auth ownership with no auth semantics in shared/worker-manager/scheduler
+- [x] Repo audit shows no standalone shared package remains
+- [x] Repo audit shows no backend -> worker production imports
+- [x] Repo audit shows no scheduler -> worker production imports
+- [x] Repo audit shows backend-only auth ownership with no auth semantics in shared/worker/scheduler
 - [x] Repo audit shows no production imports of test-support modules
 - [x] `just verify`
 - [x] `just test`

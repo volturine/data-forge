@@ -18,7 +18,7 @@ function sanitize(raw: string): string {
  * TanStack Query loading states. Also waits for network to settle so
  * async data fetches have completed before the screenshot is taken.
  */
-async function waitForStableUI(page: Page, timeout = 10_000): Promise<void> {
+async function waitForStableUI(page: Page, timeout = 5_000): Promise<void> {
 	const deadline = Date.now() + timeout;
 
 	// Wait for in-flight network requests to settle first

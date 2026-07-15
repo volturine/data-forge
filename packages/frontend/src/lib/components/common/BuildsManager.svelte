@@ -1,21 +1,16 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { cancelBuild, type CancelBuildResponse } from '$lib/api/compute';
 	import { getBuild } from '$lib/api/builds';
 	import { getDatasource, listDatasources } from '$lib/api/datasource';
 	import { listAnalyses } from '$lib/api/analysis';
-	import { listEngineRuns, type EngineRun, type ListEngineRunsParams } from '$lib/api/engine-runs';
 	import type { ActiveBuildDetail, ActiveBuildSummary } from '$lib/types/build-stream';
 	import {
 		activeBuildStatusLabel,
 		canCancelActiveBuildStatus,
-		engineRunKindLabel,
-		engineRunStatusFilterValue,
-		engineRunStatusToActiveBuildStatus,
-		readEngineRunKind
+		engineRunDisplayKind,
+		engineRunKindLabel
 	} from '$lib/types/build-stream';
-	import { engineRunBuildDetail } from '$lib/utils/engine-run-build-detail';
 	import { BuildsStore } from '$lib/stores/builds.svelte';
 	import { page as pageState } from '$app/state';
 	import {
@@ -33,12 +28,14 @@
 		Database,
 		RefreshCw,
 		Hash
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
+	import { endOfDayEpoch, startOfDayEpoch } from '$lib/utils/temporal';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { css, spinner, button, emptyText, input } from '$lib/styles/panda';
 
@@ -88,6 +85,7 @@
 		datasource_id: (pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined,
 		kind: kindFilter || undefined,
 		status: statusFilter === 'all' ? undefined : statusFilter,
+		search: effectiveSearch.trim() || undefined,
 		limit,
 		offset: (page - 1) * limit
 	});
@@ -139,38 +137,7 @@
 		return map;
 	});
 
-	const engineRunParams = $derived<ListEngineRunsParams>({
-		analysis_id: queryParams.analysis_id,
-		datasource_id: queryParams.datasource_id,
-		kind: kindFilter && kindFilter !== 'build' ? kindFilter : undefined,
-		status: engineRunStatusFilterValue(statusFilter),
-		limit,
-		offset: (page - 1) * limit
-	});
-
-	const engineRunsQuery = createQuery(() => ({
-		queryKey: ['monitoring-engine-runs', ns.value, engineRunParams],
-		queryFn: async () => {
-			const result = await listEngineRuns(engineRunParams);
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		staleTime: 10_000,
-		enabled: !ns.switching && kindFilter !== 'build'
-	}));
-
-	const monitoringEngineRuns = $derived(
-		(engineRunsQuery.data ?? []).filter((run) => run.kind !== 'build')
-	);
-
-	const engineRunMap = $derived.by(() => {
-		const map = new SvelteMap<string, EngineRun>();
-		for (const run of monitoringEngineRuns) map.set(run.id, run);
-		return map;
-	});
-
-	const engineRunSummaries = $derived(monitoringEngineRuns.map(engineRunSummary));
-	const runs = $derived([...buildsStore.builds, ...engineRunSummaries]);
+	const runs = $derived(buildsStore.builds);
 
 	const datasourceId = $derived(
 		(pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined
@@ -220,14 +187,12 @@
 		}
 
 		if (dateFrom) {
-			const from = new Date(dateFrom);
-			result = result.filter((run) => new Date(run.started_at) >= from);
+			const from = startOfDayEpoch(dateFrom);
+			result = result.filter((run) => toEpochDisplay(run.started_at) >= from);
 		}
 		if (dateTo) {
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local Date for comparison, not reactive state
-			const to = new Date(dateTo);
-			to.setHours(23, 59, 59, 999);
-			result = result.filter((run) => new Date(run.started_at) <= to);
+			const to = endOfDayEpoch(dateTo);
+			result = result.filter((run) => toEpochDisplay(run.started_at) <= to);
 		}
 
 		if (branchFilter) {
@@ -243,7 +208,7 @@
 		const dir = sortDir === 'asc' ? 1 : -1;
 		return [...list].sort((a, b) => {
 			if (sortColumn === 'created_at') {
-				return dir * (new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
+				return dir * (toEpochDisplay(a.started_at) - toEpochDisplay(b.started_at));
 			}
 			if (sortColumn === 'duration_ms') {
 				return dir * (summaryDurationMs(a) - summaryDurationMs(b));
@@ -275,37 +240,6 @@
 		});
 	}
 
-	function engineRunSummary(run: EngineRun): ActiveBuildSummary {
-		const kind = readEngineRunKind(run.kind);
-		return {
-			build_id: run.id,
-			analysis_id: run.analysis_id ?? run.id,
-			analysis_name: run.analysis_id ?? run.id,
-			namespace: '',
-			status: engineRunStatusToActiveBuildStatus(run.status),
-			started_at: run.created_at,
-			starter: { user_id: null, display_name: null, email: null, triggered_by: run.triggered_by },
-			resource_config: null,
-			progress: run.progress,
-			elapsed_ms: run.duration_ms ?? 0,
-			estimated_remaining_ms: null,
-			current_step: run.current_step,
-			current_step_index: null,
-			total_steps: 0,
-			current_kind: kind,
-			current_datasource_id: run.datasource_id,
-			current_tab_id: null,
-			current_tab_name: null,
-			current_output_id: null,
-			current_output_name: null,
-			current_engine_run_id: run.id,
-			total_tabs: 0,
-			cancelled_at: null,
-			cancelled_by: null,
-			result_json: null
-		};
-	}
-
 	function toggleSort(col: string) {
 		if (sortColumn === col) {
 			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
@@ -322,7 +256,7 @@
 	}
 
 	function formatDate(isoDate: string): string {
-		return new Date(isoDate).toLocaleString();
+		return formatDateTimeDisplay(isoDate);
 	}
 
 	function prevPage() {
@@ -343,7 +277,7 @@
 	}
 
 	function effectiveKind(run: ActiveBuildSummary): string {
-		return run.current_kind ?? '';
+		return engineRunDisplayKind(run.current_kind ?? '');
 	}
 
 	function buildDatasourceId(run: ActiveBuildSummary): string {
@@ -520,26 +454,6 @@
 	async function syncExpandedRun(buildId: string): Promise<void> {
 		const run = runs.find((item) => item.build_id === buildId);
 		if (!run || syncingExpandedId === buildId) return;
-		const engineRun = engineRunMap.get(buildId);
-		if (engineRun) {
-			const store = detailStore(buildId);
-			store.close();
-			store.applySnapshot(summaryDetail(run));
-			expandedStore = store;
-			expandedPayload = null;
-			expandedLiveId = null;
-			await tick();
-			if (expandedId !== buildId) return;
-			const engineRunDetail = engineRunBuildDetail(engineRun);
-			store.applySnapshot(engineRunDetail);
-			detailSnapshots.set(buildId, engineRunDetail);
-			detailPayloads.set(buildId, {
-				requestJson: engineRunDetail.request_json,
-				resultJson: engineRunDetail.result_json
-			});
-			expandedPayload = detailPayloads.get(buildId) ?? null;
-			return;
-		}
 		const cached = detailSnapshots.get(buildId);
 		if (cached && run.status !== 'queued' && run.status !== 'running') {
 			expandedStore = detailStore(buildId);
@@ -668,7 +582,7 @@
 		>
 			<h1 class={css({ margin: '0', marginBottom: '2', fontSize: '2xl' })}>Builds</h1>
 			<p class={css({ margin: '0', color: 'fg.tertiary' })}>
-				Build history for previews and exports
+				Build history for previews, exports, and datasource ingestions
 			</p>
 		</header>
 	{/if}
@@ -901,8 +815,8 @@
 		>
 			<p class={emptyText({ size: 'panel' })}>No builds yet.</p>
 			<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
-				Runs will appear here when you preview or export data in analyses. Compare builds from the
-				Datasources tab.
+				Runs will appear here when you preview, export, or ingest data from external sources.
+				Compare snapshots from the Datasources tab.
 			</p>
 		</div>
 	{:else}
@@ -1297,7 +1211,7 @@
 										<div class={css({ width: '100%', overflowX: 'hidden' })}>
 											<BuildPreview
 												store={expandedStore}
-												title={engineRunKindLabel(run.current_kind ?? '')}
+												title={engineRunKindLabel(effectiveKind(run))}
 												requestJson={expandedPayload?.requestJson ?? null}
 												resultJson={expandedPayload?.resultJson ?? null}
 											/>

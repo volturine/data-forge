@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import { X, Plus, ArrowUp, ArrowDown } from 'lucide-svelte';
+	import { X, Plus, ArrowUp, ArrowDown } from '@lucide/svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import ToggleButton from '$lib/components/ui/ToggleButton.svelte';

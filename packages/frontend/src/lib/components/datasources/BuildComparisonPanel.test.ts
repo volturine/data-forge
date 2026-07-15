@@ -119,6 +119,7 @@ function renderPanel(props: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+	vi.clearAllMocks();
 	mockStoreRuns = [];
 	mockStoreStatus = 'disconnected';
 	mockStoreError = null;
@@ -151,7 +152,7 @@ describe('BuildComparisonPanel', () => {
 		test('shows loading indicator while runs load', () => {
 			mockStoreStatus = 'connecting';
 			renderPanel();
-			expect(screen.getByText('Loading runs...')).toBeInTheDocument();
+			expect(screen.getByText('Loading builds...')).toBeInTheDocument();
 		});
 	});
 
@@ -170,6 +171,30 @@ describe('BuildComparisonPanel', () => {
 			mockStoreRuns = [];
 			renderPanel();
 			expect(screen.getByText('No successful datasource builds recorded.')).toBeInTheDocument();
+		});
+
+		test('shows backend-filtered build snapshots for refreshable raw datasources', () => {
+			snapshotsQueryState = makeQueryResult({
+				data: [
+					{ snapshot_id: 'snap-100', timestamp_ms: 1718450000000 },
+					{ snapshot_id: 'snap-200', timestamp_ms: 1718536000000 }
+				]
+			});
+			renderPanel({
+				datasource: makeDatasource({
+					created_by: 'import',
+					config: {
+						metadata_path: '/tmp/metadata.json',
+						branch: 'master',
+						source: { source_type: 'file', file_path: '/tmp/source.csv', file_type: 'csv' }
+					}
+				})
+			});
+			expect(screen.getByText('snap-100')).toBeInTheDocument();
+			expect(screen.getByText('snap-200')).toBeInTheDocument();
+			expect(
+				screen.queryByText('No successful datasource builds recorded.')
+			).not.toBeInTheDocument();
 		});
 	});
 
@@ -481,6 +506,53 @@ describe('BuildComparisonPanel', () => {
 
 			const compareBtn = screen.getByText('Compare snapshots').closest('button')!;
 			expect(compareBtn).not.toBeDisabled();
+		});
+
+		test('refreshable raw datasource compares the same snapshots shown in time travel', async () => {
+			snapshotsQueryState = makeQueryResult({
+				data: [
+					{ snapshot_id: 'snap-100', timestamp_ms: 1718450000000 },
+					{ snapshot_id: 'snap-200', timestamp_ms: 1718536000000 }
+				]
+			});
+			mockCompareDatasourceSnapshots.mockResolvedValue({
+				isOk: () => true,
+				isErr: () => false,
+				value: {
+					datasource_id: 'ds-1',
+					snapshot_a: 'snap-100',
+					snapshot_b: 'snap-200',
+					row_count_a: 10,
+					row_count_b: 12,
+					row_count_delta: 2,
+					schema_diff: [],
+					stats_a: [],
+					stats_b: [],
+					preview_a: { columns: ['id'], column_types: { id: 'Int64' }, data: [], row_count: 10 },
+					preview_b: { columns: ['id'], column_types: { id: 'Int64' }, data: [], row_count: 12 }
+				}
+			});
+			renderPanel({
+				datasource: makeDatasource({
+					created_by: 'import',
+					config: {
+						metadata_path: '/tmp/metadata.json',
+						branch: 'master',
+						source: { source_type: 'file', file_path: '/tmp/source.csv', file_type: 'csv' }
+					}
+				})
+			});
+
+			await fireEvent.click(screen.getByText('snap-100').closest('button')!);
+			await fireEvent.click(screen.getByText('snap-200').closest('button')!);
+			await fireEvent.click(screen.getByText('Compare snapshots').closest('button')!);
+
+			expect(mockCompareDatasourceSnapshots).toHaveBeenCalledWith(
+				'ds-1',
+				'snap-100',
+				'snap-200',
+				100
+			);
 		});
 
 		test('successful comparison renders row counts and schema changes', async () => {

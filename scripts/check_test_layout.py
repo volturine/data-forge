@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES_DIR = ROOT / 'packages'
 
 LEGACY_TEST_DIR_PREFIXES = ('playwright-report', 'test-results')
 LEGACY_TEST_DIR_NAMES = {'.auth', 'screenshots', '.pytest_cache'}
+TIMEOUT_PATTERN = re.compile(r'(timeout\s*[:=]\s*|test\.setTimeout\()([0-9_]+)')
+TIMEOUT_CONST_PATTERN = re.compile(r'\b(?:const|let|var)\s+[A-Z][A-Z0-9_]*TIMEOUT[A-Z0-9_]*\s*=')
+MAX_TEST_TIMEOUT_MS = 15_000
 
 
 def _iter_package_test_dirs() -> list[Path]:
@@ -18,6 +22,26 @@ def _iter_package_test_dirs() -> list[Path]:
         if test_dir.exists() and test_dir.is_dir():
             dirs.append(test_dir)
     return sorted(dirs)
+
+
+def _check_timeout_policy(test_dir: Path, errors: list[str]) -> None:
+    for path in test_dir.rglob('*'):
+        if not path.is_file() or path.suffix not in {'.ts', '.js', '.py'}:
+            continue
+        rel = path.relative_to(test_dir)
+        if '.artifacts' in rel.parts:
+            continue
+        for line_number, line in enumerate(path.read_text().splitlines(), start=1):
+            if TIMEOUT_CONST_PATTERN.search(line):
+                errors.append(
+                    f'{path.relative_to(ROOT)}:{line_number}: timeout constants are not allowed in tests; hardcode {MAX_TEST_TIMEOUT_MS:_} or less'
+                )
+            for match in TIMEOUT_PATTERN.finditer(line):
+                value = int(match.group(2).replace('_', ''))
+                if value > MAX_TEST_TIMEOUT_MS:
+                    errors.append(
+                        f'{path.relative_to(ROOT)}:{line_number}: test timeout {value} exceeds {MAX_TEST_TIMEOUT_MS:_}'
+                    )
 
 
 def main() -> int:
@@ -33,6 +57,7 @@ def main() -> int:
             name = path.name
             if name in LEGACY_TEST_DIR_NAMES or name.startswith(LEGACY_TEST_DIR_PREFIXES):
                 errors.append(f'{path.relative_to(ROOT)} is a legacy test artifact location; use {test_dir.relative_to(ROOT)}/.artifacts/')
+        _check_timeout_policy(test_dir, errors)
 
     for package_dir in sorted(PACKAGES_DIR.iterdir()):
         if not package_dir.is_dir():

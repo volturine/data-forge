@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronDown, Plus } from 'lucide-svelte';
+	import { ChevronDown, Plus } from '@lucide/svelte';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
 	import { css } from '$lib/styles/panda';
 

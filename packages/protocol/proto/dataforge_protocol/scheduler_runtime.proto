@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/common.proto";
+
+service SchedulerRuntimeService {
+  rpc RegisterScheduler(SchedulerRegisterRequest) returns (RuntimeWorkerResponse);
+  rpc HeartbeatScheduler(RuntimeWorkerRequest) returns (RuntimeWorkerResponse);
+  rpc StopScheduler(RuntimeWorkerRequest) returns (RuntimeWorkerResponse);
+  rpc RunDueSchedules(RuntimeWorkerRequest) returns (SchedulerRunDueResponse);
+}
+
+message SchedulerRegisterRequest {
+  string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+  string hostname = 2 [(buf.validate.field).string.min_len = 1];
+  int32 pid = 3 [(buf.validate.field).int32.gt = 0];
+  int32 capacity = 4 [(buf.validate.field).int32.gte = 1];
+}
+
+message SchedulerEnqueuedRun {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string schedule_id = 2 [(buf.validate.field).string.min_len = 1];
+  string datasource_id = 3 [(buf.validate.field).string.min_len = 1];
+  string build_id = 4 [(buf.validate.field).string.min_len = 1];
+}
+
+message SchedulerRunFailure {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string schedule_id = 2 [(buf.validate.field).string.min_len = 1];
+  string datasource_id = 3 [(buf.validate.field).string.min_len = 1];
+  string error = 4 [(buf.validate.field).string.min_len = 1];
+}
+
+message SchedulerRunDueResponse {
+  bool handled = 1;
+  repeated SchedulerEnqueuedRun enqueued = 2;
+  repeated SchedulerRunFailure failures = 3;
+}

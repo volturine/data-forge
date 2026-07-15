@@ -54,14 +54,14 @@
 		searchQuery = '';
 	}
 
-	async function handleSelect(value: string) {
-		await onSelect(value);
+	function handleSelect(value: string) {
 		handleClose();
+		void onSelect(value);
 	}
 
-	async function handleCreate() {
+	function handleCreate() {
 		if (!normalizedCandidate) return;
-		await handleSelect(normalizedCandidate);
+		handleSelect(normalizedCandidate);
 	}
 
 	const overlayConfig = $derived<OverlayConfig>({

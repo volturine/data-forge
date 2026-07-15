@@ -1,0 +1,65 @@
+[project]
+    name            = "dataforge-worker"
+    version         = "1.0.0"
+    description     = "Data-Forge worker execution runtime package"
+    requires-python = ">=3.14"
+    dependencies    = [
+    "boto3>=1.43.22",
+    "duckdb>=1.5.3",
+    "fastapi>=0.136.3",
+    "fastexcel>=0.20.2",
+    "grpcio>=1.81.0",
+    "openpyxl>=3.1.5",
+    "polars[rtcompat]>=1.41.2",
+    "protobuf>=7.35.0",
+    "protovalidate>=1.2.0",
+    "psutil>=7.2.2",
+    "psycopg>=3.3.4",
+    "psycopg-binary>=3.3.4",
+    "pyarrow>=24.0.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
+    "pyiceberg>=0.11.1",
+    "python-dotenv>=1.2.2",
+    "sqlalchemy>=2.0.50",
+    "xlsxwriter>=3.2.9",
+]
+
+[build-system]
+    requires      = ["hatchling"]
+    build-backend = "hatchling.build"
+
+[tool.ruff]
+    target-version = "py314"
+    line-length    = 160
+    indent-width   = 4
+    extend-exclude = ["buf", "dataforge_protocol"]
+
+[tool.mypy]
+    mypy_path = [
+        ".",
+        "../..",
+    ]
+    exclude = ["(^|/)conftest\\.py$", "^tests/", "buf", "dataforge_protocol"]
+
+[tool.pytest.ini_options]
+    cache_dir = "tests/.artifacts/pytest-cache"
+
+[dependency-groups]
+    dev = [
+        "mypy>=2.1.0",
+        "pytest>=9.0.3",
+        "pytest-asyncio>=1.4.0",
+        "pytest-cov>=7.1.0",
+        "pytest-timeout>=2.4.0",
+        "pytest-xdist>=3.8.0",
+        "ruff>=0.15.17",
+        "sqlmodel>=0.0.38",
+        "types-grpcio>=1.0.0.20260607",
+        "types-openpyxl>=3.1.5.20260518",
+        "types-protobuf>=7.34.1.20260518",
+]
+
+[tool.hatch.build.targets.wheel]
+    packages = ["buf", "builds", "dataforge_protocol", "datasources", "operations", "runtime", "worker_grpc"]
+    include  = ["*.py"]

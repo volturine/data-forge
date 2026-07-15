@@ -1,5 +1,6 @@
 import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { formatEpoch, isSameLocalDay, isYesterday, nowEpochMs } from '$lib/utils/temporal';
 
 const marked = new Marked({
 	breaks: true,
@@ -13,12 +14,9 @@ export function renderMarkdown(text: string): string {
 }
 
 export function timeAgo(ts: number): string {
-	const d = new Date(ts);
-	const now = new Date();
-	const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-	if (d.toDateString() === now.toDateString()) return time;
-	const yesterday = new Date(now);
-	yesterday.setDate(yesterday.getDate() - 1);
-	if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
-	return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + time;
+	const now = nowEpochMs();
+	const time = formatEpoch(ts, { hour: '2-digit', minute: '2-digit' });
+	if (isSameLocalDay(ts, now)) return time;
+	if (isYesterday(ts, now)) return `Yesterday ${time}`;
+	return `${formatEpoch(ts, { month: 'short', day: 'numeric' })} ${time}`;
 }

@@ -1,10 +1,10 @@
-from contracts.engine_runs import schemas
-from contracts.engine_runs.schemas import EngineRunKind, EngineRunStatus
-from core import engine_runs_service as service
-from core.database import get_db
 from fastapi import Depends, HTTPException
 from sqlmodel import Session
 
+from backend_core import engine_runs_service as service
+from backend_core.database import get_db
+from backend_core.domain.engine_runs import schemas
+from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import (
     EngineRunId,
@@ -14,11 +14,11 @@ from backend_core.validation import (
 )
 from modules.mcp.router import MCPRouter
 
-router = MCPRouter(prefix="/engine-runs", tags=["engine-runs"])
+router = MCPRouter(prefix='/engine-runs', tags=['engine-runs'])
 
 
-@router.get("/compare", response_model=schemas.BuildComparisonResponse, mcp=True)
-@handle_errors(operation="compare engine runs")
+@router.get('/compare', response_model=schemas.BuildComparisonResponse, mcp=True)
+@handle_errors(operation='compare engine runs')
 async def compare_runs(
     run_a: str,
     run_b: str,
@@ -38,8 +38,8 @@ async def compare_runs(
     )
 
 
-@router.get("", response_model=list[schemas.EngineRunResponseSchema], mcp=True)
-@handle_errors(operation="list engine runs")
+@router.get('', response_model=list[schemas.EngineRunResponseSchema], mcp=True)
+@handle_errors(operation='list engine runs')
 async def list_runs(
     analysis_id: str | None = None,
     datasource_id: str | None = None,
@@ -65,11 +65,11 @@ async def list_runs(
     )
 
 
-@router.get("/{run_id}", response_model=schemas.EngineRunResponseSchema, mcp=True)
-@handle_errors(operation="get engine run")
+@router.get('/{run_id}', response_model=schemas.EngineRunResponseSchema, mcp=True)
+@handle_errors(operation='get engine run')
 async def get_run(run_id: EngineRunId, session: Session = Depends(get_db)):
     """Get a single engine run by ID with full request/result JSON and step timings."""
     run = service.get_engine_run(session, parse_engine_run_id(run_id))
     if not run:
-        raise HTTPException(status_code=404, detail="Engine run not found")
+        raise HTTPException(status_code=404, detail='Engine run not found')
     return run

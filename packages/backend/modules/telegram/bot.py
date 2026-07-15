@@ -2,19 +2,21 @@ import logging
 import threading
 
 import httpx
-from core import http as http_client
 from sqlalchemy.exc import SQLAlchemyError
+from sqlmodel import Session
+
+from backend_core import http as http_client
 
 logger = logging.getLogger(__name__)
 
-_TELEGRAM_BASE = "https://api.telegram.org"
+_TELEGRAM_BASE = 'https://api.telegram.org'
 
 
 class TelegramBot:
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._token: str = ""
+        self._token: str = ''
         self._poll_lock = threading.Lock()
         self._offset_lock = threading.Lock()
         self._offset_by_token: dict[str, int] = {}
@@ -31,13 +33,13 @@ class TelegramBot:
         if self.running:
             self.stop()
         if self.running:
-            logger.warning("Telegram bot stop in progress; start skipped")
+            logger.warning('Telegram bot stop in progress; start skipped')
             return
         self._token = token
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._poll_loop, daemon=True, name="telegram-bot")
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True, name='telegram-bot')
         self._thread.start()
-        logger.info("Telegram bot polling started")
+        logger.info('Telegram bot polling started')
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -47,10 +49,10 @@ class TelegramBot:
             # exit within a few seconds.
             self._thread.join(timeout=10)
         if self._thread and self._thread.is_alive():
-            logger.warning("Telegram bot did not stop before timeout")
+            logger.warning('Telegram bot did not stop before timeout')
             return
         self._thread = None
-        logger.info("Telegram bot polling stopped")
+        logger.info('Telegram bot polling stopped')
 
     def pause(self) -> None:
         if not self.running:
@@ -67,7 +69,7 @@ class TelegramBot:
         if self.running:
             return
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._poll_loop, daemon=True, name="telegram-bot")
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True, name='telegram-bot')
         self._thread.start()
 
     def _poll_loop(self) -> None:
@@ -79,7 +81,7 @@ class TelegramBot:
             try:
                 resp = self._do_get_updates(
                     self._token,
-                    params={"offset": offset, "timeout": poll_timeout},
+                    params={'offset': offset, 'timeout': poll_timeout},
                     timeout=poll_timeout + 10,
                 )
                 if resp is None:
@@ -88,19 +90,19 @@ class TelegramBot:
                         break
                     continue
                 if resp.status_code == 401:
-                    logger.error("Telegram bot token is invalid (401 Unauthorized) — stopping bot")
+                    logger.error('Telegram bot token is invalid (401 Unauthorized) — stopping bot')
                     break
                 if resp.status_code == 409:
                     consecutive_errors += 1
                     logger.warning(
-                        "Telegram getUpdates conflict (409) — another poller or webhook is active (error %d/%d)",
+                        'Telegram getUpdates conflict (409) — another poller or webhook is active (error %d/%d)',
                         consecutive_errors,
                         max_consecutive_errors,
                     )
                     self._clear_webhook(self._token)
                     if consecutive_errors >= max_consecutive_errors:
                         logger.error(
-                            "Telegram bot hit %d consecutive errors — stopping",
+                            'Telegram bot hit %d consecutive errors — stopping',
                             max_consecutive_errors,
                         )
                         break
@@ -110,14 +112,14 @@ class TelegramBot:
                 if resp.status_code != 200:
                     consecutive_errors += 1
                     logger.warning(
-                        "Telegram getUpdates failed: %s (error %d/%d)",
+                        'Telegram getUpdates failed: %s (error %d/%d)',
                         resp.status_code,
                         consecutive_errors,
                         max_consecutive_errors,
                     )
                     if consecutive_errors >= max_consecutive_errors:
                         logger.error(
-                            "Telegram bot hit %d consecutive errors — stopping",
+                            'Telegram bot hit %d consecutive errors — stopping',
                             max_consecutive_errors,
                         )
                         break
@@ -127,18 +129,18 @@ class TelegramBot:
                 consecutive_errors = 0
                 data = resp.json()
                 if not isinstance(data, dict):
-                    raise ValueError("Telegram getUpdates returned a non-object payload")
-                result = data.get("result", [])
+                    raise ValueError('Telegram getUpdates returned a non-object payload')
+                result = data.get('result', [])
                 if not isinstance(result, list):
-                    raise ValueError("Telegram getUpdates result payload must be a list")
+                    raise ValueError('Telegram getUpdates result payload must be a list')
                 for update in result:
                     if not isinstance(update, dict):
-                        logger.warning("Skipping malformed Telegram update payload: %r", update)
+                        logger.warning('Skipping malformed Telegram update payload: %r', update)
                         continue
-                    update_id = update.get("update_id")
+                    update_id = update.get('update_id')
                     if not isinstance(update_id, int):
                         logger.warning(
-                            "Skipping Telegram update without integer update_id: %r",
+                            'Skipping Telegram update without integer update_id: %r',
                             update,
                         )
                         continue
@@ -150,14 +152,14 @@ class TelegramBot:
             except (httpx.HTTPError, ValueError) as exc:
                 consecutive_errors += 1
                 logger.exception(
-                    "Telegram bot error (%d/%d): %s",
+                    'Telegram bot error (%d/%d): %s',
                     consecutive_errors,
                     max_consecutive_errors,
                     exc,
                 )
                 if consecutive_errors >= max_consecutive_errors:
                     logger.error(
-                        "Telegram bot hit %d consecutive errors — stopping",
+                        'Telegram bot hit %d consecutive errors — stopping',
                         max_consecutive_errors,
                     )
                     break
@@ -178,7 +180,7 @@ class TelegramBot:
             return None
         try:
             return http_client.get(
-                f"{_TELEGRAM_BASE}/bot{token}/getUpdates",
+                f'{_TELEGRAM_BASE}/bot{token}/getUpdates',
                 params=params,
                 timeout=timeout,
             )
@@ -188,7 +190,7 @@ class TelegramBot:
     def get_updates(self, token: str, params: dict[str, int], timeout: float) -> httpx.Response:
         with self._poll_lock:
             return http_client.get(
-                f"{_TELEGRAM_BASE}/bot{token}/getUpdates",
+                f'{_TELEGRAM_BASE}/bot{token}/getUpdates',
                 params=params,
                 timeout=timeout,
             )
@@ -199,12 +201,12 @@ class TelegramBot:
     def _clear_webhook(self, token: str) -> None:
         try:
             http_client.post(
-                f"{_TELEGRAM_BASE}/bot{token}/deleteWebhook",
-                json={"drop_pending_updates": False},
+                f'{_TELEGRAM_BASE}/bot{token}/deleteWebhook',
+                json={'drop_pending_updates': False},
                 timeout=10,
             )
         except httpx.HTTPError as exc:
-            logger.warning("Failed to clear Telegram webhook for token: %s", exc)
+            logger.warning('Failed to clear Telegram webhook for token: %s', exc)
 
     def _get_offset(self, token: str) -> int:
         with self._offset_lock:
@@ -215,44 +217,42 @@ class TelegramBot:
             self._offset_by_token[token] = offset
 
     def _handle_update(self, update: dict) -> None:
-        msg = update.get("message")
+        msg = update.get('message')
         if not msg:
             return
-        text = msg.get("text", "")
-        chat = msg.get("chat", {})
-        chat_id = str(chat.get("id", ""))
-        title = str(chat.get("first_name") or chat.get("title") or chat.get("username") or chat_id)
+        text = msg.get('text', '')
+        chat = msg.get('chat', {})
+        chat_id = str(chat.get('id', ''))
+        title = str(chat.get('first_name') or chat.get('title') or chat.get('username') or chat_id)
 
         command = text.strip().lower()
-        if command == "/subscribe":
+        if command == '/subscribe':
             self._handle_subscribe(chat_id, title)
-        elif command == "/unsubscribe":
+        elif command == '/unsubscribe':
             self._handle_unsubscribe(chat_id)
-        elif command == "/start":
-            self._send_message(chat_id, "Welcome! Use /subscribe to receive build notifications.")
+        elif command == '/start':
+            self._send_message(chat_id, 'Welcome! Use /subscribe to receive build notifications.')
 
     def _handle_subscribe(self, chat_id: str, title: str) -> None:
-        from core.database import run_db
-
+        from backend_core.database import run_db
         from backend_core.telegram_store import add_subscriber
 
-        def _add(session) -> None:  # type: ignore[no-untyped-def]
+        def _add(session: Session) -> None:
             add_subscriber(session, chat_id, title, self._token)
 
         try:
             run_db(_add)
-            self._send_message(chat_id, "Subscribed! You will receive build notifications.")
-            logger.info("Telegram subscriber added: %s (%s)", chat_id, title)
+            self._send_message(chat_id, 'Subscribed! You will receive build notifications.')
+            logger.info('Telegram subscriber added: %s (%s)', chat_id, title)
         except SQLAlchemyError as exc:
-            logger.exception("Failed to add subscriber %s: %s", chat_id, exc)
-            self._send_message(chat_id, "Failed to subscribe. Please try again.")
+            logger.exception('Failed to add subscriber %s: %s', chat_id, exc)
+            self._send_message(chat_id, 'Failed to subscribe. Please try again.')
 
     def _handle_unsubscribe(self, chat_id: str) -> None:
-        from core.database import run_db
-
+        from backend_core.database import run_db
         from backend_core.telegram_store import get_subscriber_by_chat
 
-        def _remove(session) -> None:  # type: ignore[no-untyped-def]
+        def _remove(session: Session) -> None:
             sub = get_subscriber_by_chat(session, chat_id, self._token)
             if sub:
                 sub.is_active = False
@@ -261,20 +261,20 @@ class TelegramBot:
 
         try:
             run_db(_remove)
-            self._send_message(chat_id, "Unsubscribed. You will no longer receive notifications.")
-            logger.info("Telegram subscriber deactivated: %s", chat_id)
+            self._send_message(chat_id, 'Unsubscribed. You will no longer receive notifications.')
+            logger.info('Telegram subscriber deactivated: %s', chat_id)
         except SQLAlchemyError as exc:
-            logger.exception("Failed to unsubscribe %s: %s", chat_id, exc)
+            logger.exception('Failed to unsubscribe %s: %s', chat_id, exc)
 
     def _send_message(self, chat_id: str, text: str) -> None:
         try:
             http_client.post(
-                f"{_TELEGRAM_BASE}/bot{self._token}/sendMessage",
-                json={"chat_id": chat_id, "text": text},
+                f'{_TELEGRAM_BASE}/bot{self._token}/sendMessage',
+                json={'chat_id': chat_id, 'text': text},
                 timeout=10,
             )
         except httpx.HTTPError as exc:
-            logger.warning("Failed to send message to %s: %s", chat_id, exc)
+            logger.warning('Failed to send message to %s: %s', chat_id, exc)
 
 
 # Global singleton

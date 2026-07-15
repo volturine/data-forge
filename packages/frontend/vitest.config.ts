@@ -10,8 +10,9 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			$lib: resolve(__dirname, 'src/lib'),
-			'lucide-svelte': resolve(stub, 'lucide-svelte.ts'),
-			'$app/environment': resolve(stub, 'app-environment.ts')
+			'@lucide/svelte': resolve(stub, 'lucide.ts'),
+			'$app/environment': resolve(stub, 'app-environment.ts'),
+			'$app/paths': resolve(stub, 'app-paths.ts')
 		}
 	},
 	test: {

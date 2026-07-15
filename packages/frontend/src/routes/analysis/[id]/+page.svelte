@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { MediaQuery } from 'svelte/reactivity';
+	import { MediaQuery, SvelteSet } from 'svelte/reactivity';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
@@ -16,6 +16,8 @@
 		isUuid,
 		validatePipelineTabs
 	} from '$lib/utils/analysis-tab';
+	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
+	import { nowEpochMs } from '$lib/utils/temporal';
 	import {
 		exportAnalysisCode,
 		favoriteAnalysis,
@@ -29,7 +31,12 @@
 		unfavoriteAnalysis
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
-	import { downloadBlob, getEngineDefaults, getStepSchema } from '$lib/api/compute';
+	import {
+		downloadBlob,
+		getEngineDefaults,
+		getStepSchema,
+		spawnAnalysisEngine
+	} from '$lib/api/compute';
 	import { openLockSession, type LockSessionError } from '$lib/api/locks';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
@@ -77,7 +84,7 @@
 		Star,
 		Trash2,
 		X
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 
 	const queryClient = useQueryClient();
 	const analysisId = $derived($page.params.id ?? null);
@@ -116,10 +123,11 @@
 	let isDirty = $state(false);
 	let draftTimer: number | null = null;
 	let lastLoadedVersion = $state<string | null>(null);
-	let hydratedGates = $state(new Set<string>());
+	let hydratedGates = new SvelteSet<string>();
 	const draftLoadGate = createAsyncGate();
 	const inferredSchemaGate = createAsyncGate();
-	const sourceSchemaGate = createAsyncGate();
+	let pendingSourceSchemaKeys = new SvelteSet<string>();
+	let warmedEngineIdentityCache = $state<string | null>(null);
 
 	let lockMode = $state<EditorLockMode>('pending');
 	let lockIntent = $state<'editing' | 'released'>('editing');
@@ -195,6 +203,7 @@
 				lockMode = 'error';
 			}
 		});
+		session.acquire();
 
 		return () => {
 			alive = false;
@@ -212,7 +221,8 @@
 			analysisStore.reset();
 			schemaStore.reset();
 			selectedStepId = null;
-			hydratedGates = new Set();
+			hydratedGates = new SvelteSet();
+			pendingSourceSchemaKeys = new SvelteSet();
 			lastAnalysisId = analysisId;
 		}
 		draftLoaded = false;
@@ -501,6 +511,48 @@
 		);
 	});
 
+	// Network: warm the compute engine shortly after the route knows the analysis id.
+	// A small delay still overlaps engine startup with analysis fetch/layout work,
+	// but avoids spawning engines for transient hidden setup pages that redirect
+	// away immediately after creation/import.
+	$effect(() => {
+		if (!validAnalysisId) {
+			analysisStore.setPreviewPaused(false);
+			warmedEngineIdentityCache = null;
+			return;
+		}
+		const nextKey = `${validAnalysisId}:${JSON.stringify(analysisStore.resourceConfig ?? {})}`;
+		if (warmedEngineIdentityCache === nextKey) {
+			analysisStore.setPreviewPaused(false);
+			return;
+		}
+		warmedEngineIdentityCache = nextKey;
+		let alive = true;
+		const timer = window.setTimeout(() => {
+			if (!alive) return;
+			spawnAnalysisEngine(validAnalysisId, analysisStore.resourceConfig ?? undefined).match(
+				() => {
+					if (!alive) return;
+					analysisStore.setPreviewPaused(false);
+				},
+				(err) => {
+					if (!alive) return;
+					track({
+						event: 'engine_error',
+						action: 'prewarm',
+						target: validAnalysisId,
+						meta: { message: err.message }
+					});
+					analysisStore.setPreviewPaused(false);
+				}
+			);
+		}, 300);
+		return () => {
+			alive = false;
+			window.clearTimeout(timer);
+		};
+	});
+
 	// Network: $derived can't hydrate inferred schemas for expression/with_columns steps.
 	$effect(() => {
 		if (!validAnalysisId) return;
@@ -517,7 +569,7 @@
 		const pipelineHash = hashPipeline(applySteps(pipeline));
 		const gate = `${validAnalysisId}:${tab.id}:${pipelineHash}`;
 		if (hydratedGates.has(gate)) return;
-		hydratedGates = new Set([...hydratedGates, gate]);
+		hydratedGates.add(gate);
 		const requestToken = inferredSchemaGate.issue();
 
 		const targets = pipeline.filter(
@@ -580,9 +632,10 @@
 		const schemaId = schemaKey;
 		if (!schemaId) return;
 		const activeTabId = activeTab?.id ?? null;
+		const requestKey = `${schemaId}:${activeTabId ?? ''}`;
 
 		const existingSchema = analysisStore.sourceSchemas.get(schemaId);
-		if (existingSchema) return;
+		if (existingSchema || pendingSourceSchemaKeys.has(requestKey)) return;
 
 		const analysisTabId = activeTab?.datasource?.analysis_tab_id ?? null;
 		const analysisPayload = validAnalysisId
@@ -592,11 +645,15 @@
 					datasourceStore.datasources
 				)
 			: null;
+		const releasePendingSchema = () => {
+			if (!pendingSourceSchemaKeys.has(requestKey)) return;
+			pendingSourceSchemaKeys.delete(requestKey);
+		};
 
 		if (analysisTabId) {
 			if (!analysisPayload) return;
+			pendingSourceSchemaKeys.add(requestKey);
 			isLoadingSchema = true;
-			const requestToken = sourceSchemaGate.issue();
 			const targetTabId = analysisTabId ?? activeTab?.id ?? null;
 			getStepSchema({
 				analysis_id: validAnalysisId ?? undefined,
@@ -605,7 +662,7 @@
 				target_step_id: 'source'
 			}).match(
 				(payload) => {
-					if (!sourceSchemaGate.isCurrent(requestToken)) return;
+					releasePendingSchema();
 					if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 					const columns = payload.columns.map((name) => ({
 						name,
@@ -619,7 +676,7 @@
 					isLoadingSchema = false;
 				},
 				(error) => {
-					if (!sourceSchemaGate.isCurrent(requestToken)) return;
+					releasePendingSchema();
 					if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 					track({
 						event: 'schema_error',
@@ -630,26 +687,24 @@
 					isLoadingSchema = false;
 				}
 			);
-			return () => {
-				sourceSchemaGate.invalidate();
-			};
+			return;
 		}
 
 		if (!datasourcesQuery.data || !datasourceIdValue) return;
 		if (!isUuid(datasourceIdValue)) return;
 		const ds = datasourcesQuery.data.find((d) => d.id === datasourceIdValue);
 		if (ds?.source_type === 'analysis') return;
+		pendingSourceSchemaKeys.add(requestKey);
 		isLoadingSchema = true;
-		const requestToken = sourceSchemaGate.issue();
 		getDatasourceSchema(datasourceIdValue).match(
 			(schema) => {
-				if (!sourceSchemaGate.isCurrent(requestToken)) return;
+				releasePendingSchema();
 				if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 				analysisStore.setSourceSchema(schemaId, schema);
 				isLoadingSchema = false;
 			},
 			(err) => {
-				if (!sourceSchemaGate.isCurrent(requestToken)) return;
+				releasePendingSchema();
 				if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 				track({
 					event: 'schema_error',
@@ -660,9 +715,6 @@
 				isLoadingSchema = false;
 			}
 		);
-		return () => {
-			sourceSchemaGate.invalidate();
-		};
 	});
 
 	const currentDatasource = $derived.by(() => {
@@ -866,7 +918,7 @@
 
 	function handleAddTab(datasourceId: string, name: string) {
 		if (editorReadOnly) return;
-		const tabId = `tab-${datasourceId}-${Date.now()}`;
+		const tabId = `tab-${datasourceId}-${nowEpochMs()}`;
 		const output = buildOutputConfig({
 			outputId: uuid(),
 			name: generateOutputName(),
@@ -905,7 +957,7 @@
 			flashTabError('Select a different tab to avoid using the current tab as its own source.');
 			return;
 		}
-		const tabId = `tab-analysis-${datasourceId}-${Date.now()}`;
+		const tabId = `tab-analysis-${datasourceId}-${nowEpochMs()}`;
 		const output = buildOutputConfig({
 			outputId: uuid(),
 			name: generateOutputName(),
@@ -1083,9 +1135,8 @@
 
 	function formatVersionDate(value: string | null | undefined): string {
 		if (!value) return 'Unknown';
-		const parsed = new Date(value);
-		if (Number.isNaN(parsed.getTime())) return 'Unknown';
-		return parsed.toLocaleString();
+		if (Number.isNaN(toEpochDisplay(value))) return 'Unknown';
+		return formatDateTimeDisplay(value);
 	}
 
 	async function handleRestoreVersion(version: number) {

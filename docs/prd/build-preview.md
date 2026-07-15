@@ -1,23 +1,28 @@
 # PRD: Build Preview (Live Progress)
 
+> **Status (2026-05-28): Partially implemented.**
+> **Current truth:** Live build preview, monitoring integration, and cancellation are shipped, but this PRD still includes unshipped extras like full resource charts/log streaming as if they were core scope.
+> **Portfolio status index:** `docs/prd/README.md`
+
+
 ## Overview
 
 Add real-time live preview to the build/compute execution flow, enabling users to see the build progressing in real time — which step is executing, how long each step takes, overall progress, query plan visualization, and resource allocation.
 
 ## Problem Statement
 
-Currently, builds execute as a black box. Users trigger a build (`POST /compute/build`) and receive results only after completion. The `BuildsManager` shows historical runs with timing breakdowns and query plans, but only **after** the run finishes. There is no live feedback during execution — no progress bar, no step-by-step status, no resource monitoring. For long-running pipelines with many steps or large datasets, users have no visibility into whether a build is stuck, slow, or progressing normally.
+Historically, builds executed as a black box. Users trigger a build (`POST /compute/build`) and receive results only after completion. The `BuildsManager` shows historical runs with timing breakdowns and query plans, but only **after** the run finishes. There is no live feedback during execution — no progress bar, no step-by-step status, no resource monitoring. For long-running pipelines with many steps or large datasets, users have no visibility into whether a build is stuck, slow, or progressing normally.
 
 ### Current State
 
 | Aspect | Status |
 |--------|--------|
-| Progress calculation in engine | ✅ Computed (`idx/total_steps`) but only logged |
-| Step timings | ✅ Collected but returned only on completion |
-| Query plans | ✅ Extracted but returned only on completion |
-| Resource allocation | ✅ Configurable (`max_threads`, `max_memory_mb`) but not visible during execution |
-| WebSocket | ⚠️ Exists but single-shot (send request → receive result) |
-| Live streaming | ❌ Not implemented |
+| Progress calculation in engine | ✅ Shipped via durable build progress streaming |
+| Step timings | ✅ Shipped in build preview / build detail surfaces |
+| Query plans | ✅ Shipped in build detail / preview surfaces |
+| Resource allocation | ⚠️ Engine/runtime resource settings exist, but rich live resource charts remain backlog |
+| WebSocket / live build stream | ✅ Shipped via durable build-stream projection |
+| Live streaming | ✅ Shipped for build preview / monitoring; some advanced visualization ideas below remain backlog |
 
 ### Target State
 
@@ -125,6 +130,8 @@ Currently, builds execute as a black box. Users trigger a build (`POST /compute/
 6. Accessible from any authenticated session — no restriction to the session that started the build.
 
 ## Technical Design
+
+> **Historical / backlog note:** The detailed design below mixes shipped ideas with older pre-runtime-v2 implementation assumptions (for example, subprocess-specific wiring). Use it as backlog/reference, not as a literal description of the current runtime internals.
 
 ### Backend
 

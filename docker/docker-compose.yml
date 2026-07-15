@@ -8,16 +8,27 @@ services:
     volumes:
       - pg-data:/var/lib/postgresql
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${DF_POSTGRES_USER} -d ${DF_POSTGRES_DB}" ]
+      test: ["CMD-SHELL", "pg_isready -U ${DF_POSTGRES_USER} -d ${DF_POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 20
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${DF_OBJECT_STORE_SECRET_KEY}
+    command: ["/data"]
+    volumes:
+      - rustfs-data:/data
 
   api:
     image: ${DF_API_IMAGE}
     depends_on:
       postgres:
         condition: service_healthy
+      rustfs:
+        condition: service_started
     environment: &api-env
       ENV_FILE: ""
       APP_NAME: ${DF_APP_NAME}
@@ -27,11 +38,20 @@ services:
       DATA_DIR: ${DF_DATA_DIR}
       DATABASE_URL: ${DF_DATABASE_URL}
       DISTRIBUTED_RUNTIME_ENABLED: "true"
+      INTERNAL_API_TOKEN: ${DF_INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_HOST: 0.0.0.0
+      INTERNAL_GRPC_PORT: "50051"
       DATABASE_POOL_SIZE: ${DF_DATABASE_POOL_SIZE}
       DATABASE_MAX_OVERFLOW: ${DF_DATABASE_MAX_OVERFLOW}
       DATABASE_POOL_TIMEOUT: ${DF_DATABASE_POOL_TIMEOUT}
       DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
       UPLOAD_CHUNK_SIZE: ${DF_UPLOAD_CHUNK_SIZE}
+      OBJECT_STORE_ENDPOINT: ${DF_OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${DF_OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${DF_OBJECT_STORE_SECRET_KEY}
+      OBJECT_STORE_BUCKET: ${DF_OBJECT_STORE_BUCKET}
+      OBJECT_STORE_PREFIX: ${DF_OBJECT_STORE_PREFIX}
       POLARS_MAX_THREADS: ${DF_POLARS_MAX_THREADS}
       POLARS_MAX_MEMORY_MB: ${DF_POLARS_MAX_MEMORY_MB}
       POLARS_STREAMING_CHUNK_SIZE: ${DF_POLARS_STREAMING_CHUNK_SIZE}
@@ -65,9 +85,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import sys,urllib.request; sys.exit(0 if
-            urllib.request.urlopen('http://localhost:8000/health/ready').status\
-            ==200 else 1)\"",
+          "python -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready').status==200 else 1)\"",
         ]
       interval: 5s
       timeout: 5s
@@ -79,6 +97,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      rustfs:
+        condition: service_started
       api:
         condition: service_started
     environment: &scheduler-env
@@ -90,7 +110,15 @@ services:
       DATA_DIR: ${DF_DATA_DIR}
       DATABASE_URL: ${DF_DATABASE_URL}
       DISTRIBUTED_RUNTIME_ENABLED: "true"
+      INTERNAL_API_TOKEN: ${DF_INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_TARGET: api:50051
       DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
+      OBJECT_STORE_ENDPOINT: ${DF_OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${DF_OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${DF_OBJECT_STORE_SECRET_KEY}
+      OBJECT_STORE_BUCKET: ${DF_OBJECT_STORE_BUCKET}
+      OBJECT_STORE_PREFIX: ${DF_OBJECT_STORE_PREFIX}
       WORKERS: "1"
       SCHEDULER_CHECK_INTERVAL: ${DF_SCHEDULER_CHECK_INTERVAL}
       LOG_LEVEL: ${DF_LOG_LEVEL}
@@ -104,6 +132,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      rustfs:
+        condition: service_started
       api:
         condition: service_started
     environment: &worker-env
@@ -115,7 +145,15 @@ services:
       DATA_DIR: ${DF_DATA_DIR}
       DATABASE_URL: ${DF_DATABASE_URL}
       DISTRIBUTED_RUNTIME_ENABLED: "true"
+      INTERNAL_API_TOKEN: ${DF_INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_TARGET: api:50051
       DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
+      OBJECT_STORE_ENDPOINT: ${DF_OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${DF_OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${DF_OBJECT_STORE_SECRET_KEY}
+      OBJECT_STORE_BUCKET: ${DF_OBJECT_STORE_BUCKET}
+      OBJECT_STORE_PREFIX: ${DF_OBJECT_STORE_PREFIX}
       WORKERS: "1"
       POLARS_MAX_THREADS: ${DF_POLARS_MAX_THREADS}
       POLARS_MAX_MEMORY_MB: ${DF_POLARS_MAX_MEMORY_MB}
@@ -134,4 +172,6 @@ volumes:
   data:
     driver: local
   pg-data:
+    driver: local
+  rustfs-data:
     driver: local

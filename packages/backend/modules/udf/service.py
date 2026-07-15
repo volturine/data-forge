@@ -2,11 +2,12 @@ import ast
 import uuid
 from datetime import UTC, datetime
 
-from contracts.udf_models import Udf
-from core.exceptions import UdfNotFoundError, UdfValidationError
 from sqlalchemy import or_, select
 from sqlmodel import Session
 
+from backend_core.exceptions import UdfValidationError, udf_not_found
+from backend_core.persistence.udfs.models import Udf
+from backend_core.sqlmodel_typing import col
 from modules.udf.schemas import (
     UdfCloneSchema,
     UdfCreateSchema,
@@ -20,19 +21,26 @@ from modules.udf.schemas import (
 
 def _validate_code(code: str) -> None:
     if not code.strip():
-        raise UdfValidationError("UDF code cannot be empty")
+        raise UdfValidationError('UDF code cannot be empty')
     try:
         ast.parse(code)
     except SyntaxError as e:
-        raise UdfValidationError(f"Invalid Python syntax: {e.msg}", details={"error": e.msg})
+        raise UdfValidationError(f'Invalid Python syntax: {e.msg}', details={'error': e.msg})
 
 
 def _signature_key(signature: dict) -> str:
-    inputs = signature.get("inputs") or []
+    inputs = signature.get('inputs') or []
     if not isinstance(inputs, list):
-        return ""
-    dtypes = [str(item.get("dtype") or "") for item in inputs]
-    return ",".join(dtypes)
+        return ''
+    dtypes = [str(item.get('dtype') or '') for item in inputs]
+    return ','.join(dtypes)
+
+
+def _get_udf_model(session: Session, udf_id: str) -> Udf:
+    udf = session.get(Udf, udf_id)
+    if udf is None:
+        raise udf_not_found(udf_id)
+    return udf
 
 
 def create_udf(session: Session, data: UdfCreateSchema, owner_id: str | None = None) -> UdfResponseSchema:
@@ -45,7 +53,7 @@ def create_udf(session: Session, data: UdfCreateSchema, owner_id: str | None = N
         signature=data.signature.model_dump(),
         code=data.code,
         tags=data.tags,
-        source=data.source or "user",
+        source=data.source or 'user',
         owner_id=owner_id,
         created_at=now,
         updated_at=now,
@@ -57,10 +65,7 @@ def create_udf(session: Session, data: UdfCreateSchema, owner_id: str | None = N
 
 
 def get_udf(session: Session, udf_id: str) -> UdfResponseSchema:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
-    udf = result.scalar_one_or_none()
-    if not udf:
-        raise UdfNotFoundError(udf_id)
+    udf = _get_udf_model(session, udf_id)
     return UdfResponseSchema.model_validate(udf)
 
 
@@ -73,8 +78,8 @@ def list_udfs(
     stmt = select(Udf)
 
     if query:
-        q = f"%{query.lower()}%"
-        stmt = stmt.where(or_(Udf.name.ilike(q), Udf.description.ilike(q)))  # type: ignore[arg-type, attr-defined, union-attr]
+        q = f'%{query.lower()}%'
+        stmt = stmt.where(or_(col(Udf.name).ilike(q), col(Udf.description).ilike(q)))
 
     result = session.execute(stmt)
     udfs = result.scalars().all()
@@ -84,10 +89,7 @@ def list_udfs(
 
 
 def update_udf(session: Session, udf_id: str, data: UdfUpdateSchema) -> UdfResponseSchema:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
-    udf = result.scalar_one_or_none()
-    if not udf:
-        raise UdfNotFoundError(udf_id)
+    udf = _get_udf_model(session, udf_id)
 
     if data.name is not None:
         udf.name = data.name
@@ -110,24 +112,18 @@ def update_udf(session: Session, udf_id: str, data: UdfUpdateSchema) -> UdfRespo
 
 
 def delete_udf(session: Session, udf_id: str) -> None:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
-    udf = result.scalar_one_or_none()
-    if not udf:
-        raise UdfNotFoundError(udf_id)
+    udf = _get_udf_model(session, udf_id)
     session.delete(udf)
     session.commit()
 
 
 def clone_udf(session: Session, udf_id: str, data: UdfCloneSchema) -> UdfResponseSchema:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
-    udf = result.scalar_one_or_none()
-    if not udf:
-        raise UdfNotFoundError(udf_id)
+    udf = _get_udf_model(session, udf_id)
 
     now = datetime.now(UTC)
     cloned = Udf(
         id=str(uuid.uuid4()),
-        name=data.name or f"{udf.name} (copy)",
+        name=data.name or f'{udf.name} (copy)',
         description=udf.description,
         signature=udf.signature,
         code=udf.code,
@@ -143,7 +139,7 @@ def clone_udf(session: Session, udf_id: str, data: UdfCloneSchema) -> UdfRespons
 
 
 def match_udfs(session: Session, dtypes: list[str]) -> list[UdfResponseSchema]:
-    dtype_key = ",".join(dtypes)
+    dtype_key = ','.join(dtypes)
     return list_udfs(session, dtype_key=dtype_key)
 
 
@@ -160,7 +156,7 @@ def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseS
 
     imported: list[Udf] = []
     for item in payload.udfs:
-        existing_result = session.execute(select(Udf).where(Udf.name == item.name))  # type: ignore[arg-type, attr-defined]
+        existing_result = session.execute(select(Udf).where(col(Udf.name) == item.name))
         udf = existing_result.scalar_one_or_none()
 
         if udf and not payload.overwrite:
@@ -171,7 +167,7 @@ def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseS
             udf.signature = item.signature.model_dump()
             udf.code = item.code
             udf.tags = item.tags
-            udf.source = item.source or "user"
+            udf.source = item.source or 'user'
             udf.updated_at = datetime.now(UTC)
             imported.append(udf)
         else:
@@ -183,7 +179,7 @@ def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseS
                 signature=item.signature.model_dump(),
                 code=item.code,
                 tags=item.tags,
-                source=item.source or "user",
+                source=item.source or 'user',
                 created_at=now,
                 updated_at=now,
             )
@@ -204,52 +200,52 @@ def seed_defaults(session: Session) -> list[UdfResponseSchema]:
 
     defaults = [
         UdfCreateSchema(
-            name="Ratio",
-            description="Compute a ratio between two numbers.",
+            name='Ratio',
+            description='Compute a ratio between two numbers.',
             signature=UdfSignatureSchema(
                 inputs=[
-                    UdfInputSchema(position=0, dtype="Float64", label="numerator"),
-                    UdfInputSchema(position=1, dtype="Float64", label="denominator"),
+                    UdfInputSchema(position=0, dtype='Float64', label='numerator'),
+                    UdfInputSchema(position=1, dtype='Float64', label='denominator'),
                 ],
-                output_dtype="Float64",
+                output_dtype='Float64',
             ),
-            code=("def udf(numerator, denominator):\n    if denominator in (0, None):\n        return None\n    return numerator / denominator\n"),
-            tags=["math", "ratio"],
-            source="seeded",
+            code=('def udf(numerator, denominator):\n    if denominator in (0, None):\n        return None\n    return numerator / denominator\n'),
+            tags=['math', 'ratio'],
+            source='seeded',
         ),
         UdfCreateSchema(
-            name="Coalesce",
-            description="Return the first non-null value.",
+            name='Coalesce',
+            description='Return the first non-null value.',
             signature=UdfSignatureSchema(
                 inputs=[
-                    UdfInputSchema(position=0, dtype="String", label="primary"),
-                    UdfInputSchema(position=1, dtype="String", label="fallback"),
+                    UdfInputSchema(position=0, dtype='String', label='primary'),
+                    UdfInputSchema(position=1, dtype='String', label='fallback'),
                 ],
-                output_dtype="String",
+                output_dtype='String',
             ),
-            code=("def udf(primary, fallback):\n    return primary if primary is not None else fallback\n"),
-            tags=["string", "cleanup"],
-            source="seeded",
+            code=('def udf(primary, fallback):\n    return primary if primary is not None else fallback\n'),
+            tags=['string', 'cleanup'],
+            source='seeded',
         ),
         UdfCreateSchema(
-            name="Normalize",
-            description="Normalize a numeric value into 0-1.",
+            name='Normalize',
+            description='Normalize a numeric value into 0-1.',
             signature=UdfSignatureSchema(
                 inputs=[
-                    UdfInputSchema(position=0, dtype="Float64", label="value"),
-                    UdfInputSchema(position=1, dtype="Float64", label="min"),
-                    UdfInputSchema(position=2, dtype="Float64", label="max"),
+                    UdfInputSchema(position=0, dtype='Float64', label='value'),
+                    UdfInputSchema(position=1, dtype='Float64', label='min'),
+                    UdfInputSchema(position=2, dtype='Float64', label='max'),
                 ],
-                output_dtype="Float64",
+                output_dtype='Float64',
             ),
             code=(
-                "def udf(value, min_value, max_value):\n"
-                "    if value is None or min_value is None or max_value in (None, 0):\n"
-                "        return None\n"
-                "    return (value - min_value) / (max_value - min_value)\n"
+                'def udf(value, min_value, max_value):\n'
+                '    if value is None or min_value is None or max_value in (None, 0):\n'
+                '        return None\n'
+                '    return (value - min_value) / (max_value - min_value)\n'
             ),
-            tags=["math", "normalize"],
-            source="seeded",
+            tags=['math', 'normalize'],
+            source='seeded',
         ),
     ]
 

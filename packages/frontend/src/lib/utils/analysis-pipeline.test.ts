@@ -5,6 +5,7 @@ import {
 	buildAnalysisPipelinePayload,
 	buildDatasourceConfig,
 	buildDatasourcePipelinePayload,
+	buildDatasourcePreviewPipelinePayload,
 	normalizeSnapshotConfig
 } from './analysis-pipeline';
 
@@ -84,7 +85,7 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(buildAnalysisPipelinePayload('a-1', [t], [datasource()])).toBeNull();
 	});
 
-	test('returns null when datasource is missing from list', () => {
+	test('returns null when external datasource metadata is missing', () => {
 		const t = tab({
 			datasource: { id: 'ds-missing', analysis_tab_id: null, config: { branch: 'main' } }
 		});
@@ -234,7 +235,7 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(result!.tabs[0].steps[0].config).toEqual({ right_source: 'ds-join' });
 	});
 
-	test('returns null when a referenced source from step is missing', () => {
+	test('preserves a referenced source from step even when datasource metadata is missing', () => {
 		const t = tab({
 			steps: [
 				{
@@ -244,7 +245,9 @@ describe('buildAnalysisPipelinePayload', () => {
 				}
 			]
 		});
-		expect(buildAnalysisPipelinePayload('a-1', [t], [datasource()])).toBeNull();
+		const result = buildAnalysisPipelinePayload('a-1', [t], [datasource()]);
+		expect(result).not.toBeNull();
+		expect(result!.tabs[0].steps[0].config).toEqual({ right_source: 'ds-missing' });
 	});
 
 	test('filters out unapplied steps', () => {
@@ -476,6 +479,7 @@ describe('buildDatasourcePipelinePayload', () => {
 		expect(result.tabs[0].id).toBe('datasource-ds-1');
 		expect(result.tabs[0].name).toBe('Test DS');
 		expect(result.tabs[0].steps).toEqual([]);
+		expect(result.tabs[0].output.result_id).toBe('datasource-preview-ds-1');
 	});
 
 	test('requires datasourceConfig', () => {
@@ -592,19 +596,36 @@ describe('buildDatasourcePipelinePayload', () => {
 		expect(config.time_travel_ui).toBeUndefined();
 	});
 
-	test('analysis-created datasource payload still uses owning analysis context', () => {
-		const result = buildDatasourcePipelinePayload({
+	test('analysis-created output datasource payload keeps persisted datasource ownership', () => {
+		const result = buildDatasourcePreviewPipelinePayload({
 			datasource: datasource({
 				id: 'out-1',
-				source_type: 'analysis',
+				source_type: 'iceberg',
 				created_by_analysis_id: 'a-1',
 				output_of_tab_id: 'tab-1',
-				config: { analysis_id: 'a-1', analysis_tab_id: 'tab-1' }
+				config: {
+					branch: 'main',
+					metadata_path: '/warehouse/out-1/metadata/v1.metadata.json',
+					table: 'out_1',
+					namespace: 'outputs'
+				}
 			}),
-			datasourceConfig: { branch: 'main' }
+			datasourceConfig: { branch: 'main', snapshot_id: 'snap-1' }
 		});
 		expect(result.analysis_id).toBe('out-1');
-		expect(result.tabs[0].datasource.source_type).toBe('analysis');
+		expect(result.tabs[0].datasource).toEqual({
+			id: 'out-1',
+			analysis_tab_id: null,
+			source_type: 'iceberg',
+			config: {
+				branch: 'main',
+				metadata_path: '/warehouse/out-1/metadata/v1.metadata.json',
+				table: 'out_1',
+				namespace: 'outputs',
+				snapshot_id: 'snap-1'
+			}
+		});
+		expect(result.tabs[0].output.result_id).toBe('datasource-preview-out-1');
 	});
 });
 

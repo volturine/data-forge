@@ -10,7 +10,7 @@
 		Save,
 		Loader2,
 		Trash2
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import {
 		getSettings,
 		updateSettings,
@@ -24,7 +24,7 @@
 	import type { AppSettings } from '$lib/api/settings';
 	import { configStore } from '$lib/stores/config.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, input, label } from '$lib/styles/panda';
+	import { button, css, input, label } from '$lib/styles/panda';
 
 	let loading = $state(true);
 	let saving = $state(false);
@@ -585,21 +585,7 @@
 
 		<div class={css({ display: 'flex', justifyContent: 'flex-end' })}>
 			<button
-				class={css({
-					display: 'flex',
-					cursor: 'pointer',
-					alignItems: 'center',
-					gap: '1.5',
-					border: 'none',
-					paddingX: '4',
-					paddingY: '2',
-					fontSize: 'sm',
-					fontWeight: 'medium',
-					backgroundColor: 'accent.primary',
-					color: 'fg.inverse',
-					_hover: { opacity: 0.9 },
-					_disabled: { cursor: 'not-allowed', opacity: 0.5 }
-				})}
+				class={button({ variant: 'primaryBare' })}
 				onclick={save}
 				disabled={saving}
 				type="button"

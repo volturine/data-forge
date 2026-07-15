@@ -1,13 +1,15 @@
 import { test, expect } from './fixtures.js';
 import { createDatasource, createLargeDatasource } from './utils/api.js';
-import { deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import {
+	gotoDatasourcesPage,
 	selectDatasourceAndWaitForConfig,
 	openSchemaTabAndWait,
 	waitForDatasourceList,
-	waitForLayoutReady
+	waitForLayoutReady,
+	waitForDatasourcePreviewReady
 } from './utils/readiness.js';
 import { dialogByHeading } from './utils/locators.js';
 
@@ -15,35 +17,46 @@ import { dialogByHeading } from './utils/locators.js';
  * E2E tests for datasources – mirrors test_datasource.py / test_datasource_extended.py.
  */
 test.describe('Datasources – list & management', () => {
-	test('list shows datasource description preview', async ({ page, request }) => {
-		const ds = `e2e-description-list-${uid()}`;
-		const description = 'Primary customer dataset for retention analysis and reporting.';
-		await createDatasource(request, ds, undefined, description);
+	let sharedListDatasource = '';
+	const sharedDescription = 'Primary customer dataset for retention analysis and reporting.';
+
+	test.beforeAll(async ({ request }) => {
+		sharedListDatasource = `e2e-description-list-${uid()}`;
+		await createDatasource(request, sharedListDatasource, undefined, sharedDescription);
+	});
+
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+		await deleteDatasourceViaUI(page, sharedListDatasource);
+		await page.close();
+		await context.close();
+	});
+	test('list shows datasource description preview', async ({ page }) => {
+		const ds = sharedListDatasource;
+		const description = sharedDescription;
 		try {
 			await page.goto('/datasources');
 			const row = page.locator(`[data-ds-row="${ds}"]`);
 			await expect(row).toBeVisible();
 			await expect(row.getByText(description)).toBeVisible();
 		} finally {
-			await deleteDatasourceViaUI(page, ds);
+			// shared datasource cleaned in afterAll
 		}
 	});
 
-	test('lists datasource after API create', async ({ page, request }) => {
-		const ds = `e2e-visible-${uid()}`;
-		await createDatasource(request, ds);
+	test('lists datasource after API create', async ({ page }) => {
+		const ds = sharedListDatasource;
 		try {
 			await page.goto('/datasources');
 			await expect(page.locator(`[data-ds-row="${ds}"]`)).toBeVisible();
 			await screenshot(page, 'datasources', 'list-with-datasource');
 		} finally {
-			await deleteDatasourceViaUI(page, ds);
+			// shared datasource cleaned in afterAll
 		}
 	});
 
-	test('shows Import and Analysis badges', async ({ page, request }) => {
-		const ds = `e2e-badge-${uid()}`;
-		await createDatasource(request, ds);
+	test('shows Import and Analysis badges', async ({ page }) => {
+		const ds = sharedListDatasource;
 		try {
 			await page.goto('/datasources');
 			const row = page.locator(`[data-ds-row="${ds}"]`);
@@ -51,13 +64,12 @@ test.describe('Datasources – list & management', () => {
 			// uploaded files have "Import" badge
 			await expect(row.getByText('Import', { exact: true })).toBeVisible();
 		} finally {
-			await deleteDatasourceViaUI(page, ds);
+			// shared datasource cleaned in afterAll
 		}
 	});
 
-	test('search input filters datasource list', async ({ page, request }) => {
-		const ds = `e2e-search-${uid()}`;
-		await createDatasource(request, ds);
+	test('search input filters datasource list', async ({ page }) => {
+		const ds = sharedListDatasource;
 		try {
 			await page.goto('/datasources');
 			const row = page.locator(`[data-ds-row="${ds}"]`);
@@ -67,16 +79,14 @@ test.describe('Datasources – list & management', () => {
 			await expect(row).not.toBeVisible();
 			await expect(page.getByText(/No datasources match/i)).toBeVisible();
 		} finally {
-			await deleteDatasourceViaUI(page, ds);
+			// shared datasource cleaned in afterAll
 		}
 	});
 
 	test('clicking a datasource clears the "No datasource selected" placeholder', async ({
-		page,
-		request
+		page
 	}) => {
-		const ds = `e2e-select-${uid()}`;
-		await createDatasource(request, ds);
+		const ds = sharedListDatasource;
 		try {
 			await page.goto('/datasources');
 			await expect(page.getByText(/No datasource selected/i)).toBeVisible();
@@ -84,12 +94,11 @@ test.describe('Datasources – list & management', () => {
 			await page.locator(`[data-ds-row="${ds}"]`).click();
 			await expect(page.getByText(/No datasource selected/i)).not.toBeVisible();
 		} finally {
-			await deleteDatasourceViaUI(page, ds);
+			// shared datasource cleaned in afterAll
 		}
 	});
 
 	test('multiple datasources are all listed', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const id = uid();
 		const dsA = `e2e-multi-a-${id}`;
 		const dsB = `e2e-multi-b-${id}`;
@@ -121,13 +130,23 @@ test.describe('Datasources – list & management', () => {
 		await expect(dialog).toBeVisible();
 		await dialog.getByRole('button', { name: /^Delete$/ }).click();
 
-		await expect(row).not.toBeVisible({ timeout: 8_000 });
+		await expect(row).not.toBeVisible({ timeout: 5_000 });
 	});
 
-	test('Show/Hide hidden datasources toggle is visible', async ({ page }) => {
+	test('Show/Hide hidden datasources toggle shows and hides auto-generated datasources', async ({
+		page
+	}) => {
 		await page.goto('/datasources');
-		// EyeOff/Eye button to toggle hidden datasources
-		await expect(page.locator('button[title*="datasources"]')).toBeVisible();
+		await waitForDatasourceList(page);
+
+		const showBtn = page.locator('button[title="Show auto-generated datasources"]');
+		await expect(showBtn).toBeVisible();
+
+		await showBtn.click();
+		await expect(page.locator('button[title="Hide auto-generated datasources"]')).toBeVisible();
+
+		await page.locator('button[title="Hide auto-generated datasources"]').click();
+		await expect(page.locator('button[title="Show auto-generated datasources"]')).toBeVisible();
 	});
 });
 
@@ -161,11 +180,10 @@ test.describe('Datasources – upload page', () => {
 		await page.goto('/datasources/new');
 		await page.getByRole('button', { name: 'External DB' }).click();
 		// Connection string input has id="connection-string"
-		await expect(page.locator('#connection-string')).toBeVisible({ timeout: 8_000 });
+		await expect(page.locator('#connection-string')).toBeVisible({ timeout: 5_000 });
 	});
 
 	test('CSV upload creates datasource', async ({ page }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-upload-${Date.now()}`;
 		await page.goto('/datasources/new');
 
@@ -177,13 +195,13 @@ test.describe('Datasources – upload page', () => {
 		});
 
 		const uploadBtn = page.getByRole('button', { name: 'Upload', exact: true });
-		await expect(uploadBtn).toBeEnabled({ timeout: 10_000 });
+		await expect(uploadBtn).toBeEnabled({ timeout: 5_000 });
 		await uploadBtn.click();
 
 		// Wait for navigation away from /new, then verify the datasource exists in the list
-		await expect(page).toHaveURL((url) => !url.pathname.endsWith('/new'), { timeout: 30_000 });
+		await expect(page).toHaveURL((url) => !url.pathname.endsWith('/new'), { timeout: 5_000 });
 		await page.goto('/datasources');
-		await expect(page.locator(`[data-ds-row="${dsName}"]`)).toBeVisible({ timeout: 15_000 });
+		await expect(page.locator(`[data-ds-row="${dsName}"]`)).toBeVisible({ timeout: 5_000 });
 
 		await deleteDatasourceViaUI(page, dsName);
 	});
@@ -192,13 +210,16 @@ test.describe('Datasources – upload page', () => {
 test.describe('Datasources – detail view', () => {
 	let ds: string;
 
-	test.beforeEach(async ({ request }) => {
+	test.beforeAll(async ({ request }) => {
 		ds = `e2e-detail-view-${uid()}`;
 		await createDatasource(request, ds);
 	});
 
-	test.afterEach(async ({ page }) => {
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteDatasourceViaUI(page, ds);
+		await page.close();
+		await context.close();
 	});
 
 	test('selecting datasource shows General tab with source information', async ({ page }) => {
@@ -206,7 +227,7 @@ test.describe('Datasources – detail view', () => {
 		await page.locator(`[data-ds-row="${ds}"]`).click();
 
 		const config = page.locator('[data-ds-config]');
-		await expect(config).toBeVisible({ timeout: 8_000 });
+		await expect(config).toBeVisible({ timeout: 5_000 });
 
 		const generalTab = config.getByRole('tab', { name: 'General' });
 		await expect(generalTab).toHaveAttribute('aria-selected', 'true');
@@ -245,7 +266,7 @@ test.describe('Datasources – detail view', () => {
 		await openSchemaTabAndWait(page);
 
 		const config = page.locator('[data-ds-config]');
-		await expect(config.locator('[data-schema-column="id"]')).toBeVisible({ timeout: 10_000 });
+		await expect(config.locator('[data-schema-column="id"]')).toBeVisible({ timeout: 5_000 });
 		await expect(config.locator('[data-schema-column="name"]')).toBeVisible();
 		await expect(config.locator('[data-schema-column="age"]')).toBeVisible();
 		await expect(config.locator('[data-schema-column="city"]')).toBeVisible();
@@ -261,7 +282,7 @@ test.describe('Datasources – detail view', () => {
 		await editButton.click();
 		await config.locator('textarea').fill('Primary city label used for regional rollups');
 		await config.getByRole('button', { name: 'Save' }).click();
-		await expect(editButton).toBeVisible({ timeout: 10_000 });
+		await expect(editButton).toBeVisible({ timeout: 5_000 });
 
 		await expect(config.locator('[data-schema-description="city"]')).toContainText(
 			'Primary city label used for regional rollups'
@@ -278,9 +299,9 @@ test.describe('Datasources – detail view', () => {
 		await page.locator(`[data-ds-row="${ds}"]`).click();
 
 		const config = page.locator('[data-ds-config]');
-		await expect(config).toBeVisible({ timeout: 8_000 });
+		await expect(config).toBeVisible({ timeout: 5_000 });
 
-		await expect(config.getByText('Rows')).toBeVisible({ timeout: 10_000 });
+		await expect(config.getByText('Rows')).toBeVisible({ timeout: 5_000 });
 		await expect(page.getByTestId('datasource-row-count')).toHaveText('3', { timeout: 5_000 });
 	});
 
@@ -291,12 +312,11 @@ test.describe('Datasources – detail view', () => {
 	});
 
 	test('right pane shows preview table with column headers and data', async ({ page }) => {
-		test.setTimeout(45_000);
 		await page.goto('/datasources');
 		await page.locator(`[data-ds-row="${ds}"]`).click();
 
 		// Preview loads in the right pane (DatasourcePreview), not in a config tab
-		await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 30_000 });
+		await waitForDatasourcePreviewReady(page);
 
 		// Verify actual column headers from the CSV are rendered
 		await expect(page.locator('[data-column-id="id"]')).toBeVisible({ timeout: 5_000 });
@@ -313,8 +333,6 @@ test.describe('Datasources – detail view', () => {
 });
 
 test.describe('Datasources – preview pagination', () => {
-	test.setTimeout(60_000);
-
 	test('pagination navigates between pages', async ({ page, request }) => {
 		const ds = `e2e-pagination-${uid()}`;
 		await createLargeDatasource(request, ds, 150);
@@ -322,7 +340,7 @@ test.describe('Datasources – preview pagination', () => {
 			await page.goto('/datasources');
 			await waitForDatasourceList(page);
 			await page.locator(`[data-ds-row="${ds}"]`).click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 30_000 });
+			await waitForDatasourcePreviewReady(page);
 
 			const pageLabel = page.locator('[data-testid="pagination-page"]');
 			await expect(pageLabel).toHaveText('Page 1');
@@ -336,14 +354,14 @@ test.describe('Datasources – preview pagination', () => {
 			await expect(nextBtn).toBeEnabled();
 
 			await nextBtn.click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 30_000 });
+			await waitForDatasourcePreviewReady(page);
 			await expect(pageLabel).toHaveText('Page 2');
 			await expect(prevBtn).toBeEnabled();
 
 			await screenshot(page, 'datasources', 'preview-pagination-page2');
 
 			await prevBtn.click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 30_000 });
+			await waitForDatasourcePreviewReady(page);
 			await expect(pageLabel).toHaveText('Page 1');
 			await expect(prevBtn).toBeDisabled();
 		} finally {
@@ -353,36 +371,26 @@ test.describe('Datasources – preview pagination', () => {
 });
 
 test.describe('Datasources – column stats panel', () => {
-	test.setTimeout(60_000);
-
 	test('column stats panel opens, shows content, and closes', async ({ page, request }) => {
 		const ds = `e2e-stats-${uid()}`;
-		await createDatasource(request, ds);
+		const dsId = await createDatasource(request, ds);
 		try {
-			await page.goto('/datasources');
-			await page.locator(`[data-ds-row="${ds}"]`).click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 30_000 });
+			await page.goto(`/datasources?id=${dsId}`);
+			await waitForDatasourcePreviewReady(page);
 
-			// Open column menu for "age" column
 			const ageHeader = page.locator('[data-column-id="age"]');
 			await ageHeader.locator('button[aria-label="Column options"]').click();
 			await page.getByText('Column stats').click();
 
-			// Column stats panel should appear
 			const panel = page.locator('[data-testid="column-stats-panel"]');
-			await expect(panel).toBeVisible({ timeout: 10_000 });
-
-			// Panel should show "Column Stats" heading and the column name
+			await expect(panel).toBeVisible({ timeout: 5_000 });
 			await expect(panel.getByText('Column Stats')).toBeVisible();
 			await expect(panel.getByText('age')).toBeVisible();
-
-			// Panel should show stats content (Overview section with Rows)
-			await expect(panel.getByText('Overview')).toBeVisible({ timeout: 10_000 });
+			await expect(panel.getByText('Overview')).toBeVisible({ timeout: 5_000 });
 			await expect(panel.getByText('Rows')).toBeVisible();
 
 			await screenshot(page, 'datasources', 'column-stats-panel-open');
 
-			// Close the panel
 			await page.locator('[data-testid="column-stats-close"]').click();
 			await expect(panel).not.toBeVisible();
 		} finally {
@@ -392,9 +400,7 @@ test.describe('Datasources – column stats panel', () => {
 });
 
 test.describe('Datasources – config tab interactions', () => {
-	test.setTimeout(45_000);
-
-	test('Runs tab shows empty state for fresh datasource', async ({ page, request }) => {
+	test('Runs tab shows onboarding build for imported datasource', async ({ page, request }) => {
 		const ds = `e2e-runs-tab-${uid()}`;
 		await createDatasource(request, ds);
 		try {
@@ -402,14 +408,13 @@ test.describe('Datasources – config tab interactions', () => {
 			await page.locator(`[data-ds-row="${ds}"]`).click();
 
 			const config = page.locator('[data-ds-config]');
-			await expect(config).toBeVisible({ timeout: 8_000 });
+			await expect(config).toBeVisible({ timeout: 5_000 });
 
 			await config.getByRole('tab', { name: 'Runs' }).click();
-			await expect(config.getByText('No runs associated with this datasource.')).toBeVisible({
-				timeout: 15_000
-			});
+			await expect(config.getByText('No runs associated with this datasource.')).toHaveCount(0);
+			await expect(config.getByText('Build')).toBeVisible({ timeout: 5_000 });
 
-			await screenshot(page, 'datasources', 'runs-tab-empty-state');
+			await screenshot(page, 'datasources', 'runs-tab-onboarding-build');
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -425,7 +430,7 @@ test.describe('Datasources – config tab interactions', () => {
 			await page.locator(`[data-ds-row="${ds}"]`).click();
 
 			const config = page.locator('[data-ds-config]');
-			await expect(config).toBeVisible({ timeout: 8_000 });
+			await expect(config).toBeVisible({ timeout: 5_000 });
 
 			const nameInput = config.locator('[id^="datasource-name-"]');
 			await nameInput.fill(renamed);
@@ -443,11 +448,363 @@ test.describe('Datasources – config tab interactions', () => {
 			]);
 			expect(saveResponse.ok()).toBeTruthy();
 
+			// Verify the new name is visible immediately after save (before reload)
+			await expect(nameInput).toHaveValue(renamed, { timeout: 5_000 });
+
 			// After save, reload page and verify renamed datasource appears
 			await page.reload();
-			await expect(page.locator(`[data-ds-row="${renamed}"]`)).toBeVisible({ timeout: 10_000 });
+			await expect(page.locator(`[data-ds-row="${renamed}"]`)).toBeVisible({ timeout: 5_000 });
 		} finally {
 			await deleteDatasourceViaUI(page, renamed);
+		}
+	});
+});
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Datasources – deeper tab interactions
+// ────────────────────────────────────────────────────────────────────────────────
+
+test.describe('Datasources – Runs tab functional', () => {
+	test('Runs tab toggles show/hide previews', async ({ page, request }) => {
+		const ds = `e2e-runs-toggle-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await page.goto('/datasources');
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 5_000 });
+
+			await config.getByRole('tab', { name: 'Runs' }).click();
+
+			// The show/hide previews toggle button should be visible
+			const toggleBtn = config.getByRole('button', { name: /Show previews|Hide previews/i });
+			await expect(toggleBtn).toBeVisible({ timeout: 5_000 });
+
+			// Click to show previews (if not already showing)
+			const textBefore = await toggleBtn.textContent();
+			if (textBefore?.includes('Show')) {
+				await toggleBtn.click();
+				await expect(toggleBtn).toContainText(/Hide previews/i, { timeout: 3_000 });
+			} else {
+				await toggleBtn.click();
+				await expect(toggleBtn).toContainText(/Show previews/i, { timeout: 3_000 });
+			}
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+});
+
+test.describe('Datasources – Health Checks tab functional', () => {
+	test('Health Checks tab shows New Check button', async ({ page, request }) => {
+		const ds = `e2e-hc-tab-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await page.goto('/datasources');
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 5_000 });
+
+			await config.getByRole('tab', { name: 'Health Checks' }).click();
+			await expect(config.getByRole('button', { name: 'Add', exact: true })).toBeVisible({
+				timeout: 5_000
+			});
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+});
+
+test.describe('Datasources – CSV config tab functional', () => {
+	test('changing CSV delimiter persists after save and reload', async ({ page, request }) => {
+		const ds = `e2e-csv-config-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
+
+			const config = page.locator('[data-ds-config]');
+
+			// Click CSV tab
+			await config.getByRole('tab', { name: 'CSV' }).click();
+			await expect(config.getByText('CSV Options')).toBeVisible({ timeout: 5_000 });
+
+			// Change delimiter to semicolon
+			const delimiterSelect = config.locator('select[id^="csv-delimiter-"]');
+			await expect(delimiterSelect).toBeVisible();
+			await delimiterSelect.selectOption(';');
+
+			// Save changes
+			await config.getByRole('button', { name: 'Save Changes' }).click();
+			await expect(config.getByText('Changes saved successfully!')).toBeVisible({
+				timeout: 5_000
+			});
+
+			// Verify delimiter is still semicolon immediately after save (before reload)
+			await expect(delimiterSelect).toHaveValue(';', { timeout: 5_000 });
+
+			// Reload and verify delimiter persisted
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
+			await config.getByRole('tab', { name: 'CSV' }).click();
+			await expect(delimiterSelect).toHaveValue(';', { timeout: 5_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+
+	test('CSV header checkbox can be toggled and persists', async ({ page, request }) => {
+		const ds = `e2e-csv-header-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
+
+			const config = page.locator('[data-ds-config]');
+
+			await config.getByRole('tab', { name: 'CSV' }).click();
+			await expect(config.getByText('CSV Options')).toBeVisible({ timeout: 5_000 });
+
+			const headerCheckbox = config.locator('input[id^="csv-header-"]');
+			const wasChecked = await headerCheckbox.isChecked();
+
+			await headerCheckbox.click();
+			await expect(headerCheckbox).toBeChecked({ checked: !wasChecked });
+
+			await config.getByRole('button', { name: 'Save Changes' }).click();
+			await expect(config.getByText('Changes saved successfully!')).toBeVisible({
+				timeout: 5_000
+			});
+
+			// Verify checkbox state is correct immediately after save (before reload)
+			await expect(headerCheckbox).toBeChecked({ checked: !wasChecked, timeout: 5_000 });
+
+			// Reload and verify
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
+			await config.getByRole('tab', { name: 'CSV' }).click();
+			await expect(headerCheckbox).toBeChecked({ checked: !wasChecked, timeout: 5_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+});
+
+test.describe('Datasources – schema refresh', () => {
+	test('clicking refresh schema shows loading state', async ({ page, request }) => {
+		const ds = `e2e-refresh-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await page.goto('/datasources');
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 5_000 });
+
+			// The refresh button is in the General tab
+			const refreshBtn = config.getByRole('button', {
+				name: /Refresh schema|Re-ingest from source/i
+			});
+			await expect(refreshBtn).toBeVisible({ timeout: 5_000 });
+
+			await refreshBtn.click();
+
+			// After clicking, button should show loading text
+			await expect(config.getByRole('button', { name: /Refreshing|Re-ingesting/i })).toBeVisible({
+				timeout: 3_000
+			});
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+
+	test('refresh schema button returns to idle after loading', async ({ page, request }) => {
+		const ds = `e2e-refresh-idle-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await page.goto('/datasources');
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 5_000 });
+
+			const refreshBtn = config.getByRole('button', {
+				name: /Refresh schema|Re-ingest from source/i
+			});
+			await refreshBtn.click();
+
+			// Loading state appears
+			await expect(config.getByRole('button', { name: /Refreshing|Re-ingesting/i })).toBeVisible({
+				timeout: 5_000
+			});
+
+			// Button returns to idle after API completes
+			await expect(refreshBtn).toBeVisible({ timeout: 15_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+});
+
+test.describe('Datasources – error states', () => {
+	test('bad datasource ID shows empty state without crashing shell', async ({ page }) => {
+		await page.goto('/datasources?id=00000000-0000-0000-0000-000000000000');
+		await waitForLayoutReady(page);
+
+		// Shell should still be intact
+		await expect(page.getByLabel('Main navigation')).toBeVisible({ timeout: 5_000 });
+
+		// The right pane shows "No datasource selected" for an unknown ID
+		await expect(page.getByText(/No datasource selected/i)).toBeVisible({ timeout: 5_000 });
+	});
+});
+
+test.describe('Datasources – preview table interactions', () => {
+	test('column options dropdown opens on click', async ({ page, request }) => {
+		const ds = `e2e-col-menu-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await page.goto('/datasources');
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 5_000 });
+			await waitForDatasourcePreviewReady(page);
+
+			const colOptionsBtn = page.getByRole('button', { name: 'Column options' }).first();
+			await colOptionsBtn.click({ force: true });
+
+			// The dropdown should show sort options (rendered in the preview table, outside data-ds-config)
+			await expect(page.getByText('Sort A-Z')).toBeVisible({ timeout: 3_000 });
+			await expect(page.getByText('Sort Z-A')).toBeVisible({ timeout: 3_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+
+	test('column search filters visible columns', async ({ page, request }) => {
+		const ds = `e2e-col-search-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await page.goto('/datasources');
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 5_000 });
+			await waitForDatasourcePreviewReady(page);
+
+			const searchInput = page.locator('#dt-col-search');
+			await expect(searchInput).toBeVisible();
+			await searchInput.fill('ZZZNOMATCH');
+
+			// All column option buttons should be hidden since no columns match
+			await expect(page.getByRole('button', { name: 'Column options' })).toHaveCount(0);
+
+			await searchInput.fill('');
+			await expect(page.getByRole('button', { name: 'Column options' }).first()).toBeVisible();
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+
+	test('column sort A-Z actually reorders preview rows', async ({ page, request }) => {
+		const ds = `e2e-sort-rows-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await page.goto('/datasources');
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+			await waitForDatasourcePreviewReady(page);
+
+			// Get the first data row text before sorting
+			const firstRow = page.locator('tbody tr').first();
+			await expect(firstRow).toBeVisible();
+			const beforeText = await firstRow.textContent();
+
+			// Click column options for "city" (4th column in sample CSV)
+			const cityColBtn = page
+				.locator('th')
+				.filter({ hasText: /city/i })
+				.getByRole('button', { name: 'Column options' });
+			await cityColBtn.click({ force: true });
+
+			// Click Sort A-Z
+			await page.getByText('Sort A-Z').click();
+
+			// After sorting by city A-Z, Berlin should be first
+			await expect
+				.poll(async () => await page.locator('tbody tr').first().textContent(), {
+					timeout: 5_000
+				})
+				.toContain('Berlin');
+
+			// Clear sort should restore original order
+			await cityColBtn.click({ force: true });
+			await page.getByText('Clear sort').click();
+			await expect
+				.poll(async () => await page.locator('tbody tr').first().textContent(), {
+					timeout: 5_000
+				})
+				.toBe(beforeText);
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+
+	test('copy cell value button appears on hover and is clickable', async ({ page, request }) => {
+		const ds = `e2e-copy-cell-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await page.goto('/datasources');
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+			await waitForDatasourcePreviewReady(page);
+
+			// Hover over the first data cell (Alice in the name column)
+			const firstCell = page.locator('tbody tr').first().locator('td').nth(1);
+			await firstCell.hover();
+
+			// The copy button should appear on hover
+			const copyBtn = page.getByRole('button', { name: 'Copy cell value' }).first();
+			await expect(copyBtn).toBeVisible({ timeout: 3_000 });
+
+			// Click copy — should not throw and button should remain visible while hovering
+			await copyBtn.click();
+			await expect(copyBtn).toBeVisible({ timeout: 3_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+});
+
+test.describe('Datasources – build comparison', () => {
+	test('Compare builds button toggles comparison panel', async ({ page, request }) => {
+		const ds = `e2e-compare-${uid()}`;
+		await createDatasource(request, ds);
+		try {
+			await page.goto('/datasources');
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 5_000 });
+
+			// The comparison button should be visible for iceberg datasources
+			const compareBtn = page.getByRole('button', { name: 'Compare builds' });
+			await expect(compareBtn).toBeVisible({ timeout: 5_000 });
+
+			await compareBtn.click();
+			await expect(page.getByRole('button', { name: 'Hide comparison' })).toBeVisible({
+				timeout: 3_000
+			});
+			await expect(page.getByText('Select builds')).toBeVisible({ timeout: 3_000 });
+
+			// Toggle back off
+			await page.getByRole('button', { name: 'Hide comparison' }).click();
+			await expect(page.getByRole('button', { name: 'Compare builds' })).toBeVisible({
+				timeout: 3_000
+			});
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });

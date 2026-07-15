@@ -25,7 +25,7 @@
 		CirclePause,
 		CirclePlay,
 		FileCode
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { css, tabButton, chip, spinner } from '$lib/styles/panda';
 	import { buildStepLabel } from '$lib/utils/build-step-label';
 

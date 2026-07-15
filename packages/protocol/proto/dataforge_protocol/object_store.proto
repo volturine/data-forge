@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/common.proto";
+
+message ObjectStoreUrl {
+  string url = 1 [(buf.validate.field).string.pattern = "^s3://[^/]+/.+$"];
+}
+
+message ObjectStoreUrlClassificationRequest {
+  string value = 1;
+}
+
+message ObjectStoreUrlClassificationResponse {
+  bool is_object_store = 1;
+  bool is_managed = 2;
+  optional ObjectStoreUrl object_url = 3;
+}
+
+message ObjectStorePathParts {
+  repeated string parts = 1 [(buf.validate.field).repeated.min_items = 1];
+  optional string bucket = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message ObjectStoreJoinRequest {
+  ObjectStoreUrl base = 1 [(buf.validate.field).required = true];
+  repeated string parts = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message ObjectStoreStorageOptions {
+  string endpoint_url = 1 [(buf.validate.field).string.uri = true];
+  string access_key_id = 2 [(buf.validate.field).string.min_len = 1];
+  string secret_access_key = 3 [(buf.validate.field).string.min_len = 1];
+  string region = 4 [(buf.validate.field).string.min_len = 1];
+  bool force_virtual_addressing = 5;
+  string py_io_impl = 6 [(buf.validate.field).string.min_len = 1];
+}
+
+message ObjectStoreStorageOptionsResponse {
+  reserved 1;
+  reserved "options";
+
+  ObjectStoreStorageOptions storage_options = 2 [(buf.validate.field).required = true];
+}
+
+message ObjectStoreBytes {
+  ObjectStoreUrl target = 1 [(buf.validate.field).required = true];
+  bytes data = 2;
+  optional string content_type = 3;
+}
+
+message ObjectStoreExistsResponse {
+  bool exists = 1;
+}
+
+message ObjectStorePrefixesResponse {
+  repeated string prefixes = 1;
+}
+
+message ObjectStoreMetadataFilesResponse {
+  repeated ObjectStoreUrl files = 1;
+}
+
+service ObjectStoreService {
+  rpc ClassifyUrl(ObjectStoreUrlClassificationRequest) returns (ObjectStoreUrlClassificationResponse);
+  rpc BuildUrl(ObjectStorePathParts) returns (ObjectStoreUrl);
+  rpc JoinUrl(ObjectStoreJoinRequest) returns (ObjectStoreUrl);
+  rpc StorageOptions(EmptyRequest) returns (ObjectStoreStorageOptionsResponse);
+  rpc UploadBytes(ObjectStoreBytes) returns (ObjectStoreUrl);
+  rpc DownloadBytes(ObjectStoreUrl) returns (ObjectStoreBytes);
+  rpc DeleteObject(ObjectStoreUrl) returns (EmptyRequest);
+  rpc Exists(ObjectStoreUrl) returns (ObjectStoreExistsResponse);
+  rpc ListPrefixes(ObjectStoreUrl) returns (ObjectStorePrefixesResponse);
+  rpc ListMetadataFiles(ObjectStoreUrl) returns (ObjectStoreMetadataFilesResponse);
+  rpc DeletePrefix(ObjectStoreUrl) returns (EmptyRequest);
+}

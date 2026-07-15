@@ -85,18 +85,37 @@ test.describe('Lineage – graph interaction', () => {
 		await expect(page.getByText(/^\d+%$/)).toBeVisible();
 	});
 
+	test('zoom in and out changes zoom percentage', async ({ page }) => {
+		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
+		await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 5_000 });
+
+		const zoomLabel = page.getByText(/^\d+%$/);
+		await expect(zoomLabel).toBeVisible();
+		const before = await zoomLabel.textContent();
+
+		await page.locator('button[title="Zoom in"]').click();
+		await page.waitForTimeout(500);
+		const afterIn = await zoomLabel.textContent();
+		expect(afterIn).not.toBe(before);
+
+		await page.locator('button[title="Zoom out"]').click();
+		await page.waitForTimeout(500);
+		const afterOut = await zoomLabel.textContent();
+		expect(afterOut).not.toBe(afterIn);
+	});
+
 	test('lineage graph loads without error state', async ({ page }) => {
 		await page.goto('/lineage');
 		await waitForLineageToolbar(page);
 		// Wait for the loading state to clear first, then verify no error
-		await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 15_000 });
+		await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 5_000 });
 		await expect(page.getByText('Failed to load lineage.')).not.toBeVisible();
 	});
 });
 
 test.describe('Lineage – with datasource data', () => {
 	test('lineage graph renders nodes when datasources exist', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-lineage-ds-${uid()}`;
 		const aName = `E2E Lineage ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -106,7 +125,7 @@ test.describe('Lineage – with datasource data', () => {
 			// The lineage graph area should not show the error state
 			await expect(page.getByText('Failed to load lineage.')).not.toBeVisible();
 			// The graph container should be present and not loading
-			await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 15_000 });
+			await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 5_000 });
 			await screenshot(page, 'lineage', 'with-data');
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
@@ -114,8 +133,32 @@ test.describe('Lineage – with datasource data', () => {
 		}
 	});
 
+	test('clicking a lineage node opens node details in sidebar', async ({ page, request }) => {
+		const dsName = `e2e-lineage-node-${uid()}`;
+		const aName = `E2E Lineage Node ${uid()}`;
+		const dsId = await createDatasource(request, dsName);
+		await createAnalysis(request, aName, dsId);
+		try {
+			await page.goto('/lineage');
+			await waitForLineageToolbar(page);
+
+			await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 5_000 });
+
+			const node = page.getByRole('button', { name: `source ${dsName}` });
+			await expect(node).toBeVisible({ timeout: 5_000 });
+			await node.click();
+
+			// Sidebar should show node details instead of the default prompt
+			await expect(page.getByText('Select a node')).not.toBeVisible({ timeout: 3_000 });
+			// The sidebar heading contains the node label (scoped to sidebar to avoid matching the node itself)
+			await expect(page.locator('aside').getByText(dsName)).toBeVisible({ timeout: 3_000 });
+		} finally {
+			await deleteAnalysisViaUI(page, aName);
+			await deleteDatasourceViaUI(page, dsName);
+		}
+	});
+
 	test('dragging the canvas pans visible lineage nodes', async ({ page, request }) => {
-		test.setTimeout(60_000);
 		const dsName = `e2e-lineage-pan-ds-${uid()}`;
 		const aName = `E2E Lineage Pan ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -125,10 +168,10 @@ test.describe('Lineage – with datasource data', () => {
 			await page.goto('/lineage');
 			await waitForLineageToolbar(page);
 			const graph = page.getByTestId('lineage-canvas');
-			await expect(graph).toBeVisible({ timeout: 15_000 });
+			await expect(graph).toBeVisible({ timeout: 5_000 });
 
 			const node = page.getByRole('button', { name: `source ${dsName}` });
-			await expect(node).toBeVisible({ timeout: 15_000 });
+			await expect(node).toBeVisible({ timeout: 5_000 });
 
 			const before = await node.boundingBox();
 			const graphBox = await graph.boundingBox();

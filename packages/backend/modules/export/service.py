@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from contracts.analysis.models import Analysis
-from contracts.datasource.models import DataSource
-from core.exceptions import AnalysisNotFoundError
 from sqlmodel import Session
 
+from backend_core.exceptions import analysis_not_found
+from backend_core.persistence.analysis.models import Analysis
+from backend_core.persistence.datasource.models import DataSource
 from modules.export.generators import generate_code, select_tabs
 from modules.export.models import CodeExportFormat
 from modules.export.utils import build_export_filename
@@ -30,7 +30,7 @@ def export_analysis_code(
 ) -> CodeExportResult:
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
-        raise AnalysisNotFoundError(analysis_id)
+        raise analysis_not_found(analysis_id)
 
     export_format = CodeExportFormat.require(format_name)
     selection = select_tabs(analysis.pipeline, tab_id)

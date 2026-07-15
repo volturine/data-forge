@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+	KNOWN_PIPELINE_STEP_TYPES,
 	chartTypeForStep,
 	isChartStepType,
 	isPlotAliasStepType,
@@ -7,6 +8,11 @@ import {
 } from './pipeline-step';
 
 describe('pipeline-step helpers', () => {
+	test('derives known step types from generated protocol tokens', () => {
+		expect(KNOWN_PIPELINE_STEP_TYPES).toContain('filter');
+		expect(KNOWN_PIPELINE_STEP_TYPES).toContain('plot_scatter');
+	});
+
 	test('recognizes plot aliases explicitly', () => {
 		expect(isPlotAliasStepType('plot_scatter')).toBe(true);
 		expect(isPlotAliasStepType('chart')).toBe(false);

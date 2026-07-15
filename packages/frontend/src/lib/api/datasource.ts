@@ -76,28 +76,6 @@ export function uploadBulkFiles(
 	});
 }
 
-export interface FileListItem {
-	name: string;
-	path: string;
-	is_dir: boolean;
-}
-
-export interface FileListResponse {
-	base_path: string;
-	entries: FileListItem[];
-}
-
-export function listDataFiles(path?: string): ResultAsync<FileListResponse, ApiError> {
-	const params = new URLSearchParams();
-	if (path) {
-		params.set('path', path);
-	}
-	const suffix = params.toString() ? `?${params.toString()}` : '';
-	return apiRequest<FileListResponse>(`/v1/datasource/file/list${suffix}`, {
-		method: 'GET'
-	});
-}
-
 export function connectDatabase(
 	name: string,
 	description: string,
@@ -143,8 +121,29 @@ export function connectAnalysisDatasource(
 	});
 }
 
-export function refreshDatasource(datasourceId: string): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>(`/v1/datasource/${datasourceId}/refresh`, {
+export interface InternalPostgresTable {
+	schema_name: string;
+	table_name: string;
+	is_onboarded: boolean;
+}
+
+export function listInternalPostgresTables(): ResultAsync<InternalPostgresTable[], ApiError> {
+	return apiRequest<InternalPostgresTable[]>('/v1/datasource/internal-postgres/tables');
+}
+
+export function toggleInternalPostgresTable(
+	schemaName: string,
+	tableName: string,
+	enabled: boolean
+): ResultAsync<InternalPostgresTable, ApiError> {
+	return apiRequest<InternalPostgresTable>('/v1/datasource/internal-postgres/toggle', {
+		method: 'POST',
+		body: JSON.stringify({ schema_name: schemaName, table_name: tableName, enabled })
+	});
+}
+
+export function ingestDatasource(datasourceId: string): ResultAsync<DataSource, ApiError> {
+	return apiRequest<DataSource>(`/v1/datasource/${datasourceId}/ingest`, {
 		method: 'POST'
 	});
 }
@@ -162,10 +161,26 @@ export interface IcebergSnapshotsResponse {
 	snapshots: IcebergSnapshotInfo[];
 }
 
+export interface ListIcebergSnapshotsOptions {
+	branch?: string | null;
+	buildResultsOnly?: boolean;
+}
+
 export function listIcebergSnapshots(
-	datasourceId: string
+	datasourceId: string,
+	options?: ListIcebergSnapshotsOptions
 ): ResultAsync<IcebergSnapshotsResponse, ApiError> {
-	return apiRequest<IcebergSnapshotsResponse>(`/v1/compute/iceberg/${datasourceId}/snapshots`);
+	const params = new URLSearchParams();
+	if (options?.branch) {
+		params.set('branch', options.branch);
+	}
+	if (options?.buildResultsOnly) {
+		params.set('build_results_only', 'true');
+	}
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	return apiRequest<IcebergSnapshotsResponse>(
+		`/v1/compute/iceberg/${datasourceId}/snapshots${suffix}`
+	);
 }
 
 export interface SnapshotPreview {

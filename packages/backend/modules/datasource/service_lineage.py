@@ -1,36 +1,37 @@
 from collections import deque
-from typing import Any, TypeAlias
+from typing import Any
 
-from contracts.analysis.models import Analysis, AnalysisDataSource
-from contracts.datasource.models import DataSource
-from contracts.enums import DataForgeStrEnum
-from core.namespace import get_namespace
 from sqlalchemy import select
 from sqlmodel import Session
 
+from backend_core.domain.enums import DataForgeStrEnum
+from backend_core.namespace import get_namespace
+from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
+from backend_core.persistence.datasource.models import DataSource
+
 
 class LineageNodeType(DataForgeStrEnum):
-    DATASOURCE = "datasource"
-    ANALYSIS = "analysis"
+    DATASOURCE = 'datasource'
+    ANALYSIS = 'analysis'
 
 
 class LineageNodeKind(DataForgeStrEnum):
-    INTERNAL = "internal"
-    OUTPUT = "output"
-    SOURCE = "source"
-    ANALYSIS = "analysis"
+    INTERNAL = 'internal'
+    OUTPUT = 'output'
+    SOURCE = 'source'
+    ANALYSIS = 'analysis'
 
 
 class LineageEdgeType(DataForgeStrEnum):
-    CHAINS = "chains"
-    PRODUCES = "produces"
-    CONSUMES_INTERNAL = "consumes_internal"
-    USES = "uses"
+    CHAINS = 'chains'
+    PRODUCES = 'produces'
+    CONSUMES_INTERNAL = 'consumes_internal'
+    USES = 'uses'
 
 
-LineageNode: TypeAlias = dict[str, Any]
-LineageEdge: TypeAlias = dict[str, Any]
-LineageGraph: TypeAlias = dict[str, list[dict[str, Any]]]
+type LineageNode = dict[str, Any]
+type LineageEdge = dict[str, Any]
+type LineageGraph = dict[str, list[dict[str, Any]]]
 
 
 def build_lineage(
@@ -38,7 +39,7 @@ def build_lineage(
     target_datasource_id: str | None = None,
     branch: str | None = None,
     include_internals: bool = False,
-    mode: str = "full",
+    mode: str = 'full',
 ) -> LineageGraph:
     datasources = session.execute(select(DataSource)).scalars().all()
     analyses = session.execute(select(Analysis)).scalars().all()
@@ -55,11 +56,11 @@ def build_lineage(
     if target_datasource_id:
         target = datasource_map.get(target_datasource_id)
         if not target:
-            return {"nodes": [], "edges": []}
+            return {'nodes': [], 'edges': []}
         if isinstance(target.config, dict):
-            namespace_name = target.config.get("namespace_name")
+            namespace_name = target.config.get('namespace_name')
             if namespace_name and namespace_name != get_namespace():
-                return {"nodes": [], "edges": []}
+                return {'nodes': [], 'edges': []}
 
     ds_to_consumers: dict[str, set[str]] = {}
     for dep in deps:
@@ -80,10 +81,10 @@ def build_lineage(
     edge_keys: set[tuple[str, str, LineageEdgeType]] = set()
 
     def datasource_key(datasource_id: str) -> str:
-        return f"datasource:{datasource_id}"
+        return f'datasource:{datasource_id}'
 
     def analysis_key(analysis_id: str) -> str:
-        return f"analysis:{analysis_id}"
+        return f'analysis:{analysis_id}'
 
     def classify_datasource(ds: DataSource) -> LineageNodeKind:
         if ds.id in internal_ids:
@@ -97,7 +98,7 @@ def build_lineage(
             return branch
         if not isinstance(ds.config, dict):
             return None
-        value = ds.config.get("branch")
+        value = ds.config.get('branch')
         if value is None:
             return None
         return str(value)
@@ -108,13 +109,13 @@ def build_lineage(
             return node_id
         node_branch = datasource_branch(ds)
         nodes[node_id] = {
-            "id": node_id,
-            "type": LineageNodeType.DATASOURCE,
-            "node_kind": classify_datasource(ds),
-            "name": ds.name,
-            "source_type": ds.source_type,
-            "branch": node_branch,
-            "status": None,
+            'id': node_id,
+            'type': LineageNodeType.DATASOURCE,
+            'node_kind': classify_datasource(ds),
+            'name': ds.name,
+            'source_type': ds.source_type,
+            'branch': node_branch,
+            'status': None,
         }
         return node_id
 
@@ -123,13 +124,13 @@ def build_lineage(
         if node_id in nodes:
             return node_id
         nodes[node_id] = {
-            "id": node_id,
-            "type": LineageNodeType.ANALYSIS,
-            "node_kind": LineageNodeKind.ANALYSIS,
-            "name": analysis.name,
-            "status": analysis.status,
-            "source_type": None,
-            "branch": None,
+            'id': node_id,
+            'type': LineageNodeType.ANALYSIS,
+            'node_kind': LineageNodeKind.ANALYSIS,
+            'name': analysis.name,
+            'status': analysis.status,
+            'source_type': None,
+            'branch': None,
         }
         return node_id
 
@@ -138,7 +139,7 @@ def build_lineage(
         if key in edge_keys:
             return
         edge_keys.add(key)
-        edges.append({"from": from_id, "to": to_id, "type": edge_type})
+        edges.append({'from': from_id, 'to': to_id, 'type': edge_type})
 
     for ds in datasources:
         ds_node_id = add_datasource_node(ds)
@@ -167,10 +168,10 @@ def build_lineage(
         edge_type = LineageEdgeType.CONSUMES_INTERNAL if same_analysis_internal else LineageEdgeType.USES
         add_edge(ds_node_id, analysis_node_id, edge_type)
 
-    if mode in {"upstream", "downstream"} and target_datasource_id:
+    if mode in {'upstream', 'downstream'} and target_datasource_id:
         target_node_id = datasource_key(target_datasource_id)
         if target_node_id not in nodes:
-            return {"nodes": [], "edges": []}
+            return {'nodes': [], 'edges': []}
 
         include_internal_edges = include_internals
         lineage_types = {LineageEdgeType.USES, LineageEdgeType.PRODUCES}
@@ -180,11 +181,11 @@ def build_lineage(
         forward_adj: dict[str, set[str]] = {}
         reverse_adj: dict[str, set[str]] = {}
         for edge in edges:
-            edge_type = edge["type"]
+            edge_type = edge['type']
             if edge_type not in lineage_types:
                 continue
-            source = edge["from"]
-            target = edge["to"]
+            source = edge['from']
+            target = edge['to']
             forward_adj.setdefault(source, set()).add(target)
             reverse_adj.setdefault(target, set()).add(source)
 
@@ -193,7 +194,7 @@ def build_lineage(
 
         while queue:
             current = queue.popleft()
-            neighbors = reverse_adj.get(current, set()) if mode == "upstream" else forward_adj.get(current, set())
+            neighbors = reverse_adj.get(current, set()) if mode == 'upstream' else forward_adj.get(current, set())
             for node_id in neighbors:
                 if node_id in reachable:
                     continue
@@ -201,17 +202,17 @@ def build_lineage(
                 queue.append(node_id)
 
         nodes = {node_id: node for node_id, node in nodes.items() if node_id in reachable}
-        edges = [edge for edge in edges if edge["from"] in reachable and edge["to"] in reachable]
+        edges = [edge for edge in edges if edge['from'] in reachable and edge['to'] in reachable]
 
     if not include_internals:
-        internal_node_ids = {node_id for node_id, node in nodes.items() if node.get("node_kind") == LineageNodeKind.INTERNAL}
+        internal_node_ids = {node_id for node_id, node in nodes.items() if node.get('node_kind') == LineageNodeKind.INTERNAL}
         nodes = {node_id: node for node_id, node in nodes.items() if node_id not in internal_node_ids}
         edges = [
             edge
             for edge in edges
-            if edge["type"] not in {LineageEdgeType.CHAINS, LineageEdgeType.CONSUMES_INTERNAL}
-            and edge["from"] not in internal_node_ids
-            and edge["to"] not in internal_node_ids
+            if edge['type'] not in {LineageEdgeType.CHAINS, LineageEdgeType.CONSUMES_INTERNAL}
+            and edge['from'] not in internal_node_ids
+            and edge['to'] not in internal_node_ids
         ]
 
-    return {"nodes": list(nodes.values()), "edges": edges}
+    return {'nodes': list(nodes.values()), 'edges': edges}
