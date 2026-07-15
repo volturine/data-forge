@@ -5,7 +5,7 @@
 	import { css, button, input, label, spinner } from '$lib/styles/panda';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
-	import { GitBranch } from '@lucide/svelte';
+	import AuthProviders from '$lib/components/auth/AuthProviders.svelte';
 
 	let name = $state('');
 	let email = $state('');
@@ -33,10 +33,6 @@
 
 		const success = await authStore.register(email, password, name);
 		if (success) registered = true;
-	}
-
-	function oauth(provider: 'google' | 'github') {
-		window.location.href = `/api/v1/auth/${provider}`;
 	}
 
 	const displayed = $derived(validation ?? authStore.error);
@@ -187,41 +183,7 @@
 			</button>
 		</form>
 
-		<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
-			<div class={css({ flex: '1', height: '1px', backgroundColor: 'border.primary' })}></div>
-			<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>or continue with</span>
-			<div class={css({ flex: '1', height: '1px', backgroundColor: 'border.primary' })}></div>
-		</div>
-
-		<div class={css({ display: 'flex', gap: '3' })}>
-			<button
-				type="button"
-				class={css({
-					borderWidth: '1',
-					backgroundColor: 'transparent',
-					color: 'fg.primary',
-					flex: '1',
-					'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.secondary' }
-				})}
-				onclick={() => oauth('google')}
-			>
-				Google
-			</button>
-			<button
-				type="button"
-				class={css({
-					borderWidth: '1',
-					backgroundColor: 'transparent',
-					color: 'fg.primary',
-					flex: '1',
-					'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.secondary' }
-				})}
-				onclick={() => oauth('github')}
-			>
-				<GitBranch size={16} />
-				GitHub
-			</button>
-		</div>
+		<AuthProviders />
 	{/if}
 
 	<p class={css({ fontSize: 'sm', color: 'fg.muted', textAlign: 'center' })}>
