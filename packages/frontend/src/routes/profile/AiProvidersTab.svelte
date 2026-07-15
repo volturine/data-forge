@@ -3,7 +3,7 @@
 	import { getSettings, updateSettings, isMasked, MASKED_PLACEHOLDER } from '$lib/api/settings';
 	import type { AppSettings } from '$lib/api/settings';
 	import { listAIModels, testAIConnection } from '$lib/api/ai';
-	import { css, input, label } from '$lib/styles/panda';
+	import { button, css, input, label } from '$lib/styles/panda';
 
 	let loading = $state(true);
 	let saving = $state(false);
@@ -197,13 +197,7 @@
 			>
 				<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>OpenRouter</span>
 				<button
-					class={css({
-						borderWidth: '1',
-						paddingX: '2',
-						paddingY: '1',
-						fontSize: 'xs',
-						_disabled: { opacity: '0.5', cursor: 'not-allowed' }
-					})}
+					class={button({ variant: 'secondary', size: 'sm' })}
 					onclick={() => void handleTestAIProvider('openrouter')}
 					disabled={testingProvider === 'openrouter'}
 					aria-label="Test OpenRouter"
@@ -252,13 +246,7 @@
 			>
 				<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>OpenAI</span>
 				<button
-					class={css({
-						borderWidth: '1',
-						paddingX: '2',
-						paddingY: '1',
-						fontSize: 'xs',
-						_disabled: { opacity: '0.5', cursor: 'not-allowed' }
-					})}
+					class={button({ variant: 'secondary', size: 'sm' })}
 					onclick={() => void handleTestAIProvider('openai')}
 					disabled={testingProvider === 'openai'}
 					aria-label="Test OpenAI"
@@ -324,13 +312,7 @@
 			>
 				<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Ollama</span>
 				<button
-					class={css({
-						borderWidth: '1',
-						paddingX: '2',
-						paddingY: '1',
-						fontSize: 'xs',
-						_disabled: { opacity: '0.5', cursor: 'not-allowed' }
-					})}
+					class={button({ variant: 'secondary', size: 'sm' })}
 					onclick={() => void handleTestAIProvider('ollama')}
 					disabled={testingProvider === 'ollama'}
 					aria-label="Test Ollama"
@@ -376,13 +358,7 @@
 			>
 				<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Hugging Face</span>
 				<button
-					class={css({
-						borderWidth: '1',
-						paddingX: '2',
-						paddingY: '1',
-						fontSize: 'xs',
-						_disabled: { opacity: '0.5', cursor: 'not-allowed' }
-					})}
+					class={button({ variant: 'secondary', size: 'sm' })}
 					onclick={() => void handleTestAIProvider('huggingface')}
 					disabled={testingProvider === 'huggingface'}
 					aria-label="Test Hugging Face"
@@ -409,21 +385,7 @@
 
 		<div class={css({ display: 'flex', justifyContent: 'flex-end' })}>
 			<button
-				class={css({
-					display: 'flex',
-					cursor: 'pointer',
-					alignItems: 'center',
-					gap: '1.5',
-					border: 'none',
-					paddingX: '4',
-					paddingY: '2',
-					fontSize: 'sm',
-					fontWeight: 'medium',
-					backgroundColor: 'accent.primary',
-					color: 'fg.inverse',
-					_hover: { opacity: 0.9 },
-					_disabled: { cursor: 'not-allowed', opacity: 0.5 }
-				})}
+				class={button({ variant: 'primaryBare' })}
 				onclick={save}
 				disabled={saving}
 				type="button"

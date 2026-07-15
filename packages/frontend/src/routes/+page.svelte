@@ -23,7 +23,7 @@
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { toEpochDisplay } from '$lib/utils/datetime';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, spinner } from '$lib/styles/panda';
+	import { button, css, input, spinner } from '$lib/styles/panda';
 	import { favoriteStore } from '$lib/stores/favorites.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 
@@ -353,16 +353,7 @@
 				<p class={css({ margin: '0', marginBottom: '6', maxWidth: 'panel', fontSize: 'sm' })}>
 					{query.error.message}
 				</p>
-				<button
-					class={css({
-						backgroundColor: 'accent.primary',
-						color: 'fg.inverse',
-						borderWidth: '1',
-						paddingX: '4',
-						paddingY: '2'
-					})}
-					onclick={() => query.refetch()}
-				>
+				<button class={button({ variant: 'primary' })} onclick={() => query.refetch()}>
 					Try again
 				</button>
 			</div>
@@ -474,26 +465,13 @@
 		{/if}
 		<label class={css({ display: 'grid', gap: '1' })}>
 			<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Name</span>
-			<input
-				class={css({
-					borderWidth: '1',
-					backgroundColor: 'bg.primary',
-					paddingX: '3',
-					paddingY: '2'
-				})}
-				bind:value={duplicateName}
-			/>
+			<input class={input({ variant: 'dialog' })} bind:value={duplicateName} />
 		</label>
 		<label class={css({ display: 'grid', gap: '1' })}>
 			<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Description</span>
 			<textarea
 				rows="4"
-				class={css({
-					borderWidth: '1',
-					backgroundColor: 'bg.primary',
-					paddingX: '3',
-					paddingY: '2'
-				})}
+				class={input({ variant: 'dialog' })}
 				bind:value={duplicateDescription}
 				placeholder="Optional override. Leave empty to reuse the source description."
 			></textarea>
@@ -501,27 +479,12 @@
 	</div>
 
 	<PanelFooter>
-		<button
-			type="button"
-			class={css({
-				borderWidth: '1',
-				backgroundColor: 'transparent',
-				paddingX: '4',
-				paddingY: '2'
-			})}
-			onclick={closeDuplicate}
-		>
+		<button type="button" class={button({ variant: 'secondary' })} onclick={closeDuplicate}>
 			Cancel
 		</button>
 		<button
 			type="button"
-			class={css({
-				borderWidth: '1',
-				backgroundColor: 'accent.primary',
-				color: 'fg.inverse',
-				paddingX: '4',
-				paddingY: '2'
-			})}
+			class={button({ variant: 'primary' })}
 			disabled={duplicating || !duplicateName.trim()}
 			onclick={confirmDuplicate}
 		>

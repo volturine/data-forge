@@ -491,28 +491,7 @@
 							rows="4"
 							maxlength="4000"
 							disabled={loading}
-							class={css({
-								width: 'full',
-								fontSize: 'sm2',
-								color: 'fg.primary',
-								backgroundColor: 'bg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								paddingX: '3.5',
-								paddingY: '2.25',
-								resize: 'vertical',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focus: { outline: 'none' },
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' }
-							})}
+							class={input({ variant: 'textarea' })}
 						></textarea>
 						<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
 							Optional. Plain text only, up to 4,000 characters.
@@ -782,24 +761,7 @@
 						rows="4"
 						maxlength="4000"
 						disabled={loading}
-						class={css({
-							width: 'full',
-							fontSize: 'sm2',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							paddingX: '3.5',
-							paddingY: '2.25',
-							resize: 'vertical',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focus: { outline: 'none' },
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' }
-						})}
+						class={input({ variant: 'textarea' })}
 					></textarea>
 					<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
 						Optional. Plain text only, up to 4,000 characters.
@@ -831,24 +793,7 @@
 						placeholder="SELECT * FROM table"
 						rows="5"
 						disabled={loading}
-						class={css({
-							width: 'full',
-							fontSize: 'sm2',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							paddingX: '3.5',
-							paddingY: '2.25',
-							resize: 'vertical',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focus: { outline: 'none' },
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' }
-						})}
+						class={input({ variant: 'textarea' })}
 					></textarea>
 				</div>
 

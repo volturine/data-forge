@@ -4,7 +4,7 @@
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import { toEpochDisplay } from '$lib/utils/datetime';
 	import { nowEpochMs } from '$lib/utils/temporal';
-	import { css, emptyText } from '$lib/styles/panda';
+	import { css, emptyText, iconButton } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 	import type { EngineStatusResponse } from '$lib/types/compute';
@@ -146,20 +146,7 @@
 				})}
 			>
 				<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}> Active Engines </span>
-				<button
-					class={css({
-						display: 'flex',
-						cursor: 'pointer',
-						alignItems: 'center',
-						justifyContent: 'center',
-						border: 'none',
-						backgroundColor: 'transparent',
-						padding: '1',
-						color: 'fg.muted',
-						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-					})}
-					onclick={() => (expanded = false)}
-				>
+				<button class={iconButton({ variant: 'ghost' })} onclick={() => (expanded = false)}>
 					<X size={14} />
 				</button>
 			</div>

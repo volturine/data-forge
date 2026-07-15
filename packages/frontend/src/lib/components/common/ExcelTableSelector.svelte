@@ -3,7 +3,7 @@
 	import { preflightExcel, preflightExcelFromPath, previewExcel } from '$lib/api/excel';
 	import type { ExcelParams } from '$lib/api/excel';
 	import DataTable from '$lib/components/common/DataTable.svelte';
-	import { css, button, label } from '$lib/styles/panda';
+	import { css, button, input, label } from '$lib/styles/panda';
 
 	interface ExcelConfig {
 		sheet_name: string;
@@ -473,23 +473,7 @@
 				value={selectedSheet}
 				onchange={(event) => applySheet(event.currentTarget.value)}
 				disabled={disabled || previewLoading || !sheetNames.length}
-				class={css({
-					width: 'full',
-					fontSize: 'sm',
-					color: 'fg.primary',
-					backgroundColor: 'bg.primary',
-					borderWidth: '1',
-					borderRadius: '0',
-					paddingX: '3',
-					paddingY: '2',
-					transitionProperty: 'border-color',
-					transitionDuration: '160ms',
-					transitionTimingFunction: 'ease',
-					_focus: { outline: 'none' },
-					_focusVisible: { borderColor: 'border.accent' },
-					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-					_placeholder: { color: 'fg.muted' }
-				})}
+				class={input({ variant: 'field' })}
 			>
 				<option value="">Select sheet</option>
 				{#each sheetNames as sheet (sheet)}
@@ -504,23 +488,7 @@
 				value={selectedTable}
 				onchange={(event) => applyTable(event.currentTarget.value)}
 				disabled={disabled || previewLoading || !selectedSheet}
-				class={css({
-					width: 'full',
-					fontSize: 'sm',
-					color: 'fg.primary',
-					backgroundColor: 'bg.primary',
-					borderWidth: '1',
-					borderRadius: '0',
-					paddingX: '3',
-					paddingY: '2',
-					transitionProperty: 'border-color',
-					transitionDuration: '160ms',
-					transitionTimingFunction: 'ease',
-					_focus: { outline: 'none' },
-					_focusVisible: { borderColor: 'border.accent' },
-					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-					_placeholder: { color: 'fg.muted' }
-				})}
+				class={input({ variant: 'field' })}
 			>
 				<option value="">Manual selection</option>
 				{#each tableMap[selectedSheet] ?? [] as table (table)}
@@ -535,23 +503,7 @@
 				value={selectedRange}
 				onchange={(event) => applyNamedRange(event.currentTarget.value)}
 				disabled={disabled || previewLoading}
-				class={css({
-					width: 'full',
-					fontSize: 'sm',
-					color: 'fg.primary',
-					backgroundColor: 'bg.primary',
-					borderWidth: '1',
-					borderRadius: '0',
-					paddingX: '3',
-					paddingY: '2',
-					transitionProperty: 'border-color',
-					transitionDuration: '160ms',
-					transitionTimingFunction: 'ease',
-					_focus: { outline: 'none' },
-					_focusVisible: { borderColor: 'border.accent' },
-					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-					_placeholder: { color: 'fg.muted' }
-				})}
+				class={input({ variant: 'field' })}
 			>
 				<option value="">None</option>
 				{#each namedRanges as range (range)}
@@ -573,23 +525,7 @@
 				}}
 				disabled={disabled || previewLoading}
 				placeholder="A1:D50"
-				class={css({
-					width: 'full',
-					fontSize: 'sm',
-					color: 'fg.primary',
-					backgroundColor: 'bg.primary',
-					borderWidth: '1',
-					borderRadius: '0',
-					paddingX: '3',
-					paddingY: '2',
-					transitionProperty: 'border-color',
-					transitionDuration: '160ms',
-					transitionTimingFunction: 'ease',
-					_focus: { outline: 'none' },
-					_focusVisible: { borderColor: 'border.accent' },
-					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-					_placeholder: { color: 'fg.muted' }
-				})}
+				class={input({ variant: 'field' })}
 			/>
 			<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
 				Optional A1 range (use Sheet1!A1:D50).

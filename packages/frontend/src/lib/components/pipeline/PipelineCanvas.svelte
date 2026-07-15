@@ -62,6 +62,19 @@
 	const canDrop = $derived(!readOnly && drag.active);
 	const hoverIndex = $derived(drag.target?.index ?? null);
 	const activeTabId = $derived(activeTab?.id ?? null);
+	const insertButton = css({
+		display: 'inline-flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		padding: '0.5',
+		borderRadius: 'xs',
+		backgroundColor: 'transparent',
+		border: 'none',
+		cursor: 'pointer',
+		transitionProperty: 'color',
+		transitionDuration: '150ms',
+		_hover: { color: 'fg.primary' }
+	});
 
 	let lastTabId = $state<string | null>(null);
 	let pasteError = $state<string | null>(null);
@@ -479,19 +492,7 @@
 							{#if !readOnly}
 								<div class={insertControls}>
 									<button
-										class={css({
-											display: 'inline-flex',
-											alignItems: 'center',
-											justifyContent: 'center',
-											padding: '0.5',
-											borderRadius: 'xs',
-											backgroundColor: 'transparent',
-											border: 'none',
-											cursor: 'pointer',
-											transitionProperty: 'color',
-											transitionDuration: '150ms',
-											_hover: { color: 'fg.primary' }
-										})}
+										class={insertButton}
 										title="Insert view"
 										onclick={() => handleInsertView(0)}
 									>
@@ -509,23 +510,7 @@
 									>
 										<Plus size={14} />
 									</div>
-									<button
-										class={css({
-											display: 'inline-flex',
-											alignItems: 'center',
-											justifyContent: 'center',
-											padding: '0.5',
-											borderRadius: 'xs',
-											backgroundColor: 'transparent',
-											border: 'none',
-											cursor: 'pointer',
-											transitionProperty: 'color',
-											transitionDuration: '150ms',
-											_hover: { color: 'fg.primary' }
-										})}
-										title="Paste step"
-										onclick={() => handlePaste(0)}
-									>
+									<button class={insertButton} title="Paste step" onclick={() => handlePaste(0)}>
 										<ClipboardPaste size={14} />
 									</button>
 								</div>
@@ -658,19 +643,7 @@
 								{#if !readOnly}
 									<div class={insertControls}>
 										<button
-											class={css({
-												display: 'inline-flex',
-												alignItems: 'center',
-												justifyContent: 'center',
-												padding: '0.5',
-												borderRadius: 'xs',
-												backgroundColor: 'transparent',
-												border: 'none',
-												cursor: 'pointer',
-												transitionProperty: 'color',
-												transitionDuration: '150ms',
-												_hover: { color: 'fg.primary' }
-											})}
+											class={insertButton}
 											title="Insert view"
 											onclick={() => handleInsertView(i + 1)}
 										>
@@ -689,19 +662,7 @@
 											<Plus size={14} />
 										</div>
 										<button
-											class={css({
-												display: 'inline-flex',
-												alignItems: 'center',
-												justifyContent: 'center',
-												padding: '0.5',
-												borderRadius: 'xs',
-												backgroundColor: 'transparent',
-												border: 'none',
-												cursor: 'pointer',
-												transitionProperty: 'color',
-												transitionDuration: '150ms',
-												_hover: { color: 'fg.primary' }
-											})}
+											class={insertButton}
 											title="Paste step"
 											onclick={() => handlePaste(i + 1)}
 										>

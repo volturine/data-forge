@@ -106,60 +106,7 @@ export default defineConfig({
 		}
 	},
 	staticCss: {
-		recipes: {
-			callout: [{ tone: ['info', 'warn', 'error'] }],
-			chip: [
-				{ tone: ['accent', 'neutral', 'warning', 'success', 'error'], size: ['default', 'compact'] }
-			],
-			button: [
-				{
-					variant: ['primary', 'secondary', 'ghost', 'ghostOutline', 'danger'],
-					size: ['default', 'sm']
-				}
-			],
-			spinner: [{ size: ['default', 'sm', 'md'] }],
-			badge: [{ tone: ['type', 'file'], size: ['sm', 'md', 'lg'] }],
-			tabButton: [{ active: ['true', 'false'], size: ['default', 'lg'] }],
-			emptyText: [{ size: ['compact', 'panel', 'inline'] }],
-			toggleButton: [{ active: ['true', 'false'], radius: ['left', 'right'] }],
-			input: [
-				{
-					variant: [
-						'default',
-						'compact',
-						'compactForm',
-						'plotSelect',
-						'panelForm',
-						'timeField',
-						'dateSelect',
-						'search',
-						'searchTight',
-						'searchCompact',
-						'searchSmall',
-						'menu',
-						'searchWide'
-					]
-				}
-			],
-			label: [
-				{
-					variant: [
-						'default',
-						'field',
-						'fieldSmall',
-						'fieldTight',
-						'fieldFlush',
-						'compact',
-						'checkbox',
-						'checkboxCompact',
-						'inline',
-						'wrapper',
-						'wrapperWide',
-						'hidden'
-					]
-				}
-			]
-		}
+		recipes: '*'
 	},
 	importMap: {
 		css: ['styled-system/css', '$lib/styles/panda'],

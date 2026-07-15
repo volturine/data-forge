@@ -9,7 +9,7 @@
 		type InternalPostgresTable
 	} from '$lib/api/datasource';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { css } from '$lib/styles/panda';
+	import { button, css } from '$lib/styles/panda';
 
 	let loading = $state(true);
 	let saving = $state(false);
@@ -487,21 +487,7 @@
 
 		<div class={css({ display: 'flex', justifyContent: 'flex-end' })}>
 			<button
-				class={css({
-					display: 'flex',
-					cursor: 'pointer',
-					alignItems: 'center',
-					gap: '1.5',
-					border: 'none',
-					paddingX: '4',
-					paddingY: '2',
-					fontSize: 'sm',
-					fontWeight: 'medium',
-					backgroundColor: 'accent.primary',
-					color: 'fg.inverse',
-					_hover: { opacity: 0.9 },
-					_disabled: { cursor: 'not-allowed', opacity: 0.5 }
-				})}
+				class={button({ variant: 'primaryBare' })}
 				onclick={save}
 				disabled={saving}
 				type="button"

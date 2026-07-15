@@ -34,7 +34,7 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import { formatDateTimeDisplay } from '$lib/utils/datetime';
-	import { css, emptyText, input, label } from '$lib/styles/panda';
+	import { button, css, emptyText, input, label } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId?: string;
@@ -364,24 +364,7 @@
 				<label for="hc-target" class={label({ variant: 'compact' })}>Datasource</label>
 				<select
 					id="hc-target"
-					class={css({
-						width: 'full',
-						color: 'fg.primary',
-						backgroundColor: 'bg.primary',
-						borderWidth: '1',
-						borderRadius: '0',
-						transitionProperty: 'border-color',
-						transitionDuration: '160ms',
-						transitionTimingFunction: 'ease',
-						_focusVisible: { borderColor: 'border.accent' },
-						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-						_placeholder: { color: 'fg.muted' },
-						appearance: 'none',
-						paddingX: '2',
-						paddingY: '1.5',
-						fontSize: 'xs',
-						_focus: { borderColor: 'border.accent' }
-					})}
+					class={input({ variant: 'panelSelect' })}
 					bind:value={targetDatasourceId}
 				>
 					<option value="">Select datasource...</option>
@@ -405,23 +388,7 @@
 				<input
 					id="hc-name"
 					type="text"
-					class={css({
-						width: 'full',
-						color: 'fg.primary',
-						backgroundColor: 'bg.primary',
-						borderWidth: '1',
-						borderRadius: '0',
-						transitionProperty: 'border-color',
-						transitionDuration: '160ms',
-						transitionTimingFunction: 'ease',
-						_focusVisible: { borderColor: 'border.accent' },
-						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-						_placeholder: { color: 'fg.muted' },
-						paddingX: '2',
-						paddingY: '1.5',
-						fontSize: 'xs',
-						_focus: { borderColor: 'border.accent' }
-					})}
+					class={input({ variant: 'panelForm' })}
 					bind:value={name}
 					placeholder="e.g. Row count guard"
 				/>
@@ -432,24 +399,7 @@
 				<div class={css({ position: 'relative' })}>
 					<select
 						id="hc-type"
-						class={css({
-							width: 'full',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' },
-							appearance: 'none',
-							paddingX: '2',
-							paddingY: '1.5',
-							fontSize: 'xs',
-							_focus: { borderColor: 'border.accent' }
-						})}
+						class={input({ variant: 'panelSelect' })}
 						bind:value={checkType}
 						onchange={() => {
 							config = {};
@@ -497,26 +447,7 @@
 						<input
 							id="hc-min-rows"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('min_rows', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -525,26 +456,7 @@
 						<input
 							id="hc-max-rows"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('max_rows', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -565,26 +477,7 @@
 						<input
 							id="hc-min-cols"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('min_columns', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -593,26 +486,7 @@
 						<input
 							id="hc-max-cols"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('max_columns', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -630,23 +504,7 @@
 					<input
 						id="hc-null-threshold"
 						type="number"
-						class={css({
-							width: 'full',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' },
-							paddingX: '2',
-							paddingY: '1.5',
-							fontSize: 'xs',
-							_focus: { borderColor: 'border.accent' }
-						})}
+						class={input({ variant: 'panelForm' })}
 						oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 					/>
 				</div>
@@ -667,26 +525,7 @@
 						<input
 							id="hc-dup-threshold"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -697,26 +536,7 @@
 						<input
 							id="hc-dup-cols"
 							type="text"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							value={duplicateColumns}
 							placeholder="col_a, col_b"
 							oninput={(e) => updateDuplicateColumns(e.currentTarget.value)}
@@ -739,26 +559,7 @@
 						<input
 							id="hc-column"
 							type="text"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -767,26 +568,7 @@
 						<input
 							id="hc-threshold"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -807,26 +589,7 @@
 						<input
 							id="hc-unique-column"
 							type="text"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -837,26 +600,7 @@
 						<input
 							id="hc-expected"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('expected_unique', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -877,26 +621,7 @@
 						<input
 							id="hc-range-column"
 							type="text"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -905,26 +630,7 @@
 						<input
 							id="hc-min"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('min', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -933,26 +639,7 @@
 						<input
 							id="hc-max"
 							type="number"
-							class={css({
-								width: 'full',
-								color: 'fg.primary',
-								borderWidth: '1',
-								borderRadius: '0',
-								transitionProperty: 'border-color',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_focusVisible: { borderColor: 'border.accent' },
-								_disabled: {
-									opacity: '0.5',
-									cursor: 'not-allowed',
-									backgroundColor: 'bg.tertiary'
-								},
-								_placeholder: { color: 'fg.muted' },
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})}
+							class={input({ variant: 'compactForm' })}
 							oninput={(e) => updateConfig('max', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -1819,15 +1506,7 @@
 			</span>
 			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<button
-					class={css({
-						borderWidth: '1',
-						backgroundColor: 'bg.primary',
-						paddingX: '3',
-						paddingY: '1.5',
-						fontSize: 'xs',
-						color: 'fg.tertiary',
-						_hover: { color: 'fg.primary' }
-					})}
+					class={button({ variant: 'secondary', size: 'compact' })}
 					onclick={() => {
 						if (hcPage > 1) hcPage--;
 					}}
@@ -1836,15 +1515,7 @@
 					Previous
 				</button>
 				<button
-					class={css({
-						borderWidth: '1',
-						backgroundColor: 'bg.primary',
-						paddingX: '3',
-						paddingY: '1.5',
-						fontSize: 'xs',
-						color: 'fg.tertiary',
-						_hover: { color: 'fg.primary' }
-					})}
+					class={button({ variant: 'secondary', size: 'compact' })}
 					onclick={() => {
 						hcPage++;
 					}}

@@ -776,24 +776,7 @@
 						placeholder="Add context about what this dataset represents, when to use it, and any caveats."
 						rows="5"
 						maxlength="4000"
-						class={css({
-							width: 'full',
-							fontSize: 'sm2',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							paddingX: '3.5',
-							paddingY: '2.25',
-							resize: 'vertical',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focus: { outline: 'none' },
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' }
-						})}
+						class={input({ variant: 'textarea' })}
 					></textarea>
 					{#if description.trim().length === 0}
 						<p class={emptyText({ size: 'inline' })}>No description added yet.</p>

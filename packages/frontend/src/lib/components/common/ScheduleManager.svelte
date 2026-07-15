@@ -26,7 +26,7 @@
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import { formatDateTimeDisplay } from '$lib/utils/datetime';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { css, spinner, emptyText, label } from '$lib/styles/panda';
+	import { button, css, emptyText, input, label, spinner } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId?: string;
@@ -1214,26 +1214,7 @@
 												<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 													<input
 														type="text"
-														class={css({
-															width: 'full',
-															color: 'fg.primary',
-															borderWidth: '1',
-															borderRadius: '0',
-															transitionProperty: 'border-color',
-															transitionDuration: '160ms',
-															transitionTimingFunction: 'ease',
-															_focus: { outline: 'none' },
-															_focusVisible: { borderColor: 'border.accent' },
-															_disabled: {
-																opacity: '0.5',
-																cursor: 'not-allowed'
-															},
-															_placeholder: { color: 'fg.muted' },
-															backgroundColor: 'transparent',
-															paddingX: '1.5',
-															paddingY: '0.5',
-															fontSize: '2xs'
-														})}
+														class={input({ variant: 'micro' })}
 														id="sched-{schedule.id}-cron"
 														aria-label="Cron expression"
 														bind:value={editCronValue}
@@ -1303,26 +1284,7 @@
 										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Depends On</span>
 											<select
-												class={css({
-													width: 'full',
-													color: 'fg.primary',
-													borderWidth: '1',
-													borderRadius: '0',
-													transitionProperty: 'border-color',
-													transitionDuration: '160ms',
-													transitionTimingFunction: 'ease',
-													_focus: { outline: 'none' },
-													_focusVisible: { borderColor: 'border.accent' },
-													_disabled: {
-														opacity: '0.5',
-														cursor: 'not-allowed'
-													},
-													_placeholder: { color: 'fg.muted' },
-													backgroundColor: 'transparent',
-													paddingX: '1.5',
-													paddingY: '0.5',
-													fontSize: '2xs'
-												})}
+												class={input({ variant: 'micro' })}
 												id="sched-{schedule.id}-depends"
 												aria-label="Depends on schedule"
 												value={schedule.depends_on ?? ''}
@@ -1341,26 +1303,7 @@
 												>On Datasource Update</span
 											>
 											<select
-												class={css({
-													width: 'full',
-													color: 'fg.primary',
-													borderWidth: '1',
-													borderRadius: '0',
-													transitionProperty: 'border-color',
-													transitionDuration: '160ms',
-													transitionTimingFunction: 'ease',
-													_focus: { outline: 'none' },
-													_focusVisible: { borderColor: 'border.accent' },
-													_disabled: {
-														opacity: '0.5',
-														cursor: 'not-allowed'
-													},
-													_placeholder: { color: 'fg.muted' },
-													backgroundColor: 'transparent',
-													paddingX: '1.5',
-													paddingY: '0.5',
-													fontSize: '2xs'
-												})}
+												class={input({ variant: 'micro' })}
 												id="sched-{schedule.id}-trigger"
 												aria-label="Trigger datasource"
 												value={schedule.trigger_on_datasource_id ?? ''}
@@ -1824,26 +1767,7 @@
 													>
 													<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 														<select
-															class={css({
-																width: 'full',
-																color: 'fg.primary',
-																borderWidth: '1',
-																borderRadius: '0',
-																transitionProperty: 'border-color',
-																transitionDuration: '160ms',
-																transitionTimingFunction: 'ease',
-																_focus: { outline: 'none' },
-																_focusVisible: { borderColor: 'border.accent' },
-																_disabled: {
-																	opacity: '0.5',
-																	cursor: 'not-allowed'
-																},
-																_placeholder: { color: 'fg.muted' },
-																backgroundColor: 'transparent',
-																paddingX: '1.5',
-																paddingY: '0.5',
-																fontSize: '2xs'
-															})}
+															class={input({ variant: 'micro' })}
 															id="sched-{schedule.id}-depends"
 															aria-label="Depends on schedule"
 															value={schedule.depends_on ?? ''}
@@ -1867,26 +1791,7 @@
 													>
 													<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 														<select
-															class={css({
-																width: 'full',
-																color: 'fg.primary',
-																borderWidth: '1',
-																borderRadius: '0',
-																transitionProperty: 'border-color',
-																transitionDuration: '160ms',
-																transitionTimingFunction: 'ease',
-																_focus: { outline: 'none' },
-																_focusVisible: { borderColor: 'border.accent' },
-																_disabled: {
-																	opacity: '0.5',
-																	cursor: 'not-allowed'
-																},
-																_placeholder: { color: 'fg.muted' },
-																backgroundColor: 'transparent',
-																paddingX: '1.5',
-																paddingY: '0.5',
-																fontSize: '2xs'
-															})}
+															class={input({ variant: 'micro' })}
 															id="sched-{schedule.id}-trigger"
 															aria-label="Trigger datasource"
 															value={schedule.trigger_on_datasource_id ?? ''}
@@ -1948,15 +1853,7 @@
 			</span>
 			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<button
-					class={css({
-						borderWidth: '1',
-						backgroundColor: 'bg.primary',
-						paddingX: '3',
-						paddingY: '1.5',
-						fontSize: 'xs',
-						color: 'fg.tertiary',
-						_hover: { color: 'fg.primary' }
-					})}
+					class={button({ variant: 'secondary', size: 'compact' })}
 					onclick={() => {
 						if (schedPage > 1) schedPage--;
 					}}
@@ -1965,15 +1862,7 @@
 					Previous
 				</button>
 				<button
-					class={css({
-						borderWidth: '1',
-						backgroundColor: 'bg.primary',
-						paddingX: '3',
-						paddingY: '1.5',
-						fontSize: 'xs',
-						color: 'fg.tertiary',
-						_hover: { color: 'fg.primary' }
-					})}
+					class={button({ variant: 'secondary', size: 'compact' })}
 					onclick={() => {
 						schedPage++;
 					}}

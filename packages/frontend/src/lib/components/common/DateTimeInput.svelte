@@ -50,6 +50,19 @@
 		'November',
 		'December'
 	] as const;
+	const navButton = css({
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		height: 'row',
+		width: 'row',
+		padding: '0',
+		cursor: 'pointer',
+		border: 'none',
+		background: 'transparent',
+		color: 'fg.secondary',
+		_hover: { backgroundColor: 'bg.tertiary' }
+	});
 
 	let { value, onChange, id, withTime = true }: Props = $props();
 
@@ -319,82 +332,18 @@
 			<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 				<div class={css({ display: 'flex', alignItems: 'center' })}>
 					{#if mode === 'date'}
-						<button
-							type="button"
-							onclick={() => shiftYear(-1)}
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								height: 'row',
-								width: 'row',
-								padding: '0',
-								cursor: 'pointer',
-								border: 'none',
-								background: 'transparent',
-								color: 'fg.secondary',
-								_hover: { backgroundColor: 'bg.tertiary' }
-							})}
-						>
+						<button type="button" onclick={() => shiftYear(-1)} class={navButton}>
 							<ChevronsLeft size={16} />
 						</button>
-						<button
-							type="button"
-							onclick={() => shift(-1)}
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								height: 'row',
-								width: 'row',
-								padding: '0',
-								cursor: 'pointer',
-								border: 'none',
-								background: 'transparent',
-								color: 'fg.secondary',
-								_hover: { backgroundColor: 'bg.tertiary' }
-							})}
-						>
+						<button type="button" onclick={() => shift(-1)} class={navButton}>
 							<ChevronLeft size={16} />
 						</button>
 					{:else if mode === 'month'}
-						<button
-							type="button"
-							onclick={() => shiftYear(-1)}
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								height: 'row',
-								width: 'row',
-								padding: '0',
-								cursor: 'pointer',
-								border: 'none',
-								background: 'transparent',
-								color: 'fg.secondary',
-								_hover: { backgroundColor: 'bg.tertiary' }
-							})}
-						>
+						<button type="button" onclick={() => shiftYear(-1)} class={navButton}>
 							<ChevronLeft size={16} />
 						</button>
 					{:else}
-						<button
-							type="button"
-							onclick={() => shiftPage(-1)}
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								height: 'row',
-								width: 'row',
-								padding: '0',
-								cursor: 'pointer',
-								border: 'none',
-								background: 'transparent',
-								color: 'fg.secondary',
-								_hover: { backgroundColor: 'bg.tertiary' }
-							})}
-						>
+						<button type="button" onclick={() => shiftPage(-1)} class={navButton}>
 							<ChevronLeft size={16} />
 						</button>
 					{/if}
@@ -439,82 +388,18 @@
 				{/if}
 				<div class={css({ display: 'flex', alignItems: 'center' })}>
 					{#if mode === 'date'}
-						<button
-							type="button"
-							onclick={() => shift(1)}
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								height: 'row',
-								width: 'row',
-								padding: '0',
-								cursor: 'pointer',
-								border: 'none',
-								background: 'transparent',
-								color: 'fg.secondary',
-								_hover: { backgroundColor: 'bg.tertiary' }
-							})}
-						>
+						<button type="button" onclick={() => shift(1)} class={navButton}>
 							<ChevronRight size={16} />
 						</button>
-						<button
-							type="button"
-							onclick={() => shiftYear(1)}
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								height: 'row',
-								width: 'row',
-								padding: '0',
-								cursor: 'pointer',
-								border: 'none',
-								background: 'transparent',
-								color: 'fg.secondary',
-								_hover: { backgroundColor: 'bg.tertiary' }
-							})}
-						>
+						<button type="button" onclick={() => shiftYear(1)} class={navButton}>
 							<ChevronsRight size={16} />
 						</button>
 					{:else if mode === 'month'}
-						<button
-							type="button"
-							onclick={() => shiftYear(1)}
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								height: 'row',
-								width: 'row',
-								padding: '0',
-								cursor: 'pointer',
-								border: 'none',
-								background: 'transparent',
-								color: 'fg.secondary',
-								_hover: { backgroundColor: 'bg.tertiary' }
-							})}
-						>
+						<button type="button" onclick={() => shiftYear(1)} class={navButton}>
 							<ChevronRight size={16} />
 						</button>
 					{:else}
-						<button
-							type="button"
-							onclick={() => shiftPage(1)}
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								height: 'row',
-								width: 'row',
-								padding: '0',
-								cursor: 'pointer',
-								border: 'none',
-								background: 'transparent',
-								color: 'fg.secondary',
-								_hover: { backgroundColor: 'bg.tertiary' }
-							})}
-						>
+						<button type="button" onclick={() => shiftPage(1)} class={navButton}>
 							<ChevronRight size={16} />
 						</button>
 					{/if}

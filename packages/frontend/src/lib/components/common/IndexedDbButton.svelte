@@ -2,7 +2,7 @@
 	import { Check, Copy, Database, LoaderCircle, X } from '@lucide/svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { idbEntries, idbDelete, idbClear } from '$lib/utils/indexeddb';
-	import { css, emptyText } from '$lib/styles/panda';
+	import { css, emptyText, iconButton } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
@@ -183,17 +183,7 @@
 							Clear
 						</button>
 						<button
-							class={css({
-								display: 'flex',
-								cursor: 'pointer',
-								alignItems: 'center',
-								justifyContent: 'center',
-								border: 'none',
-								backgroundColor: 'transparent',
-								padding: '1',
-								color: 'fg.muted',
-								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-							})}
+							class={iconButton({ variant: 'ghost' })}
 							onclick={() => (open = false)}
 							type="button"
 						>

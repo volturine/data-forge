@@ -4,7 +4,7 @@
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import type { EngineStatus, EngineStatusResponse } from '$lib/types/compute';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import { css } from '$lib/styles/panda';
+	import { css, iconButton } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
@@ -91,17 +91,7 @@
 			{/snippet}
 			{#snippet actions()}
 				<button
-					class={css({
-						display: 'flex',
-						cursor: 'pointer',
-						alignItems: 'center',
-						justifyContent: 'center',
-						border: 'none',
-						backgroundColor: 'transparent',
-						padding: '1',
-						color: 'fg.muted',
-						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-					})}
+					class={iconButton({ variant: 'ghost' })}
 					onclick={handleClose}
 					aria-label="Close engines"
 					type="button"
