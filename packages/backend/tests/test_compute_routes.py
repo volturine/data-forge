@@ -144,7 +144,7 @@ def test_get_engine_defaults_resolves_auto_values(client, monkeypatch) -> None:
 
 
 def test_start_build_recreates_deleted_output_placeholder(client, test_db_session) -> None:
-    app.dependency_overrides[get_runtime_availability_probe] = lambda: _AvailableRuntimeProbe()
+    app.dependency_overrides[get_runtime_availability_probe] = _AvailableRuntimeProbe
     try:
         response = client.post(
             '/api/v1/compute/builds',
