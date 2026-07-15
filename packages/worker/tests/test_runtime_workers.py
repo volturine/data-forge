@@ -223,7 +223,7 @@ def test_next_idle_child_pid_skips_busy_workers(monkeypatch) -> None:
 
     assert runtime_process._next_idle_child_pid(children, client=client) == 202
 
-    monkeypatch.setattr(client, "idle_build_worker_pids", lambda: set())
+    monkeypatch.setattr(client, "idle_build_worker_pids", set)
 
     assert runtime_process._next_idle_child_pid(children, client=client) is None
 
