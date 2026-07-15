@@ -7,7 +7,6 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { css, spinner } from '$lib/styles/panda';
 	import { PanelLeftClose } from '@lucide/svelte';
-	// SettingsPopup removed — settings now live under /profile tabs
 	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
 	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
 	import Sidebar from '$lib/components/shell/Sidebar.svelte';
