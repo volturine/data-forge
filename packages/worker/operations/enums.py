@@ -563,13 +563,11 @@ class GroupByAggregationFunction(OperationEnumValue):
         return f"{column}_{self.value}"
 
     def render_polars_export(self, column_expr: str, alias_expr: str) -> str:
-        match self:
-            case GroupByAggregationFunction.COLLECT_LIST:
-                return f"{column_expr}.implode().alias({alias_expr})"
-            case GroupByAggregationFunction.COLLECT_SET:
-                return f"{column_expr}.implode().list.unique().alias({alias_expr})"
-            case _:
-                return f"{column_expr}.{self.polars_method_name}().alias({alias_expr})"
+        if self == GroupByAggregationFunction.COLLECT_LIST:
+            return f"{column_expr}.implode().alias({alias_expr})"
+        if self == GroupByAggregationFunction.COLLECT_SET:
+            return f"{column_expr}.implode().list.unique().alias({alias_expr})"
+        return f"{column_expr}.{self.polars_method_name}().alias({alias_expr})"
 
     def render_sql_export(self, column_expr: str, alias_expr: str) -> str | None:
         match self:
