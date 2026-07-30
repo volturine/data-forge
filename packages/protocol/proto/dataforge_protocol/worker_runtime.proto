@@ -17,6 +17,7 @@ service WorkerRuntimeService {
   rpc StopWorker(RuntimeWorkerRequest) returns (RuntimeWorkerResponse);
 
   rpc ClaimBuildJob(RuntimeWorkerRequest) returns (WorkerClaimBuildJobResponse);
+  rpc RenewBuildJobLease(WorkerBuildJobClaimRequest) returns (WorkerRenewBuildJobLeaseResponse);
   rpc ClaimComputeRequest(RuntimeWorkerRequest) returns (WorkerClaimComputeRequestResponse);
   rpc CompleteComputeRequest(WorkerCompleteComputeRequestRequest) returns (RuntimeWorkerResponse);
   rpc FailComputeRequest(WorkerFailComputeRequestRequest) returns (RuntimeWorkerResponse);
@@ -38,8 +39,8 @@ service WorkerRuntimeService {
   rpc UpdateEngineRun(WorkerUpdateEngineRunRequest) returns (IdResponse);
   rpc GetEngineRunState(WorkerEngineRunStateRequest) returns (WorkerEngineRunStateResponse);
 
-  rpc FailBuildJob(WorkerFailBuildJobRequest) returns (RuntimeWorkerResponse);
-  rpc FinalizeBuildJob(WorkerFinalizeBuildJobRequest) returns (RuntimeWorkerResponse);
+  rpc FailBuildJob(WorkerFailBuildJobRequest) returns (BoolResponse);
+  rpc FinalizeBuildJob(WorkerFinalizeBuildJobRequest) returns (BoolResponse);
   rpc ReleaseBuildWorkerJobs(RuntimeWorkerRequest) returns (CountResponse);
   rpc GetQueuedBuildJobCount(EmptyRequest) returns (CountResponse);
   rpc DispatchRuntimeOutbox(EmptyRequest) returns (CountResponse);
@@ -79,10 +80,29 @@ message WorkerClaimedBuildJob {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
   string build_id = 2 [(buf.validate.field).string.min_len = 1];
   string namespace = 3 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string claim_token = 4 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 5 [(buf.validate.field).int64.gte = 1];
+  google.protobuf.Timestamp lease_expires_at = 6 [(buf.validate.field).required = true];
+  int32 attempt = 7 [(buf.validate.field).int32.gte = 1];
+  int32 lease_ttl_seconds = 8 [(buf.validate.field).int32.gte = 1];
 }
 
 message WorkerClaimBuildJobResponse {
   optional WorkerClaimedBuildJob job = 1;
+}
+
+message WorkerBuildJobClaimRequest {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string claim_token = 3 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 4 [(buf.validate.field).int64.gte = 1];
+  string worker_id = 5 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerRenewBuildJobLeaseResponse {
+  bool renewed = 1;
+  optional google.protobuf.Timestamp lease_expires_at = 2;
+  optional int32 lease_ttl_seconds = 3 [(buf.validate.field).int32.gte = 1];
 }
 
 message WorkerClaimedComputeRequest {
@@ -139,6 +159,11 @@ message WorkerExecuteDatasourceRequest {
 message WorkerScheduleIngestDatasourceRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+  string job_id = 3 [(buf.validate.field).string.min_len = 1];
+  string build_id = 4 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 5 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 6 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 7 [(buf.validate.field).int64.gte = 1];
 }
 
 message WorkerDatasourceCommandResponse {
@@ -361,12 +386,19 @@ message WorkerFailBuildJobRequest {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string error = 3 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 4 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 5 [(buf.validate.field).int64.gte = 1];
+  string worker_id = 6 [(buf.validate.field).string.min_len = 1];
+  string build_id = 7 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerFinalizeBuildJobRequest {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
   string build_id = 2 [(buf.validate.field).string.min_len = 1];
   string namespace = 3 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string claim_token = 4 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 5 [(buf.validate.field).int64.gte = 1];
+  string worker_id = 6 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerIdlePidsResponse {
@@ -385,6 +417,10 @@ message WorkerPersistBuildEventRequest {
   string build_id = 2 [(buf.validate.field).string.min_len = 1];
   BuildEvent build_event = 5 [(buf.validate.field).required = true];
   optional BuildResourceConfigSummary build_resource_config = 6;
+  string job_id = 7 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 8 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 9 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 10 [(buf.validate.field).int64.gte = 1];
 }
 
 message WorkerPersistBuildEventResponse {
@@ -419,6 +455,10 @@ message WorkerBuildRunPayload {
 message WorkerStartBuildRunRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string build_id = 2 [(buf.validate.field).string.min_len = 1];
+  string job_id = 3 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 4 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 5 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 6 [(buf.validate.field).int64.gte = 1];
 }
 
 message WorkerStartBuildRunResponse {

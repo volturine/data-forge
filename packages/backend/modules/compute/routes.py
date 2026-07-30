@@ -62,6 +62,7 @@ from modules.compute.iceberg_service import (
 )
 from modules.datasource import service as datasource_service
 from modules.mcp.router import MCPRouter
+from modules.scheduler import service as scheduler_service
 
 logger = logging.getLogger(__name__)
 
@@ -769,34 +770,47 @@ async def cancel_build(
     cancelled_by = user.email or user.display_name or user.id
     cancelled_at = _utcnow()
     duration_ms = detail.cancel_duration_ms(cancelled_at=cancelled_at)
+    cancellation_event = detail.cancelled_event(
+        cancelled_at=cancelled_at,
+        cancelled_by=cancelled_by,
+        duration_ms=duration_ms,
+        emitted_at=_utcnow(),
+    )
+    job = build_job_service.get_job_by_build_id(session, build_id)
+    try:
+        if job is not None and (
+            build_job_service.BuildJobStatus.require(job.status) == build_job_service.BuildJobStatus.QUEUED
+            or build_job_service.BuildJobStatus.require(job.status).is_active
+        ):
+            build_job_service.mark_job_cancelled(session, job.id, commit=False)
+        event_row = build_run_service.append_build_event(
+            session,
+            build_id=detail.build_id,
+            event=cancellation_event,
+            resource_config_json=detail.resource_config.model_dump(mode='json') if detail.resource_config is not None else None,
+            commit=False,
+        )
+        if event_row is None:
+            raise HTTPException(status_code=409, detail='Build became terminal before cancellation')
+        scheduler_service.apply_schedule_run_reconciliation(session, build_id=detail.build_id)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+    await build_event_service.publish_build_notification(detail.namespace, detail.build_id, latest_sequence=event_row.sequence)
 
     if detail.current_engine_run_id is not None:
         run = engine_run_service.get_engine_run(session, detail.current_engine_run_id)
         if run is not None and run.status == EngineRunStatus.RUNNING:
-            cancelled = engine_run_service.cancel_engine_run(
-                session,
-                detail.current_engine_run_id,
-                cancelled_by=cancelled_by,
-            )
-            cancelled_at = cancelled.cancelled_at
-            duration_ms = cancelled.duration_ms or duration_ms
-    else:
-        job = build_job_service.get_job_by_build_id(session, build_id)
-        if job is not None and job.status == build_job_service.BuildJobStatus.QUEUED:
-            build_job_service.mark_job_cancelled(session, job.id)
-
-    await _emit_active_build_event(
-        detail.build_id,
-        detail.analysis_id,
-        detail.cancelled_event(
-            cancelled_at=cancelled_at,
-            cancelled_by=cancelled_by,
-            duration_ms=duration_ms,
-            emitted_at=_utcnow(),
-        ),
-        namespace=detail.namespace,
-        resource_config_json=detail.resource_config.model_dump(mode='json') if detail.resource_config is not None else None,
-    )
+            try:
+                engine_run_service.cancel_engine_run(
+                    session,
+                    detail.current_engine_run_id,
+                    cancelled_by=cancelled_by,
+                )
+            except ValueError:
+                logger.info('Engine run %s became terminal after build cancellation', detail.current_engine_run_id)
 
     return schemas.CancelBuildResponse(
         id=detail.build_id,

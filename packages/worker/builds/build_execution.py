@@ -11,7 +11,7 @@ from runtime.compute_manager import ProcessManager
 from runtime.domain.compute import schemas
 from runtime.domain.datasource.models import DataSourceTargetKind
 from runtime.domain.engine_runs.schemas import EngineRunKind
-from runtime.internal_api import WorkerInternalApiClient, client_from_env
+from runtime.internal_api import BuildJobLeaseLost, ClaimedBuildJob, WorkerInternalApiClient, client_from_env
 from runtime.namespace import reset_namespace, set_namespace_context
 
 logger = logging.getLogger(__name__)
@@ -22,21 +22,27 @@ def worker_internal_api_client() -> WorkerInternalApiClient:
 
 
 async def _emit_active_build_event(
-    namespace: str,
-    build_id: str,
+    claim: ClaimedBuildJob,
+    worker_id: str,
     payload: schemas.BuildEvent,
     *,
     resource_config_json: dict[str, object] | None = None,
 ) -> None:
-    token = set_namespace_context(namespace)
+    token = set_namespace_context(claim.namespace)
     try:
-        await asyncio.to_thread(
+        sequence = await asyncio.to_thread(
             worker_internal_api_client().persist_build_event,
-            namespace=namespace,
-            build_id=build_id,
+            namespace=claim.namespace,
+            build_id=claim.build_id,
+            job_id=claim.job_id,
+            worker_id=worker_id,
+            claim_token=claim.claim_token,
+            lease_generation=claim.lease_generation,
             event=payload.model_dump(mode="json"),
             resource_config_json=resource_config_json,
         )
+        if sequence is None:
+            raise BuildJobLeaseLost(f"Build job {claim.job_id} event was rejected because its lease is no longer active")
     finally:
         reset_namespace(token)
 
@@ -44,6 +50,8 @@ async def _emit_active_build_event(
 async def _run_active_build_task(
     *,
     manager: ProcessManager,
+    claim: ClaimedBuildJob,
+    worker_id: str,
     build: ActiveBuild,
     pipeline: dict,
     triggered_by: str | None,
@@ -56,19 +64,21 @@ async def _run_active_build_task(
             pipeline=pipeline,
             build=build,
             emitter=lambda payload: _emit_active_build_event(
-                build.namespace,
-                build.build_id,
+                claim,
+                worker_id,
                 payload,
                 resource_config_json=build.resource_config_json,
             ),
             triggered_by=triggered_by,
         )
+    except BuildJobLeaseLost:
+        raise
     except Exception as exc:
         logger.error("Active build task error: %s", exc, exc_info=True)
         if build.status == schemas.ActiveBuildStatus.RUNNING:
             await _emit_active_build_event(
-                build.namespace,
-                build.build_id,
+                claim,
+                worker_id,
                 schemas.BuildFailedEvent(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
@@ -94,13 +104,21 @@ async def _run_active_build_task(
         reset_namespace(token)
 
 
-async def run_queued_build_job(*, manager: ProcessManager, build_id: str, namespace: str = "default") -> None:
+async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim: ClaimedBuildJob) -> None:
     build: ActiveBuild | None = None
     pipeline: dict | None = None
     starter: schemas.BuildStarter | None = None
-    run = await asyncio.to_thread(worker_internal_api_client().start_build_run, namespace=namespace, build_id=build_id)
+    run = await asyncio.to_thread(
+        worker_internal_api_client().start_build_run,
+        namespace=claim.namespace,
+        build_id=claim.build_id,
+        job_id=claim.job_id,
+        worker_id=worker_id,
+        claim_token=claim.claim_token,
+        lease_generation=claim.lease_generation,
+    )
     if run is None:
-        return
+        raise BuildJobLeaseLost(f"Build job {claim.job_id} start was rejected because its lease is no longer active")
     pipeline = {**analysis_pipeline_to_execution_payload(run.analysis_pipeline), "tab_id": run.tab_id}
     starter = schemas.BuildStarter.model_validate(run.starter_json)
     build = ActiveBuild(
@@ -134,11 +152,20 @@ async def run_queued_build_job(*, manager: ProcessManager, build_id: str, namesp
         if datasource_id is None:
             raise ValueError(f"Queued schedule build {build.build_id} missing datasource id")
         try:
-            refreshed = await asyncio.to_thread(worker_internal_api_client().schedule_ingest_datasource, namespace=build.namespace, datasource_id=datasource_id)
+            refreshed = await asyncio.to_thread(
+                worker_internal_api_client().schedule_ingest_datasource,
+                namespace=build.namespace,
+                datasource_id=datasource_id,
+                job_id=claim.job_id,
+                build_id=claim.build_id,
+                worker_id=worker_id,
+                claim_token=claim.claim_token,
+                lease_generation=claim.lease_generation,
+            )
             refreshed_name = refreshed.name or datasource_id
             await _emit_active_build_event(
-                build.namespace,
-                build.build_id,
+                claim,
+                worker_id,
                 schemas.BuildCompleteEvent(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
@@ -169,8 +196,8 @@ async def run_queued_build_job(*, manager: ProcessManager, build_id: str, namesp
             return
         except Exception as exc:
             await _emit_active_build_event(
-                build.namespace,
-                build.build_id,
+                claim,
+                worker_id,
                 schemas.BuildFailedEvent(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
@@ -195,6 +222,8 @@ async def run_queued_build_job(*, manager: ProcessManager, build_id: str, namesp
             return
     await _run_active_build_task(
         manager=manager,
+        claim=claim,
+        worker_id=worker_id,
         build=build,
         pipeline=pipeline,
         triggered_by=starter.user_id or starter.email or starter.display_name or starter.triggered_by,

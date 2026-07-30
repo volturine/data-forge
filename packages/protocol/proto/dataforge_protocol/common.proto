@@ -8,6 +8,7 @@ message EmptyRequest {}
 
 message RuntimeWorkerRequest {
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+  int32 protocol_version = 2;
 }
 
 message RuntimeWorkerResponse {

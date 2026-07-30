@@ -13,7 +13,8 @@ from backend_core.namespace import namespace_database_schema
 _PUBLIC_BASE_REVISION = '0001_runtime_public'
 _PUBLIC_REVISION = '0003_engine_identity_public'
 _TENANT_BASE_REVISION = '0002_runtime_tenant'
-_TENANT_REVISION = '0004_compute_envelopes_tenant'
+_TENANT_BASE_REVISIONS = {_TENANT_BASE_REVISION, '0004_compute_envelopes_tenant'}
+_TENANT_REVISION = '0005_fenced_build_jobs_tenant'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 
@@ -119,9 +120,10 @@ def migrate_runtime(namespaces: list[str]) -> None:
     for namespace in namespaces:
         tenant_schema = namespace_database_schema(namespace)
         revision = _current_revision(tenant_schema)
-        if revision is not None and revision not in {_TENANT_BASE_REVISION, _TENANT_REVISION}:
+        supported_revisions = _TENANT_BASE_REVISIONS | {_TENANT_REVISION}
+        if revision is not None and revision not in supported_revisions:
             raise RuntimeError(
-                f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected {_TENANT_BASE_REVISION} or {_TENANT_REVISION}.'
+                f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected one of {sorted(supported_revisions)}.'
             )
         if revision == _TENANT_REVISION:
             continue

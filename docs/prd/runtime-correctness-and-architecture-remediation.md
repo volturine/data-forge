@@ -2,11 +2,33 @@
 
 ## Document Status
 
-- **Status:** Proposed remediation plan
+- **Status:** In progress
 - **Scope:** Concurrency correctness, deterministic behavior, runtime ownership, transaction boundaries, maintainability, and verification
 - **Applies to:** Backend API, worker runtime, scheduler, frontend state, protocol contracts, persistence, and CI
 - **Supersedes:** Runtime correctness claims in `distributed-runtime-v2-progress.md` where those claims conflict with verified implementation behavior
 - **Does not supersede:** Product requirements or user-facing feature PRDs
+
+### Implementation progress — 2026-07-30
+
+Completed in the first P0 build-job slice:
+
+- build claims now carry a unique token, monotonic generation, attempt, database expiry, and TTL;
+- claims renew independently of worker heartbeats, using conservative monotonic worker deadlines and bounded renewal calls;
+- stale claims are rejected for start, event append, schedule ingest entry, failure, and finalization;
+- finalization and cancellation compose job, build projection/event, and schedule reconciliation into one transaction;
+- cancellation revokes queued and running jobs, and terminal jobs are immutable;
+- the always-on manager count path reconciles exhausted jobs and exposes retryable expired jobs as pending capacity;
+- exhausted scheduled jobs release schedule leases both during runtime recovery and migration;
+- the fenced protocol uses an explicit build-claim capability version and rejects incompatible claimants;
+- worker shutdown no longer broadly releases claims that may still have executing work;
+- adversarial unit and cross-API cancellation coverage has been added.
+
+Still open at P0:
+
+- replace `MAX(sequence) + 1` with atomic event sequence allocation;
+- stage datasource/Iceberg output and validate the claim at the publication commit, eliminating the remaining check-then-act window;
+- fence every other irreversible engine/output publication path, not only build state RPCs;
+- add concurrent-session cancel/finalize and event-allocation stress tests.
 
 ## 1. Purpose
 

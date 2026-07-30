@@ -390,7 +390,12 @@ def update_build_result_json(session: Session, build_id: str, result_json: dict[
 
 
 def append_build_event(
-    session: Session, *, build_id: str, event: compute_schemas.BuildEvent, resource_config_json: dict[str, Any] | None = None
+    session: Session,
+    *,
+    build_id: str,
+    event: compute_schemas.BuildEvent,
+    resource_config_json: dict[str, Any] | None = None,
+    commit: bool = True,
 ) -> BuildEvent | None:
     run = session.get(BuildRun, build_id)
     if run is None:
@@ -431,7 +436,10 @@ def append_build_event(
     session.add(event_row)
     if should_update_run:
         session.add(run)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
     return BuildEvent(
         id=event_id,
         build_id=build_id,

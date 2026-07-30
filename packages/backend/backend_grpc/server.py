@@ -32,6 +32,7 @@ from backend_core.ai_clients import get_ai_client
 from backend_core.config import settings
 from backend_core.database import get_db, run_db, run_settings_db
 from backend_core.datasource_storage import cleanup_datasource_storage
+from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute.base import EngineStatusInfo
@@ -71,6 +72,7 @@ from modules.scheduler import service as scheduler_service
 logger = logging.getLogger(__name__)
 _TELEGRAM_BASE_URL = 'https://api.telegram.org'
 _TOKEN_METADATA_KEY = 'x-internal-token'
+_BUILD_JOB_PROTOCOL_VERSION = 2
 
 
 def dict_to_struct(payload: dict[str, object] | None) -> struct_pb2.Struct:
@@ -526,6 +528,14 @@ def _count(value: int) -> worker_runtime_pb2.CountResponse:
     return worker_runtime_pb2.CountResponse(count=value)
 
 
+def _reconcile_expired_build_jobs(session: Any) -> int:
+    build_ids = build_job_service.expire_exhausted_jobs(session, commit=False)
+    for build_id in build_ids:
+        scheduler_service.apply_schedule_run_reconciliation(session, build_id=build_id)
+    session.commit()
+    return len(build_ids)
+
+
 def _bool(value: bool) -> worker_runtime_pb2.BoolResponse:
     return worker_runtime_pb2.BoolResponse(value=value)
 
@@ -580,18 +590,55 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     async def ClaimBuildJob(
         self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerClaimBuildJobResponse:
+        if request.protocol_version != _BUILD_JOB_PROTOCOL_VERSION:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build worker protocol version is incompatible')
         reclaimable_owner_ids = run_settings_db(runtime_worker_service.reclaimable_worker_ids, kind=RuntimeWorkerKind.BUILD_WORKER)
         for namespace in run_settings_db(list_runtime_namespaces):
             token = set_namespace_context(namespace)
             try:
+                run_db(_reconcile_expired_build_jobs)
                 job = run_db(build_job_service.claim_next_job, worker_id=request.worker_id, reclaimable_owner_ids=reclaimable_owner_ids)
             finally:
                 reset_namespace(token)
             if job is not None:
+                if job.claim_token is None or job.lease_expires_at is None:
+                    raise RuntimeError(f'Claimed build job {job.id} is missing lease identity')
                 return worker_runtime_pb2.WorkerClaimBuildJobResponse(
-                    job=worker_runtime_pb2.WorkerClaimedBuildJob(job_id=job.id, build_id=job.build_id, namespace=job.namespace)
+                    job=worker_runtime_pb2.WorkerClaimedBuildJob(
+                        job_id=job.id,
+                        build_id=job.build_id,
+                        namespace=job.namespace,
+                        claim_token=job.claim_token,
+                        lease_generation=job.lease_generation,
+                        lease_expires_at=datetime_to_timestamp(job.lease_expires_at),
+                        attempt=job.attempts,
+                        lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds,
+                    )
                 )
         return worker_runtime_pb2.WorkerClaimBuildJobResponse()
+
+    @_run_async_handler_in_thread
+    async def RenewBuildJobLease(
+        self, request: worker_runtime_pb2.WorkerBuildJobClaimRequest, context: grpc.aio.ServicerContext
+    ) -> worker_runtime_pb2.WorkerRenewBuildJobLeaseResponse:
+        token = set_namespace_context(request.namespace)
+        try:
+            job = run_db(
+                build_job_service.renew_job_lease,
+                request.job_id,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+            )
+        finally:
+            reset_namespace(token)
+        response = worker_runtime_pb2.WorkerRenewBuildJobLeaseResponse(
+            renewed=job is not None,
+            lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds if job is not None else None,
+        )
+        if job is not None and job.lease_expires_at is not None:
+            response.lease_expires_at.CopyFrom(datetime_to_timestamp(job.lease_expires_at))
+        return response
 
     @_run_async_handler_in_thread
     async def ClaimComputeRequest(
@@ -793,6 +840,16 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session_gen = get_db()
         session = next(session_gen)
         try:
+            claim = build_job_service.lock_active_job_claim(
+                session,
+                request.job_id,
+                build_id=request.build_id,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+            )
+            if claim is None:
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
             response = datasource_runtime_service.ingest_datasource_for_schedule(session, request.datasource_id)
             result = datasource_result_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE, response.model_dump(mode='json'))
             if result.WhichOneof('result') != 'datasource':
@@ -1068,40 +1125,76 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def FailBuildJob(self, request: worker_runtime_pb2.WorkerFailBuildJobRequest, context: grpc.aio.ServicerContext) -> common_pb2.RuntimeWorkerResponse:
-        token = set_namespace_context(request.namespace)
-        try:
-            run_db(lambda session: build_job_service.mark_job_failed(session, request.job_id, error=request.error))
-        finally:
-            reset_namespace(token)
-        return _response(request.job_id)
-
-    @_run_async_handler_in_thread
-    async def FinalizeBuildJob(
-        self, request: worker_runtime_pb2.WorkerFinalizeBuildJobRequest, context: grpc.aio.ServicerContext
-    ) -> common_pb2.RuntimeWorkerResponse:
-
-        def _finalize(session: Any) -> Any:
-            run = build_run_service.get_build_run(session, request.build_id)
-            if run is None:
-                return build_job_service.mark_job_failed(session, request.job_id, error='Build run missing')
-            if run.status == BuildRunStatus.CANCELLED:
-                result = build_job_service.mark_job_cancelled(session, request.job_id)
-            elif run.status == BuildRunStatus.COMPLETED:
-                result = build_job_service.mark_job_completed(session, request.job_id)
-            elif run.status in {BuildRunStatus.FAILED, BuildRunStatus.ORPHANED}:
-                result = build_job_service.mark_job_failed(session, request.job_id, error=run.error_message)
-            else:
-                result = build_job_service.mark_job_failed(session, request.job_id, error=f'Unexpected build status: {run.status.value}')
-            scheduler_service.reconcile_schedule_run(session, build_id=request.build_id)
+    async def FailBuildJob(self, request: worker_runtime_pb2.WorkerFailBuildJobRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.BoolResponse:
+        def _fail(session: Any) -> Any:
+            result = build_job_service.finish_claimed_job(
+                session,
+                request.job_id,
+                worker_id=request.worker_id,
+                build_id=request.build_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+                status=BuildJobStatus.FAILED,
+                error=request.error,
+            )
+            if result is None:
+                return None
+            session.commit()
+            session.refresh(result)
             return result
 
         token = set_namespace_context(request.namespace)
         try:
-            run_db(_finalize)
+            job = run_db(_fail)
         finally:
             reset_namespace(token)
-        return _response(request.job_id)
+        return _bool(job is not None)
+
+    @_run_async_handler_in_thread
+    async def FinalizeBuildJob(
+        self, request: worker_runtime_pb2.WorkerFinalizeBuildJobRequest, context: grpc.aio.ServicerContext
+    ) -> worker_runtime_pb2.BoolResponse:
+
+        def _finalize(session: Any) -> Any:
+            run = build_run_service.get_build_run(session, request.build_id)
+            if run is None:
+                status = BuildJobStatus.FAILED
+                error = 'Build run missing'
+            elif run.status == BuildRunStatus.CANCELLED:
+                status = BuildJobStatus.CANCELLED
+                error = None
+            elif run.status == BuildRunStatus.COMPLETED:
+                status = BuildJobStatus.COMPLETED
+                error = None
+            elif run.status in {BuildRunStatus.FAILED, BuildRunStatus.ORPHANED}:
+                status = BuildJobStatus.FAILED
+                error = run.error_message
+            else:
+                status = BuildJobStatus.FAILED
+                error = f'Unexpected build status: {run.status.value}'
+            result = build_job_service.finish_claimed_job(
+                session,
+                request.job_id,
+                worker_id=request.worker_id,
+                build_id=request.build_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+                status=status,
+                error=error,
+            )
+            if result is None:
+                return None
+            scheduler_service.apply_schedule_run_reconciliation(session, build_id=request.build_id)
+            session.commit()
+            session.refresh(result)
+            return result
+
+        token = set_namespace_context(request.namespace)
+        try:
+            result = run_db(_finalize)
+        finally:
+            reset_namespace(token)
+        return _bool(result is not None)
 
     @_run_async_handler_in_thread
     async def ReleaseBuildWorkerJobs(self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
@@ -1120,6 +1213,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         for namespace in run_settings_db(list_runtime_namespaces):
             token = set_namespace_context(namespace)
             try:
+                run_db(_reconcile_expired_build_jobs)
                 count += run_db(build_job_service.queued_job_count)
             finally:
                 reset_namespace(token)
@@ -1154,6 +1248,16 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session_gen = get_db()
         session = next(session_gen)
         try:
+            claim = build_job_service.lock_active_job_claim(
+                session,
+                request.job_id,
+                build_id=request.build_id,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+            )
+            if claim is None:
+                return worker_runtime_pb2.WorkerPersistBuildEventResponse()
             result: tuple[object, int] | None = await build_event_service.persist_build_event(
                 session,
                 namespace=request.namespace,
@@ -1177,6 +1281,16 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session_gen = get_db()
         session = next(session_gen)
         try:
+            claim = build_job_service.lock_active_job_claim(
+                session,
+                request.job_id,
+                build_id=request.build_id,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+            )
+            if claim is None:
+                return worker_runtime_pb2.WorkerStartBuildRunResponse()
             run = build_run_service.mark_build_running(session, request.build_id)
             if run is None or run.status != BuildRunStatus.RUNNING:
                 return worker_runtime_pb2.WorkerStartBuildRunResponse()

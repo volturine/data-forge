@@ -1,15 +1,28 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
-from sqlalchemy import and_, desc, or_, select
+from sqlalchemy import and_, desc, func, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
 
 from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.build_jobs.models import BuildJobStatus
+from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.persistence.build_jobs.models import BuildJob
+from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
+
+
+def _database_now(session: Session) -> datetime:
+    value = session.execute(select(func.current_timestamp())).scalar_one()
+    if not isinstance(value, datetime):
+        raise TypeError('Database CURRENT_TIMESTAMP did not return a datetime')
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def create_job(
@@ -51,7 +64,7 @@ def get_job_by_build_id(session: Session, build_id: str) -> BuildJob | None:
 
 
 def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: set[str] | None = None) -> BuildJob | None:
-    now = _utcnow()
+    now = _database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
     queued_clause = table.c.status == BuildJobStatus.QUEUED
@@ -66,7 +79,7 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
         select(BuildJob)
         .where(sa(BuildJob.available_at <= now))
         .where(or_(queued_clause, reclaimable_clause))
-        .order_by(desc(sa(BuildJob.priority)), sa(BuildJob.created_at))
+        .order_by(desc(sa(BuildJob.priority)), sa(BuildJob.available_at), sa(BuildJob.created_at), sa(BuildJob.id))
         .limit(1)
     )
     stmt = with_for_update_skip_locked(session, base)
@@ -74,19 +87,29 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
     if row is None:
         return None
     current_attempts = row.attempts
+    current_generation = row.lease_generation
     previous_status = row.status
     previous_owner = row.lease_owner
+    claim_token = str(uuid.uuid4())
     claimed = claim_by_lease_owner(
         session,
         BuildJob,
         table=table,
         row_id=row.id,
         previous_owner=previous_owner,
-        extra_conditions=(table.c.attempts == current_attempts, table.c.status == previous_status),
+        extra_conditions=(
+            table.c.attempts == current_attempts,
+            table.c.lease_generation == current_generation,
+            table.c.status == previous_status,
+        ),
         values={
             'status': BuildJobStatus.RUNNING,
             'lease_owner': worker_id,
+            'claim_token': claim_token,
+            'lease_generation': current_generation + 1,
             'lease_expires_at': now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
+            'claimed_at': now,
+            'last_renewed_at': now,
             'attempts': current_attempts + 1,
             'updated_at': now,
         },
@@ -101,60 +124,188 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
     return job
 
 
-def mark_job_running(session: Session, job_id: str) -> BuildJob:
+def expire_exhausted_jobs(session: Session, *, commit: bool = True) -> list[str]:
+    now = _database_now(session)
+    table = BuildJob.metadata.tables[BuildJob.__tablename__]
+    base = (
+        select(BuildJob)
+        .where(table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]))
+        .where(table.c.lease_expires_at <= now)
+        .where(table.c.attempts >= table.c.max_attempts)
+        .order_by(sa(BuildJob.lease_expires_at), sa(BuildJob.id))
+    )
+    rows = list(session.execute(with_for_update_skip_locked(session, base)).scalars().all())
+    if not rows:
+        return []
+    build_ids: list[str] = []
+    for row in rows:
+        build_ids.append(row.build_id)
+        row.status = BuildJobStatus.FAILED
+        row.last_error = 'Build job lease expired after maximum attempts'
+        row.clear_lease()
+        row.updated_at = now
+        session.add(row)
+        session.execute(
+            update(BuildRun)
+            .where(BuildRun.metadata.tables[BuildRun.__tablename__].c.id == row.build_id)
+            .where(BuildRun.metadata.tables[BuildRun.__tablename__].c.status.in_([BuildRunStatus.QUEUED, BuildRunStatus.RUNNING]))
+            .values(
+                status=BuildRunStatus.ORPHANED,
+                error_message='Build job lease expired after maximum attempts',
+                completed_at=now,
+                updated_at=now,
+            )
+        )
+    if commit:
+        session.commit()
+    else:
+        session.flush()
+    return build_ids
+
+
+def renew_job_lease(session: Session, job_id: str, *, worker_id: str, claim_token: str, lease_generation: int) -> BuildJob | None:
+    now = _database_now(session)
+    table = BuildJob.metadata.tables[BuildJob.__tablename__]
+    statement = (
+        update(BuildJob)
+        .where(table.c.id == job_id)
+        .where(table.c.status == BuildJobStatus.RUNNING)
+        .where(table.c.lease_owner == worker_id)
+        .where(table.c.claim_token == claim_token)
+        .where(table.c.lease_generation == lease_generation)
+        .where(table.c.lease_expires_at > now)
+        .values(
+            lease_expires_at=now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
+            last_renewed_at=now,
+            updated_at=now,
+        )
+    )
+    result = cast(CursorResult[Any], session.execute(statement))
+    if result.rowcount != 1:
+        return None
+    session.commit()
+    return session.get(BuildJob, job_id)
+
+
+def lock_active_job_claim(
+    session: Session,
+    job_id: str,
+    *,
+    build_id: str,
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
+) -> BuildJob | None:
+    now = _database_now(session)
+    table = BuildJob.metadata.tables[BuildJob.__tablename__]
+    statement = (
+        select(BuildJob)
+        .where(table.c.id == job_id)
+        .where(table.c.build_id == build_id)
+        .where(table.c.status == BuildJobStatus.RUNNING)
+        .where(table.c.lease_owner == worker_id)
+        .where(table.c.claim_token == claim_token)
+        .where(table.c.lease_generation == lease_generation)
+        .where(table.c.lease_expires_at > now)
+        .with_for_update()
+    )
+    return session.execute(statement).scalars().first()
+
+
+def finish_claimed_job(
+    session: Session,
+    job_id: str,
+    *,
+    worker_id: str,
+    build_id: str,
+    claim_token: str,
+    lease_generation: int,
+    status: BuildJobStatus,
+    error: str | None = None,
+) -> BuildJob | None:
+    if status not in {BuildJobStatus.COMPLETED, BuildJobStatus.FAILED, BuildJobStatus.CANCELLED}:
+        raise ValueError(f'Unsupported claimed build job terminal status: {status.value}')
+    now = _database_now(session)
+    table = BuildJob.metadata.tables[BuildJob.__tablename__]
+    statement = (
+        update(BuildJob)
+        .where(table.c.id == job_id)
+        .where(table.c.build_id == build_id)
+        .where(table.c.status == BuildJobStatus.RUNNING)
+        .where(table.c.lease_owner == worker_id)
+        .where(table.c.claim_token == claim_token)
+        .where(table.c.lease_generation == lease_generation)
+        .where(table.c.lease_expires_at > now)
+        .values(
+            status=status,
+            lease_owner=None,
+            claim_token=None,
+            lease_expires_at=None,
+            claimed_at=None,
+            last_renewed_at=None,
+            last_error=error,
+            updated_at=now,
+        )
+    )
+    result = cast(CursorResult[Any], session.execute(statement))
+    if result.rowcount != 1:
+        return None
+    session.flush()
+    return session.get(BuildJob, job_id)
+
+
+def mark_job_cancelled(session: Session, job_id: str, *, commit: bool = True) -> BuildJob:
+    now = _database_now(session)
+    table = BuildJob.metadata.tables[BuildJob.__tablename__]
+    cancellable_statuses = [BuildJobStatus.QUEUED, *[status for status in BuildJobStatus.members() if status.is_active]]
+    statement = (
+        update(BuildJob)
+        .where(table.c.id == job_id)
+        .where(table.c.status.in_(cancellable_statuses))
+        .values(
+            status=BuildJobStatus.CANCELLED,
+            lease_owner=None,
+            claim_token=None,
+            lease_generation=table.c.lease_generation + 1,
+            lease_expires_at=None,
+            claimed_at=None,
+            last_renewed_at=None,
+            updated_at=now,
+        )
+    )
+    result = cast(CursorResult[Any], session.execute(statement))
+    if result.rowcount == 1:
+        if commit:
+            session.commit()
+        else:
+            session.flush()
+        job = session.get(BuildJob, job_id)
+        if job is None:
+            raise RuntimeError(f'Cancelled build job {job_id} disappeared')
+        return job
+    if commit:
+        session.rollback()
+    else:
+        session.expire_all()
     job = session.get(BuildJob, job_id)
     if job is None:
         raise ValueError(f'Build job {job_id} not found')
-    job.status = BuildJobStatus.RUNNING
-    job.updated_at = _utcnow()
-    session.add(job)
-    session.commit()
-    session.refresh(job)
-    return job
-
-
-def mark_job_completed(session: Session, job_id: str) -> BuildJob:
-    job = session.get(BuildJob, job_id)
-    if job is None:
-        raise ValueError(f'Build job {job_id} not found')
-    job.status = BuildJobStatus.COMPLETED
-    job.clear_lease()
-    job.updated_at = _utcnow()
-    session.add(job)
-    session.commit()
-    session.refresh(job)
-    return job
-
-
-def mark_job_failed(session: Session, job_id: str, *, error: str | None = None) -> BuildJob:
-    job = session.get(BuildJob, job_id)
-    if job is None:
-        raise ValueError(f'Build job {job_id} not found')
-    job.status = BuildJobStatus.FAILED
-    job.last_error = error
-    job.clear_lease()
-    job.updated_at = _utcnow()
-    session.add(job)
-    session.commit()
-    session.refresh(job)
-    return job
-
-
-def mark_job_cancelled(session: Session, job_id: str) -> BuildJob:
-    job = session.get(BuildJob, job_id)
-    if job is None:
-        raise ValueError(f'Build job {job_id} not found')
-    job.status = BuildJobStatus.CANCELLED
-    job.clear_lease()
-    job.updated_at = _utcnow()
-    session.add(job)
-    session.commit()
-    session.refresh(job)
     return job
 
 
 def queued_job_count(session: Session) -> int:
-    stmt = select(BuildJob).where(sa(BuildJob.status == BuildJobStatus.QUEUED))
+    now = _database_now(session)
+    table = BuildJob.metadata.tables[BuildJob.__tablename__]
+    stmt = select(BuildJob).where(
+        or_(
+            table.c.status == BuildJobStatus.QUEUED,
+            and_(
+                table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]),
+                table.c.lease_expires_at <= now,
+                table.c.attempts < table.c.max_attempts,
+            ),
+        )
+    )
     return len(session.execute(stmt).scalars().all())
 
 

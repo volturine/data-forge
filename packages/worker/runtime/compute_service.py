@@ -45,7 +45,7 @@ from runtime.exceptions import (
 )
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
-from runtime.internal_api import HealthCheckSpec, client_from_env
+from runtime.internal_api import BuildJobLeaseLost, HealthCheckSpec, client_from_env
 from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import notification_service, render_template
@@ -3057,6 +3057,17 @@ async def _stream_resource_events(
         )
 
 
+def _observe_stream_task(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None and not isinstance(error, BuildJobLeaseLost):
+        logger.error(
+            "Build event stream stopped after its owner exited",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+
 def _schedule_stream_tasks(
     loop: asyncio.AbstractEventLoop,
     *,
@@ -3105,6 +3116,8 @@ def _schedule_stream_tasks(
             tab_name=tab_name,
         )
     )
+    progress_task.add_done_callback(_observe_stream_task)
+    resource_task.add_done_callback(_observe_stream_task)
     return progress_task, resource_task
 
 

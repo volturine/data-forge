@@ -821,7 +821,7 @@ def enqueue_schedule_run(session: Session, schedule_id: str, *, worker_id: str) 
     return run.id
 
 
-def reconcile_schedule_run(session: Session, *, build_id: str) -> Schedule | None:
+def apply_schedule_run_reconciliation(session: Session, *, build_id: str) -> Schedule | None:
     run = build_run_service.get_build_run(session, build_id)
     if run is None or run.schedule_id is None or run.status not in _SCHEDULE_TERMINAL_STATUSES:
         return None
@@ -841,6 +841,14 @@ def reconcile_schedule_run(session: Session, *, build_id: str) -> Schedule | Non
     else:
         schedule.last_failure_at = stamp
     session.add(schedule)
+    session.flush()
+    return schedule
+
+
+def reconcile_schedule_run(session: Session, *, build_id: str) -> Schedule | None:
+    schedule = apply_schedule_run_reconciliation(session, build_id=build_id)
+    if schedule is None:
+        return None
     session.commit()
     session.refresh(schedule)
     return schedule
