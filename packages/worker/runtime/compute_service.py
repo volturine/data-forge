@@ -48,7 +48,7 @@ from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resol
 from runtime.internal_api import BuildJobLeaseLost, ClaimedBuildJob, HealthCheckSpec, client_from_env
 from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
-from runtime.notification_delivery import notification_service, render_template
+from runtime.notification_delivery import render_template
 from runtime.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
 from runtime.time import utc_now as _utcnow
 
@@ -704,11 +704,11 @@ def _persist_healthcheck_results(results: list[_HealthCheckEvalResult]) -> None:
     )
 
 
-def _send_pipeline_notifications(
+def _prepare_pipeline_notifications(
     context: dict[str, object],
     output_notification: dict | None = None,
-) -> None:
-    failed: list[str] = []
+) -> list[dict[str, object]]:
+    deliveries: list[dict[str, object]] = []
 
     if output_notification:
         method = output_notification.get("method", "email")
@@ -718,15 +718,7 @@ def _send_pipeline_notifications(
         if recipient and method == "email":
             subject = render_template(subject_template, context)
             body = render_template(body_template, context)
-            try:
-                notification_service.send_email(to=recipient, subject=subject, body=body)
-                logger.info(f"Output notification email sent to {recipient}")
-            except Exception as e:
-                logger.warning(
-                    f"Failed to send output {method} notification to {recipient}: {e}",
-                    exc_info=True,
-                )
-                failed.append(f"output:{method}")
+            deliveries.append({"method": "email", "recipient": recipient, "subject": subject, "body": body})
 
     # Subscriber-based notifications (from Telegram bot /subscribe)
     datasource_id = str(context.get("datasource_id", ""))
@@ -759,20 +751,11 @@ def _send_pipeline_notifications(
                 for cid, token in pairs:
                     if not token:
                         continue
-                    try:
-                        notification_service.send_telegram(chat_id=cid, message=msg, bot_token=token)
-                    except Exception as e:
-                        logger.warning(f"Failed to notify subscriber {cid}: {e}", exc_info=True)
-                        failed.append("subscriber:telegram")
+                    deliveries.append({"method": "telegram", "recipient": cid, "message": msg, "bot_token": token})
         except Exception as e:
-            logger.warning(f"Failed to send subscriber notifications: {e}", exc_info=True)
-            failed.append("subscriber:lookup")
+            raise PipelineExecutionError("Notification target resolution failed", details={"error": str(e)}) from e
 
-    if failed:
-        raise PipelineExecutionError(
-            "Notification delivery failed",
-            details={"failures": failed},
-        )
+    return deliveries
 
 
 def _sync_iceberg_schema(table: IcebergTable, new_schema: pa.Schema) -> bool:
@@ -792,6 +775,7 @@ def _upsert_output_datasource(
     publication_claim: ClaimedBuildJob | None = None,
     worker_id: str | None = None,
     build_result_json: dict[str, object] | None = None,
+    notification_deliveries: list[dict[str, object]] | None = None,
 ) -> object:
     """Create or update the output datasource for an export.
 
@@ -821,6 +805,7 @@ def _upsert_output_datasource(
         claim_token=publication_claim.claim_token if publication_claim is not None else None,
         lease_generation=publication_claim.lease_generation if publication_claim is not None else None,
         build_result_json=build_result_json,
+        notification_deliveries=notification_deliveries or [],
     )
 
 
@@ -2504,24 +2489,7 @@ def export_data(
             "current_tab_name": tab_name,
             "branch": branch_name,
         }
-        target_ds = _upsert_output_datasource(
-            session=session,
-            result_id=result_id,
-            name=datasource_name,
-            source_type=DataSourceType.ICEBERG,
-            config=iceberg_ds_config,
-            schema_cache=schema_cache,
-            analysis_id=analysis_id_value,
-            is_hidden=output_hidden,
-            keep_schema_cache=build_mode == "incremental" and publication_claim is None,
-            publication_claim=publication_claim,
-            worker_id=worker_id,
-            build_result_json=build_result_summary if publication_claim is not None else None,
-        )
-        ds_id = str(getattr(target_ds, "id"))
-        if publication_claim is not None:
-            _persist_healthcheck_results(hc_results)
-        _send_pipeline_notifications(
+        notification_deliveries = _prepare_pipeline_notifications(
             context={
                 "analysis_name": analysis_name,
                 "status": status,
@@ -2535,7 +2503,24 @@ def export_data(
             },
             output_notification=output_notification,
         )
-
+        target_ds = _upsert_output_datasource(
+            session=session,
+            result_id=result_id,
+            name=datasource_name,
+            source_type=DataSourceType.ICEBERG,
+            config=iceberg_ds_config,
+            schema_cache=schema_cache,
+            analysis_id=analysis_id_value,
+            is_hidden=output_hidden,
+            keep_schema_cache=build_mode == "incremental" and publication_claim is None,
+            publication_claim=publication_claim,
+            worker_id=worker_id,
+            build_result_json=build_result_summary if publication_claim is not None else None,
+            notification_deliveries=notification_deliveries,
+        )
+        ds_id = str(getattr(target_ds, "id"))
+        if publication_claim is not None:
+            _persist_healthcheck_results(hc_results)
         read_duration_ms = result_data.get("read_duration_ms") if isinstance(result_data, dict) else None
         return ExportDatasourceResult(
             datasource_id=ds_id,

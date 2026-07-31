@@ -53,9 +53,36 @@ Completed in the execution-generation and terminal-race P0 slice:
 - worker failure handling now writes the failed build projection, terminal event, outbox entry, job outcome, and schedule reconciliation in one claim-locked transaction;
 - a concurrent Postgres cancellation/completion test verifies that exactly one terminal event wins and job/build generations remain consistent.
 
+Completed in the terminal-engine and outbox-claim slice:
+
+- engine-run updates lock the run row, and terminal runs are immutable across status, result, error, progress, and timing fields;
+- runtime outbox rows move through a durable `dispatching` claim with a unique token, monotonic generation, and database-visible expiry;
+- each outbox claim commits before delivery, delivery occurs without holding a database transaction, and finalization compares the token and generation;
+- expired dispatch claims are reclaimable, stale finalizers are rejected, and selection has a stable `available_at`, `created_at`, `id` order;
+- delivered internal payloads include the stable outbox event ID for consumer deduplication;
+- concurrent Postgres dispatcher coverage verifies that an in-flight claimed row is never selected by another dispatcher.
+
+Completed in the compute-request fencing and worker-drain slice:
+
+- compute-request claims carry a unique token, monotonic generation, database expiry, attempt number, and claim timestamps;
+- claim selection has a deterministic kind-priority, creation-time, and ID order and increments generation on reclaim;
+- compute requests renew independently through the runtime protocol, and completion/failure lock and validate the active token and generation;
+- stale attempts cannot publish a response or response-outbox wakeup after expiry and reclaim;
+- the incompatible unfenced protocol and broad shutdown-time request release operation are removed;
+- manager shutdown stops accepting requests, drains active executor work while its claim renews, and only then stops the data plane and engines.
+
+Completed in the durable notification-publication slice:
+
+- email and Telegram RPCs enqueue durable delivery records instead of performing external network I/O inline;
+- notification delivery shares the claimed outbox lifecycle, including retry, expired-claim recovery, and token/generation compare-and-set finalization;
+- email deliveries use the stable outbox event ID as their message ID, and delivery payloads retain that ID across retries;
+- output notification commands are typed in the worker protocol and are inserted in the same transaction that publishes datasource metadata and the claimed build-result summary;
+- stale output claims cannot enqueue notification deliveries;
+- per-row notification status now reports `queued`, making the durable acceptance boundary explicit rather than claiming that delivery already occurred.
+
 Still open at P0:
 
-- fence remaining irreversible engine and ancillary publication paths outside scheduled ingestion and analysis output publication;
+- stage per-row notification commands until the enclosing output publication commits, so abandoned pipeline attempts cannot leave accepted delivery records;
 
 Follow-up cleanup for staged publication:
 
@@ -695,11 +722,12 @@ Exit criteria:
 ### Phase 1 — Freeze behavior with adversarial tests
 
 - [ ] Add concurrent-session backend test utilities.
-- [ ] Add lease expiry and stale completion tests.
+- [x] Add lease expiry and stale completion tests.
 - [x] Add event append collision tests.
 - [x] Add cancel/finalize race tests.
 - [ ] Add shutdown-with-active-executor tests.
-- [ ] Add outbox and scheduler contention tests.
+- [x] Add outbox contention tests.
+- [ ] Add scheduler contention tests.
 - [ ] Add analysis lost-update tests.
 - [ ] Add frontend stale-namespace tests.
 
@@ -710,10 +738,10 @@ Exit criteria:
 
 ### Phase 2 — Introduce fenced claim primitives
 
-- [ ] Add schema fields and migrations.
-- [ ] Add claim identity to protocol contracts.
-- [ ] Implement renew operations.
-- [ ] Require tokens/generations on all claimant writes.
+- [x] Add schema fields to the compact schema creators.
+- [x] Add claim identity to build-job and compute-request protocol contracts.
+- [x] Implement build-job and compute-request renew operations.
+- [x] Require tokens/generations on build-job and compute-request claimant writes.
 - [ ] Implement typed transition outcomes.
 - [ ] Define retry/exhaustion policies.
 - [ ] Instrument lease behavior.
@@ -730,7 +758,7 @@ Exit criteria:
 - [x] Combine event append, projection update, and outbox enqueue.
 - [x] Implement atomic cancellation.
 - [x] Implement fenced atomic finalization.
-- [ ] Make terminal transitions idempotent and immutable.
+- [x] Make build and engine-run terminal transitions idempotent and immutable.
 
 Exit criteria:
 
@@ -739,8 +767,9 @@ Exit criteria:
 
 ### Phase 4 — Correct runtime lifecycle services
 
-- [ ] Redesign worker drain and lease renewal.
-- [ ] Redesign outbox claiming and deduplication.
+- [x] Redesign worker drain and lease renewal for build jobs and compute requests.
+- [x] Redesign outbox claiming and stable delivery identity.
+- [ ] Implement persistent consumer deduplication and poison-event handling.
 - [ ] Introduce durable scheduler triggers and fenced claims.
 - [ ] Add crash/restart integration tests for each service.
 
@@ -782,6 +811,8 @@ Exit criteria:
 - [ ] Extract frontend categories by state ownership and rendering responsibility.
 - [ ] Consolidate representation mappers.
 - [ ] Apply deterministic order contracts.
+
+The naming guidance in `STYLE_GUIDE.md` now treats a concise single word as a category name, while requiring intention-revealing component names and extraction by invariant, lifecycle, or side-effect boundary.
 
 Exit criteria:
 

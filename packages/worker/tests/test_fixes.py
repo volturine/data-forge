@@ -1,5 +1,6 @@
 """Tests for bug fixes and new features."""
 
+import asyncio
 import os
 import tempfile
 from datetime import UTC, datetime
@@ -371,6 +372,10 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         id="req-preview",
         namespace="default",
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
         command_envelope=_preview_command_envelope(request_id="req-preview"),
     )
 
@@ -379,6 +384,28 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
     assert len(completed) == 1
     assert completed[0].WhichOneof("response") == "preview"
     assert completed[0].preview.step_id == "source"
+
+
+@pytest.mark.asyncio
+async def test_compute_request_renewal_reports_lost_claim(monkeypatch) -> None:
+    class _Client:
+        def renew_compute_request_lease(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(compute_request_runtime, "worker_internal_api_client", lambda: _Client())
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-lost",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=0.03,
+        command_envelope=_preview_command_envelope(request_id="req-lost"),
+    )
+
+    with pytest.raises(compute_request_runtime.ComputeRequestLeaseLost, match="no longer active"):
+        await compute_request_runtime._renew_compute_lease(claimed, stop_event=asyncio.Event())
 
 
 def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) -> None:
@@ -417,6 +444,10 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
         id="req-1",
         namespace="default",
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
         command_envelope=_command_envelope(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
             request_id="req-1",
@@ -463,6 +494,10 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
         id="req-404",
         namespace="default",
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
         command_envelope=_command_envelope(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
             request_id="req-404",
@@ -709,7 +744,7 @@ class TestNotificationHandler:
             )
             collected = result.collect()
         assert "status" in collected.columns
-        assert collected["status"].to_list() == ["sent", "sent"]
+        assert collected["status"].to_list() == ["queued", "queued"]
         assert mock_svc.send_email.call_count == 2
 
     def test_validates_params(self):
@@ -753,7 +788,7 @@ class TestNotificationHandler:
         assert params.batch_size == 10
 
 
-# render_template and _send_pipeline_notifications tests moved to test_notification.py
+# Template rendering and pipeline notification preparation tests live in test_notification.py.
 
 
 # ---------------------------------------------------------------------------

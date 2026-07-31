@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
@@ -128,6 +128,12 @@ class ClaimedComputeRequest:
     namespace: str
     kind: enums_pb2.ComputeRequestKind
     command_envelope: compute_pb2.ComputeCommandEnvelope
+    worker_id: str
+    claim_token: str
+    lease_generation: int
+    lease_expires_at: datetime
+    attempt: int
+    lease_ttl_seconds: int
 
 
 class BackendWorkerRpcError(RuntimeError):
@@ -239,12 +245,52 @@ class WorkerInternalApiClient:
         if not response.HasField("request"):
             return None
         command = response.request.command
+        lease_expires_at = optional_timestamp_to_datetime(response.request, "lease_expires_at")
+        if lease_expires_at is None:
+            raise ValueError(f"Claimed compute request {response.request.id} has no lease expiry")
+        if lease_expires_at.tzinfo is None:
+            lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
         return ClaimedComputeRequest(
             id=response.request.id,
             namespace=response.request.namespace,
             kind=command.kind,
             command_envelope=command,
+            worker_id=worker_id,
+            claim_token=response.request.claim_token,
+            lease_generation=response.request.lease_generation,
+            lease_expires_at=lease_expires_at,
+            attempt=response.request.attempt,
+            lease_ttl_seconds=response.request.lease_ttl_seconds,
         )
+
+    def renew_compute_request_lease(
+        self,
+        *,
+        request_id: str,
+        namespace: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
+        timeout_seconds: float,
+    ) -> int | None:
+        response = self._call(
+            lambda: self._stub.RenewComputeRequestLease(
+                worker_runtime_pb2.WorkerComputeRequestClaimRequest(
+                    request_id=request_id,
+                    namespace=namespace,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
+                ),
+                timeout=min(self._timeout_seconds, timeout_seconds),
+                metadata=self._metadata(),
+            )
+        )
+        if not response.renewed:
+            return None
+        if not response.HasField("lease_ttl_seconds"):
+            raise ValueError(f"Renewed compute request {request_id} has no lease TTL")
+        return int(response.lease_ttl_seconds)
 
     def complete_compute_request(
         self,
@@ -252,6 +298,9 @@ class WorkerInternalApiClient:
         namespace: str,
         request_id: str,
         kind: enums_pb2.ComputeRequestKind,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
         response: compute_pb2.ComputeResponse,
         artifact_path: str | None = None,
         artifact_name: str | None = None,
@@ -260,6 +309,9 @@ class WorkerInternalApiClient:
         request = worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
             namespace=namespace,
             request_id=request_id,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
             response_envelope=_compute_response_envelope(
                 kind=kind,
                 request_id=request_id,
@@ -281,6 +333,9 @@ class WorkerInternalApiClient:
         namespace: str,
         request_id: str,
         kind: enums_pb2.ComputeRequestKind,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
         error_message: str,
         error: compute_pb2.ComputeErrorResult,
     ) -> None:
@@ -289,6 +344,9 @@ class WorkerInternalApiClient:
                 worker_runtime_pb2.WorkerFailComputeRequestRequest(
                     namespace=namespace,
                     request_id=request_id,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
                     error_message=error_message,
                     response_envelope=_compute_response_envelope(
                         kind=kind,
@@ -302,9 +360,6 @@ class WorkerInternalApiClient:
                 metadata=self._metadata(),
             )
         )
-
-    def release_compute_requests(self, *, worker_id: str) -> int:
-        return int(self._call(lambda: self._stub.ReleaseComputeRequests(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata())).count)
 
     def execute_datasource_request(
         self,
@@ -454,6 +509,7 @@ class WorkerInternalApiClient:
         claim_token: str | None,
         lease_generation: int | None,
         build_result_json: dict[str, object] | None,
+        notification_deliveries: Sequence[Mapping[str, object]],
     ) -> DatasourceMetadata:
         request = worker_runtime_pb2.WorkerUpsertOutputDatasourceRequest(
             namespace=namespace,
@@ -463,6 +519,7 @@ class WorkerInternalApiClient:
             config=dict_to_struct(config),
             schema_info=_schema_info_proto(schema_cache),
             keep_schema_cache=keep_schema_cache,
+            notification_delivery=[_notification_delivery_proto(delivery) for delivery in notification_deliveries],
         )
         claim_values = (job_id, build_id, worker_id, claim_token, lease_generation, build_result_json)
         if any(value is not None for value in claim_values):
@@ -776,6 +833,7 @@ class WorkerInternalApiClient:
     def send_email(
         self,
         *,
+        namespace: str,
         to: str,
         subject: str,
         body: str,
@@ -784,6 +842,7 @@ class WorkerInternalApiClient:
         response = self._call(
             lambda: self._stub.SendEmail(
                 worker_runtime_pb2.WorkerSendEmailRequest(
+                    namespace=namespace,
                     to=to,
                     subject=subject,
                     body=body,
@@ -798,12 +857,14 @@ class WorkerInternalApiClient:
     def send_telegram(
         self,
         *,
+        namespace: str,
         chat_id: str,
         message: str,
         bot_token: str | None = None,
         attachments: list[Mapping[str, object]] | None = None,
     ) -> bool:
         request = worker_runtime_pb2.WorkerSendTelegramRequest(
+            namespace=namespace,
             chat_id=chat_id,
             message=message,
             attachments=_serialize_attachments(attachments or []),
@@ -885,7 +946,7 @@ def _grpc_status_number(code: grpc.StatusCode) -> int:
 
 
 def _worker(worker_id: str) -> common_pb2.RuntimeWorkerRequest:
-    return common_pb2.RuntimeWorkerRequest(worker_id=worker_id)
+    return common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2)
 
 
 def _optional_str(message: Any, field: str) -> str | None:
@@ -905,6 +966,28 @@ def _optional_proto_enum_name(message: Any, field: str, enum_type: Any, prefix: 
     if not message.HasField(field):
         return None
     return proto_value_to_enum_name(enum_type, prefix, getattr(message, field))
+
+
+def _notification_delivery_proto(delivery: Mapping[str, object]) -> worker_runtime_pb2.WorkerNotificationDelivery:
+    method = delivery.get("method")
+    if method == "email":
+        return worker_runtime_pb2.WorkerNotificationDelivery(
+            email=worker_runtime_pb2.WorkerEmailDelivery(
+                to=_required_mapping_str(delivery, "recipient"),
+                subject=_required_mapping_str(delivery, "subject"),
+                body=str(delivery.get("body", "")),
+            )
+        )
+    if method == "telegram":
+        telegram = worker_runtime_pb2.WorkerTelegramDelivery(
+            chat_id=_required_mapping_str(delivery, "recipient"),
+            message=_required_mapping_str(delivery, "message"),
+        )
+        token = delivery.get("bot_token")
+        if isinstance(token, str) and token:
+            telegram.bot_token = token
+        return worker_runtime_pb2.WorkerNotificationDelivery(telegram=telegram)
+    raise ValueError(f"Unsupported notification delivery method: {method!r}")
 
 
 def _serialize_attachments(attachments: list[Mapping[str, object]]) -> list[common_pb2.NotificationAttachment]:

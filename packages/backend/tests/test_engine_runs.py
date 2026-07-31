@@ -229,7 +229,7 @@ def test_update_engine_run_replaces_result_json_when_merge_disabled(test_db_sess
     assert 'logs' not in updated.result_json
 
 
-def test_update_engine_run_ignores_terminal_status_transition(test_db_session):
+def test_update_engine_run_keeps_terminal_run_immutable(test_db_session):
     created = engine_run_service.create_engine_run(
         test_db_session,
         engine_run_service.create_engine_run_payload(
@@ -248,12 +248,17 @@ def test_update_engine_run_ignores_terminal_status_transition(test_db_session):
         created.id,
         status=EngineRunStatus.FAILED,
         error_message='should be ignored',
+        result_json={'row_count': 999},
+        progress=0.25,
     )
 
     assert updated.status == EngineRunStatus.SUCCESS
     stored = test_db_session.get(EngineRun, created.id)
     assert stored is not None
     assert stored.status == EngineRunStatus.SUCCESS
+    assert stored.error_message is None
+    assert stored.result_json == {'row_count': 1}
+    assert stored.progress == 0.0
 
 
 def test_list_engine_runs_http_returns_filtered_runs(client, test_db_session) -> None:

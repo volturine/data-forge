@@ -43,7 +43,7 @@ class NotificationHandler(OperationHandler):
 
     Collects the DataFrame, iterates rows in batches, sends notifications
     using the configured method, and appends a status column with the
-    result of each send (``sent`` or ``[error: ...]``).
+    result of each durable enqueue (``queued`` or ``[error: ...]``).
     """
 
     def __call__(
@@ -120,7 +120,7 @@ class NotificationHandler(OperationHandler):
                                     message=message,
                                     bot_token=validated.bot_token or None,
                                 )
-                        results.append("sent")
+                        results.append("queued")
                     except Exception as exc:
                         logger.warning(
                             "Notification failed at row %d: %s",

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from email.message import EmailMessage
 from typing import Any, cast
 
 import grpc
@@ -23,7 +21,6 @@ from backend_core import (
     datasource_delete_service,
     engine_instances_service as engine_instance_service,
     engine_runs_service as engine_run_service,
-    http as http_client,
     runtime_ipc,
     runtime_outbox_service,
     runtime_workers_service as runtime_worker_service,
@@ -49,13 +46,13 @@ from backend_core.exceptions import AppError
 from backend_core.json_utils import copy_json_object
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.namespaces_service import list_runtime_namespaces
+from backend_core.notification_delivery import EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
 from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
 from backend_core.persistence.udfs.models import Udf
-from backend_core.settings_projection import get_resolved_smtp, get_resolved_telegram_settings, get_resolved_telegram_token
-from backend_core.smtp import send_smtp_message
+from backend_core.settings_projection import get_resolved_telegram_settings
 from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import (
     common_pb2,
@@ -71,7 +68,6 @@ from modules.datasource import runtime_service as datasource_runtime_service
 from modules.scheduler import service as scheduler_service
 
 logger = logging.getLogger(__name__)
-_TELEGRAM_BASE_URL = 'https://api.telegram.org'
 _TOKEN_METADATA_KEY = 'x-internal-token'
 _BUILD_JOB_PROTOCOL_VERSION = 2
 
@@ -656,6 +652,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     async def ClaimComputeRequest(
         self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerClaimComputeRequestResponse:
+        if request.protocol_version != _BUILD_JOB_PROTOCOL_VERSION:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute worker protocol version is incompatible')
         reclaimable_owner_ids = run_settings_db(runtime_worker_service.reclaimable_worker_ids, kind=RuntimeWorkerKind.BUILD_MANAGER)
         for namespace in run_settings_db(list_runtime_namespaces):
             token = set_namespace_context(namespace)
@@ -667,12 +665,19 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 )
                 if compute_request is None:
                     continue
+                if compute_request.claim_token is None or compute_request.lease_expires_at is None:
+                    raise RuntimeError(f'Claimed compute request {compute_request.id} is missing lease identity')
                 return worker_runtime_pb2.WorkerClaimComputeRequestResponse(
                     request=worker_runtime_pb2.WorkerClaimedComputeRequest(
                         id=compute_request.id,
                         namespace=compute_request.namespace,
                         kind=kind_from_proto(compute_request.kind),
                         command=compute_requests_service.command_envelope_for_request(compute_request),
+                        claim_token=compute_request.claim_token,
+                        lease_generation=compute_request.lease_generation,
+                        lease_expires_at=datetime_to_timestamp(compute_request.lease_expires_at),
+                        attempt=compute_request.attempts,
+                        lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds,
                     )
                 )
             finally:
@@ -680,19 +685,47 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return worker_runtime_pb2.WorkerClaimComputeRequestResponse()
 
     @_run_async_handler_in_thread
+    async def RenewComputeRequestLease(
+        self, request: worker_runtime_pb2.WorkerComputeRequestClaimRequest, context: grpc.aio.ServicerContext
+    ) -> worker_runtime_pb2.WorkerRenewComputeRequestLeaseResponse:
+        token = set_namespace_context(request.namespace)
+        try:
+            compute_request = run_db(
+                compute_requests_service.renew_request_lease,
+                request.request_id,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+            )
+        finally:
+            reset_namespace(token)
+        response = worker_runtime_pb2.WorkerRenewComputeRequestLeaseResponse(
+            renewed=compute_request is not None,
+            lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds if compute_request is not None else None,
+        )
+        if compute_request is not None and compute_request.lease_expires_at is not None:
+            response.lease_expires_at.CopyFrom(datetime_to_timestamp(compute_request.lease_expires_at))
+        return response
+
+    @_run_async_handler_in_thread
     async def CompleteComputeRequest(
         self, request: worker_runtime_pb2.WorkerCompleteComputeRequestRequest, context: grpc.aio.ServicerContext
     ) -> common_pb2.RuntimeWorkerResponse:
         token = set_namespace_context(request.namespace)
         try:
-            run_db(
+            completed = run_db(
                 compute_requests_service.mark_request_completed,
                 request.request_id,
                 response_envelope=request.response_envelope,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
                 artifact_path=_optional_str(request, 'artifact_path'),
                 artifact_name=_optional_str(request, 'artifact_name'),
                 artifact_content_type=_optional_str(request, 'artifact_content_type'),
             )
+            if completed is None:
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute request lease is no longer active')
             return _response(request.request_id)
         finally:
             reset_namespace(token)
@@ -703,26 +736,20 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     ) -> common_pb2.RuntimeWorkerResponse:
         token = set_namespace_context(request.namespace)
         try:
-            run_db(
+            failed = run_db(
                 compute_requests_service.mark_request_failed,
                 request.request_id,
                 error_message=request.error_message,
                 response_envelope=request.response_envelope,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
             )
+            if failed is None:
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute request lease is no longer active')
             return _response(request.request_id)
         finally:
             reset_namespace(token)
-
-    @_run_async_handler_in_thread
-    async def ReleaseComputeRequests(self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
-        released = 0
-        for namespace in run_settings_db(list_runtime_namespaces):
-            token = set_namespace_context(namespace)
-            try:
-                released += len(run_db(compute_requests_service.release_worker_requests, worker_id=request.worker_id))
-            finally:
-                reset_namespace(token)
-        return _count(released)
 
     @_run_async_handler_in_thread
     async def ExecuteDatasourceRequest(
@@ -1053,6 +1080,28 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 if not request.HasField('build_result'):
                     await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Claimed output publication requires a build result')
                 build_run_service.update_build_result_json(session, request.build_id, struct_to_dict(request.build_result))
+            for delivery in request.notification_delivery:
+                delivery_kind = delivery.WhichOneof('delivery')
+                if delivery_kind == 'email':
+                    payload: dict[str, object] = {
+                        'kind': EMAIL_DELIVERY_KIND,
+                        'to': delivery.email.to,
+                        'subject': delivery.email.subject,
+                        'body': delivery.email.body,
+                        'attachments': [],
+                    }
+                elif delivery_kind == 'telegram':
+                    payload = {
+                        'kind': TELEGRAM_DELIVERY_KIND,
+                        'chat_id': delivery.telegram.chat_id,
+                        'message': delivery.telegram.message,
+                        'attachments': [],
+                    }
+                    if delivery.telegram.HasField('bot_token'):
+                        payload['bot_token'] = delivery.telegram.bot_token
+                else:
+                    await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Notification delivery command is missing its delivery payload')
+                runtime_outbox_service.enqueue_notification_delivery(session, payload, commit=False)
             session.commit()
             session.refresh(datasource)
             return worker_runtime_pb2.WorkerUpsertOutputDatasourceResponse(
@@ -1500,67 +1549,44 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     async def SendEmail(self, request: worker_runtime_pb2.WorkerSendEmailRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.BoolResponse:
         if not request.to:
             return _bool(False)
-        smtp = get_resolved_smtp()
-        host = str(smtp.get('host', ''))
-        port = int(str(smtp.get('port', 587)))
-        user = str(smtp.get('user', ''))
-        password = str(smtp.get('password', ''))
-        if not host:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'SMTP not configured (host missing)')
-        if not user:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'SMTP not configured (user missing)')
-
-        message = EmailMessage()
-        message['From'] = user
-        message['To'] = request.to
-        message['Subject'] = request.subject
-        message.set_content(request.body)
-        message.add_alternative(request.body, subtype='html')
-        for attachment in request.attachments:
-            parts = attachment.content_type.partition('/')
-            maintype = parts[0]
-            subtype = parts[2]
-            if not maintype or not subtype:
-                maintype = 'text'
-                subtype = 'plain'
-            message.add_attachment(
-                base64.b64decode(attachment.content_base64),
-                maintype=maintype,
-                subtype=subtype,
-                filename=attachment.filename,
+        token = set_namespace_context(request.namespace)
+        try:
+            run_db(
+                runtime_outbox_service.enqueue_notification_delivery,
+                {
+                    'kind': EMAIL_DELIVERY_KIND,
+                    'to': request.to,
+                    'subject': request.subject,
+                    'body': request.body,
+                    'attachments': [
+                        {'filename': item.filename, 'content_base64': item.content_base64, 'content_type': item.content_type} for item in request.attachments
+                    ],
+                },
             )
-        send_smtp_message(host, port, user, password, message)
+        finally:
+            reset_namespace(token)
         return _bool(True)
 
     @_run_async_handler_in_thread
     async def SendTelegram(self, request: worker_runtime_pb2.WorkerSendTelegramRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.BoolResponse:
-        resolved = get_resolved_telegram_settings()
-        if not resolved['enabled']:
-            return _bool(False)
-        token = _optional_str(request, 'bot_token') or str(resolved['token']) or get_resolved_telegram_token()
-        if not token:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Telegram bot token not configured')
-        base = f'{_TELEGRAM_BASE_URL}/bot{token}'
-        response = http_client.post(
-            f'{base}/sendMessage',
-            json={'chat_id': request.chat_id, 'text': request.message, 'parse_mode': 'HTML'},
-            timeout=20,
-        )
-        response.raise_for_status()
-        for attachment in request.attachments:
-            file_response = http_client.post(
-                f'{base}/sendDocument',
-                data={'chat_id': request.chat_id},
-                files={
-                    'document': (
-                        attachment.filename,
-                        base64.b64decode(attachment.content_base64),
-                        attachment.content_type,
-                    )
-                },
-                timeout=30,
+        token = set_namespace_context(request.namespace)
+        try:
+            payload: dict[str, object] = {
+                'kind': TELEGRAM_DELIVERY_KIND,
+                'chat_id': request.chat_id,
+                'message': request.message,
+                'attachments': [
+                    {'filename': item.filename, 'content_base64': item.content_base64, 'content_type': item.content_type} for item in request.attachments
+                ],
+            }
+            if request.HasField('bot_token'):
+                payload['bot_token'] = request.bot_token
+            run_db(
+                runtime_outbox_service.enqueue_notification_delivery,
+                payload,
             )
-            file_response.raise_for_status()
+        finally:
+            reset_namespace(token)
         return _bool(True)
 
     @_run_async_handler_in_thread

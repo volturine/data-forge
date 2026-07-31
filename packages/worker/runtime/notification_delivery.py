@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from runtime.internal_api import WorkerInternalApiClient, client_from_env
+from runtime.namespace import get_namespace
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ class NotificationDelivery:
         attachments: list[NotificationAttachment] | None = None,
     ) -> None:
         self._api_client().send_email(
+            namespace=get_namespace(),
             to=to,
             subject=subject,
             body=body,
@@ -54,6 +56,7 @@ class NotificationDelivery:
         attachments: list[NotificationAttachment] | None = None,
     ) -> None:
         self._api_client().send_telegram(
+            namespace=get_namespace(),
             chat_id=chat_id,
             message=message,
             bot_token=bot_token,

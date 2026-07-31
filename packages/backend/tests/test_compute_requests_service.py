@@ -89,6 +89,15 @@ def _response(
     return response_envelope(kind=kind_from_proto(request.kind), request_id=request.id, status=status, payload=payload, error_message=error_message)
 
 
+def _claim_identity(test_db_session, request: ComputeRequest) -> tuple[str, str, int]:
+    claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test')
+    assert claimed is not None
+    assert claimed.id == request.id
+    assert claimed.lease_owner is not None
+    assert claimed.claim_token is not None
+    return claimed.lease_owner, claimed.claim_token, claimed.lease_generation
+
+
 def test_preview_command_converts_all_pipeline_output_enums() -> None:
     payload = _preview_payload()
     pipeline = cast(dict[str, object], payload['analysis_pipeline'])
@@ -161,9 +170,10 @@ def test_claim_next_request_prioritizes_user_create_requests_over_background_ing
     assert remaining.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
 
 
-def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> None:
+def test_mark_request_failed_after_transaction_owner_rolls_back(test_db_session) -> None:
     request = _create_request(test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, request_json=_preview_payload())
     request_id = request.id
+    worker_id, claim_token, lease_generation = _claim_identity(test_db_session, request)
 
     duplicate = (
         ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
@@ -181,10 +191,14 @@ def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> 
     with pytest.raises(IntegrityError):
         test_db_session.execute(duplicate)
         test_db_session.commit()
+    test_db_session.rollback()
 
     failed = compute_requests_service.mark_request_failed(
         test_db_session,
         request_id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
         error_message='boom',
         response_envelope=_response(
             request,
@@ -193,6 +207,7 @@ def test_mark_request_failed_recovers_from_pending_rollback(test_db_session) -> 
             error_message='boom',
         ),
     )
+    assert failed is not None
 
     assert failed.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
     assert failed.error_message == 'boom'
@@ -398,10 +413,14 @@ def test_mark_request_completed_stores_typed_response_envelope(test_db_session) 
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         request_json=_preview_payload(),
     )
+    worker_id, claim_token, lease_generation = _claim_identity(test_db_session, request)
 
     completed = compute_requests_service.mark_request_completed(
         test_db_session,
         request.id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
         response_envelope=_response(
             request,
             {
@@ -415,6 +434,7 @@ def test_mark_request_completed_stores_typed_response_envelope(test_db_session) 
             },
         ),
     )
+    assert completed is not None
 
     assert completed.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
     stored_response = _stored_response(completed)
@@ -446,12 +466,17 @@ def test_row_count_response_preserves_zero_count(test_db_session) -> None:
         kind=enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
         request_json=_preview_payload(),
     )
+    worker_id, claim_token, lease_generation = _claim_identity(test_db_session, request)
 
     completed = compute_requests_service.mark_request_completed(
         test_db_session,
         request.id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
         response_envelope=_response(request, {'step_id': 'filter-1', 'row_count': 0}),
     )
+    assert completed is not None
 
     assert compute_requests_service.response_payload(completed) == {'step_id': 'filter-1', 'row_count': 0}
 
@@ -463,10 +488,14 @@ def test_failed_response_preserves_integral_status_code(test_db_session) -> None
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         request_json=_preview_payload(),
     )
+    worker_id, claim_token, lease_generation = _claim_identity(test_db_session, request)
 
     failed = compute_requests_service.mark_request_failed(
         test_db_session,
         request.id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
         error_message='Datasource output is not available',
         response_envelope=_response(
             request,
@@ -480,6 +509,7 @@ def test_failed_response_preserves_integral_status_code(test_db_session) -> None
             error_message='Datasource output is not available',
         ),
     )
+    assert failed is not None
 
     assert compute_requests_service.response_payload(failed) == {
         'error': 'Datasource output is not available',
@@ -499,12 +529,17 @@ def test_datasource_error_result_shape_uses_typed_compute_error_message(test_db_
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
         request_json={'datasource_id': 'missing'},
     )
+    worker_id, claim_token, lease_generation = _claim_identity(test_db_session, request)
 
     completed = compute_requests_service.mark_request_completed(
         test_db_session,
         request.id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
         response_envelope=_response(request, {'error': 'datasource_not_found', 'message': 'DataSource missing not found'}),
     )
+    assert completed is not None
 
     assert compute_requests_service.response_payload(completed) == {
         'error': 'datasource_not_found',
@@ -540,10 +575,14 @@ def test_column_stats_response_preserves_required_zero_defaults(test_db_session)
             'datasource_config': {},
         },
     )
+    worker_id, claim_token, lease_generation = _claim_identity(test_db_session, request)
 
     completed = compute_requests_service.mark_request_completed(
         test_db_session,
         request.id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
         response_envelope=_response(
             request,
             {
@@ -556,6 +595,7 @@ def test_column_stats_response_preserves_required_zero_defaults(test_db_session)
             },
         ),
     )
+    assert completed is not None
 
     assert compute_requests_service.response_payload(completed) == {
         'column': 'city',
@@ -567,17 +607,20 @@ def test_column_stats_response_preserves_required_zero_defaults(test_db_session)
     }
 
 
-def test_claim_next_request_reclaims_expired_lease(test_db_session) -> None:
+def test_reclaimed_request_rejects_stale_completion(test_db_session) -> None:
     request = _create_request(
         test_db_session,
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         request_json=_preview_payload(),
     )
-    request.status = enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
-    request.lease_owner = 'live-worker'
-    request.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    test_db_session.add(request)
+    first_claim = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
+    assert first_claim is not None
+    assert first_claim.claim_token is not None
+    first_token = first_claim.claim_token
+    first_generation = first_claim.lease_generation
+    first_claim.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    test_db_session.add(first_claim)
     test_db_session.commit()
 
     claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-2')
@@ -585,4 +628,30 @@ def test_claim_next_request_reclaims_expired_lease(test_db_session) -> None:
     assert claimed is not None
     assert claimed.id == request.id
     assert claimed.lease_owner == 'worker-2'
+    assert claimed.claim_token is not None
+    assert claimed.claim_token != first_token
+    assert claimed.lease_generation == first_generation + 1
+    assert claimed.attempts == 2
     assert claimed.lease_expires_at is not None
+
+    stale_completion = compute_requests_service.mark_request_completed(
+        test_db_session,
+        request.id,
+        worker_id='worker-1',
+        claim_token=first_token,
+        lease_generation=first_generation,
+        response_envelope=_response(
+            request,
+            {'step_id': 'source', 'columns': [], 'column_types': {}, 'data': [], 'total_rows': 0, 'page': 1, 'page_size': 100},
+        ),
+    )
+    assert stale_completion is None
+
+    renewed = compute_requests_service.renew_request_lease(
+        test_db_session,
+        request.id,
+        worker_id='worker-2',
+        claim_token=claimed.claim_token,
+        lease_generation=claimed.lease_generation,
+    )
+    assert renewed is not None

@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from dataforge_protocol import enums_pb2
 from operations.notification import NotificationHandler, NotificationParams
 from operations.template_placeholders import render_template_placeholders
-from runtime.compute_service import _send_pipeline_notifications
+from runtime.compute_service import _prepare_pipeline_notifications
 from runtime.exceptions import PipelineExecutionError
 from runtime.notification_delivery import NotificationService, render_template
 
@@ -200,7 +200,7 @@ class TestNotificationHandler:
             )
             collected = result.collect()
         assert "send_status" in collected.columns
-        assert collected["send_status"].to_list() == ["sent", "sent", "sent"]
+        assert collected["send_status"].to_list() == ["queued", "queued", "queued"]
         assert mock_svc.send_email.call_count == 3
 
         first_call = mock_svc.send_email.call_args_list[0]
@@ -247,7 +247,7 @@ class TestNotificationHandler:
                 },
             )
             collected = result.collect()
-        assert collected["notification_status"].to_list() == ["sent"]
+        assert collected["notification_status"].to_list() == ["queued"]
         mock_svc.send_telegram.assert_called_once_with(chat_id="99999", message="hi", bot_token=None)
 
     def test_multi_column_template(self):
@@ -293,10 +293,10 @@ class TestNotificationHandler:
             )
             collected = result.collect()
         statuses = collected["notification_status"].to_list()
-        assert statuses[0] == "sent"
+        assert statuses[0] == "queued"
         assert statuses[1].startswith("[error:")
         assert "SMTP down" in statuses[1]
-        assert statuses[2] == "sent"
+        assert statuses[2] == "queued"
 
     def test_empty_dataframe(self):
         handler = NotificationHandler()
@@ -351,7 +351,7 @@ class TestNotificationHandler:
             collected = result.collect()
         assert collected.height == 25
         assert mock_svc.send_email.call_count == 25
-        assert all(s == "sent" for s in collected["notification_status"].to_list())
+        assert all(s == "queued" for s in collected["notification_status"].to_list())
 
     def test_preserves_original_columns(self):
         handler = NotificationHandler()
@@ -392,7 +392,7 @@ class TestNotificationHandler:
                 },
             )
             collected = result.collect()
-        assert collected["notification_status"].to_list() == ["sent"]
+        assert collected["notification_status"].to_list() == ["queued"]
         assert mock_svc.send_telegram.call_count == 3
         called_ids = [c.kwargs["chat_id"] for c in mock_svc.send_telegram.call_args_list]
         assert called_ids == ["111", "222", "333"]
@@ -418,7 +418,7 @@ class TestNotificationHandler:
             )
             collected = result.collect()
 
-        assert collected["notification_status"].to_list() == ["sent"]
+        assert collected["notification_status"].to_list() == ["queued"]
         mock_svc.send_telegram.assert_called_once_with(chat_id="888", message="hi", bot_token=None)
 
     def test_recipient_column_array(self):
@@ -441,7 +441,7 @@ class TestNotificationHandler:
             )
             collected = result.collect()
 
-        assert collected["notification_status"].to_list() == ["sent"]
+        assert collected["notification_status"].to_list() == ["queued"]
         assert mock_svc.send_telegram.call_count == 2
         called_ids = [c.kwargs["chat_id"] for c in mock_svc.send_telegram.call_args_list]
         assert called_ids == ["111", "222"]
@@ -466,7 +466,7 @@ class TestNotificationHandler:
                 },
             )
             collected = result.collect()
-        assert collected["notification_status"].to_list() == ["sent"]
+        assert collected["notification_status"].to_list() == ["queued"]
         mock_svc.send_telegram.assert_called_once_with(
             chat_id="12345",
             message="hi",
@@ -493,21 +493,18 @@ class TestNotificationHandler:
                 },
             )
             collected = result.collect()
-        assert collected["notification_status"].to_list() == ["sent"]
+        assert collected["notification_status"].to_list() == ["queued"]
         assert mock_svc.send_telegram.call_count == 2
         sent_ids = [c.kwargs["chat_id"] for c in mock_svc.send_telegram.call_args_list]
         assert sent_ids == ["aaa", "bbb"]
         assert all(c.kwargs["bot_token"] == "tok123" for c in mock_svc.send_telegram.call_args_list)
 
 
-class TestSendPipelineNotifications:
+class TestPreparePipelineNotifications:
     def test_output_notification_email(self):
-        with (
-            patch("runtime.compute_service.notification_service") as mock_svc,
-            patch("runtime.compute_service.client_from_env") as mock_client_from_env,
-        ):
+        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
             mock_client_from_env.return_value.telegram_targets.return_value = []
-            _send_pipeline_notifications(
+            deliveries = _prepare_pipeline_notifications(
                 context={
                     "analysis_name": "Test",
                     "status": "success",
@@ -520,19 +517,12 @@ class TestSendPipelineNotifications:
                     "body_template": "Status: {{status}}",
                 },
             )
-        mock_svc.send_email.assert_called_once_with(
-            to="admin@test.com",
-            subject="Build: Test",
-            body="Status: success",
-        )
+        assert deliveries == [{"method": "email", "recipient": "admin@test.com", "subject": "Build: Test", "body": "Status: success"}]
 
     def test_output_notification_telegram(self):
-        with (
-            patch("runtime.compute_service.notification_service") as mock_svc,
-            patch("runtime.compute_service.client_from_env") as mock_client_from_env,
-        ):
+        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
             mock_client_from_env.return_value.telegram_targets.return_value = [MockSubscriber("99999", "tok")]
-            _send_pipeline_notifications(
+            deliveries = _prepare_pipeline_notifications(
                 context={
                     "analysis_name": "A",
                     "status": "success",
@@ -545,39 +535,22 @@ class TestSendPipelineNotifications:
                     "body_template": "{{status}}",
                 },
             )
-        mock_svc.send_telegram.assert_called_once()
-        call_kwargs = mock_svc.send_telegram.call_args.kwargs
-        assert call_kwargs["chat_id"] == "99999"
-        assert "A" in call_kwargs["message"]
-        assert "success" in call_kwargs["message"]
+        assert deliveries[0]["method"] == "telegram"
+        assert deliveries[0]["recipient"] == "99999"
+        assert "A" in str(deliveries[0]["message"])
+        assert "success" in str(deliveries[0]["message"])
 
     def test_output_notification_empty_recipient_skipped(self):
-        with patch("runtime.compute_service.notification_service") as mock_svc:
-            _send_pipeline_notifications(
-                context={},
-                output_notification={
-                    "method": "email",
-                    "recipient": "",
-                },
-            )
-        mock_svc.send_email.assert_not_called()
+        deliveries = _prepare_pipeline_notifications(context={}, output_notification={"method": "email", "recipient": ""})
+        assert deliveries == []
 
     def test_output_notification_none_skipped(self):
-        with patch("runtime.compute_service.notification_service") as mock_svc:
-            _send_pipeline_notifications(
-                context={},
-                output_notification=None,
-            )
-        mock_svc.send_email.assert_not_called()
-        mock_svc.send_telegram.assert_not_called()
+        assert _prepare_pipeline_notifications(context={}, output_notification=None) == []
 
     def test_output_notification_excluded_recipients(self):
-        with (
-            patch("runtime.compute_service.notification_service") as mock_svc,
-            patch("runtime.compute_service.client_from_env") as mock_client_from_env,
-        ):
+        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
             mock_client_from_env.return_value.telegram_targets.return_value = []
-            _send_pipeline_notifications(
+            deliveries = _prepare_pipeline_notifications(
                 context={
                     "analysis_name": "Test",
                     "status": "success",
@@ -590,19 +563,12 @@ class TestSendPipelineNotifications:
                     "body_template": "Status: {{status}}",
                 },
             )
-        mock_svc.send_email.assert_called_once_with(
-            to="admin@test.com, skip@test.com",
-            subject="Build: Test",
-            body="Status: success",
-        )
+        assert deliveries[0]["recipient"] == "admin@test.com, skip@test.com"
 
     def test_output_notification_telegram_uses_subscribers(self):
-        with (
-            patch("runtime.compute_service.notification_service") as mock_svc,
-            patch("runtime.compute_service.client_from_env") as mock_client_from_env,
-        ):
+        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
             mock_client_from_env.return_value.telegram_targets.return_value = [MockSubscriber("111", "token-a")]
-            _send_pipeline_notifications(
+            deliveries = _prepare_pipeline_notifications(
                 context={
                     "analysis_name": "Test",
                     "status": "success",
@@ -615,17 +581,12 @@ class TestSendPipelineNotifications:
                     "body_template": "Status: {{status}}",
                 },
             )
-        mock_svc.send_telegram.assert_called_once()
-        message = mock_svc.send_telegram.call_args.kwargs["message"]
-        assert "Status: success" in message
+        assert "Status: success" in str(deliveries[0]["message"])
 
     def test_output_notification_telegram_excludes_subscribers(self):
-        with (
-            patch("runtime.compute_service.notification_service") as mock_svc,
-            patch("runtime.compute_service.client_from_env") as mock_client_from_env,
-        ):
+        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
             mock_client_from_env.return_value.telegram_targets.return_value = [MockSubscriber("111", "token-a")]
-            _send_pipeline_notifications(
+            deliveries = _prepare_pipeline_notifications(
                 context={
                     "analysis_name": "Test",
                     "status": "success",
@@ -639,18 +600,15 @@ class TestSendPipelineNotifications:
                     "excluded_recipients": ["111"],
                 },
             )
-        mock_svc.send_telegram.assert_not_called()
+        assert deliveries == []
 
-    def test_output_notification_error_raises(self):
-        with patch("runtime.compute_service.notification_service") as mock_svc:
-            mock_svc.send_email.side_effect = RuntimeError("SMTP error")
+    def test_output_notification_target_lookup_error_raises(self):
+        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
+            mock_client_from_env.return_value.telegram_targets.side_effect = RuntimeError("lookup failed")
             with pytest.raises(PipelineExecutionError):
-                _send_pipeline_notifications(
-                    context={},
-                    output_notification={
-                        "method": "email",
-                        "recipient": "x@x.com",
-                    },
+                _prepare_pipeline_notifications(
+                    context={"datasource_id": "ds-1"},
+                    output_notification={"method": "telegram", "recipient": ""},
                 )
 
 
@@ -683,6 +641,7 @@ class TestNotificationService:
 
         assert calls == [
             {
+                "namespace": "default",
                 "to": "dest@example.com",
                 "subject": "Subj",
                 "body": "Body",

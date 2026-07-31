@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from backend_core import build_jobs_service, build_runs_service, compute_requests_service, engine_instances_service, engine_runs_service
 from backend_core.config import settings
@@ -18,6 +18,7 @@ from backend_core.domain.compute_requests.models import command_from_payload, re
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
+from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 from backend_core.persistence.scheduler.models import Schedule
 from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
@@ -387,7 +388,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     )
     servicer = WorkerRuntimeServicer()
 
-    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
+    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2), context)
 
     assert response.HasField('request')
     assert response.request.id == request.id
@@ -402,11 +403,31 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     test_db_session.refresh(request)
     assert request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     assert request.lease_owner == worker_id
+    assert response.request.claim_token
+    assert response.request.lease_generation == 1
+    assert response.request.attempt == 1
+    assert response.request.HasField('lease_expires_at')
+
+    renewed = await servicer.RenewComputeRequestLease(
+        worker_runtime_pb2.WorkerComputeRequestClaimRequest(
+            namespace='default',
+            request_id=request.id,
+            worker_id=worker_id,
+            claim_token=response.request.claim_token,
+            lease_generation=response.request.lease_generation,
+        ),
+        context,
+    )
+    assert renewed.renewed is True
+    assert renewed.HasField('lease_expires_at')
 
     await servicer.CompleteComputeRequest(
         worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
             namespace='default',
             request_id=request.id,
+            worker_id=worker_id,
+            claim_token=response.request.claim_token,
+            lease_generation=response.request.lease_generation,
             response_envelope=response_envelope(
                 kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
                 request_id=request.id,
@@ -425,13 +446,16 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
         request_json=_schema_payload(),
     )
-    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
+    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2), context)
     assert response.request.id == failed_request.id
 
     await servicer.FailComputeRequest(
         worker_runtime_pb2.WorkerFailComputeRequestRequest(
             namespace='default',
             request_id=failed_request.id,
+            worker_id=worker_id,
+            claim_token=response.request.claim_token,
+            lease_generation=response.request.lease_generation,
             error_message='boom',
             response_envelope=response_envelope(
                 kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
@@ -534,6 +558,11 @@ async def test_internal_worker_grpc_upserts_output_datasource_with_typed_schema_
                 row_count=10,
             ),
             keep_schema_cache=False,
+            notification_delivery=[
+                worker_runtime_pb2.WorkerNotificationDelivery(
+                    email=worker_runtime_pb2.WorkerEmailDelivery(to='owner@example.com', subject='Ready', body='Output published')
+                )
+            ],
         ),
         context,
     )
@@ -543,6 +572,14 @@ async def test_internal_worker_grpc_upserts_output_datasource_with_typed_schema_
     assert datasource.schema_cache == {
         'columns': [{'name': 'score', 'dtype': 'Float64', 'nullable': True}],
         'row_count': 10,
+    }
+    outbox = test_db_session.execute(select(RuntimeOutboxEvent)).scalars().one()
+    assert outbox.payload_json == {
+        'kind': 'email_delivery',
+        'to': 'owner@example.com',
+        'subject': 'Ready',
+        'body': 'Output published',
+        'attachments': [],
     }
 
 
@@ -597,6 +634,11 @@ async def test_internal_worker_grpc_rejects_stale_output_publication_without_mut
                 claim_token='stale-token',
                 lease_generation=claimed.lease_generation,
                 build_result=dict_to_struct({'current_output_id': datasource_id}),
+                notification_delivery=[
+                    worker_runtime_pb2.WorkerNotificationDelivery(
+                        email=worker_runtime_pb2.WorkerEmailDelivery(to='owner@example.com', subject='Stale', body='Must not enqueue')
+                    )
+                ],
             ),
             cast(Any, context),
         )
@@ -610,6 +652,7 @@ async def test_internal_worker_grpc_rejects_stale_output_publication_without_mut
     assert datasource.schema_cache == {'columns': [{'name': 'old', 'dtype': 'Int64', 'nullable': False}]}
     assert build is not None
     assert build.result_json is None
+    assert list(test_db_session.execute(select(RuntimeOutboxEvent)).scalars().all()) == []
 
 
 @pytest.mark.asyncio

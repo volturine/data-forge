@@ -228,11 +228,17 @@ def upgrade() -> None:
         sa.Column('artifact_name', sa.String(), nullable=True),
         sa.Column('artifact_content_type', sa.String(), nullable=True),
         sa.Column('lease_owner', sa.String(), nullable=True),
+        sa.Column('claim_token', sa.String(), nullable=True),
+        sa.Column('lease_generation', sa.BigInteger(), nullable=False, server_default='0'),
         sa.Column('lease_expires_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('claimed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('last_renewed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('attempts', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('claim_token', name='uq_compute_requests_claim_token'),
     )
     op.create_index('ix_compute_requests_namespace', 'compute_requests', ['namespace'])
     op.create_index('ix_compute_requests_kind', 'compute_requests', ['kind'])
@@ -242,9 +248,12 @@ def upgrade() -> None:
         'runtime_outbox_events',
         sa.Column('id', sa.String(), nullable=False),
         sa.Column('kind', sa.String(), nullable=False),
-        sa.Column('status', sa.String(length=10), nullable=False),
+        sa.Column('status', sa.String(length=11), nullable=False),
         sa.Column('payload_json', sa.JSON(), nullable=False),
         sa.Column('attempts', sa.Integer(), nullable=False, server_default='0'),
+        sa.Column('claim_token', sa.String(), nullable=True),
+        sa.Column('lease_generation', sa.Integer(), nullable=False, server_default='0'),
+        sa.Column('lease_expires_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('last_error', sa.String(), nullable=True),
         sa.Column('available_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
@@ -255,6 +264,7 @@ def upgrade() -> None:
     op.create_index('ix_runtime_outbox_events_kind', 'runtime_outbox_events', ['kind'])
     op.create_index('ix_runtime_outbox_events_status', 'runtime_outbox_events', ['status'])
     op.create_index('ix_runtime_outbox_events_available_at', 'runtime_outbox_events', ['available_at'])
+    op.create_index('ix_runtime_outbox_events_lease_expires_at', 'runtime_outbox_events', ['lease_expires_at'])
     op.create_table(
         'healthchecks',
         sa.Column('id', sa.String(), nullable=False),
@@ -366,6 +376,7 @@ def downgrade() -> None:
     op.drop_table('healthcheck_results')
     op.drop_index('ix_healthchecks_datasource_id', table_name='healthchecks')
     op.drop_table('healthchecks')
+    op.drop_index('ix_runtime_outbox_events_lease_expires_at', table_name='runtime_outbox_events')
     op.drop_index('ix_runtime_outbox_events_available_at', table_name='runtime_outbox_events')
     op.drop_index('ix_runtime_outbox_events_status', table_name='runtime_outbox_events')
     op.drop_index('ix_runtime_outbox_events_kind', table_name='runtime_outbox_events')
