@@ -2,7 +2,6 @@ import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '$lib/t
 
 import type { SchemaInfo } from '$lib/types/datasource';
 import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
-import type { Schema } from '$lib/types/schema';
 import { getAnalysisWithHeaders, updateAnalysis } from '$lib/api/analysis';
 import {
 	buildOutputConfig,
@@ -10,13 +9,11 @@ import {
 	generateOutputName,
 	validatePipelineTabs
 } from '$lib/utils/analysis-tab';
-import { normalizeDtype } from '$lib/utils/transform';
 import { normalizeConfig } from '$lib/utils/step-config-defaults';
 import { isChartStep, normalizeStepType } from '$lib/components/pipeline/utils';
 import { track } from '$lib/utils/audit-log';
 import { cloneJson, isRecord } from '$lib/utils/json';
 import { uuid } from '$lib/utils/uuid';
-import { schemaStore } from '$lib/stores/schema.svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { ResultAsync, errAsync, ok } from 'neverthrow';
 import type { ApiError } from '$lib/api/client';
@@ -41,17 +38,17 @@ function nextDuplicateTabName(tabs: AnalysisTab[], sourceName: string): string {
 	return `${base} ${suffix}`;
 }
 
-async function loadPreviewRuns(map: SvelteMap<string, boolean>): Promise<void> {
-	const stored = await idbGet<Array<[string, boolean]>>('analysis_preview_runs');
+async function loadPreviewRuns(map: SvelteMap<string, boolean>, namespace: string): Promise<void> {
+	const stored = await idbGet<Array<[string, boolean]>>(`analysis_preview_runs:${namespace}`);
 	if (!stored) return;
 	for (const [key, value] of stored) {
 		map.set(key, value);
 	}
 }
 
-function savePreviewRuns(map: SvelteMap<string, boolean>): void {
+function savePreviewRuns(map: SvelteMap<string, boolean>, namespace: string): void {
 	const entries = Array.from(map.entries());
-	void idbSet('analysis_preview_runs', entries);
+	void idbSet(`analysis_preview_runs:${namespace}`, entries);
 }
 
 export class AnalysisStore {
@@ -68,14 +65,19 @@ export class AnalysisStore {
 	lastSaved = $state<{ name: string; description: string | null } | null>(null);
 	previewRuns = $state(new SvelteMap<string, boolean>());
 	previewPaused = $state(false);
+	previewNamespace = $state<string | null>(null);
+	currentRevision = $state<string | null>(null);
 
-	constructor() {
-		void loadPreviewRuns(this.previewRuns);
+	async initialize(namespace: string): Promise<void> {
+		if (this.previewNamespace === namespace) return;
+		this.previewRuns.clear();
+		this.previewNamespace = namespace;
+		await loadPreviewRuns(this.previewRuns, namespace);
 	}
 
 	setPreviewRun(key: string, value: boolean): void {
 		this.previewRuns.set(key, value);
-		savePreviewRuns(this.previewRuns);
+		if (this.previewNamespace) savePreviewRuns(this.previewRuns, this.previewNamespace);
 	}
 
 	setPreviewPaused(value: boolean): void {
@@ -99,29 +101,10 @@ export class AnalysisStore {
 
 	pipeline = $derived(this.activeTab?.steps ?? []);
 
-	calculatedSchema = $derived.by(() => {
-		if (!this.pipeline.length || !this.sourceSchemas.size) return null;
-
-		const sourceSchema = this.activeSchemaKey
-			? this.sourceSchemas.get(this.activeSchemaKey)
-			: this.sourceSchemas.values().next().value;
-		if (!sourceSchema) return null;
-
-		const baseSchema: Schema = {
-			columns: sourceSchema.columns.map((col) => ({
-				name: col.name,
-				dtype: normalizeDtype(col.dtype) ?? col.dtype,
-				nullable: col.nullable
-			})),
-			row_count: sourceSchema.row_count
-		};
-
-		return schemaStore.getLastOutput() ?? baseSchema;
-	});
-
 	applyAnalysis(analysis: Analysis): void {
 		const previousId = this.current?.id ?? null;
 		this.current = analysis;
+		this.currentRevision = String(analysis.revision);
 		this.lastSaved = { name: analysis.name, description: analysis.description ?? null };
 		if (previousId !== analysis.id) {
 			this.activeTabId = null;
@@ -140,7 +123,8 @@ export class AnalysisStore {
 		return getAnalysisWithHeaders(id)
 			.andThen(({ analysis, version }) => {
 				if (this.loadId !== token) return ok(undefined);
-				this.current = { ...analysis, version };
+				this.current = analysis;
+				this.currentRevision = version;
 				this.lastSaved = { name: analysis.name, description: analysis.description ?? null };
 				this.resolveTabs(analysis);
 				return ok(undefined);
@@ -590,11 +574,19 @@ export class AnalysisStore {
 			tabs: this.tabs
 		};
 
-		const version = this.current.version ?? null;
+		const version = this.currentRevision;
+		if (version === null) {
+			this.loading = false;
+			return errAsync({
+				type: 'parse' as const,
+				message: 'Analysis response is missing its revision'
+			});
+		}
 
 		return updateAnalysis(this.current.id, update, version)
 			.andThen(({ analysis: updated, version: nextVersion }) => {
-				this.current = { ...updated, version: nextVersion };
+				this.current = updated;
+				this.currentRevision = nextVersion;
 				this.lastSaved = { name: updated.name, description: updated.description ?? null };
 				const tabs = (updated.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs ?? [];
 				if (tabs.length) {
@@ -641,6 +633,7 @@ export class AnalysisStore {
 
 	reset(): void {
 		this.current = null;
+		this.currentRevision = null;
 		this.tabs = [];
 		this.savedTabs = [];
 		this.activeTabId = null;

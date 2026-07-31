@@ -160,7 +160,7 @@ def test_build_event_projection_counter_and_outbox_roll_back_together(test_db_se
         message='uncommitted',
     )
 
-    row = build_run_service.append_build_event(test_db_session, build_id=run.id, event=event, commit=False)
+    row = build_run_service.stage_build_event(test_db_session, build_id=run.id, event=event)
     assert row is not None
     test_db_session.rollback()
     test_db_session.expire_all()
@@ -249,16 +249,15 @@ def test_cancellation_and_worker_completion_race_preserves_one_terminal_outcome(
         )
         with Session(test_engine) as session:
             barrier.wait(timeout=5)
-            cancelled_job = build_jobs_service.mark_job_cancelled(session, claimed.id, commit=False)
+            cancelled_job = build_jobs_service.stage_job_cancelled(session, claimed.id)
             if cancelled_job.status != BuildJobStatus.CANCELLED:
                 session.rollback()
                 return 'lost'
-            row = build_run_service.append_build_event(
+            row = build_run_service.stage_build_event(
                 session,
                 build_id=run.id,
                 event=event,
                 authoritative_execution_generation=cancelled_job.lease_generation,
-                commit=False,
             )
             if row is None:
                 session.rollback()
@@ -290,12 +289,11 @@ def test_cancellation_and_worker_completion_race_preserves_one_terminal_outcome(
             if claim is None:
                 session.rollback()
                 return 'lost'
-            row = build_run_service.append_build_event(
+            row = build_run_service.stage_build_event(
                 session,
                 build_id=run.id,
                 event=event,
                 expected_execution_generation=claimed.lease_generation,
-                commit=False,
             )
             if row is None:
                 session.rollback()

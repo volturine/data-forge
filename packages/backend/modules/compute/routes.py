@@ -671,7 +671,7 @@ async def start_active_build(
                 source_type=placeholder_source_type,
                 config=placeholder_config,
             )
-        build_run_service.create_build_run(
+        build_run_service.stage_build_run(
             session,
             build_id=build_id,
             namespace=namespace,
@@ -695,16 +695,14 @@ async def start_active_build(
             total_tabs=len(tabs),
             created_at=started_at,
             started_at=started_at,
-            commit=False,
         )
-        build_job_service.create_job(
+        build_job_service.stage_job(
             session,
             build_id=build_id,
             namespace=namespace,
-            commit=False,
         )
-        runtime_outbox_service.enqueue_api_build_notification(session, namespace=namespace, build_id=build_id, latest_sequence=0, commit=False)
-        runtime_outbox_service.enqueue_build_job_notification(session, commit=False)
+        runtime_outbox_service.enqueue_api_build_notification(session, namespace=namespace, build_id=build_id, latest_sequence=0)
+        runtime_outbox_service.enqueue_build_job_notification(session)
         session.commit()
     except Exception:
         session.rollback()
@@ -757,16 +755,15 @@ async def cancel_build(
         job_status = build_job_service.BuildJobStatus.require(job.status)
         if job_status != build_job_service.BuildJobStatus.QUEUED and not job_status.is_active:
             raise HTTPException(status_code=409, detail='Build job became terminal before cancellation')
-        cancelled_job = build_job_service.mark_job_cancelled(session, job.id, commit=False)
+        cancelled_job = build_job_service.stage_job_cancelled(session, job.id)
         if build_job_service.BuildJobStatus.require(cancelled_job.status) != build_job_service.BuildJobStatus.CANCELLED:
             raise HTTPException(status_code=409, detail='Build job became terminal before cancellation')
-        event_row = build_run_service.append_build_event(
+        event_row = build_run_service.stage_build_event(
             session,
             build_id=detail.build_id,
             event=cancellation_event,
             resource_config_json=detail.resource_config.model_dump(mode='json') if detail.resource_config is not None else None,
             authoritative_execution_generation=cancelled_job.lease_generation,
-            commit=False,
         )
         if event_row is None:
             raise HTTPException(status_code=409, detail='Build became terminal before cancellation')

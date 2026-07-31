@@ -2,12 +2,15 @@
 
 ## Status Summary
 
-This tracker reflects the current repository state after the distributed runtime v2 implementation, Docker topology, verification gate, and final frontend determinism fixes.
+This tracker reflects the current repository state after the distributed runtime v2 implementation and the subsequent correctness remediation. The detailed invariant-level source of truth is `runtime-correctness-and-architecture-remediation.md`.
 
 Latest update:
 
-- Added `/api/v1/runtime/overview` as the release-confidence runtime/admin endpoint required by the PRD observability section.
-- Fixed the engines monitor popup failure in Docker e2e by deduping DB-backed engine websocket snapshots to one active row per `analysis_id` across worker-owned `engine_instances` rows.
+- Build jobs and compute requests now use renewable token-and-generation claims; stale event, completion, failure, and publication writes are fenced.
+- Build event allocation, projection updates, terminal transitions, and runtime-outbox enqueueing now use atomic database transactions.
+- Scheduler and runtime-outbox dispatch use durable, ordered, expiring claims.
+- Analysis mutations require revisions, frontend requests are scoped to namespace epochs, and order-sensitive runtime operations define tie ordering.
+- The database history is intentionally compacted to the two complete schema creators; no legacy upgrade path is supported.
 
 Overall status:
 
@@ -26,30 +29,36 @@ Current claim:
 - Postgres is the supported distributed runtime backend.
 - Local dev/test uses the same Postgres-backed runtime model.
 - One supervised app runtime runs API, scheduler, and a worker manager; build workers spawn dynamically from zero.
-- Durable build state, durable job leasing, DB-backed websocket replay, and scheduler leasing are implemented.
+- Durable build state, renewable fenced leasing, DB-backed websocket replay, and scheduler leasing are implemented.
 - `WORKERS > 1` is supported only when distributed runtime is enabled on Postgres.
 
 Residual audit note:
 
-- The implementation and Docker validation now cover multi-worker build start, cross-worker build detail reads, cross-worker cancellation, websocket replay, worker registration, and scheduler execution.
-- The runtime/admin surface now exposes runtime mode, API process identity, worker heartbeats, engine rows, and queue status through `/api/v1/runtime/overview`.
-- Lower-level metric counters from the PRD observability wishlist such as build-event insert failures, websocket connected client counts, CAS conflict counts, and scheduler duplicate-prevention counters are not yet exposed as dedicated metrics.
+- The implementation covers stale-owner rejection, active lease renewal, atomic build transitions, durable outbox recovery, scheduler claim ordering, analysis lost-update prevention, and frontend namespace isolation.
+- The runtime/admin surface exposes runtime mode, API process identity, worker heartbeats, engine rows, and queue status through `/api/v1/runtime/overview`.
+- Datasource command orchestration still crosses the API gRPC boundary, external notification consumers do not all provide durable idempotency acknowledgements, and the broad multi-process failure-injection matrix remains follow-up work.
+- Lower-level metric counters such as lease renew outcomes, fenced-write rejection, attempt exhaustion, scheduler duplicate prevention, and datasource contention are not yet exposed as dedicated metrics.
 
 ## Final Validation Snapshot
 
-Latest validated state:
+Latest canonical validation on 2026-07-31:
 
-- focused backend runtime suite: `23 passed`
-- `just verify`: passed
-- `just docker-test`: passed
-- Docker test suite result: `276 passed`
+- `just verify`: passed without warnings or generated drift
+- backend unit suite: `976 passed`
+- backend integration suite: `92 passed, 2 skipped`
+- worker suite: `306 passed`
+- scheduler suite: `3 passed`
+- frontend unit suite: `1161 passed`
+- `just test-e2e`: `350 passed` without unclassified warnings
 
-Frontend/runtime fixes included in the final green run:
+Correctness fixes included in this green run:
 
-- shell readiness tightened before UI interaction
-- engine websocket snapshots now project one active engine entry per analysis, preventing duplicate-key popup render crashes in multi-worker/runtime races
-- health-check create flow now populates the rendered datasource selector state
-- build cancellation preview and monitoring rows now apply authoritative optimistic cancelled state immediately after successful cancel requests
+- token-and-generation fencing for build jobs, compute requests, scheduler triggers, datasource publication, and runtime-outbox dispatch
+- atomic build event/projection/finalization/cancellation transactions and bounded retry exhaustion
+- analysis revision compare-and-swap and atomic version allocation
+- namespace-epoch cancellation and stale-response rejection in frontend state
+- deterministic query and tied pipeline-operation ordering
+- durable notification staging and poison outbox handling
 
 ## Phase Details
 

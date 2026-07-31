@@ -11,6 +11,7 @@ class RuntimeOutboxStatus(DataForgeStrEnum):
     DISPATCHING = 'dispatching'
     DISPATCHED = 'dispatched'
     FAILED = 'failed'
+    POISONED = 'poisoned'
 
 
 class RuntimeOutboxEvent(SQLModel, table=True):  # type: ignore[call-arg, assignment]

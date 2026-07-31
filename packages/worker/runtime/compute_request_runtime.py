@@ -207,7 +207,15 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             if claimed.command_envelope.command.WhichOneof("command") != "datasource":
                 raise ValueError("compute command envelope must contain datasource")
             datasource_command = claimed.command_envelope.command.datasource
-            result = client.execute_datasource_request(namespace=claimed.namespace, kind=claimed.kind, command=datasource_command)
+            result = client.execute_datasource_request(
+                namespace=claimed.namespace,
+                kind=claimed.kind,
+                command=datasource_command,
+                request_id=claimed.id,
+                worker_id=claimed.worker_id,
+                claim_token=claimed.claim_token,
+                lease_generation=claimed.lease_generation,
+            )
             _complete_request(client, claimed, response=compute_pb2.ComputeResponse(datasource=result))
             return
 
@@ -548,8 +556,9 @@ def _error_message(exc: Exception) -> str:
 def _error_result(exc: Exception) -> compute_pb2.ComputeErrorResult:
     if isinstance(exc, BackendWorkerRpcError):
         result = compute_pb2.ComputeErrorResult(error=exc.error, status_code=exc.status_code)
-        if exc.error_code is not None:
-            result.error_code = cast(errors_pb2.ErrorCode, errors_pb2.ErrorCode.Value(f"ERROR_CODE_{exc.error_code}"))
+        protocol_error_code = f"ERROR_CODE_{exc.error_code}" if exc.error_code is not None else None
+        if protocol_error_code in errors_pb2.ErrorCode.keys():
+            result.error_code = cast(errors_pb2.ErrorCode, errors_pb2.ErrorCode.Value(protocol_error_code))
         if exc.details:
             result.details.CopyFrom(dict_to_struct(exc.details))
         return result

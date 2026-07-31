@@ -45,7 +45,7 @@ This index is the fastest way to understand which PRDs reflect current product t
 | `mcp-tool-contract.md` | Not implemented | MCP tool contract remains backlog | Keep as backlog |
 | `mobile-first-ui.md` | Not implemented | Mobile-first UI remains backlog | Keep as backlog |
 | `pipeline-compute.md` | Superseded | Describes the earlier multiprocessing engine architecture; now superseded by the durable runtime | Keep as historical architecture record |
-| `runtime-correctness-and-architecture-remediation.md` | Not implemented | Corrective plan for fenced leases, atomic runtime transitions, deterministic ordering, ownership boundaries, and maintainability | Use as the active runtime remediation backlog |
+| `runtime-correctness-and-architecture-remediation.md` | Partial | Fenced runtime claims, atomic build transitions, analysis revisions, namespace epochs, deterministic ordering, and warning-clean verification are implemented; execution ownership, broad failure injection, and structural extraction remain | Use as the active runtime remediation backlog |
 | `s3-storage-support.md` | Not implemented | S3 storage support remains backlog | Keep as backlog |
 | `schedule-descriptions.md` | Not implemented | Schedule descriptions remain backlog | Keep as backlog |
 | `scheduling.md` | Superseded | Describes the earlier in-process scheduler; now superseded by the dedicated scheduler service | Keep as historical architecture record |

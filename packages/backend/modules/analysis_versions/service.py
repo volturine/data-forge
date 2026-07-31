@@ -19,7 +19,8 @@ from backend_core.sqlmodel_typing import col
 from modules.analysis import service as analysis_service
 
 
-def create_version(session: Session, analysis: Analysis, *, commit: bool = True) -> AnalysisVersion:
+def create_version(session: Session, analysis: Analysis) -> AnalysisVersion:
+    session.execute(select(Analysis).where(col(Analysis.id) == analysis.id).with_for_update()).scalar_one()
     version_id = str(uuid.uuid4())
     now = datetime.now(UTC).replace(tzinfo=None)
     next_version = select(func.coalesce(func.max(AnalysisVersion.version), 0) + 1).where(col(AnalysisVersion.analysis_id) == analysis.id).scalar_subquery()
@@ -33,10 +34,7 @@ def create_version(session: Session, analysis: Analysis, *, commit: bool = True)
         created_at=now,
     )
     session.execute(stmt)
-    if commit:
-        session.commit()
-    else:
-        session.flush()
+    session.flush()
     version = session.get(AnalysisVersion, version_id)
     if not version:
         raise AnalysisValidationError('Failed to create analysis version')
@@ -78,7 +76,7 @@ def rename_version(session: Session, analysis_id: str, version: int, name: str) 
 
 
 def restore_version(session: Session, analysis_id: str, version: int) -> Analysis:
-    analysis = session.get(Analysis, analysis_id)
+    analysis = session.execute(select(Analysis).where(col(Analysis.id) == analysis_id).with_for_update()).scalar_one_or_none()
     if not analysis:
         raise analysis_not_found(analysis_id)
 
@@ -86,12 +84,13 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
     if not target:
         raise analysis_version_not_found(analysis_id, version)
 
-    create_version(session, analysis, commit=False)
+    create_version(session, analysis)
 
     analysis.name = target.name
     analysis.description = target.description
     analysis.pipeline_definition = target.pipeline_definition
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    analysis.revision += 1
 
     pipeline_definition = analysis.pipeline_definition
     analysis_service.validate_stored_pipeline_definition(session, pipeline_definition, analysis_id)
@@ -127,6 +126,4 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
 
     session.commit()
     session.refresh(analysis)
-
-    create_version(session, analysis)
     return analysis

@@ -112,6 +112,7 @@
 	$effect(() => {
 		if (!isNamespaceReady()) return;
 		favoriteStore.setNamespace(namespaceState.value);
+		void analysisStore.initialize(namespaceState.value);
 	});
 
 	// Subscription: $derived can't install listeners.

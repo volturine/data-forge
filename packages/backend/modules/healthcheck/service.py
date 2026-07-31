@@ -40,7 +40,7 @@ def list_healthchecks(
                 col(DataSource.name).ilike(q),
             )
         )
-    query = query.order_by(col(HealthCheck.created_at).desc()).limit(limit).offset(offset)
+    query = query.order_by(col(HealthCheck.created_at).desc(), col(HealthCheck.id).asc()).limit(limit).offset(offset)
     checks = session.execute(query).scalars().all()
     return [HealthCheckResponse.model_validate(check) for check in checks]
 
@@ -62,7 +62,7 @@ def list_all_healthchecks(
                 col(DataSource.name).ilike(q),
             )
         )
-    query = query.order_by(col(HealthCheck.created_at).desc()).limit(limit).offset(offset)
+    query = query.order_by(col(HealthCheck.created_at).desc(), col(HealthCheck.id).asc()).limit(limit).offset(offset)
     checks = session.execute(query).scalars().all()
     return [HealthCheckResponse.model_validate(check) for check in checks]
 
@@ -116,7 +116,7 @@ def list_results(session: Session, datasource_id: str, limit: int = 10) -> list[
     datasource = session.get(DataSource, datasource_id)
     if not datasource:
         return []
-    query = select(HealthCheckResult).order_by(col(HealthCheckResult.checked_at).desc()).limit(limit)
+    query = select(HealthCheckResult).order_by(col(HealthCheckResult.checked_at).desc(), col(HealthCheckResult.id).asc()).limit(limit)
     checks = session.execute(
         select(col(HealthCheck.id)).where(col(HealthCheck.datasource_id) == datasource_id),
     )
@@ -130,7 +130,7 @@ def list_results(session: Session, datasource_id: str, limit: int = 10) -> list[
 
 
 def list_all_results(session: Session, limit: int = 10) -> list[HealthCheckResultResponse]:
-    query = select(HealthCheckResult).order_by(col(HealthCheckResult.checked_at).desc()).limit(limit)
+    query = select(HealthCheckResult).order_by(col(HealthCheckResult.checked_at).desc(), col(HealthCheckResult.id).asc()).limit(limit)
     results = session.execute(query)
     return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
 
@@ -140,7 +140,10 @@ def list_results_for_check(session: Session, healthcheck_id: str, limit: int = 1
     if not check:
         return []
     results = session.execute(
-        select(HealthCheckResult).where(sa(HealthCheckResult.healthcheck_id == healthcheck_id)).order_by(col(HealthCheckResult.checked_at).desc()).limit(limit),
+        select(HealthCheckResult)
+        .where(sa(HealthCheckResult.healthcheck_id == healthcheck_id))
+        .order_by(col(HealthCheckResult.checked_at).desc(), col(HealthCheckResult.id).asc())
+        .limit(limit),
     )
     return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
 

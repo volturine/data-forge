@@ -331,6 +331,7 @@ def test_postgres_outbox_dispatchers_do_not_share_unclaimed_batch_rows(monkeypat
         with Session(database._get_tenant_engine()) as session:
             first = runtime_outbox_service.enqueue_build_job_notification(session)
             second = runtime_outbox_service.enqueue_build_job_notification(session)
+            session.commit()
             event_ids = [first.id, second.id]
 
         delivered: list[str] = []

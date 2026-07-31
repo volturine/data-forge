@@ -50,7 +50,7 @@ def api_process(worker_id: str | None) -> schemas.ApiProcessSummary:
 
 def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary]:
     now = _utcnow()
-    stmt = select(RuntimeWorker).order_by(sa(RuntimeWorker.kind), sa(RuntimeWorker.started_at))
+    stmt = select(RuntimeWorker).order_by(sa(RuntimeWorker.kind), sa(RuntimeWorker.started_at), sa(RuntimeWorker.id))
     rows = list(session.execute(stmt).scalars().all())
     return [
         schemas.RuntimeWorkerSummary(
@@ -70,7 +70,12 @@ def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary
 
 
 def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummary]:
-    stmt = select(EngineInstance).order_by(EngineInstance.namespace, EngineInstance.analysis_id)
+    stmt = select(EngineInstance).order_by(
+        EngineInstance.namespace,
+        EngineInstance.analysis_id,
+        EngineInstance.engine_scope,
+        EngineInstance.id,
+    )
     rows = list(session.execute(stmt).scalars().all())
     items: list[schemas.EngineInstanceSummary] = []
     for row in rows:

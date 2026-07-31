@@ -24,6 +24,8 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('runtime_reconciliation_poll_interval_seconds', 1, None),
     ('runtime_outbox_retry_seconds', 1, None),
     ('runtime_outbox_claim_ttl_seconds', 1, None),
+    ('runtime_outbox_max_attempts', 1, None),
+    ('runtime_compute_max_attempts', 1, None),
     ('runtime_work_lease_ttl_seconds', 1, None),
     ('build_worker_min_processes', 0, 100),
     ('build_worker_max_processes', 0, 100),
@@ -135,6 +137,8 @@ class Settings(BaseSettings):
     runtime_reconciliation_poll_interval_seconds: int = Field(default=1, alias='RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS')
     runtime_outbox_retry_seconds: int = Field(default=5, alias='RUNTIME_OUTBOX_RETRY_SECONDS')
     runtime_outbox_claim_ttl_seconds: int = Field(default=30, alias='RUNTIME_OUTBOX_CLAIM_TTL_SECONDS')
+    runtime_outbox_max_attempts: int = Field(default=10, alias='RUNTIME_OUTBOX_MAX_ATTEMPTS')
+    runtime_compute_max_attempts: int = Field(default=3, alias='RUNTIME_COMPUTE_MAX_ATTEMPTS')
     runtime_work_lease_ttl_seconds: int = Field(default=300, alias='RUNTIME_WORK_LEASE_TTL_SECONDS')
     embedded_build_worker_enabled: bool = Field(default=False, alias='EMBEDDED_BUILD_WORKER_ENABLED')
 

@@ -194,7 +194,7 @@ class TestDatasourceIngest:
         test_db_session.add(ds)
         test_db_session.commit()
 
-        out = ingest_external_datasource(test_db_session, ds.id)
+        out = ingest_external_datasource(test_db_session, ds.id, staging_key='manual-claim')
         assert out.config['snapshot_id'] == '222'
         assert out.config['snapshot_timestamp_ms'] == 654321
         assert out.config['current_snapshot_id'] == '222'
@@ -276,7 +276,7 @@ class TestDatasourceIngest:
         test_db_session,
         sample_csv_object_url: str,
     ):
-        from modules.datasource.runtime_service import ingest_external_datasource
+        from modules.datasource.runtime_service import DatasourcePublicationClaimLost, ingest_external_datasource
 
         class _Snap:
             snapshot_id = 333
@@ -333,7 +333,7 @@ class TestDatasourceIngest:
         def run_ingest() -> None:
             try:
                 with Session(test_engine) as session:
-                    ingest_external_datasource(session, ds.id)
+                    ingest_external_datasource(session, ds.id, staging_key=str(uuid.uuid4()))
             except Exception as exc:  # pragma: no cover - assertion captures failure state
                 errors.append(exc)
 
@@ -350,5 +350,10 @@ class TestDatasourceIngest:
 
         assert not first.is_alive()
         assert not second.is_alive()
-        assert not errors
-        assert max_active_writes == 1
+        assert len(errors) == 1
+        assert isinstance(errors[0], DatasourcePublicationClaimLost)
+        assert max_active_writes == 2
+        test_db_session.expire_all()
+        persisted = test_db_session.get(DataSource, ds.id)
+        assert persisted is not None
+        assert persisted.revision == 2

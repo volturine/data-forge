@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 from sqlmodel import Session
 
@@ -11,6 +12,12 @@ from backend_core.sqlmodel_typing import sa
 from main import app
 from modules.analysis.schemas import AnalysisResponseSchema
 from modules.auth.dependencies import get_optional_user
+from tests.http_client import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _use_current_analysis_revision(client: TestClient) -> None:
+    client.headers['If-Match'] = '1'
 
 
 def _schema_enum_values(schema: dict, field_name: str) -> list[str]:
@@ -663,9 +670,19 @@ class TestAnalysisUpdate:
 
         assert response.status_code == 200
         result = response.json()
-        updated_at = result['updated_at'].replace('Z', '+00:00')
-        assert response.headers['X-Analysis-Version'] == updated_at
-        assert response.headers['ETag'] == f'"analysis-{result["id"]}-{updated_at}"'
+        assert result['revision'] == 2
+        assert response.headers['X-Analysis-Version'] == '2'
+        assert response.headers['ETag'] == f'"analysis-{result["id"]}-2"'
+
+    def test_update_analysis_requires_revision(self, client, sample_analysis: Analysis):
+        del client.headers['If-Match']
+        response = client.put(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json={'name': 'Updated', 'tabs': sample_analysis.pipeline_definition['tabs']},
+        )
+
+        assert response.status_code == 428
+        assert response.json()['detail'] == 'If-Match analysis revision is required'
 
     def test_update_analysis_rejects_stale_if_match(self, client, sample_analysis: Analysis):
         payload = {
@@ -1210,6 +1227,7 @@ class TestRemoveStep:
         )
         assert add_response.status_code == 200
         second_step_id = add_response.json()['id']
+        client.headers['If-Match'] = add_response.headers['X-Analysis-Version']
 
         delete_response = client.delete(f'/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/steps/{first_step_id}')
         assert delete_response.status_code == 204

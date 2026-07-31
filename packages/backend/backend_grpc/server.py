@@ -176,9 +176,19 @@ def _run_async_handler_in_thread(func):
             finally:
                 loop.close()
 
-        return await asyncio.to_thread(_run)
+        try:
+            return await asyncio.to_thread(_run)
+        except _ThreadedRpcAbort as exc:
+            await context.abort(exc.status, exc.details)
 
     return wrapper
+
+
+class _ThreadedRpcAbort(Exception):
+    def __init__(self, status: grpc.StatusCode, details: str) -> None:
+        super().__init__(details)
+        self.status = status
+        self.details = details
 
 
 def _parse_worker_kind(value: str) -> RuntimeWorkerKind:
@@ -537,7 +547,7 @@ def _count(value: int) -> worker_runtime_pb2.CountResponse:
 
 
 def _reconcile_expired_build_jobs(session: Any) -> int:
-    build_ids = build_job_service.expire_exhausted_jobs(session, commit=False)
+    build_ids = build_job_service.stage_exhausted_jobs(session)
     for build_id in build_ids:
         scheduler_service.apply_schedule_run_reconciliation(session, build_id=build_id)
     session.commit()
@@ -599,7 +609,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerClaimBuildJobResponse:
         if request.protocol_version != _BUILD_JOB_PROTOCOL_VERSION:
-            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build worker protocol version is incompatible')
+            raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Build worker protocol version is incompatible')
         reclaimable_owner_ids = run_settings_db(runtime_worker_service.reclaimable_worker_ids, kind=RuntimeWorkerKind.BUILD_WORKER)
         for namespace in run_settings_db(list_runtime_namespaces):
             token = set_namespace_context(namespace)
@@ -653,7 +663,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerClaimComputeRequestResponse:
         if request.protocol_version != _BUILD_JOB_PROTOCOL_VERSION:
-            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute worker protocol version is incompatible')
+            raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute worker protocol version is incompatible')
         reclaimable_owner_ids = run_settings_db(runtime_worker_service.reclaimable_worker_ids, kind=RuntimeWorkerKind.BUILD_MANAGER)
         for namespace in run_settings_db(list_runtime_namespaces):
             token = set_namespace_context(namespace)
@@ -725,7 +735,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 artifact_content_type=_optional_str(request, 'artifact_content_type'),
             )
             if completed is None:
-                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute request lease is no longer active')
+                raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute request lease is no longer active')
             return _response(request.request_id)
         finally:
             reset_namespace(token)
@@ -746,7 +756,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 lease_generation=request.lease_generation,
             )
             if failed is None:
-                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute request lease is no longer active')
+                raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute request lease is no longer active')
             return _response(request.request_id)
         finally:
             reset_namespace(token)
@@ -822,7 +832,24 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             elif kind == enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE:
                 if command.WhichOneof('command') != 'ingest':
                     raise ValueError('datasource command must contain ingest')
-                response = datasource_runtime_service.ingest_external_datasource(session, command.ingest.datasource_id)
+
+                def _guard_compute_publication(active_session: Any) -> None:
+                    active_claim = compute_requests_service.lock_active_request_claim(
+                        active_session,
+                        request.request_id,
+                        worker_id=request.worker_id,
+                        claim_token=request.claim_token,
+                        lease_generation=request.lease_generation,
+                    )
+                    if active_claim is None:
+                        raise datasource_runtime_service.DatasourcePublicationClaimLost
+
+                response = datasource_runtime_service.ingest_external_datasource(
+                    session,
+                    command.ingest.datasource_id,
+                    staging_key=request.claim_token,
+                    publication_guard=_guard_compute_publication,
+                )
             elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
                 if command.WhichOneof('command') != 'schema':
                     raise ValueError('datasource command must contain schema')
@@ -860,6 +887,11 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 raise ValueError(f'Unsupported datasource request kind: {compute_request_kind_name(kind)}')
             response_payload = response.model_dump(mode='json')
             return worker_runtime_pb2.WorkerDatasourceCommandResponse(result=datasource_result_from_payload(kind, response_payload))
+        except datasource_runtime_service.DatasourcePublicationClaimLost as exc:
+            raise _ThreadedRpcAbort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                str(exc) or 'Datasource publication claim is no longer active',
+            ) from exc
         except AppError as exc:
             if exc.error_code != 'DATASOURCE_NOT_FOUND':
                 raise
@@ -888,7 +920,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 lease_generation=request.lease_generation,
             )
             if claim is None:
-                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
+                raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
 
             def _guard_publication(active_session: Any) -> None:
                 active_claim = build_job_service.lock_active_job_claim(
@@ -910,7 +942,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     publication_guard=_guard_publication,
                 )
             except datasource_runtime_service.DatasourcePublicationClaimLost:
-                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
+                raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
             result = datasource_result_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE, response.model_dump(mode='json'))
             if result.WhichOneof('result') != 'datasource':
                 raise ValueError('schedule ingest must return a datasource result')
@@ -1017,7 +1049,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 lease_generation=request.lease_generation,
             )
             if claim is None:
-                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
+                raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
             build_run_service.update_build_result_json(session, request.build_id, struct_to_dict(request.result))
             return _response(request.build_id)
         finally:
@@ -1036,7 +1068,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             claimed_publication = request.HasField('build_id')
             claim_fields = ('job_id', 'build_id', 'worker_id', 'claim_token', 'lease_generation')
             if any(request.HasField(field) for field in claim_fields) != all(request.HasField(field) for field in claim_fields):
-                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Output publication claim fields must be provided together')
+                raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Output publication claim fields must be provided together')
             if claimed_publication:
                 claim = build_job_service.lock_active_job_claim(
                     session,
@@ -1047,7 +1079,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     lease_generation=request.lease_generation,
                 )
                 if claim is None:
-                    await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
+                    raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
             config = struct_to_dict(request.config)
             schema_cache = _schema_info_payload(request.schema_info)
             existing = session.get(DataSource, request.result_id)
@@ -1078,7 +1110,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 session.add(datasource)
             if claimed_publication:
                 if not request.HasField('build_result'):
-                    await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Claimed output publication requires a build result')
+                    raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Claimed output publication requires a build result')
                 build_run_service.update_build_result_json(session, request.build_id, struct_to_dict(request.build_result))
             for delivery in request.notification_delivery:
                 delivery_kind = delivery.WhichOneof('delivery')
@@ -1100,8 +1132,11 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     if delivery.telegram.HasField('bot_token'):
                         payload['bot_token'] = delivery.telegram.bot_token
                 else:
-                    await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Notification delivery command is missing its delivery payload')
-                runtime_outbox_service.enqueue_notification_delivery(session, payload, commit=False)
+                    raise _ThreadedRpcAbort(
+                        grpc.StatusCode.INVALID_ARGUMENT,
+                        'Notification delivery command is missing its delivery payload',
+                    )
+                runtime_outbox_service.enqueue_notification_delivery(session, payload)
             session.commit()
             session.refresh(datasource)
             return worker_runtime_pb2.WorkerUpsertOutputDatasourceResponse(
@@ -1272,12 +1307,11 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     duration_ms=run.elapsed_ms,
                     error=request.error,
                 )
-                event_row = build_run_service.append_build_event(
+                event_row = build_run_service.stage_build_event(
                     session,
                     build_id=request.build_id,
                     event=failed_event,
                     expected_execution_generation=request.lease_generation,
-                    commit=False,
                 )
                 if event_row is None:
                     return None
@@ -1551,8 +1585,13 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             return _bool(False)
         token = set_namespace_context(request.namespace)
         try:
+
+            def _enqueue_email(session: Any, payload: dict[str, object]) -> None:
+                runtime_outbox_service.enqueue_notification_delivery(session, payload)
+                session.commit()
+
             run_db(
-                runtime_outbox_service.enqueue_notification_delivery,
+                _enqueue_email,
                 {
                     'kind': EMAIL_DELIVERY_KIND,
                     'to': request.to,
@@ -1581,8 +1620,13 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             }
             if request.HasField('bot_token'):
                 payload['bot_token'] = request.bot_token
+
+            def _enqueue_telegram(session: Any, delivery: dict[str, object]) -> None:
+                runtime_outbox_service.enqueue_notification_delivery(session, delivery)
+                session.commit()
+
             run_db(
-                runtime_outbox_service.enqueue_notification_delivery,
+                _enqueue_telegram,
                 payload,
             )
         finally:
@@ -1691,7 +1735,7 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
             try:
                 claimed = run_db(
                     lambda session: [
-                        (schedule.id, schedule.datasource_id)
+                        (schedule.id, schedule.datasource_id, schedule.claim_token, schedule.lease_generation)
                         for schedule in scheduler_service.claim_due_schedules(
                             session,
                             worker_id=request.worker_id,
@@ -1699,14 +1743,23 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
                         )
                     ]
                 )
-                for schedule_id, datasource_id in claimed:
+                for schedule_id, datasource_id, claim_token, lease_generation in claimed:
+                    if claim_token is None:
+                        raise RuntimeError(f'Schedule {schedule_id} claim token missing')
                     try:
 
-                        def _enqueue(session: Any, target_id: str = schedule_id) -> str:
+                        def _enqueue(
+                            session: Any,
+                            target_id: str = schedule_id,
+                            target_token: str = claim_token,
+                            target_generation: int = lease_generation,
+                        ) -> str:
                             return scheduler_service.enqueue_schedule_run(
                                 session,
                                 target_id,
                                 worker_id=request.worker_id,
+                                claim_token=target_token,
+                                lease_generation=target_generation,
                             )
 
                         build_id = run_db(_enqueue)
@@ -1720,11 +1773,19 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
                         )
                     except Exception as exc:
 
-                        def _mark_failed(session: Any, target_id: str = schedule_id, error: str = str(exc)) -> None:
+                        def _mark_failed(
+                            session: Any,
+                            target_id: str = schedule_id,
+                            error: str = str(exc),
+                            target_token: str = claim_token,
+                            target_generation: int = lease_generation,
+                        ) -> None:
                             scheduler_service.mark_schedule_enqueue_failed(
                                 session,
                                 target_id,
                                 error=error,
+                                claim_token=target_token,
+                                lease_generation=target_generation,
                             )
 
                         run_db(_mark_failed)

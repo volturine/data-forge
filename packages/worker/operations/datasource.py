@@ -304,6 +304,7 @@ def _build_tab_pipeline(
         base_frame = PolarsComputeEngine._apply_step(
             base_frame,
             backend_step,
+            step_id=str(step_id),
             right_sources=additional,
             right_lf=right_lf,
         )

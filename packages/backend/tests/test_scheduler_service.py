@@ -39,6 +39,15 @@ from modules.scheduler.service import (
 # ---------------------------------------------------------------------------
 
 
+def _assign_schedule_claim(schedule: Schedule, worker_id: str = 'scheduler:test') -> tuple[str, int]:
+    token = str(uuid.uuid4())
+    schedule.lease_owner = worker_id
+    schedule.claim_token = token
+    schedule.lease_generation += 1
+    schedule.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    return token, schedule.lease_generation
+
+
 @pytest.fixture
 def schedule_id() -> str:
     return str(uuid.uuid4())
@@ -576,7 +585,9 @@ class TestScheduleClaiming:
         row = test_db_session.get(Schedule, schedule.id)
         assert row is not None
         assert row.lease_owner == 'scheduler:test'
-        assert row.lease_expires_at is None
+        assert row.claim_token is not None
+        assert row.lease_generation == 1
+        assert row.lease_expires_at is not None
 
     def test_claim_due_schedule_skips_already_owned_row(self, test_db_session: Session, output_datasource: DataSource):
         schedule = create_schedule(
@@ -644,6 +655,29 @@ class TestScheduleClaiming:
         claimed = claim_due_schedules(test_db_session, worker_id='scheduler:test')
 
         assert claimed == []
+
+    def test_replaced_claim_cannot_enqueue(self, test_db_session: Session, output_datasource: DataSource):
+        schedule = create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=output_datasource.id, cron_expression='* * * * *'),
+        )
+        row = test_db_session.get(Schedule, schedule.id)
+        assert row is not None
+        stale_token, stale_generation = _assign_schedule_claim(row, 'scheduler:stale')
+        row.claim_token = str(uuid.uuid4())
+        row.lease_generation += 1
+        row.lease_owner = 'scheduler:replacement'
+        test_db_session.add(row)
+        test_db_session.commit()
+
+        with pytest.raises(ValueError, match='claim is stale'):
+            enqueue_schedule_run(
+                test_db_session,
+                schedule.id,
+                worker_id='scheduler:stale',
+                claim_token=stale_token,
+                lease_generation=stale_generation,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -787,12 +821,17 @@ class TestEnqueueScheduleRun:
         )
         row = test_db_session.get(Schedule, schedule.id)
         assert row is not None
-        row.lease_owner = 'scheduler:test'
-        row.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+        claim_token, lease_generation = _assign_schedule_claim(row)
         test_db_session.add(row)
         test_db_session.commit()
 
-        run_id = enqueue_schedule_run(test_db_session, schedule.id, worker_id='scheduler:test')
+        run_id = enqueue_schedule_run(
+            test_db_session,
+            schedule.id,
+            worker_id='scheduler:test',
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+        )
         run = build_run_service.get_build_run(test_db_session, run_id)
 
         assert run is not None
@@ -809,12 +848,17 @@ class TestEnqueueScheduleRun:
         )
         row = test_db_session.get(Schedule, schedule.id)
         assert row is not None
-        row.lease_owner = 'scheduler:test'
-        row.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+        claim_token, lease_generation = _assign_schedule_claim(row)
         test_db_session.add(row)
         test_db_session.commit()
 
-        run_id = enqueue_schedule_run(test_db_session, schedule.id, worker_id='scheduler:test')
+        run_id = enqueue_schedule_run(
+            test_db_session,
+            schedule.id,
+            worker_id='scheduler:test',
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+        )
         run = build_run_service.get_build_run(test_db_session, run_id)
 
         assert run is not None
@@ -849,12 +893,17 @@ class TestEnqueueScheduleRun:
         )
         row = test_db_session.get(Schedule, schedule.id)
         assert row is not None
-        row.lease_owner = 'scheduler:test'
-        row.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+        claim_token, lease_generation = _assign_schedule_claim(row)
         test_db_session.add(row)
         test_db_session.commit()
 
-        run_id = enqueue_schedule_run(test_db_session, schedule.id, worker_id='scheduler:test')
+        run_id = enqueue_schedule_run(
+            test_db_session,
+            schedule.id,
+            worker_id='scheduler:test',
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+        )
         run = build_run_service.get_build_run(test_db_session, run_id)
 
         assert run is not None

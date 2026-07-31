@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
 from sqlmodel import Session
 
 from backend_core.domain.analysis.models import AnalysisStatus
@@ -12,6 +13,11 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.locks.models import ResourceLock
 from modules.analysis_versions.service import create_version, get_version
 from tests.http_client import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _use_current_analysis_revision(client: TestClient) -> None:
+    client.headers['If-Match'] = '1'
 
 
 def test_list_versions_returns_versions(test_db_session, client, sample_datasource: DataSource):

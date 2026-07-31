@@ -63,6 +63,7 @@ def _to_response(analysis: Analysis, *, is_favorite: bool = False) -> AnalysisRe
             'pipeline_definition': analysis.pipeline_definition,
             'created_at': analysis.created_at,
             'updated_at': analysis.updated_at,
+            'revision': analysis.revision,
             'result_path': analysis.result_path,
             'thumbnail': analysis.thumbnail,
             'is_favorite': is_favorite,
@@ -645,7 +646,7 @@ def create_analysis(
         )
         session.add(link)
 
-    version_service.create_version(session, analysis, commit=False)
+    version_service.create_version(session, analysis)
     session.commit()
 
     session.refresh(analysis)
@@ -667,12 +668,16 @@ def get_analysis(
 def list_analyses(
     session: Session,
 ) -> list[AnalysisGalleryItemSchema]:
-    stmt = select(Analysis).options(
-        defer(sa(Analysis.pipeline_definition)),
-        defer(sa(Analysis.description)),
-        defer(sa(Analysis.status)),
-        defer(sa(Analysis.result_path)),
-        defer(sa(Analysis.owner_id)),
+    stmt = (
+        select(Analysis)
+        .options(
+            defer(sa(Analysis.pipeline_definition)),
+            defer(sa(Analysis.description)),
+            defer(sa(Analysis.status)),
+            defer(sa(Analysis.result_path)),
+            defer(sa(Analysis.owner_id)),
+        )
+        .order_by(col(Analysis.updated_at).desc(), col(Analysis.id).asc())
     )
     analyses = list(session.execute(stmt).scalars())
     return [
@@ -707,9 +712,8 @@ def list_favorite_analyses(
         defer(sa(Analysis.status)),
         defer(sa(Analysis.result_path)),
         defer(sa(Analysis.owner_id)),
-    )
+    ).order_by(col(Analysis.updated_at).desc(), col(Analysis.id).asc())
     analyses = list(session.execute(analysis_stmt).scalars())
-    analyses.sort(key=lambda analysis: analysis.updated_at, reverse=True)
     return [
         AnalysisGalleryItemSchema.model_validate(
             {
@@ -1007,7 +1011,7 @@ def update_analysis(
     if not analysis:
         raise analysis_not_found(analysis_id)
 
-    version_service.create_version(session, analysis, commit=False)
+    version_service.create_version(session, analysis)
 
     if data.name is not None:
         analysis.name = data.name
@@ -1029,6 +1033,7 @@ def update_analysis(
             )
 
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    analysis.revision += 1
 
     session.commit()
     session.refresh(analysis)
@@ -1106,7 +1111,7 @@ def add_step(
     if not analysis:
         raise analysis_not_found(analysis_id)
 
-    version_service.create_version(session, analysis, commit=False)
+    version_service.create_version(session, analysis)
 
     pipeline = analysis.pipeline
     tab = pipeline.find_tab(tab_id)
@@ -1151,6 +1156,7 @@ def add_step(
     analysis.pipeline_definition = pipeline.to_dict()
     flag_modified(analysis, 'pipeline_definition')
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    analysis.revision += 1
     session.commit()
     session.refresh(analysis)
     return step
@@ -1186,7 +1192,7 @@ def update_step(
     if not analysis:
         raise analysis_not_found(analysis_id)
 
-    version_service.create_version(session, analysis, commit=False)
+    version_service.create_version(session, analysis)
 
     pipeline = analysis.pipeline
     tab = pipeline.find_tab(tab_id)
@@ -1203,6 +1209,7 @@ def update_step(
     analysis.pipeline_definition = pipeline.to_dict()
     flag_modified(analysis, 'pipeline_definition')
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    analysis.revision += 1
     session.commit()
     session.refresh(analysis)
     return step
@@ -1218,7 +1225,7 @@ def remove_step(
     if not analysis:
         raise analysis_not_found(analysis_id)
 
-    version_service.create_version(session, analysis, commit=False)
+    version_service.create_version(session, analysis)
 
     pipeline = analysis.pipeline
     tab = pipeline.find_tab(tab_id)
@@ -1236,6 +1243,7 @@ def remove_step(
     analysis.pipeline_definition = pipeline.to_dict()
     flag_modified(analysis, 'pipeline_definition')
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    analysis.revision += 1
     session.commit()
 
 
@@ -1249,6 +1257,8 @@ def derive_tab(
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
         raise analysis_not_found(analysis_id)
+
+    version_service.create_version(session, analysis)
 
     pipeline = analysis.pipeline
     source = pipeline.find_tab(tab_id)
@@ -1288,6 +1298,7 @@ def derive_tab(
     analysis.pipeline_definition = pipeline.to_dict()
     flag_modified(analysis, 'pipeline_definition')
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    analysis.revision += 1
     session.commit()
     session.refresh(analysis)
     return new_tab
@@ -1324,6 +1335,8 @@ def duplicate_tab(
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
         raise analysis_not_found(analysis_id)
+
+    version_service.create_version(session, analysis)
 
     pipeline = analysis.pipeline
     source = pipeline.find_tab(tab_id)
@@ -1387,6 +1400,7 @@ def duplicate_tab(
     analysis.pipeline_definition = pipeline.to_dict()
     flag_modified(analysis, 'pipeline_definition')
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    analysis.revision += 1
     session.commit()
     session.refresh(analysis)
     return duplicated_tab

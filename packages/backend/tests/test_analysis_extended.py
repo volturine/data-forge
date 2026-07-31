@@ -3,8 +3,31 @@
 import uuid
 from typing import Any
 
+import pytest
+from httpx import Response
+from sqlmodel import Session
+
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
+
+
+@pytest.fixture(autouse=True)
+def current_analysis_revision(client, test_db_session: Session, monkeypatch: pytest.MonkeyPatch):
+    request = client.request
+
+    def request_with_revision(method: str, url: str, **kwargs: Any) -> Response:
+        path = url.split('?', maxsplit=1)[0]
+        parts = path.strip('/').split('/')
+        if method.upper() in {'POST', 'PUT', 'DELETE'} and len(parts) >= 4 and parts[:3] == ['api', 'v1', 'analysis']:
+            test_db_session.expire_all()
+            analysis = test_db_session.get(Analysis, parts[3])
+            if analysis is not None:
+                headers = dict(kwargs.get('headers') or {})
+                headers.setdefault('If-Match', str(analysis.revision))
+                kwargs['headers'] = headers
+        return request(method, url, **kwargs)
+
+    monkeypatch.setattr(client, 'request', request_with_revision)
 
 
 def _filter_config(column: str, operator: str, value: object) -> dict[str, object]:

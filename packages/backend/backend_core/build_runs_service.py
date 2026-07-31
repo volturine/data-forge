@@ -16,6 +16,7 @@ from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
+from backend_core.transactions import committed
 from dataforge_protocol import compute_pb2
 
 _TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
@@ -184,7 +185,7 @@ def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, seq
     raise ValueError(f'Unsupported build event type: {type(event).__name__}')
 
 
-def create_build_run(
+def stage_build_run(
     session: Session,
     *,
     build_id: str,
@@ -208,7 +209,6 @@ def create_build_run(
     execution_generation: int = 0,
     created_at: datetime | None = None,
     started_at: datetime | None = None,
-    commit: bool = True,
 ) -> BuildRun:
     now = created_at or _utcnow()
     run_started_at = started_at or now
@@ -237,12 +237,11 @@ def create_build_run(
         execution_generation=execution_generation,
     )
     session.add(run)
-    if commit:
-        session.commit()
-        session.refresh(run)
-    else:
-        session.flush()
+    session.flush()
     return run
+
+
+create_build_run = committed(stage_build_run, refresh=True)
 
 
 def get_build_run(session: Session, build_id: str) -> BuildRun | None:
@@ -250,7 +249,7 @@ def get_build_run(session: Session, build_id: str) -> BuildRun | None:
 
 
 def get_build_run_by_engine_run(session: Session, engine_run_id: str) -> BuildRun | None:
-    stmt = select(BuildRun).where(sa(BuildRun.current_engine_run_id == engine_run_id)).order_by(desc(sa(BuildRun.updated_at))).limit(1)
+    stmt = select(BuildRun).where(sa(BuildRun.current_engine_run_id == engine_run_id)).order_by(desc(sa(BuildRun.updated_at)), sa(BuildRun.id)).limit(1)
     return session.execute(stmt).scalars().first()
 
 
@@ -301,7 +300,7 @@ def list_build_runs(
                 col(DataSource.name).ilike(q),
             )
         )
-    stmt = stmt.order_by(desc(sa(BuildRun.created_at))).limit(limit).offset(offset)
+    stmt = stmt.order_by(desc(sa(BuildRun.created_at)), sa(BuildRun.id)).limit(limit).offset(offset)
     runs = list(session.execute(stmt).scalars().all())
     for run in runs:
         session.refresh(run)
@@ -398,7 +397,7 @@ def update_build_result_json(session: Session, build_id: str, result_json: dict[
     return run
 
 
-def append_build_event(
+def stage_build_event(
     session: Session,
     *,
     build_id: str,
@@ -406,7 +405,6 @@ def append_build_event(
     resource_config_json: dict[str, Any] | None = None,
     expected_execution_generation: int | None = None,
     authoritative_execution_generation: int | None = None,
-    commit: bool = True,
 ) -> BuildEvent | None:
     if expected_execution_generation is not None and authoritative_execution_generation is not None:
         raise ValueError('Expected and authoritative execution generations are mutually exclusive')
@@ -460,12 +458,8 @@ def append_build_event(
         namespace=run_namespace,
         build_id=build_id,
         latest_sequence=sequence,
-        commit=False,
     )
-    if commit:
-        session.commit()
-    else:
-        session.flush()
+    session.flush()
     return BuildEvent(
         id=event_id,
         build_id=build_id,
@@ -477,6 +471,9 @@ def append_build_event(
         emitted_at=event.emitted_at,
         created_at=created_at,
     )
+
+
+append_build_event = committed(stage_build_event)
 
 
 def _list_build_events(session: Session, build_id: str) -> list[BuildEvent]:

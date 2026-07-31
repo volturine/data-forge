@@ -13,6 +13,12 @@ let ready = $state(false);
 let switching = $state(false);
 let pending: Promise<void> | null = null;
 
+function invalidateNamespaceRequests(): void {
+	if (typeof window !== 'undefined') {
+		window.dispatchEvent(new Event('dataforge:namespace-will-change'));
+	}
+}
+
 export async function initNamespace(): Promise<void> {
 	if (isValid(namespace)) {
 		ready = true;
@@ -63,11 +69,14 @@ export function isNamespaceSwitching(): boolean {
 
 export async function setNamespace(value: string): Promise<void> {
 	if (!isValid(value)) {
+		if (namespace) invalidateNamespaceRequests();
 		namespace = '';
 		ready = false;
 		await idbDelete(NAMESPACE_KEY);
 		return;
 	}
+	if (value === namespace && ready) return;
+	invalidateNamespaceRequests();
 	namespace = value;
 	ready = true;
 	await idbSet(NAMESPACE_KEY, value);

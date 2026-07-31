@@ -1,13 +1,14 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.ext.mutable import MutableDict
 from sqlmodel import Field, SQLModel
 
 
 class AnalysisVersion(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = 'analysis_versions'
+    __table_args__ = (UniqueConstraint('analysis_id', 'version', name='uq_analysis_versions_analysis_version'),)
 
     id: str = Field(sa_column=Column(String, primary_key=True))
     analysis_id: str = Field(sa_column=Column(String, ForeignKey('analyses.id', ondelete='CASCADE'), nullable=False))

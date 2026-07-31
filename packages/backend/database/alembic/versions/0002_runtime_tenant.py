@@ -38,6 +38,7 @@ def upgrade() -> None:
         sa.Column('source_type', sa.String(), nullable=False),
         sa.Column('config', sa.JSON(), nullable=False),
         sa.Column('schema_cache', sa.JSON(), nullable=True),
+        sa.Column('revision', sa.Integer(), nullable=False, server_default='1'),
         sa.Column('created_by_analysis_id', sa.String(), nullable=True),
         sa.Column('created_by', sa.String(), nullable=False, server_default='import'),
         sa.Column('is_hidden', sa.Boolean(), nullable=False, server_default=sa.false()),
@@ -72,6 +73,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('result_path', sa.String(), nullable=True),
+        sa.Column('revision', sa.Integer(), nullable=False, server_default='1'),
         sa.Column('thumbnail', sa.String(), nullable=True),
         sa.Column('owner_id', sa.String(), nullable=True),
         sa.PrimaryKeyConstraint('id'),
@@ -103,6 +105,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(['analysis_id'], ['analyses.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('analysis_id', 'version', name='uq_analysis_versions_analysis_version'),
     )
     op.create_table(
         'engine_runs',
@@ -234,6 +237,7 @@ def upgrade() -> None:
         sa.Column('claimed_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('last_renewed_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('attempts', sa.Integer(), nullable=False, server_default='0'),
+        sa.Column('max_attempts', sa.Integer(), nullable=False, server_default='3'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
@@ -314,15 +318,18 @@ def upgrade() -> None:
         sa.Column('last_run', sa.DateTime(timezone=True), nullable=True),
         sa.Column('next_run', sa.DateTime(timezone=True), nullable=True),
         sa.Column('lease_owner', sa.String(), nullable=True),
+        sa.Column('claim_token', sa.String(), nullable=True),
+        sa.Column('lease_generation', sa.BigInteger(), nullable=False, server_default='0'),
         sa.Column('lease_expires_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('attempts', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('last_claimed_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('last_triggered_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('last_success_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('last_failure_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('last_successful_build_id', sa.String(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('analysis_id', sa.String(), nullable=True),
         sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('claim_token', name='uq_schedules_claim_token'),
     )
     op.create_index('ix_schedules_datasource_id', 'schedules', ['datasource_id'])
     op.create_index('ix_schedules_lease_owner', 'schedules', ['lease_owner'])

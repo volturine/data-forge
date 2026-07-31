@@ -110,7 +110,7 @@ async def _run_once(
             lease_deadline=claim_started + job.lease_ttl_seconds,
         )
     except BuildJobLeaseLost:
-        logger.warning("Build job %s lease was lost; local execution stopped", job.build_id)
+        logger.info("Build job %s lease was lost; local execution stopped", job.build_id)
         return True
     except Exception as exc:
         logger.error("Build job %s failed: %s", job.build_id, exc, exc_info=True)
@@ -124,7 +124,7 @@ async def _run_once(
             error=str(exc),
         )
         if not failed:
-            logger.warning("Build job %s failure was rejected because its lease is no longer active", job.build_id)
+            logger.info("Build job %s failure was rejected because its lease is no longer active", job.build_id)
         raise
     finally:
         client.heartbeat_worker(worker_id=worker_id, active_jobs=0)
@@ -138,7 +138,7 @@ async def _run_once(
         lease_generation=job.lease_generation,
     )
     if not finalized:
-        logger.warning("Build job %s finalization was rejected because its lease is no longer active", job.build_id)
+        logger.info("Build job %s finalization was rejected because its lease is no longer active", job.build_id)
     return True
 
 

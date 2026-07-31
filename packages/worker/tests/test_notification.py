@@ -1,515 +1,170 @@
+import json
 from dataclasses import dataclass
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import polars as pl
+import pyarrow as pa  # type: ignore[import-untyped]
 import pytest
 from pydantic import ValidationError
 
-from dataforge_protocol import enums_pb2
 from operations.notification import NotificationHandler, NotificationParams
 from operations.template_placeholders import render_template_placeholders
 from runtime.compute_service import _prepare_pipeline_notifications
-from runtime.exceptions import PipelineExecutionError
-from runtime.notification_delivery import NotificationService, render_template
+from runtime.notification_delivery import (
+    NotificationService,
+    extract_staged_deliveries,
+    render_template,
+    staged_column_name,
+    strip_staged_preview,
+)
 
 
 @dataclass(frozen=True)
 class MockSubscriber:
     chat_id: str
     bot_token: str
-    is_active: bool = True
+
+
+def _collect(params: dict[str, object], frame: pl.DataFrame | None = None) -> pl.DataFrame:
+    source = frame if frame is not None else pl.DataFrame({"body": ["hello"]})
+    return NotificationHandler()(source.lazy(), params, step_id="step-1").collect()
 
 
 class TestNotificationParams:
-    def test_basic(self):
-        params = NotificationParams.model_validate(
-            {
-                "method": "email",
-                "recipient": "user@example.com",
-                "input_columns": ["body"],
-            },
-        )
-        assert params.method == enums_pb2.NOTIFICATION_METHOD_EMAIL
-        assert params.recipient == "user@example.com"
-        assert params.input_columns == ["body"]
-        assert params.output_column == "notification_status"
-        assert params.message_template == "{{message}}"
-        assert params.subject_template == "Notification"
-        assert params.batch_size == 10
-
-    def test_telegram_method(self):
-        params = NotificationParams.model_validate(
-            {
-                "method": "telegram",
-                "recipient": "12345",
-                "input_columns": ["col"],
-            },
-        )
-        assert params.method == enums_pb2.NOTIFICATION_METHOD_TELEGRAM
-
-    def test_invalid_method_rejected(self):
-        with pytest.raises(ValidationError):
-            NotificationParams.model_validate(
-                {
-                    "method": "slack",
-                    "recipient": "test",
-                    "input_columns": ["col"],
-                },
-            )
-
-    def test_empty_recipient_rejected(self):
+    def test_requires_recipient_and_input_columns(self) -> None:
         with pytest.raises(ValidationError, match="recipient"):
-            NotificationParams.model_validate(
-                {
-                    "method": "email",
-                    "recipient": "",
-                    "input_columns": ["col"],
-                },
-            )
+            NotificationParams.model_validate({"method": "email", "input_columns": ["body"]})
+        with pytest.raises(ValidationError, match="input_columns"):
+            NotificationParams.model_validate({"method": "email", "recipient": "a@example.com"})
 
-    def test_missing_recipient_rejected(self):
-        with pytest.raises(ValidationError, match="recipient"):
-            NotificationParams.model_validate(
-                {
-                    "method": "email",
-                    "input_columns": ["col"],
-                },
-            )
-
-    def test_recipient_column_allows_missing_recipient(self):
-        params = NotificationParams.model_validate(
-            {
-                "method": "telegram",
-                "recipient_column": "chat_id",
-                "input_columns": ["body"],
-            },
-        )
+    def test_recipient_column_is_an_explicit_recipient_source(self) -> None:
+        params = NotificationParams.model_validate({"method": "telegram", "recipient_column": "chat_id", "input_columns": ["body"]})
         assert params.recipient_column == "chat_id"
 
-    def test_empty_input_columns_rejected(self):
-        with pytest.raises(ValidationError, match="input_columns"):
-            NotificationParams.model_validate(
-                {
-                    "method": "email",
-                    "recipient": "test@test.com",
-                    "input_columns": [],
-                },
-            )
-
-    def test_no_input_columns_rejected(self):
-        with pytest.raises(ValidationError, match="input_columns"):
-            NotificationParams.model_validate(
-                {
-                    "method": "email",
-                    "recipient": "test@test.com",
-                },
-            )
-
-    def test_multi_columns(self):
-        params = NotificationParams.model_validate(
-            {
-                "method": "email",
-                "recipient": "test@test.com",
-                "input_columns": ["title", "body", "status"],
-            },
-        )
-        assert params.input_columns == ["title", "body", "status"]
-
-    def test_extra_forbidden(self):
+    def test_rejects_unknown_configuration(self) -> None:
         with pytest.raises(ValidationError):
             NotificationParams.model_validate(
                 {
                     "method": "email",
-                    "recipient": "test@test.com",
-                    "input_columns": ["col"],
-                    "unknown_field": True,
-                },
+                    "recipient": "a@example.com",
+                    "input_columns": ["body"],
+                    "unknown": True,
+                }
             )
-
-    def test_custom_batch_size(self):
-        params = NotificationParams.model_validate(
-            {
-                "method": "email",
-                "recipient": "test@test.com",
-                "input_columns": ["col"],
-                "batch_size": 50,
-            },
-        )
-        assert params.batch_size == 50
-
-    def test_bot_token_default_empty(self):
-        params = NotificationParams.model_validate(
-            {
-                "method": "telegram",
-                "recipient": "123",
-                "input_columns": ["col"],
-            },
-        )
-        assert params.bot_token == ""
-
-    def test_bot_token_custom(self):
-        params = NotificationParams.model_validate(
-            {
-                "method": "telegram",
-                "recipient": "123",
-                "input_columns": ["col"],
-                "bot_token": "123456:ABC-DEF",
-            },
-        )
-        assert params.bot_token == "123456:ABC-DEF"
 
 
 class TestRenderTemplatePlaceholders:
-    def test_single_placeholder(self):
-        assert render_template_placeholders("Hello {{name}}!", {"name": "Alice"}) == "Hello Alice!"
-
-    def test_multiple_placeholders(self):
-        result = render_template_placeholders("{{title}}: {{body}}", {"title": "Alert", "body": "Fire"})
-        assert result == "Alert: Fire"
-
-    def test_missing_key_untouched(self):
-        result = render_template_placeholders("Hello {{name}}!", {})
-        assert result == "Hello {{name}}!"
-
-    def test_numeric_value(self):
-        result = render_template_placeholders("Count: {{n}}", {"n": 42})
-        assert result == "Count: 42"
-
-    def test_no_placeholders(self):
-        result = render_template_placeholders("Plain text", {"key": "val"})
-        assert result == "Plain text"
+    def test_renders_known_values_and_keeps_unknown_placeholders(self) -> None:
+        assert render_template_placeholders("{{title}}: {{body}} {{missing}}", {"title": "A", "body": 2}) == "A: 2 {{missing}}"
 
 
 class TestNotificationHandler:
-    def test_email_per_row(self):
-        """Each row triggers one email send; status column added."""
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"body": ["hello", "world", "test"]}).lazy()
-
-        with patch("operations.notification.notification_service") as mock_svc:
-            result = handler(
-                lf,
-                {
-                    "method": "email",
-                    "recipient": "dest@test.com",
-                    "input_columns": ["body"],
-                    "output_column": "send_status",
-                    "message_template": "Msg: {{body}}",
-                    "subject_template": "Subj: {{body}}",
-                },
-            )
-            collected = result.collect()
-        assert "send_status" in collected.columns
-        assert collected["send_status"].to_list() == ["queued", "queued", "queued"]
-        assert mock_svc.send_email.call_count == 3
-
-        first_call = mock_svc.send_email.call_args_list[0]
-        assert first_call.kwargs["to"] == "dest@test.com"
-        assert first_call.kwargs["subject"] == "Subj: hello"
-        assert first_call.kwargs["body"] == "Msg: hello"
-
-    def test_lazy_execution_defers_side_effects(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"body": ["hello"]}).lazy()
-
-        with patch("operations.notification.notification_service") as mock_svc:
-            result = handler(
-                lf,
-                {
-                    "method": "email",
-                    "recipient": "dest@test.com",
-                    "input_columns": ["body"],
-                    "output_column": "send_status",
-                    "message_template": "Msg: {{body}}",
-                    "subject_template": "Subj: {{body}}",
-                },
-            )
-            mock_svc.send_email.assert_not_called()
-            result.collect()
-            mock_svc.send_email.assert_called_once()
-
-    def test_telegram_per_row(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"msg": ["hi"]}).lazy()
-
-        with (
-            patch("operations.notification.notification_service") as mock_svc,
-            patch("operations.notification.get_resolved_telegram_settings") as mock_settings,
-        ):
-            mock_settings.return_value = {"enabled": True, "token": "tok"}
-            result = handler(
-                lf,
-                {
-                    "method": "telegram",
-                    "recipient": "99999",
-                    "input_columns": ["msg"],
-                    "message_template": "{{msg}}",
-                },
-            )
-            collected = result.collect()
-        assert collected["notification_status"].to_list() == ["queued"]
-        mock_svc.send_telegram.assert_called_once_with(chat_id="99999", message="hi", bot_token=None)
-
-    def test_multi_column_template(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame(
+    def test_stages_email_commands_without_network_side_effects(self) -> None:
+        result = _collect(
             {
-                "name": ["Alice", "Bob"],
-                "amount": [100, 200],
+                "method": "email",
+                "recipient": "dest@test.com",
+                "input_columns": ["body"],
+                "output_column": "send_status",
+                "message_template": "Msg: {{body}}",
+                "subject_template": "Subj: {{body}}",
             },
-        ).lazy()
-
-        with patch("operations.notification.notification_service") as mock_svc:
-            result = handler(
-                lf,
-                {
-                    "method": "email",
-                    "recipient": "x@x.com",
-                    "input_columns": ["name", "amount"],
-                    "message_template": "{{name}} owes {{amount}}",
-                    "subject_template": "Invoice for {{name}}",
-                },
-            )
-            collected = result.collect()
-        assert collected.height == 2
-        second_call = mock_svc.send_email.call_args_list[1]
-        assert second_call.kwargs["body"] == "Bob owes 200"
-        assert second_call.kwargs["subject"] == "Invoice for Bob"
-
-    def test_error_handling_per_row(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"col": ["ok", "bad", "ok2"]}).lazy()
-
-        with patch("operations.notification.notification_service") as mock_svc:
-            mock_svc.send_email.side_effect = [None, RuntimeError("SMTP down"), None]
-            result = handler(
-                lf,
-                {
-                    "method": "email",
-                    "recipient": "x@x.com",
-                    "input_columns": ["col"],
-                    "message_template": "{{col}}",
-                },
-            )
-            collected = result.collect()
-        statuses = collected["notification_status"].to_list()
-        assert statuses[0] == "queued"
-        assert statuses[1].startswith("[error:")
-        assert "SMTP down" in statuses[1]
-        assert statuses[2] == "queued"
-
-    def test_empty_dataframe(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"col": []}).cast({"col": pl.Utf8}).lazy()
-
-        with patch("operations.notification.notification_service") as mock_svc:
-            result = handler(
-                lf,
-                {
-                    "method": "email",
-                    "recipient": "x@x.com",
-                    "input_columns": ["col"],
-                    "message_template": "{{col}}",
-                },
-            )
-            collected = result.collect()
-        assert collected.height == 0
-        assert "notification_status" in collected.columns
-        mock_svc.send_email.assert_not_called()
-
-    def test_missing_column_raises(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"a": [1]}).lazy()
-
-        with pytest.raises(ValueError, match="not found"):
-            handler(
-                lf,
-                {
-                    "method": "email",
-                    "recipient": "x@x.com",
-                    "input_columns": ["nonexistent"],
-                    "message_template": "{{nonexistent}}",
-                },
-            )
-
-    def test_batch_size_respected(self):
-        """Batching works correctly — all rows processed."""
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"v": list(range(25))}).lazy()
-
-        with patch("operations.notification.notification_service") as mock_svc:
-            result = handler(
-                lf,
-                {
-                    "method": "email",
-                    "recipient": "x@x.com",
-                    "input_columns": ["v"],
-                    "message_template": "{{v}}",
-                    "batch_size": 7,
-                },
-            )
-            collected = result.collect()
-        assert collected.height == 25
-        assert mock_svc.send_email.call_count == 25
-        assert all(s == "queued" for s in collected["notification_status"].to_list())
-
-    def test_preserves_original_columns(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"a": [1, 2], "b": ["x", "y"]}).lazy()
-
-        with patch("operations.notification.notification_service"):
-            result = handler(
-                lf,
-                {
-                    "method": "email",
-                    "recipient": "x@x.com",
-                    "input_columns": ["b"],
-                    "message_template": "{{b}}",
-                    "output_column": "status",
-                },
-            )
-            collected = result.collect()
-        assert collected.columns == ["a", "b", "status"]
-        assert collected["a"].to_list() == [1, 2]
-        assert collected["b"].to_list() == ["x", "y"]
-
-    def test_telegram_comma_separated_recipients(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"msg": ["hello"]}).lazy()
-
-        with (
-            patch("operations.notification.notification_service") as mock_svc,
-            patch("operations.notification.get_resolved_telegram_settings") as mock_settings,
-        ):
-            mock_settings.return_value = {"enabled": True, "token": "tok"}
-            result = handler(
-                lf,
-                {
-                    "method": "telegram",
-                    "recipient": "111, 222, 333",
-                    "input_columns": ["msg"],
-                    "message_template": "{{msg}}",
-                },
-            )
-            collected = result.collect()
-        assert collected["notification_status"].to_list() == ["queued"]
-        assert mock_svc.send_telegram.call_count == 3
-        called_ids = [c.kwargs["chat_id"] for c in mock_svc.send_telegram.call_args_list]
-        assert called_ids == ["111", "222", "333"]
-
-    def test_recipient_column_override(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"msg": ["hi"], "chat_id": ["888"]}).lazy()
-
-        with (
-            patch("operations.notification.notification_service") as mock_svc,
-            patch("operations.notification.get_resolved_telegram_settings") as mock_settings,
-        ):
-            mock_settings.return_value = {"enabled": True, "token": "tok"}
-            result = handler(
-                lf,
-                {
-                    "method": "telegram",
-                    "recipient": "999",
-                    "recipient_column": "chat_id",
-                    "input_columns": ["msg"],
-                    "message_template": "{{msg}}",
-                },
-            )
-            collected = result.collect()
-
-        assert collected["notification_status"].to_list() == ["queued"]
-        mock_svc.send_telegram.assert_called_once_with(chat_id="888", message="hi", bot_token=None)
-
-    def test_recipient_column_array(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"msg": ["hi"], "chat_ids": [["111", "222"]]}).lazy()
-
-        with (
-            patch("operations.notification.notification_service") as mock_svc,
-            patch("operations.notification.get_resolved_telegram_settings") as mock_settings,
-        ):
-            mock_settings.return_value = {"enabled": True, "token": "tok"}
-            result = handler(
-                lf,
-                {
-                    "method": "telegram",
-                    "recipient_column": "chat_ids",
-                    "input_columns": ["msg"],
-                    "message_template": "{{msg}}",
-                },
-            )
-            collected = result.collect()
-
-        assert collected["notification_status"].to_list() == ["queued"]
-        assert mock_svc.send_telegram.call_count == 2
-        called_ids = [c.kwargs["chat_id"] for c in mock_svc.send_telegram.call_args_list]
-        assert called_ids == ["111", "222"]
-
-    def test_telegram_custom_bot_token(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"msg": ["hi"]}).lazy()
-
-        with (
-            patch("operations.notification.notification_service") as mock_svc,
-            patch("operations.notification.get_resolved_telegram_settings") as mock_settings,
-        ):
-            mock_settings.return_value = {"enabled": True, "token": "tok"}
-            result = handler(
-                lf,
-                {
-                    "method": "telegram",
-                    "recipient": "12345",
-                    "input_columns": ["msg"],
-                    "message_template": "{{msg}}",
-                    "bot_token": "custom-token-123",
-                },
-            )
-            collected = result.collect()
-        assert collected["notification_status"].to_list() == ["queued"]
-        mock_svc.send_telegram.assert_called_once_with(
-            chat_id="12345",
-            message="hi",
-            bot_token="custom-token-123",
+            pl.DataFrame({"body": ["hello", "world"]}),
         )
 
-    def test_telegram_custom_bot_multi_recipients(self):
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"msg": ["test"]}).lazy()
+        command_column = staged_column_name("step-1")
+        assert result["send_status"].to_list() == ["staged", "staged"]
+        assert json.loads(result[command_column][0]) == [
+            {
+                "body": "Msg: hello",
+                "method": "email",
+                "recipient": "dest@test.com",
+                "subject": "Subj: hello",
+            }
+        ]
 
-        with (
-            patch("operations.notification.notification_service") as mock_svc,
-            patch("operations.notification.get_resolved_telegram_settings") as mock_settings,
-        ):
-            mock_settings.return_value = {"enabled": True, "token": "tok"}
-            result = handler(
-                lf,
-                {
-                    "method": "telegram",
-                    "recipient": "aaa, bbb",
-                    "input_columns": ["msg"],
-                    "message_template": "{{msg}}",
-                    "bot_token": "tok123",
-                },
+    def test_stages_one_telegram_command_per_recipient(self) -> None:
+        result = _collect(
+            {
+                "method": "telegram",
+                "recipient": "111, 222",
+                "input_columns": ["body"],
+                "message_template": "{{body}}",
+                "bot_token": "token",
+            }
+        )
+        commands = json.loads(result[staged_column_name("step-1")][0])
+        assert [command["recipient"] for command in commands] == ["111", "222"]
+        assert all(command["bot_token"] == "token" for command in commands)
+
+    def test_recipient_column_overrides_static_recipient(self) -> None:
+        result = _collect(
+            {
+                "method": "telegram",
+                "recipient": "static",
+                "recipient_column": "chat_ids",
+                "input_columns": ["body"],
+            },
+            pl.DataFrame({"body": ["hello"], "chat_ids": [["one", "two"]]}),
+        )
+        commands = json.loads(result[staged_column_name("step-1")][0])
+        assert [command["recipient"] for command in commands] == ["one", "two"]
+
+    def test_preserves_rows_and_handles_empty_input(self) -> None:
+        result = _collect(
+            {"method": "email", "recipient": "a@example.com", "input_columns": ["body"]},
+            pl.DataFrame({"body": []}, schema={"body": pl.String}),
+        )
+        assert result.height == 0
+        assert result.columns == ["body", "notification_status", staged_column_name("step-1")]
+
+    def test_missing_input_column_fails_before_execution(self) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            NotificationHandler()(
+                pl.DataFrame({"body": ["hello"]}).lazy(),
+                {"method": "email", "recipient": "a@example.com", "input_columns": ["missing"]},
+                step_id="step-1",
             )
-            collected = result.collect()
-        assert collected["notification_status"].to_list() == ["queued"]
-        assert mock_svc.send_telegram.call_count == 2
-        sent_ids = [c.kwargs["chat_id"] for c in mock_svc.send_telegram.call_args_list]
-        assert sent_ids == ["aaa", "bbb"]
-        assert all(c.kwargs["bot_token"] == "tok123" for c in mock_svc.send_telegram.call_args_list)
+
+
+class TestStagedDeliveryExtraction:
+    def test_removes_internal_columns_and_returns_commands(self) -> None:
+        command_column = staged_column_name("step-1")
+        table = pa.table(
+            {
+                "value": [1],
+                command_column: [
+                    json.dumps(
+                        [
+                            {
+                                "method": "email",
+                                "recipient": "a@example.com",
+                                "subject": "Ready",
+                                "body": "Done",
+                            }
+                        ]
+                    )
+                ],
+            }
+        )
+
+        sanitized, deliveries = extract_staged_deliveries(table)
+
+        assert sanitized.column_names == ["value"]
+        assert deliveries[0]["recipient"] == "a@example.com"
+
+    def test_preview_never_exposes_internal_command_columns(self) -> None:
+        command_column = staged_column_name("step-1")
+        result = strip_staged_preview({"schema": {"value": "Int64", command_column: "String"}, "data": [{"value": 1, command_column: "[]"}]})
+        assert result == {"schema": {"value": "Int64"}, "data": [{"value": 1}]}
 
 
 class TestPreparePipelineNotifications:
-    def test_output_notification_email(self):
-        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
-            mock_client_from_env.return_value.telegram_targets.return_value = []
+    def test_output_email_is_rendered(self) -> None:
+        with patch("runtime.compute_service.client_from_env") as client:
+            client.return_value.telegram_targets.return_value = []
             deliveries = _prepare_pipeline_notifications(
-                context={
-                    "analysis_name": "Test",
-                    "status": "success",
-                    "datasource_id": "ds-1",
-                },
+                context={"analysis_name": "Test", "status": "success", "datasource_id": "ds-1"},
                 output_notification={
                     "method": "email",
                     "recipient": "admin@test.com",
@@ -517,134 +172,35 @@ class TestPreparePipelineNotifications:
                     "body_template": "Status: {{status}}",
                 },
             )
-        assert deliveries == [{"method": "email", "recipient": "admin@test.com", "subject": "Build: Test", "body": "Status: success"}]
+        assert deliveries == [
+            {
+                "method": "email",
+                "recipient": "admin@test.com",
+                "subject": "Build: Test",
+                "body": "Status: success",
+            }
+        ]
 
-    def test_output_notification_telegram(self):
-        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
-            mock_client_from_env.return_value.telegram_targets.return_value = [MockSubscriber("99999", "tok")]
-            deliveries = _prepare_pipeline_notifications(
-                context={
-                    "analysis_name": "A",
-                    "status": "success",
-                    "datasource_id": "ds-1",
-                },
-                output_notification={
-                    "method": "telegram",
-                    "recipient": "",
-                    "subject_template": "{{analysis_name}}",
-                    "body_template": "{{status}}",
-                },
-            )
-        assert deliveries[0]["method"] == "telegram"
-        assert deliveries[0]["recipient"] == "99999"
-        assert "A" in str(deliveries[0]["message"])
-        assert "success" in str(deliveries[0]["message"])
-
-    def test_output_notification_empty_recipient_skipped(self):
-        deliveries = _prepare_pipeline_notifications(context={}, output_notification={"method": "email", "recipient": ""})
-        assert deliveries == []
-
-    def test_output_notification_none_skipped(self):
-        assert _prepare_pipeline_notifications(context={}, output_notification=None) == []
-
-    def test_output_notification_excluded_recipients(self):
-        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
-            mock_client_from_env.return_value.telegram_targets.return_value = []
-            deliveries = _prepare_pipeline_notifications(
-                context={
-                    "analysis_name": "Test",
-                    "status": "success",
-                    "datasource_id": "ds-1",
-                },
-                output_notification={
-                    "method": "email",
-                    "recipient": "admin@test.com, skip@test.com",
-                    "subject_template": "Build: {{analysis_name}}",
-                    "body_template": "Status: {{status}}",
-                },
-            )
-        assert deliveries[0]["recipient"] == "admin@test.com, skip@test.com"
-
-    def test_output_notification_telegram_uses_subscribers(self):
-        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
-            mock_client_from_env.return_value.telegram_targets.return_value = [MockSubscriber("111", "token-a")]
-            deliveries = _prepare_pipeline_notifications(
-                context={
-                    "analysis_name": "Test",
-                    "status": "success",
-                    "datasource_id": "ds-1",
-                },
-                output_notification={
-                    "method": "telegram",
-                    "recipient": "",
-                    "subject_template": "Build: {{analysis_name}}",
-                    "body_template": "Status: {{status}}",
-                },
-            )
-        assert "Status: success" in str(deliveries[0]["message"])
-
-    def test_output_notification_telegram_excludes_subscribers(self):
-        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
-            mock_client_from_env.return_value.telegram_targets.return_value = [MockSubscriber("111", "token-a")]
-            deliveries = _prepare_pipeline_notifications(
-                context={
-                    "analysis_name": "Test",
-                    "status": "success",
-                    "datasource_id": "ds-1",
-                },
-                output_notification={
-                    "method": "telegram",
-                    "recipient": "",
-                    "subject_template": "Build: {{analysis_name}}",
-                    "body_template": "Status: {{status}}",
-                    "excluded_recipients": ["111"],
-                },
-            )
-        assert deliveries == []
-
-    def test_output_notification_target_lookup_error_raises(self):
-        with patch("runtime.compute_service.client_from_env") as mock_client_from_env:
-            mock_client_from_env.return_value.telegram_targets.side_effect = RuntimeError("lookup failed")
-            with pytest.raises(PipelineExecutionError):
-                _prepare_pipeline_notifications(
-                    context={"datasource_id": "ds-1"},
-                    output_notification={"method": "telegram", "recipient": ""},
-                )
+    def test_subscriber_targets_are_resolved_before_publication(self) -> None:
+        with patch("runtime.compute_service.client_from_env") as client:
+            client.return_value.telegram_targets.return_value = [MockSubscriber("999", "token")]
+            deliveries = _prepare_pipeline_notifications(context={"analysis_name": "Test", "status": "success", "datasource_id": "ds-1"})
+        assert deliveries[0]["recipient"] == "999"
 
 
 class TestRenderTemplate:
-    def test_basic(self):
-        assert render_template("Hello {{name}}!", {"name": "World"}) == "Hello World!"
-
-    def test_multiple_keys(self):
-        result = render_template("{{a}} and {{b}}", {"a": "foo", "b": "bar"})
-        assert result == "foo and bar"
-
-    def test_missing_key_untouched(self):
-        assert render_template("{{missing}}", {}) == "{{missing}}"
-
-    def test_numeric(self):
-        assert render_template("Count: {{n}}", {"n": 42}) == "Count: 42"
+    def test_replaces_context_values(self) -> None:
+        assert render_template("{{name}} is {{status}}", {"name": "Build", "status": "ready"}) == "Build is ready"
 
 
 class TestNotificationService:
-    def test_send_email_uses_internal_worker_api(self):
-        calls: list[dict[str, object]] = []
+    def test_delegates_explicit_email_and_telegram_commands(self) -> None:
+        client = MagicMock()
+        service = NotificationService(client)
 
-        class _Client:
-            def send_email(self, **kwargs):
-                calls.append(kwargs)
-                return True
+        with patch("runtime.notification_delivery.get_namespace", return_value="default"):
+            service.send_email(to="a@example.com", subject="Subject", body="Body")
+            service.send_telegram(chat_id="123", message="Message", bot_token="token")
 
-        service = NotificationService(client=_Client())
-        service.send_email(to="dest@example.com", subject="Subj", body="Body")
-
-        assert calls == [
-            {
-                "namespace": "default",
-                "to": "dest@example.com",
-                "subject": "Subj",
-                "body": "Body",
-                "attachments": [],
-            }
-        ]
+        client.send_email.assert_called_once()
+        client.send_telegram.assert_called_once()

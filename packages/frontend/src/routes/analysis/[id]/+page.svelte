@@ -234,7 +234,7 @@
 		if (!analysisStore.tabs.length) return;
 		const currentStorageKey = storageKey;
 		const currentAnalysisId = analysisId;
-		const serverVersion = lastLoadedVersion ?? analysisStore.current?.version ?? null;
+		const serverVersion = lastLoadedVersion ?? analysisStore.currentRevision;
 		if (!serverVersion) {
 			draftLoaded = true;
 			return;
@@ -301,7 +301,7 @@
 		if (!analysisStore.tabs.length) return;
 		const payload = {
 			analysisId,
-			version: analysisStore.current?.version ?? null,
+			version: analysisStore.currentRevision,
 			tabs: analysisStore.tabs,
 			activeTabId: analysisStore.activeTabId,
 			resourceConfig: analysisStore.resourceConfig,
@@ -385,10 +385,8 @@
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
-			analysisStore.applyAnalysis({
-				...result.value.analysis,
-				version: result.value.version
-			});
+			analysisStore.applyAnalysis(result.value.analysis);
+			analysisStore.currentRevision = result.value.version;
 			lastLoadedVersion = result.value.version;
 			isDirty = false;
 			return result.value.analysis;
@@ -1141,16 +1139,21 @@
 
 	async function handleRestoreVersion(version: number) {
 		if (!analysisId || editorReadOnly) return;
+		if (!analysisStore.currentRevision) {
+			versionError = 'Analysis response is missing its revision';
+			return;
+		}
 		versionError = null;
-		const result = await restoreAnalysisVersion(analysisId, version);
+		const result = await restoreAnalysisVersion(analysisId, version, analysisStore.currentRevision);
 		if (result.isErr()) {
 			versionError = result.error.message;
 			return;
 		}
 		schemaStore.reset();
 		analysisStore.previewRuns.clear();
-		analysisStore.applyAnalysis(result.value);
-		lastLoadedVersion = result.value.version ?? lastLoadedVersion;
+		analysisStore.applyAnalysis(result.value.analysis);
+		analysisStore.currentRevision = result.value.version;
+		lastLoadedVersion = result.value.version;
 		selectedStepId = null;
 		showVersionModal = false;
 		isDirty = false;
@@ -1910,7 +1913,7 @@
 						></div>
 						<StepConfig
 							step={selectedStepState}
-							schema={analysisStore.calculatedSchema}
+							schema={schemaStore.calculatedSchema}
 							{isLoadingSchema}
 							onClose={handleCloseConfig}
 							onConfigApply={markUnsaved}
@@ -1941,7 +1944,7 @@
 				>
 					<StepConfig
 						step={selectedStepState}
-						schema={analysisStore.calculatedSchema}
+						schema={schemaStore.calculatedSchema}
 						{isLoadingSchema}
 						onClose={handleCloseConfig}
 						onConfigApply={markUnsaved}

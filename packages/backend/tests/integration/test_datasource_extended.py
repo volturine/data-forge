@@ -733,7 +733,11 @@ class TestIsHidden:
             ],
         }
 
-        response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=update_payload)
+        response = client.put(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json=update_payload,
+            headers={'If-Match': str(sample_analysis.revision)},
+        )
         assert response.status_code == 200
 
 

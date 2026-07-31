@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures.js';
-import { createDatasource, createAnalysis } from './utils/api.js';
+import { createDatasource, createAnalysis, deleteAnalysisByApi } from './utils/api.js';
 import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
 import { uid } from './utils/uid.js';
@@ -53,7 +53,12 @@ async function cleanupAnalysis(page: Page, analysisId: string): Promise<void> {
 		`/api/v1/compute/engine/analysis/${analysisId}`,
 		new Set([204, 404, 409])
 	);
-	await deleteBestEffort(page, `/api/v1/analysis/${analysisId}`, new Set([204, 404]));
+	const analysisDeleteStatus = await deleteAnalysisByApi(page, analysisId);
+	if (![204, 404].includes(analysisDeleteStatus)) {
+		throw new Error(
+			`Cleanup DELETE /api/v1/analysis/${analysisId} returned HTTP ${analysisDeleteStatus}`
+		);
+	}
 }
 
 test.describe('Analyses – output visibility toggle', () => {

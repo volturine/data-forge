@@ -431,7 +431,7 @@ def list_engine_runs(
             )
         )
 
-    stmt = stmt.order_by(desc(sa(EngineRun.created_at))).limit(limit).offset(offset)
+    stmt = stmt.order_by(desc(sa(EngineRun.created_at)), sa(EngineRun.id)).limit(limit).offset(offset)
     runs = session.execute(stmt).scalars().all()
     return [_serialize_run(run) for run in runs]
 

@@ -2,7 +2,7 @@ import logging
 import uuid
 from collections import deque
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import croniter  # type: ignore[import-untyped]
@@ -37,6 +37,7 @@ from modules.analysis.step_schemas import normalize_pipeline_step_configs_for_pr
 logger = logging.getLogger(__name__)
 
 _SCHEDULE_TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
+_SCHEDULE_LEASE_DURATION = timedelta(minutes=5)
 
 
 def _build_request_json(request: compute_schemas.BuildRequest) -> dict[str, object]:
@@ -59,11 +60,16 @@ def _mark_schedule_failure(
     *,
     schedule: Schedule,
     error: str,
+    claim_token: str,
+    lease_generation: int,
     now: datetime | None = None,
 ) -> Schedule:
     stamp = now or _utcnow()
+    if schedule.claim_token != claim_token or schedule.lease_generation != lease_generation:
+        raise ValueError(f'Schedule {schedule.id} claim was replaced')
     schedule.last_failure_at = stamp
     schedule.lease_owner = None
+    schedule.claim_token = None
     schedule.lease_expires_at = None
     session.add(schedule)
     session.commit()
@@ -71,11 +77,24 @@ def _mark_schedule_failure(
     return schedule
 
 
-def mark_schedule_enqueue_failed(session: Session, schedule_id: str, *, error: str) -> Schedule | None:
-    schedule = session.get(Schedule, schedule_id)
+def mark_schedule_enqueue_failed(
+    session: Session,
+    schedule_id: str,
+    *,
+    error: str,
+    claim_token: str,
+    lease_generation: int,
+) -> Schedule | None:
+    schedule = session.execute(select(Schedule).where(col(Schedule.id) == schedule_id).with_for_update()).scalar_one_or_none()
     if schedule is None:
         return None
-    return _mark_schedule_failure(session, schedule=schedule, error=error)
+    return _mark_schedule_failure(
+        session,
+        schedule=schedule,
+        error=error,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+    )
 
 
 def build_analysis_pipeline_payload(session: Session, analysis: Analysis, datasource_id: str | None = None) -> dict[str, Any]:
@@ -257,7 +276,7 @@ def _enqueue_schedule_ingest_build(
 ) -> build_run_service.BuildRun:
     build_id = str(uuid.uuid4())
     analysis_name = f'Schedule ingest {schedule.datasource_id}'
-    run = build_run_service.create_build_run(
+    run = build_run_service.stage_build_run(
         session,
         build_id=build_id,
         namespace=namespace,
@@ -276,10 +295,9 @@ def _enqueue_schedule_ingest_build(
         total_tabs=1,
         created_at=now,
         started_at=now,
-        commit=False,
     )
-    build_job_service.create_job(session, build_id=build_id, namespace=namespace, commit=False)
-    runtime_outbox_service.enqueue_build_job_notification(session, commit=False)
+    build_job_service.stage_job(session, build_id=build_id, namespace=namespace)
+    runtime_outbox_service.enqueue_build_job_notification(session)
     return run
 
 
@@ -296,7 +314,7 @@ def _enqueue_schedule_analysis_build(
     now: datetime,
 ) -> build_run_service.BuildRun:
     build_id = str(uuid.uuid4())
-    run = build_run_service.create_build_run(
+    run = build_run_service.stage_build_run(
         session,
         build_id=build_id,
         namespace=namespace,
@@ -315,10 +333,9 @@ def _enqueue_schedule_analysis_build(
         total_tabs=len(request.analysis_pipeline.tabs),
         created_at=now,
         started_at=now,
-        commit=False,
     )
-    build_job_service.create_job(session, build_id=build_id, namespace=namespace, commit=False)
-    runtime_outbox_service.enqueue_build_job_notification(session, commit=False)
+    build_job_service.stage_job(session, build_id=build_id, namespace=namespace)
+    runtime_outbox_service.enqueue_build_job_notification(session)
     return run
 
 
@@ -431,7 +448,7 @@ def list_schedules(
                 col(Analysis.name).ilike(q),
             )
         )
-    query = query.order_by(col(Schedule.created_at).desc()).limit(limit).offset(offset)
+    query = query.order_by(col(Schedule.created_at).desc(), col(Schedule.id).asc()).limit(limit).offset(offset)
     result = session.execute(query)
     schedules = result.scalars().all()
     datasource_ids = {schedule.datasource_id for schedule in schedules}
@@ -585,12 +602,12 @@ def get_build_order(session: Session, analysis_id: str) -> list[str]:
         if is_new:
             in_degree[dep.analysis_id] = in_degree.get(dep.analysis_id, 0) + 1
 
-    queue = deque(aid for aid, degree in in_degree.items() if degree == 0)
+    queue = deque(sorted(aid for aid, degree in in_degree.items() if degree == 0))
     ordered: list[str] = []
     while queue:
         node = queue.popleft()
         ordered.append(node)
-        for neighbor in graph.get(node, set()):
+        for neighbor in sorted(graph.get(node, set())):
             in_degree[neighbor] -= 1
             if in_degree[neighbor] == 0:
                 queue.append(neighbor)
@@ -698,24 +715,30 @@ def claim_due_schedules(
     naive_stamp = _naive_utc(stamp)
     table = Schedule.metadata.tables[Schedule.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
+    due_ids = {schedule.id for schedule in get_due_schedules(session)}
+    if not due_ids:
+        return []
     base = (
         select(Schedule)
+        .where(col(Schedule.id).in_(due_ids))
         .where(col(Schedule.enabled).is_(True))
         .where(
             or_(
                 table.c.lease_owner.is_(None),
                 table.c.lease_owner.in_(reclaimable),
+                table.c.lease_expires_at <= naive_stamp,
             )
         )
+        .order_by(table.c.next_run.asc().nullsfirst(), table.c.created_at.asc(), table.c.id.asc())
+        .limit(limit)
     )
     stmt = with_for_update_skip_locked(session, base)
     schedules = list(session.execute(stmt).scalars().all())
-    due_ids = {schedule.id for schedule in get_due_schedules(session)}
-    due = [schedule for schedule in schedules if schedule.id in due_ids]
     claimed: list[Schedule] = []
-    for schedule in due[:limit]:
+    for schedule in schedules:
         if build_run_service.has_inflight_build_for_schedule(session, schedule.id):
             continue
+        claim_token = str(uuid.uuid4())
         claimed_schedule = claim_by_lease_owner(
             session,
             Schedule,
@@ -724,8 +747,11 @@ def claim_due_schedules(
             previous_owner=schedule.lease_owner,
             values={
                 'lease_owner': worker_id,
-                'lease_expires_at': None,
+                'claim_token': claim_token,
+                'lease_generation': table.c.lease_generation + 1,
+                'lease_expires_at': naive_stamp + _SCHEDULE_LEASE_DURATION,
                 'last_claimed_at': naive_stamp,
+                'attempts': table.c.attempts + 1,
             },
         )
         if not claimed_schedule:
@@ -737,7 +763,8 @@ def claim_due_schedules(
     session.commit()
     claimed_ids = [schedule.id for schedule in claimed]
     refreshed = session.execute(select(Schedule).where(col(Schedule.id).in_(claimed_ids))).scalars().all()
-    return list(refreshed)
+    rows_by_id = {row.id: row for row in refreshed}
+    return [rows_by_id[schedule_id] for schedule_id in claimed_ids]
 
 
 def mark_schedule_run(session: Session, schedule_id: str) -> None:
@@ -750,13 +777,21 @@ def mark_schedule_run(session: Session, schedule_id: str) -> None:
     schedule.last_success_at = now
     schedule.next_run = Schedule.compute_next_run(schedule.cron_expression)
     schedule.lease_owner = None
+    schedule.claim_token = None
     schedule.lease_expires_at = None
     session.add(schedule)
     session.commit()
 
 
-def enqueue_schedule_run(session: Session, schedule_id: str, *, worker_id: str) -> str:
-    schedule = session.get(Schedule, schedule_id)
+def enqueue_schedule_run(
+    session: Session,
+    schedule_id: str,
+    *,
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
+) -> str:
+    schedule = session.execute(select(Schedule).where(col(Schedule.id) == schedule_id).with_for_update()).scalar_one_or_none()
     if not schedule:
         raise ValueError(f'Schedule {schedule_id} not found')
     if build_run_service.has_inflight_build_for_schedule(session, schedule_id):
@@ -764,8 +799,14 @@ def enqueue_schedule_run(session: Session, schedule_id: str, *, worker_id: str) 
 
     stamp = _utcnow()
     naive_stamp = _naive_utc(stamp)
-    if schedule.lease_owner != worker_id:
-        raise ValueError(f'Schedule {schedule_id} is not owned by {worker_id}')
+    if (
+        schedule.lease_owner != worker_id
+        or schedule.claim_token != claim_token
+        or schedule.lease_generation != lease_generation
+        or schedule.lease_expires_at is None
+        or _naive_utc(schedule.lease_expires_at) <= naive_stamp
+    ):
+        raise ValueError(f'Schedule {schedule_id} claim is stale')
 
     target_kind, analysis_id, _ = _resolve_schedule_target(session, schedule.datasource_id)
     namespace = get_namespace()

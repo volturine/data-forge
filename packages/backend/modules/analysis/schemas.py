@@ -133,6 +133,7 @@ class AnalysisResponseSchema(BaseModel):
     pipeline_definition: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    revision: int
     result_path: str | None
     thumbnail: str | None
     is_favorite: bool = False

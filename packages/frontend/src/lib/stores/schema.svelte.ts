@@ -30,6 +30,18 @@ export class SchemaStore {
 	primaryDatasourceId = $derived(analysisStore.activeTab?.datasource.id ?? null);
 	steps = $derived(analysisStore.pipeline);
 
+	calculatedSchema = $derived.by(() => {
+		const lastOutput = this.getLastOutput();
+		if (lastOutput) return lastOutput;
+		const schemaKey = analysisStore.activeSchemaKey;
+		const source = schemaKey ? analysisStore.sourceSchemas.get(schemaKey) : undefined;
+		if (!source) return null;
+		return {
+			columns: source.columns.map((column) => ({ ...column })),
+			row_count: source.row_count
+		};
+	});
+
 	stepSchemas = $derived.by(() => {
 		const schemas = new SvelteMap<string, StepSchemas>();
 		let currentSchema: Schema | null = null;

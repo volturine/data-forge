@@ -367,6 +367,10 @@ class WorkerInternalApiClient:
         namespace: str,
         kind: enums_pb2.ComputeRequestKind,
         command: datasource_pb2.DatasourceCommand,
+        request_id: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
     ) -> datasource_pb2.DatasourceResult:
         response = self._call(
             lambda: self._stub.ExecuteDatasourceRequest(
@@ -374,6 +378,10 @@ class WorkerInternalApiClient:
                     namespace=namespace,
                     kind=kind,
                     command=command,
+                    request_id=request_id,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
                 ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
@@ -939,10 +947,25 @@ def _rpc_error_from_grpc_error(exc: grpc.RpcError, *, target: str) -> BackendWor
 
 
 def _grpc_status_number(code: grpc.StatusCode) -> int:
-    value = code.value
-    if isinstance(value, tuple) and value and isinstance(value[0], int):
-        return value[0]
-    return 0
+    return {
+        grpc.StatusCode.OK: 200,
+        grpc.StatusCode.CANCELLED: 499,
+        grpc.StatusCode.UNKNOWN: 500,
+        grpc.StatusCode.INVALID_ARGUMENT: 400,
+        grpc.StatusCode.DEADLINE_EXCEEDED: 504,
+        grpc.StatusCode.NOT_FOUND: 404,
+        grpc.StatusCode.ALREADY_EXISTS: 409,
+        grpc.StatusCode.PERMISSION_DENIED: 403,
+        grpc.StatusCode.RESOURCE_EXHAUSTED: 429,
+        grpc.StatusCode.FAILED_PRECONDITION: 412,
+        grpc.StatusCode.ABORTED: 409,
+        grpc.StatusCode.OUT_OF_RANGE: 400,
+        grpc.StatusCode.UNIMPLEMENTED: 501,
+        grpc.StatusCode.INTERNAL: 500,
+        grpc.StatusCode.UNAVAILABLE: 503,
+        grpc.StatusCode.DATA_LOSS: 500,
+        grpc.StatusCode.UNAUTHENTICATED: 401,
+    }[code]
 
 
 def _worker(worker_id: str) -> common_pb2.RuntimeWorkerRequest:

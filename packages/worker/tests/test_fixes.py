@@ -6,7 +6,6 @@ import tempfile
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
 
 import polars as pl
 import pytest
@@ -519,6 +518,19 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
     ]
 
 
+def test_grpc_precondition_error_does_not_invent_domain_error_code() -> None:
+    error = compute_request_runtime._error_result(
+        BackendWorkerRpcError(
+            status_code=412,
+            error="Datasource publication claim is no longer active",
+            error_code="FAILED_PRECONDITION",
+        )
+    )
+
+    assert error.status_code == 412
+    assert not error.HasField("error_code")
+
+
 @pytest.mark.asyncio
 async def test_pending_datasource_delete_waits_for_busy_preview_engine(monkeypatch) -> None:
     datasource_id = "datasource-1"
@@ -726,26 +738,25 @@ class TestEngineRunProgressDefault:
 
 
 class TestNotificationHandler:
-    def test_per_row_sends_and_adds_status_column(self):
-        """NotificationHandler sends per-row and adds output status column."""
+    def test_per_row_stages_and_adds_status_column(self):
+        """NotificationHandler stages per-row delivery and adds a status column."""
         handler = NotificationHandler()
         lf = pl.DataFrame({"msg": ["hello", "world"]}).lazy()
-        with patch("operations.notification.notification_service") as mock_svc:
-            result = handler(
-                lf,
-                {
-                    "method": "email",
-                    "recipient": "test@example.com",
-                    "input_columns": ["msg"],
-                    "output_column": "status",
-                    "message_template": "{{msg}}",
-                    "subject_template": "Test",
-                },
-            )
-            collected = result.collect()
+        result = handler(
+            lf,
+            {
+                "method": "email",
+                "recipient": "test@example.com",
+                "input_columns": ["msg"],
+                "output_column": "status",
+                "message_template": "{{msg}}",
+                "subject_template": "Test",
+            },
+            step_id="step-1",
+        )
+        collected = result.collect()
         assert "status" in collected.columns
-        assert collected["status"].to_list() == ["queued", "queued"]
-        assert mock_svc.send_email.call_count == 2
+        assert collected["status"].to_list() == ["staged", "staged"]
 
     def test_validates_params(self):
         """Invalid params raise ValidationError."""
@@ -759,6 +770,7 @@ class TestNotificationHandler:
                     "recipient": "test@test.com",
                     "input_columns": ["a"],
                 },
+                step_id="step-1",
             )
 
     def test_extra_fields_forbidden(self):

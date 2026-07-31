@@ -78,11 +78,25 @@ Completed in the durable notification-publication slice:
 - email deliveries use the stable outbox event ID as their message ID, and delivery payloads retain that ID across retries;
 - output notification commands are typed in the worker protocol and are inserted in the same transaction that publishes datasource metadata and the claimed build-result summary;
 - stale output claims cannot enqueue notification deliveries;
-- per-row notification status now reports `queued`, making the durable acceptance boundary explicit rather than claiming that delivery already occurred.
+- per-row notification commands are staged as internal pipeline columns, stripped from previews and published data, and inserted into the durable outbox in the same transaction as output publication;
+- abandoned or stale pipeline attempts therefore cannot leave accepted delivery records, and per-row status reports `staged` until publication commits.
 
-Still open at P0:
+Completed in the scheduler, analysis, and frontend-concurrency slice:
 
-- stage per-row notification commands until the enclosing output publication commits, so abandoned pipeline attempts cannot leave accepted delivery records;
+- schedule claims are bounded, totally ordered, tokenized, generation-fenced, expiring, and reclaimable;
+- stale schedule owners cannot enqueue work or clear a replacement claim;
+- analysis content mutations require an exact `If-Match` revision and return the next revision in `ETag` and `X-Analysis-Version`;
+- analysis version allocation locks the parent row and is protected by a database unique constraint;
+- namespace changes abort active frontend requests and reject responses crossing the namespace epoch;
+- analysis IndexedDB state now has explicit namespace-scoped initialization, and the analysis/schema store cycle is removed.
+
+Completed in the retry, datasource-publication, and verification slice:
+
+- compute requests and outbox deliveries have explicit attempt limits; exhausted work becomes a durable failed or poisoned terminal record;
+- datasource ingests write only to claim-specific staging locations and publish metadata with both the active work claim and datasource revision as fences;
+- process-local datasource ingest locking is removed;
+- verification checks rather than formats, fails if it changes the worktree, validates generated protocol output, and uses pinned Python, uv, Bun, and Just versions in CI;
+- runtime composition uses staged operations for multi-write transactions, while explicit command adapters own standalone commits without `commit` flags.
 
 Follow-up cleanup for staged publication:
 
@@ -154,7 +168,7 @@ After this plan is complete:
 
 ## 5. Current Findings
 
-### 5.1 Work claims have expiry but not complete lease semantics
+### 5.1 Work claims originally had expiry but not complete lease semantics
 
 Build jobs and compute requests record a lease owner and expiry. The claim returned to a worker does not contain a unique claim token or generation, and completion methods update rows by ID without verifying the current owner, generation, or expected status.
 
@@ -168,7 +182,7 @@ Consequences:
 
 The default build job has `max_attempts = 1`. Claiming increments `attempts` to one. An expired running job then fails the `attempts < max_attempts` reclaim condition, so an unclean worker loss can leave the default job stranded instead of transitioning through an explicit exhausted-attempt policy.
 
-### 5.2 Heartbeats do not renew work leases
+### 5.2 Heartbeats are not work-lease renewal
 
 Runtime worker heartbeat updates process liveness, but it is not a renewal of each active work lease. Process liveness and claim ownership are different concepts:
 
@@ -178,13 +192,13 @@ Runtime worker heartbeat updates process liveness, but it is not a renewal of ea
 
 Each active claim needs an independent renewal lifecycle.
 
-### 5.3 Worker shutdown can create duplicate execution
+### 5.3 Unsafe worker shutdown could create duplicate execution
 
 Compute request loops share a worker ID. Cleanup releases all requests owned by that worker ID. Cancellation of `run_in_executor` does not stop the underlying thread, so cleanup can make a request claimable while the old thread continues executing.
 
 Shutdown must drain active execution or allow leases to expire. It must not broadly release claims that can still have running code behind them.
 
-### 5.4 Build event sequence allocation is racy
+### 5.4 Build event sequence allocation was racy
 
 The next build event sequence is derived from `MAX(sequence) + 1`. Concurrent event producers can observe the same maximum. They can then:
 
@@ -195,7 +209,7 @@ The next build event sequence is derived from `MAX(sequence) + 1`. Concurrent ev
 
 Worker build progress and resource events are emitted concurrently, making this a real runtime path rather than a theoretical multi-client case.
 
-### 5.5 Cancellation spans independent transactions
+### 5.5 Cancellation previously spanned independent transactions
 
 Cancellation currently coordinates durable build state, engine state, queue state, and a cancellation event through separately committing calls. A crash or interleaving can leave combinations such as:
 
@@ -204,13 +218,13 @@ Cancellation currently coordinates durable build state, engine state, queue stat
 - completed job followed by a late cancellation projection;
 - duplicate cancellation events after client retry.
 
-### 5.6 Finalization is not one fenced transition
+### 5.6 Finalization was not one fenced transition
 
 Build finalization updates build state, job state, and schedule reconciliation in separate commits. The finalization request does not prove that the caller still owns the active claim.
 
 The system can therefore expose partial terminal state, and a stale worker can finalize after ownership has moved.
 
-### 5.7 Outbox batching releases locks too early
+### 5.7 Outbox batching previously released locks too early
 
 The dispatcher locks a batch, then performs external delivery and commits each row individually. The first commit releases locks for every selected row, including rows still held only in process memory. Another dispatcher can select those remaining rows.
 
@@ -221,23 +235,23 @@ At-least-once notification is acceptable, but it must be intentional:
 - claim and delivery state need compare-and-set ownership;
 - a crashed dispatcher needs recoverable claim expiry.
 
-### 5.8 Datasource mutation locking is process-local
+### 5.8 Datasource mutation locking was process-local
 
 Datasource ingestion uses a `threading.Lock`. With multiple API processes, each process owns a different lock, so the lock does not protect the shared datasource.
 
 The worker also claims datasource-related compute requests and then asks the backend to execute them. This reverses the intended ownership boundary: the API process performs Polars/Iceberg work while the worker acts as a relay.
 
-### 5.9 Scheduler claim selection is broader than the work
+### 5.9 Scheduler claim selection was broader than the work
 
 The scheduler locks enabled schedules before fully narrowing the set to due work. This reduces the value of `SKIP LOCKED`, increases contention, and has no stable total order. Schedule lease fields and recovery rules also do not use the same renewal and fencing semantics as other work.
 
-### 5.10 Analysis concurrency is optional
+### 5.10 Analysis concurrency was optional
 
 Mutation revision validation is conditional when `If-Match` is absent. Editor locks prevent a mutation only when another active lock exists, so clients that omit both mechanisms can update concurrently.
 
 Analysis version allocation also uses `MAX(version) + 1` without a database-enforced unique `(analysis_id, version)` allocation contract.
 
-### 5.11 Frontend asynchronous work can cross namespace boundaries
+### 5.11 Frontend asynchronous work could cross namespace boundaries
 
 Some stores use request gates, but this is not a universal contract. A raw request started in namespace A can finish after switching to namespace B and write A’s data into the reset B store.
 
@@ -709,10 +723,10 @@ Success criterion: the style guide supports cohesive categories without encourag
 
 ### Phase 0 — Correct the source of truth
 
-- [ ] Mark distributed runtime progress guarantees as under remediation.
-- [ ] Adopt this document as the runtime correctness backlog.
-- [ ] Record the supported production topology during remediation.
-- [ ] Define temporary operational limits if any P0 race cannot immediately be contained.
+- [x] Mark distributed runtime progress guarantees as under remediation.
+- [x] Adopt this document as the runtime correctness backlog.
+- [x] Record the supported production topology during remediation.
+- [x] Define temporary operational limits if any P0 race cannot immediately be contained. No uncontained P0 race remains.
 
 Exit criteria:
 
@@ -725,11 +739,11 @@ Exit criteria:
 - [x] Add lease expiry and stale completion tests.
 - [x] Add event append collision tests.
 - [x] Add cancel/finalize race tests.
-- [ ] Add shutdown-with-active-executor tests.
+- [x] Add shutdown-with-active-executor tests.
 - [x] Add outbox contention tests.
 - [ ] Add scheduler contention tests.
-- [ ] Add analysis lost-update tests.
-- [ ] Add frontend stale-namespace tests.
+- [x] Add analysis lost-update tests.
+- [x] Add frontend stale-namespace tests.
 
 Exit criteria:
 
@@ -743,7 +757,7 @@ Exit criteria:
 - [x] Implement build-job and compute-request renew operations.
 - [x] Require tokens/generations on build-job and compute-request claimant writes.
 - [ ] Implement typed transition outcomes.
-- [ ] Define retry/exhaustion policies.
+- [x] Define retry/exhaustion policies.
 - [ ] Instrument lease behavior.
 
 Exit criteria:
@@ -770,7 +784,7 @@ Exit criteria:
 - [x] Redesign worker drain and lease renewal for build jobs and compute requests.
 - [x] Redesign outbox claiming and stable delivery identity.
 - [ ] Implement persistent consumer deduplication and poison-event handling.
-- [ ] Introduce durable scheduler triggers and fenced claims.
+- [x] Introduce durable scheduler triggers and fenced claims.
 - [ ] Add crash/restart integration tests for each service.
 
 Exit criteria:
@@ -781,8 +795,8 @@ Exit criteria:
 ### Phase 5 — Move execution to the correct owner
 
 - [ ] Move datasource operations into workers.
-- [ ] Add durable datasource resource fencing.
-- [ ] Remove API process-local execution locks.
+- [x] Add durable datasource resource fencing.
+- [x] Remove API process-local execution locks.
 - [ ] Remove API-side data execution dependencies.
 
 Exit criteria:
@@ -792,11 +806,11 @@ Exit criteria:
 
 ### Phase 6 — Enforce application concurrency
 
-- [ ] Add mandatory analysis revisions.
-- [ ] Make version allocation atomic.
+- [x] Add mandatory analysis revisions.
+- [x] Make version allocation atomic.
 - [ ] Introduce frontend app-scoped services.
-- [ ] Enforce namespace epoch/abort behavior.
-- [ ] Eliminate store cycles and import-time I/O.
+- [x] Enforce namespace epoch/abort behavior.
+- [x] Eliminate store cycles and import-time I/O.
 
 Exit criteria:
 
@@ -806,11 +820,11 @@ Exit criteria:
 ### Phase 7 — Simplify boundaries
 
 - [ ] Centralize transaction ownership in application commands.
-- [ ] Remove internal commits and `commit` flags.
+- [x] Remove internal `commit` flags from composable runtime operations.
 - [ ] Extract runtime categories by invariant/lifecycle.
 - [ ] Extract frontend categories by state ownership and rendering responsibility.
 - [ ] Consolidate representation mappers.
-- [ ] Apply deterministic order contracts.
+- [x] Apply deterministic order contracts to runtime queries and order-sensitive pipeline operators.
 
 The naming guidance in `STYLE_GUIDE.md` now treats a concise single word as a category name, while requiring intention-revealing component names and extraction by invariant, lifecycle, or side-effect boundary.
 
@@ -821,12 +835,12 @@ Exit criteria:
 
 ### Phase 8 — Harden verification and declare support
 
-- [ ] Make verification non-mutating and reproducible.
-- [ ] Pin toolchain versions.
-- [ ] Run canonical checks in CI.
+- [x] Make verification non-mutating and reproducible.
+- [x] Pin toolchain versions.
+- [x] Run canonical checks in CI.
 - [ ] Run multi-process stress and failure-injection suites.
 - [ ] Update architecture diagrams and runtime progress status.
-- [ ] Remove temporary operational limits.
+- [x] Remove temporary operational limits. No temporary containment limits remain.
 
 Exit criteria:
 
@@ -835,27 +849,9 @@ Exit criteria:
 
 ## 10. Migration Strategy
 
-No backward-compatibility layer is required.
+No backward-compatibility or upgrade layer is supported. The database definition is compacted into two creator revisions: one for shared/public state and one for complete tenant state. Runtime claim fields, revision constraints, retry limits, outbox states, and ordering constraints are defined directly in those creators.
 
-1. Add new database fields and constraints in a migration.
-2. Stop runtime processes during the protocol/schema cutover.
-3. Resolve pre-existing active rows:
-   - terminal rows remain terminal;
-   - queued rows receive initial generation values;
-   - running rows are marked orphaned/failed or explicitly requeued according to the new retry policy;
-   - no active row is assigned a fabricated valid claim token.
-4. Deploy backend protocol and persistence changes.
-5. Deploy workers and scheduler using the new claims.
-6. Start services and verify lease/queue health.
-7. Remove old columns and operations once all code paths use fenced commands.
-
-Each migration must include:
-
-- forward schema change;
-- data validation query;
-- explicit active-row policy;
-- post-deploy invariant query;
-- recovery procedure that does not resurrect stale ownership.
+Deployment recreates the database from the creator revisions and deploys backend, worker, scheduler, frontend, and protocol as one versioned unit. There are no compatibility columns, active-row backfills, fabricated claim tokens, or incremental legacy migrations.
 
 ## 11. Test Matrix
 
@@ -915,24 +911,24 @@ Metrics and logs must distinguish expected contention (`LeaseLost`, `AlreadyTerm
 
 The remediation is complete only when all statements below are true:
 
-- [ ] A stale worker cannot append an event or finalize work after claim replacement.
-- [ ] Active claims renew and renewal loss stops publication.
-- [ ] Default retry behavior cannot strand a running job indefinitely.
-- [ ] Worker shutdown cannot release work while associated execution can still publish.
+- [x] A stale worker cannot append an event or finalize work after claim replacement.
+- [x] Active claims renew and renewal loss stops publication.
+- [x] Default retry behavior cannot strand a running job indefinitely.
+- [x] Worker shutdown cannot release work while associated execution can still publish.
 - [x] Build event sequence allocation is atomic under concurrent producers.
-- [ ] Build projection equals a fold of committed events.
-- [ ] Cancellation and finalization are atomic and idempotent.
-- [ ] Terminal states cannot be overwritten by late writers.
+- [x] Build projection equals a fold of committed events.
+- [x] Cancellation and finalization are atomic and idempotent.
+- [x] Terminal states cannot be overwritten by late writers.
 - [ ] Outbox dispatch is recoverable and duplicate delivery is harmless.
 - [ ] Datasource execution occurs in workers and uses durable resource fencing.
 - [ ] Multiple schedulers claim only due, bounded, totally ordered triggers.
-- [ ] Analysis mutations require a revision and versions are unique.
-- [ ] Frontend results cannot cross namespace epochs.
+- [x] Analysis mutations require a revision and versions are unique.
+- [x] Frontend results cannot cross namespace epochs.
 - [ ] Every mutating entrypoint has one application-owned transaction.
-- [ ] Observable queries and pipeline operators define tie ordering.
+- [x] Observable queries and pipeline operators define tie ordering.
 - [ ] Runtime/frontend modules align with invariant and lifecycle ownership.
-- [ ] Verification is non-mutating and detects generated drift.
-- [ ] `just verify`, `just test`, and `just test-e2e` pass without warnings.
+- [x] Verification is non-mutating and detects generated drift.
+- [x] `just verify`, `just test`, and `just test-e2e` pass without warnings.
 - [ ] Multi-process failure-injection tests pass repeatedly.
 - [ ] Runtime documentation and architecture diagrams match the implementation.
 

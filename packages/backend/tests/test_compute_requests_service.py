@@ -60,12 +60,19 @@ def _create_request(
                 config = step.get('config')
                 if isinstance(step_type, str) and isinstance(config, dict):
                     step['config'] = normalize_step_config_for_protocol(step_type, config)
+    command = command_from_payload(kind, request_json)
+    if not commit:
+        return compute_requests_service.stage_request(
+            test_db_session,
+            namespace=namespace,
+            kind=kind,
+            command=command,
+        )
     return compute_requests_service.create_request(
         test_db_session,
         namespace=namespace,
         kind=kind,
-        command=command_from_payload(kind, request_json),
-        commit=commit,
+        command=command,
     )
 
 
@@ -655,3 +662,28 @@ def test_reclaimed_request_rejects_stale_completion(test_db_session) -> None:
         lease_generation=claimed.lease_generation,
     )
     assert renewed is not None
+
+
+def test_expired_request_is_failed_after_attempt_exhaustion(test_db_session) -> None:
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+    request.max_attempts = 1
+    test_db_session.add(request)
+    test_db_session.commit()
+    claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
+    assert claimed is not None
+    claimed.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    test_db_session.add(claimed)
+    test_db_session.commit()
+
+    assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-2') is None
+
+    test_db_session.refresh(claimed)
+    assert claimed.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+    assert claimed.error_message == 'Compute request exhausted 1 execution attempts'
+    assert claimed.response_envelope is not None
+    assert response_payload(_stored_response(claimed))['error'] == 'Compute request exhausted 1 execution attempts'

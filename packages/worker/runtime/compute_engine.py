@@ -797,6 +797,7 @@ class PolarsComputeEngine:
                 schema_map[step_id] = PolarsComputeEngine._apply_step(
                     parent_frame,
                     backend_step,
+                    step_id=str(step_id),
                     right_sources=right_sources,
                     right_lf=right_lf,
                 )
@@ -1128,6 +1129,7 @@ class PolarsComputeEngine:
     def _apply_step(
         lf: pl.LazyFrame,
         step: BackendStep,
+        step_id: str,
         right_sources: dict[str, pl.LazyFrame] | None = None,
         right_lf: pl.LazyFrame | None = None,
     ) -> pl.LazyFrame:
@@ -1142,4 +1144,4 @@ class PolarsComputeEngine:
         if not handler:
             raise ValueError(f"Unsupported operation: {operation}")
 
-        return handler(lf, params, right_lf=right_lf, right_sources=right_sources)
+        return handler(lf, params, right_lf=right_lf, right_sources=right_sources, step_id=step_id)

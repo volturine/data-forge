@@ -1,9 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
 
-from sqlalchemy import func, or_, select, update
-from sqlalchemy.engine import CursorResult
+from sqlalchemy import func, or_, select
 from sqlmodel import Session
 
 from backend_core import notification_delivery, runtime_ipc
@@ -24,7 +22,7 @@ def _database_now(session: Session) -> datetime:
     return value.astimezone(UTC)
 
 
-def enqueue_runtime_event(session: Session, payload: dict[str, object], *, commit: bool = True) -> RuntimeOutboxEvent:
+def enqueue_runtime_event(session: Session, payload: dict[str, object]) -> RuntimeOutboxEvent:
     kind = RuntimePayloadKind.from_payload(payload)
     if kind is None:
         raise ValueError(f'Unsupported runtime outbox payload kind: {payload.get("kind")!r}')
@@ -40,15 +38,11 @@ def enqueue_runtime_event(session: Session, payload: dict[str, object], *, commi
         updated_at=now,
     )
     session.add(event)
-    if commit:
-        session.commit()
-        session.refresh(event)
-    else:
-        session.flush()
+    session.flush()
     return event
 
 
-def enqueue_notification_delivery(session: Session, payload: dict[str, object], *, commit: bool = True) -> RuntimeOutboxEvent:
+def enqueue_notification_delivery(session: Session, payload: dict[str, object]) -> RuntimeOutboxEvent:
     kind = payload.get('kind')
     if kind not in {notification_delivery.EMAIL_DELIVERY_KIND, notification_delivery.TELEGRAM_DELIVERY_KIND}:
         raise ValueError(f'Unsupported notification delivery kind: {kind!r}')
@@ -64,15 +58,11 @@ def enqueue_notification_delivery(session: Session, payload: dict[str, object], 
         updated_at=now,
     )
     session.add(event)
-    if commit:
-        session.commit()
-        session.refresh(event)
-    else:
-        session.flush()
+    session.flush()
     return event
 
 
-def enqueue_api_build_notification(session: Session, *, namespace: str, build_id: str, latest_sequence: int, commit: bool = True) -> RuntimeOutboxEvent:
+def enqueue_api_build_notification(session: Session, *, namespace: str, build_id: str, latest_sequence: int) -> RuntimeOutboxEvent:
     return enqueue_runtime_event(
         session,
         {
@@ -81,27 +71,24 @@ def enqueue_api_build_notification(session: Session, *, namespace: str, build_id
             'build_id': build_id,
             'latest_sequence': latest_sequence,
         },
-        commit=commit,
     )
 
 
-def enqueue_build_job_notification(session: Session, *, commit: bool = True) -> RuntimeOutboxEvent:
-    return enqueue_runtime_event(session, {'kind': RuntimePayloadKind.JOB.value}, commit=commit)
+def enqueue_build_job_notification(session: Session) -> RuntimeOutboxEvent:
+    return enqueue_runtime_event(session, {'kind': RuntimePayloadKind.JOB.value})
 
 
-def enqueue_compute_request_notification(session: Session, *, request_id: str, commit: bool = True) -> RuntimeOutboxEvent:
+def enqueue_compute_request_notification(session: Session, *, request_id: str) -> RuntimeOutboxEvent:
     return enqueue_runtime_event(
         session,
         {'kind': RuntimePayloadKind.COMPUTE_REQUEST.value, 'request_id': request_id},
-        commit=commit,
     )
 
 
-def enqueue_compute_response_notification(session: Session, *, request_id: str, commit: bool = True) -> RuntimeOutboxEvent:
+def enqueue_compute_response_notification(session: Session, *, request_id: str) -> RuntimeOutboxEvent:
     return enqueue_runtime_event(
         session,
         {'kind': RuntimePayloadKind.COMPUTE_RESPONSE.value, 'request_id': request_id},
-        commit=commit,
     )
 
 
@@ -174,23 +161,26 @@ def _finalize_claim(
 ) -> bool:
     now = _database_now(session)
     table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
-    values: dict[str, object] = {
-        'status': RuntimeOutboxStatus.DISPATCHED if error is None else RuntimeOutboxStatus.FAILED,
-        'claim_token': None,
-        'lease_expires_at': None,
-        'last_error': error[:1000] if error is not None else None,
-        'available_at': now + timedelta(seconds=settings.runtime_outbox_retry_seconds) if error is not None else now,
-        'dispatched_at': now if error is None else None,
-        'updated_at': now,
-    }
     statement = (
-        update(RuntimeOutboxEvent)
+        select(RuntimeOutboxEvent)
         .where(table.c.id == event_id)
         .where(table.c.status == RuntimeOutboxStatus.DISPATCHING)
         .where(table.c.claim_token == claim_token)
         .where(table.c.lease_generation == lease_generation)
-        .values(**values)
+        .with_for_update()
     )
-    result = cast(CursorResult[Any], session.execute(statement))
+    event = session.execute(statement).scalars().first()
+    if event is None:
+        session.rollback()
+        return False
+    poisoned = error is not None and event.attempts >= settings.runtime_outbox_max_attempts
+    event.status = RuntimeOutboxStatus.DISPATCHED if error is None else RuntimeOutboxStatus.POISONED if poisoned else RuntimeOutboxStatus.FAILED
+    event.claim_token = None
+    event.lease_expires_at = None
+    event.last_error = error[:1000] if error is not None else None
+    event.available_at = now + timedelta(seconds=settings.runtime_outbox_retry_seconds) if error is not None and not poisoned else now
+    event.dispatched_at = now if error is None else None
+    event.updated_at = now
+    session.add(event)
     session.commit()
-    return result.rowcount == 1
+    return True

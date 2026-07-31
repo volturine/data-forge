@@ -48,7 +48,7 @@ from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resol
 from runtime.internal_api import BuildJobLeaseLost, ClaimedBuildJob, HealthCheckSpec, client_from_env
 from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
-from runtime.notification_delivery import render_template
+from runtime.notification_delivery import extract_staged_deliveries, render_template, strip_staged_preview
 from runtime.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
 from runtime.time import utc_now as _utcnow
 
@@ -1855,7 +1855,7 @@ def preview_step(
             failure_prefix="Preview",
         )
 
-        data = result_data.get("data", {})
+        data = strip_staged_preview(result_data.get("data", {}))
         result_meta = _build_preview_result_metadata(
             data=data,
             page=page,
@@ -2312,6 +2312,12 @@ def export_data(
         row_count = data.get("row_count", 0)
         logger.info(f"Export completed: {row_count} rows written to parquet")
 
+        staged_table = pq.read_table(tmp_output)
+        sanitized_table, staged_notification_deliveries = extract_staged_deliveries(staged_table)
+        if sanitized_table.column_names != staged_table.column_names:
+            pq.write_table(sanitized_table, tmp_output)
+            data = strip_staged_preview(data)
+
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
 
@@ -2503,6 +2509,7 @@ def export_data(
             },
             output_notification=output_notification,
         )
+        notification_deliveries.extend(staged_notification_deliveries)
         target_ds = _upsert_output_datasource(
             session=session,
             result_id=result_id,

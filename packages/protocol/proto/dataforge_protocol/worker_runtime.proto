@@ -179,6 +179,10 @@ message WorkerExecuteDatasourceRequest {
     not_in: 0
   }];
   DatasourceCommand command = 4 [(buf.validate.field).required = true];
+  string request_id = 5 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 6 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 7 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 8 [(buf.validate.field).int64.gte = 1];
 }
 
 message WorkerScheduleIngestDatasourceRequest {

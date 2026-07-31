@@ -179,8 +179,16 @@ check-protocol-generated:
     diff -ru "$tmp/frontend_protocol" ../frontend/src/lib/protocol
 
 verify:
-    env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py -- just format
+    #!/usr/bin/env bash
+    set -euo pipefail
+    before="$(git status --porcelain=v1 --untracked-files=all)"
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py -- just check
+    after="$(git status --porcelain=v1 --untracked-files=all)"
+    if [ "$before" != "$after" ]; then
+        echo 'Verification mutated the worktree:' >&2
+        diff -u <(printf '%s\n' "$before") <(printf '%s\n' "$after") || true
+        exit 1
+    fi
 
 
 test:

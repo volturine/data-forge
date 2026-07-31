@@ -14,6 +14,7 @@ from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
+from backend_core.transactions import committed
 
 
 def _database_now(session: Session) -> datetime:
@@ -25,7 +26,7 @@ def _database_now(session: Session) -> datetime:
     return value.astimezone(UTC)
 
 
-def create_job(
+def stage_job(
     session: Session,
     *,
     build_id: str,
@@ -34,7 +35,6 @@ def create_job(
     priority: int = 0,
     max_attempts: int = 1,
     available_at: datetime | None = None,
-    commit: bool = True,
 ) -> BuildJob:
     now = _utcnow()
     job = BuildJob(
@@ -50,12 +50,11 @@ def create_job(
         updated_at=now,
     )
     session.add(job)
-    if commit:
-        session.commit()
-        session.refresh(job)
-    else:
-        session.flush()
+    session.flush()
     return job
+
+
+create_job = committed(stage_job, refresh=True)
 
 
 def get_job_by_build_id(session: Session, build_id: str) -> BuildJob | None:
@@ -124,7 +123,7 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
     return job
 
 
-def expire_exhausted_jobs(session: Session, *, commit: bool = True) -> list[str]:
+def stage_exhausted_jobs(session: Session) -> list[str]:
     now = _database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     base = (
@@ -156,11 +155,11 @@ def expire_exhausted_jobs(session: Session, *, commit: bool = True) -> list[str]
                 updated_at=now,
             )
         )
-    if commit:
-        session.commit()
-    else:
-        session.flush()
+    session.flush()
     return build_ids
+
+
+expire_exhausted_jobs = committed(stage_exhausted_jobs)
 
 
 def renew_job_lease(session: Session, job_id: str, *, worker_id: str, claim_token: str, lease_generation: int) -> BuildJob | None:
@@ -254,7 +253,7 @@ def finish_claimed_job(
     return session.get(BuildJob, job_id)
 
 
-def mark_job_cancelled(session: Session, job_id: str, *, commit: bool = True) -> BuildJob:
+def stage_job_cancelled(session: Session, job_id: str) -> BuildJob:
     now = _database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     cancellable_statuses = [BuildJobStatus.QUEUED, *[status for status in BuildJobStatus.members() if status.is_active]]
@@ -275,22 +274,19 @@ def mark_job_cancelled(session: Session, job_id: str, *, commit: bool = True) ->
     )
     result = cast(CursorResult[Any], session.execute(statement))
     if result.rowcount == 1:
-        if commit:
-            session.commit()
-        else:
-            session.flush()
+        session.flush()
         job = session.get(BuildJob, job_id)
         if job is None:
             raise RuntimeError(f'Cancelled build job {job_id} disappeared')
         return job
-    if commit:
-        session.rollback()
-    else:
-        session.expire_all()
+    session.expire_all()
     job = session.get(BuildJob, job_id)
     if job is None:
         raise ValueError(f'Build job {job_id} not found')
     return job
+
+
+mark_job_cancelled = committed(stage_job_cancelled, refresh=True)
 
 
 def queued_job_count(session: Session) -> int:

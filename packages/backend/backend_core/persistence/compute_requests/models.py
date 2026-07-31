@@ -24,6 +24,7 @@ class ComputeRequest(SQLModel, table=True):  # type: ignore[call-arg, assignment
     claimed_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     last_renewed_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     attempts: int = Field(default=0, sa_column=Column(Integer, nullable=False))
+    max_attempts: int = Field(default=3, sa_column=Column(Integer, nullable=False, server_default='3'))
     created_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     updated_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     completed_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))

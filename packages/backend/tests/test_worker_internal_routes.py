@@ -515,6 +515,35 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
+async def test_internal_worker_grpc_maps_lost_datasource_publication_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+
+    def reject_publication(**_kwargs):
+        from modules.datasource.runtime_service import DatasourcePublicationClaimLost
+
+        raise DatasourcePublicationClaimLost('Datasource publication claim is no longer active')
+
+    monkeypatch.setattr('modules.datasource.runtime_service.create_database_datasource', reject_publication)
+
+    with pytest.raises(RuntimeError, match='publication claim is no longer active'):
+        await WorkerRuntimeServicer().ExecuteDatasourceRequest(
+            worker_runtime_pb2.WorkerExecuteDatasourceRequest(
+                namespace='default',
+                kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
+                command=datasource_pb2.DatasourceCommand(
+                    create_database=datasource_pb2.CreateDatabaseDatasourceCommand(
+                        name='Created',
+                        connection_string='postgresql://example/db',
+                        query='SELECT 1',
+                        branch='main',
+                    )
+                ),
+            ),
+            context,
+        )
+
+
+@pytest.mark.asyncio
 async def test_internal_worker_grpc_uses_typed_schema_info_for_datasource_metadata(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     datasource_id = str(uuid.uuid4())

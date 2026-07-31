@@ -4,7 +4,6 @@ import logging
 import os
 import re
 import tempfile
-import threading
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -17,6 +16,8 @@ import polars as pl
 import psycopg
 from polars.datatypes import Array, List, Struct
 from pyiceberg.table import Table
+from sqlalchemy import update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -46,9 +47,6 @@ from modules.datasource.schemas import (
 )
 
 logger = logging.getLogger(__name__)
-
-_DATASOURCE_INGEST_LOCKS: dict[str, threading.Lock] = {}
-_DATASOURCE_INGEST_LOCKS_GUARD = threading.Lock()
 
 
 class DatasourcePublicationClaimLost(RuntimeError):
@@ -572,27 +570,6 @@ def create_database_datasource(
                 },
             )
         except Exception as exc:
-            if connection_string.startswith('postgresql://'):
-                datasource = DataSource(
-                    id=datasource_id,
-                    name=name,
-                    description=DataSourceDescriptionModel.normalize_description(description),
-                    source_type=DataSourceType.DATABASE,
-                    config=source_config,
-                    owner_id=owner_id,
-                    created_at=datetime.now(UTC).replace(tzinfo=None),
-                )
-                session.add(datasource)
-                session.commit()
-                session.refresh(datasource)
-                _complete_ingest_run(
-                    session,
-                    run_id=run.id,
-                    started=started,
-                    datasource=datasource,
-                    original_source_type=DataSourceType.DATABASE,
-                )
-                return DataSourceResponse.model_validate(datasource)
             raise DataSourceConnectionError(
                 DataSourceType.DATABASE.ingestion_error_message,
                 details={'connection_string': connection_string},
@@ -727,7 +704,7 @@ def ingest_external_datasource(
     *,
     triggered_by: str = 'manual',
     mode: str = 'manual_ingest',
-    staging_key: str | None = None,
+    staging_key: str,
     publication_guard: Callable[[Session], None] | None = None,
 ) -> DataSourceResponse:
     datasource = session.get(DataSource, datasource_id)
@@ -756,7 +733,7 @@ def ingest_external_datasource(
             'Datasource branch is required',
             details={'datasource_id': datasource_id},
         )
-    lock = _datasource_ingest_mutex(datasource_id)
+    source_revision = datasource.revision
     run = _create_ingest_run(
         session,
         datasource_id=datasource_id,
@@ -766,7 +743,6 @@ def ingest_external_datasource(
         triggered_by=triggered_by,
         request_json={'query': source.get('query')} if source_type == DataSourceType.DATABASE else None,
     )
-    lock.acquire()
     started = monotonic()
     try:
         metadata_path = datasource.config.get('metadata_path')
@@ -776,15 +752,10 @@ def ingest_external_datasource(
                 details={'datasource_id': datasource_id},
             )
         branch = branch_raw.strip()
-        if staging_key is not None:
-            safe_staging_key = re.sub(r'[^a-zA-Z0-9_]+', '_', staging_key).strip('_')
-            if not safe_staging_key:
-                raise ValueError('Datasource staging key must contain an alphanumeric character')
-            target_path = _prepare_clean_target(namespace_paths().clean_dir, f'{datasource_id}__claim_{safe_staging_key}', branch)
-        else:
-            target_path = metadata_path.rstrip('/')
-        if staging_key is None and target_path.split('/')[-1] != branch:
-            target_path = _prepare_clean_target(namespace_paths().clean_dir, datasource_id, branch)
+        safe_staging_key = re.sub(r'[^a-zA-Z0-9_]+', '_', staging_key).strip('_')
+        if not safe_staging_key:
+            raise ValueError('Datasource staging key must contain an alphanumeric character')
+        target_path = _prepare_clean_target(namespace_paths().clean_dir, f'{datasource_id}__claim_{safe_staging_key}', branch)
         try:
             if source_type == DataSourceType.DATABASE:
                 connection_string = source.get('connection_string')
@@ -822,10 +793,17 @@ def ingest_external_datasource(
         next_config['ingest'] = {'ingested_at': datetime.now(UTC).replace(tzinfo=None).isoformat()}
         if publication_guard is not None:
             publication_guard(session)
-        datasource.config = next_config
-        datasource.schema_cache = None
-        session.add(datasource)
+        statement = (
+            update(DataSource)
+            .where(sa(DataSource.id == datasource_id), sa(DataSource.revision == source_revision))
+            .values(config=next_config, schema_cache=None, revision=source_revision + 1)
+        )
+        publication = cast(CursorResult[Any], session.execute(statement))
+        if publication.rowcount != 1:
+            session.rollback()
+            raise DatasourcePublicationClaimLost(f'Datasource {datasource_id} publication fence was replaced')
         session.commit()
+        session.expire(datasource)
         session.refresh(datasource)
         _complete_ingest_run(
             session,
@@ -835,20 +813,12 @@ def ingest_external_datasource(
             original_source_type=source_type,
             metadata_path=next_config.get('metadata_path'),
         )
-        lock.release()
         return DataSourceResponse.model_validate(datasource)
     except Exception as exc:
         with contextlib.suppress(Exception):
             session.rollback()
             _fail_ingest_run(session, run_id=run.id, started=started, exc=exc)
-        if lock.locked():
-            lock.release()
         raise
-
-
-def _datasource_ingest_mutex(datasource_id: str) -> threading.Lock:
-    with _DATASOURCE_INGEST_LOCKS_GUARD:
-        return _DATASOURCE_INGEST_LOCKS.setdefault(datasource_id, threading.Lock())
 
 
 def is_reingestable_raw_datasource(datasource: DataSource) -> bool:

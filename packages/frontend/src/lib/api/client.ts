@@ -34,6 +34,17 @@ export interface ApiResponse<T> {
 	headers: Headers;
 }
 
+let namespaceEpoch = 0;
+const namespaceRequests = new Set<AbortController>();
+
+if (typeof window !== 'undefined') {
+	window.addEventListener('dataforge:namespace-will-change', () => {
+		namespaceEpoch += 1;
+		for (const controller of namespaceRequests) controller.abort('Namespace changed');
+		namespaceRequests.clear();
+	});
+}
+
 export function buildApiUrl(endpoint: string): string {
 	return `${BASE_URL}${endpoint}`;
 }
@@ -116,15 +127,54 @@ function apiFetch<T>(
 	parse: (response: Response) => ResultAsync<T, ApiError>
 ): ResultAsync<T, ApiError> {
 	const headers = buildHeaders(options);
-	const request = { ...options, headers, cache: requestCacheMode(options) } satisfies RequestInit;
-	return ResultAsync.fromPromise(
+	const requestEpoch = namespaceEpoch;
+	const requestNamespace = headers.get('X-Namespace');
+	const namespaceController = new AbortController();
+	if (requestNamespace) namespaceRequests.add(namespaceController);
+	const signals = [
+		options?.signal,
+		requestNamespace ? namespaceController.signal : undefined
+	].filter((signal): signal is AbortSignal => signal !== undefined);
+	const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+	const request = {
+		...options,
+		headers,
+		signal,
+		cache: requestCacheMode(options)
+	} satisfies RequestInit;
+	const result = ResultAsync.fromPromise(
 		fetch(buildApiUrl(endpoint), request),
 		(error): ApiError =>
-			createApiError('network', error instanceof Error ? error.message : 'Network error')
+			createApiError(
+				'network',
+				namespaceController.signal.aborted
+					? 'Request cancelled because the namespace changed'
+					: error instanceof Error
+						? error.message
+						: 'Network error'
+			)
 	).andThen((response) => {
 		if (!response.ok) return handleErrorResponse(response, endpoint, options);
-		return parse(response);
+		return parse(response).andThen((value) => {
+			const currentNamespace = isNamespaceReady() ? requireNamespace() : null;
+			if (
+				requestNamespace &&
+				(requestEpoch !== namespaceEpoch || requestNamespace !== currentNamespace)
+			) {
+				return err(createApiError('network', 'Response discarded because the namespace changed'));
+			}
+			return okAsync(value);
+		});
 	});
+	return result
+		.map((value) => {
+			namespaceRequests.delete(namespaceController);
+			return value;
+		})
+		.mapErr((error) => {
+			namespaceRequests.delete(namespaceController);
+			return error;
+		});
 }
 
 export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAsync<T, ApiError> {
