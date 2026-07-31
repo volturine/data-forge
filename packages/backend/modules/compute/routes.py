@@ -222,32 +222,6 @@ def _resolve_websocket_user(websocket: WebSocket) -> User | None:
     return run_settings_db(_lookup)
 
 
-async def _emit_active_build_event(
-    build_id: str,
-    analysis_id: str,
-    payload: schemas.BuildEvent,
-    *,
-    namespace: str,
-    resource_config_json: dict[str, object] | None = None,
-) -> None:
-    del analysis_id
-    token = set_namespace_context(namespace)
-    session_gen = get_db()
-    session = next(session_gen)
-    try:
-        await build_event_service.persist_build_event(
-            session,
-            namespace=namespace,
-            build_id=build_id,
-            event=payload,
-            resource_config_json=resource_config_json,
-        )
-    finally:
-        session.close()
-        session_gen.close()
-        reset_namespace(token)
-
-
 def _get_durable_build_detail(session: Session, build_id: str) -> schemas.ActiveBuildDetail | None:
     build_run = build_run_service.get_build_run(session, build_id)
     if build_run is None or build_run.namespace != get_namespace():
@@ -778,16 +752,20 @@ async def cancel_build(
     )
     job = build_job_service.get_job_by_build_id(session, build_id)
     try:
-        if job is not None and (
-            build_job_service.BuildJobStatus.require(job.status) == build_job_service.BuildJobStatus.QUEUED
-            or build_job_service.BuildJobStatus.require(job.status).is_active
-        ):
-            build_job_service.mark_job_cancelled(session, job.id, commit=False)
+        if job is None:
+            raise HTTPException(status_code=409, detail='Active build has no cancellable job')
+        job_status = build_job_service.BuildJobStatus.require(job.status)
+        if job_status != build_job_service.BuildJobStatus.QUEUED and not job_status.is_active:
+            raise HTTPException(status_code=409, detail='Build job became terminal before cancellation')
+        cancelled_job = build_job_service.mark_job_cancelled(session, job.id, commit=False)
+        if build_job_service.BuildJobStatus.require(cancelled_job.status) != build_job_service.BuildJobStatus.CANCELLED:
+            raise HTTPException(status_code=409, detail='Build job became terminal before cancellation')
         event_row = build_run_service.append_build_event(
             session,
             build_id=detail.build_id,
             event=cancellation_event,
             resource_config_json=detail.resource_config.model_dump(mode='json') if detail.resource_config is not None else None,
+            authoritative_execution_generation=cancelled_job.lease_generation,
             commit=False,
         )
         if event_row is None:

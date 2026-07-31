@@ -83,6 +83,10 @@ def upgrade() -> None:
         sa.Column('worker_id', sa.String(), nullable=False),
         sa.Column('namespace', sa.String(), nullable=False),
         sa.Column('analysis_id', sa.String(), nullable=False),
+        sa.Column('engine_scope', sa.String(), nullable=False),
+        sa.Column('engine_reuse_policy', sa.String(), nullable=False),
+        sa.Column('datasource_id', sa.String(), nullable=True),
+        sa.Column('build_id', sa.String(), nullable=True),
         sa.Column('process_id', sa.Integer(), nullable=True),
         sa.Column('status', sa.String(), nullable=False),
         sa.Column('current_job_id', sa.String(), nullable=True),
@@ -98,6 +102,7 @@ def upgrade() -> None:
     op.create_index('ix_engine_instances_worker_id', 'engine_instances', ['worker_id'])
     op.create_index('ix_engine_instances_namespace', 'engine_instances', ['namespace'])
     op.create_index('ix_engine_instances_analysis_id', 'engine_instances', ['analysis_id'])
+    op.create_index('ix_engine_instances_engine_scope', 'engine_instances', ['engine_scope'])
     op.create_index('ix_engine_instances_status', 'engine_instances', ['status'])
     op.create_index('ix_engine_instances_last_seen_at', 'engine_instances', ['last_seen_at'])
 
@@ -107,6 +112,7 @@ def downgrade() -> None:
         return
     op.drop_index('ix_engine_instances_last_seen_at', table_name='engine_instances')
     op.drop_index('ix_engine_instances_status', table_name='engine_instances')
+    op.drop_index('ix_engine_instances_engine_scope', table_name='engine_instances')
     op.drop_index('ix_engine_instances_analysis_id', table_name='engine_instances')
     op.drop_index('ix_engine_instances_namespace', table_name='engine_instances')
     op.drop_index('ix_engine_instances_worker_id', table_name='engine_instances')

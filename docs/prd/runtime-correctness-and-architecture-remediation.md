@@ -35,17 +35,27 @@ Completed in the staged-publication P0 slice:
 
 Completed in the atomic build-event P0 slice:
 
-- each build run persists `next_event_sequence`, backfilled from existing events by a tenant migration;
+- each build run persists `next_event_sequence` directly in the tenant schema creator;
 - event producers lock the build row before allocating a sequence or changing the durable projection;
 - counter increment, projection fold, event insertion, and runtime-outbox enqueue commit or roll back as one transaction;
 - cross-process wakeups use the durable outbox while the committing API process updates its local build hub after commit;
 - concurrent Postgres producers are verified to receive one unique total order, with the final projection matching the last committed event;
 - rollback coverage verifies that no counter, projection, event, or outbox residue survives a failed transaction.
 
+Completed in the execution-generation and terminal-race P0 slice:
+
+- the migration graph is compacted to the public and tenant schema creators; incremental compatibility revisions and upgrade handling are removed;
+- build startup copies the active claim generation into the build projection and advances it when a reclaimed job restarts;
+- worker events must match the build execution generation in addition to holding the active job claim;
+- cancellation increments the job generation and atomically installs that exact generation with the cancellation event and projection;
+- cancellation now rejects missing or concurrently terminalized jobs instead of continuing from stale state;
+- finalization locks the active claim first and refuses to terminalize a job before the build projection is terminal;
+- worker failure handling now writes the failed build projection, terminal event, outbox entry, job outcome, and schedule reconciliation in one claim-locked transaction;
+- a concurrent Postgres cancellation/completion test verifies that exactly one terminal event wins and job/build generations remain consistent.
+
 Still open at P0:
 
 - fence remaining irreversible engine and ancillary publication paths outside scheduled ingestion and analysis output publication;
-- add concurrent-session cancel/finalize stress tests.
 
 Follow-up cleanup for staged publication:
 
@@ -479,10 +489,10 @@ Success criterion: no claimant-owned mutation can succeed with only a row ID or 
 ### Workstream C — Atomic build events
 
 - Move sequence allocation to the locked build row. **Completed.**
-- Add execution generation validation.
+- Add execution generation validation. **Completed.**
 - Fold event projection and insert event/outbox in one transaction. **Completed.**
 - Make producer retries idempotent with a producer event ID where RPC retry can duplicate a call.
-- Reject worker events after cancellation or lease replacement.
+- Reject worker events after cancellation or lease replacement. **Completed.**
 - Test concurrent resource and progress event streams.
 
 Success criterion: event sequences are gap-tolerant if required but unique and strictly increasing; projection state is equivalent to folding the committed event stream.
@@ -687,7 +697,7 @@ Exit criteria:
 - [ ] Add concurrent-session backend test utilities.
 - [ ] Add lease expiry and stale completion tests.
 - [x] Add event append collision tests.
-- [ ] Add cancel/finalize race tests.
+- [x] Add cancel/finalize race tests.
 - [ ] Add shutdown-with-active-executor tests.
 - [ ] Add outbox and scheduler contention tests.
 - [ ] Add analysis lost-update tests.
@@ -715,11 +725,11 @@ Exit criteria:
 
 ### Phase 3 — Make build state atomic
 
-- [ ] Add build event counter and execution generation.
+- [x] Add build event counter and execution generation.
 - [x] Replace `MAX(sequence) + 1`.
 - [x] Combine event append, projection update, and outbox enqueue.
-- [ ] Implement atomic cancellation.
-- [ ] Implement fenced atomic finalization.
+- [x] Implement atomic cancellation.
+- [x] Implement fenced atomic finalization.
 - [ ] Make terminal transitions idempotent and immutable.
 
 Exit criteria:

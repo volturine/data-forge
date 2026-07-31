@@ -6,7 +6,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlmodel import Session, select
 
-from backend_core import build_runs_service as build_run_service
+from backend_core import build_jobs_service, build_runs_service as build_run_service
+from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
@@ -47,6 +48,7 @@ def test_create_build_run_persists(test_db_session) -> None:
     assert stored.status == BuildRunStatus.RUNNING
     assert stored.analysis_name == 'Analysis 1'
     assert stored.starter_json['email'] == 'test@example.com'
+    assert stored.execution_generation == 0
     assert stored.next_event_sequence == 1
 
 
@@ -172,6 +174,158 @@ def test_build_event_projection_counter_and_outbox_roll_back_together(test_db_se
     assert stored.version == 1
     assert events == []
     assert outbox_events == []
+
+
+def test_build_event_rejects_stale_execution_generation_without_writes(test_db_session) -> None:
+    run = build_run_service.create_build_run(
+        test_db_session,
+        build_id=str(uuid.uuid4()),
+        namespace='default',
+        analysis_id='analysis-1',
+        analysis_name='Generation test',
+        request_json={'analysis_id': 'analysis-1'},
+        starter_json=_starter(),
+        execution_generation=2,
+    )
+    event = compute_schemas.BuildLogEvent(
+        build_id=run.id,
+        analysis_id=run.analysis_id,
+        emitted_at=datetime.now(UTC),
+        current_kind=EngineRunKind.BUILD,
+        current_datasource_id='source-1',
+        level=compute_schemas.BuildLogLevel.INFO,
+        message='stale',
+    )
+
+    row = build_run_service.append_build_event(
+        test_db_session,
+        build_id=run.id,
+        event=event,
+        expected_execution_generation=1,
+    )
+
+    test_db_session.expire_all()
+    stored = build_run_service.get_build_run(test_db_session, run.id)
+    assert row is None
+    assert stored is not None
+    assert stored.execution_generation == 2
+    assert stored.next_event_sequence == 1
+    assert build_run_service.list_build_events_after(test_db_session, run.id) == []
+    assert list(test_db_session.execute(select(RuntimeOutboxEvent)).scalars().all()) == []
+
+
+def test_cancellation_and_worker_completion_race_preserves_one_terminal_outcome(test_engine, test_db_session) -> None:
+    run = build_run_service.create_build_run(
+        test_db_session,
+        build_id=str(uuid.uuid4()),
+        namespace='default',
+        analysis_id='analysis-1',
+        analysis_name='Terminal race',
+        request_json={'analysis_id': 'analysis-1'},
+        starter_json=_starter(),
+        execution_generation=1,
+    )
+    build_jobs_service.create_job(test_db_session, build_id=run.id, namespace='default')
+    claimed = build_jobs_service.claim_next_job(test_db_session, worker_id='worker:race')
+    assert claimed is not None
+    assert claimed.claim_token is not None
+    claim_token = claimed.claim_token
+    barrier = threading.Barrier(2)
+    emitted_at = datetime.now(UTC)
+
+    def cancel() -> str:
+        event = compute_schemas.BuildCancelledEvent(
+            build_id=run.id,
+            analysis_id=run.analysis_id,
+            emitted_at=emitted_at,
+            progress=0.5,
+            elapsed_ms=50,
+            total_steps=1,
+            tabs_built=0,
+            results=[],
+            duration_ms=50,
+            cancelled_at=emitted_at,
+            cancelled_by='user@example.com',
+        )
+        with Session(test_engine) as session:
+            barrier.wait(timeout=5)
+            cancelled_job = build_jobs_service.mark_job_cancelled(session, claimed.id, commit=False)
+            if cancelled_job.status != BuildJobStatus.CANCELLED:
+                session.rollback()
+                return 'lost'
+            row = build_run_service.append_build_event(
+                session,
+                build_id=run.id,
+                event=event,
+                authoritative_execution_generation=cancelled_job.lease_generation,
+                commit=False,
+            )
+            if row is None:
+                session.rollback()
+                return 'lost'
+            session.commit()
+            return 'cancelled'
+
+    def complete() -> str:
+        event = compute_schemas.BuildCompleteEvent(
+            build_id=run.id,
+            analysis_id=run.analysis_id,
+            emitted_at=emitted_at,
+            elapsed_ms=50,
+            total_steps=1,
+            tabs_built=1,
+            results=[],
+            duration_ms=50,
+        )
+        with Session(test_engine) as session:
+            barrier.wait(timeout=5)
+            claim = build_jobs_service.lock_active_job_claim(
+                session,
+                claimed.id,
+                build_id=run.id,
+                worker_id='worker:race',
+                claim_token=claim_token,
+                lease_generation=claimed.lease_generation,
+            )
+            if claim is None:
+                session.rollback()
+                return 'lost'
+            row = build_run_service.append_build_event(
+                session,
+                build_id=run.id,
+                event=event,
+                expected_execution_generation=claimed.lease_generation,
+                commit=False,
+            )
+            if row is None:
+                session.rollback()
+                return 'lost'
+            session.commit()
+            return 'completed'
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = {pool.submit(cancel), pool.submit(complete)}
+        accepted = sorted(future.result() for future in outcomes)
+
+    with Session(test_engine) as session:
+        stored_run = build_run_service.get_build_run(session, run.id)
+        stored_job = session.get(type(claimed), claimed.id)
+        events = build_run_service.list_build_events_after(session, run.id)
+        assert stored_run is not None
+        assert stored_job is not None
+        if 'cancelled' in accepted:
+            assert accepted == ['cancelled', 'lost']
+            assert stored_run.status == BuildRunStatus.CANCELLED
+            assert stored_run.execution_generation == 2
+            assert stored_job.status == BuildJobStatus.CANCELLED
+            assert stored_job.lease_generation == 2
+            assert [event.type for event in events] == ['cancelled']
+        else:
+            assert accepted == ['completed', 'lost']
+            assert stored_run.status == BuildRunStatus.COMPLETED
+            assert stored_run.execution_generation == 1
+            assert stored_job.status == BuildJobStatus.RUNNING
+            assert [event.type for event in events] == ['complete']
 
 
 def test_list_build_events_after_and_latest_sequence(test_db_session) -> None:
@@ -505,7 +659,7 @@ def test_mark_build_running_uses_cas_and_preserves_terminal_state(test_db_sessio
     test_db_session.add(run)
     test_db_session.commit()
 
-    updated = build_run_service.mark_build_running(test_db_session, run.id)
+    updated = build_run_service.mark_build_running(test_db_session, run.id, execution_generation=1)
     stored = build_run_service.get_build_run(test_db_session, run.id)
 
     assert updated is not None
@@ -513,6 +667,22 @@ def test_mark_build_running_uses_cas_and_preserves_terminal_state(test_db_sessio
     assert updated.status == BuildRunStatus.CANCELLED
     assert stored.status == BuildRunStatus.CANCELLED
     assert stored.version == 5
+
+
+def test_mark_running_build_advances_execution_generation_for_reclaimed_job(test_db_session) -> None:
+    run = _create_run(test_db_session)
+    run.execution_generation = 1
+    test_db_session.add(run)
+    test_db_session.commit()
+
+    updated = build_run_service.mark_build_running(test_db_session, run.id, execution_generation=2)
+
+    assert updated is not None
+    assert updated.status == BuildRunStatus.RUNNING
+    assert updated.execution_generation == 2
+    assert updated.version == 2
+    stale = build_run_service.mark_build_running(test_db_session, run.id, execution_generation=1)
+    assert stale is None
 
 
 def test_append_build_event_persists_matching_terminal_event_without_mutating_terminal_run(test_db_session) -> None:

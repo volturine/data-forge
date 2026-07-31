@@ -43,6 +43,7 @@ from backend_core.domain.compute_requests.models import (
     kind_from_proto,
 )
 from backend_core.domain.datasource.models import DataSourceCreatedBy
+from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
 from backend_core.json_utils import copy_json_object
@@ -73,6 +74,17 @@ logger = logging.getLogger(__name__)
 _TELEGRAM_BASE_URL = 'https://api.telegram.org'
 _TOKEN_METADATA_KEY = 'x-internal-token'
 _BUILD_JOB_PROTOCOL_VERSION = 2
+
+
+def _build_job_terminal_outcome(run_status: BuildRunStatus | str, error_message: str | None) -> tuple[BuildJobStatus, str | None] | None:
+    status = BuildRunStatus.require(run_status)
+    if status == BuildRunStatus.CANCELLED:
+        return BuildJobStatus.CANCELLED, None
+    if status == BuildRunStatus.COMPLETED:
+        return BuildJobStatus.COMPLETED, None
+    if status in {BuildRunStatus.FAILED, BuildRunStatus.ORPHANED}:
+        return BuildJobStatus.FAILED, error_message
+    return None
 
 
 def dict_to_struct(payload: dict[str, object] | None) -> struct_pb2.Struct:
@@ -1175,7 +1187,54 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
 
     @_run_async_handler_in_thread
     async def FailBuildJob(self, request: worker_runtime_pb2.WorkerFailBuildJobRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.BoolResponse:
-        def _fail(session: Any) -> Any:
+        def _fail(session: Any) -> tuple[object, str, int | None] | None:
+            claim = build_job_service.lock_active_job_claim(
+                session,
+                request.job_id,
+                build_id=request.build_id,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+            )
+            if claim is None:
+                return None
+            run = build_run_service.get_build_run(session, request.build_id)
+            if run is None:
+                return None
+            latest_sequence: int | None = None
+            outcome = _build_job_terminal_outcome(run.status, run.error_message)
+            if outcome is None:
+                failed_event = compute_schemas.BuildFailedEvent(
+                    build_id=run.id,
+                    analysis_id=run.analysis_id,
+                    emitted_at=datetime.now(UTC),
+                    current_kind=EngineRunKind.parse(run.current_kind) if run.current_kind is not None else None,
+                    current_datasource_id=run.current_datasource_id,
+                    tab_id=run.current_tab_id,
+                    tab_name=run.current_tab_name,
+                    current_output_id=run.current_output_id,
+                    current_output_name=run.current_output_name,
+                    engine_run_id=run.current_engine_run_id,
+                    progress=run.progress,
+                    elapsed_ms=run.elapsed_ms,
+                    total_steps=run.total_steps,
+                    tabs_built=0,
+                    results=[],
+                    duration_ms=run.elapsed_ms,
+                    error=request.error,
+                )
+                event_row = build_run_service.append_build_event(
+                    session,
+                    build_id=request.build_id,
+                    event=failed_event,
+                    expected_execution_generation=request.lease_generation,
+                    commit=False,
+                )
+                if event_row is None:
+                    return None
+                latest_sequence = event_row.sequence
+                outcome = (BuildJobStatus.FAILED, request.error)
+            status, error = outcome
             result = build_job_service.finish_claimed_job(
                 session,
                 request.job_id,
@@ -1183,21 +1242,24 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 build_id=request.build_id,
                 claim_token=request.claim_token,
                 lease_generation=request.lease_generation,
-                status=BuildJobStatus.FAILED,
-                error=request.error,
+                status=status,
+                error=error,
             )
             if result is None:
                 return None
+            scheduler_service.apply_schedule_run_reconciliation(session, build_id=request.build_id)
             session.commit()
             session.refresh(result)
-            return result
+            return result, run.namespace, latest_sequence
 
         token = set_namespace_context(request.namespace)
         try:
-            job = run_db(_fail)
+            result = run_db(_fail)
         finally:
             reset_namespace(token)
-        return _bool(job is not None)
+        if result is not None and result[2] is not None:
+            await build_event_service.publish_build_notification(result[1], request.build_id, latest_sequence=result[2])
+        return _bool(result is not None)
 
     @_run_async_handler_in_thread
     async def FinalizeBuildJob(
@@ -1205,22 +1267,23 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     ) -> worker_runtime_pb2.BoolResponse:
 
         def _finalize(session: Any) -> Any:
+            claim = build_job_service.lock_active_job_claim(
+                session,
+                request.job_id,
+                build_id=request.build_id,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+            )
+            if claim is None:
+                return None
             run = build_run_service.get_build_run(session, request.build_id)
             if run is None:
-                status = BuildJobStatus.FAILED
-                error = 'Build run missing'
-            elif run.status == BuildRunStatus.CANCELLED:
-                status = BuildJobStatus.CANCELLED
-                error = None
-            elif run.status == BuildRunStatus.COMPLETED:
-                status = BuildJobStatus.COMPLETED
-                error = None
-            elif run.status in {BuildRunStatus.FAILED, BuildRunStatus.ORPHANED}:
-                status = BuildJobStatus.FAILED
-                error = run.error_message
-            else:
-                status = BuildJobStatus.FAILED
-                error = f'Unexpected build status: {run.status.value}'
+                return None
+            outcome = _build_job_terminal_outcome(run.status, run.error_message)
+            if outcome is None:
+                return None
+            status, error = outcome
             result = build_job_service.finish_claimed_job(
                 session,
                 request.job_id,
@@ -1311,6 +1374,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 session,
                 namespace=request.namespace,
                 build_id=request.build_id,
+                execution_generation=request.lease_generation,
                 event=event,
                 resource_config_json=_build_resource_config_payload(request.build_resource_config) if request.HasField('build_resource_config') else None,
             )
@@ -1340,7 +1404,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             )
             if claim is None:
                 return worker_runtime_pb2.WorkerStartBuildRunResponse()
-            run = build_run_service.mark_build_running(session, request.build_id)
+            run = build_run_service.mark_build_running(session, request.build_id, execution_generation=request.lease_generation)
             if run is None or run.status != BuildRunStatus.RUNNING:
                 return worker_runtime_pb2.WorkerStartBuildRunResponse()
             await build_event_service.publish_build_notification(run.namespace, run.id, latest_sequence=0)

@@ -10,11 +10,8 @@ from sqlalchemy import create_engine, text
 from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
-_PUBLIC_BASE_REVISION = '0001_runtime_public'
-_PUBLIC_REVISION = '0003_engine_identity_public'
-_TENANT_BASE_REVISION = '0002_runtime_tenant'
-_TENANT_BASE_REVISIONS = {_TENANT_BASE_REVISION, '0004_compute_envelopes_tenant', '0005_fenced_build_jobs_tenant'}
-_TENANT_REVISION = '0006_atomic_build_events_tenant'
+_PUBLIC_REVISION = '0001_runtime_public'
+_TENANT_REVISION = '0002_runtime_tenant'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 
@@ -113,18 +110,16 @@ def _upgrade_schema(*, scope: str, schema: str, revision: str) -> None:
 def migrate_runtime(namespaces: list[str]) -> None:
     ensure_database_exists()
     public_revision = _current_revision('public')
-    if public_revision is not None and public_revision not in {_PUBLIC_BASE_REVISION, _PUBLIC_REVISION}:
-        raise RuntimeError(f'Unsupported existing public schema revision: {public_revision}. Expected {_PUBLIC_BASE_REVISION} or {_PUBLIC_REVISION}.')
-    if public_revision != _PUBLIC_REVISION:
+    if public_revision is None:
         _upgrade_schema(scope='public', schema='public', revision=_PUBLIC_REVISION)
+    elif public_revision != _PUBLIC_REVISION:
+        raise RuntimeError(f'Unsupported existing public schema revision: {public_revision}. Expected {_PUBLIC_REVISION}. Recreate the database.')
     for namespace in namespaces:
         tenant_schema = namespace_database_schema(namespace)
         revision = _current_revision(tenant_schema)
-        supported_revisions = _TENANT_BASE_REVISIONS | {_TENANT_REVISION}
-        if revision is not None and revision not in supported_revisions:
+        if revision is None:
+            _upgrade_schema(scope='tenant', schema=tenant_schema, revision=_TENANT_REVISION)
+        elif revision != _TENANT_REVISION:
             raise RuntimeError(
-                f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected one of {sorted(supported_revisions)}.'
+                f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected {_TENANT_REVISION}. Recreate the database.'
             )
-        if revision == _TENANT_REVISION:
-            continue
-        _upgrade_schema(scope='tenant', schema=tenant_schema, revision=_TENANT_REVISION)

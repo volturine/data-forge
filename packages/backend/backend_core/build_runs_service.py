@@ -205,6 +205,7 @@ def create_build_run(
     current_output_id: str | None = None,
     current_output_name: str | None = None,
     total_tabs: int = 0,
+    execution_generation: int = 0,
     created_at: datetime | None = None,
     started_at: datetime | None = None,
     commit: bool = True,
@@ -233,6 +234,7 @@ def create_build_run(
         started_at=run_started_at,
         updated_at=now,
         total_tabs=total_tabs,
+        execution_generation=execution_generation,
     )
     session.add(run)
     if commit:
@@ -358,16 +360,28 @@ def guarded_terminal_update(session: Session, *, build_id: str, event: compute_s
     return updated
 
 
-def mark_build_running(session: Session, build_id: str, *, now: datetime | None = None) -> BuildRun | None:
+def mark_build_running(session: Session, build_id: str, *, execution_generation: int, now: datetime | None = None) -> BuildRun | None:
     session.expire_all()
     run = session.get(BuildRun, build_id)
     if run is None:
         return None
-    if run.status != BuildRunStatus.QUEUED:
+    if run.status not in {BuildRunStatus.QUEUED, BuildRunStatus.RUNNING}:
+        return run
+    if execution_generation < run.execution_generation:
+        return None
+    if run.status == BuildRunStatus.RUNNING and execution_generation == run.execution_generation:
         return run
     marker = now or _utcnow()
     return _cas_update_build_run(
-        session, run=run, expected_status=BuildRunStatus.QUEUED, values={'status': BuildRunStatus.RUNNING, 'updated_at': marker, 'version': run.version + 1}
+        session,
+        run=run,
+        expected_status=run.status,
+        values={
+            'status': BuildRunStatus.RUNNING,
+            'execution_generation': execution_generation,
+            'updated_at': marker,
+            'version': run.version + 1,
+        },
     )
 
 
@@ -390,11 +404,19 @@ def append_build_event(
     build_id: str,
     event: compute_schemas.BuildEvent,
     resource_config_json: dict[str, Any] | None = None,
+    expected_execution_generation: int | None = None,
+    authoritative_execution_generation: int | None = None,
     commit: bool = True,
 ) -> BuildEvent | None:
+    if expected_execution_generation is not None and authoritative_execution_generation is not None:
+        raise ValueError('Expected and authoritative execution generations are mutually exclusive')
     run = session.execute(select(BuildRun).where(sa(BuildRun.id == build_id)).with_for_update().execution_options(populate_existing=True)).scalars().first()
     if run is None:
         raise ValueError(f'Build run {build_id} not found')
+    if expected_execution_generation is not None and run.execution_generation != expected_execution_generation:
+        return None
+    if authoritative_execution_generation is not None and authoritative_execution_generation <= run.execution_generation:
+        return None
     terminal_status = BuildRun.terminal_status_for_event(event)
     if run.status in _TERMINAL_STATUSES and terminal_status != run.status:
         return None
@@ -402,6 +424,8 @@ def append_build_event(
 
     should_update_run = run.status not in _TERMINAL_STATUSES
     if should_update_run:
+        if authoritative_execution_generation is not None:
+            run.execution_generation = authoritative_execution_generation
         run.apply_event_context(event)
         if resource_config_json is not None:
             run.resource_config_json = copy_json_dict(resource_config_json)
