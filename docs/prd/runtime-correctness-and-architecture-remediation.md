@@ -23,12 +23,26 @@ Completed in the first P0 build-job slice:
 - worker shutdown no longer broadly releases claims that may still have executing work;
 - adversarial unit and cross-API cancellation coverage has been added.
 
+Completed in the staged-publication P0 slice:
+
+- queued analysis outputs are written to claim-specific Iceberg tables and object-store paths instead of mutating the published table;
+- incremental builds copy the previously published table into a claim-specific stage before appending new rows;
+- datasource metadata and the build-result summary publish in one claim-locked database transaction;
+- stale output claims are rejected without changing the published datasource or build result;
+- scheduled datasource ingests write to a claim-specific clean-table location and revalidate ownership immediately before committing datasource metadata;
+- queued-build health-check persistence and notifications occur only after fenced output publication succeeds;
+- failed build-result summaries are fenced by the same claim token and generation.
+
 Still open at P0:
 
 - replace `MAX(sequence) + 1` with atomic event sequence allocation;
-- stage datasource/Iceberg output and validate the claim at the publication commit, eliminating the remaining check-then-act window;
-- fence every other irreversible engine/output publication path, not only build state RPCs;
+- fence remaining irreversible engine and ancillary publication paths outside scheduled ingestion and analysis output publication;
 - add concurrent-session cancel/finalize and event-allocation stress tests.
+
+Follow-up cleanup for staged publication:
+
+- reclaim orphaned claim-specific Iceberg tables and object-store prefixes after rejected or abandoned attempts;
+- replace the full-table copy used by fenced incremental publication with an Iceberg-native branch/snapshot promotion mechanism if the selected catalog exposes an atomic promotion primitive.
 
 ## 1. Purpose
 

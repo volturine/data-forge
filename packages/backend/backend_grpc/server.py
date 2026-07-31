@@ -850,7 +850,28 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             )
             if claim is None:
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
-            response = datasource_runtime_service.ingest_datasource_for_schedule(session, request.datasource_id)
+
+            def _guard_publication(active_session: Any) -> None:
+                active_claim = build_job_service.lock_active_job_claim(
+                    active_session,
+                    request.job_id,
+                    build_id=request.build_id,
+                    worker_id=request.worker_id,
+                    claim_token=request.claim_token,
+                    lease_generation=request.lease_generation,
+                )
+                if active_claim is None:
+                    raise datasource_runtime_service.DatasourcePublicationClaimLost
+
+            try:
+                response = datasource_runtime_service.ingest_datasource_for_schedule(
+                    session,
+                    request.datasource_id,
+                    staging_key=request.claim_token,
+                    publication_guard=_guard_publication,
+                )
+            except datasource_runtime_service.DatasourcePublicationClaimLost:
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
             result = datasource_result_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE, response.model_dump(mode='json'))
             if result.WhichOneof('result') != 'datasource':
                 raise ValueError('schedule ingest must return a datasource result')
@@ -945,10 +966,24 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         self, request: worker_runtime_pb2.WorkerUpdateBuildResultRequest, context: grpc.aio.ServicerContext
     ) -> common_pb2.RuntimeWorkerResponse:
         token = set_namespace_context(request.namespace)
+        session_gen = get_db()
+        session = next(session_gen)
         try:
-            run_db(build_run_service.update_build_result_json, request.build_id, struct_to_dict(request.result))
+            claim = build_job_service.lock_active_job_claim(
+                session,
+                request.job_id,
+                build_id=request.build_id,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+            )
+            if claim is None:
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
+            build_run_service.update_build_result_json(session, request.build_id, struct_to_dict(request.result))
             return _response(request.build_id)
         finally:
+            session.close()
+            session_gen.close()
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -959,6 +994,21 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session_gen = get_db()
         session = next(session_gen)
         try:
+            claimed_publication = request.HasField('build_id')
+            claim_fields = ('job_id', 'build_id', 'worker_id', 'claim_token', 'lease_generation')
+            if any(request.HasField(field) for field in claim_fields) != all(request.HasField(field) for field in claim_fields):
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Output publication claim fields must be provided together')
+            if claimed_publication:
+                claim = build_job_service.lock_active_job_claim(
+                    session,
+                    request.job_id,
+                    build_id=request.build_id,
+                    worker_id=request.worker_id,
+                    claim_token=request.claim_token,
+                    lease_generation=request.lease_generation,
+                )
+                if claim is None:
+                    await context.abort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
             config = struct_to_dict(request.config)
             schema_cache = _schema_info_payload(request.schema_info)
             existing = session.get(DataSource, request.result_id)
@@ -973,25 +1023,24 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 if request.HasField('is_hidden'):
                     existing.is_hidden = request.is_hidden
                 session.add(existing)
-                session.commit()
-                session.refresh(existing)
-                return worker_runtime_pb2.WorkerUpsertOutputDatasourceResponse(
-                    datasource_id=existing.id,
-                    datasource_name=existing.name,
-                    is_hidden=existing.is_hidden,
+                datasource = existing
+            else:
+                datasource = DataSource(
+                    id=request.result_id,
+                    name=request.name,
+                    source_type=proto_value_to_enum_name(enums_pb2.DataSourceType, 'DATA_SOURCE_TYPE', request.source_type),
+                    config=config,
+                    schema_cache=schema_cache,
+                    created_by_analysis_id=_optional_str(request, 'analysis_id'),
+                    created_by=DataSourceCreatedBy.ANALYSIS.value,
+                    is_hidden=request.is_hidden if request.HasField('is_hidden') else True,
+                    created_at=datetime.now(UTC),
                 )
-            datasource = DataSource(
-                id=request.result_id,
-                name=request.name,
-                source_type=proto_value_to_enum_name(enums_pb2.DataSourceType, 'DATA_SOURCE_TYPE', request.source_type),
-                config=config,
-                schema_cache=schema_cache,
-                created_by_analysis_id=_optional_str(request, 'analysis_id'),
-                created_by=DataSourceCreatedBy.ANALYSIS.value,
-                is_hidden=request.is_hidden if request.HasField('is_hidden') else True,
-                created_at=datetime.now(UTC),
-            )
-            session.add(datasource)
+                session.add(datasource)
+            if claimed_publication:
+                if not request.HasField('build_result'):
+                    await context.abort(grpc.StatusCode.INVALID_ARGUMENT, 'Claimed output publication requires a build result')
+                build_run_service.update_build_result_json(session, request.build_id, struct_to_dict(request.build_result))
             session.commit()
             session.refresh(datasource)
             return worker_runtime_pb2.WorkerUpsertOutputDatasourceResponse(

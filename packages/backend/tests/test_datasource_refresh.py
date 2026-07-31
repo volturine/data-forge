@@ -211,6 +211,63 @@ class TestDatasourceIngest:
 
     @patch('modules.datasource.runtime_service.load_datasource')
     @patch('modules.datasource.runtime_service._write_iceberg_table')
+    def test_scheduled_ingest_stages_data_and_rejects_publication_after_claim_loss(
+        self,
+        mock_write,
+        mock_load,
+        test_db_session,
+        sample_csv_object_url: str,
+    ):
+        from modules.datasource.runtime_service import DatasourcePublicationClaimLost, ingest_datasource_for_schedule
+
+        class _Table:
+            def current_snapshot(self):
+                return None
+
+        mock_load.return_value = pl.DataFrame({'x': [1]}).lazy()
+        mock_write.return_value = _Table()
+        datasource_id = str(uuid.uuid4())
+        original_config = {
+            'metadata_path': f's3://bucket/namespaces/default/clean/{datasource_id}/master',
+            'branch': 'master',
+            'source': {
+                'source_type': 'file',
+                'file_path': sample_csv_object_url,
+                'file_type': 'csv',
+                'options': {},
+            },
+        }
+        datasource = DataSource(
+            id=datasource_id,
+            name='Scheduled raw',
+            source_type='iceberg',
+            config=original_config,
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(datasource)
+        test_db_session.commit()
+
+        def reject_publication(_session: Session) -> None:
+            raise DatasourcePublicationClaimLost
+
+        with pytest.raises(DatasourcePublicationClaimLost):
+            ingest_datasource_for_schedule(
+                test_db_session,
+                datasource_id,
+                staging_key='claim-token-1',
+                publication_guard=reject_publication,
+            )
+
+        staged_path = mock_write.call_args.args[1]
+        assert f'{datasource_id}__claim_claim_token_1/master' in staged_path
+        test_db_session.expire_all()
+        persisted = test_db_session.get(DataSource, datasource_id)
+        assert persisted is not None
+        assert persisted.config == original_config
+
+    @patch('modules.datasource.runtime_service.load_datasource')
+    @patch('modules.datasource.runtime_service._write_iceberg_table')
     def test_ingest_external_serializes_same_datasource_writes(
         self,
         mock_write,

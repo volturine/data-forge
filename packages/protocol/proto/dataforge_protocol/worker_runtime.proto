@@ -229,6 +229,10 @@ message WorkerUpdateBuildResultRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string build_id = 2 [(buf.validate.field).string.min_len = 1];
   google.protobuf.Struct result = 3;
+  string job_id = 4 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 5 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 6 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 7 [(buf.validate.field).int64.gte = 1];
 }
 
 message WorkerUpsertOutputDatasourceRequest {
@@ -247,6 +251,12 @@ message WorkerUpsertOutputDatasourceRequest {
   optional bool is_hidden = 8;
   bool keep_schema_cache = 9;
   SchemaInfo schema_info = 10 [(buf.validate.field).required = true];
+  optional string job_id = 11 [(buf.validate.field).string.min_len = 1];
+  optional string build_id = 12 [(buf.validate.field).string.min_len = 1];
+  optional string worker_id = 13 [(buf.validate.field).string.min_len = 1];
+  optional string claim_token = 14 [(buf.validate.field).string.min_len = 1];
+  optional int64 lease_generation = 15 [(buf.validate.field).int64.gte = 1];
+  google.protobuf.Struct build_result = 16;
 }
 
 message WorkerUpsertOutputDatasourceResponse {

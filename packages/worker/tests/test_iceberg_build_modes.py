@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +9,7 @@ from pyiceberg.types import NestedField, StringType
 
 from runtime.compute_service import _schema_cache_payload_from_arrow, _sync_iceberg_schema, export_data
 from runtime.domain.compute.base import EngineResult
+from runtime.internal_api import ClaimedBuildJob
 from runtime.namespace import namespace_paths
 
 
@@ -175,6 +177,7 @@ class TestBuildModeWiring:
         client.list_healthchecks.return_value = []
         client.analysis_name.return_value = "Test Analysis"
         client.telegram_targets.return_value = []
+        client.build_cancel_status.return_value = (False, None, None)
         client.upsert_output_datasource.return_value = MagicMock(id=output_ds_id, name="test_out")
         return client
 
@@ -224,6 +227,56 @@ class TestBuildModeWiring:
         mock_sync.assert_called_once_with(mock_table, mock_arrow.schema)
         mock_table.overwrite.assert_called_once_with(mock_arrow)
         mock_table.append.assert_not_called()
+
+    def test_queued_full_build_writes_claim_table_before_publication(self, sample_datasource: SimpleNamespace):
+        output_ds_id = str(uuid.uuid4())
+        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="full")
+        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
+        internal_client = self._make_internal_client_mock(output_ds_id)
+        claim = ClaimedBuildJob(
+            job_id="job-1",
+            build_id="build-1",
+            namespace="default",
+            claim_token="claim-token-1",
+            lease_generation=3,
+            lease_expires_at=datetime.now(UTC),
+            attempt=1,
+            lease_ttl_seconds=60,
+        )
+
+        with (
+            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
+            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.os.path.getsize", return_value=100),
+            patch("runtime.compute_service.ensure_bucket_exists"),
+            patch("runtime.compute_service.client_from_env", return_value=internal_client),
+        ):
+            export_data(
+                session=None,
+                manager=self._make_manager_mock(),
+                target_step_id="source",
+                analysis_pipeline=pipeline,
+                request_json={"analysis_pipeline": pipeline, "target_step_id": "source"},
+                filename="test_out",
+                iceberg_options={"namespace": "ns", "table_name": "tbl", "branch": "master"},
+                result_id=output_ds_id,
+                build_mode="full",
+                build_id="build-1",
+                publication_claim=claim,
+                worker_id="worker-1",
+            )
+
+        staged_identifier = f"ns.{output_ds_id}_master_claim_claim_token_1"
+        mock_catalog.drop_table.assert_called_once_with(staged_identifier)
+        mock_catalog.create_table.assert_called_once()
+        assert mock_catalog.create_table.call_args.args[0] == staged_identifier
+        mock_table.overwrite.assert_not_called()
+        publication = internal_client.upsert_output_datasource.call_args.kwargs
+        assert publication["job_id"] == "job-1"
+        assert publication["claim_token"] == "claim-token-1"
+        assert publication["lease_generation"] == 3
+        assert publication["config"]["table"].endswith("_claim_claim_token_1")
+        assert "/claims/claim-token-1" in publication["config"]["metadata_path"]
 
     def test_incremental_mode_calls_append(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())

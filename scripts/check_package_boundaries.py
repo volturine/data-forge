@@ -259,6 +259,7 @@ PROTO_STRUCT_ALLOWLIST = {
     'proto/dataforge_protocol/worker_runtime.proto:WorkerDatasourceMetadataResponse.config': 'datasource metadata exposes provider/user-defined config JSON',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerUpdateBuildResultRequest.result': 'build result is persisted runtime JSON at the database boundary',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerUpsertOutputDatasourceRequest.config': 'output datasource config is provider/user-defined JSON',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerUpsertOutputDatasourceRequest.build_result': 'build result is atomically persisted with output publication',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerHealthCheckSpec.config': 'healthcheck config is check-type-specific JSON',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerHealthCheckResultPayload.details': 'healthcheck result details are check-type-specific diagnostics',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerCreateEngineRunRequest.request': 'engine-run request is persisted runtime JSON at the database boundary',

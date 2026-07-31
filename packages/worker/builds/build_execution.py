@@ -70,6 +70,8 @@ async def _run_active_build_task(
                 resource_config_json=build.resource_config_json,
             ),
             triggered_by=triggered_by,
+            publication_claim=claim,
+            worker_id=worker_id,
         )
     except BuildJobLeaseLost:
         raise

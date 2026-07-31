@@ -45,7 +45,7 @@ from runtime.exceptions import (
 )
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
-from runtime.internal_api import BuildJobLeaseLost, HealthCheckSpec, client_from_env
+from runtime.internal_api import BuildJobLeaseLost, ClaimedBuildJob, HealthCheckSpec, client_from_env
 from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import notification_service, render_template
@@ -683,6 +683,12 @@ def _run_worker_healthchecks(checks: list[HealthCheckSpec], lf: pl.LazyFrame) ->
     for check in valid_checks:
         passed, message, details = _evaluate_healthcheck(check, values=values, schema_names=schema_names)
         results.append(_HealthCheckEvalResult(check.id, passed, message, details, now))
+    return results
+
+
+def _persist_healthcheck_results(results: list[_HealthCheckEvalResult]) -> None:
+    if not results:
+        return
     client_from_env().record_healthcheck_results(
         namespace=get_namespace(),
         results=[
@@ -696,7 +702,6 @@ def _run_worker_healthchecks(checks: list[HealthCheckSpec], lf: pl.LazyFrame) ->
             for result in results
         ],
     )
-    return results
 
 
 def _send_pipeline_notifications(
@@ -784,6 +789,9 @@ def _upsert_output_datasource(
     analysis_id: str | None,
     is_hidden: bool | None = None,
     keep_schema_cache: bool = False,
+    publication_claim: ClaimedBuildJob | None = None,
+    worker_id: str | None = None,
+    build_result_json: dict[str, object] | None = None,
 ) -> object:
     """Create or update the output datasource for an export.
 
@@ -807,6 +815,12 @@ def _upsert_output_datasource(
         analysis_id=analysis_id,
         is_hidden=is_hidden,
         keep_schema_cache=keep_schema_cache,
+        job_id=publication_claim.job_id if publication_claim is not None else None,
+        build_id=publication_claim.build_id if publication_claim is not None else None,
+        worker_id=worker_id,
+        claim_token=publication_claim.claim_token if publication_claim is not None else None,
+        lease_generation=publication_claim.lease_generation if publication_claim is not None else None,
+        build_result_json=build_result_json,
     )
 
 
@@ -2217,11 +2231,18 @@ def export_data(
     resources_fn: Callable[[], list[dict[str, object]]] | None = None,
     engine_identity: compute_pb2.EngineIdentity | None = None,
     build_id: str | None = None,
+    publication_claim: ClaimedBuildJob | None = None,
+    worker_id: str | None = None,
 ) -> ExportDatasourceResult:
     if result_id is None:
         raise ValueError("Output exports require result_id")
     if not iceberg_options or not isinstance(iceberg_options.get("branch"), str):
         raise ValueError("Iceberg exports require iceberg_options with an explicit branch")
+    if build_id is not None:
+        if publication_claim is None or worker_id is None:
+            raise ValueError("Queued build exports require an active publication claim and worker identity")
+        if publication_claim.build_id != build_id:
+            raise ValueError("Output publication claim does not belong to the build")
 
     started_perf = time.perf_counter()
 
@@ -2332,6 +2353,8 @@ def export_data(
                     ) from exc
                 logger.exception("Health check evaluation failed")
             else:
+                if publication_claim is None:
+                    _persist_healthcheck_results(hc_results)
                 critical_ids = {check.id for check in hc_checks if check.critical}
                 critical_failed = [result for result in hc_results if not result.passed and result.healthcheck_id in critical_ids]
                 if critical_failed:
@@ -2363,26 +2386,18 @@ def export_data(
                 "excluded_recipients": excluded,
             }
 
-        _send_pipeline_notifications(
-            context={
-                "analysis_name": analysis_name,
-                "status": status,
-                "duration_ms": str(duration_ms),
-                "row_count": str(row_count),
-                "datasource_id": hc_datasource_id,
-                "format": "parquet",
-                "destination": "datasource",
-                "healthcheck_summary": hc_summary,
-                "healthcheck_details": hc_details,
-            },
-            output_notification=output_notification,
-        )
-
         namespace = iceberg_options.get("namespace", "outputs")
         branch_name = iceberg_options["branch"]
         safe_branch = re.sub(r"[^a-zA-Z0-9_]+", "_", branch_name).strip("_")
-        table_name = f"{result_id}_{safe_branch}"
-        export_base = object_store_url("namespaces", get_namespace(), "exports", str(result_id))
+        published_table_name = f"{result_id}_{safe_branch}"
+        published_export_base = object_store_url("namespaces", get_namespace(), "exports", str(result_id))
+        if publication_claim is None:
+            table_name = published_table_name
+            export_base = published_export_base
+        else:
+            safe_claim_token = re.sub(r"[^a-zA-Z0-9_]+", "_", publication_claim.claim_token).strip("_")
+            table_name = f"{published_table_name}_claim_{safe_claim_token}"
+            export_base = join_object_store_url(published_export_base, "claims", publication_claim.claim_token)
         table_path = join_object_store_url(export_base, branch_name)
         warehouse_path = object_store_url("namespaces", get_namespace(), "exports")
         ensure_bucket_exists()
@@ -2411,11 +2426,30 @@ def export_data(
         write_started = time.perf_counter()
         arrow_table = pq.read_table(tmp_output)
         table_exists = catalog.table_exists(identifier)
-        if build_mode == "recreate" and table_exists:
+        if publication_claim is not None and table_exists:
+            catalog.drop_table(identifier)
+            table_exists = False
+        elif build_mode == "recreate" and table_exists:
             catalog.drop_table(identifier)
             table_exists = False
 
-        if table_exists:
+        if publication_claim is not None:
+            previous_arrow: pa.Table | None = None
+            previous_config = existing_output_metadata.config
+            if build_mode == "incremental" and isinstance(previous_config, dict):
+                previous_namespace = previous_config.get("namespace")
+                previous_table_name = previous_config.get("table")
+                if isinstance(previous_namespace, str) and isinstance(previous_table_name, str):
+                    previous_identifier = f"{previous_namespace}.{previous_table_name}"
+                    if catalog.table_exists(previous_identifier):
+                        previous_arrow = catalog.load_table(previous_identifier).scan().to_arrow()
+            initial_schema = previous_arrow.schema if previous_arrow is not None else arrow_table.schema
+            iceberg_table = catalog.create_table(identifier, schema=initial_schema, location=table_path)
+            if previous_arrow is not None:
+                iceberg_table.append(previous_arrow)
+                _sync_iceberg_schema(iceberg_table, arrow_table.schema)
+            iceberg_table.append(arrow_table)
+        elif table_exists:
             iceberg_table = catalog.load_table(identifier)
             if build_mode == "incremental":
                 iceberg_table.append(arrow_table)
@@ -2450,21 +2484,10 @@ def export_data(
             iceberg_ds_config["analysis_tab_id"] = str(tab_id)
         iceberg_ds_config = _set_snapshot_metadata(iceberg_ds_config, snapshot_id, snapshot_timestamp_ms)
         schema_cache = _schema_cache_payload_from_arrow(arrow_table.schema, data)
-        target_ds = _upsert_output_datasource(
-            session=session,
-            result_id=result_id,
-            name=datasource_name,
-            source_type=DataSourceType.ICEBERG,
-            config=iceberg_ds_config,
-            schema_cache=schema_cache,
-            analysis_id=analysis_id_value,
-            is_hidden=output_hidden,
-            keep_schema_cache=build_mode == "incremental",
-        )
         write_duration_ms = (time.perf_counter() - write_started) * 1000
         if build_stage_event is not None:
             build_stage_event({"stage": "write_complete", "write_duration_ms": write_duration_ms})
-        ds_id = str(getattr(target_ds, "id"))
+        ds_id = result_id
         result_meta["datasource_id"] = ds_id
         result_meta["datasource_name"] = datasource_name
         if snapshot_id:
@@ -2481,8 +2504,37 @@ def export_data(
             "current_tab_name": tab_name,
             "branch": branch_name,
         }
-        if build_id is not None:
-            client_from_env().update_build_result(namespace=get_namespace(), build_id=build_id, result_json=build_result_summary)
+        target_ds = _upsert_output_datasource(
+            session=session,
+            result_id=result_id,
+            name=datasource_name,
+            source_type=DataSourceType.ICEBERG,
+            config=iceberg_ds_config,
+            schema_cache=schema_cache,
+            analysis_id=analysis_id_value,
+            is_hidden=output_hidden,
+            keep_schema_cache=build_mode == "incremental" and publication_claim is None,
+            publication_claim=publication_claim,
+            worker_id=worker_id,
+            build_result_json=build_result_summary if publication_claim is not None else None,
+        )
+        ds_id = str(getattr(target_ds, "id"))
+        if publication_claim is not None:
+            _persist_healthcheck_results(hc_results)
+        _send_pipeline_notifications(
+            context={
+                "analysis_name": analysis_name,
+                "status": status,
+                "duration_ms": str(duration_ms),
+                "row_count": str(row_count),
+                "datasource_id": hc_datasource_id,
+                "format": "parquet",
+                "destination": "datasource",
+                "healthcheck_summary": hc_summary,
+                "healthcheck_details": hc_details,
+            },
+            output_notification=output_notification,
+        )
 
         read_duration_ms = result_data.get("read_duration_ms") if isinstance(result_data, dict) else None
         return ExportDatasourceResult(
@@ -2517,7 +2569,17 @@ def export_data(
                 "current_tab_name": tab_name,
                 "branch": iceberg_options.get("branch") if isinstance(iceberg_options, dict) else None,
             }
-            client_from_env().update_build_result(namespace=get_namespace(), build_id=build_id, result_json=failed_summary)
+            assert publication_claim is not None
+            assert worker_id is not None
+            client_from_env().update_build_result(
+                namespace=get_namespace(),
+                build_id=build_id,
+                job_id=publication_claim.job_id,
+                worker_id=worker_id,
+                claim_token=publication_claim.claim_token,
+                lease_generation=publication_claim.lease_generation,
+                result_json=failed_summary,
+            )
         elif run_response is not None:
             execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
             _finalize_failed_engine_run(
@@ -3226,6 +3288,8 @@ async def run_analysis_build_stream(
     build: ActiveBuild,
     emitter: BuildEmitter | None,
     triggered_by: str | None = None,
+    publication_claim: ClaimedBuildJob | None = None,
+    worker_id: str | None = None,
 ) -> dict:
     if not isinstance(pipeline, dict):
         raise ValueError("analysis_pipeline is required")
@@ -3688,6 +3752,8 @@ async def run_analysis_build_stream(
                     resources_fn=lambda: [item.model_dump(mode="json") for item in build.resources],
                     engine_identity=build_identity,
                     build_id=build.build_id,
+                    publication_claim=publication_claim,
+                    worker_id=worker_id,
                 )
                 build.current_engine_run_id = result.engine_run_id
                 return result

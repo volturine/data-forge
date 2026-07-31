@@ -404,14 +404,37 @@ class WorkerInternalApiClient:
         )
         return (response.cancelled, _optional_timestamp_iso(response, "cancelled_at"), _optional_str(response, "cancelled_by"))
 
-    def update_build_result(self, *, namespace: str, build_id: str, result_json: dict[str, object]) -> None:
-        self._call(
-            lambda: self._stub.UpdateBuildResult(
-                worker_runtime_pb2.WorkerUpdateBuildResultRequest(namespace=namespace, build_id=build_id, result=dict_to_struct(result_json)),
-                timeout=self._timeout_seconds,
-                metadata=self._metadata(),
+    def update_build_result(
+        self,
+        *,
+        namespace: str,
+        build_id: str,
+        job_id: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
+        result_json: dict[str, object],
+    ) -> None:
+        try:
+            self._call(
+                lambda: self._stub.UpdateBuildResult(
+                    worker_runtime_pb2.WorkerUpdateBuildResultRequest(
+                        namespace=namespace,
+                        build_id=build_id,
+                        job_id=job_id,
+                        worker_id=worker_id,
+                        claim_token=claim_token,
+                        lease_generation=lease_generation,
+                        result=dict_to_struct(result_json),
+                    ),
+                    timeout=self._timeout_seconds,
+                    metadata=self._metadata(),
+                )
             )
-        )
+        except BackendWorkerRpcError as exc:
+            if exc.error_code == "FAILED_PRECONDITION":
+                raise BuildJobLeaseLost(f"Build job {job_id} result update was rejected because its lease is no longer active") from exc
+            raise
 
     def upsert_output_datasource(
         self,
@@ -425,6 +448,12 @@ class WorkerInternalApiClient:
         analysis_id: str | None,
         is_hidden: bool | None,
         keep_schema_cache: bool,
+        job_id: str | None,
+        build_id: str | None,
+        worker_id: str | None,
+        claim_token: str | None,
+        lease_generation: int | None,
+        build_result_json: dict[str, object] | None,
     ) -> DatasourceMetadata:
         request = worker_runtime_pb2.WorkerUpsertOutputDatasourceRequest(
             namespace=namespace,
@@ -435,11 +464,26 @@ class WorkerInternalApiClient:
             schema_info=_schema_info_proto(schema_cache),
             keep_schema_cache=keep_schema_cache,
         )
+        claim_values = (job_id, build_id, worker_id, claim_token, lease_generation, build_result_json)
+        if any(value is not None for value in claim_values):
+            if any(value is None for value in claim_values):
+                raise ValueError("Output publication claim fields must be provided together")
+            request.job_id = cast(str, job_id)
+            request.build_id = cast(str, build_id)
+            request.worker_id = cast(str, worker_id)
+            request.claim_token = cast(str, claim_token)
+            request.lease_generation = cast(int, lease_generation)
+            request.build_result.CopyFrom(dict_to_struct(cast(dict[str, object], build_result_json)))
         if analysis_id is not None:
             request.analysis_id = analysis_id
         if is_hidden is not None:
             request.is_hidden = is_hidden
-        response = self._call(lambda: self._stub.UpsertOutputDatasource(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        try:
+            response = self._call(lambda: self._stub.UpsertOutputDatasource(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        except BackendWorkerRpcError as exc:
+            if exc.error_code == "FAILED_PRECONDITION" and job_id is not None:
+                raise BuildJobLeaseLost(f"Build job {job_id} output publication was rejected because its lease is no longer active") from exc
+            raise
         return DatasourceMetadata(
             found=True,
             id=response.datasource_id,

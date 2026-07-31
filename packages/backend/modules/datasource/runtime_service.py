@@ -2,6 +2,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 import uuid
@@ -48,6 +49,10 @@ logger = logging.getLogger(__name__)
 
 _DATASOURCE_INGEST_LOCKS: dict[str, threading.Lock] = {}
 _DATASOURCE_INGEST_LOCKS_GUARD = threading.Lock()
+
+
+class DatasourcePublicationClaimLost(RuntimeError):
+    """Raised when a scheduled ingest loses ownership before publication."""
 
 
 def _ensure_catalog_namespace(catalog, namespace: str) -> None:
@@ -722,6 +727,8 @@ def ingest_external_datasource(
     *,
     triggered_by: str = 'manual',
     mode: str = 'manual_ingest',
+    staging_key: str | None = None,
+    publication_guard: Callable[[Session], None] | None = None,
 ) -> DataSourceResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
@@ -769,8 +776,14 @@ def ingest_external_datasource(
                 details={'datasource_id': datasource_id},
             )
         branch = branch_raw.strip()
-        target_path = metadata_path.rstrip('/')
-        if target_path.split('/')[-1] != branch:
+        if staging_key is not None:
+            safe_staging_key = re.sub(r'[^a-zA-Z0-9_]+', '_', staging_key).strip('_')
+            if not safe_staging_key:
+                raise ValueError('Datasource staging key must contain an alphanumeric character')
+            target_path = _prepare_clean_target(namespace_paths().clean_dir, f'{datasource_id}__claim_{safe_staging_key}', branch)
+        else:
+            target_path = metadata_path.rstrip('/')
+        if staging_key is None and target_path.split('/')[-1] != branch:
             target_path = _prepare_clean_target(namespace_paths().clean_dir, datasource_id, branch)
         try:
             if source_type == DataSourceType.DATABASE:
@@ -807,6 +820,8 @@ def ingest_external_datasource(
         next_config['metadata_path'] = target_path
         next_config['source'] = _validated_file_source_config(source) if source_type == DataSourceType.FILE else source
         next_config['ingest'] = {'ingested_at': datetime.now(UTC).replace(tzinfo=None).isoformat()}
+        if publication_guard is not None:
+            publication_guard(session)
         datasource.config = next_config
         datasource.schema_cache = None
         session.add(datasource)
@@ -840,7 +855,13 @@ def is_reingestable_raw_datasource(datasource: DataSource) -> bool:
     return datasource.is_reingestable_raw()
 
 
-def ingest_datasource_for_schedule(session: Session, datasource_id: str) -> DataSourceResponse:
+def ingest_datasource_for_schedule(
+    session: Session,
+    datasource_id: str,
+    *,
+    staging_key: str,
+    publication_guard: Callable[[Session], None],
+) -> DataSourceResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
         raise datasource_not_found(datasource_id)
@@ -850,6 +871,8 @@ def ingest_datasource_for_schedule(session: Session, datasource_id: str) -> Data
             datasource_id,
             triggered_by='schedule',
             mode='schedule_ingest',
+            staging_key=staging_key,
+            publication_guard=publication_guard,
         )
     schema = _extract_schema(datasource)
     next_config = dict(datasource.config) if isinstance(datasource.config, dict) else {}
@@ -859,6 +882,7 @@ def ingest_datasource_for_schedule(session: Session, datasource_id: str) -> Data
     }
     datasource.config = next_config
     datasource.schema_cache = _schema_cache_payload(schema)
+    publication_guard(session)
     session.add(datasource)
     session.commit()
     session.refresh(datasource)
