@@ -1,14 +1,17 @@
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from backend_core import build_runs_service as build_run_service
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.build_runs.models import BuildEvent
+from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.sqlmodel_typing import sa
 
 
@@ -44,6 +47,7 @@ def test_create_build_run_persists(test_db_session) -> None:
     assert stored.status == BuildRunStatus.RUNNING
     assert stored.analysis_name == 'Analysis 1'
     assert stored.starter_json['email'] == 'test@example.com'
+    assert stored.next_event_sequence == 1
 
 
 def test_append_build_event_sequences_and_updates_snapshot(test_db_session) -> None:
@@ -95,6 +99,79 @@ def test_append_build_event_sequences_and_updates_snapshot(test_db_session) -> N
     assert stored.current_output_name == 'Output 1'
     assert stored.progress == 0.5
     assert stored.current_step == 'Filter rows'
+    assert stored.next_event_sequence == 3
+
+
+def test_concurrent_build_event_producers_receive_one_total_order_and_consistent_projection(test_engine, test_db_session) -> None:
+    run = _create_run(test_db_session)
+    producer_count = 8
+    barrier = threading.Barrier(producer_count)
+    emitted_at = datetime.now(UTC)
+
+    def append_progress(index: int) -> tuple[int, str]:
+        current_step = f'producer-{index}'
+        event = compute_schemas.BuildProgressEvent(
+            build_id=run.id,
+            analysis_id=run.analysis_id,
+            emitted_at=emitted_at + timedelta(milliseconds=index),
+            current_kind=EngineRunKind.BUILD,
+            current_datasource_id='source-1',
+            progress=(index + 1) / producer_count,
+            elapsed_ms=index,
+            current_step=current_step,
+            current_step_index=index,
+            total_steps=producer_count,
+        )
+        with Session(test_engine) as session:
+            barrier.wait(timeout=5)
+            row = build_run_service.append_build_event(session, build_id=run.id, event=event)
+            assert row is not None
+            return row.sequence, current_step
+
+    with ThreadPoolExecutor(max_workers=producer_count) as pool:
+        accepted = list(pool.map(append_progress, range(producer_count)))
+
+    with Session(test_engine) as session:
+        events = build_run_service.list_build_events_after(session, run.id)
+        stored = build_run_service.get_build_run(session, run.id)
+        outbox_events = list(session.execute(select(RuntimeOutboxEvent)).scalars().all())
+
+    assert sorted(sequence for sequence, _step in accepted) == list(range(1, producer_count + 1))
+    assert [event.sequence for event in events] == list(range(1, producer_count + 1))
+    assert stored is not None
+    assert stored.next_event_sequence == producer_count + 1
+    assert stored.version == producer_count + 1
+    assert stored.current_step == events[-1].payload_json['current_step']
+    assert stored.current_step_index == events[-1].payload_json['current_step_index']
+    assert sorted(event.payload_json['latest_sequence'] for event in outbox_events) == list(range(1, producer_count + 1))
+
+
+def test_build_event_projection_counter_and_outbox_roll_back_together(test_db_session) -> None:
+    run = _create_run(test_db_session)
+    event = compute_schemas.BuildLogEvent(
+        build_id=run.id,
+        analysis_id=run.analysis_id,
+        emitted_at=datetime.now(UTC),
+        current_kind=EngineRunKind.BUILD,
+        current_datasource_id='source-1',
+        level=compute_schemas.BuildLogLevel.INFO,
+        message='uncommitted',
+    )
+
+    row = build_run_service.append_build_event(test_db_session, build_id=run.id, event=event, commit=False)
+    assert row is not None
+    test_db_session.rollback()
+    test_db_session.expire_all()
+
+    stored = build_run_service.get_build_run(test_db_session, run.id)
+    events = list(test_db_session.execute(select(BuildEvent).where(sa(BuildEvent.build_id == run.id))).scalars().all())
+    outbox_events = list(test_db_session.execute(select(RuntimeOutboxEvent)).scalars().all())
+
+    assert stored is not None
+    assert stored.next_event_sequence == 1
+    assert stored.version == 1
+    assert events == []
+    assert outbox_events == []
 
 
 def test_list_build_events_after_and_latest_sequence(test_db_session) -> None:

@@ -13,8 +13,8 @@ from backend_core.namespace import namespace_database_schema
 _PUBLIC_BASE_REVISION = '0001_runtime_public'
 _PUBLIC_REVISION = '0003_engine_identity_public'
 _TENANT_BASE_REVISION = '0002_runtime_tenant'
-_TENANT_BASE_REVISIONS = {_TENANT_BASE_REVISION, '0004_compute_envelopes_tenant'}
-_TENANT_REVISION = '0005_fenced_build_jobs_tenant'
+_TENANT_BASE_REVISIONS = {_TENANT_BASE_REVISION, '0004_compute_envelopes_tenant', '0005_fenced_build_jobs_tenant'}
+_TENANT_REVISION = '0006_atomic_build_events_tenant'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 

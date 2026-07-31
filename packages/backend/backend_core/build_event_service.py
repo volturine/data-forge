@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from sqlmodel import Session
 
-from backend_core import build_runs_service as build_run_service, runtime_ipc
+from backend_core import build_runs_service as build_run_service
 from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
 from backend_core.domain.compute import schemas as compute_schemas
 
 
 async def publish_build_notification(namespace: str, build_id: str, latest_sequence: int) -> None:
     await build_hub.publish(BuildNotification(namespace=namespace, build_id=build_id, latest_sequence=latest_sequence))
-    await asyncio.to_thread(runtime_ipc.notify_api_build, namespace, build_id, latest_sequence)
 
 
 async def persist_build_event(

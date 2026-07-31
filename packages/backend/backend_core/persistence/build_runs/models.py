@@ -161,6 +161,7 @@ class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     completed_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     updated_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     version: int = Field(default=1, sa_column=Column(Integer, nullable=False))
+    next_event_sequence: int = Field(default=1, sa_column=Column(Integer, nullable=False))
 
 
 class BuildEvent(SQLModel, table=True):  # type: ignore[call-arg, assignment]

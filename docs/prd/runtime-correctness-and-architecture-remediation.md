@@ -8,7 +8,7 @@
 - **Supersedes:** Runtime correctness claims in `distributed-runtime-v2-progress.md` where those claims conflict with verified implementation behavior
 - **Does not supersede:** Product requirements or user-facing feature PRDs
 
-### Implementation progress — 2026-07-30
+### Implementation progress — through 2026-07-31
 
 Completed in the first P0 build-job slice:
 
@@ -33,11 +33,19 @@ Completed in the staged-publication P0 slice:
 - queued-build health-check persistence and notifications occur only after fenced output publication succeeds;
 - failed build-result summaries are fenced by the same claim token and generation.
 
+Completed in the atomic build-event P0 slice:
+
+- each build run persists `next_event_sequence`, backfilled from existing events by a tenant migration;
+- event producers lock the build row before allocating a sequence or changing the durable projection;
+- counter increment, projection fold, event insertion, and runtime-outbox enqueue commit or roll back as one transaction;
+- cross-process wakeups use the durable outbox while the committing API process updates its local build hub after commit;
+- concurrent Postgres producers are verified to receive one unique total order, with the final projection matching the last committed event;
+- rollback coverage verifies that no counter, projection, event, or outbox residue survives a failed transaction.
+
 Still open at P0:
 
-- replace `MAX(sequence) + 1` with atomic event sequence allocation;
 - fence remaining irreversible engine and ancillary publication paths outside scheduled ingestion and analysis output publication;
-- add concurrent-session cancel/finalize and event-allocation stress tests.
+- add concurrent-session cancel/finalize stress tests.
 
 Follow-up cleanup for staged publication:
 
@@ -470,9 +478,9 @@ Success criterion: no claimant-owned mutation can succeed with only a row ID or 
 
 ### Workstream C — Atomic build events
 
-- Move sequence allocation to the locked build row.
+- Move sequence allocation to the locked build row. **Completed.**
 - Add execution generation validation.
-- Fold event projection and insert event/outbox in one transaction.
+- Fold event projection and insert event/outbox in one transaction. **Completed.**
 - Make producer retries idempotent with a producer event ID where RPC retry can duplicate a call.
 - Reject worker events after cancellation or lease replacement.
 - Test concurrent resource and progress event streams.
@@ -678,7 +686,7 @@ Exit criteria:
 
 - [ ] Add concurrent-session backend test utilities.
 - [ ] Add lease expiry and stale completion tests.
-- [ ] Add event append collision tests.
+- [x] Add event append collision tests.
 - [ ] Add cancel/finalize race tests.
 - [ ] Add shutdown-with-active-executor tests.
 - [ ] Add outbox and scheduler contention tests.
@@ -708,8 +716,8 @@ Exit criteria:
 ### Phase 3 — Make build state atomic
 
 - [ ] Add build event counter and execution generation.
-- [ ] Replace `MAX(sequence) + 1`.
-- [ ] Combine event append, projection update, and outbox enqueue.
+- [x] Replace `MAX(sequence) + 1`.
+- [x] Combine event append, projection update, and outbox enqueue.
 - [ ] Implement atomic cancellation.
 - [ ] Implement fenced atomic finalization.
 - [ ] Make terminal transitions idempotent and immutable.
@@ -870,7 +878,7 @@ The remediation is complete only when all statements below are true:
 - [ ] Active claims renew and renewal loss stops publication.
 - [ ] Default retry behavior cannot strand a running job indefinitely.
 - [ ] Worker shutdown cannot release work while associated execution can still publish.
-- [ ] Build event sequence allocation is atomic under concurrent producers.
+- [x] Build event sequence allocation is atomic under concurrent producers.
 - [ ] Build projection equals a fold of committed events.
 - [ ] Cancellation and finalization are atomic and idempotent.
 - [ ] Terminal states cannot be overwritten by late writers.

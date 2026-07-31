@@ -6,6 +6,7 @@ from google.protobuf import json_format, timestamp_pb2
 from sqlalchemy import desc, func, or_, select, update
 from sqlmodel import Session
 
+from backend_core import runtime_outbox_service
 from backend_core.domain.analysis.step_types import PipelineStepType
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
@@ -313,12 +314,6 @@ def has_inflight_build_for_schedule(session: Session, schedule_id: str) -> bool:
     return session.execute(running_stmt).first() is not None
 
 
-def _next_sequence(session: Session, build_id: str) -> int:
-    stmt = select(func.max(BuildEvent.sequence)).where(sa(BuildEvent.build_id == build_id))
-    last = session.execute(stmt).scalar_one()
-    return (int(last) if isinstance(last, int) else 0) + 1
-
-
 def _cas_update_build_run(session: Session, *, run: BuildRun, values: dict[str, object], expected_status: BuildRunStatus) -> BuildRun | None:
     result = session.execute(
         update(BuildRun)
@@ -397,7 +392,7 @@ def append_build_event(
     resource_config_json: dict[str, Any] | None = None,
     commit: bool = True,
 ) -> BuildEvent | None:
-    run = session.get(BuildRun, build_id)
+    run = session.execute(select(BuildRun).where(sa(BuildRun.id == build_id)).with_for_update().execution_options(populate_existing=True)).scalars().first()
     if run is None:
         raise ValueError(f'Build run {build_id} not found')
     terminal_status = BuildRun.terminal_status_for_event(event)
@@ -418,7 +413,8 @@ def append_build_event(
 
         run.updated_at = event.emitted_at
         run.version += 1
-    sequence = _next_sequence(session, build_id)
+    sequence = run.next_event_sequence
+    run.next_event_sequence += 1
     event_id = str(uuid.uuid4())
     payload_json = event.model_dump(mode='json')
     created_at = _utcnow()
@@ -434,8 +430,14 @@ def append_build_event(
         created_at=created_at,
     )
     session.add(event_row)
-    if should_update_run:
-        session.add(run)
+    session.add(run)
+    runtime_outbox_service.enqueue_api_build_notification(
+        session,
+        namespace=run_namespace,
+        build_id=build_id,
+        latest_sequence=sequence,
+        commit=False,
+    )
     if commit:
         session.commit()
     else:
@@ -464,9 +466,9 @@ def list_build_events_after(session: Session, build_id: str, sequence: int = 0) 
 
 
 def get_latest_sequence(session: Session, build_id: str) -> int:
-    stmt = select(func.max(BuildEvent.sequence)).where(sa(BuildEvent.build_id == build_id))
-    last = session.execute(stmt).scalar_one()
-    return int(last) if isinstance(last, int) else 0
+    stmt = select(sa(BuildRun.next_event_sequence)).where(sa(BuildRun.id == build_id))
+    next_sequence = session.execute(stmt).scalar_one_or_none()
+    return next_sequence - 1 if isinstance(next_sequence, int) else 0
 
 
 def latest_namespace_update(session: Session, *, namespace: str) -> datetime | None:
