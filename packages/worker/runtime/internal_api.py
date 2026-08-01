@@ -111,6 +111,10 @@ class DatasourceMetadata:
     config: dict[str, object] | None
     schema_cache: dict[str, object] | None
     is_hidden: bool | None
+    revision: int | None = None
+    description: str | None = None
+    column_descriptions: dict[str, str] | None = None
+    created_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -154,6 +158,30 @@ class BackendWorkerRpcError(RuntimeError):
 
 class BuildJobLeaseLost(RuntimeError):
     pass
+
+
+def _datasource_record_payload(message: datasource_pb2.DataSourceRecord) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": message.id,
+        "name": message.name,
+        "source_type": proto_value_to_enum_name(enums_pb2.DataSourceType, "DATA_SOURCE_TYPE", message.source_type),
+        "config": struct_to_dict(message.config),
+        "created_by": proto_value_to_enum_name(enums_pb2.DataSourceCreatedBy, "DATA_SOURCE_CREATED_BY", message.created_by),
+        "is_hidden": message.is_hidden,
+    }
+    if message.HasField("description"):
+        payload["description"] = message.description
+    if message.HasField("created_by_analysis_id"):
+        payload["created_by_analysis_id"] = message.created_by_analysis_id
+    if message.HasField("created_at"):
+        payload["created_at"] = message.created_at.ToDatetime(tzinfo=UTC)
+    if message.HasField("output_of_tab_id"):
+        payload["output_of_tab_id"] = message.output_of_tab_id
+    if message.HasField("schema_info"):
+        payload["schema_cache"] = _schema_info_payload(message.schema_info)
+    else:
+        payload["schema_cache"] = None
+    return payload
 
 
 class WorkerInternalApiClient:
@@ -361,61 +389,92 @@ class WorkerInternalApiClient:
             )
         )
 
-    def execute_datasource_request(
-        self,
-        *,
-        namespace: str,
-        kind: enums_pb2.ComputeRequestKind,
-        command: datasource_pb2.DatasourceCommand,
-        request_id: str,
-        worker_id: str,
-        claim_token: str,
-        lease_generation: int,
-    ) -> datasource_pb2.DatasourceResult:
-        response = self._call(
-            lambda: self._stub.ExecuteDatasourceRequest(
-                worker_runtime_pb2.WorkerExecuteDatasourceRequest(
-                    namespace=namespace,
-                    kind=kind,
-                    command=command,
-                    request_id=request_id,
-                    worker_id=worker_id,
-                    claim_token=claim_token,
-                    lease_generation=lease_generation,
-                ),
-                timeout=self._timeout_seconds,
-                metadata=self._metadata(),
-            )
-        )
-        return response.result
-
-    def schedule_ingest_datasource(
+    def publish_datasource_create(
         self,
         *,
         namespace: str,
         datasource_id: str,
-        job_id: str,
-        build_id: str,
+        name: str,
+        description: str | None,
+        source_type: str,
+        config: dict[str, object],
+        owner_id: str | None = None,
+        schema_info: object | None = None,
+    ):
+        from datasources.schemas import DataSourceRecord
+
+        request = worker_runtime_pb2.WorkerPublishDatasourceCreateRequest(
+            namespace=namespace,
+            datasource_id=datasource_id,
+            name=name,
+            source_type=enum_to_proto_value("DATA_SOURCE_TYPE", source_type),
+            config=dict_to_struct(config),
+        )
+        if description is not None:
+            request.description = description
+        if owner_id is not None:
+            request.owner_id = owner_id
+        if schema_info is not None:
+            payload = cast(dict[str, object], schema_info.model_dump(mode="json") if hasattr(schema_info, "model_dump") else schema_info)
+            request.schema_info.CopyFrom(json_format.ParseDict(payload, datasource_pb2.SchemaInfo()))
+        response = self._call(lambda: self._stub.PublishDatasourceCreate(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        return DataSourceRecord.model_validate(_datasource_record_payload(response.datasource))
+
+    def publish_datasource_ingest(
+        self,
+        *,
+        namespace: str,
+        datasource_id: str,
+        config: dict[str, object],
+        expected_revision: int,
         worker_id: str,
         claim_token: str,
         lease_generation: int,
-    ) -> datasource_pb2.DataSourceRecord:
-        response = self._call(
-            lambda: self._stub.ScheduleIngestDatasource(
-                worker_runtime_pb2.WorkerScheduleIngestDatasourceRequest(
-                    namespace=namespace,
-                    datasource_id=datasource_id,
-                    job_id=job_id,
-                    build_id=build_id,
-                    worker_id=worker_id,
-                    claim_token=claim_token,
-                    lease_generation=lease_generation,
-                ),
-                timeout=self._timeout_seconds,
-                metadata=self._metadata(),
-            )
+        schema_info: object | None = None,
+        compute_request_id: str | None = None,
+        job_id: str | None = None,
+        build_id: str | None = None,
+    ):
+        from datasources.schemas import DataSourceRecord
+
+        request = worker_runtime_pb2.WorkerPublishDatasourceIngestRequest(
+            namespace=namespace,
+            datasource_id=datasource_id,
+            config=dict_to_struct(config),
+            expected_revision=expected_revision,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
         )
-        return response.datasource
+        if schema_info is not None:
+            payload = cast(dict[str, object], schema_info.model_dump(mode="json") if hasattr(schema_info, "model_dump") else schema_info)
+            request.schema_info.CopyFrom(json_format.ParseDict(payload, datasource_pb2.SchemaInfo()))
+        if compute_request_id is not None:
+            request.compute_request_id = compute_request_id
+        if job_id is not None:
+            request.job_id = job_id
+        if build_id is not None:
+            request.build_id = build_id
+        response = self._call(lambda: self._stub.PublishDatasourceIngest(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        return DataSourceRecord.model_validate(_datasource_record_payload(response.datasource))
+
+    def publish_datasource_schema_cache(
+        self,
+        *,
+        namespace: str,
+        datasource_id: str,
+        schema_info: object,
+    ):
+        from datasources.schemas import SchemaInfo
+
+        payload = cast(dict[str, object], schema_info.model_dump(mode="json") if hasattr(schema_info, "model_dump") else schema_info)
+        request = worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheRequest(
+            namespace=namespace,
+            datasource_id=datasource_id,
+            schema_info=json_format.ParseDict(payload, datasource_pb2.SchemaInfo()),
+        )
+        response = self._call(lambda: self._stub.PublishDatasourceSchemaCache(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        return SchemaInfo.model_validate(_schema_info_payload(response.schema_info))
 
     def datasource_metadata(self, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
         response = self._call(
@@ -433,6 +492,10 @@ class WorkerInternalApiClient:
             config=optional_struct_to_dict(response, "config"),
             schema_cache=_schema_info_payload(response.schema_info) if response.HasField("schema_info") else None,
             is_hidden=_optional_bool(response, "is_hidden"),
+            revision=int(response.revision) if response.HasField("revision") else None,
+            description=_optional_str(response, "description"),
+            column_descriptions=dict(response.column_descriptions) if response.column_descriptions else {},
+            created_by=_optional_str(response, "created_by"),
         )
 
     def udf_codes(self, *, namespace: str, udf_ids: list[str]) -> dict[str, str]:

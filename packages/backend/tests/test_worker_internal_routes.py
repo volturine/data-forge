@@ -472,7 +472,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
 
 
 @pytest.mark.asyncio
-async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_internal_worker_grpc_publishes_datasource_create(monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
 
     class _Response:
@@ -481,63 +481,55 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
             return {
                 'id': 'ds-1',
                 'name': 'Created',
-                'source_type': 'database',
+                'source_type': 'iceberg',
                 'created_by': 'import',
-                'config': {},
+                'config': {'branch': 'main'},
             }
 
-    def fake_create_database_datasource(**kwargs):
+    def fake_create_datasource(_session, **kwargs):
         assert kwargs['name'] == 'Created'
-        assert kwargs['connection_string'] == 'postgresql://example/db'
-        assert kwargs['query'] == 'SELECT 1'
+        assert kwargs['datasource_id'] == 'ds-1'
+        assert kwargs['source_type'] == 'iceberg'
         return _Response()
 
-    monkeypatch.setattr('modules.datasource.runtime_service.create_database_datasource', fake_create_database_datasource)
+    monkeypatch.setattr('modules.datasource.publication_service.create_datasource', fake_create_datasource)
 
-    response = await WorkerRuntimeServicer().ExecuteDatasourceRequest(
-        worker_runtime_pb2.WorkerExecuteDatasourceRequest(
+    response = await WorkerRuntimeServicer().PublishDatasourceCreate(
+        worker_runtime_pb2.WorkerPublishDatasourceCreateRequest(
             namespace='default',
-            kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
-            command=datasource_pb2.DatasourceCommand(
-                create_database=datasource_pb2.CreateDatabaseDatasourceCommand(
-                    name='Created',
-                    connection_string='postgresql://example/db',
-                    query='SELECT 1',
-                    branch='main',
-                )
-            ),
+            datasource_id='ds-1',
+            name='Created',
+            source_type=enums_pb2.DATA_SOURCE_TYPE_ICEBERG,
+            config=dict_to_struct({'branch': 'main'}),
         ),
         context,
     )
 
-    assert response.result.datasource.id == 'ds-1'
-    assert response.result.datasource.name == 'Created'
+    assert response.datasource.id == 'ds-1'
+    assert response.datasource.name == 'Created'
 
 
 @pytest.mark.asyncio
-async def test_internal_worker_grpc_maps_lost_datasource_publication_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_internal_worker_grpc_maps_lost_datasource_publication_claim(monkeypatch: pytest.MonkeyPatch, test_db_session: Session) -> None:
     context = _context(monkeypatch)
+    from modules.datasource.publication_service import DatasourcePublicationClaimLost
 
-    def reject_publication(**_kwargs):
-        from modules.datasource.runtime_service import DatasourcePublicationClaimLost
-
+    def reject_publication(_session, **_kwargs):
         raise DatasourcePublicationClaimLost('Datasource publication claim is no longer active')
 
-    monkeypatch.setattr('modules.datasource.runtime_service.create_database_datasource', reject_publication)
+    monkeypatch.setattr('modules.datasource.publication_service.publish_ingest', reject_publication)
 
     with pytest.raises(RuntimeError, match='publication claim is no longer active'):
-        await WorkerRuntimeServicer().ExecuteDatasourceRequest(
-            worker_runtime_pb2.WorkerExecuteDatasourceRequest(
+        await WorkerRuntimeServicer().PublishDatasourceIngest(
+            worker_runtime_pb2.WorkerPublishDatasourceIngestRequest(
                 namespace='default',
-                kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
-                command=datasource_pb2.DatasourceCommand(
-                    create_database=datasource_pb2.CreateDatabaseDatasourceCommand(
-                        name='Created',
-                        connection_string='postgresql://example/db',
-                        query='SELECT 1',
-                        branch='main',
-                    )
-                ),
+                datasource_id='ds-1',
+                config=dict_to_struct({'branch': 'main'}),
+                expected_revision=1,
+                compute_request_id='req-1',
+                worker_id='worker-1',
+                claim_token='claim-1',
+                lease_generation=1,
             ),
             context,
         )

@@ -23,8 +23,9 @@ service WorkerRuntimeService {
   rpc CompleteComputeRequest(WorkerCompleteComputeRequestRequest) returns (RuntimeWorkerResponse);
   rpc FailComputeRequest(WorkerFailComputeRequestRequest) returns (RuntimeWorkerResponse);
 
-  rpc ExecuteDatasourceRequest(WorkerExecuteDatasourceRequest) returns (WorkerDatasourceCommandResponse);
-  rpc ScheduleIngestDatasource(WorkerScheduleIngestDatasourceRequest) returns (WorkerScheduleIngestDatasourceResponse);
+  rpc PublishDatasourceCreate(WorkerPublishDatasourceCreateRequest) returns (WorkerPublishDatasourceCreateResponse);
+  rpc PublishDatasourceIngest(WorkerPublishDatasourceIngestRequest) returns (WorkerPublishDatasourceIngestResponse);
+  rpc PublishDatasourceSchemaCache(WorkerPublishDatasourceSchemaCacheRequest) returns (WorkerPublishDatasourceSchemaCacheResponse);
   rpc GetDatasourceMetadata(WorkerDatasourceMetadataRequest) returns (WorkerDatasourceMetadataResponse);
   rpc GetUdfCodes(WorkerUdfCodesRequest) returns (WorkerUdfCodesResponse);
   rpc GetAnalysisMetadata(WorkerAnalysisMetadataRequest) returns (WorkerAnalysisMetadataResponse);
@@ -169,38 +170,50 @@ message WorkerFailComputeRequestRequest {
   int64 lease_generation = 8 [(buf.validate.field).int64.gte = 1];
 }
 
-message WorkerExecuteDatasourceRequest {
-  reserved 3;
-  reserved "request";
-
+message WorkerPublishDatasourceCreateRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  ComputeRequestKind kind = 2 [(buf.validate.field).enum = {
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+  string name = 3 [(buf.validate.field).string.min_len = 1];
+  optional string description = 4;
+  DataSourceType source_type = 5 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
-  DatasourceCommand command = 4 [(buf.validate.field).required = true];
-  string request_id = 5 [(buf.validate.field).string.min_len = 1];
-  string worker_id = 6 [(buf.validate.field).string.min_len = 1];
-  string claim_token = 7 [(buf.validate.field).string.min_len = 1];
-  int64 lease_generation = 8 [(buf.validate.field).int64.gte = 1];
+  google.protobuf.Struct config = 6 [(buf.validate.field).required = true];
+  optional string owner_id = 7 [(buf.validate.field).string.min_len = 1];
+  SchemaInfo schema_info = 8;
 }
 
-message WorkerScheduleIngestDatasourceRequest {
+message WorkerPublishDatasourceCreateResponse {
+  DataSourceRecord datasource = 1 [(buf.validate.field).required = true];
+}
+
+message WorkerPublishDatasourceIngestRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
-  string job_id = 3 [(buf.validate.field).string.min_len = 1];
-  string build_id = 4 [(buf.validate.field).string.min_len = 1];
-  string worker_id = 5 [(buf.validate.field).string.min_len = 1];
-  string claim_token = 6 [(buf.validate.field).string.min_len = 1];
-  int64 lease_generation = 7 [(buf.validate.field).int64.gte = 1];
+  google.protobuf.Struct config = 3 [(buf.validate.field).required = true];
+  int64 expected_revision = 4 [(buf.validate.field).int64.gte = 1];
+  SchemaInfo schema_info = 5;
+  optional string compute_request_id = 6 [(buf.validate.field).string.min_len = 1];
+  optional string job_id = 7 [(buf.validate.field).string.min_len = 1];
+  optional string build_id = 8 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 9 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 10 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 11 [(buf.validate.field).int64.gte = 1];
 }
 
-message WorkerDatasourceCommandResponse {
-  DatasourceResult result = 1 [(buf.validate.field).required = true];
-}
-
-message WorkerScheduleIngestDatasourceResponse {
+message WorkerPublishDatasourceIngestResponse {
   DataSourceRecord datasource = 1 [(buf.validate.field).required = true];
+}
+
+message WorkerPublishDatasourceSchemaCacheRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+  SchemaInfo schema_info = 3 [(buf.validate.field).required = true];
+}
+
+message WorkerPublishDatasourceSchemaCacheResponse {
+  SchemaInfo schema_info = 1 [(buf.validate.field).required = true];
 }
 
 message WorkerDatasourceMetadataRequest {
@@ -222,6 +235,10 @@ message WorkerDatasourceMetadataResponse {
   optional google.protobuf.Struct config = 5;
   optional bool is_hidden = 7;
   SchemaInfo schema_info = 8;
+  optional int64 revision = 9 [(buf.validate.field).int64.gte = 1];
+  optional string description = 10;
+  map<string, string> column_descriptions = 11;
+  optional string created_by = 12;
 }
 
 message WorkerUdfCodesRequest {

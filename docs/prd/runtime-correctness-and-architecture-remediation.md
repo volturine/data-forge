@@ -90,6 +90,14 @@ Completed in the scheduler, analysis, and frontend-concurrency slice:
 - namespace changes abort active frontend requests and reject responses crossing the namespace epoch;
 - analysis IndexedDB state now has explicit namespace-scoped initialization, and the analysis/schema store cycle is removed.
 
+
+Completed in the datasource-execution-ownership slice:
+
+- worker-owned modules execute create/ingest/schema/stats/snapshot-compare Polars and Iceberg work;
+- backend worker-runtime RPCs only publish fenced datasource metadata and schema cache;
+- schedule ingest executes on the worker and publishes with the build-job claim fence;
+- API process-local datasource execution modules are removed.
+
 Completed in the retry, datasource-publication, and verification slice:
 
 - compute requests and outbox deliveries have explicit attempt limits; exhausted work becomes a durable failed or poisoned terminal record;
@@ -794,10 +802,10 @@ Exit criteria:
 
 ### Phase 5 — Move execution to the correct owner
 
-- [ ] Move datasource operations into workers.
+- [x] Move datasource operations into workers.
 - [x] Add durable datasource resource fencing.
 - [x] Remove API process-local execution locks.
-- [ ] Remove API-side data execution dependencies.
+- [x] Remove API-side data execution dependencies.
 
 Exit criteria:
 
@@ -920,7 +928,7 @@ The remediation is complete only when all statements below are true:
 - [x] Cancellation and finalization are atomic and idempotent.
 - [x] Terminal states cannot be overwritten by late writers.
 - [ ] Outbox dispatch is recoverable and duplicate delivery is harmless.
-- [ ] Datasource execution occurs in workers and uses durable resource fencing.
+- [x] Datasource execution occurs in workers and uses durable resource fencing.
 - [ ] Multiple schedulers claim only due, bounded, totally ordered triggers.
 - [x] Analysis mutations require a revision and versions are unique.
 - [x] Frontend results cannot cross namespace epochs.

@@ -36,7 +36,7 @@ Residual audit note:
 
 - The implementation covers stale-owner rejection, active lease renewal, atomic build transitions, durable outbox recovery, scheduler claim ordering, analysis lost-update prevention, and frontend namespace isolation.
 - The runtime/admin surface exposes runtime mode, API process identity, worker heartbeats, engine rows, and queue status through `/api/v1/runtime/overview`.
-- Datasource command orchestration still crosses the API gRPC boundary, external notification consumers do not all provide durable idempotency acknowledgements, and the broad multi-process failure-injection matrix remains follow-up work.
+- Datasource execution is worker-owned; backend publication RPCs only persist fenced metadata. External notification consumers do not all provide durable idempotency acknowledgements, and the broad multi-process failure-injection matrix remains follow-up work.
 - Lower-level metric counters such as lease renew outcomes, fenced-write rejection, attempt exhaustion, scheduler duplicate prevention, and datasource contention are not yet exposed as dedicated metrics.
 
 ## Final Validation Snapshot

@@ -35,7 +35,6 @@ from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute.base import EngineStatusInfo
 from backend_core.domain.compute_requests.models import (
     analysis_pipeline_from_payload,
-    compute_request_kind_name,
     datasource_result_from_payload,
     kind_from_proto,
 )
@@ -64,7 +63,8 @@ from dataforge_protocol import (
     worker_runtime_pb2,
     worker_runtime_pb2_grpc,
 )
-from modules.datasource import runtime_service as datasource_runtime_service
+from modules.datasource import publication_service as datasource_publication_service
+from modules.datasource.schemas import SchemaInfo
 from modules.scheduler import service as scheduler_service
 
 logger = logging.getLogger(__name__)
@@ -762,168 +762,69 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def ExecuteDatasourceRequest(
-        self, request: worker_runtime_pb2.WorkerExecuteDatasourceRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.WorkerDatasourceCommandResponse:
+    async def PublishDatasourceCreate(
+        self, request: worker_runtime_pb2.WorkerPublishDatasourceCreateRequest, context: grpc.aio.ServicerContext
+    ) -> worker_runtime_pb2.WorkerPublishDatasourceCreateResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
         session = next(session_gen)
         try:
-            kind = _proto_compute_request_kind(request.kind)
-            command = request.command
-            response: Any
-            if kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE:
-                if command.WhichOneof('command') != 'create_file':
-                    raise ValueError('datasource command must contain create_file')
-                create_file = command.create_file
-                csv_options = None
-                if create_file.HasField('csv_options'):
-                    csv_options = datasource_runtime_service.CSVOptions(
-                        delimiter=create_file.csv_options.delimiter,
-                        quote_char=create_file.csv_options.quote_char,
-                        has_header=create_file.csv_options.has_header,
-                        skip_rows=create_file.csv_options.skip_rows,
-                        encoding=create_file.csv_options.encoding,
-                    )
-                response = datasource_runtime_service.create_file_datasource(
-                    session=session,
-                    name=create_file.name,
-                    description=create_file.description if create_file.HasField('description') else None,
-                    file_path=create_file.file_path,
-                    file_type=proto_value_to_enum_name(enums_pb2.DataSourceFileType, 'DATA_SOURCE_FILE_TYPE', create_file.file_type),
-                    options=struct_to_dict(create_file.options),
-                    csv_options=csv_options,
-                    sheet_name=create_file.sheet_name if create_file.HasField('sheet_name') else None,
-                    start_row=create_file.start_row if create_file.HasField('start_row') else None,
-                    start_col=create_file.start_col if create_file.HasField('start_col') else None,
-                    end_col=create_file.end_col if create_file.HasField('end_col') else None,
-                    end_row=create_file.end_row if create_file.HasField('end_row') else None,
-                    has_header=create_file.has_header if create_file.HasField('has_header') else None,
-                    table_name=create_file.table_name if create_file.HasField('table_name') else None,
-                    named_range=create_file.named_range if create_file.HasField('named_range') else None,
-                    cell_range=create_file.cell_range if create_file.HasField('cell_range') else None,
-                    owner_id=create_file.owner_id if create_file.HasField('owner_id') else None,
-                )
-            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE:
-                if command.WhichOneof('command') != 'create_database':
-                    raise ValueError('datasource command must contain create_database')
-                create_database = command.create_database
-                response = datasource_runtime_service.create_database_datasource(
-                    session=session,
-                    name=create_database.name,
-                    description=create_database.description if create_database.HasField('description') else None,
-                    connection_string=create_database.connection_string,
-                    query=create_database.query,
-                    branch=create_database.branch,
-                    owner_id=create_database.owner_id if create_database.HasField('owner_id') else None,
-                )
-            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE:
-                if command.WhichOneof('command') != 'create_iceberg':
-                    raise ValueError('datasource command must contain create_iceberg')
-                create_iceberg = command.create_iceberg
-                response = datasource_runtime_service.create_iceberg_datasource(
-                    session=session,
-                    name=create_iceberg.name,
-                    description=create_iceberg.description if create_iceberg.HasField('description') else None,
-                    source=struct_to_dict(create_iceberg.source),
-                    branch=create_iceberg.branch,
-                    owner_id=create_iceberg.owner_id if create_iceberg.HasField('owner_id') else None,
-                )
-            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE:
-                if command.WhichOneof('command') != 'ingest':
-                    raise ValueError('datasource command must contain ingest')
-
-                def _guard_compute_publication(active_session: Any) -> None:
-                    active_claim = compute_requests_service.lock_active_request_claim(
-                        active_session,
-                        request.request_id,
-                        worker_id=request.worker_id,
-                        claim_token=request.claim_token,
-                        lease_generation=request.lease_generation,
-                    )
-                    if active_claim is None:
-                        raise datasource_runtime_service.DatasourcePublicationClaimLost
-
-                response = datasource_runtime_service.ingest_external_datasource(
-                    session,
-                    command.ingest.datasource_id,
-                    staging_key=request.claim_token,
-                    publication_guard=_guard_compute_publication,
-                )
-            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
-                if command.WhichOneof('command') != 'schema':
-                    raise ValueError('datasource command must contain schema')
-                schema = command.schema
-                response = datasource_runtime_service.get_datasource_schema(
-                    session,
-                    schema.datasource_id,
-                    sheet_name=schema.sheet_name if schema.HasField('sheet_name') else None,
-                    refresh=schema.refresh,
-                )
-            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
-                if command.WhichOneof('command') != 'column_stats':
-                    raise ValueError('datasource command must contain column_stats')
-                column_stats = command.column_stats
-                response = datasource_runtime_service.get_column_stats(
-                    session=session,
-                    datasource_id=column_stats.datasource_id,
-                    column_name=column_stats.column_name,
-                    use_sample=column_stats.use_sample,
-                    sample_size=column_stats.sample_size,
-                    datasource_config=struct_to_dict(column_stats.datasource_config),
-                )
-            elif kind == enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS:
-                if command.WhichOneof('command') != 'compare_iceberg_snapshots':
-                    raise ValueError('datasource command must contain compare_iceberg_snapshots')
-                compare_snapshots = command.compare_iceberg_snapshots
-                response = datasource_runtime_service.compare_iceberg_snapshots(
-                    session,
-                    compare_snapshots.datasource_id,
-                    compare_snapshots.snapshot_a,
-                    compare_snapshots.snapshot_b,
-                    compare_snapshots.row_limit,
-                )
-            else:
-                raise ValueError(f'Unsupported datasource request kind: {compute_request_kind_name(kind)}')
-            response_payload = response.model_dump(mode='json')
-            return worker_runtime_pb2.WorkerDatasourceCommandResponse(result=datasource_result_from_payload(kind, response_payload))
-        except datasource_runtime_service.DatasourcePublicationClaimLost as exc:
-            raise _ThreadedRpcAbort(
-                grpc.StatusCode.FAILED_PRECONDITION,
-                str(exc) or 'Datasource publication claim is no longer active',
-            ) from exc
-        except AppError as exc:
-            if exc.error_code != 'DATASOURCE_NOT_FOUND':
-                raise
-            logger.warning('Datasource not found for %s: %s', compute_request_kind_name(kind), exc)
-            response_payload = {'error': 'datasource_not_found', 'message': str(exc)}
-            return worker_runtime_pb2.WorkerDatasourceCommandResponse(result=datasource_result_from_payload(kind, response_payload))
+            schema_info = None
+            if request.HasField('schema_info') and len(request.schema_info.columns) > 0:
+                schema_info = SchemaInfo.model_validate(_schema_info_payload(request.schema_info))
+            response = datasource_publication_service.create_datasource(
+                session,
+                datasource_id=request.datasource_id,
+                name=request.name,
+                description=request.description if request.HasField('description') else None,
+                source_type=proto_value_to_enum_name(enums_pb2.DataSourceType, 'DATA_SOURCE_TYPE', request.source_type),
+                config=struct_to_dict(request.config),
+                owner_id=request.owner_id if request.HasField('owner_id') else None,
+                schema_info=schema_info,
+            )
+            record = datasource_result_from_payload(
+                enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+                response.model_dump(mode='json'),
+            )
+            if record.WhichOneof('result') != 'datasource':
+                raise ValueError('create publication must return a datasource result')
+            return worker_runtime_pb2.WorkerPublishDatasourceCreateResponse(datasource=record.datasource)
         finally:
             session.close()
             session_gen.close()
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def ScheduleIngestDatasource(
-        self, request: worker_runtime_pb2.WorkerScheduleIngestDatasourceRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.WorkerScheduleIngestDatasourceResponse:
+    async def PublishDatasourceIngest(
+        self, request: worker_runtime_pb2.WorkerPublishDatasourceIngestRequest, context: grpc.aio.ServicerContext
+    ) -> worker_runtime_pb2.WorkerPublishDatasourceIngestResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
         session = next(session_gen)
         try:
-            claim = build_job_service.lock_active_job_claim(
-                session,
-                request.job_id,
-                build_id=request.build_id,
-                worker_id=request.worker_id,
-                claim_token=request.claim_token,
-                lease_generation=request.lease_generation,
-            )
-            if claim is None:
-                raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
+            has_compute = request.HasField('compute_request_id')
+            has_build = request.HasField('job_id') or request.HasField('build_id')
+            if has_compute == has_build:
+                raise _ThreadedRpcAbort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    'Ingest publication requires exactly one of compute_request_id or build job claim fields',
+                )
+            if has_build and not (request.HasField('job_id') and request.HasField('build_id')):
+                raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build job claim fields must be provided together')
 
             def _guard_publication(active_session: Any) -> None:
-                active_claim = build_job_service.lock_active_job_claim(
+                if has_compute:
+                    request_claim = compute_requests_service.lock_active_request_claim(
+                        active_session,
+                        request.compute_request_id,
+                        worker_id=request.worker_id,
+                        claim_token=request.claim_token,
+                        lease_generation=request.lease_generation,
+                    )
+                    if request_claim is None:
+                        raise datasource_publication_service.DatasourcePublicationClaimLost
+                    return
+                job_claim = build_job_service.lock_active_job_claim(
                     active_session,
                     request.job_id,
                     build_id=request.build_id,
@@ -931,22 +832,57 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     claim_token=request.claim_token,
                     lease_generation=request.lease_generation,
                 )
-                if active_claim is None:
-                    raise datasource_runtime_service.DatasourcePublicationClaimLost
+                if job_claim is None:
+                    raise datasource_publication_service.DatasourcePublicationClaimLost
 
+            schema_info = None
+            if request.HasField('schema_info') and len(request.schema_info.columns) > 0:
+                schema_info = SchemaInfo.model_validate(_schema_info_payload(request.schema_info))
             try:
-                response = datasource_runtime_service.ingest_datasource_for_schedule(
+                response = datasource_publication_service.publish_ingest(
                     session,
-                    request.datasource_id,
-                    staging_key=request.claim_token,
+                    datasource_id=request.datasource_id,
+                    config=struct_to_dict(request.config),
+                    expected_revision=int(request.expected_revision),
+                    schema_info=schema_info,
                     publication_guard=_guard_publication,
                 )
-            except datasource_runtime_service.DatasourcePublicationClaimLost:
-                raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
-            result = datasource_result_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE, response.model_dump(mode='json'))
-            if result.WhichOneof('result') != 'datasource':
-                raise ValueError('schedule ingest must return a datasource result')
-            return worker_runtime_pb2.WorkerScheduleIngestDatasourceResponse(datasource=result.datasource)
+            except datasource_publication_service.DatasourcePublicationClaimLost as exc:
+                raise _ThreadedRpcAbort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    str(exc) or 'Datasource publication claim is no longer active',
+                ) from exc
+            record = datasource_result_from_payload(
+                enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
+                response.model_dump(mode='json'),
+            )
+            if record.WhichOneof('result') != 'datasource':
+                raise ValueError('ingest publication must return a datasource result')
+            return worker_runtime_pb2.WorkerPublishDatasourceIngestResponse(datasource=record.datasource)
+        finally:
+            session.close()
+            session_gen.close()
+            reset_namespace(token)
+
+    @_run_async_handler_in_thread
+    async def PublishDatasourceSchemaCache(
+        self, request: worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheRequest, context: grpc.aio.ServicerContext
+    ) -> worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheResponse:
+        token = set_namespace_context(request.namespace)
+        session_gen = get_db()
+        session = next(session_gen)
+        try:
+            schema_info = SchemaInfo.model_validate(_schema_info_payload(request.schema_info))
+            published = datasource_publication_service.publish_schema_cache(
+                session,
+                datasource_id=request.datasource_id,
+                schema_info=schema_info,
+            )
+            return worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheResponse(schema_info=_schema_info_proto(published.model_dump(mode='json')))
+        except AppError as exc:
+            if exc.error_code != 'DATASOURCE_NOT_FOUND':
+                raise
+            raise _ThreadedRpcAbort(grpc.StatusCode.NOT_FOUND, str(exc)) from exc
         finally:
             session.close()
             session_gen.close()
@@ -970,9 +906,16 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 source_type=_proto_value('DATA_SOURCE_TYPE', datasource.source_type),
                 config=dict_to_struct(dict(datasource.config)),
                 is_hidden=datasource.is_hidden,
+                revision=int(datasource.revision),
+                created_by=str(datasource.created_by),
             )
+            if datasource.description is not None:
+                response.description = datasource.description
             if isinstance(datasource.schema_cache, dict):
                 response.schema_info.CopyFrom(_schema_info_proto(dict(datasource.schema_cache)))
+            descriptions = datasource_publication_service.column_description_map(session, datasource.id)
+            if descriptions:
+                response.column_descriptions.update(descriptions)
             return response
         finally:
             session.close()

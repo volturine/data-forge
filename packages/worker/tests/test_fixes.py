@@ -9,11 +9,10 @@ from typing import Any, cast
 
 import polars as pl
 import pytest
-from google.protobuf import json_format
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
-from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2, errors_pb2
+from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2
 from operations.download import DownloadParams
 from operations.export import ExportParams
 from operations.notification import NotificationHandler, NotificationParams
@@ -464,28 +463,28 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
     assert dispatched == [True]
 
 
-def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
-    failed: list[compute_pb2.ComputeErrorResult] = []
-    dispatched: list[bool] = []
+def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) -> None:
+    completed: list[compute_pb2.ComputeResponse] = []
 
     monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
     monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
 
     class _Client:
-        def execute_datasource_request(self, **_kwargs):
-            raise BackendWorkerRpcError(
-                status_code=404,
-                error="DataSource datasource-1 not found",
-                error_code="DATASOURCE_NOT_FOUND",
-                details={"datasource_id": "datasource-1"},
+        def datasource_metadata(self, **_kwargs):
+            from runtime.internal_api import DatasourceMetadata
+
+            return DatasourceMetadata(
+                found=False,
+                id=None,
+                name=None,
+                source_type=None,
+                config=None,
+                schema_cache=None,
+                is_hidden=None,
             )
 
-        def fail_compute_request(self, **kwargs):
-            failed.append(kwargs["error"])
-
-        def dispatch_runtime_outbox(self):
-            dispatched.append(True)
-            return 0
+        def complete_compute_request(self, **kwargs):
+            completed.append(kwargs["response"])
 
     monkeypatch.setattr(compute_request_runtime, "worker_internal_api_client", lambda: _Client())
 
@@ -504,18 +503,13 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
         ),
     )
 
-    with caplog.at_level("INFO"):
-        compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
+    compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
 
-    assert len(failed) == 1
-    assert failed[0].error == "DataSource datasource-1 not found"
-    assert failed[0].status_code == 404
-    assert failed[0].error_code == errors_pb2.ERROR_CODE_DATASOURCE_NOT_FOUND
-    assert json_format.MessageToDict(failed[0].details) == {"datasource_id": "datasource-1"}
-    assert dispatched == [True]
-    assert [(record.levelname, record.getMessage()) for record in caplog.records] == [
-        ("INFO", "Compute request req-404 rejected: DataSource datasource-1 not found")
-    ]
+    assert len(completed) == 1
+    assert completed[0].WhichOneof("response") == "datasource"
+    assert completed[0].datasource.WhichOneof("result") == "error"
+    assert completed[0].datasource.error.error == "datasource_not_found"
+    assert completed[0].datasource.error.message == "datasource-1"
 
 
 def test_grpc_precondition_error_does_not_invent_domain_error_code() -> None:

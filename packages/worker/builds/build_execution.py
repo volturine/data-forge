@@ -154,15 +154,21 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
         if datasource_id is None:
             raise ValueError(f"Queued schedule build {build.build_id} missing datasource id")
         try:
+            from datasources import execution as datasource_execution
+            from runtime.config import settings as worker_settings
+
             refreshed = await asyncio.to_thread(
-                worker_internal_api_client().schedule_ingest_datasource,
+                datasource_execution.ingest_datasource_for_schedule,
+                worker_internal_api_client(),
                 namespace=build.namespace,
+                database_url=worker_settings.database_url,
                 datasource_id=datasource_id,
-                job_id=claim.job_id,
-                build_id=claim.build_id,
+                staging_key=claim.claim_token,
                 worker_id=worker_id,
                 claim_token=claim.claim_token,
                 lease_generation=claim.lease_generation,
+                job_id=claim.job_id,
+                build_id=claim.build_id,
             )
             refreshed_name = refreshed.name or datasource_id
             await _emit_active_build_event(
