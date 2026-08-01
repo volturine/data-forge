@@ -1,64 +1,34 @@
 import contextlib
 
-from fastapi import Depends, Header, HTTPException, Request, Response
+from fastapi import Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session
 
 from backend_core.database import get_db
-from backend_core.dependencies import (
-    RuntimeAvailabilityProbe,
-    get_optional_lock_owner_id,
-    get_runtime_availability_probe,
-)
+from backend_core.dependencies import RuntimeAvailabilityProbe, get_runtime_availability_probe
 from backend_core.domain.analysis.step_types import is_step_type
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import PipelineExecutionError
+from backend_core.persistence.analysis.models import Analysis
 from backend_core.validation import AnalysisId, parse_analysis_id
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.analysis import schemas, service
 from modules.analysis.pipeline_compiler import compile_step
+from modules.analysis.revisions import (
+    etag as analysis_etag,
+    require as require_analysis_revision,
+    set_response_headers as set_analysis_revision_headers,
+    version as analysis_version,
+)
 from modules.analysis.step_schemas import get_step_catalog
 from modules.auth.dependencies import get_current_user_id, get_optional_user
 from modules.auth.models import User
 from modules.compute import executor_client
 from modules.export import service as export_service
-from modules.locks import service as lock_service
 from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/analysis', tags=['analysis'])
-
-
-def _analysis_etag(analysis: schemas.AnalysisResponseSchema) -> str:
-    return f'"analysis-{analysis.id}-{analysis.updated_at.isoformat()}"'
-
-
-def _analysis_version(analysis: schemas.AnalysisResponseSchema) -> str:
-    return analysis.updated_at.isoformat()
-
-
-def _validate_if_match(current_version: str, current_etag: str, if_match: str | None) -> None:
-    if if_match is None:
-        return
-    normalized = if_match.strip()
-    if normalized == '*':
-        return
-    if normalized == current_version:
-        return
-    if normalized == current_etag:
-        return
-    raise HTTPException(status_code=412, detail='Analysis version mismatch')
-
-
-async def require_analysis_lock(
-    analysis_id: AnalysisId,
-    session: Session = Depends(get_db),
-    owner_id: str | None = Depends(get_optional_lock_owner_id),
-) -> None:
-    try:
-        lock_service.ensure_mutation_lock(session, 'analysis', parse_analysis_id(analysis_id), owner_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post('/validate', mcp=True)
@@ -172,8 +142,8 @@ async def get_analysis(
 ):
     """Get a single analysis by ID with full pipeline definition including all tabs and steps."""
     analysis = service.get_analysis(session, parse_analysis_id(analysis_id))
-    response.headers['ETag'] = _analysis_etag(analysis)
-    response.headers['X-Analysis-Version'] = _analysis_version(analysis)
+    response.headers['ETag'] = analysis_etag(analysis)
+    response.headers['X-Analysis-Version'] = analysis_version(analysis)
     return analysis
 
 
@@ -196,8 +166,7 @@ async def update_analysis(
     analysis_id: AnalysisId,
     response: Response,
     data: schemas.AnalysisUpdateSchema,
-    if_match: str | None = Header(default=None, alias='If-Match'),
-    _lock: None = Depends(require_analysis_lock),
+    _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
 ):
     """Update an analysis and replace the full tabs array.
@@ -206,16 +175,9 @@ async def update_analysis(
     then add steps via POST /analysis/{id}/tabs/{tab_id}/steps.
     """
     analysis_id_value = parse_analysis_id(analysis_id)
-    try:
-        analysis = service.get_analysis(session, analysis_id_value)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    _validate_if_match(_analysis_version(analysis), _analysis_etag(analysis), if_match)
-
     updated = service.update_analysis(session, analysis_id_value, data)
-    response.headers['ETag'] = _analysis_etag(updated)
-    response.headers['X-Analysis-Version'] = _analysis_version(updated)
+    response.headers['ETag'] = analysis_etag(updated)
+    response.headers['X-Analysis-Version'] = analysis_version(updated)
     return updated
 
 
@@ -254,7 +216,7 @@ async def unfavorite_analysis(
 @handle_errors(operation='delete analysis', value_error_status=404)
 async def delete_analysis(
     analysis_id: AnalysisId,
-    _lock: None = Depends(require_analysis_lock),
+    _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -404,7 +366,8 @@ async def add_step(
     analysis_id: AnalysisId,
     tab_id: str,
     data: AddStepBody,
-    _lock: None = Depends(require_analysis_lock),
+    response: Response,
+    _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
 ):
     """Add a new pipeline step to a tab in an analysis.
@@ -420,7 +383,7 @@ async def add_step(
         depends_on=data.depends_on,
         is_applied=None,
     )
-    return service.add_step(
+    result = service.add_step(
         session,
         parse_analysis_id(analysis_id),
         tab_id,
@@ -429,6 +392,8 @@ async def add_step(
         data.position,
         data.depends_on,
     )
+    set_analysis_revision_headers(response, _analysis)
+    return result
 
 
 @router.put('/{analysis_id}/tabs/{tab_id}/steps/{step_id}', mcp=True)
@@ -438,7 +403,8 @@ async def update_step(
     tab_id: str,
     step_id: str,
     data: UpdateStepBody,
-    _lock: None = Depends(require_analysis_lock),
+    response: Response,
+    _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
 ):
     """Update a pipeline step's type and/or config.
@@ -476,7 +442,7 @@ async def update_step(
                 depends_on=[],
                 is_applied=None,
             ).config
-    return service.update_step(
+    result = service.update_step(
         session,
         analysis_id_value,
         tab_id,
@@ -484,6 +450,8 @@ async def update_step(
         normalized_config,
         data.type,
     )
+    set_analysis_revision_headers(response, _analysis)
+    return result
 
 
 @router.delete('/{analysis_id}/tabs/{tab_id}/steps/{step_id}', status_code=204, mcp=True, mcp_confirm_required=True)
@@ -492,7 +460,8 @@ async def remove_step(
     analysis_id: AnalysisId,
     tab_id: str,
     step_id: str,
-    _lock: None = Depends(require_analysis_lock),
+    response: Response,
+    _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
 ):
     """Remove a pipeline step from a tab. Also cleans up depends_on references in other steps that depended on the removed step."""
@@ -502,6 +471,7 @@ async def remove_step(
         tab_id,
         step_id,
     )
+    set_analysis_revision_headers(response, _analysis)
 
 
 class DeriveTabBody(BaseModel):
@@ -514,7 +484,8 @@ async def derive_tab(
     analysis_id: AnalysisId,
     tab_id: str,
     data: DeriveTabBody,
-    _lock: None = Depends(require_analysis_lock),
+    response: Response,
+    _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
 ):
     """Create a new tab whose datasource is the given tab's output result_id.
@@ -522,7 +493,9 @@ async def derive_tab(
     This chains the output of an existing tab into a new tab for further processing.
     The source tab must have a computed output.result_id. The new tab starts with no steps.
     """
-    return service.derive_tab(session, parse_analysis_id(analysis_id), tab_id, data.name)
+    result = service.derive_tab(session, parse_analysis_id(analysis_id), tab_id, data.name)
+    set_analysis_revision_headers(response, _analysis)
+    return result
 
 
 class DuplicateTabBody(BaseModel):
@@ -535,7 +508,8 @@ async def duplicate_tab(
     analysis_id: AnalysisId,
     tab_id: str,
     data: DuplicateTabBody,
-    _lock: None = Depends(require_analysis_lock),
+    response: Response,
+    _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
 ):
     """Duplicate a tab inside the same analysis.
@@ -543,4 +517,6 @@ async def duplicate_tab(
     The duplicate is inserted immediately after the source tab, keeps the same datasource and step logic,
     and receives fresh tab/step/output IDs so it can evolve independently.
     """
-    return service.duplicate_tab(session, parse_analysis_id(analysis_id), tab_id, data.name)
+    result = service.duplicate_tab(session, parse_analysis_id(analysis_id), tab_id, data.name)
+    set_analysis_revision_headers(response, _analysis)
+    return result

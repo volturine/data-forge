@@ -8,8 +8,8 @@ Code style standards for this repository. See `AGENTS.md` for project-specific p
 
 - **Prefer `const`** over `let` — avoid reassigning variables
 - **Avoid `else`** — use early returns
-- **Single word names** — keep identifiers short
-- **Unified functions** — don't split unless composable
+- **Cohesive category names** — prefer a concise single word for a category containing multiple related components; use intention-revealing names within it
+- **Cohesive behavior** — keep behavior together when it shares an invariant and lifecycle; extract reusable operations, side-effect boundaries, and independently testable policies
 - **No unnecessary destructuring** — use `obj.a` instead of `const { a } = obj`
 - **Avoid `try/catch`** — handle errors at boundaries
 - **No `any`** type — use proper types or infer from function signatures
@@ -52,17 +52,24 @@ function foo() {
 }
 ```
 
-### Single word naming
+### Cohesive category naming
 
 ```ts
-// Good
-const foo = 1;
-const bar = 2;
+// Good — `runtime` is a cohesive category; members retain domain meaning
+const runtime = {
+	claimLease,
+	renewLease,
+	finalizeBuild,
+};
 
-// Bad
-const fooBar = 1;
-const barBaz = 2;
+// Bad — short names hide ownership and intent
+const run = {
+	do: claimLease,
+	next: renewLease,
+};
 ```
+
+Do not shorten an identifier at the cost of ownership, domain meaning, or searchability. Keep a function or component unified when its behavior shares one invariant and lifecycle. Extract it when the result is a reusable operation, an isolated side-effect boundary, or an independently testable policy with a clear owner.
 
 ### No any
 

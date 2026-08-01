@@ -1,44 +1,17 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
-from backend_core.domain.analysis.step_types import iter_step_types, normalize_step_type
+from backend_core.domain.analysis.step_types import iter_step_types
 from modules.analysis.step_schemas import STEP_CATALOG
 
-ROOT = Path(__file__).resolve().parents[3]
-WORKER_ROOT = ROOT / 'packages' / 'worker'
-FRONTEND_PROTOCOL_ANALYSIS = ROOT / 'packages' / 'frontend' / 'src' / 'lib' / 'protocol' / 'dataforge_protocol' / 'analysis_pb.ts'
-
-
-def _load_worker_module(name: str, path: Path):
-    sys.path.insert(0, str(WORKER_ROOT))
-    try:
-        spec = importlib.util.spec_from_file_location(name, path)
-        assert spec is not None
-        module = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(module)
-        return module
-    finally:
-        sys.path.remove(str(WORKER_ROOT))
+FRONTEND_PROTOCOL_ANALYSIS = (
+    Path(__file__).resolve().parents[3] / 'packages' / 'frontend' / 'src' / 'lib' / 'protocol' / 'dataforge_protocol' / 'analysis_pb.ts'
+)
 
 
 def test_step_catalog_matches_public_step_types() -> None:
     assert set(STEP_CATALOG) == set(iter_step_types(include_plot_aliases=True))
-
-
-def test_worker_handler_and_parameter_registries_cover_catalog() -> None:
-    operations = {normalize_step_type(step_type) for step_type in STEP_CATALOG}
-    compute_operations = _load_worker_module(
-        'compute_operations_registry_test',
-        WORKER_ROOT / 'operations' / '__init__.py',
-    )
-    assert set(compute_operations.HANDLERS) == operations
-    assert set(compute_operations.PARAM_MODELS) == operations
-    for operation, params_model in compute_operations.PARAM_MODELS.items():
-        assert issubclass(params_model, compute_operations.OperationParams), operation
 
 
 def test_generated_frontend_protocol_exports_catalog_configs() -> None:

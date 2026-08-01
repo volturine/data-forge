@@ -9,12 +9,10 @@ from threading import Lock
 import polars as pl
 from pydantic import ConfigDict
 
-from datasources.datasource_loading import load_datasource_frame
+from datasources.datasource_loading import load_datasource as load_datasource_frame
 from operations.step_converter import convert_step_format
 from runtime.domain.compute.base import OperationHandler, OperationParams
 from runtime.domain.datasource.source_types import DataSourceLoadType, DataSourceType, IcebergReader
-from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path
-from runtime.object_store import object_store_storage_options
 
 
 class DatasourceParams(OperationParams):
@@ -83,19 +81,6 @@ class DatasourceHandler(OperationHandler):
         return load_datasource_frame(config.model_dump(mode="json"))
 
     def _load_iceberg(self, config: DatasourceParams) -> pl.LazyFrame:
-        if config.snapshot_id is None and config.snapshot_timestamp_ms is not None and config.metadata_path is not None:
-            metadata_path = resolve_iceberg_branch_metadata_path(
-                config.metadata_path,
-                config.branch,
-                namespace_name=config.namespace_name,
-            )
-            from pyiceberg.table import StaticTable
-
-            table = StaticTable.from_metadata(metadata_path, properties=object_store_storage_options())
-            snapshot = table.snapshot_as_of_timestamp(config.snapshot_timestamp_ms)
-            if snapshot is None:
-                raise ValueError("Iceberg snapshot not found for the selected timestamp")
-            config = config.model_copy(update={"snapshot_id": str(snapshot.snapshot_id)})
         return load_datasource_frame(config.model_dump(mode="json"))
 
     def _load_analysis(self, config: DatasourceParams) -> pl.LazyFrame:
@@ -304,6 +289,7 @@ def _build_tab_pipeline(
         base_frame = PolarsComputeEngine._apply_step(
             base_frame,
             backend_step,
+            step_id=str(step_id),
             right_sources=additional,
             right_lf=right_lf,
         )

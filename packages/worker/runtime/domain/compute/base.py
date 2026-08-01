@@ -13,7 +13,13 @@ class OperationParams(BaseModel):
 
 class OperationHandler(Protocol):
     def __call__(
-        self, lf: pl.LazyFrame, params: dict[str, object], *, right_lf: pl.LazyFrame | None = None, right_sources: dict[str, pl.LazyFrame] | None = None
+        self,
+        lf: pl.LazyFrame,
+        params: dict[str, object],
+        *,
+        step_id: str,
+        right_lf: pl.LazyFrame | None = None,
+        right_sources: dict[str, pl.LazyFrame] | None = None,
     ) -> pl.LazyFrame:
         raise NotImplementedError
 

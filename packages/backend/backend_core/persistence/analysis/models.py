@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, String
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.ext.mutable import MutableDict
 from sqlmodel import Field, SQLModel
 
@@ -25,6 +25,7 @@ class Analysis(SQLModel, table=True):  # type: ignore[call-arg]
     status: AnalysisStatus = Field(default=AnalysisStatus.DRAFT, sa_column=Column(String, nullable=False))
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     updated_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    revision: int = Field(default=1, sa_column=Column(Integer, nullable=False, server_default='1'))
     result_path: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     thumbnail: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     owner_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))

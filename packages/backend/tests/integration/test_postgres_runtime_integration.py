@@ -312,6 +312,65 @@ def test_init_db_bootstraps_public_and_tenant_schemas_in_postgres(monkeypatch, t
 
 
 @pytest.mark.timeout(300)
+def test_postgres_outbox_dispatchers_do_not_share_unclaimed_batch_rows(monkeypatch, tmp_path: Path) -> None:
+    require_docker()
+
+    from backend_core import database, runtime_outbox_service
+    from backend_core.config import settings
+
+    with PostgresContainer() as container:
+        _clear_database_state()
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+        database.set_settings_engine_override(database._create_public_engine())
+        asyncio.run(database.init_db())
+
+        with Session(database._get_tenant_engine()) as session:
+            first = runtime_outbox_service.enqueue_build_job_notification(session)
+            second = runtime_outbox_service.enqueue_build_job_notification(session)
+            session.commit()
+            event_ids = [first.id, second.id]
+
+        delivered: list[str] = []
+        delivery_lock = threading.Lock()
+        second_delivery_started = threading.Event()
+        release_second_delivery = threading.Event()
+
+        def deliver(payload: dict[str, object]) -> None:
+            event_id = str(payload['event_id'])
+            with delivery_lock:
+                delivered.append(event_id)
+                delivery_number = len(delivered)
+            if delivery_number == 2 and threading.current_thread().name == 'dispatcher-a':
+                second_delivery_started.set()
+                assert release_second_delivery.wait(timeout=30)
+
+        monkeypatch.setattr(runtime_outbox_service.runtime_ipc, 'notify_runtime_payload', deliver)
+
+        def dispatch() -> None:
+            with Session(database._get_tenant_engine()) as session:
+                runtime_outbox_service.dispatch_pending_events(session, limit=2)
+
+        dispatcher_a = threading.Thread(target=dispatch, name='dispatcher-a')
+        dispatcher_a.start()
+        assert second_delivery_started.wait(timeout=30)
+
+        dispatcher_b = threading.Thread(target=dispatch, name='dispatcher-b')
+        dispatcher_b.start()
+        dispatcher_b.join(timeout=30)
+        assert not dispatcher_b.is_alive()
+        release_second_delivery.set()
+        dispatcher_a.join(timeout=30)
+        assert not dispatcher_a.is_alive()
+
+        assert sorted(delivered) == sorted(event_ids)
+        _clear_database_state()
+
+
+@pytest.mark.timeout(300)
 def test_init_db_postgres_shared_seed_is_safe_under_concurrent_startup(monkeypatch, tmp_path: Path) -> None:
     require_docker()
 

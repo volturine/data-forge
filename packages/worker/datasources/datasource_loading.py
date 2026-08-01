@@ -15,14 +15,31 @@ from runtime.iceberg_snapshot_reader import scan_iceberg_snapshot
 from runtime.object_store import download_file, is_object_store_url, object_store_storage_options
 
 
+def _as_int(value: Any, *, default: int | None = None) -> int | None:
+    """Coerce protobuf-Struct / JSON numeric values back to int when possible."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        return int(value)
+    if default is not None:
+        return default
+    raise TypeError(f"Expected integer-compatible value, got {type(value).__name__}")
+
+
 def _csv_opts(opts: dict[str, Any] | None) -> dict[str, Any]:
     if not opts:
         return {}
     return {
         "separator": opts.get("delimiter", ","),
         "quote_char": opts.get("quote_char", '"'),
-        "has_header": opts.get("has_header", True),
-        "skip_rows": opts.get("skip_rows", 0),
+        "has_header": bool(opts.get("has_header", True)),
+        "skip_rows": _as_int(opts.get("skip_rows", 0), default=0) or 0,
         "encoding": opts.get("encoding", "utf8"),
         "try_parse_dates": True,
     }
@@ -80,10 +97,10 @@ def _has_bounds(config: dict[str, Any]) -> bool:
 def _read_excel_bounds(config: dict[str, Any]) -> pl.LazyFrame:
     file_path = config.get("file_path")
     sheet_name = config.get("sheet_name")
-    start_row = config.get("start_row")
-    start_col = config.get("start_col")
-    end_row = config.get("end_row")
-    end_col = config.get("end_col")
+    start_row = _as_int(config.get("start_row"))
+    start_col = _as_int(config.get("start_col"))
+    end_row = _as_int(config.get("end_row"))
+    end_col = _as_int(config.get("end_col"))
     has_header = config.get("has_header") if config.get("has_header") is not None else True
     if not file_path or start_row is None or start_col is None or end_row is None or end_col is None:
         raise ValueError("Excel bounds require file_path, start_row, start_col, end_row, end_col")
@@ -206,12 +223,23 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         metadata_path = config.get("metadata_path")
         if not isinstance(metadata_path, str):
             raise ValueError("Datasource Iceberg loading requires metadata_path")
+        branch = config.get("branch") if isinstance(config.get("branch"), str) else None
+        namespace_name = config.get("namespace_name") if isinstance(config.get("namespace_name"), str) else None
         resolved_metadata_path = resolve_iceberg_branch_metadata_path(
             metadata_path,
-            config.get("branch") if isinstance(config.get("branch"), str) else None,
-            namespace_name=config.get("namespace_name") if isinstance(config.get("namespace_name"), str) else None,
+            branch,
+            namespace_name=namespace_name,
         )
         snapshot_id = config.get("snapshot_id")
+        snapshot_timestamp_ms = config.get("snapshot_timestamp_ms")
+        if snapshot_id is None and snapshot_timestamp_ms is not None:
+            from pyiceberg.table import StaticTable
+
+            table = StaticTable.from_metadata(resolved_metadata_path, properties=object_store_storage_options())
+            snapshot = table.snapshot_as_of_timestamp(int(snapshot_timestamp_ms))
+            if snapshot is None:
+                raise ValueError("Iceberg snapshot not found for the selected timestamp")
+            snapshot_id = str(snapshot.snapshot_id)
         snapshot_value: int | None = None
         if snapshot_id is not None:
             try:
@@ -236,3 +264,7 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         )
 
     raise ValueError(f"Unsupported source type: {source_type}")
+
+
+# Public alias used by execution and pipeline loaders.
+load_datasource = load_datasource_frame

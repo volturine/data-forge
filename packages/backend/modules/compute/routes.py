@@ -62,6 +62,7 @@ from modules.compute.iceberg_service import (
 )
 from modules.datasource import service as datasource_service
 from modules.mcp.router import MCPRouter
+from modules.scheduler import service as scheduler_service
 
 logger = logging.getLogger(__name__)
 
@@ -219,32 +220,6 @@ def _resolve_websocket_user(websocket: WebSocket) -> User | None:
         return None
 
     return run_settings_db(_lookup)
-
-
-async def _emit_active_build_event(
-    build_id: str,
-    analysis_id: str,
-    payload: schemas.BuildEvent,
-    *,
-    namespace: str,
-    resource_config_json: dict[str, object] | None = None,
-) -> None:
-    del analysis_id
-    token = set_namespace_context(namespace)
-    session_gen = get_db()
-    session = next(session_gen)
-    try:
-        await build_event_service.persist_build_event(
-            session,
-            namespace=namespace,
-            build_id=build_id,
-            event=payload,
-            resource_config_json=resource_config_json,
-        )
-    finally:
-        session.close()
-        session_gen.close()
-        reset_namespace(token)
 
 
 def _get_durable_build_detail(session: Session, build_id: str) -> schemas.ActiveBuildDetail | None:
@@ -696,7 +671,7 @@ async def start_active_build(
                 source_type=placeholder_source_type,
                 config=placeholder_config,
             )
-        build_run_service.create_build_run(
+        build_run_service.stage_build_run(
             session,
             build_id=build_id,
             namespace=namespace,
@@ -720,16 +695,14 @@ async def start_active_build(
             total_tabs=len(tabs),
             created_at=started_at,
             started_at=started_at,
-            commit=False,
         )
-        build_job_service.create_job(
+        build_job_service.stage_job(
             session,
             build_id=build_id,
             namespace=namespace,
-            commit=False,
         )
-        runtime_outbox_service.enqueue_api_build_notification(session, namespace=namespace, build_id=build_id, latest_sequence=0, commit=False)
-        runtime_outbox_service.enqueue_build_job_notification(session, commit=False)
+        runtime_outbox_service.enqueue_api_build_notification(session, namespace=namespace, build_id=build_id, latest_sequence=0)
+        runtime_outbox_service.enqueue_build_job_notification(session)
         session.commit()
     except Exception:
         session.rollback()
@@ -769,34 +742,50 @@ async def cancel_build(
     cancelled_by = user.email or user.display_name or user.id
     cancelled_at = _utcnow()
     duration_ms = detail.cancel_duration_ms(cancelled_at=cancelled_at)
+    cancellation_event = detail.cancelled_event(
+        cancelled_at=cancelled_at,
+        cancelled_by=cancelled_by,
+        duration_ms=duration_ms,
+        emitted_at=_utcnow(),
+    )
+    job = build_job_service.get_job_by_build_id(session, build_id)
+    try:
+        if job is None:
+            raise HTTPException(status_code=409, detail='Active build has no cancellable job')
+        job_status = build_job_service.BuildJobStatus.require(job.status)
+        if job_status != build_job_service.BuildJobStatus.QUEUED and not job_status.is_active:
+            raise HTTPException(status_code=409, detail='Build job became terminal before cancellation')
+        cancelled_job = build_job_service.stage_job_cancelled(session, job.id)
+        if build_job_service.BuildJobStatus.require(cancelled_job.status) != build_job_service.BuildJobStatus.CANCELLED:
+            raise HTTPException(status_code=409, detail='Build job became terminal before cancellation')
+        event_row = build_run_service.stage_build_event(
+            session,
+            build_id=detail.build_id,
+            event=cancellation_event,
+            resource_config_json=detail.resource_config.model_dump(mode='json') if detail.resource_config is not None else None,
+            authoritative_execution_generation=cancelled_job.lease_generation,
+        )
+        if event_row is None:
+            raise HTTPException(status_code=409, detail='Build became terminal before cancellation')
+        scheduler_service.apply_schedule_run_reconciliation(session, build_id=detail.build_id)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+    await build_event_service.publish_build_notification(detail.namespace, detail.build_id, latest_sequence=event_row.sequence)
 
     if detail.current_engine_run_id is not None:
         run = engine_run_service.get_engine_run(session, detail.current_engine_run_id)
         if run is not None and run.status == EngineRunStatus.RUNNING:
-            cancelled = engine_run_service.cancel_engine_run(
-                session,
-                detail.current_engine_run_id,
-                cancelled_by=cancelled_by,
-            )
-            cancelled_at = cancelled.cancelled_at
-            duration_ms = cancelled.duration_ms or duration_ms
-    else:
-        job = build_job_service.get_job_by_build_id(session, build_id)
-        if job is not None and job.status == build_job_service.BuildJobStatus.QUEUED:
-            build_job_service.mark_job_cancelled(session, job.id)
-
-    await _emit_active_build_event(
-        detail.build_id,
-        detail.analysis_id,
-        detail.cancelled_event(
-            cancelled_at=cancelled_at,
-            cancelled_by=cancelled_by,
-            duration_ms=duration_ms,
-            emitted_at=_utcnow(),
-        ),
-        namespace=detail.namespace,
-        resource_config_json=detail.resource_config.model_dump(mode='json') if detail.resource_config is not None else None,
-    )
+            try:
+                engine_run_service.cancel_engine_run(
+                    session,
+                    detail.current_engine_run_id,
+                    cancelled_by=cancelled_by,
+                )
+            except ValueError:
+                logger.info('Engine run %s became terminal after build cancellation', detail.current_engine_run_id)
 
     return schemas.CancelBuildResponse(
         id=detail.build_id,

@@ -10,8 +10,10 @@ from typing import Any, cast
 
 from google.protobuf import json_format, message
 
-from dataforge_protocol import compute_pb2, enums_pb2, errors_pb2
+from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2, errors_pb2
 from operations.step_converter import analysis_pipeline_to_execution_payload
+from datasources import execution as datasource_execution
+from datasources.schemas import CSVOptions
 from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager
 from runtime.config import settings
@@ -67,6 +69,14 @@ class ClaimedComputeRequest:
     namespace: str
     kind: enums_pb2.ComputeRequestKind
     command_envelope: compute_pb2.ComputeCommandEnvelope
+    worker_id: str
+    claim_token: str
+    lease_generation: int
+    lease_ttl_seconds: int
+
+
+class ComputeRequestLeaseLost(RuntimeError):
+    pass
 
 
 def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:
@@ -78,6 +88,10 @@ def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:
         namespace=claimed.namespace,
         kind=claimed.kind,
         command_envelope=claimed.command_envelope,
+        worker_id=claimed.worker_id,
+        claim_token=claimed.claim_token,
+        lease_generation=claimed.lease_generation,
+        lease_ttl_seconds=claimed.lease_ttl_seconds,
     )
 
 
@@ -88,54 +102,288 @@ async def compute_request_loop(
     manager: ProcessManager,
 ) -> None:
     last_seen = request_hub.version()
-    try:
-        while not stop_event.is_set():
-            try:
-                handled = await _run_once(worker_id=worker_id, manager=manager)
-                if handled:
-                    last_seen = request_hub.version()
-                    continue
-            except Exception as exc:
-                logger.warning("Compute request loop iteration failed; will retry: %s", exc)
-                await asyncio.sleep(1.0)
+    while not stop_event.is_set():
+        try:
+            handled = await _run_once(worker_id=worker_id, manager=manager)
+            if handled:
+                last_seen = request_hub.version()
                 continue
-            wait_task = asyncio.create_task(request_hub.wait(last_seen))
-            stop_task = asyncio.create_task(stop_event.wait())
-            poll_task = asyncio.create_task(asyncio.sleep(settings.runtime_reconciliation_poll_interval_seconds))
-            done, pending = await asyncio.wait(
-                {wait_task, stop_task, poll_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-            if stop_task in done:
-                return
-            with contextlib.suppress(asyncio.CancelledError):
-                if wait_task in done:
-                    value = await wait_task
-                    if isinstance(value, int):
-                        last_seen = value
-    finally:
-        release_worker_requests(worker_id)
+        except Exception as exc:
+            logger.warning("Compute request loop iteration failed; will retry: %s", exc)
+            await asyncio.sleep(1.0)
+            continue
+        wait_task = asyncio.create_task(request_hub.wait(last_seen))
+        stop_task = asyncio.create_task(stop_event.wait())
+        poll_task = asyncio.create_task(asyncio.sleep(settings.runtime_reconciliation_poll_interval_seconds))
+        done, pending = await asyncio.wait(
+            {wait_task, stop_task, poll_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        if stop_task in done:
+            return
+        with contextlib.suppress(asyncio.CancelledError):
+            if wait_task in done:
+                value = await wait_task
+                if isinstance(value, int):
+                    last_seen = value
 
 
 async def _run_once(*, worker_id: str, manager: ProcessManager) -> bool:
     claimed = next_compute_request(worker_id)
     if claimed is None:
         return False
-    await _execute_request(claimed, manager)
+    try:
+        await _execute_request(claimed, manager)
+    except ComputeRequestLeaseLost:
+        logger.warning("Compute request %s lease was lost; execution drained without publication", claimed.id)
     return True
-
-
-def release_worker_requests(worker_id: str) -> None:
-    worker_internal_api_client().release_compute_requests(worker_id=worker_id)
 
 
 async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManager) -> None:
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
+    execution = loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
+    renewal_stop = asyncio.Event()
+    renewal = asyncio.create_task(_renew_compute_lease(claimed, stop_event=renewal_stop))
+    try:
+        done, _pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
+        if renewal in done:
+            try:
+                await renewal
+            except ComputeRequestLeaseLost:
+                await asyncio.gather(execution, return_exceptions=True)
+                raise
+            raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
+        await execution
+    finally:
+        renewal_stop.set()
+        await asyncio.gather(renewal, return_exceptions=True)
+
+
+async def _renew_compute_lease(claimed: ClaimedComputeRequest, *, stop_event: asyncio.Event) -> None:
+    clock = asyncio.get_running_loop().time
+    deadline = clock() + claimed.lease_ttl_seconds
+    delay = claimed.lease_ttl_seconds / 3
+    client = worker_internal_api_client()
+    while True:
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=delay)
+            return
+        except TimeoutError:
+            pass
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease renewal was not confirmed before expiry")
+        renewal_started = clock()
+        try:
+            lease_ttl_seconds = await asyncio.to_thread(
+                client.renew_compute_request_lease,
+                request_id=claimed.id,
+                namespace=claimed.namespace,
+                worker_id=claimed.worker_id,
+                claim_token=claimed.claim_token,
+                lease_generation=claimed.lease_generation,
+                timeout_seconds=remaining,
+            )
+        except Exception as exc:
+            remaining = deadline - clock()
+            if remaining <= 0:
+                raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease renewal was not confirmed before expiry") from exc
+            delay = min(1.0, max(remaining / 3, 0.05))
+            logger.warning("Compute request %s lease renewal failed; retrying before confirmed expiry: %s", claimed.id, exc)
+            continue
+        if lease_ttl_seconds is None:
+            raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease is no longer active")
+        deadline = renewal_started + lease_ttl_seconds
+        delay = lease_ttl_seconds / 3
+
+
+def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
+    from google.protobuf import json_format
+    from dataforge_protocol import datasource_pb2
+
+    result = datasource_pb2.DatasourceResult()
+    if "error" in payload:
+        result.error.CopyFrom(json_format.ParseDict(payload, datasource_pb2.DatasourceErrorResult()))
+        return result
+    if kind in {
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
+    }:
+        proto_payload = dict(payload)
+        schema_cache = proto_payload.pop("schema_cache", None)
+        if isinstance(schema_cache, dict):
+            proto_payload["schema_info"] = schema_cache
+        if "source_type" in proto_payload:
+            from runtime.internal_api import enum_to_proto_value
+
+            proto_payload["source_type"] = enum_to_proto_value("DATA_SOURCE_TYPE", str(proto_payload["source_type"]))
+        if "created_by" in proto_payload:
+            from runtime.internal_api import enum_to_proto_value
+
+            proto_payload["created_by"] = enum_to_proto_value("DATA_SOURCE_CREATED_BY", str(proto_payload["created_by"]))
+        result.datasource.CopyFrom(json_format.ParseDict(proto_payload, datasource_pb2.DataSourceRecord()))
+        return result
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
+        result.schema.CopyFrom(json_format.ParseDict(payload, datasource_pb2.SchemaInfo()))
+        return result
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
+        result.column_stats.CopyFrom(json_format.ParseDict(payload, datasource_pb2.ColumnStatsResult()))
+        return result
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS:
+        proto_payload = dict(payload)
+        raw_schema_diff = proto_payload.get("schema_diff")
+        if isinstance(raw_schema_diff, list):
+            converted = []
+            for raw_diff in raw_schema_diff:
+                if not isinstance(raw_diff, dict):
+                    converted.append(raw_diff)
+                    continue
+                diff = dict(raw_diff)
+                status = diff.get("status")
+                if isinstance(status, str):
+                    from runtime.internal_api import enum_to_proto_value
+
+                    diff["status"] = enum_to_proto_value("SCHEMA_DIFF_STATUS", status)
+                converted.append(diff)
+            proto_payload["schema_diff"] = converted
+        result.snapshot_compare.CopyFrom(json_format.ParseDict(proto_payload, datasource_pb2.SnapshotCompareResult()))
+        return result
+    raise ValueError(f"Unsupported datasource response kind: {_compute_request_kind_name(kind)}")
+
+
+def _execute_datasource_command(client: WorkerInternalApiClient, claimed: ClaimedComputeRequest, command) -> datasource_pb2.DatasourceResult:
+    from runtime.internal_api import proto_value_to_enum_name, struct_to_dict
+
+    kind = claimed.kind
+    namespace = claimed.namespace
+    database_url = settings.database_url
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE:
+        if command.WhichOneof("command") != "create_file":
+            raise ValueError("datasource command must contain create_file")
+        create_file = command.create_file
+        csv_options = None
+        if create_file.HasField("csv_options"):
+            csv_options = CSVOptions(
+                delimiter=create_file.csv_options.delimiter,
+                quote_char=create_file.csv_options.quote_char,
+                has_header=create_file.csv_options.has_header,
+                skip_rows=create_file.csv_options.skip_rows,
+                encoding=create_file.csv_options.encoding,
+            )
+        record = datasource_execution.create_file_datasource(
+            client,
+            namespace=namespace,
+            database_url=database_url,
+            name=create_file.name,
+            description=create_file.description if create_file.HasField("description") else None,
+            file_path=create_file.file_path,
+            file_type=proto_value_to_enum_name(enums_pb2.DataSourceFileType, "DATA_SOURCE_FILE_TYPE", create_file.file_type),
+            options=struct_to_dict(create_file.options),
+            csv_options=csv_options,
+            sheet_name=create_file.sheet_name if create_file.HasField("sheet_name") else None,
+            start_row=create_file.start_row if create_file.HasField("start_row") else None,
+            start_col=create_file.start_col if create_file.HasField("start_col") else None,
+            end_col=create_file.end_col if create_file.HasField("end_col") else None,
+            end_row=create_file.end_row if create_file.HasField("end_row") else None,
+            has_header=create_file.has_header if create_file.HasField("has_header") else None,
+            table_name=create_file.table_name if create_file.HasField("table_name") else None,
+            named_range=create_file.named_range if create_file.HasField("named_range") else None,
+            cell_range=create_file.cell_range if create_file.HasField("cell_range") else None,
+            owner_id=create_file.owner_id if create_file.HasField("owner_id") else None,
+        )
+        return _datasource_result_from_payload(kind, record.model_dump(mode="json"))
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE:
+        if command.WhichOneof("command") != "create_database":
+            raise ValueError("datasource command must contain create_database")
+        create_database = command.create_database
+        record = datasource_execution.create_database_datasource(
+            client,
+            namespace=namespace,
+            database_url=database_url,
+            name=create_database.name,
+            description=create_database.description if create_database.HasField("description") else None,
+            connection_string=create_database.connection_string,
+            query=create_database.query,
+            branch=create_database.branch,
+            owner_id=create_database.owner_id if create_database.HasField("owner_id") else None,
+        )
+        return _datasource_result_from_payload(kind, record.model_dump(mode="json"))
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE:
+        if command.WhichOneof("command") != "create_iceberg":
+            raise ValueError("datasource command must contain create_iceberg")
+        create_iceberg = command.create_iceberg
+        record = datasource_execution.create_iceberg_datasource(
+            client,
+            namespace=namespace,
+            database_url=database_url,
+            name=create_iceberg.name,
+            description=create_iceberg.description if create_iceberg.HasField("description") else None,
+            source=struct_to_dict(create_iceberg.source),
+            branch=create_iceberg.branch,
+            owner_id=create_iceberg.owner_id if create_iceberg.HasField("owner_id") else None,
+        )
+        return _datasource_result_from_payload(kind, record.model_dump(mode="json"))
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE:
+        if command.WhichOneof("command") != "ingest":
+            raise ValueError("datasource command must contain ingest")
+        record = datasource_execution.ingest_external_datasource(
+            client,
+            namespace=namespace,
+            database_url=database_url,
+            datasource_id=command.ingest.datasource_id,
+            staging_key=claimed.claim_token,
+            worker_id=claimed.worker_id,
+            claim_token=claimed.claim_token,
+            lease_generation=claimed.lease_generation,
+            compute_request_id=claimed.id,
+        )
+        return _datasource_result_from_payload(kind, record.model_dump(mode="json"))
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
+        if command.WhichOneof("command") != "schema":
+            raise ValueError("datasource command must contain schema")
+        schema = command.schema
+        schema_result = datasource_execution.get_datasource_schema(
+            client,
+            namespace=namespace,
+            datasource_id=schema.datasource_id,
+            sheet_name=schema.sheet_name if schema.HasField("sheet_name") else None,
+            refresh=schema.refresh,
+        )
+        return _datasource_result_from_payload(kind, cast(dict[str, object], schema_result.model_dump(mode="json")))
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
+        if command.WhichOneof("command") != "column_stats":
+            raise ValueError("datasource command must contain column_stats")
+        column_stats = command.column_stats
+        stats_result = datasource_execution.get_column_stats(
+            client,
+            namespace=namespace,
+            datasource_id=column_stats.datasource_id,
+            column_name=column_stats.column_name,
+            use_sample=column_stats.use_sample,
+            sample_size=column_stats.sample_size,
+            datasource_config=(struct_to_dict(column_stats.datasource_config) or None),
+        )
+        return _datasource_result_from_payload(kind, cast(dict[str, object], stats_result.model_dump(mode="json")))
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS:
+        if command.WhichOneof("command") != "compare_iceberg_snapshots":
+            raise ValueError("datasource command must contain compare_iceberg_snapshots")
+        compare_snapshots = command.compare_iceberg_snapshots
+        compare_result = datasource_execution.compare_iceberg_snapshots(
+            client,
+            namespace=namespace,
+            datasource_id=compare_snapshots.datasource_id,
+            snapshot_a=compare_snapshots.snapshot_a,
+            snapshot_b=compare_snapshots.snapshot_b,
+            row_limit=compare_snapshots.row_limit,
+        )
+        return _datasource_result_from_payload(kind, cast(dict[str, object], compare_result.model_dump(mode="json")))
+    raise ValueError(f"Unsupported datasource request kind: {_compute_request_kind_name(kind)}")
 
 
 def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManager) -> None:
@@ -146,7 +394,13 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             if claimed.command_envelope.command.WhichOneof("command") != "datasource":
                 raise ValueError("compute command envelope must contain datasource")
             datasource_command = claimed.command_envelope.command.datasource
-            result = client.execute_datasource_request(namespace=claimed.namespace, kind=claimed.kind, command=datasource_command)
+            try:
+                result = _execute_datasource_command(client, claimed, datasource_command)
+            except datasource_execution.DatasourceNotFound as exc:
+                payload: dict[str, object] = {"error": "datasource_not_found", "message": str(exc)}
+                result = _datasource_result_from_payload(claimed.kind, payload)
+            except datasource_execution.DatasourcePublicationClaimLost as exc:
+                raise ComputeRequestLeaseLost(str(exc) or "Datasource publication claim is no longer active") from exc
             _complete_request(client, claimed, response=compute_pb2.ComputeResponse(datasource=result))
             return
 
@@ -278,6 +532,9 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             _complete_request(client, claimed, response=compute_pb2.ComputeResponse(ack=compute_pb2.ComputeAckResult(success=True)))
         else:
             raise ValueError(f"Unsupported compute request kind: {_compute_request_kind_name(claimed.kind)}")
+    except ComputeRequestLeaseLost:
+        # Stale claim / replaced publication fence: drain without failing the request as an infrastructure error.
+        raise
     except Exception as exc:
         error = _error_result(exc)
         status_code = error.status_code if error.HasField("status_code") else None
@@ -287,7 +544,16 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             logger.info("Compute request %s rejected: %s", claimed.id, exc)
         else:
             logger.warning("Compute request %s failed: %s", claimed.id, exc)
-        client.fail_compute_request(namespace=claimed.namespace, request_id=claimed.id, kind=claimed.kind, error_message=_error_message(exc), error=error)
+        client.fail_compute_request(
+            namespace=claimed.namespace,
+            request_id=claimed.id,
+            kind=claimed.kind,
+            worker_id=claimed.worker_id,
+            claim_token=claimed.claim_token,
+            lease_generation=claimed.lease_generation,
+            error_message=_error_message(exc),
+            error=error,
+        )
     finally:
         try:
             client.dispatch_runtime_outbox()
@@ -457,6 +723,9 @@ def _complete_request(
         namespace=claimed.namespace,
         request_id=claimed.id,
         kind=claimed.kind,
+        worker_id=claimed.worker_id,
+        claim_token=claimed.claim_token,
+        lease_generation=claimed.lease_generation,
         response=response,
         artifact_path=artifact_path,
         artifact_name=artifact_name,
@@ -475,8 +744,9 @@ def _error_message(exc: Exception) -> str:
 def _error_result(exc: Exception) -> compute_pb2.ComputeErrorResult:
     if isinstance(exc, BackendWorkerRpcError):
         result = compute_pb2.ComputeErrorResult(error=exc.error, status_code=exc.status_code)
-        if exc.error_code is not None:
-            result.error_code = cast(errors_pb2.ErrorCode, errors_pb2.ErrorCode.Value(f"ERROR_CODE_{exc.error_code}"))
+        protocol_error_code = f"ERROR_CODE_{exc.error_code}" if exc.error_code is not None else None
+        if protocol_error_code in errors_pb2.ErrorCode.keys():
+            result.error_code = cast(errors_pb2.ErrorCode, errors_pb2.ErrorCode.Value(protocol_error_code))
         if exc.details:
             result.details.CopyFrom(dict_to_struct(exc.details))
         return result

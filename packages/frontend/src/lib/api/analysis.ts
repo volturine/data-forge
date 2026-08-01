@@ -11,8 +11,12 @@ import type {
 	ImportAnalysisRequest
 } from '$lib/types/analysis';
 import { apiRequest, apiRequestWithHeaders } from './client';
-import type { ResultAsync } from 'neverthrow';
+import { errAsync, okAsync, type ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
+
+function missingAnalysisRevision(): ApiError {
+	return { type: 'parse', message: 'Analysis response is missing its revision' };
+}
 
 export const createAnalysis = (data: AnalysisCreate): ResultAsync<Analysis, ApiError> =>
 	apiRequest<Analysis>('/v1/analysis', { method: 'POST', body: JSON.stringify(data) });
@@ -59,29 +63,31 @@ export const getAnalysis = (id: string): ResultAsync<Analysis, ApiError> =>
 
 export function getAnalysisWithHeaders(
 	id: string
-): ResultAsync<{ analysis: Analysis; etag: string | null; version: string | null }, ApiError> {
-	return apiRequestWithHeaders<Analysis>(`/v1/analysis/${id}`).map(({ data, headers }) => ({
-		analysis: data,
-		etag: headers.get('ETag'),
-		version: headers.get('X-Analysis-Version')
-	}));
+): ResultAsync<{ analysis: Analysis; etag: string; version: string }, ApiError> {
+	return apiRequestWithHeaders<Analysis>(`/v1/analysis/${id}`).andThen(({ data, headers }) => {
+		const etag = headers.get('ETag');
+		const version = headers.get('X-Analysis-Version');
+		if (!etag || !version) return errAsync(missingAnalysisRevision());
+		return okAsync({ analysis: data, etag, version });
+	});
 }
 
 export function updateAnalysis(
 	id: string,
 	data: AnalysisUpdate,
-	version?: string | null
-): ResultAsync<{ analysis: Analysis; version: string | null }, ApiError> {
+	version: string
+): ResultAsync<{ analysis: Analysis; version: string }, ApiError> {
 	const headers: Record<string, string> = {};
-	if (version) headers['If-Match'] = version;
+	headers['If-Match'] = version;
 	return apiRequestWithHeaders<Analysis>(`/v1/analysis/${id}`, {
 		method: 'PUT',
 		body: JSON.stringify(data),
 		headers
-	}).map(({ data: analysis, headers: h }) => ({
-		analysis,
-		version: h.get('X-Analysis-Version')
-	}));
+	}).andThen(({ data: analysis, headers: responseHeaders }) => {
+		const nextVersion = responseHeaders.get('X-Analysis-Version');
+		if (!nextVersion) return errAsync(missingAnalysisRevision());
+		return okAsync({ analysis, version: nextVersion });
+	});
 }
 
 export const listAnalysisVersions = (
@@ -91,10 +97,16 @@ export const listAnalysisVersions = (
 
 export const restoreAnalysisVersion = (
 	analysisId: string,
-	version: number
-): ResultAsync<Analysis, ApiError> =>
-	apiRequest<Analysis>(`/v1/analysis/${analysisId}/versions/${version}/restore`, {
-		method: 'POST'
+	version: number,
+	revision: string
+): ResultAsync<{ analysis: Analysis; version: string }, ApiError> =>
+	apiRequestWithHeaders<Analysis>(`/v1/analysis/${analysisId}/versions/${version}/restore`, {
+		method: 'POST',
+		headers: { 'If-Match': revision }
+	}).andThen(({ data, headers }) => {
+		const nextVersion = headers.get('X-Analysis-Version');
+		if (!nextVersion) return errAsync(missingAnalysisRevision());
+		return okAsync({ analysis: data, version: nextVersion });
 	});
 
 export const renameAnalysisVersion = (
@@ -114,7 +126,12 @@ export const deleteAnalysisVersion = (
 	apiRequest<void>(`/v1/analysis/${analysisId}/versions/${version}`, { method: 'DELETE' });
 
 export const deleteAnalysis = (id: string): ResultAsync<void, ApiError> =>
-	apiRequest<void>(`/v1/analysis/${id}`, { method: 'DELETE' });
+	getAnalysisWithHeaders(id).andThen(({ version }) =>
+		apiRequest<void>(`/v1/analysis/${id}`, {
+			method: 'DELETE',
+			headers: { 'If-Match': version }
+		})
+	);
 
 export type AnalysisFavoriteStatus = {
 	analysis_id: string;

@@ -78,7 +78,7 @@ def list_workers(session: Session, *, kind: RuntimeWorkerKind | None = None) -> 
     stmt = select(RuntimeWorker)
     if kind is not None:
         stmt = stmt.where(sa(RuntimeWorker.kind == kind))
-    stmt = stmt.order_by(sa(RuntimeWorker.started_at))
+    stmt = stmt.order_by(sa(RuntimeWorker.started_at), sa(RuntimeWorker.id))
     return list(session.execute(stmt).scalars().all())
 
 

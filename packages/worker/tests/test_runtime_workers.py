@@ -1,6 +1,9 @@
 import asyncio
 import importlib.util
+import time
 import uuid
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -15,6 +18,9 @@ class FakeWorkerInternalApiClient:
     def __init__(self, jobs: list[ClaimedBuildJob] | None = None) -> None:
         self.jobs = list(jobs or [])
         self.calls: list[tuple[str, object]] = []
+        self.lease_active = True
+        self.renewal_errors = 0
+        self.claim_delay_seconds = 0.0
 
     def register_worker(self, **kwargs) -> None:
         self.calls.append(("register_worker", kwargs))
@@ -27,13 +33,25 @@ class FakeWorkerInternalApiClient:
 
     def claim_build_job(self, *, worker_id: str) -> ClaimedBuildJob | None:
         self.calls.append(("claim_build_job", worker_id))
+        time.sleep(self.claim_delay_seconds)
         return self.jobs.pop(0) if self.jobs else None
 
-    def fail_build_job(self, **kwargs) -> None:
+    def fail_build_job(self, **kwargs) -> bool:
         self.calls.append(("fail_build_job", kwargs))
+        return True
 
-    def finalize_build_job(self, **kwargs) -> None:
+    def finalize_build_job(self, **kwargs) -> bool:
         self.calls.append(("finalize_build_job", kwargs))
+        return True
+
+    def renew_build_job_lease(self, **kwargs) -> int | None:
+        self.calls.append(("renew_build_job_lease", kwargs))
+        if self.renewal_errors > 0:
+            self.renewal_errors -= 1
+            raise ConnectionError("temporary renewal failure")
+        if not self.lease_active:
+            return None
+        return 300
 
     def release_build_worker_jobs(self, **kwargs) -> int:
         self.calls.append(("release_build_worker_jobs", kwargs))
@@ -65,16 +83,28 @@ def _load_runtime_process():
 runtime_process = _load_runtime_process()
 
 
+def _job() -> ClaimedBuildJob:
+    return ClaimedBuildJob(
+        job_id=str(uuid.uuid4()),
+        build_id=str(uuid.uuid4()),
+        namespace="default",
+        claim_token=str(uuid.uuid4()),
+        lease_generation=1,
+        lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        attempt=1,
+        lease_ttl_seconds=300,
+    )
+
+
 @pytest.mark.asyncio
 async def test_build_worker_loop_tracks_runtime_worker_lifecycle() -> None:
-    build_id = str(uuid.uuid4())
-    job = ClaimedBuildJob(job_id=str(uuid.uuid4()), build_id=build_id, namespace="default")
+    job = _job()
     client = FakeWorkerInternalApiClient([job])
     stop_event = asyncio.Event()
     seen: list[tuple[str, str]] = []
 
-    async def run_job(job_build_id: str, namespace: str) -> None:
-        seen.append((job_build_id, namespace))
+    async def run_job(claim: ClaimedBuildJob) -> None:
+        seen.append((claim.build_id, claim.namespace))
         await asyncio.sleep(0.05)
         stop_event.set()
 
@@ -89,26 +119,115 @@ async def test_build_worker_loop_tracks_runtime_worker_lifecycle() -> None:
     )
     await asyncio.gather(task)
 
-    assert seen == [(build_id, "default")]
-    assert ("finalize_build_job", {"job_id": job.job_id, "build_id": job.build_id, "namespace": job.namespace}) in client.calls
+    assert seen == [(job.build_id, "default")]
+    assert (
+        "finalize_build_job",
+        {
+            "job_id": job.job_id,
+            "build_id": job.build_id,
+            "namespace": job.namespace,
+            "worker_id": "worker-1",
+            "claim_token": job.claim_token,
+            "lease_generation": job.lease_generation,
+        },
+    ) in client.calls
+    assert any(name == "renew_build_job_lease" for name, _ in client.calls)
     assert any(name == "stop_worker" for name, _ in client.calls)
 
 
 @pytest.mark.asyncio
 async def test_build_worker_loop_exits_after_one_job_when_max_jobs_set() -> None:
-    first = ClaimedBuildJob(job_id=str(uuid.uuid4()), build_id=str(uuid.uuid4()), namespace="default")
-    second = ClaimedBuildJob(job_id=str(uuid.uuid4()), build_id=str(uuid.uuid4()), namespace="default")
+    first = _job()
+    second = _job()
     client = FakeWorkerInternalApiClient([first, second])
     stop_event = asyncio.Event()
     seen: list[str] = []
 
-    async def run_job(job_build_id: str, namespace: str) -> None:
-        assert namespace == "default"
-        seen.append(job_build_id)
+    async def run_job(claim: ClaimedBuildJob) -> None:
+        assert claim.namespace == "default"
+        seen.append(claim.build_id)
 
     await build_worker_loop(stop_event, "worker-once", run_job, client=cast(WorkerInternalApiClient, client), max_jobs=1)
 
     assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_build_worker_loop_stops_execution_when_lease_is_lost() -> None:
+    job = _job()
+    client = FakeWorkerInternalApiClient([job])
+    stop_event = asyncio.Event()
+    execution_stopped = asyncio.Event()
+    client.lease_active = False
+
+    async def run_job(_claim: ClaimedBuildJob) -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            execution_stopped.set()
+
+    await build_worker_loop(
+        stop_event,
+        "worker-lost",
+        run_job,
+        client=cast(WorkerInternalApiClient, client),
+        heartbeat_seconds=0.001,
+        max_jobs=1,
+    )
+
+    assert execution_stopped.is_set()
+    assert any(name == "renew_build_job_lease" for name, _ in client.calls)
+    assert not any(name == "finalize_build_job" for name, _ in client.calls)
+    assert not any(name == "fail_build_job" for name, _ in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_build_worker_loop_retries_renewal_transport_error_before_expiry() -> None:
+    job = replace(_job(), lease_ttl_seconds=1)
+    client = FakeWorkerInternalApiClient([job])
+    client.renewal_errors = 1
+    stop_event = asyncio.Event()
+
+    async def run_job(_claim: ClaimedBuildJob) -> None:
+        await asyncio.sleep(0.5)
+        stop_event.set()
+
+    await build_worker_loop(
+        stop_event,
+        "worker-retry",
+        run_job,
+        client=cast(WorkerInternalApiClient, client),
+        heartbeat_seconds=0.005,
+    )
+
+    renewals = [call for call in client.calls if call[0] == "renew_build_job_lease"]
+    assert len(renewals) >= 2
+    assert any(name == "finalize_build_job" for name, _ in client.calls)
+    assert not any(name == "fail_build_job" for name, _ in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_build_worker_loop_does_not_start_after_claim_deadline() -> None:
+    job = replace(_job(), lease_ttl_seconds=1)
+    client = FakeWorkerInternalApiClient([job])
+    client.claim_delay_seconds = 1.05
+    started = False
+
+    async def run_job(_claim: ClaimedBuildJob) -> None:
+        nonlocal started
+        started = True
+
+    await build_worker_loop(
+        asyncio.Event(),
+        "worker-expired-claim",
+        run_job,
+        client=cast(WorkerInternalApiClient, client),
+        max_jobs=1,
+    )
+
+    assert started is False
+    assert not any(name == "finalize_build_job" for name, _ in client.calls)
+    assert not any(name == "fail_build_job" for name, _ in client.calls)
 
 
 def test_wait_for_child_stop_joins_once_after_ack(monkeypatch) -> None:

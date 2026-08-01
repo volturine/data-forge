@@ -1,6 +1,6 @@
 import datetime as dt
 
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import BigInteger, Column, DateTime, Integer, String
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.build_jobs.models import BuildJobStatus
@@ -11,7 +11,10 @@ class BuildJob(SQLModel, table=True):  # type: ignore[call-arg, assignment]
 
     def clear_lease(self) -> None:
         self.lease_owner = None
+        self.claim_token = None
         self.lease_expires_at = None
+        self.claimed_at = None
+        self.last_renewed_at = None
 
     def is_orphaned(self, reclaimable_owner_ids: set[str]) -> bool:
         return self.status_kind().is_active and (self.lease_owner is None or self.lease_owner in reclaimable_owner_ids)
@@ -30,7 +33,11 @@ class BuildJob(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     status: BuildJobStatus = Field(sa_column=Column(String, nullable=False, index=True))
     priority: int = Field(default=0, sa_column=Column(Integer, nullable=False))
     lease_owner: str | None = Field(default=None, sa_column=Column(String, nullable=True, index=True))
+    claim_token: str | None = Field(default=None, sa_column=Column(String, nullable=True, unique=True))
+    lease_generation: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
     lease_expires_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
+    claimed_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
+    last_renewed_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     attempts: int = Field(default=0, sa_column=Column(Integer, nullable=False))
     max_attempts: int = Field(default=1, sa_column=Column(Integer, nullable=False))
     last_error: str | None = Field(default=None, sa_column=Column(String, nullable=True))

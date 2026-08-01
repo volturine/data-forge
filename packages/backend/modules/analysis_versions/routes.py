@@ -1,27 +1,16 @@
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Response
 from sqlmodel import Session
 
 from backend_core.database import get_db
-from backend_core.dependencies import get_optional_lock_owner_id
 from backend_core.error_handlers import handle_errors
+from backend_core.persistence.analysis.models import Analysis
 from backend_core.validation import AnalysisId, parse_analysis_id
 from modules.analysis import schemas as analysis_schemas, service as analysis_service
+from modules.analysis.revisions import require as require_analysis_revision, set_response_headers as set_analysis_revision_headers
 from modules.analysis_versions import schemas, service
-from modules.locks import service as lock_service
 from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/analysis', tags=['analysis-versions'])
-
-
-def require_analysis_lock(
-    analysis_id: AnalysisId,
-    session: Session = Depends(get_db),
-    owner_id: str | None = Depends(get_optional_lock_owner_id),
-) -> None:
-    try:
-        lock_service.ensure_mutation_lock(session, 'analysis', parse_analysis_id(analysis_id), owner_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get(
@@ -65,7 +54,6 @@ def get_version(
 def delete_version(
     analysis_id: AnalysisId,
     version: int,
-    _lock: None = Depends(require_analysis_lock),
     session: Session = Depends(get_db),
 ):
     """Delete a specific version of an analysis by version number."""
@@ -82,7 +70,6 @@ def rename_version(
     analysis_id: AnalysisId,
     version: int,
     body: schemas.AnalysisVersionUpdate,
-    _lock: None = Depends(require_analysis_lock),
     session: Session = Depends(get_db),
 ):
     """Rename a version (set a descriptive label like 'before refactor'). Only the name field can be changed."""
@@ -98,7 +85,8 @@ def rename_version(
 def restore_version(
     analysis_id: AnalysisId,
     version: int,
-    _lock: None = Depends(require_analysis_lock),
+    response: Response,
+    _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
 ):
     """Restore an analysis to a specific version. Creates a new version with the restored pipeline_definition.
@@ -106,4 +94,5 @@ def restore_version(
     The current state is saved as a version before restoring, so you can always undo.
     """
     restored = service.restore_version(session, parse_analysis_id(analysis_id), version)
+    set_analysis_revision_headers(response, restored)
     return analysis_service.get_analysis(session, restored.id)

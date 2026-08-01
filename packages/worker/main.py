@@ -18,7 +18,7 @@ from runtime.config import settings
 from runtime.datasource_delete_runtime import datasource_delete_loop
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
 from runtime.engine_notifications import create_snapshot_notifier
-from runtime.internal_api import WorkerInternalApiClient, client_from_env
+from runtime.internal_api import ClaimedBuildJob, WorkerInternalApiClient, client_from_env
 from runtime.logging import configure_logging
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
 from runtime.worker_runtime import (
@@ -110,10 +110,10 @@ async def run_build_worker_process(
 
     client = worker_internal_api_client()
 
-    async def run_job(build_id: str, namespace: str) -> None:
-        token = set_namespace_context(namespace)
+    async def run_job(job: ClaimedBuildJob) -> None:
+        token = set_namespace_context(job.namespace)
         try:
-            await run_queued_build_job(manager=manager, build_id=build_id, namespace=namespace)
+            await run_queued_build_job(manager=manager, worker_id=worker_id, claim=job)
         finally:
             reset_namespace(token)
 
@@ -274,11 +274,11 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
         local_stop.set()
         heartbeat_stop.set()
         heartbeat_thread.join()
-        await data_plane_server.stop(grace=1.0)
         for child in children.values():
             _stop_worker_process(child)
-        manager.shutdown_all()
         await asyncio.gather(*request_tasks, datasource_delete_task, return_exceptions=True)
+        await data_plane_server.stop(grace=1.0)
+        manager.shutdown_all()
         client.stop_worker(worker_id=worker_id)
         logger.info("Build worker manager shutdown complete")
 

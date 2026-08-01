@@ -3,7 +3,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import polars as pl
 from sqlmodel import select
 
 from backend_core.exceptions import DataSourceValidationError
@@ -308,26 +307,11 @@ class TestDataSourceConnect:
         assert body['config']['source']['file_path'] == sample_csv_object_url
         assert body['config']['source']['file_type'] == 'csv'
 
-    @patch('modules.datasource.runtime_service.load_datasource')
-    @patch('modules.datasource.runtime_service._write_iceberg_table')
     def test_connect_iceberg_with_source_config_creates_iceberg(
         self,
-        mock_write,
-        mock_load,
         client,
         sample_csv_object_url: str,
     ):
-        class _Snap:
-            snapshot_id = 100
-            timestamp_ms = 123456
-
-        class _Table:
-            def current_snapshot(self):
-                return _Snap()
-
-        mock_load.return_value = pl.DataFrame({'a': [1]}).lazy()
-        mock_write.return_value = _Table()
-
         payload = {
             'name': 'Good Iceberg Connection',
             'source_type': 'iceberg',

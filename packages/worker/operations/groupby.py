@@ -77,4 +77,4 @@ class GroupByHandler(OperationHandler):
             .alias(aggregation.alias or aggregation.function.default_alias(aggregation.column))
             for aggregation in validated.aggregations
         ]
-        return lf.group_by(validated.group_by).agg(exprs)
+        return lf.group_by(validated.group_by, maintain_order=True).agg(exprs)

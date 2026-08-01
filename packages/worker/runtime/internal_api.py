@@ -3,9 +3,9 @@ from __future__ import annotations
 import base64
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
 import grpc
@@ -63,6 +63,11 @@ class ClaimedBuildJob:
     job_id: str
     build_id: str
     namespace: str
+    claim_token: str
+    lease_generation: int
+    lease_expires_at: datetime
+    attempt: int
+    lease_ttl_seconds: int
 
 
 @dataclass(frozen=True)
@@ -106,6 +111,10 @@ class DatasourceMetadata:
     config: dict[str, object] | None
     schema_cache: dict[str, object] | None
     is_hidden: bool | None
+    revision: int | None = None
+    description: str | None = None
+    column_descriptions: dict[str, str] | None = None
+    created_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +132,12 @@ class ClaimedComputeRequest:
     namespace: str
     kind: enums_pb2.ComputeRequestKind
     command_envelope: compute_pb2.ComputeCommandEnvelope
+    worker_id: str
+    claim_token: str
+    lease_generation: int
+    lease_expires_at: datetime
+    attempt: int
+    lease_ttl_seconds: int
 
 
 class BackendWorkerRpcError(RuntimeError):
@@ -139,6 +154,34 @@ class BackendWorkerRpcError(RuntimeError):
         self.error = error
         self.error_code = error_code
         self.details = details or {}
+
+
+class BuildJobLeaseLost(RuntimeError):
+    pass
+
+
+def _datasource_record_payload(message: datasource_pb2.DataSourceRecord) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": message.id,
+        "name": message.name,
+        "source_type": proto_value_to_enum_name(enums_pb2.DataSourceType, "DATA_SOURCE_TYPE", message.source_type),
+        "config": struct_to_dict(message.config),
+        "created_by": proto_value_to_enum_name(enums_pb2.DataSourceCreatedBy, "DATA_SOURCE_CREATED_BY", message.created_by),
+        "is_hidden": message.is_hidden,
+    }
+    if message.HasField("description"):
+        payload["description"] = message.description
+    if message.HasField("created_by_analysis_id"):
+        payload["created_by_analysis_id"] = message.created_by_analysis_id
+    if message.HasField("created_at"):
+        payload["created_at"] = message.created_at.ToDatetime(tzinfo=UTC)
+    if message.HasField("output_of_tab_id"):
+        payload["output_of_tab_id"] = message.output_of_tab_id
+    if message.HasField("schema_info"):
+        payload["schema_cache"] = _schema_info_payload(message.schema_info)
+    else:
+        payload["schema_cache"] = None
+    return payload
 
 
 class WorkerInternalApiClient:
@@ -171,22 +214,111 @@ class WorkerInternalApiClient:
         self._call(lambda: self._stub.StopWorker(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
 
     def claim_build_job(self, *, worker_id: str) -> ClaimedBuildJob | None:
-        response = self._call(lambda: self._stub.ClaimBuildJob(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
+        response = self._call(
+            lambda: self._stub.ClaimBuildJob(
+                common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2),
+                timeout=self._timeout_seconds,
+                metadata=self._metadata(),
+            )
+        )
         if not response.HasField("job"):
             return None
-        return ClaimedBuildJob(job_id=response.job.job_id, build_id=response.job.build_id, namespace=response.job.namespace)
+        lease_expires_at = optional_timestamp_to_datetime(response.job, "lease_expires_at")
+        if lease_expires_at is None:
+            raise ValueError(f"Claimed build job {response.job.job_id} has no lease expiry")
+        if lease_expires_at.tzinfo is None:
+            lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+        return ClaimedBuildJob(
+            job_id=response.job.job_id,
+            build_id=response.job.build_id,
+            namespace=response.job.namespace,
+            claim_token=response.job.claim_token,
+            lease_generation=response.job.lease_generation,
+            lease_expires_at=lease_expires_at,
+            attempt=response.job.attempt,
+            lease_ttl_seconds=response.job.lease_ttl_seconds,
+        )
+
+    def renew_build_job_lease(
+        self,
+        *,
+        job_id: str,
+        namespace: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
+        timeout_seconds: float,
+    ) -> int | None:
+        response = self._call(
+            lambda: self._stub.RenewBuildJobLease(
+                worker_runtime_pb2.WorkerBuildJobClaimRequest(
+                    job_id=job_id,
+                    namespace=namespace,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
+                    worker_id=worker_id,
+                ),
+                timeout=min(self._timeout_seconds, timeout_seconds),
+                metadata=self._metadata(),
+            )
+        )
+        if not response.renewed:
+            return None
+        if not response.HasField("lease_ttl_seconds"):
+            raise ValueError(f"Renewed build job {job_id} has no lease TTL")
+        return int(response.lease_ttl_seconds)
 
     def claim_compute_request(self, *, worker_id: str) -> ClaimedComputeRequest | None:
         response = self._call(lambda: self._stub.ClaimComputeRequest(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
         if not response.HasField("request"):
             return None
         command = response.request.command
+        lease_expires_at = optional_timestamp_to_datetime(response.request, "lease_expires_at")
+        if lease_expires_at is None:
+            raise ValueError(f"Claimed compute request {response.request.id} has no lease expiry")
+        if lease_expires_at.tzinfo is None:
+            lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
         return ClaimedComputeRequest(
             id=response.request.id,
             namespace=response.request.namespace,
             kind=command.kind,
             command_envelope=command,
+            worker_id=worker_id,
+            claim_token=response.request.claim_token,
+            lease_generation=response.request.lease_generation,
+            lease_expires_at=lease_expires_at,
+            attempt=response.request.attempt,
+            lease_ttl_seconds=response.request.lease_ttl_seconds,
         )
+
+    def renew_compute_request_lease(
+        self,
+        *,
+        request_id: str,
+        namespace: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
+        timeout_seconds: float,
+    ) -> int | None:
+        response = self._call(
+            lambda: self._stub.RenewComputeRequestLease(
+                worker_runtime_pb2.WorkerComputeRequestClaimRequest(
+                    request_id=request_id,
+                    namespace=namespace,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
+                ),
+                timeout=min(self._timeout_seconds, timeout_seconds),
+                metadata=self._metadata(),
+            )
+        )
+        if not response.renewed:
+            return None
+        if not response.HasField("lease_ttl_seconds"):
+            raise ValueError(f"Renewed compute request {request_id} has no lease TTL")
+        return int(response.lease_ttl_seconds)
 
     def complete_compute_request(
         self,
@@ -194,6 +326,9 @@ class WorkerInternalApiClient:
         namespace: str,
         request_id: str,
         kind: enums_pb2.ComputeRequestKind,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
         response: compute_pb2.ComputeResponse,
         artifact_path: str | None = None,
         artifact_name: str | None = None,
@@ -202,6 +337,9 @@ class WorkerInternalApiClient:
         request = worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
             namespace=namespace,
             request_id=request_id,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
             response_envelope=_compute_response_envelope(
                 kind=kind,
                 request_id=request_id,
@@ -223,6 +361,9 @@ class WorkerInternalApiClient:
         namespace: str,
         request_id: str,
         kind: enums_pb2.ComputeRequestKind,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
         error_message: str,
         error: compute_pb2.ComputeErrorResult,
     ) -> None:
@@ -231,6 +372,9 @@ class WorkerInternalApiClient:
                 worker_runtime_pb2.WorkerFailComputeRequestRequest(
                     namespace=namespace,
                     request_id=request_id,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
                     error_message=error_message,
                     response_envelope=_compute_response_envelope(
                         kind=kind,
@@ -245,38 +389,92 @@ class WorkerInternalApiClient:
             )
         )
 
-    def release_compute_requests(self, *, worker_id: str) -> int:
-        return int(self._call(lambda: self._stub.ReleaseComputeRequests(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata())).count)
-
-    def execute_datasource_request(
+    def publish_datasource_create(
         self,
         *,
         namespace: str,
-        kind: enums_pb2.ComputeRequestKind,
-        command: datasource_pb2.DatasourceCommand,
-    ) -> datasource_pb2.DatasourceResult:
-        response = self._call(
-            lambda: self._stub.ExecuteDatasourceRequest(
-                worker_runtime_pb2.WorkerExecuteDatasourceRequest(
-                    namespace=namespace,
-                    kind=kind,
-                    command=command,
-                ),
-                timeout=self._timeout_seconds,
-                metadata=self._metadata(),
-            )
-        )
-        return response.result
+        datasource_id: str,
+        name: str,
+        description: str | None,
+        source_type: str,
+        config: dict[str, object],
+        owner_id: str | None = None,
+        schema_info: object | None = None,
+    ):
+        from datasources.schemas import DataSourceRecord
 
-    def schedule_ingest_datasource(self, *, namespace: str, datasource_id: str) -> datasource_pb2.DataSourceRecord:
-        response = self._call(
-            lambda: self._stub.ScheduleIngestDatasource(
-                worker_runtime_pb2.WorkerScheduleIngestDatasourceRequest(namespace=namespace, datasource_id=datasource_id),
-                timeout=self._timeout_seconds,
-                metadata=self._metadata(),
-            )
+        request = worker_runtime_pb2.WorkerPublishDatasourceCreateRequest(
+            namespace=namespace,
+            datasource_id=datasource_id,
+            name=name,
+            source_type=enum_to_proto_value("DATA_SOURCE_TYPE", source_type),
+            config=dict_to_struct(config),
         )
-        return response.datasource
+        if description is not None:
+            request.description = description
+        if owner_id is not None:
+            request.owner_id = owner_id
+        if schema_info is not None:
+            payload = cast(dict[str, object], schema_info.model_dump(mode="json") if hasattr(schema_info, "model_dump") else schema_info)
+            request.schema_info.CopyFrom(json_format.ParseDict(payload, datasource_pb2.SchemaInfo()))
+        response = self._call(lambda: self._stub.PublishDatasourceCreate(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        return DataSourceRecord.model_validate(_datasource_record_payload(response.datasource))
+
+    def publish_datasource_ingest(
+        self,
+        *,
+        namespace: str,
+        datasource_id: str,
+        config: dict[str, object],
+        expected_revision: int,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
+        schema_info: object | None = None,
+        compute_request_id: str | None = None,
+        job_id: str | None = None,
+        build_id: str | None = None,
+    ):
+        from datasources.schemas import DataSourceRecord
+
+        request = worker_runtime_pb2.WorkerPublishDatasourceIngestRequest(
+            namespace=namespace,
+            datasource_id=datasource_id,
+            config=dict_to_struct(config),
+            expected_revision=expected_revision,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+        )
+        if schema_info is not None:
+            payload = cast(dict[str, object], schema_info.model_dump(mode="json") if hasattr(schema_info, "model_dump") else schema_info)
+            request.schema_info.CopyFrom(json_format.ParseDict(payload, datasource_pb2.SchemaInfo()))
+        if compute_request_id is not None:
+            request.compute_request_id = compute_request_id
+        if job_id is not None:
+            request.job_id = job_id
+        if build_id is not None:
+            request.build_id = build_id
+        response = self._call(lambda: self._stub.PublishDatasourceIngest(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        return DataSourceRecord.model_validate(_datasource_record_payload(response.datasource))
+
+    def publish_datasource_schema_cache(
+        self,
+        *,
+        namespace: str,
+        datasource_id: str,
+        schema_info: object,
+    ):
+        from datasources.schemas import SchemaInfo
+
+        payload = cast(dict[str, object], schema_info.model_dump(mode="json") if hasattr(schema_info, "model_dump") else schema_info)
+        request = worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheRequest(
+            namespace=namespace,
+            datasource_id=datasource_id,
+            schema_info=json_format.ParseDict(payload, datasource_pb2.SchemaInfo()),
+        )
+        response = self._call(lambda: self._stub.PublishDatasourceSchemaCache(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        return SchemaInfo.model_validate(_schema_info_payload(response.schema_info))
 
     def datasource_metadata(self, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
         response = self._call(
@@ -294,6 +492,10 @@ class WorkerInternalApiClient:
             config=optional_struct_to_dict(response, "config"),
             schema_cache=_schema_info_payload(response.schema_info) if response.HasField("schema_info") else None,
             is_hidden=_optional_bool(response, "is_hidden"),
+            revision=int(response.revision) if response.HasField("revision") else None,
+            description=_optional_str(response, "description"),
+            column_descriptions=dict(response.column_descriptions) if response.column_descriptions else {},
+            created_by=_optional_str(response, "created_by"),
         )
 
     def udf_codes(self, *, namespace: str, udf_ids: list[str]) -> dict[str, str]:
@@ -328,14 +530,37 @@ class WorkerInternalApiClient:
         )
         return (response.cancelled, _optional_timestamp_iso(response, "cancelled_at"), _optional_str(response, "cancelled_by"))
 
-    def update_build_result(self, *, namespace: str, build_id: str, result_json: dict[str, object]) -> None:
-        self._call(
-            lambda: self._stub.UpdateBuildResult(
-                worker_runtime_pb2.WorkerUpdateBuildResultRequest(namespace=namespace, build_id=build_id, result=dict_to_struct(result_json)),
-                timeout=self._timeout_seconds,
-                metadata=self._metadata(),
+    def update_build_result(
+        self,
+        *,
+        namespace: str,
+        build_id: str,
+        job_id: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
+        result_json: dict[str, object],
+    ) -> None:
+        try:
+            self._call(
+                lambda: self._stub.UpdateBuildResult(
+                    worker_runtime_pb2.WorkerUpdateBuildResultRequest(
+                        namespace=namespace,
+                        build_id=build_id,
+                        job_id=job_id,
+                        worker_id=worker_id,
+                        claim_token=claim_token,
+                        lease_generation=lease_generation,
+                        result=dict_to_struct(result_json),
+                    ),
+                    timeout=self._timeout_seconds,
+                    metadata=self._metadata(),
+                )
             )
-        )
+        except BackendWorkerRpcError as exc:
+            if exc.error_code == "FAILED_PRECONDITION":
+                raise BuildJobLeaseLost(f"Build job {job_id} result update was rejected because its lease is no longer active") from exc
+            raise
 
     def upsert_output_datasource(
         self,
@@ -349,6 +574,13 @@ class WorkerInternalApiClient:
         analysis_id: str | None,
         is_hidden: bool | None,
         keep_schema_cache: bool,
+        job_id: str | None,
+        build_id: str | None,
+        worker_id: str | None,
+        claim_token: str | None,
+        lease_generation: int | None,
+        build_result_json: dict[str, object] | None,
+        notification_deliveries: Sequence[Mapping[str, object]],
     ) -> DatasourceMetadata:
         request = worker_runtime_pb2.WorkerUpsertOutputDatasourceRequest(
             namespace=namespace,
@@ -358,12 +590,28 @@ class WorkerInternalApiClient:
             config=dict_to_struct(config),
             schema_info=_schema_info_proto(schema_cache),
             keep_schema_cache=keep_schema_cache,
+            notification_delivery=[_notification_delivery_proto(delivery) for delivery in notification_deliveries],
         )
+        claim_values = (job_id, build_id, worker_id, claim_token, lease_generation, build_result_json)
+        if any(value is not None for value in claim_values):
+            if any(value is None for value in claim_values):
+                raise ValueError("Output publication claim fields must be provided together")
+            request.job_id = cast(str, job_id)
+            request.build_id = cast(str, build_id)
+            request.worker_id = cast(str, worker_id)
+            request.claim_token = cast(str, claim_token)
+            request.lease_generation = cast(int, lease_generation)
+            request.build_result.CopyFrom(dict_to_struct(cast(dict[str, object], build_result_json)))
         if analysis_id is not None:
             request.analysis_id = analysis_id
         if is_hidden is not None:
             request.is_hidden = is_hidden
-        response = self._call(lambda: self._stub.UpsertOutputDatasource(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        try:
+            response = self._call(lambda: self._stub.UpsertOutputDatasource(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        except BackendWorkerRpcError as exc:
+            if exc.error_code == "FAILED_PRECONDITION" and job_id is not None:
+                raise BuildJobLeaseLost(f"Build job {job_id} output publication was rejected because its lease is no longer active") from exc
+            raise
         return DatasourceMetadata(
             found=True,
             id=response.datasource_id,
@@ -500,23 +748,40 @@ class WorkerInternalApiClient:
             "cancelled_by": _optional_str(response, "cancelled_by"),
         }
 
-    def fail_build_job(self, *, job_id: str, namespace: str, error: str) -> None:
-        self._call(
+    def fail_build_job(self, *, job_id: str, build_id: str, namespace: str, worker_id: str, claim_token: str, lease_generation: int, error: str) -> bool:
+        response = self._call(
             lambda: self._stub.FailBuildJob(
-                worker_runtime_pb2.WorkerFailBuildJobRequest(job_id=job_id, namespace=namespace, error=error),
+                worker_runtime_pb2.WorkerFailBuildJobRequest(
+                    job_id=job_id,
+                    namespace=namespace,
+                    error=error,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
+                    worker_id=worker_id,
+                    build_id=build_id,
+                ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
             )
         )
+        return bool(response.value)
 
-    def finalize_build_job(self, *, job_id: str, build_id: str, namespace: str) -> None:
-        self._call(
+    def finalize_build_job(self, *, job_id: str, build_id: str, namespace: str, worker_id: str, claim_token: str, lease_generation: int) -> bool:
+        response = self._call(
             lambda: self._stub.FinalizeBuildJob(
-                worker_runtime_pb2.WorkerFinalizeBuildJobRequest(job_id=job_id, build_id=build_id, namespace=namespace),
+                worker_runtime_pb2.WorkerFinalizeBuildJobRequest(
+                    job_id=job_id,
+                    build_id=build_id,
+                    namespace=namespace,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
+                    worker_id=worker_id,
+                ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
             )
         )
+        return bool(response.value)
 
     def release_build_worker_jobs(self, *, worker_id: str) -> int:
         return int(self._call(lambda: self._stub.ReleaseBuildWorkerJobs(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata())).count)
@@ -544,19 +809,38 @@ class WorkerInternalApiClient:
         *,
         namespace: str,
         build_id: str,
+        job_id: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
         event: dict[str, object],
         resource_config_json: dict[str, object] | None = None,
     ) -> int | None:
-        request = worker_runtime_pb2.WorkerPersistBuildEventRequest(namespace=namespace, build_id=build_id, build_event=_build_event_proto(namespace, event))
+        request = worker_runtime_pb2.WorkerPersistBuildEventRequest(
+            namespace=namespace,
+            build_id=build_id,
+            job_id=job_id,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+            build_event=_build_event_proto(namespace, event),
+        )
         if resource_config_json is not None:
             request.build_resource_config.CopyFrom(_build_resource_config_proto(resource_config_json))
         response = self._call(lambda: self._stub.PersistBuildEvent(request, timeout=self._timeout_seconds, metadata=self._metadata()))
         return int(response.sequence) if response.HasField("sequence") else None
 
-    def start_build_run(self, *, namespace: str, build_id: str) -> StartedBuildRun | None:
+    def start_build_run(self, *, namespace: str, build_id: str, job_id: str, worker_id: str, claim_token: str, lease_generation: int) -> StartedBuildRun | None:
         response = self._call(
             lambda: self._stub.StartBuildRun(
-                worker_runtime_pb2.WorkerStartBuildRunRequest(namespace=namespace, build_id=build_id),
+                worker_runtime_pb2.WorkerStartBuildRunRequest(
+                    namespace=namespace,
+                    build_id=build_id,
+                    job_id=job_id,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
+                ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
             )
@@ -620,6 +904,7 @@ class WorkerInternalApiClient:
     def send_email(
         self,
         *,
+        namespace: str,
         to: str,
         subject: str,
         body: str,
@@ -628,6 +913,7 @@ class WorkerInternalApiClient:
         response = self._call(
             lambda: self._stub.SendEmail(
                 worker_runtime_pb2.WorkerSendEmailRequest(
+                    namespace=namespace,
                     to=to,
                     subject=subject,
                     body=body,
@@ -642,12 +928,14 @@ class WorkerInternalApiClient:
     def send_telegram(
         self,
         *,
+        namespace: str,
         chat_id: str,
         message: str,
         bot_token: str | None = None,
         attachments: list[Mapping[str, object]] | None = None,
     ) -> bool:
         request = worker_runtime_pb2.WorkerSendTelegramRequest(
+            namespace=namespace,
             chat_id=chat_id,
             message=message,
             attachments=_serialize_attachments(attachments or []),
@@ -722,14 +1010,29 @@ def _rpc_error_from_grpc_error(exc: grpc.RpcError, *, target: str) -> BackendWor
 
 
 def _grpc_status_number(code: grpc.StatusCode) -> int:
-    value = code.value
-    if isinstance(value, tuple) and value and isinstance(value[0], int):
-        return value[0]
-    return 0
+    return {
+        grpc.StatusCode.OK: 200,
+        grpc.StatusCode.CANCELLED: 499,
+        grpc.StatusCode.UNKNOWN: 500,
+        grpc.StatusCode.INVALID_ARGUMENT: 400,
+        grpc.StatusCode.DEADLINE_EXCEEDED: 504,
+        grpc.StatusCode.NOT_FOUND: 404,
+        grpc.StatusCode.ALREADY_EXISTS: 409,
+        grpc.StatusCode.PERMISSION_DENIED: 403,
+        grpc.StatusCode.RESOURCE_EXHAUSTED: 429,
+        grpc.StatusCode.FAILED_PRECONDITION: 412,
+        grpc.StatusCode.ABORTED: 409,
+        grpc.StatusCode.OUT_OF_RANGE: 400,
+        grpc.StatusCode.UNIMPLEMENTED: 501,
+        grpc.StatusCode.INTERNAL: 500,
+        grpc.StatusCode.UNAVAILABLE: 503,
+        grpc.StatusCode.DATA_LOSS: 500,
+        grpc.StatusCode.UNAUTHENTICATED: 401,
+    }[code]
 
 
 def _worker(worker_id: str) -> common_pb2.RuntimeWorkerRequest:
-    return common_pb2.RuntimeWorkerRequest(worker_id=worker_id)
+    return common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2)
 
 
 def _optional_str(message: Any, field: str) -> str | None:
@@ -749,6 +1052,28 @@ def _optional_proto_enum_name(message: Any, field: str, enum_type: Any, prefix: 
     if not message.HasField(field):
         return None
     return proto_value_to_enum_name(enum_type, prefix, getattr(message, field))
+
+
+def _notification_delivery_proto(delivery: Mapping[str, object]) -> worker_runtime_pb2.WorkerNotificationDelivery:
+    method = delivery.get("method")
+    if method == "email":
+        return worker_runtime_pb2.WorkerNotificationDelivery(
+            email=worker_runtime_pb2.WorkerEmailDelivery(
+                to=_required_mapping_str(delivery, "recipient"),
+                subject=_required_mapping_str(delivery, "subject"),
+                body=str(delivery.get("body", "")),
+            )
+        )
+    if method == "telegram":
+        telegram = worker_runtime_pb2.WorkerTelegramDelivery(
+            chat_id=_required_mapping_str(delivery, "recipient"),
+            message=_required_mapping_str(delivery, "message"),
+        )
+        token = delivery.get("bot_token")
+        if isinstance(token, str) and token:
+            telegram.bot_token = token
+        return worker_runtime_pb2.WorkerNotificationDelivery(telegram=telegram)
+    raise ValueError(f"Unsupported notification delivery method: {method!r}")
 
 
 def _serialize_attachments(attachments: list[Mapping[str, object]]) -> list[common_pb2.NotificationAttachment]:

@@ -159,10 +159,10 @@ def _latest_completed_step_name(result_json: dict[str, Any]) -> str | None:
 
 
 def cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str | None) -> compute_schemas.CancelBuildResponse:
-    run = session.get(EngineRun, run_id)
-    if run is None or run.namespace != get_namespace():
+    table = EngineRun.metadata.tables[EngineRun.__tablename__]
+    run = session.execute(select(EngineRun).where(table.c.id == run_id).where(table.c.namespace == get_namespace()).with_for_update()).scalars().first()
+    if run is None:
         raise ValueError('Engine run not found')
-    session.refresh(run)
     if run.status_kind() != EngineRunStatus.RUNNING:
         raise ValueError('Only running builds can be cancelled')
 
@@ -286,10 +286,17 @@ def update_engine_run(
     current_step: str | None | _UnsetType = _UNSET,
     triggered_by: str | None | _UnsetType = _UNSET,
 ) -> EngineRunResponseSchema:
-    run = session.get(EngineRun, run_id)
-    if run is None or run.namespace != get_namespace():
+    table = EngineRun.metadata.tables[EngineRun.__tablename__]
+    run = session.execute(select(EngineRun).where(table.c.id == run_id).where(table.c.namespace == get_namespace()).with_for_update()).scalars().first()
+    if run is None:
         raise engine_run_not_found(run_id)
-    session.refresh(run)
+
+    current_status = run.status_kind()
+    if current_status.is_terminal:
+        requested_status = EngineRunStatus.require(status) if isinstance(status, (EngineRunStatus, str)) else None
+        if requested_status is not None and requested_status != current_status:
+            logger.warning('Rejected terminal status transition from %s to %s for run %s', current_status, requested_status, run_id)
+        return _serialize_run(run)
 
     if not isinstance(analysis_id, _UnsetType):
         run.analysis_id = analysis_id if analysis_id is None or isinstance(analysis_id, str) else run.analysis_id
@@ -299,10 +306,7 @@ def update_engine_run(
         run.kind = EngineRunKind.require(kind).value if isinstance(kind, (EngineRunKind, str)) else run.kind
     if not isinstance(status, _UnsetType):
         new_status = EngineRunStatus.require(status) if isinstance(status, (EngineRunStatus, str)) else None
-        current_status = run.status_kind()
-        if new_status is not None and current_status.blocks_transition_to(new_status):
-            logger.warning(f'Ignoring status transition from {current_status} to {new_status} for run {run_id}')
-        elif new_status is not None:
+        if new_status is not None:
             run.status = new_status.value
     if not isinstance(request_json, _UnsetType) and isinstance(request_json, dict):
         run.request_json = request_json
@@ -427,7 +431,7 @@ def list_engine_runs(
             )
         )
 
-    stmt = stmt.order_by(desc(sa(EngineRun.created_at))).limit(limit).offset(offset)
+    stmt = stmt.order_by(desc(sa(EngineRun.created_at)), sa(EngineRun.id)).limit(limit).offset(offset)
     runs = session.execute(stmt).scalars().all()
     return [_serialize_run(run) for run in runs]
 

@@ -64,14 +64,13 @@ async def _submit_and_wait(
 ):
     _ensure_runtime_available(runtime_probe)
     try:
-        request = compute_requests_service.create_request(
+        request = compute_requests_service.stage_request(
             session,
             namespace=get_namespace(),
             kind=kind,
             command=command,
-            commit=False,
         )
-        runtime_outbox_service.enqueue_compute_request_notification(session, request_id=request.id, commit=False)
+        runtime_outbox_service.enqueue_compute_request_notification(session, request_id=request.id)
         session.commit()
         session.refresh(request)
     except Exception:

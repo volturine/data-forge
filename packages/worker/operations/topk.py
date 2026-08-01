@@ -19,4 +19,4 @@ class TopKHandler(OperationHandler):
         **_,
     ) -> pl.LazyFrame:
         validated = TopKParams.model_validate(params)
-        return lf.sort(validated.column, descending=validated.descending).head(validated.k)
+        return lf.sort(validated.column, descending=validated.descending, maintain_order=True).head(validated.k)

@@ -1,0 +1,137 @@
+"""Worker-local result DTOs for datasource execution.
+
+These models are not the HTTP API contract. Backend HTTP schemas live under
+`packages/backend/modules/datasource/schemas.py`. Worker results are serialized
+to protocol payloads for compute responses and publication RPCs only.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
+
+
+class ColumnSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    dtype: str
+    nullable: bool
+    sample_value: str | None = None
+    description: str | None = None
+
+
+class SchemaInfo(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    columns: list[ColumnSchema]
+    row_count: int | None = None
+    sheet_names: list[str] | None = None
+
+
+class CSVOptions(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    delimiter: str = ","
+    quote_char: str = '"'
+    has_header: bool = True
+    skip_rows: int = 0
+    encoding: str = "utf8"
+
+
+class DataSourceDescriptionModel(BaseModel):
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value.strip() == "":
+            return None
+        return value
+
+
+class DataSourceRecord(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    description: str | None = None
+    source_type: str
+    config: dict[str, Any]
+    schema_cache: dict[str, Any] | None = None
+    created_by_analysis_id: str | None = None
+    created_by: str = "import"
+    is_hidden: bool = False
+    created_at: datetime | None = None
+    output_of_tab_id: str | None = None
+
+
+class SnapshotPreview(BaseModel):
+    columns: list[str]
+    column_types: dict[str, str]
+    data: list[dict[str, object]]
+    row_count: int
+
+
+class ColumnStats(BaseModel):
+    column: str
+    dtype: str
+    null_count: int
+    unique_count: int | None = None
+    min: object | None = None
+    max: object | None = None
+
+
+class SchemaDiff(BaseModel):
+    column: str
+    status: str
+    type_a: str | None = None
+    type_b: str | None = None
+
+
+class SnapshotCompareResponse(BaseModel):
+    datasource_id: str
+    snapshot_a: str
+    snapshot_b: str
+    row_count_a: int
+    row_count_b: int
+    row_count_delta: int
+    schema_diff: list[SchemaDiff]
+    stats_a: list[ColumnStats]
+    stats_b: list[ColumnStats]
+    preview_a: SnapshotPreview
+    preview_b: SnapshotPreview
+
+
+class HistogramBin(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    start: float
+    end: float
+    count: int
+
+
+class ColumnStatsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    column: str
+    dtype: str
+    count: int
+    null_count: int
+    null_percentage: float
+    unique: int | None = None
+    mean: float | None = None
+    std: float | None = None
+    min: float | str | None = None
+    max: float | str | None = None
+    median: float | None = None
+    q25: float | None = None
+    q75: float | None = None
+    true_count: int | None = None
+    false_count: int | None = None
+    min_length: int | None = None
+    max_length: int | None = None
+    avg_length: float | None = None
+    top_values: list[dict[str, object]] | None = None
+    histogram: list[HistogramBin] | None = None

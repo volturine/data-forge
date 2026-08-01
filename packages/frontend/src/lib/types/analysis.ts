@@ -85,10 +85,10 @@ export interface Analysis {
 	pipeline_definition: Record<string, unknown>;
 	created_at: string;
 	updated_at: string;
+	revision: number;
 	result_path: string | null;
 	thumbnail: string | null;
 	is_favorite?: boolean;
-	version?: string | null;
 }
 
 export interface AnalysisGalleryItem {

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.datasource.models import DataSourceCreatedBy, DataSourceTargetKind
@@ -95,6 +95,7 @@ class DataSource(SQLModel, table=True):  # type: ignore[call-arg]
     source_type: str = Field(sa_column=Column(String, nullable=False))
     config: dict = Field(sa_column=Column(JSON, nullable=False))
     schema_cache: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    revision: int = Field(default=1, sa_column=Column(Integer, nullable=False, server_default='1'))
     created_by_analysis_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     created_by: str = Field(default=DataSourceCreatedBy.IMPORT.value, sa_column=Column(String, nullable=False, server_default=DataSourceCreatedBy.IMPORT.value))
     is_hidden: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0'))

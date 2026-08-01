@@ -1,18 +1,14 @@
-import logging
-
 import polars as pl
 from pydantic import ConfigDict, Field, model_validator
 
 from operations.enums import NotificationMethod
 from operations.template_placeholders import render_template_placeholders
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.notification_delivery import notification_service
-
-logger = logging.getLogger(__name__)
+from runtime.notification_delivery import encode_staged_deliveries, staged_column_name
 
 
 def get_resolved_telegram_settings() -> dict[str, object]:
-    return {"enabled": notification_service.telegram_enabled()}
+    return {"enabled": True}
 
 
 class NotificationParams(OperationParams):
@@ -43,20 +39,20 @@ class NotificationHandler(OperationHandler):
 
     Collects the DataFrame, iterates rows in batches, sends notifications
     using the configured method, and appends a status column with the
-    result of each send (``sent`` or ``[error: ...]``).
+    staged delivery command (``staged`` or ``[error: ...]``). The commands are
+    removed from the exported dataset and committed to the durable outbox with
+    the output datasource publication.
     """
 
     def __call__(
         self,
         lf: pl.LazyFrame,
-        params: dict,
+        params: dict[str, object],
+        *,
+        step_id: str,
         **_,
     ) -> pl.LazyFrame:
         validated = NotificationParams.model_validate(params)
-        telegram_enabled = True
-        if validated.method == NotificationMethod.TELEGRAM:
-            resolved = get_resolved_telegram_settings()
-            telegram_enabled = bool(resolved.get("enabled"))
         schema = lf.collect_schema()
 
         required_columns = list(validated.input_columns)
@@ -69,6 +65,8 @@ class NotificationHandler(OperationHandler):
         select_cols = list(dict.fromkeys(required_columns))
         output_schema = dict(schema)
         output_schema[validated.output_column] = pl.Utf8()
+        command_column = staged_column_name(step_id)
+        output_schema[command_column] = pl.Utf8()
 
         def parse_recipients(value: object) -> list[str]:
             if value is None:
@@ -81,19 +79,13 @@ class NotificationHandler(OperationHandler):
             if df.is_empty():
                 return df.with_columns(
                     pl.Series(name=validated.output_column, values=[], dtype=pl.Utf8),
-                )
-            if validated.method == NotificationMethod.TELEGRAM and not telegram_enabled:
-                return df.with_columns(
-                    pl.Series(
-                        name=validated.output_column,
-                        values=["[error: telegram disabled]" for _ in range(df.height)],
-                        dtype=pl.Utf8,
-                    ),
+                    pl.Series(name=command_column, values=[], dtype=pl.Utf8),
                 )
 
             rows = df.select(select_cols).to_dicts()
             row_count = len(rows)
             results: list[str] = []
+            staged: list[str] = []
 
             for offset in range(0, row_count, validated.batch_size):
                 batch = rows[offset : offset + validated.batch_size]
@@ -106,35 +98,39 @@ class NotificationHandler(OperationHandler):
                             recipients = parse_recipients(validated.recipient)
                         if not recipients:
                             raise ValueError("recipient is required")
+                        commands: list[dict[str, object]]
                         if validated.method == NotificationMethod.EMAIL:
                             subject = render_template_placeholders(validated.subject_template, row)
-                            notification_service.send_email(
-                                to=",".join(recipients),
-                                subject=subject,
-                                body=message,
-                            )
+                            commands = [
+                                {
+                                    "method": "email",
+                                    "recipient": ",".join(recipients),
+                                    "subject": subject,
+                                    "body": message,
+                                }
+                            ]
                         else:
-                            for cid in recipients:
-                                notification_service.send_telegram(
-                                    chat_id=cid,
-                                    message=message,
-                                    bot_token=validated.bot_token or None,
-                                )
-                        results.append("sent")
+                            commands = [
+                                {
+                                    "method": "telegram",
+                                    "recipient": recipient,
+                                    "message": message,
+                                    **({"bot_token": validated.bot_token} if validated.bot_token else {}),
+                                }
+                                for recipient in recipients
+                            ]
+                        results.append("staged")
+                        staged.append(encode_staged_deliveries(commands))
                     except Exception as exc:
-                        logger.warning(
-                            "Notification failed at row %d: %s",
-                            offset,
-                            exc,
-                            exc_info=True,
-                        )
                         results.append(f"[error: {exc}]")
+                        staged.append(encode_staged_deliveries([]))
 
             if len(results) != row_count:
                 raise ValueError(f"Notification output length mismatch: got {len(results)}, expected {row_count}")
 
             return df.with_columns(
                 pl.Series(name=validated.output_column, values=results, dtype=pl.Utf8),
+                pl.Series(name=command_column, values=staged, dtype=pl.Utf8),
             )
 
         return lf.map_batches(

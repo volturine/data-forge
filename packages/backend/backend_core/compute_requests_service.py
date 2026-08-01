@@ -1,7 +1,9 @@
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
-from sqlalchemy import and_, case, or_, select
+from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
 
 from backend_core import runtime_outbox_service
@@ -12,12 +14,14 @@ from backend_core.domain.compute_requests.models import (
     compute_request_kind_name,
     compute_request_status_name,
     kind_from_proto,
+    response_envelope,
     response_payload as proto_response_payload,
     status_from_proto,
 )
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
+from backend_core.transactions import committed
 from dataforge_protocol import compute_pb2, enums_pb2
 
 _BLOCKING_REQUEST_KINDS = frozenset(
@@ -45,6 +49,15 @@ _INTERACTIVE_REQUEST_KINDS = frozenset(
 )
 
 
+def _database_now(session: Session) -> datetime:
+    value = session.execute(select(func.current_timestamp())).scalar_one()
+    if not isinstance(value, datetime):
+        raise TypeError('Database CURRENT_TIMESTAMP did not return a datetime')
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _request_priority_clause(table):
     return case(
         *[(table.c.kind == kind, 0) for kind in _BLOCKING_REQUEST_KINDS],
@@ -53,13 +66,12 @@ def _request_priority_clause(table):
     )
 
 
-def create_request(
+def stage_request(
     session: Session,
     *,
     namespace: str,
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
-    commit: bool = True,
 ) -> ComputeRequest:
     now = _utcnow()
     request_id = str(uuid.uuid4())
@@ -74,16 +86,16 @@ def create_request(
         kind=kind,
         status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
         command_envelope=envelope.SerializeToString(),
+        max_attempts=settings.runtime_compute_max_attempts,
         created_at=now,
         updated_at=now,
     )
     session.add(request)
-    if commit:
-        session.commit()
-        session.refresh(request)
-    else:
-        session.flush()
+    session.flush()
     return request
+
+
+create_request = committed(stage_request, refresh=True)
 
 
 def command_envelope_for_request(request: ComputeRequest):
@@ -125,32 +137,72 @@ def get_request(session: Session, request_id: str) -> ComputeRequest | None:
 
 
 def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_ids: set[str] | None = None) -> ComputeRequest | None:
-    now = _utcnow()
+    now = _database_now(session)
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
+    exhausted_statement = with_for_update_skip_locked(
+        session,
+        select(ComputeRequest)
+        .where(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
+        .where(table.c.attempts >= table.c.max_attempts)
+        .where(or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable), table.c.lease_expires_at <= now))
+        .order_by(table.c.created_at, table.c.id),
+    )
+    exhausted = list(session.execute(exhausted_statement).scalars().all())
+    for request in exhausted:
+        error_message = f'Compute request exhausted {request.max_attempts} execution attempts'
+        request.status = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+        request.response_envelope = response_envelope(
+            kind=kind_from_proto(request.kind),
+            request_id=request.id,
+            status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
+            payload=None,
+            error_message=error_message,
+        ).SerializeToString()
+        request.error_message = error_message
+        request.completed_at = now
+        request.updated_at = now
+        request.lease_owner = None
+        request.claim_token = None
+        request.lease_expires_at = None
+        request.claimed_at = None
+        request.last_renewed_at = None
+        session.add(request)
+        runtime_outbox_service.enqueue_compute_response_notification(session, request_id=request.id)
+    if exhausted:
+        session.commit()
     queued_clause = table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
     reclaimable_clause = and_(
         table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
         or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable), table.c.lease_expires_at <= now),
     )
-    base = select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).order_by(_request_priority_clause(table), table.c.created_at).limit(1)
+    base = (
+        select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).order_by(_request_priority_clause(table), table.c.created_at, table.c.id).limit(1)
+    )
     stmt = with_for_update_skip_locked(session, base)
     row = session.execute(stmt).scalars().first()
     if row is None:
         return None
     previous_status = row.status
     previous_owner = row.lease_owner
+    previous_generation = row.lease_generation
+    claim_token = str(uuid.uuid4())
     lease_claimed = claim_by_lease_owner(
         session,
         ComputeRequest,
         table=table,
         row_id=row.id,
         previous_owner=previous_owner,
-        extra_conditions=(table.c.status == previous_status,),
+        extra_conditions=(table.c.status == previous_status, table.c.lease_generation == previous_generation),
         values={
             'status': enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
             'lease_owner': worker_id,
+            'claim_token': claim_token,
+            'lease_generation': previous_generation + 1,
             'lease_expires_at': now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
+            'claimed_at': now,
+            'last_renewed_at': now,
+            'attempts': row.attempts + 1,
             'updated_at': now,
         },
     )
@@ -162,18 +214,83 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
     return claimed
 
 
+def renew_request_lease(
+    session: Session,
+    request_id: str,
+    *,
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
+) -> ComputeRequest | None:
+    now = _database_now(session)
+    table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
+    statement = (
+        update(ComputeRequest)
+        .where(table.c.id == request_id)
+        .where(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
+        .where(table.c.lease_owner == worker_id)
+        .where(table.c.claim_token == claim_token)
+        .where(table.c.lease_generation == lease_generation)
+        .where(table.c.lease_expires_at > now)
+        .values(
+            lease_expires_at=now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
+            last_renewed_at=now,
+            updated_at=now,
+        )
+    )
+    result = cast(CursorResult[Any], session.execute(statement))
+    if result.rowcount != 1:
+        session.rollback()
+        return None
+    session.commit()
+    return session.get(ComputeRequest, request_id)
+
+
+def lock_active_request_claim(
+    session: Session,
+    request_id: str,
+    *,
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
+) -> ComputeRequest | None:
+    now = _database_now(session)
+    table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
+    statement = (
+        select(ComputeRequest)
+        .where(table.c.id == request_id)
+        .where(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
+        .where(table.c.lease_owner == worker_id)
+        .where(table.c.claim_token == claim_token)
+        .where(table.c.lease_generation == lease_generation)
+        .where(table.c.lease_expires_at > now)
+        .with_for_update()
+    )
+    return session.execute(statement).scalars().first()
+
+
 def mark_request_completed(
     session: Session,
     request_id: str,
     *,
     response_envelope: compute_pb2.ComputeResponseEnvelope,
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
     artifact_path: str | None = None,
     artifact_name: str | None = None,
     artifact_content_type: str | None = None,
-) -> ComputeRequest:
-    request = session.get(ComputeRequest, request_id)
+) -> ComputeRequest | None:
+    request = lock_active_request_claim(
+        session,
+        request_id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+    )
     if request is None:
-        raise ValueError(f'Compute request {request_id} not found')
+        session.rollback()
+        return None
     request.status = enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
     _validate_response_envelope(request, response_envelope, enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED)
     request.response_envelope = response_envelope.SerializeToString()
@@ -184,9 +301,12 @@ def mark_request_completed(
     request.completed_at = _utcnow()
     request.updated_at = request.completed_at
     request.lease_owner = None
+    request.claim_token = None
     request.lease_expires_at = None
+    request.claimed_at = None
+    request.last_renewed_at = None
     session.add(request)
-    runtime_outbox_service.enqueue_compute_response_notification(session, request_id=request.id, commit=False)
+    runtime_outbox_service.enqueue_compute_response_notification(session, request_id=request.id)
     session.commit()
     session.refresh(request)
     return request
@@ -198,11 +318,20 @@ def mark_request_failed(
     *,
     error_message: str,
     response_envelope: compute_pb2.ComputeResponseEnvelope,
-) -> ComputeRequest:
-    session.rollback()
-    request = session.get(ComputeRequest, request_id)
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
+) -> ComputeRequest | None:
+    request = lock_active_request_claim(
+        session,
+        request_id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+    )
     if request is None:
-        raise ValueError(f'Compute request {request_id} not found')
+        session.rollback()
+        return None
     request.status = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
     request.error_message = error_message
     _validate_response_envelope(request, response_envelope, enums_pb2.COMPUTE_REQUEST_STATUS_FAILED)
@@ -210,9 +339,12 @@ def mark_request_failed(
     request.completed_at = _utcnow()
     request.updated_at = request.completed_at
     request.lease_owner = None
+    request.claim_token = None
     request.lease_expires_at = None
+    request.claimed_at = None
+    request.last_renewed_at = None
     session.add(request)
-    runtime_outbox_service.enqueue_compute_response_notification(session, request_id=request.id, commit=False)
+    runtime_outbox_service.enqueue_compute_response_notification(session, request_id=request.id)
     session.commit()
     session.refresh(request)
     return request
@@ -234,24 +366,6 @@ def _validate_response_envelope(
 def queued_request_count(session: Session) -> int:
     stmt = select(ComputeRequest).where(sa(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED))
     return len(session.execute(stmt).scalars().all())
-
-
-def release_worker_requests(session: Session, *, worker_id: str) -> list[ComputeRequest]:
-    now = _utcnow()
-    stmt = (
-        select(ComputeRequest).where(sa(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)).where(sa(ComputeRequest.lease_owner == worker_id))
-    )
-    rows = list(session.execute(stmt).scalars().all())
-    for row in rows:
-        row.status = enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
-        row.lease_owner = None
-        row.lease_expires_at = None
-        row.updated_at = now
-        session.add(row)
-    session.commit()
-    for row in rows:
-        session.refresh(row)
-    return rows
 
 
 def cleanup_completed_requests(session: Session, *, older_than_seconds: int) -> int:

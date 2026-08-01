@@ -448,6 +448,7 @@ describe('AnalysisStore.isDirty', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -466,6 +467,7 @@ describe('AnalysisStore.isDirty', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -483,6 +485,7 @@ describe('AnalysisStore.isDirty', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -500,6 +503,7 @@ describe('AnalysisStore.isDirty', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -521,6 +525,7 @@ describe('AnalysisStore.reset', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -552,6 +557,7 @@ describe('AnalysisStore.updateStepConfig', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -715,6 +721,7 @@ describe('AnalysisStore.normalizeSteps', () => {
 			pipeline_definition: { tabs: [tab] },
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -735,6 +742,7 @@ describe('AnalysisStore.normalizeSteps', () => {
 			pipeline_definition: { tabs: [tab] },
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -756,6 +764,7 @@ describe('AnalysisStore.normalizeSteps', () => {
 			pipeline_definition: { tabs: [tab] },
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -780,6 +789,7 @@ describe('AnalysisStore.normalizeSteps', () => {
 			pipeline_definition: { tabs: [tab] },
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -801,6 +811,7 @@ describe('AnalysisStore.normalizeSteps', () => {
 			pipeline_definition: { tabs: [tab] },
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -824,6 +835,7 @@ describe('AnalysisStore.applyAnalysis', () => {
 			pipeline_definition: { tabs: [makeTab({ id: 'tab-1' })] },
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -837,6 +849,7 @@ describe('AnalysisStore.applyAnalysis', () => {
 			pipeline_definition: { tabs: [makeTab({ id: 'tab-2' })] },
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -852,6 +865,7 @@ describe('AnalysisStore.applyAnalysis', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -868,6 +882,7 @@ describe('AnalysisStore.applyAnalysis', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -883,6 +898,7 @@ describe('AnalysisStore.applyAnalysis', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -903,6 +919,7 @@ describe('AnalysisStore.applyAnalysis', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};
@@ -923,6 +940,7 @@ describe('AnalysisStore.update', () => {
 			pipeline_definition: {},
 			created_at: '',
 			updated_at: '',
+			revision: 1,
 			result_path: null,
 			thumbnail: null
 		};

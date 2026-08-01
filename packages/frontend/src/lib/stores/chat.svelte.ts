@@ -771,7 +771,7 @@ export class ChatStore {
 		const last = schemaStore.getLastOutput();
 		if (last) return last;
 
-		const calculated = analysisStore.calculatedSchema;
+		const calculated = schemaStore.calculatedSchema;
 		if (calculated) return calculated;
 
 		const key = analysisStore.activeSchemaKey;

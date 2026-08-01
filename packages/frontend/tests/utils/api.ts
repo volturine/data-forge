@@ -129,6 +129,20 @@ export async function deleteDatasource(
 	});
 }
 
+export async function deleteAnalysisByApi(page: Page, analysisId: string): Promise<number> {
+	const endpoint = `/api/v1/analysis/${analysisId}`;
+	const current = await page.request.get(endpoint, { timeout: 5_000 });
+	if (current.status() === 404) return 404;
+	if (!current.ok()) throw new Error(`Cleanup GET ${endpoint} returned HTTP ${current.status()}`);
+	const revision = current.headers()['x-analysis-version'];
+	if (!revision) throw new Error(`Cleanup GET ${endpoint} did not return X-Analysis-Version`);
+	const response = await page.request.delete(endpoint, {
+		timeout: 5_000,
+		headers: { 'If-Match': revision }
+	});
+	return response.status();
+}
+
 export async function createAnalysis(
 	request: E2ERequest,
 	name: string,

@@ -1,19 +1,18 @@
 """Tests for bug fixes and new features."""
 
+import asyncio
 import os
 import tempfile
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
 
 import polars as pl
 import pytest
-from google.protobuf import json_format
 from pydantic import ValidationError
 
 from builds.build_live import ActiveBuild
-from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2, errors_pb2
+from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2
 from operations.download import DownloadParams
 from operations.export import ExportParams
 from operations.notification import NotificationHandler, NotificationParams
@@ -371,6 +370,10 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         id="req-preview",
         namespace="default",
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
         command_envelope=_preview_command_envelope(request_id="req-preview"),
     )
 
@@ -379,6 +382,28 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
     assert len(completed) == 1
     assert completed[0].WhichOneof("response") == "preview"
     assert completed[0].preview.step_id == "source"
+
+
+@pytest.mark.asyncio
+async def test_compute_request_renewal_reports_lost_claim(monkeypatch) -> None:
+    class _Client:
+        def renew_compute_request_lease(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(compute_request_runtime, "worker_internal_api_client", lambda: _Client())
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-lost",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=0.03,
+        command_envelope=_preview_command_envelope(request_id="req-lost"),
+    )
+
+    with pytest.raises(compute_request_runtime.ComputeRequestLeaseLost, match="no longer active"):
+        await compute_request_runtime._renew_compute_lease(claimed, stop_event=asyncio.Event())
 
 
 def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) -> None:
@@ -417,6 +442,10 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
         id="req-1",
         namespace="default",
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
         command_envelope=_command_envelope(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
             request_id="req-1",
@@ -434,28 +463,28 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
     assert dispatched == [True]
 
 
-def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
-    failed: list[compute_pb2.ComputeErrorResult] = []
-    dispatched: list[bool] = []
+def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) -> None:
+    completed: list[compute_pb2.ComputeResponse] = []
 
     monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
     monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
 
     class _Client:
-        def execute_datasource_request(self, **_kwargs):
-            raise BackendWorkerRpcError(
-                status_code=404,
-                error="DataSource datasource-1 not found",
-                error_code="DATASOURCE_NOT_FOUND",
-                details={"datasource_id": "datasource-1"},
+        def datasource_metadata(self, **_kwargs):
+            from runtime.internal_api import DatasourceMetadata
+
+            return DatasourceMetadata(
+                found=False,
+                id=None,
+                name=None,
+                source_type=None,
+                config=None,
+                schema_cache=None,
+                is_hidden=None,
             )
 
-        def fail_compute_request(self, **kwargs):
-            failed.append(kwargs["error"])
-
-        def dispatch_runtime_outbox(self):
-            dispatched.append(True)
-            return 0
+        def complete_compute_request(self, **kwargs):
+            completed.append(kwargs["response"])
 
     monkeypatch.setattr(compute_request_runtime, "worker_internal_api_client", lambda: _Client())
 
@@ -463,6 +492,10 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
         id="req-404",
         namespace="default",
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
         command_envelope=_command_envelope(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
             request_id="req-404",
@@ -470,18 +503,26 @@ def test_compute_request_preserves_backend_rpc_404(monkeypatch, caplog) -> None:
         ),
     )
 
-    with caplog.at_level("INFO"):
-        compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
+    compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
 
-    assert len(failed) == 1
-    assert failed[0].error == "DataSource datasource-1 not found"
-    assert failed[0].status_code == 404
-    assert failed[0].error_code == errors_pb2.ERROR_CODE_DATASOURCE_NOT_FOUND
-    assert json_format.MessageToDict(failed[0].details) == {"datasource_id": "datasource-1"}
-    assert dispatched == [True]
-    assert [(record.levelname, record.getMessage()) for record in caplog.records] == [
-        ("INFO", "Compute request req-404 rejected: DataSource datasource-1 not found")
-    ]
+    assert len(completed) == 1
+    assert completed[0].WhichOneof("response") == "datasource"
+    assert completed[0].datasource.WhichOneof("result") == "error"
+    assert completed[0].datasource.error.error == "datasource_not_found"
+    assert completed[0].datasource.error.message == "datasource-1"
+
+
+def test_grpc_precondition_error_does_not_invent_domain_error_code() -> None:
+    error = compute_request_runtime._error_result(
+        BackendWorkerRpcError(
+            status_code=412,
+            error="Datasource publication claim is no longer active",
+            error_code="FAILED_PRECONDITION",
+        )
+    )
+
+    assert error.status_code == 412
+    assert not error.HasField("error_code")
 
 
 @pytest.mark.asyncio
@@ -691,26 +732,25 @@ class TestEngineRunProgressDefault:
 
 
 class TestNotificationHandler:
-    def test_per_row_sends_and_adds_status_column(self):
-        """NotificationHandler sends per-row and adds output status column."""
+    def test_per_row_stages_and_adds_status_column(self):
+        """NotificationHandler stages per-row delivery and adds a status column."""
         handler = NotificationHandler()
         lf = pl.DataFrame({"msg": ["hello", "world"]}).lazy()
-        with patch("operations.notification.notification_service") as mock_svc:
-            result = handler(
-                lf,
-                {
-                    "method": "email",
-                    "recipient": "test@example.com",
-                    "input_columns": ["msg"],
-                    "output_column": "status",
-                    "message_template": "{{msg}}",
-                    "subject_template": "Test",
-                },
-            )
-            collected = result.collect()
+        result = handler(
+            lf,
+            {
+                "method": "email",
+                "recipient": "test@example.com",
+                "input_columns": ["msg"],
+                "output_column": "status",
+                "message_template": "{{msg}}",
+                "subject_template": "Test",
+            },
+            step_id="step-1",
+        )
+        collected = result.collect()
         assert "status" in collected.columns
-        assert collected["status"].to_list() == ["sent", "sent"]
-        assert mock_svc.send_email.call_count == 2
+        assert collected["status"].to_list() == ["staged", "staged"]
 
     def test_validates_params(self):
         """Invalid params raise ValidationError."""
@@ -724,6 +764,7 @@ class TestNotificationHandler:
                     "recipient": "test@test.com",
                     "input_columns": ["a"],
                 },
+                step_id="step-1",
             )
 
     def test_extra_fields_forbidden(self):
@@ -753,7 +794,7 @@ class TestNotificationHandler:
         assert params.batch_size == 10
 
 
-# render_template and _send_pipeline_notifications tests moved to test_notification.py
+# Template rendering and pipeline notification preparation tests live in test_notification.py.
 
 
 # ---------------------------------------------------------------------------

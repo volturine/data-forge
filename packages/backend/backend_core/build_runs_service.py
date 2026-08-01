@@ -6,6 +6,7 @@ from google.protobuf import json_format, timestamp_pb2
 from sqlalchemy import desc, func, or_, select, update
 from sqlmodel import Session
 
+from backend_core import runtime_outbox_service
 from backend_core.domain.analysis.step_types import PipelineStepType
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
@@ -15,6 +16,7 @@ from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
+from backend_core.transactions import committed
 from dataforge_protocol import compute_pb2
 
 _TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
@@ -183,7 +185,7 @@ def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, seq
     raise ValueError(f'Unsupported build event type: {type(event).__name__}')
 
 
-def create_build_run(
+def stage_build_run(
     session: Session,
     *,
     build_id: str,
@@ -204,9 +206,9 @@ def create_build_run(
     current_output_id: str | None = None,
     current_output_name: str | None = None,
     total_tabs: int = 0,
+    execution_generation: int = 0,
     created_at: datetime | None = None,
     started_at: datetime | None = None,
-    commit: bool = True,
 ) -> BuildRun:
     now = created_at or _utcnow()
     run_started_at = started_at or now
@@ -232,14 +234,14 @@ def create_build_run(
         started_at=run_started_at,
         updated_at=now,
         total_tabs=total_tabs,
+        execution_generation=execution_generation,
     )
     session.add(run)
-    if commit:
-        session.commit()
-        session.refresh(run)
-    else:
-        session.flush()
+    session.flush()
     return run
+
+
+create_build_run = committed(stage_build_run, refresh=True)
 
 
 def get_build_run(session: Session, build_id: str) -> BuildRun | None:
@@ -247,7 +249,7 @@ def get_build_run(session: Session, build_id: str) -> BuildRun | None:
 
 
 def get_build_run_by_engine_run(session: Session, engine_run_id: str) -> BuildRun | None:
-    stmt = select(BuildRun).where(sa(BuildRun.current_engine_run_id == engine_run_id)).order_by(desc(sa(BuildRun.updated_at))).limit(1)
+    stmt = select(BuildRun).where(sa(BuildRun.current_engine_run_id == engine_run_id)).order_by(desc(sa(BuildRun.updated_at)), sa(BuildRun.id)).limit(1)
     return session.execute(stmt).scalars().first()
 
 
@@ -298,7 +300,7 @@ def list_build_runs(
                 col(DataSource.name).ilike(q),
             )
         )
-    stmt = stmt.order_by(desc(sa(BuildRun.created_at))).limit(limit).offset(offset)
+    stmt = stmt.order_by(desc(sa(BuildRun.created_at)), sa(BuildRun.id)).limit(limit).offset(offset)
     runs = list(session.execute(stmt).scalars().all())
     for run in runs:
         session.refresh(run)
@@ -311,12 +313,6 @@ def has_inflight_build_for_schedule(session: Session, schedule_id: str) -> bool:
         return True
     running_stmt = select(BuildRun).where(sa(BuildRun.schedule_id == schedule_id)).where(sa(BuildRun.status == BuildRunStatus.RUNNING)).limit(1)
     return session.execute(running_stmt).first() is not None
-
-
-def _next_sequence(session: Session, build_id: str) -> int:
-    stmt = select(func.max(BuildEvent.sequence)).where(sa(BuildEvent.build_id == build_id))
-    last = session.execute(stmt).scalar_one()
-    return (int(last) if isinstance(last, int) else 0) + 1
 
 
 def _cas_update_build_run(session: Session, *, run: BuildRun, values: dict[str, object], expected_status: BuildRunStatus) -> BuildRun | None:
@@ -363,16 +359,28 @@ def guarded_terminal_update(session: Session, *, build_id: str, event: compute_s
     return updated
 
 
-def mark_build_running(session: Session, build_id: str, *, now: datetime | None = None) -> BuildRun | None:
+def mark_build_running(session: Session, build_id: str, *, execution_generation: int, now: datetime | None = None) -> BuildRun | None:
     session.expire_all()
     run = session.get(BuildRun, build_id)
     if run is None:
         return None
-    if run.status != BuildRunStatus.QUEUED:
+    if run.status not in {BuildRunStatus.QUEUED, BuildRunStatus.RUNNING}:
+        return run
+    if execution_generation < run.execution_generation:
+        return None
+    if run.status == BuildRunStatus.RUNNING and execution_generation == run.execution_generation:
         return run
     marker = now or _utcnow()
     return _cas_update_build_run(
-        session, run=run, expected_status=BuildRunStatus.QUEUED, values={'status': BuildRunStatus.RUNNING, 'updated_at': marker, 'version': run.version + 1}
+        session,
+        run=run,
+        expected_status=run.status,
+        values={
+            'status': BuildRunStatus.RUNNING,
+            'execution_generation': execution_generation,
+            'updated_at': marker,
+            'version': run.version + 1,
+        },
     )
 
 
@@ -389,12 +397,24 @@ def update_build_result_json(session: Session, build_id: str, result_json: dict[
     return run
 
 
-def append_build_event(
-    session: Session, *, build_id: str, event: compute_schemas.BuildEvent, resource_config_json: dict[str, Any] | None = None
+def stage_build_event(
+    session: Session,
+    *,
+    build_id: str,
+    event: compute_schemas.BuildEvent,
+    resource_config_json: dict[str, Any] | None = None,
+    expected_execution_generation: int | None = None,
+    authoritative_execution_generation: int | None = None,
 ) -> BuildEvent | None:
-    run = session.get(BuildRun, build_id)
+    if expected_execution_generation is not None and authoritative_execution_generation is not None:
+        raise ValueError('Expected and authoritative execution generations are mutually exclusive')
+    run = session.execute(select(BuildRun).where(sa(BuildRun.id == build_id)).with_for_update().execution_options(populate_existing=True)).scalars().first()
     if run is None:
         raise ValueError(f'Build run {build_id} not found')
+    if expected_execution_generation is not None and run.execution_generation != expected_execution_generation:
+        return None
+    if authoritative_execution_generation is not None and authoritative_execution_generation <= run.execution_generation:
+        return None
     terminal_status = BuildRun.terminal_status_for_event(event)
     if run.status in _TERMINAL_STATUSES and terminal_status != run.status:
         return None
@@ -402,6 +422,8 @@ def append_build_event(
 
     should_update_run = run.status not in _TERMINAL_STATUSES
     if should_update_run:
+        if authoritative_execution_generation is not None:
+            run.execution_generation = authoritative_execution_generation
         run.apply_event_context(event)
         if resource_config_json is not None:
             run.resource_config_json = copy_json_dict(resource_config_json)
@@ -413,7 +435,8 @@ def append_build_event(
 
         run.updated_at = event.emitted_at
         run.version += 1
-    sequence = _next_sequence(session, build_id)
+    sequence = run.next_event_sequence
+    run.next_event_sequence += 1
     event_id = str(uuid.uuid4())
     payload_json = event.model_dump(mode='json')
     created_at = _utcnow()
@@ -429,9 +452,14 @@ def append_build_event(
         created_at=created_at,
     )
     session.add(event_row)
-    if should_update_run:
-        session.add(run)
-    session.commit()
+    session.add(run)
+    runtime_outbox_service.enqueue_api_build_notification(
+        session,
+        namespace=run_namespace,
+        build_id=build_id,
+        latest_sequence=sequence,
+    )
+    session.flush()
     return BuildEvent(
         id=event_id,
         build_id=build_id,
@@ -445,6 +473,9 @@ def append_build_event(
     )
 
 
+append_build_event = committed(stage_build_event)
+
+
 def _list_build_events(session: Session, build_id: str) -> list[BuildEvent]:
     stmt = select(BuildEvent).where(sa(BuildEvent.build_id == build_id)).order_by(sa(BuildEvent.sequence))
     return list(session.execute(stmt).scalars().all())
@@ -456,9 +487,9 @@ def list_build_events_after(session: Session, build_id: str, sequence: int = 0) 
 
 
 def get_latest_sequence(session: Session, build_id: str) -> int:
-    stmt = select(func.max(BuildEvent.sequence)).where(sa(BuildEvent.build_id == build_id))
-    last = session.execute(stmt).scalar_one()
-    return int(last) if isinstance(last, int) else 0
+    stmt = select(sa(BuildRun.next_event_sequence)).where(sa(BuildRun.id == build_id))
+    next_sequence = session.execute(stmt).scalar_one_or_none()
+    return next_sequence - 1 if isinstance(next_sequence, int) else 0
 
 
 def latest_namespace_update(session: Session, *, namespace: str) -> datetime | None:

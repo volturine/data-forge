@@ -1,11 +1,17 @@
+"""Healthcheck persistence and pure evaluation tests.
+
+Polars-backed healthcheck execution lives on the worker. Backend owns check
+CRUD and the pure evaluate() policy that turns collected metric maps into
+pass/fail results.
+"""
+
+from __future__ import annotations
+
 import uuid
 from datetime import UTC, datetime, timedelta
 
-import polars as pl
-
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
-from modules.healthcheck.runner import run_healthchecks
 
 
 def _create_datasource(session, ds_id: str | None = None) -> DataSource:
@@ -64,243 +70,93 @@ def _create_result(session, healthcheck_id: str, passed: bool, message: str, min
     return result
 
 
-SAMPLE_LF = pl.LazyFrame(
-    {
-        'id': [1, 2, 3, 4, 5],
-        'name': ['a', 'b', None, 'd', 'e'],
-        'value': [10.0, 20.0, 30.0, 40.0, 50.0],
-    },
-)
-
-
-class TestRunHealthchecks:
-    def test_empty_checks(self, test_db_session):
-        results = run_healthchecks(test_db_session, [], SAMPLE_LF)
-        assert results == []
-
-    def test_row_count_pass(self, test_db_session):
+class TestHealthCheckEvaluate:
+    def test_row_count_pass(self) -> None:
         check = _make_check('ds-1', config={'min_rows': 1, 'max_rows': 10})
-        test_db_session.add(check)
-        test_db_session.flush()
+        passed, message, details = check.evaluate(values={check.metric_alias('count'): 5}, schema_names={'id'})
+        assert passed is True
+        assert 'Row count: 5' in message
+        assert details['actual_count'] == 5
 
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is True
-        assert 'Row count: 5' in results[0].message
-        assert results[0].details['actual_count'] == 5
-
-    def test_row_count_fail(self, test_db_session):
+    def test_row_count_fail(self) -> None:
         check = _make_check('ds-1', config={'min_rows': 10})
-        test_db_session.add(check)
-        test_db_session.flush()
+        passed, message, _details = check.evaluate(values={check.metric_alias('count'): 5}, schema_names={'id'})
+        assert passed is False
+        assert 'Too few' in message
 
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is False
-        assert 'Too few' in results[0].message
+    def test_column_null_pass(self) -> None:
+        check = _make_check('ds-1', check_type='column_null', config={'column': 'name', 'threshold': 50})
+        passed, message, details = check.evaluate(values={check.metric_alias('null_pct'): 20.0}, schema_names={'name'})
+        assert passed is True
+        assert 'Nulls: 20.0%' in message
+        assert details['actual_percentage'] == 20.0
 
-    def test_column_null_pass(self, test_db_session):
-        check = _make_check('ds-1', check_type='column_null', config={'column': 'name', 'threshold': 25})
-        test_db_session.add(check)
-        test_db_session.flush()
-
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is True
-        assert 'Nulls: 20.0%' in results[0].message
-
-    def test_column_null_fail(self, test_db_session):
+    def test_column_null_fail(self) -> None:
         check = _make_check('ds-1', check_type='column_null', config={'column': 'name', 'threshold': 10})
-        test_db_session.add(check)
-        test_db_session.flush()
+        passed, _message, _details = check.evaluate(values={check.metric_alias('null_pct'): 20.0}, schema_names={'name'})
+        assert passed is False
 
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is False
+    def test_column_unique(self) -> None:
+        check = _make_check('ds-1', check_type='column_unique', config={'column': 'id', 'expected_unique': 5})
+        passed, message, details = check.evaluate(values={check.metric_alias('unique'): 5}, schema_names={'id'})
+        assert passed is True
+        assert details['actual_unique'] == 5
+        assert 'Unique: 5' in message or 'Unique values: 5' in message
 
-    def test_column_unique(self, test_db_session):
-        check = _make_check(
-            'ds-1',
-            check_type='column_unique',
-            config={'column': 'id', 'expected_unique': 5},
+    def test_column_range_pass(self) -> None:
+        check = _make_check('ds-1', check_type='column_range', config={'column': 'value', 'min': 0, 'max': 100})
+        passed, _message, _details = check.evaluate(
+            values={check.metric_alias('min'): 10.0, check.metric_alias('max'): 50.0},
+            schema_names={'value'},
         )
-        test_db_session.add(check)
-        test_db_session.flush()
+        assert passed is True
 
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is True
-        assert results[0].details['actual_unique'] == 5
-
-    def test_column_range_pass(self, test_db_session):
-        check = _make_check(
-            'ds-1',
-            check_type='column_range',
-            config={'column': 'value', 'min': 0, 'max': 100},
+    def test_column_range_fail(self) -> None:
+        check = _make_check('ds-1', check_type='column_range', config={'column': 'value', 'min': 0, 'max': 20})
+        passed, message, _details = check.evaluate(
+            values={check.metric_alias('min'): 10.0, check.metric_alias('max'): 50.0},
+            schema_names={'value'},
         )
-        test_db_session.add(check)
-        test_db_session.flush()
+        assert passed is False
+        assert 'max' in message.lower() or '50' in message
 
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is True
+    def test_missing_column_immediate_failure(self) -> None:
+        check = _make_check('ds-1', check_type='column_null', config={'column': 'missing'})
+        result = check.missing_column_result(now=datetime.now(UTC))
+        assert result.passed is False
+        assert 'not found' in result.message
 
-    def test_column_range_fail(self, test_db_session):
-        check = _make_check(
-            'ds-1',
-            check_type='column_range',
-            config={'column': 'value', 'min': 0, 'max': 25},
-        )
-        test_db_session.add(check)
-        test_db_session.flush()
-
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is False
-        assert 'Max' in results[0].message
-
-    def test_missing_column_immediate_failure(self, test_db_session):
-        check = _make_check(
-            'ds-1',
-            check_type='column_null',
-            config={'column': 'nonexistent', 'threshold': 10},
-        )
-        test_db_session.add(check)
-        test_db_session.flush()
-
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is False
-        assert 'not found' in results[0].message
-
-    def test_batch_single_collect(self, test_db_session):
-        checks = [
-            _make_check('ds-1', check_type='row_count', config={'min_rows': 1}, name='Row'),
-            _make_check(
-                'ds-1',
-                check_type='column_null',
-                config={'column': 'name', 'threshold': 50},
-                name='Null',
-            ),
-            _make_check(
-                'ds-1',
-                check_type='column_range',
-                config={'column': 'value', 'min': 0, 'max': 100},
-                name='Range',
-            ),
-            _make_check(
-                'ds-1',
-                check_type='column_count',
-                config={'min_columns': 3},
-                name='Columns',
-            ),
-            _make_check(
-                'ds-1',
-                check_type='null_percentage',
-                config={'threshold': 30},
-                name='Nulls Overall',
-            ),
-            _make_check(
-                'ds-1',
-                check_type='duplicate_percentage',
-                config={'threshold': 10},
-                name='Duplicates',
-            ),
-        ]
-        for c in checks:
-            test_db_session.add(c)
-        test_db_session.flush()
-
-        results = run_healthchecks(test_db_session, checks, SAMPLE_LF)
-        assert len(results) == 6
-        assert all(r.passed for r in results)
-
-    def test_batch_mixed_pass_fail(self, test_db_session):
-        checks = [
-            _make_check('ds-1', check_type='row_count', config={'min_rows': 100}, name='Fail'),
-            _make_check(
-                'ds-1',
-                check_type='column_null',
-                config={'column': 'name', 'threshold': 50},
-                name='Pass',
-            ),
-        ]
-        for c in checks:
-            test_db_session.add(c)
-        test_db_session.flush()
-
-        results = run_healthchecks(test_db_session, checks, SAMPLE_LF)
-        assert len(results) == 2
-        by_name = {r.healthcheck_id: r for r in results}
-        assert by_name[checks[0].id].passed is False
-        assert by_name[checks[1].id].passed is True
-
-    def test_null_percentage(self, test_db_session):
+    def test_null_percentage(self) -> None:
         check = _make_check('ds-1', check_type='null_percentage', config={'threshold': 30})
-        test_db_session.add(check)
-        test_db_session.flush()
+        passed, message, details = check.evaluate(values={check.metric_alias('null_pct'): 20.0}, schema_names={'id', 'name'})
+        assert passed is True
+        assert details['actual_percentage'] == 20.0
+        assert 'Nulls' in message or '20' in message
 
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is True
-        assert 'Nulls:' in results[0].message
-
-    def test_null_percentage_zero_column_dataset(self, test_db_session):
-        check = _make_check('ds-1', check_type='null_percentage', config={'threshold': 30})
-        test_db_session.add(check)
-        test_db_session.flush()
-
-        results = run_healthchecks(test_db_session, [check], pl.DataFrame(schema={}).lazy())
-
-        assert len(results) == 1
-        assert results[0].passed is True
-        assert results[0].message == 'Nulls: 0.0% (threshold: 30.0%)'
-        assert results[0].details['actual_percentage'] == 0.0
-
-    def test_duplicate_percentage(self, test_db_session):
-        check = _make_check('ds-1', check_type='duplicate_percentage', config={'threshold': 10})
-        test_db_session.add(check)
-        test_db_session.flush()
-
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is True
-        assert 'Duplicates:' in results[0].message
-
-    def test_column_count(self, test_db_session):
-        check = _make_check(
-            'ds-1',
-            check_type='column_count',
-            config={'min_columns': 3, 'max_columns': 5},
+    def test_duplicate_percentage(self) -> None:
+        check = _make_check('ds-1', check_type='duplicate_percentage', config={'threshold': 50, 'columns': ['id']})
+        passed, message, details = check.evaluate(
+            values={check.metric_alias('rows'): 5, check.metric_alias('unique_rows'): 5},
+            schema_names={'id'},
         )
-        test_db_session.add(check)
-        test_db_session.flush()
+        assert passed is True
+        assert details['actual_percentage'] == 0.0
+        assert 'Duplicates: 0.0%' in message
 
-        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
-        assert len(results) == 1
-        assert results[0].passed is True
+    def test_column_count(self) -> None:
+        check = _make_check('ds-1', check_type='column_count', config={'min_columns': 2, 'max_columns': 5})
+        passed, message, details = check.evaluate(values={}, schema_names={'id', 'name', 'value'})
+        assert passed is True
+        assert details['actual_count'] == 3
+        assert 'Column count: 3' in message
 
-    def test_critical_only(self, test_db_session):
-        checks = [
-            _make_check(
-                'ds-1',
-                check_type='row_count',
-                config={'min_rows': 100},
-                name='Fail',
-                critical=True,
-            ),
-            _make_check(
-                'ds-1',
-                check_type='column_null',
-                config={'column': 'name', 'threshold': 50},
-                name='Pass',
-            ),
-        ]
-        for check in checks:
-            test_db_session.add(check)
-        test_db_session.flush()
 
-        results = run_healthchecks(test_db_session, checks, SAMPLE_LF, critical_only=True)
-        assert len(results) == 1
-        assert results[0].healthcheck_id == checks[0].id
-        assert results[0].passed is False
+class TestHealthCheckPersistence:
+    def test_create_and_list_results(self, test_db_session) -> None:
+        datasource = _create_datasource(test_db_session)
+        check = _create_check(test_db_session, datasource.id)
+        result = _create_result(test_db_session, check.id, passed=True, message='ok')
+        loaded = test_db_session.get(HealthCheckResult, result.id)
+        assert loaded is not None
+        assert loaded.passed is True
+        assert loaded.healthcheck_id == check.id

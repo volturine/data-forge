@@ -1,12 +1,13 @@
 import datetime as dt
 
 import croniter  # type: ignore[import-untyped]
-from sqlalchemy import Column, DateTime, String
+from sqlalchemy import BigInteger, Column, DateTime, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
 class Schedule(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     __tablename__ = 'schedules'  # type: ignore[assignment]
+    __table_args__ = (UniqueConstraint('claim_token', name='uq_schedules_claim_token'),)
 
     @staticmethod
     def compute_next_run(cron_expression: str, *, now: dt.datetime | None = None) -> dt.datetime | None:
@@ -24,7 +25,10 @@ class Schedule(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     last_run: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     next_run: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     lease_owner: str | None = Field(default=None, sa_column=Column(String, nullable=True, index=True))
+    claim_token: str | None = Field(default=None, sa_column=Column(String, nullable=True))
+    lease_generation: int = Field(default=0, sa_column=Column(BigInteger, nullable=False, server_default='0'))
     lease_expires_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
+    attempts: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default='0'))
     last_claimed_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     last_triggered_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     last_success_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))

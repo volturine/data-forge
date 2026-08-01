@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import pytest
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from backend_core import build_jobs_service, build_runs_service, compute_requests_service, engine_instances_service, engine_runs_service
 from backend_core.config import settings
@@ -18,7 +18,9 @@ from backend_core.domain.compute_requests.models import command_from_payload, re
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
+from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
+from backend_core.persistence.scheduler.models import Schedule
 from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
 from backend_core.persistence.udfs.models import Udf
 from backend_grpc.server import WorkerRuntimeServicer
@@ -132,23 +134,159 @@ async def test_internal_worker_grpc_claims_and_finalizes_build_job(test_db_sessi
     job = build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
     servicer = WorkerRuntimeServicer()
 
-    response = await servicer.ClaimBuildJob(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
+    response = await servicer.ClaimBuildJob(common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2), context)
 
     assert response.HasField('job')
     assert response.job.job_id == job.id
     assert response.job.build_id == build_id
     assert response.job.namespace == 'default'
+    assert response.job.claim_token
+    assert response.job.lease_generation == 1
+    assert response.job.HasField('lease_expires_at')
+    assert response.job.attempt == 1
+    assert response.job.lease_ttl_seconds == settings.runtime_work_lease_ttl_seconds
     test_db_session.refresh(job)
     assert job.status == BuildJobStatus.RUNNING
     assert job.lease_owner == worker_id
+    assert job.claim_token == response.job.claim_token
 
-    await servicer.FinalizeBuildJob(
-        worker_runtime_pb2.WorkerFinalizeBuildJobRequest(job_id=job.id, build_id=build_id, namespace='default'),
+    renewed = await servicer.RenewBuildJobLease(
+        worker_runtime_pb2.WorkerBuildJobClaimRequest(
+            job_id=job.id,
+            namespace='default',
+            claim_token=response.job.claim_token,
+            lease_generation=response.job.lease_generation,
+            worker_id=worker_id,
+        ),
         cast(Any, context),
     )
+    assert renewed.renewed is True
+    assert renewed.HasField('lease_expires_at')
+
+    finalized = await servicer.FinalizeBuildJob(
+        worker_runtime_pb2.WorkerFinalizeBuildJobRequest(
+            job_id=job.id,
+            build_id=build_id,
+            namespace='default',
+            claim_token=response.job.claim_token,
+            lease_generation=response.job.lease_generation,
+            worker_id=worker_id,
+        ),
+        cast(Any, context),
+    )
+    assert finalized.value is True
     test_db_session.refresh(job)
     assert job.status == BuildJobStatus.COMPLETED
     assert job.lease_owner is None
+    assert job.claim_token is None
+
+    replayed = await servicer.FinalizeBuildJob(
+        worker_runtime_pb2.WorkerFinalizeBuildJobRequest(
+            job_id=job.id,
+            build_id=build_id,
+            namespace='default',
+            claim_token=response.job.claim_token,
+            lease_generation=response.job.lease_generation,
+            worker_id=worker_id,
+        ),
+        cast(Any, context),
+    )
+    assert replayed.value is False
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_does_not_finalize_job_before_build_is_terminal(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    worker_id = f'local-worker:{uuid.uuid4()}'
+    build_id = str(uuid.uuid4())
+    build_runs_service.create_build_run(
+        test_db_session,
+        build_id=build_id,
+        namespace='default',
+        analysis_id=str(uuid.uuid4()),
+        analysis_name='Active finalization rejection',
+        request_json={'analysis_pipeline': {'analysis_id': str(uuid.uuid4()), 'tabs': []}},
+        starter_json={'triggered_by': 'test'},
+        status=BuildRunStatus.RUNNING,
+        execution_generation=1,
+        created_at=datetime.now(UTC),
+    )
+    job = build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
+    claimed = build_jobs_service.claim_next_job(test_db_session, worker_id=worker_id)
+    assert claimed is not None
+    assert claimed.claim_token is not None
+
+    finalized = await WorkerRuntimeServicer().FinalizeBuildJob(
+        worker_runtime_pb2.WorkerFinalizeBuildJobRequest(
+            job_id=job.id,
+            build_id=build_id,
+            namespace='default',
+            claim_token=claimed.claim_token,
+            lease_generation=claimed.lease_generation,
+            worker_id=worker_id,
+        ),
+        cast(Any, context),
+    )
+
+    assert finalized.value is False
+    test_db_session.expire_all()
+    stored = test_db_session.get(type(job), job.id)
+    assert stored is not None
+    assert stored.status == BuildJobStatus.RUNNING
+    assert stored.claim_token == claimed.claim_token
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_fails_job_and_active_build_atomically(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    worker_id = f'local-worker:{uuid.uuid4()}'
+    build_id = str(uuid.uuid4())
+    build_runs_service.create_build_run(
+        test_db_session,
+        build_id=build_id,
+        namespace='default',
+        analysis_id=str(uuid.uuid4()),
+        analysis_name='Atomic worker failure',
+        request_json={'analysis_pipeline': {'analysis_id': str(uuid.uuid4()), 'tabs': []}},
+        starter_json={'triggered_by': 'test'},
+        status=BuildRunStatus.RUNNING,
+        execution_generation=1,
+        created_at=datetime.now(UTC),
+    )
+    job = build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
+    claimed = build_jobs_service.claim_next_job(test_db_session, worker_id=worker_id)
+    assert claimed is not None
+    assert claimed.claim_token is not None
+    request = worker_runtime_pb2.WorkerFailBuildJobRequest(
+        job_id=job.id,
+        build_id=build_id,
+        namespace='default',
+        claim_token=claimed.claim_token,
+        lease_generation=claimed.lease_generation,
+        worker_id=worker_id,
+        error='worker crashed before emitting a terminal event',
+    )
+
+    failed = await WorkerRuntimeServicer().FailBuildJob(request, cast(Any, context))
+
+    assert failed.value is True
+    test_db_session.expire_all()
+    stored_job = test_db_session.get(type(job), job.id)
+    stored_run = build_runs_service.get_build_run(test_db_session, build_id)
+    events = build_runs_service.list_build_events_after(test_db_session, build_id)
+    assert stored_job is not None
+    assert stored_job.status == BuildJobStatus.FAILED
+    assert stored_job.claim_token is None
+    assert stored_run is not None
+    assert stored_run.status == BuildRunStatus.FAILED
+    assert stored_run.error_message == request.error
+    assert stored_run.execution_generation == claimed.lease_generation
+    assert [event.type for event in events] == ['failed']
+    assert events[0].payload_json['error'] == request.error
+
+    replayed = await WorkerRuntimeServicer().FailBuildJob(request, cast(Any, context))
+    assert replayed.value is False
+    assert len(build_runs_service.list_build_events_after(test_db_session, build_id)) == 1
 
 
 @pytest.mark.asyncio
@@ -162,12 +300,73 @@ async def test_internal_worker_grpc_counts_and_releases_jobs(test_db_session: Se
     queued = await servicer.GetQueuedBuildJobCount(common_pb2.EmptyRequest(), context)
     assert queued.count >= 1
 
-    await servicer.ClaimBuildJob(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
+    await servicer.ClaimBuildJob(common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2), context)
     released = await servicer.ReleaseBuildWorkerJobs(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
     assert released.count == 1
     test_db_session.refresh(job)
     assert job.status == BuildJobStatus.QUEUED
     assert job.lease_owner is None
+
+
+@pytest.mark.asyncio
+async def test_build_job_count_recovers_exhausted_scheduled_job(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    now = datetime.now(UTC)
+    schedule = Schedule(
+        id=str(uuid.uuid4()),
+        datasource_id=str(uuid.uuid4()),
+        cron_expression='0 * * * *',
+        enabled=True,
+        lease_owner='scheduler:test',
+        lease_expires_at=now + timedelta(minutes=5),
+        created_at=now,
+    )
+    test_db_session.add(schedule)
+    test_db_session.commit()
+    build_id = str(uuid.uuid4())
+    build_runs_service.create_build_run(
+        test_db_session,
+        build_id=build_id,
+        namespace='default',
+        schedule_id=schedule.id,
+        analysis_id=str(uuid.uuid4()),
+        analysis_name='scheduled recovery',
+        request_json={'analysis_pipeline': {'analysis_id': str(uuid.uuid4()), 'tabs': []}},
+        starter_json={'triggered_by': f'schedule:{schedule.id}'},
+        status=BuildRunStatus.RUNNING,
+        created_at=now,
+    )
+    job = build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
+    claimed = build_jobs_service.claim_next_job(test_db_session, worker_id='worker:lost')
+    assert claimed is not None
+    claimed.lease_expires_at = now - timedelta(seconds=1)
+    test_db_session.add(claimed)
+    test_db_session.commit()
+
+    count = await WorkerRuntimeServicer().GetQueuedBuildJobCount(common_pb2.EmptyRequest(), context)
+
+    assert count.count == 0
+    test_db_session.expire_all()
+    recovered_job = test_db_session.get(type(job), job.id)
+    recovered_run = build_runs_service.get_build_run(test_db_session, build_id)
+    recovered_schedule = test_db_session.get(Schedule, schedule.id)
+    assert recovered_job is not None and recovered_job.status == BuildJobStatus.FAILED
+    assert recovered_run is not None and recovered_run.status == BuildRunStatus.ORPHANED
+    assert recovered_schedule is not None
+    assert recovered_schedule.lease_owner is None
+    assert recovered_schedule.lease_expires_at is None
+    assert recovered_schedule.last_failure_at is not None
+
+
+@pytest.mark.asyncio
+async def test_build_job_claim_rejects_incompatible_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+
+    with pytest.raises(RuntimeError, match='protocol version is incompatible'):
+        await WorkerRuntimeServicer().ClaimBuildJob(
+            common_pb2.RuntimeWorkerRequest(worker_id='old-worker', protocol_version=1),
+            context,
+        )
 
 
 @pytest.mark.asyncio
@@ -189,7 +388,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     )
     servicer = WorkerRuntimeServicer()
 
-    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
+    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2), context)
 
     assert response.HasField('request')
     assert response.request.id == request.id
@@ -204,11 +403,31 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     test_db_session.refresh(request)
     assert request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     assert request.lease_owner == worker_id
+    assert response.request.claim_token
+    assert response.request.lease_generation == 1
+    assert response.request.attempt == 1
+    assert response.request.HasField('lease_expires_at')
+
+    renewed = await servicer.RenewComputeRequestLease(
+        worker_runtime_pb2.WorkerComputeRequestClaimRequest(
+            namespace='default',
+            request_id=request.id,
+            worker_id=worker_id,
+            claim_token=response.request.claim_token,
+            lease_generation=response.request.lease_generation,
+        ),
+        context,
+    )
+    assert renewed.renewed is True
+    assert renewed.HasField('lease_expires_at')
 
     await servicer.CompleteComputeRequest(
         worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
             namespace='default',
             request_id=request.id,
+            worker_id=worker_id,
+            claim_token=response.request.claim_token,
+            lease_generation=response.request.lease_generation,
             response_envelope=response_envelope(
                 kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
                 request_id=request.id,
@@ -227,13 +446,16 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
         request_json=_schema_payload(),
     )
-    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
+    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2), context)
     assert response.request.id == failed_request.id
 
     await servicer.FailComputeRequest(
         worker_runtime_pb2.WorkerFailComputeRequestRequest(
             namespace='default',
             request_id=failed_request.id,
+            worker_id=worker_id,
+            claim_token=response.request.claim_token,
+            lease_generation=response.request.lease_generation,
             error_message='boom',
             response_envelope=response_envelope(
                 kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
@@ -250,7 +472,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
 
 
 @pytest.mark.asyncio
-async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_internal_worker_grpc_publishes_datasource_create(monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
 
     class _Response:
@@ -259,37 +481,58 @@ async def test_internal_worker_grpc_executes_datasource_request(monkeypatch: pyt
             return {
                 'id': 'ds-1',
                 'name': 'Created',
-                'source_type': 'database',
+                'source_type': 'iceberg',
                 'created_by': 'import',
-                'config': {},
+                'config': {'branch': 'main'},
             }
 
-    def fake_create_database_datasource(**kwargs):
+    def fake_create_datasource(_session, **kwargs):
         assert kwargs['name'] == 'Created'
-        assert kwargs['connection_string'] == 'postgresql://example/db'
-        assert kwargs['query'] == 'SELECT 1'
+        assert kwargs['datasource_id'] == 'ds-1'
+        assert kwargs['source_type'] == 'iceberg'
         return _Response()
 
-    monkeypatch.setattr('modules.datasource.runtime_service.create_database_datasource', fake_create_database_datasource)
+    monkeypatch.setattr('modules.datasource.publication_service.create_datasource', fake_create_datasource)
 
-    response = await WorkerRuntimeServicer().ExecuteDatasourceRequest(
-        worker_runtime_pb2.WorkerExecuteDatasourceRequest(
+    response = await WorkerRuntimeServicer().PublishDatasourceCreate(
+        worker_runtime_pb2.WorkerPublishDatasourceCreateRequest(
             namespace='default',
-            kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
-            command=datasource_pb2.DatasourceCommand(
-                create_database=datasource_pb2.CreateDatabaseDatasourceCommand(
-                    name='Created',
-                    connection_string='postgresql://example/db',
-                    query='SELECT 1',
-                    branch='main',
-                )
-            ),
+            datasource_id='ds-1',
+            name='Created',
+            source_type=enums_pb2.DATA_SOURCE_TYPE_ICEBERG,
+            config=dict_to_struct({'branch': 'main'}),
         ),
         context,
     )
 
-    assert response.result.datasource.id == 'ds-1'
-    assert response.result.datasource.name == 'Created'
+    assert response.datasource.id == 'ds-1'
+    assert response.datasource.name == 'Created'
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_maps_lost_datasource_publication_claim(monkeypatch: pytest.MonkeyPatch, test_db_session: Session) -> None:
+    context = _context(monkeypatch)
+    from modules.datasource.publication_service import DatasourcePublicationClaimLost
+
+    def reject_publication(_session, **_kwargs):
+        raise DatasourcePublicationClaimLost('Datasource publication claim is no longer active')
+
+    monkeypatch.setattr('modules.datasource.publication_service.publish_ingest', reject_publication)
+
+    with pytest.raises(RuntimeError, match='publication claim is no longer active'):
+        await WorkerRuntimeServicer().PublishDatasourceIngest(
+            worker_runtime_pb2.WorkerPublishDatasourceIngestRequest(
+                namespace='default',
+                datasource_id='ds-1',
+                config=dict_to_struct({'branch': 'main'}),
+                expected_revision=1,
+                compute_request_id='req-1',
+                worker_id='worker-1',
+                claim_token='claim-1',
+                lease_generation=1,
+            ),
+            context,
+        )
 
 
 @pytest.mark.asyncio
@@ -336,6 +579,11 @@ async def test_internal_worker_grpc_upserts_output_datasource_with_typed_schema_
                 row_count=10,
             ),
             keep_schema_cache=False,
+            notification_delivery=[
+                worker_runtime_pb2.WorkerNotificationDelivery(
+                    email=worker_runtime_pb2.WorkerEmailDelivery(to='owner@example.com', subject='Ready', body='Output published')
+                )
+            ],
         ),
         context,
     )
@@ -346,6 +594,86 @@ async def test_internal_worker_grpc_upserts_output_datasource_with_typed_schema_
         'columns': [{'name': 'score', 'dtype': 'Float64', 'nullable': True}],
         'row_count': 10,
     }
+    outbox = test_db_session.execute(select(RuntimeOutboxEvent)).scalars().one()
+    assert outbox.payload_json == {
+        'kind': 'email_delivery',
+        'to': 'owner@example.com',
+        'subject': 'Ready',
+        'body': 'Output published',
+        'attachments': [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_internal_worker_grpc_rejects_stale_output_publication_without_mutating_datasource(
+    test_db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = _context(monkeypatch)
+    datasource_id = str(uuid.uuid4())
+    build_id = str(uuid.uuid4())
+    analysis_id = str(uuid.uuid4())
+    build_runs_service.create_build_run(
+        test_db_session,
+        build_id=build_id,
+        namespace='default',
+        analysis_id=analysis_id,
+        analysis_name='Stale publication test',
+        request_json={'analysis_pipeline': {'analysis_id': analysis_id, 'tabs': []}},
+        starter_json={'triggered_by': 'test'},
+        status=BuildRunStatus.RUNNING,
+        execution_generation=1,
+        created_at=datetime.now(UTC),
+    )
+    build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
+    claimed = build_jobs_service.claim_next_job(test_db_session, worker_id='worker:publisher')
+    assert claimed is not None
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='Published output',
+            source_type=DataSourceType.ICEBERG.value,
+            config={'metadata_path': 's3://bucket/published'},
+            schema_cache={'columns': [{'name': 'old', 'dtype': 'Int64', 'nullable': False}]},
+            is_hidden=False,
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    with pytest.raises(RuntimeError, match='lease is no longer active'):
+        await WorkerRuntimeServicer().UpsertOutputDatasource(
+            worker_runtime_pb2.WorkerUpsertOutputDatasourceRequest(
+                namespace='default',
+                result_id=datasource_id,
+                name='Stale output',
+                source_type=enums_pb2.DATA_SOURCE_TYPE_ICEBERG,
+                config=dict_to_struct({'metadata_path': 's3://bucket/stale'}),
+                schema_info=datasource_pb2.SchemaInfo(columns=[datasource_pb2.ColumnSchema(name='new', dtype='String', nullable=True)]),
+                job_id=claimed.id,
+                build_id=build_id,
+                worker_id='worker:publisher',
+                claim_token='stale-token',
+                lease_generation=claimed.lease_generation,
+                build_result=dict_to_struct({'current_output_id': datasource_id}),
+                notification_delivery=[
+                    worker_runtime_pb2.WorkerNotificationDelivery(
+                        email=worker_runtime_pb2.WorkerEmailDelivery(to='owner@example.com', subject='Stale', body='Must not enqueue')
+                    )
+                ],
+            ),
+            cast(Any, context),
+        )
+
+    test_db_session.expire_all()
+    datasource = test_db_session.get(DataSource, datasource_id)
+    build = build_runs_service.get_build_run(test_db_session, build_id)
+    assert datasource is not None
+    assert datasource.name == 'Published output'
+    assert datasource.config == {'metadata_path': 's3://bucket/published'}
+    assert datasource.schema_cache == {'columns': [{'name': 'old', 'dtype': 'Int64', 'nullable': False}]}
+    assert build is not None
+    assert build.result_json is None
+    assert list(test_db_session.execute(select(RuntimeOutboxEvent)).scalars().all()) == []
 
 
 @pytest.mark.asyncio
@@ -564,6 +892,7 @@ async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: 
 async def test_internal_worker_grpc_persists_build_event(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     build_id = str(uuid.uuid4())
+    worker_id = f'local-worker:{uuid.uuid4()}'
     analysis_id = str(uuid.uuid4())
     build_runs_service.create_build_run(
         test_db_session,
@@ -574,8 +903,15 @@ async def test_internal_worker_grpc_persists_build_event(test_db_session: Sessio
         request_json={'analysis_pipeline': {'analysis_id': analysis_id, 'tabs': []}, 'tab_id': 'tab-1'},
         starter_json={'triggered_by': 'test'},
         status=BuildRunStatus.RUNNING,
+        execution_generation=1,
         created_at=datetime.now(UTC),
     )
+    build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
+    job = build_jobs_service.claim_next_job(test_db_session, worker_id=worker_id)
+    assert job is not None
+    assert job.claim_token is not None
+    claim_token = job.claim_token
+    lease_generation = job.lease_generation
     event = compute_schemas.BuildCompleteEvent(
         build_id=build_id,
         analysis_id=analysis_id,
@@ -591,6 +927,10 @@ async def test_internal_worker_grpc_persists_build_event(test_db_session: Sessio
         worker_runtime_pb2.WorkerPersistBuildEventRequest(
             namespace='default',
             build_id=build_id,
+            job_id=job.id,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
             build_event=compute_pb2.BuildEvent(
                 namespace='default',
                 context=compute_pb2.BuildEventContext(
@@ -615,11 +955,41 @@ async def test_internal_worker_grpc_persists_build_event(test_db_session: Sessio
     assert run is not None
     assert run.status == BuildRunStatus.COMPLETED
 
+    build_jobs_service.mark_job_cancelled(test_db_session, job.id)
+    stale = await WorkerRuntimeServicer().PersistBuildEvent(
+        worker_runtime_pb2.WorkerPersistBuildEventRequest(
+            namespace='default',
+            build_id=build_id,
+            job_id=job.id,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+            build_event=compute_pb2.BuildEvent(
+                namespace='default',
+                context=compute_pb2.BuildEventContext(
+                    build_id=build_id,
+                    analysis_id=analysis_id,
+                    emitted_at=datetime_to_timestamp(datetime.now(UTC)),
+                ),
+                completed=compute_pb2.BuildTerminalEvent(
+                    progress=1,
+                    elapsed_ms=13,
+                    total_steps=0,
+                    tabs_built=1,
+                    duration_ms=13,
+                ),
+            ),
+        ),
+        context,
+    )
+    assert not stale.HasField('sequence')
+
 
 @pytest.mark.asyncio
 async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     build_id = str(uuid.uuid4())
+    worker_id = f'local-worker:{uuid.uuid4()}'
     analysis_id = str(uuid.uuid4())
     build_runs_service.create_build_run(
         test_db_session,
@@ -652,9 +1022,20 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
         current_kind=EngineRunKind.BUILD.value,
         created_at=datetime.now(UTC),
     )
+    build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
+    job = build_jobs_service.claim_next_job(test_db_session, worker_id=worker_id)
+    assert job is not None
+    assert job.claim_token is not None
 
     response = await WorkerRuntimeServicer().StartBuildRun(
-        worker_runtime_pb2.WorkerStartBuildRunRequest(namespace='default', build_id=build_id),
+        worker_runtime_pb2.WorkerStartBuildRunRequest(
+            namespace='default',
+            build_id=build_id,
+            job_id=job.id,
+            worker_id=worker_id,
+            claim_token=job.claim_token,
+            lease_generation=job.lease_generation,
+        ),
         context,
     )
 
@@ -672,6 +1053,7 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
     run = build_runs_service.get_build_run(test_db_session, build_id)
     assert run is not None
     assert run.status == BuildRunStatus.RUNNING
+    assert run.execution_generation == job.lease_generation
     assert run.current_kind == EngineRunKind.BUILD.value
 
 
