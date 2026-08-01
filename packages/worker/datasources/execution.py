@@ -20,7 +20,7 @@ from polars.datatypes import Array, List, Struct
 from pyiceberg.table import Table
 from sqlalchemy.exc import IntegrityError
 
-from datasources.datasource_loading import load_datasource_frame as load_datasource
+from datasources.datasource_loading import load_datasource
 from datasources.schemas import (
     CSVOptions,
     ColumnSchema,

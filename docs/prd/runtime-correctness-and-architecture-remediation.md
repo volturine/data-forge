@@ -91,6 +91,15 @@ Completed in the scheduler, analysis, and frontend-concurrency slice:
 - analysis IndexedDB state now has explicit namespace-scoped initialization, and the analysis/schema store cycle is removed.
 
 
+
+Completed in the ownership-cleanup polish:
+
+- single worker load entrypoint (`datasources.load_datasource`) used by execution and pipeline ops;
+- worker result DTOs documented as protocol/publication payloads, not HTTP API schemas;
+- backend no longer owns Polars healthcheck execution or export-format writers;
+- backend compute base retains only API-facing engine status snapshots;
+- deferred work list reduced to true remaining redesign slices (consumer idempotency, chaos suites, structural extraction, transaction ownership).
+
 Completed in the datasource-execution-ownership slice:
 
 - worker-owned modules execute create/ingest/schema/stats/snapshot-compare Polars and Iceberg work;

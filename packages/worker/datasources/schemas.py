@@ -1,9 +1,16 @@
+"""Worker-local result DTOs for datasource execution.
+
+These models are not the HTTP API contract. Backend HTTP schemas live under
+`packages/backend/modules/datasource/schemas.py`. Worker results are serialized
+to protocol payloads for compute responses and publication RPCs only.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class ColumnSchema(BaseModel):
@@ -128,22 +135,3 @@ class ColumnStatsResponse(BaseModel):
     avg_length: float | None = None
     top_values: list[dict[str, object]] | None = None
     histogram: list[HistogramBin] | None = None
-
-
-class CreateFileParams(BaseModel):
-    name: str
-    description: str | None = None
-    file_path: str
-    file_type: str
-    options: dict[str, Any] = Field(default_factory=dict)
-    csv_options: CSVOptions | None = None
-    sheet_name: str | None = None
-    start_row: int | None = None
-    start_col: int | None = None
-    end_col: int | None = None
-    end_row: int | None = None
-    has_header: bool | None = None
-    table_name: str | None = None
-    named_range: str | None = None
-    cell_range: str | None = None
-    owner_id: str | None = None

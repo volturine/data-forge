@@ -223,12 +223,23 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         metadata_path = config.get("metadata_path")
         if not isinstance(metadata_path, str):
             raise ValueError("Datasource Iceberg loading requires metadata_path")
+        branch = config.get("branch") if isinstance(config.get("branch"), str) else None
+        namespace_name = config.get("namespace_name") if isinstance(config.get("namespace_name"), str) else None
         resolved_metadata_path = resolve_iceberg_branch_metadata_path(
             metadata_path,
-            config.get("branch") if isinstance(config.get("branch"), str) else None,
-            namespace_name=config.get("namespace_name") if isinstance(config.get("namespace_name"), str) else None,
+            branch,
+            namespace_name=namespace_name,
         )
         snapshot_id = config.get("snapshot_id")
+        snapshot_timestamp_ms = config.get("snapshot_timestamp_ms")
+        if snapshot_id is None and snapshot_timestamp_ms is not None:
+            from pyiceberg.table import StaticTable
+
+            table = StaticTable.from_metadata(resolved_metadata_path, properties=object_store_storage_options())
+            snapshot = table.snapshot_as_of_timestamp(int(snapshot_timestamp_ms))
+            if snapshot is None:
+                raise ValueError("Iceberg snapshot not found for the selected timestamp")
+            snapshot_id = str(snapshot.snapshot_id)
         snapshot_value: int | None = None
         if snapshot_id is not None:
             try:
@@ -253,3 +264,7 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         )
 
     raise ValueError(f"Unsupported source type: {source_type}")
+
+
+# Public alias used by execution and pipeline loaders.
+load_datasource = load_datasource_frame

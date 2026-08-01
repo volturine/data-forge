@@ -34,10 +34,12 @@ Current claim:
 
 Residual audit note:
 
-- The implementation covers stale-owner rejection, active lease renewal, atomic build transitions, durable outbox recovery, scheduler claim ordering, analysis lost-update prevention, and frontend namespace isolation.
+- The implementation covers stale-owner rejection, active lease renewal, atomic build transitions, durable outbox recovery, scheduler claim ordering, analysis lost-update prevention, frontend namespace isolation, and worker-owned datasource execution.
 - The runtime/admin surface exposes runtime mode, API process identity, worker heartbeats, engine rows, and queue status through `/api/v1/runtime/overview`.
-- Datasource execution is worker-owned; backend publication RPCs only persist fenced metadata. External notification consumers do not all provide durable idempotency acknowledgements, and the broad multi-process failure-injection matrix remains follow-up work.
+- Backend packages no longer own dataframe execution for datasources or healthchecks; remaining backend Polars mentions are code-export string generation only.
+- Still deferred as separate redesign slices: durable external-notification consumer idempotency, broad multi-process crash/failure injection, deeper runtime/frontend module extraction, and centralized application-command transaction ownership.
 - Lower-level metric counters such as lease renew outcomes, fenced-write rejection, attempt exhaustion, scheduler duplicate prevention, and datasource contention are not yet exposed as dedicated metrics.
+
 
 ## Final Validation Snapshot
 

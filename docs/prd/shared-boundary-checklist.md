@@ -5,7 +5,7 @@ Goal: no production package imports another owner package's internals. Owner-spe
 ## Rules
 
 - [x] `backend` owns HTTP/API concerns, auth/session wiring, route validation, response shaping, settings CRUD, Telegram CRUD, and websocket delivery state
-- [x] `worker` owns execution/runtime behavior, datasource execution/loading, notification execution, and runtime-local build state
+- [x] `worker` owns execution/runtime behavior, datasource execution/loading, healthcheck evaluation over dataframes, notification execution, and runtime-local build state
 - [x] `scheduler` owns schedule orchestration and scheduled-build request construction
 - [x] No standalone shared package remains; backend owns contracts, persistence, migrations, runtime IPC transport, config/database/logging/http helpers, and API schemas
 - [x] No production package imports another owner package's internals
