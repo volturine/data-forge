@@ -315,10 +315,10 @@ If you discover a security vulnerability, please report it privately to the proj
 
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) — Release and project history
 - [docs/ENV_VARIABLES.md](docs/ENV_VARIABLES.md) — Environment variable reference
-- [docs/prd/data-forge.md](docs/prd/data-forge.md) — Core product spec and architecture
+- [docs/prd/active/data-forge.md](docs/prd/active/data-forge.md) — Core product spec and architecture
 - [AGENTS.md](AGENTS.md) — Developer guidelines
 - [STYLE_GUIDE.md](STYLE_GUIDE.md) — Code style
-- [docs/prd/mcp-tool-contract.md](docs/prd/mcp-tool-contract.md) — How API routes are exposed as MCP tools
+- [docs/prd/reference/mcp-tool-contract.md](docs/prd/reference/mcp-tool-contract.md) — How API routes are exposed as MCP tools
 ---
 
 ## License
