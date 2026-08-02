@@ -26,8 +26,10 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Duplicate Analysis](implemented/duplicate-analysis.md)
 - [E2E Runtime Baseline](implemented/e2e-runtime-baseline.md) — current five-run measurement record
 - [Engine Lifecycle Alignment](implemented/engine-lifecycle-alignment.md) — superseded design
+- [Hot-Path Ownership Map](implemented/hot-path-ownership-map.md) — current product-path ownership contract
 - [MCP Tool Contract](implemented/mcp-tool-contract.md)
 - [New Analysis Creation Flow](implemented/new-analysis-creation-flow.md)
+- [Performance Stability Gate](implemented/performance-stability-gate.md) — current repeated-run safeguards and evidence
 - [Pipeline Compute](implemented/pipeline-compute.md) — superseded design
 - [PostgreSQL Backend Support](implemented/postgresql-backend-support.md) — superseded design
 - [Runtime Correctness and Architecture Remediation](implemented/runtime-correctness-and-architecture-remediation.md)
@@ -40,10 +42,10 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 
 - [Build Length Tracking](active/build-length-tracking.md)
 - [Docker Release](active/docker-release.md)
-- [Hot-Path Request Map](active/hot-path-request-map.md) — ownership mapped; direct profiling remains open
+- [Hot-Path Profiling Plan](active/hot-path-request-map.md) — direct timing, occupancy, and request measurements deferred
 - [Hugging Face Connection](active/hugging-face-connection.md)
 - [Lineage Revamp](active/lineage-revamp.md)
-- [Performance Violation Checklist](active/performance-violation-checklist.md) — stable five-run gate; runtime regression remains open
+- [Performance Regression Investigation](active/performance-violation-checklist.md) — +54.0% regression attribution and optimization deferred
 - [S3 Storage Support](active/s3-storage-support.md)
 
 ## Backlog

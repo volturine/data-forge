@@ -15,8 +15,10 @@ It is intentionally strict:
 - stability claims require repeated clean `just test-e2e` runs
 
 Related documents:
-- [Hot-path request map](../active/hot-path-request-map.md)
-- [Performance violation checklist](../active/performance-violation-checklist.md)
+- [Implemented hot-path ownership map](hot-path-ownership-map.md)
+- [Implemented performance stability gate](performance-stability-gate.md)
+- [Active hot-path profiling plan](../active/hot-path-request-map.md)
+- [Active performance regression investigation](../active/performance-violation-checklist.md)
 
 ## Current baseline — 2026-08-02
 
@@ -89,7 +91,7 @@ Five consecutive clean `just test-e2e` runs on the then-current state:
 - Best run: **284.26s**
 - Worst run: **293.76s**
 - Historical target: **~280s**
-- Current gap to 280s target: **~4s to ~14s**, depending on run
+- Historical gap to 280s target: **~4s to ~14s**, depending on run
 - Flaky retries: **0**
 - Clean runs in a row: **5**
 

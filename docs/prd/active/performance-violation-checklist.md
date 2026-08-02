@@ -1,39 +1,27 @@
-# Performance violation checklist
+# Performance regression investigation
 
-> **Status (audited 2026-08-02): Active — stable, but 54.0% slower than the historical baseline.**
+> **Status (audited 2026-08-02): Active — attribution and optimization deferred.**
 > **Portfolio:** [PRD index](../README.md)
 
 _Last audited: 2026-08-02_
 
-Use this checklist before claiming that e2e runtime or stability work is done.
+The current suite is stable, but the five-run mean is 445.91s: 156.36s and
+54.0% slower than the historical 289.55s mean. This PRD contains only the work
+that remains for a later performance cycle.
 
-## Current verified gates
+Completed stability evidence and permanent guardrails are archived in the
+[Performance Stability Gate](../implemented/performance-stability-gate.md).
+The exact measurements are in the
+[E2E Runtime Baseline](../implemented/e2e-runtime-baseline.md).
 
-- [x] `just verify` passes.
-- [x] `just test` passes.
-- [x] `packages/frontend/playwright.config.ts` keeps `retries: 0`.
-- [x] Five consecutive canonical `just test-e2e` runs passed all 351 tests.
-- [x] All five runs used zero retries.
-- [x] A dated wall-clock measurement is published in the [E2E Runtime Baseline](../implemented/e2e-runtime-baseline.md).
-- [ ] Explain or reverse the increase from the May mean of 289.55s to the current measured mean of 445.91s (+54.0%).
+## Objective
 
-The five-run gate proves current stability. It does not substitute for direct
-profiling, worker-occupancy evidence, or request counts.
+- [ ] Attribute the 54.0% regression to measured product paths.
+- [ ] Remove or redesign the verified bottlenecks without weakening coverage.
+- [ ] Publish a replacement five-run baseline on the optimized revision.
+- [ ] Decide and document an explicit performance acceptance threshold.
 
-## Product-level regressions that must stay fixed
-
-- [x] Hidden setup pages do not eagerly burn editor prewarm budget.
-- [x] Compute requests no longer block the asyncio loop.
-- [x] Compute request fanout is bounded so builds are not starved.
-- [x] Interactive work is prioritized above background ingest.
-- [x] User-triggered datasource create is prioritized above background ingest.
-- [x] Same-datasource ingest writes are serialized.
-- [x] Concurrent Iceberg namespace bootstrap is treated idempotently.
-- [x] Namespace-sensitive GETs default to `cache: 'no-store'`.
-- [x] Datasource creation uses browser-visible ids from UI flow.
-- [x] Engine shutdown uses the real UI.
-
-## Open profiling work
+## Required investigation
 
 ### Residual editor-open work
 
@@ -70,3 +58,13 @@ Do not use these to get the number down:
 - Hiding latency with longer waits instead of fixing the product path.
 - Reintroducing backend-only engine shutdown where the UI already supports it.
 - Reintroducing network-response coupling when the browser already exposes the needed id or state.
+
+## Exit criteria
+
+- [ ] Direct timing, occupancy, and request-count evidence is checked in.
+- [ ] Each implemented optimization has focused regression coverage.
+- [ ] `just verify` and `just test` pass on the final revision.
+- [ ] Five consecutive `just test-e2e` runs pass with zero retries.
+- [ ] The new baseline and comparison are published.
+- [ ] The result meets the documented threshold, or the remaining gap is
+  explicitly accepted as a product decision.
