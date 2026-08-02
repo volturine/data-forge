@@ -38,6 +38,56 @@ dev:
     (cd packages/worker && env -u VIRTUAL_ENV uv run --env-file ../../config/env/dev.env main.py) & \
     (cd packages/frontend && bun run dev) & wait
 
+# Build the frontend and run the three fixed production roles from source.
+prod:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just generate-protocol
+    cd packages/frontend
+    bun run build
+    cd ../..
+    set -a
+    source config/env/prod.env
+    set +a
+    pids=()
+    shutdown() {
+        trap - EXIT INT TERM
+        for pid in "${pids[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -TERM "$pid" 2>/dev/null || true
+            fi
+        done
+        for pid in "${pids[@]}"; do
+            wait "$pid" 2>/dev/null || true
+        done
+    }
+    trap 'status=$?; shutdown; exit "$status"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    (cd packages/backend && env -u VIRTUAL_ENV uv run main.py) &
+    pids+=("$!")
+    (cd packages/scheduler && env -u VIRTUAL_ENV uv run main.py) &
+    pids+=("$!")
+    (cd packages/worker && env -u VIRTUAL_ENV uv run main.py) &
+    pids+=("$!")
+    while true; do
+        for pid in "${pids[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                continue
+            fi
+            set +e
+            wait "$pid"
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ]; then
+                echo 'A production role exited unexpectedly.' >&2
+                exit 1
+            fi
+            exit "$status"
+        done
+        sleep 1
+    done
+
 dev-clean:
     #!/usr/bin/env bash
     set -euo pipefail

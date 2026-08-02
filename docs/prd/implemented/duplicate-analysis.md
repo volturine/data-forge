@@ -9,7 +9,7 @@
 
 Add first-class analysis duplication so a user can clone an existing analysis with the same inputs, tab graph, and transform logic, while regenerating all output identities so the clone never overlaps with the source analysis's managed outputs.
 
-This is a narrower, implementation-focused follow-up to the clone concept in the [new-analysis creation flow](../active/new-analysis-creation-flow.md). The product requirement here is explicit: duplicate the whole analysis, keep the same input datasources and transformations, and make the outputs safe and isolated.
+This is a narrower, implementation-focused follow-up to the clone concept in the [new-analysis creation flow](new-analysis-creation-flow.md). The product requirement here is explicit: duplicate the whole analysis, keep the same input datasources and transformations, and make the outputs safe and isolated.
 
 Tab-only duplication is intentionally handled separately in [duplicate-analysis-tab.md](duplicate-analysis-tab.md).
 

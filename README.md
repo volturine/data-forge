@@ -19,7 +19,8 @@ Data-Forge is a **local-first**, **no-code** data transformation tool. Build mul
   - [Tech Stack](#tech-stack)
   - [Quick Start](#quick-start)
     - [Option 1: Docker (Recommended)](#option-1-docker-recommended)
-    - [Option 2: Local Development](#option-2-local-development)
+    - [Option 2: From Source](#option-2-from-source)
+    - [Option 3: Local Development](#option-3-local-development)
   - [Configuration](#configuration)
     - [Production (Docker)](#production-docker)
     - [Development (local runtime)](#development-local-runtime)
@@ -87,38 +88,43 @@ Data-Forge is a **local-first**, **no-code** data transformation tool. Build mul
 Docker has one production topology:
 
 ```text
-postgres + api + scheduler + worker
+postgres + RustFS + api + scheduler + worker
 ```
 
 The API container serves both the backend API and the built frontend on port 8000.
 
 ```bash
 # 1) Edit docker/env/prod.env and set image tags, passwords, and secrets.
-# 2) Start the production stack.
-just docker-prod
+# 2) Pull and start the production stack.
+docker compose --env-file docker/env/prod.env \
+  -p dataforge-prod -f docker/docker-compose.yml pull
+docker compose --env-file docker/env/prod.env \
+  -p dataforge-prod -f docker/docker-compose.yml up -d
 
 # Open the application.
 open http://localhost:8000
 ```
 
-Equivalent raw Compose command:
+See [Deployment](docs/DEPLOYMENT.md) for TLS, health checks, upgrades, backup,
+restore, and the source deployment path. Docker-specific commands are also
+summarized in [`docker/README.md`](docker/README.md).
+
+### Option 2: From Source
+
+Run the production roles from source when PostgreSQL and S3-compatible storage
+are already managed for you:
 
 ```bash
-docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod \
-  -f docker/docker-compose.yml \
-  up -d
+just install
+# Edit config/env/prod.env, including DATABASE_URL, OBJECT_STORE_*, and secrets.
+just prod
 ```
 
-For local image validation instead of pulling GHCR images:
+`just prod` builds the frontend and runs API, scheduler, and worker as one
+foreground process group. Standalone binaries from the old single-process
+runtime are not supported by the current architecture.
 
-```bash
-just docker-prod-local
-```
-
-See [`docker/README.md`](docker/README.md) for the Docker production, evaluation, and development model.
-
-### Option 2: Local Development
+### Option 3: Local Development
 
 **Prerequisites:** Python 3.14+, [uv](https://github.com/astral-sh/uv), [Bun](https://bun.sh), [just](https://github.com/casey/just)
 
@@ -148,7 +154,8 @@ Production Docker deployments use `docker/docker-compose.yml` with `docker/env/p
 The API serves both the backend API and the pre-built frontend on port 8000.
 
 ```bash
-just docker-prod
+docker compose --env-file docker/env/prod.env \
+  -p dataforge-prod -f docker/docker-compose.yml up -d
 ```
 
 The repository defaults are tuned for concurrent clients:
@@ -177,7 +184,8 @@ just dev
 | `DISTRIBUTED_RUNTIME_ENABLED` | `false` | Enables supported Postgres distributed runtime mode |
 | `DEFAULT_NAMESPACE` | `default` | Default data namespace |
 
-See **[docs/ENV_VARIABLES.md](docs/ENV_VARIABLES.md)** for the complete reference.
+See [Environment Variables](docs/ENV_VARIABLES.md) for the complete reference
+and [Deployment](docs/DEPLOYMENT.md) for production operations.
 
 ---
 
@@ -314,6 +322,7 @@ If you discover a security vulnerability, please report it privately to the proj
 ### Development
 
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) — Release and project history
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Production deployment and operations
 - [docs/ENV_VARIABLES.md](docs/ENV_VARIABLES.md) — Environment variable reference
 - [docs/prd/implemented/data-forge.md](docs/prd/implemented/data-forge.md) — Core product baseline and architecture
 - [AGENTS.md](AGENTS.md) — Developer guidelines

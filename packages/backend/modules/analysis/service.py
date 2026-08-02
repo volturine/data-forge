@@ -244,6 +244,12 @@ def _rewrite_import_payload(
             step['is_applied'] = True
 
     for tab in tabs:
+        parent_id = tab.get('parent_id')
+        if parent_id is not None:
+            mapped_parent_id = tab_id_map.get(str(parent_id))
+            if not mapped_parent_id:
+                raise ValueError(f"Imported tab references missing parent tab '{parent_id}'")
+            tab['parent_id'] = mapped_parent_id
         datasource = tab.get('datasource')
         if not isinstance(datasource, dict):
             raise ValueError('Imported pipeline tabs must include datasource')
@@ -793,6 +799,12 @@ def duplicate_analysis(
     for tab in tabs:
         if not isinstance(tab, dict):
             continue
+        parent_id = tab.get('parent_id')
+        if parent_id is not None:
+            mapped_parent_id = tab_id_map.get(str(parent_id))
+            if not mapped_parent_id:
+                raise ValueError(f"Duplicate source references missing parent tab '{parent_id}'")
+            tab['parent_id'] = mapped_parent_id
         datasource = tab.get('datasource')
         if isinstance(datasource, dict):
             upstream_tab_id = datasource.get('analysis_tab_id')

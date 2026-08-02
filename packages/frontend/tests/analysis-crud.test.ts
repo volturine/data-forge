@@ -327,10 +327,16 @@ test.describe('Analyses – create wizard', () => {
 		}
 	});
 
-	test('template create flow reaches editor for Data Quality Audit', async ({ page, request }) => {
-		const dsName = `e2e-template-ds-${uid()}`;
+	test('template wizard configures ordered sources, outputs, and validated review', async ({
+		page,
+		request
+	}) => {
+		const suffix = uid();
+		const firstDsName = `e2e-template-first-${suffix}`;
+		const secondDsName = `e2e-template-second-${suffix}`;
 		const aName = `E2E Template ${uid()}`;
-		await createDatasource(request, dsName);
+		await createDatasource(request, firstDsName);
+		await createDatasource(request, secondDsName);
 		try {
 			await gotoNewAnalysis(page);
 			await page.locator('#name').fill(aName);
@@ -338,19 +344,57 @@ test.describe('Analyses – create wizard', () => {
 
 			await expect(page.getByRole('heading', { name: /Select Data Sources/i })).toBeVisible();
 			await page.getByPlaceholder('Search datasources...').click();
-			await page.locator(`[data-picker-option="${dsName}"]`).click();
+			await page.locator(`[data-picker-option="${firstDsName}"]`).click();
+			await page.locator(`[data-picker-option="${secondDsName}"]`).click();
 			await page.getByRole('heading', { name: /Select Data Sources/i }).click();
+
+			const firstSource = page.getByRole('listitem', {
+				name: `Selected datasource ${firstDsName}`
+			});
+			const secondSource = page.getByRole('listitem', {
+				name: `Selected datasource ${secondDsName}`
+			});
+			await expect(firstSource.getByRole('combobox')).toHaveValue('master');
+			await expect(firstSource.getByRole('button', { name: /Snapshot/i })).toContainText('Latest');
+			await firstSource.getByRole('button', { name: /Snapshot/i }).click();
+			await expect(page.getByText(/Selected: Latest/i)).toBeVisible();
+			await page.keyboard.press('Escape');
+
+			await secondSource.dragTo(firstSource);
+			await expect(page.getByRole('listitem').filter({ hasText: secondDsName })).toBeVisible();
+			await expect(
+				page.getByRole('listitem', { name: /Selected datasource/ }).first()
+			).toContainText(secondDsName);
 			await page.getByRole('button', { name: /Next/i }).click();
 
 			await expect(page.getByRole('heading', { name: /Choose Template/i })).toBeVisible();
 			await page.getByRole('button', { name: 'Data Quality Audit' }).click();
 			await expect(page.locator('main')).toContainText('Profile nulls, derive quality flags');
+			await expect(page.locator('main')).toContainText(
+				/view\s*→\s*filter\s*→\s*with_columns\s*→\s*groupby/
+			);
 			await page.getByRole('button', { name: /Next/i }).click();
 
 			await expect(page.getByRole('heading', { name: /Configure Outputs/i })).toBeVisible();
+			const outputSection = page.locator('section').filter({
+				has: page.getByRole('heading', { name: /Configure Outputs/i })
+			});
+			const firstOutput = outputSection.locator(':scope > div > div').first();
+			await firstOutput.getByLabel('Output name').fill('reviewed_output');
+			await firstOutput.getByLabel('Namespace').fill('reviewed_namespace');
+			await firstOutput.getByLabel('Table name').fill('reviewed_table');
+			await firstOutput.getByLabel('Build mode').selectOption('incremental');
+			await expect(firstOutput.getByLabel('Build mode')).toHaveValue('incremental');
 			await page.getByRole('button', { name: /Next/i }).click();
 
 			await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
+			await expect(page.locator('main')).toContainText('Sources: 2');
+			await expect(page.locator('main')).toContainText('Steps: 8');
+			await expect(page.locator('main')).toContainText('Complexity: High');
+			await expect(page.locator('main')).toContainText(secondDsName);
+			await expect(page.locator('main')).toContainText('view');
+			await expect(page.locator('main')).toContainText('reviewed_namespace.reviewed_table');
+			await expect(page.getByText('Validation passed.')).toBeVisible({ timeout: 5_000 });
 			await page.getByRole('button', { name: /Create Analysis/i }).click();
 
 			await expect(page).toHaveURL(
@@ -368,6 +412,72 @@ test.describe('Analyses – create wizard', () => {
 			);
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
+			await deleteDatasourceViaUI(page, firstDsName);
+			await deleteDatasourceViaUI(page, secondDsName);
+		}
+	});
+
+	test('JSON import remaps a missing datasource and reaches the editor', async ({
+		page,
+		request
+	}) => {
+		const suffix = uid();
+		const dsName = `e2e-import-ds-${suffix}`;
+		const analysisName = `E2E Import ${suffix}`;
+		await createDatasource(request, dsName);
+		try {
+			await gotoNewAnalysis(page);
+			await page.getByRole('button', { name: 'Import JSON' }).click();
+			await page.locator('#name').fill(analysisName);
+			await page.getByRole('button', { name: /Next/i }).click();
+
+			const importedResultId = crypto.randomUUID();
+			await page.locator('input[type="file"]').setInputFiles({
+				name: 'pipeline.json',
+				mimeType: 'application/json',
+				buffer: Buffer.from(
+					JSON.stringify({
+						tabs: [
+							{
+								id: 'import-tab',
+								name: 'Imported Source',
+								parent_id: null,
+								datasource: {
+									id: 'missing-source',
+									analysis_tab_id: null,
+									config: { branch: 'master' }
+								},
+								output: {
+									result_id: importedResultId,
+									datasource_type: 'iceberg',
+									format: 'parquet',
+									filename: 'imported_output',
+									build_mode: 'full',
+									iceberg: {
+										namespace: 'outputs',
+										table_name: 'imported_output',
+										branch: 'master'
+									}
+								},
+								steps: []
+							}
+						]
+					})
+				)
+			});
+			await expect(page.getByText('Loaded: pipeline.json')).toBeVisible();
+			await expect(page.getByText(/Remap missing datasource references/i)).toBeVisible();
+			await page.getByLabel('Remap missing-source').selectOption({ label: dsName });
+			await page.getByRole('button', { name: /Next/i }).click();
+			await expect(page.getByRole('heading', { name: /Review Import/i })).toBeVisible();
+			await expect(page.locator('main')).toContainText('Remapped datasources: 1');
+			await page.getByRole('button', { name: /Create Analysis/i }).click();
+			await expect(page).toHaveURL(
+				(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
+				{ timeout: 5_000 }
+			);
+		} finally {
+			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
