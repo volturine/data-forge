@@ -191,7 +191,8 @@
 	async function gotoCreatedDatasource(datasourceId: string) {
 		queryClient.invalidateQueries({ queryKey: ['datasources'] });
 		queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
-		await goto(resolve(`/datasources?created_id=${datasourceId}` as '/'), { invalidateAll: true });
+		// Select the created datasource via the list page's canonical `id` param.
+		await goto(resolve(`/datasources?id=${datasourceId}` as '/'), { invalidateAll: true });
 	}
 
 	async function handleFileUpload() {

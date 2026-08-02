@@ -8,6 +8,7 @@
 		toggleInternalPostgresTable,
 		type InternalPostgresTable
 	} from '$lib/api/datasource';
+	import { configStore } from '$lib/stores/config.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import { button, css } from '$lib/styles/panda';
 
@@ -176,6 +177,8 @@
 		result.match(
 			() => {
 				feedback = { type: 'success', message: 'System settings saved' };
+				// Re-fetch public config so shell controls (e.g. IndexedDB inspector) update live.
+				void configStore.refresh();
 			},
 			(err) => {
 				feedback = { type: 'error', message: err.message };
@@ -264,7 +267,7 @@
 				<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
 					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>IndexedDB Inspector</span>
 					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
-						Show cache debug button in header
+						Show the IndexedDB inspector control in the main content header
 					</span>
 				</div>
 				<button

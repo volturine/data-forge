@@ -83,12 +83,26 @@ interface DataSourceBase {
 	id: string;
 	name: string;
 	description: string | null;
+	/** List responses project this from schema_cache; detail may omit it. */
+	row_count?: number | null;
 	schema_cache?: Record<string, unknown> | null;
 	created_by_analysis_id?: string | null;
 	created_by: DataSourceCreatedBy;
 	is_hidden: boolean;
 	created_at: string;
 	output_of_tab_id?: string | null;
+}
+
+/** Prefer the list scalar, then full schema_cache (detail responses). */
+export function datasourceRowCount(datasource: DataSourceBase): number | null {
+	if (typeof datasource.row_count === 'number' && Number.isFinite(datasource.row_count)) {
+		return datasource.row_count;
+	}
+	const cached = datasource.schema_cache?.row_count;
+	if (typeof cached === 'number' && Number.isFinite(cached)) {
+		return cached;
+	}
+	return null;
 }
 
 export interface FileDataSource extends DataSourceBase {

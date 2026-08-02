@@ -30,6 +30,7 @@
 	import {
 		datasourceIsAnalysisOutput,
 		datasourceNeedsExternalIngest,
+		datasourceRowCount,
 		type DataSource
 	} from '$lib/types/datasource';
 	import {
@@ -205,8 +206,7 @@
 	});
 	const estimatedOutputSize = $derived.by(() => {
 		const rowCount = selectedDatasources.reduce((total, datasource) => {
-			const raw = datasource.schema_cache?.row_count;
-			return total + (typeof raw === 'number' ? raw : 0);
+			return total + (datasourceRowCount(datasource) ?? 0);
 		}, 0);
 		if (rowCount >= 1_000_000 || complexity.steps >= 10) return 'Large';
 		if (rowCount >= 100_000 || complexity.steps >= 5) return 'Medium';
@@ -806,6 +806,7 @@
 							bind:selected={selectedDatasourceIds}
 							mode="multi"
 							label="Available datasources"
+							alwaysOpen
 							onSelect={(id) => ensureDatasourceConfig(id)}
 							onDeselect={(id) => removeDatasourceConfig(id)}
 						/>
@@ -872,9 +873,8 @@
 									>
 										<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
 											Row count:
-											{typeof datasource.schema_cache?.row_count === 'number'
-												? datasource.schema_cache.row_count
-												: 'Unknown'}
+											{datasourceRowCount(datasource)?.toLocaleString() ??
+												'Unknown (not cached yet)'}
 										</div>
 										<div>
 											<SnapshotPicker

@@ -354,7 +354,7 @@ test.describe('Profile – System tab', () => {
 		await waitForProfileTab(page, 'System');
 
 		await expect(page.getByRole('heading', { name: 'Debug' })).toBeVisible();
-		await expect(page.getByText('IndexedDB Inspector')).toBeVisible();
+		await expect(page.getByText('IndexedDB Inspector', { exact: true })).toBeVisible();
 		await expect(page.getByRole('switch', { name: 'Toggle IndexedDB inspector' })).toBeVisible();
 
 		await screenshot(page, 'profile', 'system-tab');

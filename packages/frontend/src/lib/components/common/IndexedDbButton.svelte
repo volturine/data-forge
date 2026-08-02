@@ -109,8 +109,11 @@
 				_hover: { color: 'fg.primary' }
 			})}
 			onclick={toggle}
-			title="IndexedDB"
+			title="IndexedDB inspector"
+			aria-label="IndexedDB inspector"
+			aria-expanded={open}
 			type="button"
+			data-testid="indexeddb-inspector-button"
 		>
 			<Database size={16} />
 		</button>
@@ -129,6 +132,8 @@
 					borderWidth: '1',
 					backgroundColor: 'bg.primary'
 				})}
+				role="dialog"
+				aria-label="IndexedDB inspector"
 				use:overlayStack.action={overlayConfig}
 			>
 				<div

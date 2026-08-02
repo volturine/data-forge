@@ -180,6 +180,7 @@
 				})}
 				onclick={handleBack}
 				type="button"
+				aria-label="Back to UDFs"
 			>
 				<ArrowLeft size={18} />
 			</button>
