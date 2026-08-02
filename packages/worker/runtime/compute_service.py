@@ -8,7 +8,7 @@ import tempfile
 import time
 import uuid
 from collections import deque
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,8 +22,15 @@ from sqlalchemy.exc import IntegrityError
 
 from builds.build_live import ActiveBuild
 from dataforge_protocol import compute_pb2, enums_pb2
+from runtime.build_events import (
+    BuildCancelledError,
+    BuildEmitter,
+    BuildEventContext as _BuildEventBase,
+    build_event as _build_event,
+    emit_build_event as _emit_build_event,
+    emit_progress as _emit_progress,
+)
 from runtime.compute_manager import ProcessManager
-from runtime.compute_monitor import monitor_engine_resources
 from runtime.compute_utils import (
     apply_steps,
     await_engine_result,
@@ -36,20 +43,32 @@ from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
 from runtime.domain.datasource.source_types import DataSourceType
 from runtime.domain.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
-from runtime.domain.healthcheck_models import HealthCheckType
 from runtime.exceptions import (
     DataSourceSnapshotError,
     PipelineExecutionError,
     PipelineValidationError,
     datasource_not_found,
 )
+from runtime.healthchecks import (
+    HealthCheckResult as _HealthCheckEvalResult,
+    load_lazy_frame as _load_healthcheck_lazy,
+    persist_results as _persist_healthcheck_results,
+    resolve_build_status as _resolve_build_status,
+    run_healthchecks as _run_worker_healthchecks,
+)
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
-from runtime.internal_api import BuildJobLeaseLost, ClaimedBuildJob, HealthCheckSpec, client_from_env
+from runtime.internal_api import ClaimedBuildJob, HealthCheckSpec, client_from_env
 from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import extract_staged_deliveries, render_template, strip_staged_preview
 from runtime.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
+from runtime.resource_observation import (
+    observe_stream_task as _observe_stream_task,
+    resource_summary as _resource_summary,
+    stop_stream_task as _stop_stream_task,
+    stream_resource_events as _stream_resource_events,
+)
 from runtime.time import utc_now as _utcnow
 
 logger = logging.getLogger(__name__)
@@ -63,8 +82,6 @@ def _ensure_catalog_namespace(catalog, namespace: str) -> None:
 
 
 MAX_DOWNLOAD_BYTES: Final = 10 * 1024 * 1024
-
-BuildEmitter = Callable[[compute_schemas.BuildEvent], Awaitable[None]]
 
 
 def _secure_temp_path(suffix: str) -> str:
@@ -103,181 +120,12 @@ class _EngineRunFailureUpdateKwargs(TypedDict, total=False):
     current_step: str | None
 
 
-@dataclass(frozen=True)
-class _BuildEventBase:
-    build_id: str
-    analysis_id: str
-    emitted_at: datetime
-    current_kind: str | None
-    current_datasource_id: str | None
-    tab_id: str | None
-    tab_name: str | None
-    current_output_id: str | None
-    current_output_name: str | None
-    engine_run_id: str | None
-
-    @classmethod
-    def from_build(
-        cls,
-        build: ActiveBuild,
-        analysis_id: str,
-        *,
-        emitted_at: datetime | None = None,
-        current_kind: str | None = None,
-        current_datasource_id: str | None = None,
-        tab_id: str | None = None,
-        tab_name: str | None = None,
-        current_output_id: str | None = None,
-        current_output_name: str | None = None,
-        engine_run_id: str | None = None,
-    ) -> "_BuildEventBase":
-        return cls(
-            build_id=build.build_id,
-            analysis_id=analysis_id,
-            emitted_at=emitted_at or _utcnow(),
-            current_kind=current_kind if current_kind is not None else build.current_kind,
-            current_datasource_id=(current_datasource_id if current_datasource_id is not None else build.current_datasource_id),
-            tab_id=tab_id,
-            tab_name=tab_name,
-            current_output_id=current_output_id if current_output_id is not None else build.current_output_id,
-            current_output_name=current_output_name if current_output_name is not None else build.current_output_name,
-            engine_run_id=engine_run_id if engine_run_id is not None else build.current_engine_run_id,
-        )
-
-    def payload(self) -> dict[str, object]:
-        return {
-            "build_id": self.build_id,
-            "analysis_id": self.analysis_id,
-            "emitted_at": self.emitted_at,
-            "current_kind": self.current_kind,
-            "current_datasource_id": self.current_datasource_id,
-            "tab_id": self.tab_id,
-            "tab_name": self.tab_name,
-            "current_output_id": self.current_output_id,
-            "current_output_name": self.current_output_name,
-            "engine_run_id": self.engine_run_id,
-        }
-
-
-class BuildCancelledError(Exception):
-    def __init__(
-        self,
-        run_id: str,
-        *,
-        cancelled_at: str | None = None,
-        cancelled_by: str | None = None,
-    ) -> None:
-        super().__init__("Build cancelled")
-        self.run_id = run_id
-        self.cancelled_at = cancelled_at
-        self.cancelled_by = cancelled_by
-
-
-def _resource_summary(engine) -> dict[str, int | None]:
-    effective = engine.effective_resources if getattr(engine, "effective_resources", None) else {}
-    max_threads = effective.get("max_threads")
-    max_memory_mb = effective.get("max_memory_mb")
-    streaming_chunk_size = effective.get("streaming_chunk_size")
-    return {
-        "max_threads": int(max_threads) if isinstance(max_threads, int) else None,
-        "max_memory_mb": int(max_memory_mb) if isinstance(max_memory_mb, int) else None,
-        "streaming_chunk_size": int(streaming_chunk_size) if isinstance(streaming_chunk_size, int) else None,
-    }
-
-
 def _datasource_name(session: object | None, datasource_id: str | None) -> str | None:
     del session
     if not datasource_id:
         return None
     metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
     return metadata.name if metadata.found else None
-
-
-def _estimate_remaining(elapsed_ms: int, completed_steps: int, total_steps: int) -> int | None:
-    if completed_steps <= 0 or total_steps <= completed_steps:
-        return None
-    avg = elapsed_ms / completed_steps
-    remaining = max(total_steps - completed_steps, 0)
-    return int(avg * remaining)
-
-
-def _event_model(payload: dict[str, object]) -> compute_schemas.BuildEvent:
-    return compute_schemas.BuildEventAdapter.validate_python(payload)
-
-
-def _build_event(
-    build: ActiveBuild,
-    analysis_id: str,
-    payload: dict[str, object],
-) -> compute_schemas.BuildEvent:
-    return _event_model({**_BuildEventBase.from_build(build, analysis_id).payload(), **payload})
-
-
-async def _emit_build_event(
-    emitter: BuildEmitter | None,
-    *,
-    event: compute_schemas.BuildEvent,
-) -> None:
-    if emitter is None:
-        return
-    await emitter(event)
-
-
-async def _emit_progress(
-    emitter: BuildEmitter | None,
-    *,
-    build: ActiveBuild,
-    analysis_id: str,
-    progress: float,
-    elapsed_ms: int,
-    completed_steps: int,
-    total_steps: int,
-    current_step: str | None,
-    current_step_index: int | None,
-    tab_id: str | None,
-    tab_name: str | None,
-    current_output_id: str | None = None,
-    current_output_name: str | None = None,
-    engine_run_id: str | None = None,
-) -> None:
-    await _emit_build_event(
-        emitter,
-        event=_build_event(
-            build,
-            analysis_id,
-            {
-                "type": compute_schemas.BuildEventType.PROGRESS,
-                "progress": progress,
-                "elapsed_ms": elapsed_ms,
-                "estimated_remaining_ms": _estimate_remaining(elapsed_ms, completed_steps, total_steps),
-                "current_step": current_step,
-                "current_step_index": current_step_index,
-                "total_steps": total_steps,
-                "tab_id": tab_id,
-                "tab_name": tab_name,
-                "current_output_id": current_output_id,
-                "current_output_name": current_output_name,
-                "engine_run_id": engine_run_id,
-            },
-        ),
-    )
-
-
-@dataclass(frozen=True)
-class HealthCheckDetail:
-    name: str
-    passed: bool
-    message: str
-    critical: bool
-
-
-@dataclass(frozen=True)
-class _HealthCheckEvalResult:
-    healthcheck_id: str
-    passed: bool
-    message: str
-    details: dict[str, object]
-    checked_at: datetime
 
 
 @dataclass(frozen=True)
@@ -310,33 +158,6 @@ class _SyntheticBuildStage:
     started_at: float
     started: bool = False
     completed: bool = False
-
-
-def _resolve_build_status(
-    hc_results: Sequence[_HealthCheckEvalResult],
-    checks: Sequence[HealthCheckSpec] | None = None,
-) -> tuple[BuildStatus, str | None, list[HealthCheckDetail] | None]:
-    if not hc_results:
-        return BuildStatus.SUCCESS, None, None
-
-    name_map = {c.id: c.name for c in checks} if checks else {}
-    critical_map = {c.id: c.critical for c in checks} if checks else {}
-    total = len(hc_results)
-    failed = [r for r in hc_results if not r.passed]
-
-    if not failed:
-        return BuildStatus.SUCCESS, f"{total}/{total} passed", None
-
-    details = [
-        HealthCheckDetail(
-            name=name_map.get(r.healthcheck_id, r.healthcheck_id),
-            passed=r.passed,
-            message=r.message,
-            critical=critical_map.get(r.healthcheck_id, False),
-        )
-        for r in hc_results
-    ]
-    return BuildStatus.WARNING, f"{len(failed)}/{total} failed", details
 
 
 def _raise_engine_failure(
@@ -481,227 +302,6 @@ def _build_subscriber_message(context: BuildContext) -> str:
         return header[:max_len] + "\n…(truncated)"
     trimmed = hc_tail[:available]
     return f"{header}\nHealth check details:\n{trimmed}\n…(truncated)"
-
-
-_HC_SCANNERS: dict[str, Callable[[str], pl.LazyFrame]] = {
-    "parquet": pl.scan_parquet,
-    "csv": pl.scan_csv,
-    "ndjson": pl.scan_ndjson,
-}
-
-
-def _load_healthcheck_lazy(output_path: str, export_format: str) -> pl.LazyFrame | None:
-    if scanner := _HC_SCANNERS.get(export_format):
-        return scanner(output_path)
-    if export_format == "json":
-        return pl.read_json(output_path).lazy()
-    return None
-
-
-def _healthcheck_metric_alias(check: HealthCheckSpec, suffix: str) -> str:
-    if HealthCheckType.require(check.check_type) == HealthCheckType.ROW_COUNT and suffix == "count":
-        return "row_count__count"
-    return f"{check.id}__{suffix}"
-
-
-def _healthcheck_column_name(check: HealthCheckSpec) -> str | None:
-    value = check.config.get("column")
-    return value if isinstance(value, str) and value else None
-
-
-def _healthcheck_config_int(check: HealthCheckSpec, key: str) -> int | None:
-    value = check.config.get(key)
-    return int(cast(int | float | str, value)) if value is not None else None
-
-
-def _healthcheck_config_float(check: HealthCheckSpec, key: str) -> float | None:
-    value = check.config.get(key)
-    return float(cast(int | float | str, value)) if value is not None else None
-
-
-def _healthcheck_configured_columns(check: HealthCheckSpec, *, default: list[str]) -> list[str]:
-    values = check.config.get("columns")
-    if not isinstance(values, list):
-        return default
-    columns = [str(value) for value in values if str(value)]
-    return columns or default
-
-
-def _healthcheck_result_details(check: HealthCheckSpec, **actuals: object) -> dict[str, object]:
-    return {**check.config, **actuals}
-
-
-def _healthcheck_metric_value(check: HealthCheckSpec, values: dict[str, object], suffix: str) -> object:
-    return values[_healthcheck_metric_alias(check, suffix)]
-
-
-def _healthcheck_metric_int(check: HealthCheckSpec, values: dict[str, object], suffix: str) -> int:
-    return int(cast(int | float | str, _healthcheck_metric_value(check, values, suffix)))
-
-
-def _healthcheck_metric_float(check: HealthCheckSpec, values: dict[str, object], suffix: str) -> float:
-    return float(cast(int | float | str, _healthcheck_metric_value(check, values, suffix)))
-
-
-def _healthcheck_missing_column_result(check: HealthCheckSpec, *, now: datetime) -> _HealthCheckEvalResult:
-    column_name = _healthcheck_column_name(check) or ""
-    return _HealthCheckEvalResult(
-        healthcheck_id=check.id,
-        passed=False,
-        message=f'Column "{column_name}" not found in dataset',
-        details=_healthcheck_result_details(check, error="column_not_found"),
-        checked_at=now,
-    )
-
-
-def _evaluate_healthcheck(check: HealthCheckSpec, *, values: dict[str, object], schema_names: set[str]) -> tuple[bool, str, dict[str, object]]:
-    match HealthCheckType.require(check.check_type):
-        case HealthCheckType.ROW_COUNT:
-            count = _healthcheck_metric_int(check, values, "count")
-            min_rows = _healthcheck_config_int(check, "min_rows")
-            max_rows = _healthcheck_config_int(check, "max_rows")
-            passed = True
-            messages: list[str] = []
-            if min_rows is not None and count < min_rows:
-                passed = False
-                messages.append(f"Too few: {count} < {min_rows}")
-            if max_rows is not None and count > max_rows:
-                passed = False
-                messages.append(f"Too many: {count} > {max_rows}")
-            return passed, "; ".join(messages) if messages else f"Row count: {count}", _healthcheck_result_details(check, actual_count=count)
-        case HealthCheckType.COLUMN_COUNT:
-            count = len(schema_names)
-            min_cols = _healthcheck_config_int(check, "min_columns")
-            max_cols = _healthcheck_config_int(check, "max_columns")
-            passed = True
-            messages = []
-            if min_cols is not None and count < min_cols:
-                passed = False
-                messages.append(f"Too few: {count} < {min_cols}")
-            if max_cols is not None and count > max_cols:
-                passed = False
-                messages.append(f"Too many: {count} > {max_cols}")
-            return passed, "; ".join(messages) if messages else f"Column count: {count}", _healthcheck_result_details(check, actual_count=count)
-        case HealthCheckType.COLUMN_NULL | HealthCheckType.NULL_PERCENTAGE:
-            pct = _healthcheck_metric_float(check, values, "null_pct")
-            threshold = _healthcheck_config_float(check, "threshold") or 0.0
-            return pct <= threshold, f"Nulls: {pct:.1f}% (threshold: {threshold}%)", _healthcheck_result_details(check, actual_percentage=round(pct, 2))
-        case HealthCheckType.COLUMN_UNIQUE:
-            unique = _healthcheck_metric_int(check, values, "unique")
-            expected = _healthcheck_config_int(check, "expected_unique")
-            if expected is None:
-                return True, f"Unique values: {unique}", _healthcheck_result_details(check, actual_unique=unique)
-            return unique == expected, f"Unique: {unique} (expected: {expected})", _healthcheck_result_details(check, actual_unique=unique)
-        case HealthCheckType.COLUMN_RANGE:
-            col_min = _healthcheck_metric_value(check, values, "min")
-            col_max = _healthcheck_metric_value(check, values, "max")
-            col_min_number = float(cast(int | float | str, col_min))
-            col_max_number = float(cast(int | float | str, col_max))
-            min_value = _healthcheck_config_float(check, "min")
-            max_value = _healthcheck_config_float(check, "max")
-            passed = True
-            messages = []
-            if min_value is not None and col_min_number < min_value:
-                passed = False
-                messages.append(f"Min {col_min!r} < {min_value}")
-            if max_value is not None and col_max_number > max_value:
-                passed = False
-                messages.append(f"Max {col_max!r} > {max_value}")
-            return (
-                passed,
-                "; ".join(messages) if messages else f"Range: [{col_min!r}, {col_max!r}]",
-                _healthcheck_result_details(check, actual_min=col_min, actual_max=col_max),
-            )
-        case HealthCheckType.DUPLICATE_PERCENTAGE:
-            total = _healthcheck_metric_int(check, values, "rows")
-            unique = _healthcheck_metric_int(check, values, "unique_rows")
-            threshold = _healthcheck_config_float(check, "threshold") or 0.0
-            pct = 0.0 if total == 0 else (1 - unique / total) * 100.0
-            return pct <= threshold, f"Duplicates: {pct:.1f}% (threshold: {threshold}%)", _healthcheck_result_details(check, actual_percentage=round(pct, 2))
-    raise ValueError(f"Unsupported healthcheck type: {check.check_type!r}")
-
-
-def _build_healthcheck_expressions(checks: list[HealthCheckSpec], schema_names: set[str]) -> tuple[list[pl.Expr], list[HealthCheckSpec]]:
-    exprs: list[pl.Expr] = []
-    valid: list[HealthCheckSpec] = []
-    sorted_names = sorted(schema_names)
-    row_count_added = False
-    for check in checks:
-        check_type = HealthCheckType.require(check.check_type)
-        column_name = _healthcheck_column_name(check)
-        match check_type:
-            case HealthCheckType.ROW_COUNT:
-                valid.append(check)
-                if not row_count_added:
-                    exprs.append(pl.len().alias(_healthcheck_metric_alias(check, "count")))
-                    row_count_added = True
-            case HealthCheckType.COLUMN_NULL:
-                if column_name is not None and column_name in schema_names:
-                    pct = pl.col(column_name).null_count().cast(pl.Float64) / pl.len().cast(pl.Float64) * 100.0
-                    exprs.append(pct.alias(_healthcheck_metric_alias(check, "null_pct")))
-                    valid.append(check)
-            case HealthCheckType.COLUMN_UNIQUE:
-                if column_name is not None and column_name in schema_names:
-                    exprs.append(pl.col(column_name).n_unique().alias(_healthcheck_metric_alias(check, "unique")))
-                    valid.append(check)
-            case HealthCheckType.COLUMN_RANGE:
-                if column_name is not None and column_name in schema_names:
-                    exprs.append(pl.col(column_name).min().alias(_healthcheck_metric_alias(check, "min")))
-                    exprs.append(pl.col(column_name).max().alias(_healthcheck_metric_alias(check, "max")))
-                    valid.append(check)
-            case HealthCheckType.COLUMN_COUNT:
-                valid.append(check)
-            case HealthCheckType.NULL_PERCENTAGE:
-                threshold = float(cast(int | float | str, check.config.get("threshold", 0)))
-                if threshold >= 0:
-                    if not sorted_names:
-                        exprs.append(pl.lit(0.0).alias(_healthcheck_metric_alias(check, "null_pct")))
-                    else:
-                        nulls = sum(pl.col(name).null_count().cast(pl.Float64) for name in sorted_names)
-                        total = pl.len().cast(pl.Float64) * float(len(sorted_names))
-                        exprs.append((nulls / total * 100.0).fill_nan(0.0).alias(_healthcheck_metric_alias(check, "null_pct")))
-                    valid.append(check)
-            case HealthCheckType.DUPLICATE_PERCENTAGE:
-                columns = _healthcheck_configured_columns(check, default=sorted_names)
-                if not any(column not in schema_names for column in columns):
-                    exprs.append(pl.len().alias(_healthcheck_metric_alias(check, "rows")))
-                    exprs.append(pl.struct(columns).n_unique().alias(_healthcheck_metric_alias(check, "unique_rows")))
-                    valid.append(check)
-    return exprs, valid
-
-
-def _run_worker_healthchecks(checks: list[HealthCheckSpec], lf: pl.LazyFrame) -> list[_HealthCheckEvalResult]:
-    if not checks:
-        return []
-    now = datetime.now(UTC)
-    schema_names = set(lf.collect_schema().names())
-    exprs, valid_checks = _build_healthcheck_expressions(checks, schema_names)
-    valid_ids = {check.id for check in valid_checks}
-    results = [_healthcheck_missing_column_result(check, now=now) for check in checks if check.id not in valid_ids]
-    collected = lf.select(exprs).collect() if exprs else None
-    values = dict(collected.row(0, named=True)) if collected is not None and collected.height > 0 else {}
-    for check in valid_checks:
-        passed, message, details = _evaluate_healthcheck(check, values=values, schema_names=schema_names)
-        results.append(_HealthCheckEvalResult(check.id, passed, message, details, now))
-    return results
-
-
-def _persist_healthcheck_results(results: list[_HealthCheckEvalResult]) -> None:
-    if not results:
-        return
-    client_from_env().record_healthcheck_results(
-        namespace=get_namespace(),
-        results=[
-            {
-                "healthcheck_id": result.healthcheck_id,
-                "passed": result.passed,
-                "message": result.message,
-                "details": result.details,
-                "checked_at": result.checked_at.isoformat(),
-            }
-            for result in results
-        ],
-    )
 
 
 def _prepare_pipeline_notifications(
@@ -3086,42 +2686,6 @@ async def _stream_engine_events(
             return
 
 
-async def _stream_resource_events(
-    *,
-    build: ActiveBuild,
-    analysis_id: str,
-    engine,
-    emitter: BuildEmitter | None,
-    tab_id: str | None,
-    tab_name: str | None,
-) -> None:
-    async for resource in monitor_engine_resources(engine):
-        await _emit_build_event(
-            emitter,
-            event=_build_event(
-                build,
-                analysis_id,
-                {
-                    "type": "resources",
-                    "tab_id": tab_id,
-                    "tab_name": tab_name,
-                    **resource,
-                },
-            ),
-        )
-
-
-def _observe_stream_task(task: asyncio.Task) -> None:
-    if task.cancelled():
-        return
-    error = task.exception()
-    if error is not None and not isinstance(error, BuildJobLeaseLost):
-        logger.error(
-            "Build event stream stopped after its owner exited",
-            exc_info=(type(error), error, error.__traceback__),
-        )
-
-
 def _schedule_stream_tasks(
     loop: asyncio.AbstractEventLoop,
     *,
@@ -3248,14 +2812,6 @@ def _start_stream_tasks(
             exc,
         )
         return None, None
-
-
-async def _stop_stream_task(task: asyncio.Task | None) -> None:
-    if task is None:
-        return
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        _ = await task
 
 
 async def _prewarm_build_engine(manager: ProcessManager, *, build_id: str) -> None:

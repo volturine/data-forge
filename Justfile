@@ -212,6 +212,22 @@ test-backend-raw:
 test-frontend-raw:
     cd packages/frontend && bun run test:unit
 
+test-runtime-stability repeats='3':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for run in $(seq 1 {{repeats}}); do
+        echo "Runtime stability pass ${run}/{{repeats}}"
+        cd packages/backend
+        {{pytest}} \
+            tests/test_build_jobs_service.py \
+            tests/test_compute_requests_service.py \
+            tests/test_scheduler_service.py::TestScheduleClaiming::test_concurrent_schedulers_claim_due_schedule_once \
+            tests/test_transitions.py \
+            tests/integration/test_postgres_runtime_integration.py::test_postgres_outbox_claim_recovers_after_dispatcher_process_crash \
+            tests/integration/test_postgres_runtime_integration.py::test_postgres_runtime_roles_restart_after_forced_process_exit
+        cd ../..
+    done
+
 test-e2e:
     #!/usr/bin/env bash
     set -euo pipefail

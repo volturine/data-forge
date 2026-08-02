@@ -6,14 +6,11 @@ import {
 } from '$lib/api/compute';
 import { ReconnectionManager } from './reconnection-manager';
 import { SvelteSet } from 'svelte/reactivity';
+import { engineIdentityKey } from '$lib/representations/engine';
 
 const RECONNECT_DELAY_MS = 1_000;
 
 export type EnginesConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
-
-function engineIdentityKey(engine: EngineStatusResponse): string {
-	return `${engine.scope ?? 'analysis_interactive'}:${engine.resource_id}`;
-}
 
 export class EnginesStore {
 	engines = $state.raw<EngineStatusResponse[]>([]);

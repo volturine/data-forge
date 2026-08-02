@@ -38,9 +38,20 @@
 	import type { MCPTool } from '$lib/api/mcp';
 	import { stopGeneration as stopChatGeneration } from '$lib/api/chat';
 	import type { ChatUiPatchEvent } from '$lib/api/chat';
+	import { ChatPanelLayout } from '$lib/chat/panel-layout.svelte';
+	import {
+		formatDuration,
+		formatTokens,
+		methodColor,
+		outputHint,
+		resultSummary,
+		timelineDateSeparator,
+		timelineEntriesAreGrouped,
+		toolDisplayName
+	} from '$lib/chat/presentation';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { renderMarkdown, timeAgo } from '$lib/utils/markdown';
-	import { formatEpoch, isSameLocalDay, isYesterday, nowEpochMs } from '$lib/utils/temporal';
+	import { nowEpochMs } from '$lib/utils/temporal';
 
 	const queryClient = useQueryClient();
 
@@ -57,16 +68,11 @@
 	let copiedId = $state<string | null>(null);
 	let userScrolledUp = $state(false);
 	let inputEl = $state<HTMLTextAreaElement | undefined>();
-	let maximized = $state(false);
+	const layout = new ChatPanelLayout();
 	const anyPanelOpen = $derived(configOpen || toolsOpen || sessionsOpen);
 	let modelPickerOpen = $state(false);
 	let modelPickerSearch = $state('');
-	let panelHeight = $state(500);
-	let panelWidth = $state(420);
-	let expandedHeight = $state(
-		typeof window !== 'undefined' ? Math.round(window.innerHeight * 0.95) : 800
-	);
-	let isResizing = $state(false);
+	if (typeof window !== 'undefined') layout.restore();
 
 	async function stopGeneration() {
 		if (chatStore.sessionId) {
@@ -82,67 +88,15 @@
 	}
 
 	function isGrouped(idx: number): boolean {
-		if (idx === 0) return false;
-		const cur = chatStore.timeline[idx];
-		const prev = chatStore.timeline[idx - 1];
-		if (cur.kind !== 'message' || prev.kind !== 'message') return false;
-		return cur.item.role === prev.item.role && cur.item.role !== 'tool';
+		return timelineEntriesAreGrouped(chatStore.timeline, idx);
 	}
 
 	function dateSeparator(idx: number): string | null {
-		const entry = chatStore.timeline[idx];
-		const ts = entry.kind === 'message' ? entry.item.ts : 0;
-		if (!ts) return null;
-		for (let i = idx - 1; i >= 0; i--) {
-			const prev = chatStore.timeline[i];
-			const prevTs = prev.kind === 'message' ? prev.item.ts : 0;
-			if (prevTs) {
-				return isSameLocalDay(ts, prevTs) ? null : formatDateLabel(ts);
-			}
-		}
-		return idx === 0 ? formatDateLabel(ts) : null;
-	}
-
-	function formatDateLabel(ts: number): string {
-		const now = nowEpochMs();
-		if (isSameLocalDay(ts, now)) return 'Today';
-		if (isYesterday(ts, now)) return 'Yesterday';
-		return formatEpoch(ts, { weekday: 'short', month: 'short', day: 'numeric' });
-	}
-
-	/** Extract a human-readable name from a tool_id like "post_analysis" → "Create Analysis" */
-	function toolDisplayName(toolId: string, method: string): string {
-		const verbMap: Record<string, string> = {
-			GET: 'Get',
-			POST: 'Create',
-			PUT: 'Update',
-			PATCH: 'Update',
-			DELETE: 'Delete'
-		};
-		const verb = verbMap[method] ?? method;
-		const name = toolId
-			.replace(/^(get|post|put|patch|delete)_/i, '')
-			.replace(/_/g, ' ')
-			.replace(/\b\w/g, (c) => c.toUpperCase());
-		return `${verb} ${name}`;
-	}
-
-	/** Format a result status for compact display */
-	function resultSummary(result: unknown): string {
-		if (!result || typeof result !== 'object') return '';
-		const r = result as { ok?: boolean; status?: number; body?: unknown };
-		if (r.ok === false) return `Error ${r.status ?? ''}`;
-		if (r.ok === true) return `OK ${r.status ?? 200}`;
-		return '';
+		return timelineDateSeparator(chatStore.timeline, idx);
 	}
 
 	function findTool(toolId: string): MCPTool | undefined {
 		return chatStore.tools.find((t) => t.id === toolId);
-	}
-
-	function outputHint(tool: MCPTool | undefined): string | null {
-		if (!tool?.output_schema) return null;
-		return tool.output_schema.hint ?? null;
 	}
 
 	const EXAMPLE_PROMPTS = [
@@ -296,11 +250,6 @@
 				: 'Disconnected'
 	);
 
-	function formatDuration(ms: number): string {
-		if (ms < 1000) return `${ms}ms`;
-		return `${(ms / 1000).toFixed(1)}s`;
-	}
-
 	/** Reactive elapsed timer — ticks every second while a tool is running. */
 	let elapsedTick = $state(nowEpochMs());
 	$effect(() => {
@@ -345,100 +294,6 @@
 		if (modelPickerOpen && chatStore.models.length === 0) {
 			void chatStore.loadModels();
 		}
-	}
-
-	const PANEL_HEIGHT_KEY = 'chat_panel_height';
-	const PANEL_WIDTH_KEY = 'chat_panel_width';
-	const EXPANDED_HEIGHT_KEY = 'chat_expanded_height';
-
-	// Restore persisted panel dimensions
-	if (typeof window !== 'undefined') {
-		const stored = localStorage.getItem(PANEL_HEIGHT_KEY);
-		if (stored) panelHeight = Math.max(300, Number(stored));
-		const storedW = localStorage.getItem(PANEL_WIDTH_KEY);
-		if (storedW) panelWidth = Math.max(320, Number(storedW));
-		const storedExpanded = localStorage.getItem(EXPANDED_HEIGHT_KEY);
-		if (storedExpanded) expandedHeight = Math.max(400, Number(storedExpanded));
-	}
-
-	const activeHeight = $derived(maximized ? expandedHeight : panelHeight);
-
-	function persistDimensions() {
-		localStorage.setItem(maximized ? EXPANDED_HEIGHT_KEY : PANEL_HEIGHT_KEY, String(activeHeight));
-		localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth));
-	}
-
-	function startResize(e: PointerEvent) {
-		e.preventDefault();
-		isResizing = true;
-		const startY = e.clientY;
-		const startH = activeHeight;
-		const minH = maximized ? 400 : 300;
-		function onMove(ev: PointerEvent) {
-			const delta = startY - ev.clientY;
-			const clamped = Math.max(minH, Math.min(window.innerHeight * 0.95, startH + delta));
-			if (maximized) {
-				expandedHeight = clamped;
-			} else {
-				panelHeight = clamped;
-			}
-		}
-		function onUp() {
-			isResizing = false;
-			window.removeEventListener('pointermove', onMove);
-			window.removeEventListener('pointerup', onUp);
-			persistDimensions();
-		}
-		window.addEventListener('pointermove', onMove);
-		window.addEventListener('pointerup', onUp);
-	}
-
-	function startResizeWidth(e: PointerEvent) {
-		e.preventDefault();
-		isResizing = true;
-		const startX = e.clientX;
-		const startW = panelWidth;
-		function onMove(ev: PointerEvent) {
-			panelWidth = Math.max(320, Math.min(window.innerWidth * 0.9, startW + (startX - ev.clientX)));
-		}
-		function onUp() {
-			isResizing = false;
-			window.removeEventListener('pointermove', onMove);
-			window.removeEventListener('pointerup', onUp);
-			persistDimensions();
-		}
-		window.addEventListener('pointermove', onMove);
-		window.addEventListener('pointerup', onUp);
-	}
-
-	function startResizeCorner(e: PointerEvent) {
-		e.preventDefault();
-		isResizing = true;
-		const startX = e.clientX;
-		const startY = e.clientY;
-		const startW = panelWidth;
-		const startH = activeHeight;
-		const minH = maximized ? 400 : 300;
-		function onMove(ev: PointerEvent) {
-			panelWidth = Math.max(320, Math.min(window.innerWidth * 0.9, startW + (startX - ev.clientX)));
-			const dh = Math.max(
-				minH,
-				Math.min(window.innerHeight * 0.95, startH + (startY - ev.clientY))
-			);
-			if (maximized) {
-				expandedHeight = dh;
-			} else {
-				panelHeight = dh;
-			}
-		}
-		function onUp() {
-			isResizing = false;
-			window.removeEventListener('pointermove', onMove);
-			window.removeEventListener('pointerup', onUp);
-			persistDimensions();
-		}
-		window.addEventListener('pointermove', onMove);
-		window.addEventListener('pointerup', onUp);
 	}
 
 	const tagEntries = $derived(
@@ -561,19 +416,6 @@
 		}, 2000);
 	}
 
-	function methodColor(method: string): string {
-		if (method === 'GET') return 'fg.success';
-		if (method === 'DELETE') return 'fg.error';
-		if (method === 'POST') return 'fg.primary';
-		return 'fg.warning';
-	}
-
-	function formatTokens(n: number): string {
-		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-		if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-		return String(n);
-	}
-
 	const lastPromptTokens = $derived(chatStore.lastTurnUsage?.prompt_tokens ?? 0);
 	const contextPct = $derived(
 		chatStore.contextLimit > 0
@@ -622,11 +464,11 @@
 			borderTopRadius: 'lg',
 			boxShadow: 'lg',
 			zIndex: 'overlay',
-			userSelect: isResizing ? 'none' : 'auto',
+			userSelect: layout.isResizing ? 'none' : 'auto',
 			overflow: 'hidden'
 		})}
-		style:width="{panelWidth}px"
-		style:height="{activeHeight}px"
+		style:width="{layout.panelWidth}px"
+		style:height="{layout.activeHeight}px"
 		use:overlayStack.action={chatOverlayConfig}
 	>
 		<!-- Corner resize handle (top-left) -->
@@ -644,7 +486,7 @@
 				borderTopLeftRadius: 'lg',
 				touchAction: 'none'
 			})}
-			onpointerdown={startResizeCorner}
+			onpointerdown={(event) => layout.startCornerResize(event)}
 		></div>
 
 		<!-- Left edge resize handle -->
@@ -663,7 +505,7 @@
 				touchAction: 'none',
 				_hover: { backgroundColor: 'border.primary' }
 			})}
-			onpointerdown={startResizeWidth}
+			onpointerdown={(event) => layout.startWidthResize(event)}
 		></div>
 
 		<!-- Top edge resize handle -->
@@ -688,7 +530,7 @@
 				},
 				_hover: { backgroundColor: 'border.primary' }
 			})}
-			onpointerdown={startResize}
+			onpointerdown={(event) => layout.startHeightResize(event)}
 		></div>
 
 		<!-- Header -->
@@ -844,11 +686,11 @@
 					</button>
 					<button
 						class={iconButton()}
-						onclick={() => (maximized = !maximized)}
-						title={maximized ? 'Minimize' : 'Expand'}
-						aria-label={maximized ? 'Minimize' : 'Expand'}
+						onclick={() => (layout.maximized = !layout.maximized)}
+						title={layout.maximized ? 'Minimize' : 'Expand'}
+						aria-label={layout.maximized ? 'Minimize' : 'Expand'}
 					>
-						{#if maximized}<Minimize2 size={13} />{:else}<Maximize2 size={13} />{/if}
+						{#if layout.maximized}<Minimize2 size={13} />{:else}<Maximize2 size={13} />{/if}
 					</button>
 					<button
 						class={iconButton()}
@@ -881,7 +723,7 @@
 					gap: '2',
 					minHeight: '0',
 					overflowY: 'auto',
-					...(maximized ? { flexShrink: '1', maxHeight: '55vh' } : { flex: '1' })
+					...(layout.maximized ? { flexShrink: '1', maxHeight: '55vh' } : { flex: '1' })
 				})}
 			>
 				<div>
@@ -1078,7 +920,7 @@
 					flexDirection: 'column',
 					minHeight: '0',
 					overflowY: 'auto',
-					...(maximized ? { flexShrink: '1', maxHeight: '55vh' } : { flex: '1' })
+					...(layout.maximized ? { flexShrink: '1', maxHeight: '55vh' } : { flex: '1' })
 				})}
 			>
 				<div
@@ -1274,7 +1116,7 @@
 					gap: '2',
 					minHeight: '0',
 					overflowY: 'auto',
-					...(maximized ? { flexShrink: '1', maxHeight: '55vh' } : { flex: '1' })
+					...(layout.maximized ? { flexShrink: '1', maxHeight: '55vh' } : { flex: '1' })
 				})}
 			>
 				<div
@@ -1392,7 +1234,7 @@
 			</div>
 		{/if}
 
-		{#if maximized || !anyPanelOpen}
+		{#if layout.maximized || !anyPanelOpen}
 			<!-- Messages area -->
 			<div
 				class={css({

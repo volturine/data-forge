@@ -4,10 +4,12 @@ from datetime import datetime
 
 from sqlmodel import Session, select
 
+from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.exceptions import datasource_not_found
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
+from backend_core.transactions import committed
 
 
 def get_datasource(session: Session, datasource_id: str) -> DataSource | None:
@@ -44,3 +46,13 @@ def list_pending_deletes(session: Session) -> list[DataSource]:
         .order_by(sa(DataSource.delete_requested_at), sa(DataSource.created_at), sa(DataSource.id))
     )
     return list(session.execute(stmt).scalars().all())
+
+
+@committed
+def finalize_delete(session: Session, datasource_id: str) -> bool:
+    datasource = get_datasource(session, datasource_id)
+    if datasource is None:
+        return False
+    cleanup_datasource_storage(datasource)
+    session.delete(datasource)
+    return True

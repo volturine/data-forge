@@ -31,6 +31,7 @@ from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.engine_runs.models import EngineRun
 from backend_core.sqlmodel_typing import col, sa
+from backend_core.transactions import committed
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,7 @@ def _latest_completed_step_name(result_json: dict[str, Any]) -> str | None:
     return step_name if isinstance(step_name, str) else None
 
 
-def cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str | None) -> compute_schemas.CancelBuildResponse:
+def stage_cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str | None) -> compute_schemas.CancelBuildResponse:
     table = EngineRun.metadata.tables[EngineRun.__tablename__]
     run = session.execute(select(EngineRun).where(table.c.id == run_id).where(table.c.namespace == get_namespace()).with_for_update()).scalars().first()
     if run is None:
@@ -194,7 +195,7 @@ def cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str | None
 
     created_at = run.created_at if run.created_at.tzinfo is not None else run.created_at.replace(tzinfo=UTC)
     duration_ms = max(int((now - created_at).total_seconds() * 1000), 0)
-    update_engine_run(
+    stage_update_engine_run(
         session,
         run_id,
         status=EngineRunStatus.CANCELLED,
@@ -210,6 +211,9 @@ def cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str | None
     return compute_schemas.CancelBuildResponse(
         id=run_id, build_id=None, engine_run_id=run_id, status='cancelled', duration_ms=duration_ms, cancelled_at=now, cancelled_by=cancelled_by
     )
+
+
+cancel_engine_run = committed(stage_cancel_engine_run)
 
 
 def _serialize_run(run: EngineRun) -> EngineRunResponseSchema:
@@ -234,7 +238,7 @@ def get_engine_run(session: Session, run_id: str) -> EngineRunResponseSchema | N
     return _serialize_run(run)
 
 
-def create_engine_run(session: Session, payload: EngineRunPayload) -> EngineRunResponseSchema:
+def stage_create_engine_run(session: Session, payload: EngineRunPayload) -> EngineRunResponseSchema:
     result_json = payload.result_json.copy() if isinstance(payload.result_json, dict) else None
     if payload.execution_entries:
         result_json = result_json or {}
@@ -260,12 +264,14 @@ def create_engine_run(session: Session, payload: EngineRunPayload) -> EngineRunR
         triggered_by=payload.triggered_by,
     )
     session.add(run)
-    session.commit()
-    session.refresh(run)
+    session.flush()
     return _serialize_run(run)
 
 
-def update_engine_run(
+create_engine_run = committed(stage_create_engine_run)
+
+
+def stage_update_engine_run(
     session: Session,
     run_id: str,
     *,
@@ -342,9 +348,11 @@ def update_engine_run(
         run.result_json = next_result_json
 
     session.add(run)
-    session.commit()
-    session.refresh(run)
+    session.flush()
     return _serialize_run(run)
+
+
+update_engine_run = committed(stage_update_engine_run)
 
 
 def create_engine_run_payload(

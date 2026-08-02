@@ -29,6 +29,7 @@ from backend_core.namespace import list_namespaces
 from backend_core.smtp import send_smtp_message
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import naive_utc_now as _utcnow
+from backend_core.transactions import committed
 from modules.auth.models import (
     AuthProvider,
     AuthProviderName,
@@ -159,6 +160,10 @@ def _get_password_provider(session: Session, user_id: str) -> AuthProvider | Non
     return session.exec(stmt).first()
 
 
+def get_password_provider(session: Session, user_id: str) -> AuthProvider | None:
+    return _get_password_provider(session, user_id)
+
+
 def _build_default_provider_metadata(password: str) -> dict[str, str]:
     return {
         'managed_by': _DEFAULT_USER_MARKER,
@@ -174,7 +179,7 @@ def get_default_user(session: Session) -> User | None:
     return get_user_by_id(session, _DEFAULT_USER_ID)
 
 
-def ensure_default_user(session: Session) -> User:
+def stage_ensure_default_user(session: Session) -> User:
     _acquire_default_user_lock(session)
     return _ensure_default_user_locked(session)
 
@@ -214,8 +219,7 @@ def _ensure_default_user_locked(session: Session) -> User:
                 created_at=now,
             ),
         )
-        session.commit()
-        session.refresh(user)
+        session.flush()
         return user
 
     if user.display_name != desired_name:
@@ -278,14 +282,16 @@ def _ensure_default_user_locked(session: Session) -> User:
 
     user.updated_at = now
     session.add(user)
-    session.commit()
+    session.flush()
     if password_changed:
-        revoke_all_sessions(session, user.id)
-    session.refresh(user)
+        stage_revoke_all_sessions(session, user.id)
     return user
 
 
-def create_user(
+ensure_default_user = committed(stage_ensure_default_user, refresh=True)
+
+
+def stage_create_user(
     session: Session,
     email: str,
     password: str,
@@ -320,9 +326,11 @@ def create_user(
         created_at=now,
     )
     session.add(provider)
-    session.commit()
-    session.refresh(user)
+    session.flush()
     return user
+
+
+create_user = committed(stage_create_user, refresh=True)
 
 
 def get_user_by_email(session: Session, email: str) -> User | None:
@@ -341,7 +349,7 @@ def get_user_providers(session: Session, user_id: str) -> list[AuthProviderName]
     return [AuthProviderName(provider.provider) for provider in providers]
 
 
-def delete_user_account(session: Session, user_id: str) -> None:
+def stage_delete_user_account(session: Session, user_id: str) -> None:
     user = get_user_by_id(session, user_id)
     if not user:
         raise InvalidCredentialsError()
@@ -352,10 +360,12 @@ def delete_user_account(session: Session, user_id: str) -> None:
     _clear_owned_resources_in_namespaces(user_id)
 
     session.delete(user)
-    session.commit()
 
 
-def update_profile(
+delete_user_account = committed(stage_delete_user_account)
+
+
+def stage_update_profile(
     session: Session,
     user_id: str,
     display_name: str | None,
@@ -373,12 +383,14 @@ def update_profile(
         user.preferences = preferences
     user.updated_at = _utcnow()
     session.add(user)
-    session.commit()
-    session.refresh(user)
+    session.flush()
     return user
 
 
-def change_password(session: Session, user_id: str, current_password: str, new_password: str) -> None:
+update_profile = committed(stage_update_profile, refresh=True)
+
+
+def stage_change_password(session: Session, user_id: str, current_password: str, new_password: str) -> None:
     validate_password(new_password)
     stmt = select(AuthProvider).where(sa(AuthProvider.user_id == user_id), sa(AuthProvider.provider == _PASSWORD_PROVIDER))
     provider = session.exec(stmt).first()
@@ -398,10 +410,12 @@ def change_password(session: Session, user_id: str, current_password: str, new_p
     user.updated_at = _utcnow()
     session.add(provider)
     session.add(user)
-    session.commit()
 
 
-def create_session(session: Session, user_id: str, device_info: str | None, ip_address: str | None) -> UserSession:
+change_password = committed(stage_change_password)
+
+
+def stage_create_session(session: Session, user_id: str, device_info: str | None, ip_address: str | None) -> UserSession:
     now = _utcnow()
     expires_at = now + timedelta(days=auth_settings.session_max_age_days)
     user_session = UserSession(
@@ -414,12 +428,14 @@ def create_session(session: Session, user_id: str, device_info: str | None, ip_a
         revoked=False,
     )
     session.add(user_session)
-    session.commit()
-    session.refresh(user_session)
+    session.flush()
     return user_session
 
 
-def validate_session(session: Session, session_id: str) -> User | None:
+create_session = committed(stage_create_session, refresh=True)
+
+
+def stage_validate_session(session: Session, session_id: str) -> User | None:
     user_session = session.get(UserSession, session_id)
     if not user_session:
         return None
@@ -429,7 +445,7 @@ def validate_session(session: Session, session_id: str) -> User | None:
     if _naive_utc(user_session.expires_at) <= now:
         user_session.revoked = True
         session.add(user_session)
-        session.commit()
+        session.flush()
         return None
     user = get_user_by_id(session, user_session.user_id)
     if not user:
@@ -439,12 +455,14 @@ def validate_session(session: Session, session_id: str) -> User | None:
     user.last_login_at = now
     user.updated_at = now
     session.add(user)
-    session.commit()
-    session.refresh(user)
+    session.flush()
     return user
 
 
-def revoke_session(session: Session, session_id: str) -> None:
+validate_session = committed(stage_validate_session, refresh=True)
+
+
+def stage_revoke_session(session: Session, session_id: str) -> None:
     user_session = session.get(UserSession, session_id)
     if not user_session:
         return
@@ -452,10 +470,12 @@ def revoke_session(session: Session, session_id: str) -> None:
         return
     user_session.revoked = True
     session.add(user_session)
-    session.commit()
 
 
-def revoke_all_sessions(session: Session, user_id: str) -> None:
+revoke_session = committed(stage_revoke_session)
+
+
+def stage_revoke_all_sessions(session: Session, user_id: str) -> None:
     stmt = select(UserSession).where(sa(UserSession.user_id == user_id), col(UserSession.revoked).is_(False))
     sessions = session.exec(stmt).all()
     if not sessions:
@@ -463,10 +483,12 @@ def revoke_all_sessions(session: Session, user_id: str) -> None:
     for item in sessions:
         item.revoked = True
         session.add(item)
-    session.commit()
 
 
-def link_provider(
+revoke_all_sessions = committed(stage_revoke_all_sessions)
+
+
+def stage_link_provider(
     session: Session,
     user_id: str,
     provider: AuthProviderName,
@@ -493,12 +515,14 @@ def link_provider(
         created_at=now,
     )
     session.add(linked)
-    session.commit()
-    session.refresh(linked)
+    session.flush()
     return linked
 
 
-def find_or_create_oauth_user(
+link_provider = committed(stage_link_provider, refresh=True)
+
+
+def stage_find_or_create_oauth_user(
     session: Session,
     provider: AuthProviderName,
     provider_subject: str,
@@ -521,7 +545,7 @@ def find_or_create_oauth_user(
         return user
     matched_email = get_user_by_email(session, normalized_email)
     if matched_email:
-        link_provider(
+        stage_link_provider(
             session=session,
             user_id=matched_email.id,
             provider=provider_name,
@@ -534,8 +558,7 @@ def find_or_create_oauth_user(
             matched_email.display_name = display_name
         matched_email.updated_at = _utcnow()
         session.add(matched_email)
-        session.commit()
-        session.refresh(matched_email)
+        session.flush()
         return matched_email
     now = _utcnow()
     user = User(
@@ -561,12 +584,14 @@ def find_or_create_oauth_user(
         created_at=now,
     )
     session.add(provider_row)
-    session.commit()
-    session.refresh(user)
+    session.flush()
     return user
 
 
-def unlink_provider(session: Session, user_id: str, provider: AuthProviderName) -> None:
+find_or_create_oauth_user = committed(stage_find_or_create_oauth_user, refresh=True)
+
+
+def stage_unlink_provider(session: Session, user_id: str, provider: AuthProviderName) -> None:
     provider_name = AuthProviderName.require(provider)
     providers_stmt = select(AuthProvider).where(sa(AuthProvider.user_id == user_id))
     providers = session.exec(providers_stmt).all()
@@ -585,10 +610,12 @@ def unlink_provider(session: Session, user_id: str, provider: AuthProviderName) 
     user.has_password = has_password_provider
     user.updated_at = _utcnow()
     session.add(user)
-    session.commit()
 
 
-def create_verification_token(
+unlink_provider = committed(stage_unlink_provider)
+
+
+def stage_create_verification_token(
     session: Session,
     user_id: str,
     token_type: VerificationTokenType,
@@ -607,11 +634,14 @@ def create_verification_token(
         used=False,
     )
     session.add(token)
-    session.commit()
+    session.flush()
     return raw
 
 
-def validate_verification_token(session: Session, token: str, token_type: VerificationTokenType) -> str:
+create_verification_token = committed(stage_create_verification_token)
+
+
+def stage_validate_verification_token(session: Session, token: str, token_type: VerificationTokenType) -> str:
     token_type_value = VerificationTokenType.require(token_type)
     stmt = select(VerificationToken).where(
         sa(VerificationToken.token == token),
@@ -627,8 +657,11 @@ def validate_verification_token(session: Session, token: str, token_type: Verifi
         raise TokenExpiredError()
     row.used = True
     session.add(row)
-    session.commit()
+    session.flush()
     return row.user_id
+
+
+validate_verification_token = committed(stage_validate_verification_token)
 
 
 async def send_verification_email(user_email: str, token: str) -> bool:
@@ -663,12 +696,12 @@ async def send_verification_email(user_email: str, token: str) -> bool:
     return True
 
 
-async def resend_verification(session: Session, user_id: str) -> bool:
+def stage_prepare_resend_verification(session: Session, user_id: str) -> tuple[str, str] | None:
     user = get_user_by_id(session, user_id)
     if not user:
         raise InvalidCredentialsError()
     if user.email_verified:
-        return False
+        return None
 
     stmt = select(VerificationToken).where(
         sa(VerificationToken.user_id == user_id),
@@ -682,15 +715,29 @@ async def resend_verification(session: Session, user_id: str) -> bool:
         if created_at + timedelta(minutes=_RESEND_COOLDOWN_MINUTES) > now:
             raise ValueError('Verification email was sent recently. Please wait before requesting again')
 
-    token = create_verification_token(session, user_id=user_id, token_type=_EMAIL_VERIFY)
-    return await send_verification_email(user.email, token)
+    token = stage_create_verification_token(session, user_id=user_id, token_type=_EMAIL_VERIFY)
+    return user.email, token
 
 
-def create_password_reset_token(session: Session, email: str) -> str | None:
+prepare_resend_verification = committed(stage_prepare_resend_verification)
+
+
+async def resend_verification(session: Session, user_id: str) -> bool:
+    delivery = prepare_resend_verification(session, user_id)
+    if delivery is None:
+        return False
+    email, token = delivery
+    return await send_verification_email(email, token)
+
+
+def stage_create_password_reset_token(session: Session, email: str) -> str | None:
     user = get_user_by_email(session, email)
     if not user:
         return None
-    return create_verification_token(session, user_id=user.id, token_type=_PASSWORD_RESET, ttl_hours=1)
+    return stage_create_verification_token(session, user_id=user.id, token_type=_PASSWORD_RESET, ttl_hours=1)
+
+
+create_password_reset_token = committed(stage_create_password_reset_token)
 
 
 async def send_password_reset_email(user_email: str, token: str) -> bool:
@@ -722,7 +769,7 @@ async def send_password_reset_email(user_email: str, token: str) -> bool:
     return True
 
 
-def reset_password(session: Session, token: str, new_password: str) -> None:
+def stage_reset_password(session: Session, token: str, new_password: str) -> None:
     validate_password(new_password)
     stmt = select(VerificationToken).where(
         sa(VerificationToken.token == token),
@@ -761,5 +808,7 @@ def reset_password(session: Session, token: str, new_password: str) -> None:
     row.used = True
     session.add(user)
     session.add(row)
-    revoke_all_sessions(session, user.id)
-    session.commit()
+    stage_revoke_all_sessions(session, user.id)
+
+
+reset_password = committed(stage_reset_password)

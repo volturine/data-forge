@@ -240,9 +240,13 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
     try:
         while not local_stop.is_set():
             _reap_dead_children(children)
-            await asyncio.to_thread(client.dispatch_runtime_outbox)
-
-            queued = await asyncio.to_thread(client.queued_build_job_count)
+            try:
+                await asyncio.to_thread(client.dispatch_runtime_outbox)
+                queued = await asyncio.to_thread(client.queued_build_job_count)
+            except Exception as exc:
+                logger.info("Backend temporarily unavailable to build manager; retrying: %s", exc)
+                await asyncio.sleep(min(settings.runtime_reconciliation_poll_interval_seconds, 1.0))
+                continue
             desired = min(
                 settings.build_worker_max_processes,
                 max(settings.build_worker_min_processes, queued),

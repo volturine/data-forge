@@ -270,6 +270,14 @@ def upgrade() -> None:
     op.create_index('ix_runtime_outbox_events_available_at', 'runtime_outbox_events', ['available_at'])
     op.create_index('ix_runtime_outbox_events_lease_expires_at', 'runtime_outbox_events', ['lease_expires_at'])
     op.create_table(
+        'notification_delivery_receipts',
+        sa.Column('event_id', sa.String(), nullable=False),
+        sa.Column('kind', sa.String(), nullable=False),
+        sa.Column('delivered_at', sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(['event_id'], ['runtime_outbox_events.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('event_id'),
+    )
+    op.create_table(
         'healthchecks',
         sa.Column('id', sa.String(), nullable=False),
         sa.Column('datasource_id', sa.String(), nullable=False),
@@ -383,6 +391,7 @@ def downgrade() -> None:
     op.drop_table('healthcheck_results')
     op.drop_index('ix_healthchecks_datasource_id', table_name='healthchecks')
     op.drop_table('healthchecks')
+    op.drop_table('notification_delivery_receipts')
     op.drop_index('ix_runtime_outbox_events_lease_expires_at', table_name='runtime_outbox_events')
     op.drop_index('ix_runtime_outbox_events_available_at', table_name='runtime_outbox_events')
     op.drop_index('ix_runtime_outbox_events_status', table_name='runtime_outbox_events')

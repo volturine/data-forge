@@ -10,11 +10,13 @@ from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_loc
 from backend_core.config import settings
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.lease_observability import record_lease_transition
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
 from backend_core.transactions import committed
+from backend_core.transitions import TransitionOutcome, TransitionResult, applied, rejected
 
 
 def _database_now(session: Session) -> datetime:
@@ -120,6 +122,16 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
     job = session.get(BuildJob, row.id)
     if job is None:
         return None
+    record_lease_transition(
+        kind='build_job',
+        transition='reclaim' if previous_owner is not None else 'claim',
+        outcome=TransitionOutcome.APPLIED,
+        entity_id=job.id,
+        owner_id=worker_id,
+        claim_token=claim_token,
+        generation=job.lease_generation,
+        attempt=job.attempts,
+    )
     return job
 
 
@@ -138,6 +150,10 @@ def stage_exhausted_jobs(session: Session) -> list[str]:
         return []
     build_ids: list[str] = []
     for row in rows:
+        owner_id = row.lease_owner or 'unowned'
+        claim_token = row.claim_token or ''
+        generation = row.lease_generation
+        attempt = row.attempts
         build_ids.append(row.build_id)
         row.status = BuildJobStatus.FAILED
         row.last_error = 'Build job lease expired after maximum attempts'
@@ -155,6 +171,16 @@ def stage_exhausted_jobs(session: Session) -> list[str]:
                 updated_at=now,
             )
         )
+        record_lease_transition(
+            kind='build_job',
+            transition='exhaust',
+            outcome=TransitionOutcome.APPLIED,
+            entity_id=row.id,
+            owner_id=owner_id,
+            claim_token=claim_token,
+            generation=generation,
+            attempt=attempt,
+        )
     session.flush()
     return build_ids
 
@@ -162,7 +188,7 @@ def stage_exhausted_jobs(session: Session) -> list[str]:
 expire_exhausted_jobs = committed(stage_exhausted_jobs)
 
 
-def renew_job_lease(session: Session, job_id: str, *, worker_id: str, claim_token: str, lease_generation: int) -> BuildJob | None:
+def renew_job_lease(session: Session, job_id: str, *, worker_id: str, claim_token: str, lease_generation: int) -> TransitionResult[BuildJob]:
     now = _database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     statement = (
@@ -181,9 +207,33 @@ def renew_job_lease(session: Session, job_id: str, *, worker_id: str, claim_toke
     )
     result = cast(CursorResult[Any], session.execute(statement))
     if result.rowcount != 1:
-        return None
+        session.rollback()
+        outcome = TransitionOutcome.NOT_FOUND if session.get(BuildJob, job_id) is None else TransitionOutcome.LEASE_LOST
+        record_lease_transition(
+            kind='build_job',
+            transition='renew',
+            outcome=outcome,
+            entity_id=job_id,
+            owner_id=worker_id,
+            claim_token=claim_token,
+            generation=lease_generation,
+        )
+        return rejected(outcome)
     session.commit()
-    return session.get(BuildJob, job_id)
+    job = session.get(BuildJob, job_id)
+    if job is None:
+        raise RuntimeError(f'Renewed build job {job_id} disappeared after commit')
+    record_lease_transition(
+        kind='build_job',
+        transition='renew',
+        outcome=TransitionOutcome.APPLIED,
+        entity_id=job_id,
+        owner_id=worker_id,
+        claim_token=claim_token,
+        generation=lease_generation,
+        attempt=job.attempts,
+    )
+    return applied(job)
 
 
 def lock_active_job_claim(

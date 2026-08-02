@@ -14,12 +14,14 @@ from protovalidate import ValidationError, Validator
 from sqlalchemy import select
 
 from backend_core import (
+    build_commands,
     build_event_service,
     build_jobs_service as build_job_service,
     build_runs_service as build_run_service,
     compute_requests_service,
     datasource_delete_service,
     engine_instances_service as engine_instance_service,
+    engine_run_commands,
     engine_runs_service as engine_run_service,
     runtime_ipc,
     runtime_outbox_service,
@@ -28,8 +30,6 @@ from backend_core import (
 from backend_core.ai_clients import get_ai_client
 from backend_core.config import settings
 from backend_core.database import get_db, run_db, run_settings_db
-from backend_core.datasource_storage import cleanup_datasource_storage
-from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute.base import EngineStatusInfo
@@ -38,8 +38,6 @@ from backend_core.domain.compute_requests.models import (
     datasource_result_from_payload,
     kind_from_proto,
 )
-from backend_core.domain.datasource.models import DataSourceCreatedBy
-from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
 from backend_core.json_utils import copy_json_object
@@ -63,24 +61,14 @@ from dataforge_protocol import (
     worker_runtime_pb2,
     worker_runtime_pb2_grpc,
 )
-from modules.datasource import publication_service as datasource_publication_service
+from modules.datasource import commands as datasource_commands, publication_service as datasource_publication_service
 from modules.datasource.schemas import SchemaInfo
-from modules.scheduler import service as scheduler_service
+from modules.healthcheck import commands as healthcheck_commands
+from modules.scheduler import commands as scheduler_commands, service as scheduler_service
 
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = 'x-internal-token'
 _BUILD_JOB_PROTOCOL_VERSION = 2
-
-
-def _build_job_terminal_outcome(run_status: BuildRunStatus | str, error_message: str | None) -> tuple[BuildJobStatus, str | None] | None:
-    status = BuildRunStatus.require(run_status)
-    if status == BuildRunStatus.CANCELLED:
-        return BuildJobStatus.CANCELLED, None
-    if status == BuildRunStatus.COMPLETED:
-        return BuildJobStatus.COMPLETED, None
-    if status in {BuildRunStatus.FAILED, BuildRunStatus.ORPHANED}:
-        return BuildJobStatus.FAILED, error_message
-    return None
 
 
 def dict_to_struct(payload: dict[str, object] | None) -> struct_pb2.Struct:
@@ -546,14 +534,6 @@ def _count(value: int) -> worker_runtime_pb2.CountResponse:
     return worker_runtime_pb2.CountResponse(count=value)
 
 
-def _reconcile_expired_build_jobs(session: Any) -> int:
-    build_ids = build_job_service.stage_exhausted_jobs(session)
-    for build_id in build_ids:
-        scheduler_service.apply_schedule_run_reconciliation(session, build_id=build_id)
-    session.commit()
-    return len(build_ids)
-
-
 def _bool(value: bool) -> worker_runtime_pb2.BoolResponse:
     return worker_runtime_pb2.BoolResponse(value=value)
 
@@ -614,7 +594,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         for namespace in run_settings_db(list_runtime_namespaces):
             token = set_namespace_context(namespace)
             try:
-                run_db(_reconcile_expired_build_jobs)
+                run_db(scheduler_commands.reconcile_expired_build_jobs)
                 job = run_db(build_job_service.claim_next_job, worker_id=request.worker_id, reclaimable_owner_ids=reclaimable_owner_ids)
             finally:
                 reset_namespace(token)
@@ -641,7 +621,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     ) -> worker_runtime_pb2.WorkerRenewBuildJobLeaseResponse:
         token = set_namespace_context(request.namespace)
         try:
-            job = run_db(
+            renewal = run_db(
                 build_job_service.renew_job_lease,
                 request.job_id,
                 worker_id=request.worker_id,
@@ -651,11 +631,11 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         finally:
             reset_namespace(token)
         response = worker_runtime_pb2.WorkerRenewBuildJobLeaseResponse(
-            renewed=job is not None,
-            lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds if job is not None else None,
+            renewed=renewal.applied,
+            lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds if renewal.applied else None,
         )
-        if job is not None and job.lease_expires_at is not None:
-            response.lease_expires_at.CopyFrom(datetime_to_timestamp(job.lease_expires_at))
+        if renewal.value is not None and renewal.value.lease_expires_at is not None:
+            response.lease_expires_at.CopyFrom(datetime_to_timestamp(renewal.value.lease_expires_at))
         return response
 
     @_run_async_handler_in_thread
@@ -700,7 +680,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     ) -> worker_runtime_pb2.WorkerRenewComputeRequestLeaseResponse:
         token = set_namespace_context(request.namespace)
         try:
-            compute_request = run_db(
+            renewal = run_db(
                 compute_requests_service.renew_request_lease,
                 request.request_id,
                 worker_id=request.worker_id,
@@ -710,11 +690,11 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         finally:
             reset_namespace(token)
         response = worker_runtime_pb2.WorkerRenewComputeRequestLeaseResponse(
-            renewed=compute_request is not None,
-            lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds if compute_request is not None else None,
+            renewed=renewal.applied,
+            lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds if renewal.applied else None,
         )
-        if compute_request is not None and compute_request.lease_expires_at is not None:
-            response.lease_expires_at.CopyFrom(datetime_to_timestamp(compute_request.lease_expires_at))
+        if renewal.value is not None and renewal.value.lease_expires_at is not None:
+            response.lease_expires_at.CopyFrom(datetime_to_timestamp(renewal.value.lease_expires_at))
         return response
 
     @_run_async_handler_in_thread
@@ -1013,48 +993,19 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             if any(request.HasField(field) for field in claim_fields) != all(request.HasField(field) for field in claim_fields):
                 raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Output publication claim fields must be provided together')
             if claimed_publication:
-                claim = build_job_service.lock_active_job_claim(
-                    session,
-                    request.job_id,
+                if not request.HasField('build_result'):
+                    raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Claimed output publication requires a build result')
+                publication_claim = datasource_commands.OutputPublicationClaim(
+                    job_id=request.job_id,
                     build_id=request.build_id,
                     worker_id=request.worker_id,
                     claim_token=request.claim_token,
                     lease_generation=request.lease_generation,
+                    build_result=struct_to_dict(request.build_result),
                 )
-                if claim is None:
-                    raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Build job lease is no longer active')
-            config = struct_to_dict(request.config)
-            schema_cache = _schema_info_payload(request.schema_info)
-            existing = session.get(DataSource, request.result_id)
-            if existing is not None:
-                existing.name = request.name
-                existing.source_type = proto_value_to_enum_name(enums_pb2.DataSourceType, 'DATA_SOURCE_TYPE', request.source_type)
-                existing.config = config
-                if not request.keep_schema_cache:
-                    existing.schema_cache = schema_cache
-                existing.created_by_analysis_id = _optional_str(request, 'analysis_id')
-                existing.created_by = DataSourceCreatedBy.ANALYSIS.value
-                if request.HasField('is_hidden'):
-                    existing.is_hidden = request.is_hidden
-                session.add(existing)
-                datasource = existing
             else:
-                datasource = DataSource(
-                    id=request.result_id,
-                    name=request.name,
-                    source_type=proto_value_to_enum_name(enums_pb2.DataSourceType, 'DATA_SOURCE_TYPE', request.source_type),
-                    config=config,
-                    schema_cache=schema_cache,
-                    created_by_analysis_id=_optional_str(request, 'analysis_id'),
-                    created_by=DataSourceCreatedBy.ANALYSIS.value,
-                    is_hidden=request.is_hidden if request.HasField('is_hidden') else True,
-                    created_at=datetime.now(UTC),
-                )
-                session.add(datasource)
-            if claimed_publication:
-                if not request.HasField('build_result'):
-                    raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Claimed output publication requires a build result')
-                build_run_service.update_build_result_json(session, request.build_id, struct_to_dict(request.build_result))
+                publication_claim = None
+            notification_deliveries: list[dict[str, object]] = []
             for delivery in request.notification_delivery:
                 delivery_kind = delivery.WhichOneof('delivery')
                 if delivery_kind == 'email':
@@ -1079,9 +1030,23 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                         grpc.StatusCode.INVALID_ARGUMENT,
                         'Notification delivery command is missing its delivery payload',
                     )
-                runtime_outbox_service.enqueue_notification_delivery(session, payload)
-            session.commit()
-            session.refresh(datasource)
+                notification_deliveries.append(payload)
+            try:
+                datasource = datasource_commands.upsert_output_datasource(
+                    session,
+                    result_id=request.result_id,
+                    name=request.name,
+                    source_type=proto_value_to_enum_name(enums_pb2.DataSourceType, 'DATA_SOURCE_TYPE', request.source_type),
+                    config=struct_to_dict(request.config),
+                    schema_cache=_schema_info_payload(request.schema_info),
+                    keep_schema_cache=request.keep_schema_cache,
+                    analysis_id=_optional_str(request, 'analysis_id'),
+                    is_hidden=request.is_hidden if request.HasField('is_hidden') else None,
+                    claim=publication_claim,
+                    notification_deliveries=notification_deliveries,
+                )
+            except datasource_commands.OutputPublicationClaimLost as exc:
+                raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, str(exc)) from exc
             return worker_runtime_pb2.WorkerUpsertOutputDatasourceResponse(
                 datasource_id=datasource.id,
                 datasource_name=datasource.name,
@@ -1127,8 +1092,9 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session_gen = get_db()
         session = next(session_gen)
         try:
-            for result in request.results:
-                session.add(
+            count = healthcheck_commands.record_results(
+                session,
+                (
                     HealthCheckResult(
                         id=str(uuid.uuid4()),
                         healthcheck_id=result.healthcheck_id,
@@ -1137,9 +1103,10 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                         details=struct_to_dict(result.details),
                         checked_at=timestamp_to_datetime(result.checked_at),
                     )
-                )
-            session.commit()
-            return _count(len(request.results))
+                    for result in request.results
+                ),
+            )
+            return _count(count)
         finally:
             session.close()
             session_gen.close()
@@ -1152,7 +1119,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         token = set_namespace_context(request.namespace)
         try:
             run = run_db(
-                engine_run_service.create_engine_run,
+                engine_run_commands.create_engine_run,
                 engine_run_service.create_engine_run_payload(
                     analysis_id=_optional_str(request, 'analysis_id'),
                     datasource_id=request.datasource_id,
@@ -1183,7 +1150,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         kwargs = _engine_run_update_kwargs(request.update, merge_result=request.merge_result)
         token = set_namespace_context(request.namespace)
         try:
-            run = run_db(lambda session: engine_run_service.update_engine_run(session, request.run_id, **kwargs))
+            run = run_db(lambda session: engine_run_commands.update_engine_run(session, request.run_id, **kwargs))
             return _id(run.id)
         finally:
             reset_namespace(token)
@@ -1214,77 +1181,23 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
 
     @_run_async_handler_in_thread
     async def FailBuildJob(self, request: worker_runtime_pb2.WorkerFailBuildJobRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.BoolResponse:
-        def _fail(session: Any) -> tuple[object, str, int | None] | None:
-            claim = build_job_service.lock_active_job_claim(
-                session,
-                request.job_id,
-                build_id=request.build_id,
-                worker_id=request.worker_id,
-                claim_token=request.claim_token,
-                lease_generation=request.lease_generation,
-            )
-            if claim is None:
-                return None
-            run = build_run_service.get_build_run(session, request.build_id)
-            if run is None:
-                return None
-            latest_sequence: int | None = None
-            outcome = _build_job_terminal_outcome(run.status, run.error_message)
-            if outcome is None:
-                failed_event = compute_schemas.BuildFailedEvent(
-                    build_id=run.id,
-                    analysis_id=run.analysis_id,
-                    emitted_at=datetime.now(UTC),
-                    current_kind=EngineRunKind.parse(run.current_kind) if run.current_kind is not None else None,
-                    current_datasource_id=run.current_datasource_id,
-                    tab_id=run.current_tab_id,
-                    tab_name=run.current_tab_name,
-                    current_output_id=run.current_output_id,
-                    current_output_name=run.current_output_name,
-                    engine_run_id=run.current_engine_run_id,
-                    progress=run.progress,
-                    elapsed_ms=run.elapsed_ms,
-                    total_steps=run.total_steps,
-                    tabs_built=0,
-                    results=[],
-                    duration_ms=run.elapsed_ms,
-                    error=request.error,
-                )
-                event_row = build_run_service.stage_build_event(
-                    session,
-                    build_id=request.build_id,
-                    event=failed_event,
-                    expected_execution_generation=request.lease_generation,
-                )
-                if event_row is None:
-                    return None
-                latest_sequence = event_row.sequence
-                outcome = (BuildJobStatus.FAILED, request.error)
-            status, error = outcome
-            result = build_job_service.finish_claimed_job(
-                session,
-                request.job_id,
-                worker_id=request.worker_id,
-                build_id=request.build_id,
-                claim_token=request.claim_token,
-                lease_generation=request.lease_generation,
-                status=status,
-                error=error,
-            )
-            if result is None:
-                return None
-            scheduler_service.apply_schedule_run_reconciliation(session, build_id=request.build_id)
-            session.commit()
-            session.refresh(result)
-            return result, run.namespace, latest_sequence
-
         token = set_namespace_context(request.namespace)
         try:
-            result = run_db(_fail)
+            result = run_db(
+                build_commands.fail_build_job,
+                build_commands.BuildClaimCommand(
+                    job_id=request.job_id,
+                    build_id=request.build_id,
+                    worker_id=request.worker_id,
+                    claim_token=request.claim_token,
+                    lease_generation=request.lease_generation,
+                ),
+                error=request.error,
+            )
         finally:
             reset_namespace(token)
-        if result is not None and result[2] is not None:
-            await build_event_service.publish_build_notification(result[1], request.build_id, latest_sequence=result[2])
+        if result is not None and result.latest_sequence is not None:
+            await build_event_service.publish_build_notification(result.namespace, request.build_id, latest_sequence=result.latest_sequence)
         return _bool(result is not None)
 
     @_run_async_handler_in_thread
@@ -1292,44 +1205,18 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         self, request: worker_runtime_pb2.WorkerFinalizeBuildJobRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.BoolResponse:
 
-        def _finalize(session: Any) -> Any:
-            claim = build_job_service.lock_active_job_claim(
-                session,
-                request.job_id,
-                build_id=request.build_id,
-                worker_id=request.worker_id,
-                claim_token=request.claim_token,
-                lease_generation=request.lease_generation,
-            )
-            if claim is None:
-                return None
-            run = build_run_service.get_build_run(session, request.build_id)
-            if run is None:
-                return None
-            outcome = _build_job_terminal_outcome(run.status, run.error_message)
-            if outcome is None:
-                return None
-            status, error = outcome
-            result = build_job_service.finish_claimed_job(
-                session,
-                request.job_id,
-                worker_id=request.worker_id,
-                build_id=request.build_id,
-                claim_token=request.claim_token,
-                lease_generation=request.lease_generation,
-                status=status,
-                error=error,
-            )
-            if result is None:
-                return None
-            scheduler_service.apply_schedule_run_reconciliation(session, build_id=request.build_id)
-            session.commit()
-            session.refresh(result)
-            return result
-
         token = set_namespace_context(request.namespace)
         try:
-            result = run_db(_finalize)
+            result = run_db(
+                build_commands.finalize_build_job,
+                build_commands.BuildClaimCommand(
+                    job_id=request.job_id,
+                    build_id=request.build_id,
+                    worker_id=request.worker_id,
+                    claim_token=request.claim_token,
+                    lease_generation=request.lease_generation,
+                ),
+            )
         finally:
             reset_namespace(token)
         return _bool(result is not None)
@@ -1351,7 +1238,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         for namespace in run_settings_db(list_runtime_namespaces):
             token = set_namespace_context(namespace)
             try:
-                run_db(_reconcile_expired_build_jobs)
+                run_db(scheduler_commands.reconcile_expired_build_jobs)
                 count += run_db(build_job_service.queued_job_count)
             finally:
                 reset_namespace(token)
@@ -1503,13 +1390,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session_gen = get_db()
         session = next(session_gen)
         try:
-            datasource = datasource_delete_service.get_datasource(session, request.datasource_id)
-            if datasource is None:
-                return worker_runtime_pb2.WorkerFinalizeDatasourceDeleteResponse(deleted=False)
-            cleanup_datasource_storage(datasource)
-            session.delete(datasource)
-            session.commit()
-            return worker_runtime_pb2.WorkerFinalizeDatasourceDeleteResponse(deleted=True)
+            deleted = datasource_delete_service.finalize_delete(session, request.datasource_id)
+            return worker_runtime_pb2.WorkerFinalizeDatasourceDeleteResponse(deleted=deleted)
         finally:
             session.close()
             session_gen.close()
@@ -1528,13 +1410,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             return _bool(False)
         token = set_namespace_context(request.namespace)
         try:
-
-            def _enqueue_email(session: Any, payload: dict[str, object]) -> None:
-                runtime_outbox_service.enqueue_notification_delivery(session, payload)
-                session.commit()
-
             run_db(
-                _enqueue_email,
+                runtime_outbox_service.enqueue_notification_delivery_command,
                 {
                     'kind': EMAIL_DELIVERY_KIND,
                     'to': request.to,
@@ -1564,12 +1441,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             if request.HasField('bot_token'):
                 payload['bot_token'] = request.bot_token
 
-            def _enqueue_telegram(session: Any, delivery: dict[str, object]) -> None:
-                runtime_outbox_service.enqueue_notification_delivery(session, delivery)
-                session.commit()
-
             run_db(
-                _enqueue_telegram,
+                runtime_outbox_service.enqueue_notification_delivery_command,
                 payload,
             )
         finally:

@@ -4,7 +4,24 @@
 	import { css } from '$lib/styles/panda';
 	import { downloadBlob } from '$lib/api/compute';
 	import { formatEpoch, parsePlainDateTime } from '$lib/utils/temporal';
-	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+	import {
+		datumKey,
+		groupOrder,
+		numberValue,
+		pointKey,
+		stackRows,
+		stringValue,
+		type ChartRow,
+		type StackRow
+	} from '$lib/charts/preparation';
+	import {
+		isolateSeries as isolateSeriesState,
+		selectionOpacity as selectedOpacity,
+		toggleSelection as toggleSelectionState,
+		toggleSeries as toggleSeriesState
+	} from '$lib/charts/interaction';
+	import { observeChart, type ChartRenderer } from '$lib/charts/render-lifecycle';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	type ChartType =
 		| 'bar'
@@ -16,7 +33,7 @@
 		| 'histogram'
 		| 'scatter'
 		| 'boxplot';
-	type Row = Record<string, unknown>;
+	type Row = ChartRow;
 
 	interface Props {
 		data: Row[];
@@ -93,16 +110,8 @@
 	}
 
 	/* ── Primitive helpers ── */
-	function num(v: unknown): number {
-		if (typeof v === 'number') return v;
-		if (typeof v === 'string') return Number(v) || 0;
-		return 0;
-	}
-
-	function str(v: unknown): string {
-		if (v == null) return '';
-		return String(v);
-	}
+	const num = numberValue;
+	const str = stringValue;
 
 	const CHAR_WIDTH = 6;
 	const TITLE_PAD = 14;
@@ -384,58 +393,23 @@
 	}
 
 	function getGroupOrder(rows: Row[], groupKey: string): string[] {
-		const groups = [...new Set(rows.map((r) => str(r[groupKey])))];
-		const mode = getGroupSortBy();
-		if (!mode) return groups;
-		const order = getGroupSortOrder();
-		if (mode === 'name') {
-			return [...groups].sort((a, b) =>
-				order === 'asc' ? a.localeCompare(b) : b.localeCompare(a)
-			);
-		}
-		if (mode === 'value') {
-			const sums = new SvelteMap<string, number>();
-			for (const row of rows) {
-				const key = str(row[groupKey]);
-				const next = (sums.get(key) ?? 0) + num(row.y);
-				sums.set(key, next);
-			}
-			return [...groups].sort((a, b) => {
-				const aVal = sums.get(a) ?? 0;
-				const bVal = sums.get(b) ?? 0;
-				if (order === 'asc') return aVal - bVal;
-				return bVal - aVal;
-			});
-		}
-		const col = str(config.group_sort_column);
-		if (!col) return groups;
-		const values = new SvelteMap<string, string>();
-		for (const row of rows) {
-			const key = str(row[groupKey]);
-			if (values.has(key)) continue;
-			values.set(key, str(row[col]));
-		}
-		return [...groups].sort((a, b) => {
-			const aVal = values.get(a) ?? '';
-			const bVal = values.get(b) ?? '';
-			const cmp = aVal.localeCompare(bVal);
-			if (order === 'asc') return cmp;
-			return -cmp;
+		return groupOrder(rows, groupKey, {
+			mode: getGroupSortBy(),
+			order: getGroupSortOrder(),
+			customColumn: str(config.group_sort_column)
 		});
 	}
 
 	function makeKey(group: string, label: string): string {
-		return `${group}::${label}`;
+		return datumKey(group, label);
 	}
 
 	function makePointKey(group: string, label: string, value: number): string {
-		return `${group}::${label}::${value}`;
+		return pointKey(group, label, value);
 	}
 
 	function selectionOpacity(key: string): number {
-		if (selectedKeys.size === 0) return 1;
-		if (selectedKeys.has(key)) return 1;
-		return HOVER_DIM;
+		return selectedOpacity(selectedKeys, key, HOVER_DIM);
 	}
 
 	function isSeriesVisible(series: string): boolean {
@@ -475,31 +449,15 @@
 	}
 
 	function toggleSelection(key: string, multi: boolean) {
-		if (!multi) selectedKeys.clear();
-		if (selectedKeys.has(key)) {
-			selectedKeys.delete(key);
-			return;
-		}
-		selectedKeys.add(key);
+		toggleSelectionState(selectedKeys, key, multi);
 	}
 
 	function toggleSeries(series: string) {
-		if (hiddenSeries.has(series)) {
-			hiddenSeries.delete(series);
-			return;
-		}
-		hiddenSeries.add(series);
+		toggleSeriesState(hiddenSeries, series);
 	}
 
 	function isolateSeries(series: string, all: string[]) {
-		const next = new SvelteSet<string>();
-		for (const item of all) {
-			if (item !== series) next.add(item);
-		}
-		hiddenSeries.clear();
-		for (const item of next) {
-			hiddenSeries.add(item);
-		}
+		isolateSeriesState(hiddenSeries, series, all);
 	}
 
 	function applyZoom(
@@ -517,27 +475,7 @@
 	}
 
 	function buildStackRows(labels: string[], groups: string[], groupCol: string) {
-		const rows = new SvelteMap<string, StackRow>();
-		for (const label of labels) {
-			const row = { x: label } as StackRow;
-			for (const group of groups) {
-				row[group] = 0;
-			}
-			rows.set(label, row);
-		}
-
-		for (const item of data) {
-			const label = str(item.x);
-			const group = str(item[groupCol]);
-			const row = rows.get(label);
-			if (!row) continue;
-			row[group] = (row[group] ?? 0) + num(item.y);
-		}
-
-		const ordered = labels.map((label) => rows.get(label) ?? ({ x: label } as StackRow));
-		const totals = ordered.map((row) => groups.reduce((sum, group) => sum + (row[group] ?? 0), 0));
-
-		return { rows: ordered, totals };
+		return stackRows(data, labels, groups, groupCol);
 	}
 
 	/* ── Tooltip ── */
@@ -567,8 +505,6 @@
 	type Svg = d3.Selection<SVGGElement, unknown, null, undefined>;
 	type RootSvg = d3.Selection<SVGSVGElement, unknown, null, undefined>;
 	type AxisScale = d3.ScaleLinear<number, number> | d3.ScaleLogarithmic<number, number>;
-	type StackRow = { x: string } & Record<string, number>;
-
 	function getOptionalNumber(value: unknown): number | null {
 		if (value == null) return null;
 		const parsed = Number(value);
@@ -1113,63 +1049,21 @@
 	// DOM: $derived can't render SVG imperatively.
 	$effect(() => {
 		if (!chartEl || data.length === 0) return;
-
-		let rafId = 0;
-
-		function draw() {
-			if (!chartEl) return;
-			htmlLegend = null;
-			d3.select(chartEl).selectAll('svg').remove();
-			const rect = chartEl.getBoundingClientRect();
-			const w = rect.width || 400;
-			const h = rect.height || 300;
-			switch (chartType) {
-				case 'bar':
-					renderBar(chartEl, w, h);
-					break;
-				case 'horizontal_bar':
-					renderHorizontalBar(chartEl, w, h);
-					break;
-				case 'area':
-					renderArea(chartEl, w, h);
-					break;
-				case 'heatgrid':
-					renderHeatgrid(chartEl, w, h);
-					break;
-				case 'line':
-					renderLine(chartEl, w, h);
-					break;
-				case 'pie':
-					renderPie(chartEl, w, h);
-					break;
-				case 'histogram':
-					renderHistogram(chartEl, w, h);
-					break;
-				case 'scatter':
-					renderScatter(chartEl, w, h);
-					break;
-				case 'boxplot':
-					renderBoxplot(chartEl, w, h);
-					break;
-				default:
-					renderBar(chartEl, w, h);
-			}
-		}
-
-		// DOM: $derived can't drive ResizeObserver.
-		const observer = new ResizeObserver(() => {
-			cancelAnimationFrame(rafId);
-			rafId = requestAnimationFrame(draw);
-		});
-
-		observer.observe(chartEl);
-		draw();
-
-		return () => {
-			observer.disconnect();
-			cancelAnimationFrame(rafId);
-			if (chartEl) d3.select(chartEl).selectAll('svg').remove();
+		const renderers: Record<ChartType, ChartRenderer> = {
+			bar: renderBar,
+			horizontal_bar: renderHorizontalBar,
+			area: renderArea,
+			heatgrid: renderHeatgrid,
+			line: renderLine,
+			pie: renderPie,
+			histogram: renderHistogram,
+			scatter: renderScatter,
+			boxplot: renderBoxplot
 		};
+		return observeChart(chartEl, (element, width, chartHeight) => {
+			htmlLegend = null;
+			renderers[chartType](element, width, chartHeight);
+		});
 	});
 
 	/* ═══════════════════════════════════════════════════

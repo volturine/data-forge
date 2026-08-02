@@ -159,7 +159,12 @@ async def scheduler_loop(
     heartbeat_thread.start()
     try:
         while not stop_event.is_set():
-            result = await asyncio.to_thread(client.run_due, worker_id=worker_id)
+            try:
+                result = await asyncio.to_thread(client.run_due, worker_id=worker_id)
+            except RuntimeError as exc:
+                logger.info("Backend temporarily unavailable to scheduler; retrying: %s", exc)
+                await _sleep_until_tick_or_stop(stop_event, check_interval_seconds)
+                continue
             if result.handled:
                 _log_run_due_result(result)
                 continue
@@ -167,7 +172,8 @@ async def scheduler_loop(
     finally:
         heartbeat_stop.set()
         heartbeat_thread.join()
-        await asyncio.to_thread(client.stop, worker_id=worker_id)
+        with contextlib.suppress(RuntimeError):
+            await asyncio.to_thread(client.stop, worker_id=worker_id)
 
 
 def _log_run_due_result(result: SchedulerRunDueResult) -> None:

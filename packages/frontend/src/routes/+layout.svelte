@@ -26,6 +26,7 @@
 	} from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
+	import { AppLifecycle } from '$lib/services/app-lifecycle';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
 	import { untrack } from 'svelte';
 	import 'styled-system/styles.css';
@@ -123,9 +124,9 @@
 		return cleanup;
 	});
 
-	// Cleanup: $derived can't teardown singleton resources.
+	// Cleanup: $derived can't teardown app-scoped resources.
 	$effect(() => {
-		return () => chatStore.destroy();
+		return () => appLifecycle.destroy();
 	});
 
 	// Websocket: keep engines status lazy and only active during compute work.
@@ -237,14 +238,7 @@
 						noScroll: true
 					});
 				}
-				await queryClient.cancelQueries();
-				computeActivityStore.reset();
-				enginesStore.reset();
-				chatStore.reset();
-				analysisStore.reset();
-				datasourceStore.reset();
-				favoriteStore.reset();
-				schemaStore.reset();
+				await appLifecycle.releaseNamespace();
 			},
 			async afterCommit() {
 				const nextUrl = new URL(page.url);
@@ -255,7 +249,7 @@
 					invalidateAll: true,
 					replaceState: true
 				});
-				queryClient.clear();
+				appLifecycle.activateNamespace();
 			}
 		});
 	}
@@ -285,6 +279,15 @@
 				retry: 1
 			}
 		}
+	});
+	const appLifecycle = new AppLifecycle(queryClient, {
+		analysis: analysisStore,
+		chat: chatStore,
+		computeActivity: computeActivityStore,
+		datasource: datasourceStore,
+		engines: enginesStore,
+		favorites: favoriteStore,
+		schema: schemaStore
 	});
 </script>
 

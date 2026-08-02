@@ -2,7 +2,12 @@
 	import { X, Power, LoaderCircle } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { enginesStore } from '$lib/stores/engines.svelte';
-	import type { EngineStatus, EngineStatusResponse } from '$lib/types/compute';
+	import type { EngineStatusResponse } from '$lib/types/compute';
+	import {
+		engineIdentityKey,
+		engineStatusColor as statusColor,
+		engineStatusLabel as statusLabel
+	} from '$lib/representations/engine';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import { css, iconButton } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
@@ -19,22 +24,8 @@
 	let popupRef = $state<HTMLElement | null>(null);
 	const activeAnchor = $derived(open ? anchor : null);
 
-	function statusColor(status: EngineStatus): string {
-		if (status === 'healthy') return 'fg.success';
-		return 'fg.error';
-	}
-
-	function statusLabel(status: EngineStatus): string {
-		if (status === 'healthy') return 'Healthy';
-		return 'Terminated';
-	}
-
-	function engineKey(engine: EngineStatusResponse): string {
-		return `${engine.scope ?? 'analysis_interactive'}:${engine.resource_id}`;
-	}
-
 	async function handleShutdown(engine: EngineStatusResponse) {
-		const key = engineKey(engine);
+		const key = engineIdentityKey(engine);
 		shuttingDown.add(key);
 		try {
 			await enginesStore.shutdownEngine(engine);
@@ -131,9 +122,9 @@
 			</div>
 		{:else}
 			<div class={css({ display: 'flex', flexDirection: 'column' })}>
-				{#each enginesStore.engines as engine (engineKey(engine))}
+				{#each enginesStore.engines as engine (engineIdentityKey(engine))}
 					<div
-						data-engine-row={engineKey(engine)}
+						data-engine-row={engineIdentityKey(engine)}
 						class={css({
 							display: 'flex',
 							alignItems: 'center',
@@ -171,7 +162,7 @@
 							</span>
 						</div>
 						<button
-							data-engine-shutdown={engineKey(engine)}
+							data-engine-shutdown={engineIdentityKey(engine)}
 							class={css({
 								display: 'flex',
 								cursor: 'pointer',
@@ -186,11 +177,11 @@
 								_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 							})}
 							onclick={() => handleShutdown(engine)}
-							disabled={shuttingDown.has(engineKey(engine))}
+							disabled={shuttingDown.has(engineIdentityKey(engine))}
 							type="button"
 							title="Shutdown engine"
 						>
-							{#if shuttingDown.has(engineKey(engine))}
+							{#if shuttingDown.has(engineIdentityKey(engine))}
 								<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 							{:else}
 								<Power size={14} />

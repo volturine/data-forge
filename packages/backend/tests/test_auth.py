@@ -30,6 +30,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.udfs.models import Udf
 from backend_core.sqlmodel_typing import sa
 from main import app
+from modules.auth import commands as auth_commands
 from modules.auth.dependencies import get_current_user, get_optional_user
 from modules.auth.models import (
     AuthProvider,
@@ -218,6 +219,30 @@ class TestPasswordHashing:
 
 
 class TestUserService:
+    def test_register_command_rolls_back_user_and_token_when_session_staging_fails(
+        self,
+        auth_db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def fail_session_staging(*args: object, **kwargs: object) -> UserSession:
+            raise RuntimeError('session staging failed')
+
+        monkeypatch.setattr(auth_commands.service, 'stage_create_session', fail_session_staging)
+
+        with pytest.raises(RuntimeError, match='session staging failed'):
+            auth_commands.register_user(
+                auth_db_session,
+                email='atomic-register@example.com',
+                password='Password123',
+                display_name='Atomic Register',
+                email_verified=False,
+                device_info='pytest-agent',
+                ip_address='127.0.0.1',
+            )
+
+        assert get_user_by_email(auth_db_session, 'atomic-register@example.com') is None
+        assert auth_db_session.exec(select(VerificationToken)).all() == []
+
     def test_backend_bootstrap_seeds_default_user(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from backend_core import database
         from backend_core.public_schema import ensure_backend_public_tables
@@ -619,7 +644,7 @@ class TestSessionService:
 class TestOAuthService:
     def test_find_or_create_oauth_user_new(self, auth_db_session: Session) -> None:
         user = find_or_create_oauth_user(
-            session=auth_db_session,
+            auth_db_session,
             provider=AuthProviderName.GOOGLE,
             provider_subject='google-subject-1',
             email='oauth@example.com',
@@ -657,7 +682,7 @@ class TestOAuthService:
         monkeypatch.setattr(auth_db_session, 'flush', tracked_flush)
 
         user = find_or_create_oauth_user(
-            session=auth_db_session,
+            auth_db_session,
             provider=AuthProviderName.GITHUB,
             provider_subject='github-subject-flush',
             email='oauth-flush@example.com',
@@ -669,7 +694,7 @@ class TestOAuthService:
 
     def test_find_or_create_oauth_user_existing_provider(self, auth_db_session: Session) -> None:
         user = find_or_create_oauth_user(
-            session=auth_db_session,
+            auth_db_session,
             provider=AuthProviderName.GITHUB,
             provider_subject='github-subject-1',
             email='oauth@example.com',
@@ -678,7 +703,7 @@ class TestOAuthService:
         )
 
         resolved = find_or_create_oauth_user(
-            session=auth_db_session,
+            auth_db_session,
             provider=AuthProviderName.GITHUB,
             provider_subject='github-subject-1',
             email='oauth-changed@example.com',
@@ -694,7 +719,7 @@ class TestOAuthService:
         user = create_user(auth_db_session, 'existing@example.com', 'Password123', 'Existing User')
 
         resolved = find_or_create_oauth_user(
-            session=auth_db_session,
+            auth_db_session,
             provider=AuthProviderName.GOOGLE,
             provider_subject='google-subject-2',
             email='existing@example.com',
@@ -710,7 +735,7 @@ class TestOAuthService:
     def test_unlink_provider_success(self, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'existing@example.com', 'Password123', 'Existing User')
         find_or_create_oauth_user(
-            session=auth_db_session,
+            auth_db_session,
             provider=AuthProviderName.GOOGLE,
             provider_subject='google-subject-3',
             email='existing@example.com',
@@ -726,7 +751,7 @@ class TestOAuthService:
 
     def test_unlink_provider_last(self, auth_db_session: Session) -> None:
         user = find_or_create_oauth_user(
-            session=auth_db_session,
+            auth_db_session,
             provider=AuthProviderName.GOOGLE,
             provider_subject='google-subject-4',
             email='oauth-last@example.com',
@@ -740,7 +765,7 @@ class TestOAuthService:
     def test_unlink_provider_preserves_row_when_user_missing(self, auth_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
         user = create_user(auth_db_session, 'missing-user@example.com', 'Password123', 'Missing User')
         find_or_create_oauth_user(
-            session=auth_db_session,
+            auth_db_session,
             provider=AuthProviderName.GOOGLE,
             provider_subject='google-subject-5',
             email='missing-user@example.com',

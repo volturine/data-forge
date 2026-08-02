@@ -98,7 +98,7 @@
 		gcTime: Infinity,
 		refetchOnMount: false,
 		retry: false,
-		enabled: isActiveStep && !!analysisPipeline && !analysisStore.previewPaused
+		enabled: isActiveStep && !!analysisPipeline && !analysisStore.previews.paused
 	}));
 
 	const data = $derived(isActiveStep ? query.data : null);
@@ -108,7 +108,7 @@
 	const previewState = $derived.by(() => {
 		if (!isActiveStep) return 'inactive';
 		if (!analysisPipeline) return 'waiting-for-payload';
-		if (analysisStore.previewPaused) return 'paused';
+		if (analysisStore.previews.paused) return 'paused';
 		if (isLoading) return 'loading';
 		if (error) return 'error';
 		if (data) return 'ready';
@@ -135,7 +135,7 @@
 	});
 
 	function runPreview() {
-		if (!isActiveStep || analysisStore.previewPaused) return;
+		if (!isActiveStep || analysisStore.previews.paused) return;
 		query.refetch();
 	}
 

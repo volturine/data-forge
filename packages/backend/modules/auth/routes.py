@@ -5,26 +5,19 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from backend_core import http as http_client
 from backend_core.auth_config import settings as auth_settings
-from backend_core.auth_exceptions import (
-    AccountDisabledError,
-    InvalidCredentialsError,
-    OAuthError,
-)
+from backend_core.auth_exceptions import OAuthError
 from backend_core.database import get_settings_db, run_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.proxy import client_ip, request_scheme
-from backend_core.sqlmodel_typing import sa
+from modules.auth import commands, service as auth_service
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import (
-    AuthProvider,
     AuthProviderName,
     User,
-    UserStatus,
-    VerificationTokenType,
 )
 from modules.auth.schemas import (
     ChangePasswordRequest,
@@ -39,30 +32,18 @@ from modules.auth.schemas import (
     VerifyEmailRequest,
 )
 from modules.auth.service import (
-    change_password,
-    create_password_reset_token,
-    create_session,
-    create_user,
-    create_verification_token,
-    delete_user_account,
     ensure_default_user,
-    find_or_create_oauth_user,
-    get_user_by_email,
-    get_user_by_id,
     get_user_providers,
-    resend_verification,
-    reset_password,
-    revoke_all_sessions,
-    revoke_session,
     send_password_reset_email,
-    send_verification_email,
-    unlink_provider,
     validate_session,
-    validate_verification_token,
-    verify_password,
 )
 
 router = APIRouter(prefix='/auth', tags=['auth'])
+
+
+async def send_verification_email(user_email: str, token: str) -> bool:
+    return await auth_service.send_verification_email(user_email, token)
+
 
 _me_cache: dict[str, tuple[float, UserPublic]] = {}
 _ME_CACHE_TTL: float = 10.0
@@ -170,24 +151,19 @@ async def register(
     session: Session = Depends(get_settings_db),
 ) -> UserPublic:
     needs_verification = auth_settings.verify_email_address
-    user = create_user(
+    result = commands.register_user(
         session,
-        body.email,
-        body.password,
-        body.display_name,
+        email=body.email,
+        password=body.password,
+        display_name=body.display_name,
         email_verified=not needs_verification,
-    )
-    if needs_verification:
-        token = create_verification_token(session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY)
-        await send_verification_email(user.email, token)
-    created_session = create_session(
-        session,
-        user_id=user.id,
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, created_session.id, secure=request_scheme(request) == 'https')
-    return _build_user_public(session, user)
+    if result.verification_token is not None:
+        await send_verification_email(result.user.email, result.verification_token)
+    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
+    return _build_user_public(session, result.user)
 
 
 @router.post('/login', response_model=UserPublic)
@@ -198,33 +174,15 @@ async def login(
     response: Response,
     session: Session = Depends(get_settings_db),
 ) -> UserPublic:
-    user = get_user_by_email(session, body.email)
-    if not user:
-        raise InvalidCredentialsError()
-    if user.status == UserStatus.DISABLED:
-        raise AccountDisabledError()
-    password_provider = session.exec(
-        select(AuthProvider).where(
-            sa(AuthProvider.user_id == user.id),
-            sa(AuthProvider.provider == AuthProviderName.PASSWORD),
-        ),
-    ).first()
-    if not password_provider:
-        raise InvalidCredentialsError()
-    metadata = password_provider.provider_metadata or {}
-    hashed = metadata.get('password_hash')
-    if not isinstance(hashed, str):
-        raise InvalidCredentialsError()
-    if not verify_password(body.password, hashed):
-        raise InvalidCredentialsError()
-    created_session = create_session(
+    result = commands.login_user(
         session,
-        user_id=user.id,
+        email=body.email,
+        password=body.password,
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, created_session.id, secure=request_scheme(request) == 'https')
-    return _build_user_public(session, user)
+    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
+    return _build_user_public(session, result.user)
 
 
 @router.post('/logout')
@@ -232,7 +190,7 @@ async def login(
 async def logout(request: Request, response: Response, session: Session = Depends(get_settings_db)) -> dict[str, bool]:
     token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
     if token:
-        revoke_session(session, token)
+        commands.revoke_session(session, token)
         invalidate_me_cache(token)
     _clear_session_cookie(response)
     return {'success': True}
@@ -245,7 +203,7 @@ async def delete_account_route(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),
 ) -> dict[str, bool]:
-    delete_user_account(session, current_user.id)
+    commands.delete_user_account(session, current_user.id)
     invalidate_me_cache()
     _clear_session_cookie(response)
     return {'success': True}
@@ -254,13 +212,7 @@ async def delete_account_route(
 @router.post('/verify-email', response_model=MessageResponse)
 @handle_errors(operation='verify email')
 async def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    user_id = validate_verification_token(session, token=body.token, token_type=VerificationTokenType.EMAIL_VERIFY)
-    user = get_user_by_id(session, user_id)
-    if not user:
-        raise InvalidCredentialsError()
-    user.email_verified = True
-    session.add(user)
-    session.commit()
+    commands.verify_email(session, body.token)
     return MessageResponse(message='Email verified successfully')
 
 
@@ -270,14 +222,17 @@ async def resend_verification_route(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),
 ) -> MessageResponse:
-    await resend_verification(session, current_user.id)
+    delivery = commands.prepare_resend_verification(session, current_user.id)
+    if delivery is not None:
+        email, token = delivery
+        await send_verification_email(email, token)
     return MessageResponse(message='Verification email sent')
 
 
 @router.post('/forgot-password', response_model=MessageResponse)
 @handle_errors(operation='forgot password')
 async def forgot_password(body: ForgotPasswordRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    token = create_password_reset_token(session, body.email)
+    token = commands.create_password_reset_token(session, body.email)
     if token:
         await send_password_reset_email(body.email.strip().lower(), token)
     return MessageResponse(message='If the email exists, a password reset link has been sent')
@@ -286,7 +241,7 @@ async def forgot_password(body: ForgotPasswordRequest, session: Session = Depend
 @router.post('/reset-password', response_model=MessageResponse)
 @handle_errors(operation='reset password')
 async def reset_password_route(body: ResetPasswordRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    reset_password(session, body.token, body.new_password)
+    commands.reset_password(session, body.token, body.new_password)
     return MessageResponse(message='Password reset successful')
 
 
@@ -331,9 +286,7 @@ async def update_profile_route(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),
 ) -> UserPublic:
-    from modules.auth.service import update_profile
-
-    updated = update_profile(
+    updated = commands.update_profile(
         session,
         user_id=current_user.id,
         display_name=body.display_name,
@@ -351,7 +304,7 @@ async def change_password_route(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),
 ) -> dict[str, bool]:
-    change_password(session, current_user.id, body.current_password, body.new_password)
+    commands.change_password(session, current_user.id, body.current_password, body.new_password)
     invalidate_me_cache()
     return {'success': True}
 
@@ -365,9 +318,11 @@ async def revoke_all_sessions_route(
     session: Session = Depends(get_settings_db),
 ) -> dict[str, bool]:
     current_token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
-    revoke_all_sessions(session, current_user.id)
-    if current_token:
-        revoke_session(session, current_token)
+    commands.revoke_all_user_sessions(
+        session,
+        user_id=current_user.id,
+        current_session_id=current_token,
+    )
     invalidate_me_cache()
     _clear_session_cookie(response)
     return {'success': True}
@@ -434,21 +389,17 @@ async def google_oauth_callback(
     email = info.get('email')
     if not isinstance(subject, str) or not isinstance(email, str):
         raise OAuthError('Google user info missing id or email')
-    user = find_or_create_oauth_user(
-        session=session,
+    result = commands.authenticate_oauth_user(
+        session,
         provider=AuthProviderName.GOOGLE,
         provider_subject=subject,
         email=email,
         display_name=str(info.get('name') or email.split('@')[0]),
         avatar_url=info.get('picture') if isinstance(info.get('picture'), str) else None,
-    )
-    created_session = create_session(
-        session,
-        user_id=user.id,
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, created_session.id, secure=request_scheme(request) == 'https')
+    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
     return response
 
 
@@ -526,21 +477,17 @@ async def github_oauth_callback(
         email = next((item.get('email') for item in emails if item.get('verified')), None)
     if not isinstance(email, str):
         raise OAuthError('GitHub account has no verified email')
-    user = find_or_create_oauth_user(
-        session=session,
+    result = commands.authenticate_oauth_user(
+        session,
         provider=AuthProviderName.GITHUB,
         provider_subject=str(subject),
         email=email,
         display_name=str(gh_user.get('name') or gh_user.get('login') or email.split('@')[0]),
         avatar_url=gh_user.get('avatar_url') if isinstance(gh_user.get('avatar_url'), str) else None,
-    )
-    created_session = create_session(
-        session,
-        user_id=user.id,
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, created_session.id, secure=request_scheme(request) == 'https')
+    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
     return response
 
 
@@ -557,5 +504,5 @@ async def unlink_provider_route(
         raise HTTPException(status_code=400, detail='Unsupported provider') from exc
     if provider_name not in {AuthProviderName.GOOGLE, AuthProviderName.GITHUB}:
         raise HTTPException(status_code=400, detail='Unsupported provider')
-    unlink_provider(session, current_user.id, provider_name)
+    commands.unlink_provider(session, current_user.id, provider_name)
     return {'success': True}

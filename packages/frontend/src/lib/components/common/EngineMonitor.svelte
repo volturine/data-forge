@@ -8,6 +8,7 @@
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 	import type { EngineStatusResponse } from '$lib/types/compute';
+	import { engineIdentityKey } from '$lib/representations/engine';
 
 	let expanded = $state(false);
 	let killing = $state<string | null>(null);
@@ -18,12 +19,8 @@
 		return () => enginesStore.stopStream();
 	});
 
-	function engineKey(engine: EngineStatusResponse): string {
-		return `${engine.scope ?? 'analysis_interactive'}:${engine.resource_id}`;
-	}
-
 	async function handleKill(engine: EngineStatusResponse) {
-		const key = engineKey(engine);
+		const key = engineIdentityKey(engine);
 		killing = key;
 		try {
 			await enginesStore.shutdownEngine(engine);
@@ -176,7 +173,7 @@
 					{/if}
 				{:else}
 					<ul class={css({ margin: '0', listStyle: 'none', padding: '0' })}>
-						{#each enginesStore.engines as engine (engineKey(engine))}
+						{#each enginesStore.engines as engine (engineIdentityKey(engine))}
 							<li
 								class={css({
 									display: 'flex',
@@ -246,10 +243,10 @@
 										_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 									})}
 									onclick={() => handleKill(engine)}
-									disabled={killing === engineKey(engine)}
+									disabled={killing === engineIdentityKey(engine)}
 									title="Shutdown engine"
 								>
-									{#if killing === engineKey(engine)}
+									{#if killing === engineIdentityKey(engine)}
 										<LoaderCircle size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 									{:else}
 										<X size={12} />

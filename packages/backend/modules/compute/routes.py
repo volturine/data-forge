@@ -4,7 +4,6 @@ import logging
 import os
 import re
 import uuid
-from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -15,7 +14,6 @@ from sqlmodel import Session
 
 from backend_core import (
     build_event_service,
-    build_jobs_service as build_job_service,
     build_runs_service as build_run_service,
     engine_runs_service as engine_run_service,
     runtime_outbox_service,
@@ -31,7 +29,7 @@ from backend_core.dependencies import (
 )
 from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
 from backend_core.domain.compute import schemas
-from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.engine_live import load_engine_snapshot, registry as engine_registry
 from backend_core.error_handlers import handle_errors
@@ -55,122 +53,17 @@ from dataforge_protocol import compute_pb2, enums_pb2
 from modules.analysis.step_schemas import normalize_pipeline_step_configs_for_protocol
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
-from modules.compute import executor_client
+from modules.compute import commands, executor_client, representations
 from modules.compute.iceberg_service import (
     delete_iceberg_snapshot as delete_iceberg_snapshot_info,
     list_iceberg_snapshots as list_iceberg_snapshots_info,
 )
 from modules.datasource import service as datasource_service
 from modules.mcp.router import MCPRouter
-from modules.scheduler import service as scheduler_service
 
 logger = logging.getLogger(__name__)
 
 router = MCPRouter(prefix='/compute', tags=['compute'])
-
-
-def _engine_run_active_status(status: EngineRunStatus) -> schemas.ActiveBuildStatus:
-    match status:
-        case EngineRunStatus.RUNNING:
-            return schemas.ActiveBuildStatus.RUNNING
-        case EngineRunStatus.SUCCESS:
-            return schemas.ActiveBuildStatus.COMPLETED
-        case EngineRunStatus.FAILED:
-            return schemas.ActiveBuildStatus.FAILED
-        case EngineRunStatus.CANCELLED:
-            return schemas.ActiveBuildStatus.CANCELLED
-    raise ValueError(f'Unsupported engine run status: {status!r}')
-
-
-def _engine_run_status_filter(status: schemas.ActiveBuildStatus | None) -> EngineRunStatus | None:
-    match status:
-        case None:
-            return None
-        case schemas.ActiveBuildStatus.RUNNING:
-            return EngineRunStatus.RUNNING
-        case schemas.ActiveBuildStatus.COMPLETED:
-            return EngineRunStatus.SUCCESS
-        case schemas.ActiveBuildStatus.FAILED:
-            return EngineRunStatus.FAILED
-        case schemas.ActiveBuildStatus.CANCELLED:
-            return EngineRunStatus.CANCELLED
-        case schemas.ActiveBuildStatus.QUEUED:
-            return EngineRunStatus.RUNNING
-    raise ValueError(f'Unsupported active build status: {status!r}')
-
-
-def _engine_run_kind_filter(kind: str | None) -> EngineRunKind | str | None:
-    if kind == 'build':
-        return EngineRunKind.INGEST
-    return kind
-
-
-def _elapsed_ms_for_engine_run(run) -> int:
-    if run.duration_ms is not None:
-        return run.duration_ms
-    if run.status != EngineRunStatus.RUNNING:
-        return 0
-    started_at = run.created_at if run.created_at.tzinfo is not None else run.created_at.replace(tzinfo=UTC)
-    return max(int((datetime.now(UTC) - started_at).total_seconds() * 1000), 0)
-
-
-def _engine_run_result_dict(run) -> dict[str, object]:
-    return dict(run.result_json) if isinstance(run.result_json, dict) else {}
-
-
-def _optional_result_str(result_json: dict[str, object], key: str) -> str | None:
-    value = result_json.get(key)
-    return value if isinstance(value, str) and value else None
-
-
-def _engine_run_summary(run, *, namespace: str) -> schemas.ActiveBuildSummary:
-    result_json = _engine_run_result_dict(run)
-    return schemas.ActiveBuildSummary(
-        build_id=run.id,
-        analysis_id=run.analysis_id or '',
-        analysis_name=run.analysis_id or '',
-        namespace=namespace,
-        status=_engine_run_active_status(run.status),
-        started_at=run.created_at,
-        starter=schemas.BuildStarter(user_id=None, display_name=None, email=None, triggered_by=run.triggered_by),
-        resource_config=None,
-        progress=run.progress,
-        elapsed_ms=_elapsed_ms_for_engine_run(run),
-        estimated_remaining_ms=None,
-        current_step=run.current_step,
-        current_step_index=None,
-        total_steps=0,
-        current_kind=run.kind,
-        current_datasource_id=run.datasource_id,
-        current_tab_id=_optional_result_str(result_json, 'current_tab_id'),
-        current_tab_name=_optional_result_str(result_json, 'current_tab_name'),
-        current_output_id=_optional_result_str(result_json, 'current_output_id'),
-        current_output_name=_optional_result_str(result_json, 'current_output_name'),
-        current_engine_run_id=run.id,
-        total_tabs=0,
-        cancelled_at=run.completed_at if run.status == EngineRunStatus.CANCELLED else None,
-        cancelled_by=None,
-        result_json=result_json,
-    )
-
-
-def _engine_run_detail(run, *, namespace: str) -> schemas.ActiveBuildDetail:
-    summary = _engine_run_summary(run, namespace=namespace)
-    summary_payload = summary.model_dump()
-    summary_payload.pop('result_json', None)
-    return schemas.ActiveBuildDetail(
-        **summary_payload,
-        steps=[],
-        query_plans=[],
-        latest_resources=None,
-        resources=[],
-        logs=[],
-        results=[],
-        duration_ms=run.duration_ms,
-        error=run.error_message,
-        request_json=dict(run.request_json),
-        result_json=_engine_run_result_dict(run),
-    )
 
 
 async def _wait_for_websocket_disconnect(websocket: WebSocket) -> None:
@@ -625,67 +518,61 @@ async def start_active_build(
         if isinstance(active_tab.get('name'), str):
             current_tab_name = active_tab.get('name')
     starter = schemas.BuildStarter.for_user(user)
-    try:
-        for tab in tabs:
-            if not isinstance(tab, dict):
-                continue
-            tab_id = tab.get('id')
-            output = tab.get('output')
-            if not isinstance(tab_id, str) or not isinstance(output, dict):
-                continue
-            result_id = output.get('result_id')
-            if not isinstance(result_id, str):
-                continue
-            iceberg = output.get('iceberg')
-            table_name = iceberg.get('table_name') if isinstance(iceberg, dict) else None
-            filename = output.get('filename')
-            output_name = table_name if isinstance(table_name, str) and table_name.strip() else filename
-            branch_name = iceberg.get('branch') if isinstance(iceberg, dict) else None
-            namespace_name = iceberg.get('namespace') if isinstance(iceberg, dict) else None
-            placeholder_config: dict[str, Any] | None = None
-            placeholder_source_type = datasource_service.DataSourceType.ANALYSIS
-            if isinstance(branch_name, str) and branch_name.strip():
-                safe_branch = re.sub(r'[^a-zA-Z0-9_]+', '_', branch_name).strip('_')
-                table_name = f'{result_id}_{safe_branch}'
-                data_plane = client_from_settings()
-                warehouse_path = data_plane.build_object_url('namespaces', get_namespace(), 'exports')
-                placeholder_source_type = datasource_service.DataSourceType.ICEBERG
-                placeholder_config = {
-                    'catalog_type': 'sql',
-                    'catalog_uri': settings.database_url,
-                    'warehouse': warehouse_path,
-                    'namespace': namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else 'outputs',
-                    'table': table_name,
-                    'table_name': output_name if isinstance(output_name, str) and output_name.strip() else table_name,
-                    'metadata_path': data_plane.build_object_url('namespaces', get_namespace(), 'exports', str(result_id)),
-                    'branch': branch_name,
-                    'namespace_name': get_namespace(),
-                    'reader': 'native',
-                }
-            datasource_service.create_placeholder_output_datasource(
-                session,
+    placeholders: list[commands.OutputPlaceholder] = []
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        tab_id = tab.get('id')
+        output = tab.get('output')
+        if not isinstance(tab_id, str) or not isinstance(output, dict):
+            continue
+        result_id = output.get('result_id')
+        if not isinstance(result_id, str):
+            continue
+        iceberg = output.get('iceberg')
+        table_name = iceberg.get('table_name') if isinstance(iceberg, dict) else None
+        filename = output.get('filename')
+        output_name = table_name if isinstance(table_name, str) and table_name.strip() else filename
+        branch_name = iceberg.get('branch') if isinstance(iceberg, dict) else None
+        namespace_name = iceberg.get('namespace') if isinstance(iceberg, dict) else None
+        placeholder_config: dict[str, object] | None = None
+        placeholder_source_type = datasource_service.DataSourceType.ANALYSIS
+        if isinstance(branch_name, str) and branch_name.strip():
+            safe_branch = re.sub(r'[^a-zA-Z0-9_]+', '_', branch_name).strip('_')
+            table_name = f'{result_id}_{safe_branch}'
+            data_plane = client_from_settings()
+            warehouse_path = data_plane.build_object_url('namespaces', get_namespace(), 'exports')
+            placeholder_source_type = datasource_service.DataSourceType.ICEBERG
+            placeholder_config = {
+                'catalog_type': 'sql',
+                'catalog_uri': settings.database_url,
+                'warehouse': warehouse_path,
+                'namespace': namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else 'outputs',
+                'table': table_name,
+                'table_name': output_name if isinstance(output_name, str) and output_name.strip() else table_name,
+                'metadata_path': data_plane.build_object_url('namespaces', get_namespace(), 'exports', str(result_id)),
+                'branch': branch_name,
+                'namespace_name': get_namespace(),
+                'reader': 'native',
+            }
+        placeholders.append(
+            commands.OutputPlaceholder(
                 result_id=result_id,
-                analysis_id=analysis_id,
-                analysis_tab_id=tab_id,
+                tab_id=tab_id,
                 name=output_name if isinstance(output_name, str) else None,
                 source_type=placeholder_source_type,
                 config=placeholder_config,
             )
-        build_run_service.stage_build_run(
-            session,
+        )
+    commands.start_build(
+        session,
+        commands.StartBuildCommand(
             build_id=build_id,
             namespace=namespace,
             analysis_id=analysis_id,
             analysis_name=analysis_name,
-            request_json={
-                'analysis_pipeline': {
-                    'analysis_id': pipeline['analysis_id'],
-                    'tabs': pipeline['tabs'],
-                },
-                'tab_id': request.tab_id,
-            },
+            request_json={'analysis_pipeline': {'analysis_id': pipeline['analysis_id'], 'tabs': pipeline['tabs']}, 'tab_id': request.tab_id},
             starter_json=starter.model_dump(mode='json'),
-            status=build_run_service.BuildRunStatus.QUEUED,
             current_kind=current_kind,
             current_datasource_id=current_datasource_id,
             current_tab_id=current_tab_id,
@@ -693,20 +580,10 @@ async def start_active_build(
             current_output_id=current_output_id,
             current_output_name=current_output_name,
             total_tabs=len(tabs),
-            created_at=started_at,
             started_at=started_at,
-        )
-        build_job_service.stage_job(
-            session,
-            build_id=build_id,
-            namespace=namespace,
-        )
-        runtime_outbox_service.enqueue_api_build_notification(session, namespace=namespace, build_id=build_id, latest_sequence=0)
-        runtime_outbox_service.enqueue_build_job_notification(session)
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
+            placeholders=placeholders,
+        ),
+    )
     detail = _get_durable_build_detail(session, build_id)
     if detail is None:
         raise HTTPException(status_code=500, detail='Failed to create build')
@@ -748,44 +625,12 @@ async def cancel_build(
         duration_ms=duration_ms,
         emitted_at=_utcnow(),
     )
-    job = build_job_service.get_job_by_build_id(session, build_id)
     try:
-        if job is None:
-            raise HTTPException(status_code=409, detail='Active build has no cancellable job')
-        job_status = build_job_service.BuildJobStatus.require(job.status)
-        if job_status != build_job_service.BuildJobStatus.QUEUED and not job_status.is_active:
-            raise HTTPException(status_code=409, detail='Build job became terminal before cancellation')
-        cancelled_job = build_job_service.stage_job_cancelled(session, job.id)
-        if build_job_service.BuildJobStatus.require(cancelled_job.status) != build_job_service.BuildJobStatus.CANCELLED:
-            raise HTTPException(status_code=409, detail='Build job became terminal before cancellation')
-        event_row = build_run_service.stage_build_event(
-            session,
-            build_id=detail.build_id,
-            event=cancellation_event,
-            resource_config_json=detail.resource_config.model_dump(mode='json') if detail.resource_config is not None else None,
-            authoritative_execution_generation=cancelled_job.lease_generation,
-        )
-        if event_row is None:
-            raise HTTPException(status_code=409, detail='Build became terminal before cancellation')
-        scheduler_service.apply_schedule_run_reconciliation(session, build_id=detail.build_id)
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
+        event_row = commands.cancel_build(session, detail=detail, event=cancellation_event)
+    except commands.BuildCancellationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     await build_event_service.publish_build_notification(detail.namespace, detail.build_id, latest_sequence=event_row.sequence)
-
-    if detail.current_engine_run_id is not None:
-        run = engine_run_service.get_engine_run(session, detail.current_engine_run_id)
-        if run is not None and run.status == EngineRunStatus.RUNNING:
-            try:
-                engine_run_service.cancel_engine_run(
-                    session,
-                    detail.current_engine_run_id,
-                    cancelled_by=cancelled_by,
-                )
-            except ValueError:
-                logger.info('Engine run %s became terminal after build cancellation', detail.current_engine_run_id)
 
     return schemas.CancelBuildResponse(
         id=detail.build_id,
@@ -832,13 +677,13 @@ async def list_builds(
             session,
             analysis_id=analysis_id.strip() if analysis_id else None,
             datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
-            kind=_engine_run_kind_filter(kind),
-            status=_engine_run_status_filter(status),
+            kind=representations.engine_run_kind_filter(kind),
+            status=representations.engine_run_status_filter(status),
             search=search,
             limit=fetch_limit,
             offset=0,
         )
-        engine_rows = [_engine_run_summary(run, namespace=namespace) for run in engine_runs]
+        engine_rows = [representations.engine_run_summary(run, namespace=namespace) for run in engine_runs]
     visible = sorted([*build_rows, *engine_rows], key=lambda run: run.started_at, reverse=True)
     paged = visible[offset : offset + limit]
     return schemas.ActiveBuildListResponse(builds=paged, total=len(visible))
@@ -886,7 +731,7 @@ async def get_active_build(
         return detail
     engine_run = engine_run_service.get_engine_run(session, build_id)
     if engine_run is not None:
-        return _engine_run_detail(engine_run, namespace=get_namespace())
+        return representations.engine_run_detail(engine_run, namespace=get_namespace())
     raise HTTPException(status_code=404, detail='Active build not found')
 
 

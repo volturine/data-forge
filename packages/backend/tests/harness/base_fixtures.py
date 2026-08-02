@@ -74,7 +74,7 @@ def _register_sqlmodel_metadata() -> None:
     from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
     from backend_core.persistence.locks.models import ResourceLock
     from backend_core.persistence.namespaces.models import RuntimeNamespace
-    from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
+    from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxEvent
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
     from backend_core.persistence.scheduler.models import Schedule
     from backend_core.persistence.settings.models import AppSettings
@@ -97,6 +97,7 @@ def _register_sqlmodel_metadata() -> None:
     del HealthCheckResult
     del ResourceLock
     del RuntimeNamespace
+    del NotificationDeliveryReceipt
     del RuntimeOutboxEvent
     del RuntimeWorker
     del Schedule

@@ -17,7 +17,7 @@ import { uuid } from '$lib/utils/uuid';
 import { SvelteMap } from 'svelte/reactivity';
 import { ResultAsync, errAsync, ok } from 'neverthrow';
 import type { ApiError } from '$lib/api/client';
-import { idbGet, idbSet } from '$lib/utils/indexeddb';
+import { PreviewState } from '$lib/editor/preview-state.svelte';
 
 function cloneConfig<T extends Record<string, unknown>>(config: T): T {
 	return cloneJson(config);
@@ -38,19 +38,6 @@ function nextDuplicateTabName(tabs: AnalysisTab[], sourceName: string): string {
 	return `${base} ${suffix}`;
 }
 
-async function loadPreviewRuns(map: SvelteMap<string, boolean>, namespace: string): Promise<void> {
-	const stored = await idbGet<Array<[string, boolean]>>(`analysis_preview_runs:${namespace}`);
-	if (!stored) return;
-	for (const [key, value] of stored) {
-		map.set(key, value);
-	}
-}
-
-function savePreviewRuns(map: SvelteMap<string, boolean>, namespace: string): void {
-	const entries = Array.from(map.entries());
-	void idbSet(`analysis_preview_runs:${namespace}`, entries);
-}
-
 export class AnalysisStore {
 	current = $state<Analysis | null>(null);
 	tabs = $state<AnalysisTab[]>([]);
@@ -63,25 +50,11 @@ export class AnalysisStore {
 	error = $state<string | null>(null);
 	loadId = $state(0);
 	lastSaved = $state<{ name: string; description: string | null } | null>(null);
-	previewRuns = $state(new SvelteMap<string, boolean>());
-	previewPaused = $state(false);
-	previewNamespace = $state<string | null>(null);
+	readonly previews = new PreviewState();
 	currentRevision = $state<string | null>(null);
 
 	async initialize(namespace: string): Promise<void> {
-		if (this.previewNamespace === namespace) return;
-		this.previewRuns.clear();
-		this.previewNamespace = namespace;
-		await loadPreviewRuns(this.previewRuns, namespace);
-	}
-
-	setPreviewRun(key: string, value: boolean): void {
-		this.previewRuns.set(key, value);
-		if (this.previewNamespace) savePreviewRuns(this.previewRuns, this.previewNamespace);
-	}
-
-	setPreviewPaused(value: boolean): void {
-		this.previewPaused = value;
+		await this.previews.initialize(namespace);
 	}
 
 	activeTab: AnalysisTab | null = $derived(
@@ -424,7 +397,7 @@ export class AnalysisStore {
 			if (!reachable[item.id]) continue;
 			const rowLimit = typeof item.config?.rowLimit === 'number' ? item.config.rowLimit : 100;
 			const runKey = `${analysisId}:${datasourceId}:${snapshotKey}:${rowLimit}:${item.id}`;
-			this.setPreviewRun(runKey, true);
+			this.previews.setRun(runKey, true);
 		}
 		// Invalidate previews in dependent tabs that use this tab as input
 		const activeTabId = this.activeTab.id;
@@ -443,7 +416,7 @@ export class AnalysisStore {
 				if (item.type !== 'view') continue;
 				const rowLimit = typeof item.config?.rowLimit === 'number' ? item.config.rowLimit : 100;
 				const runKey = `${analysisId}:${depDatasourceId}:${depSnapshotKey}:${rowLimit}:${item.id}`;
-				this.setPreviewRun(runKey, true);
+				this.previews.setRun(runKey, true);
 			}
 		}
 	}
@@ -643,7 +616,7 @@ export class AnalysisStore {
 		this.lastSaved = null;
 		this.loading = false;
 		this.error = null;
-		this.previewPaused = false;
+		this.previews.paused = false;
 	}
 
 	buildTabs(datasourceIds: string[]): AnalysisTab[] {

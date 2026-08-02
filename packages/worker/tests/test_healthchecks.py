@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from runtime.compute_service import _build_subscriber_message, _resolve_build_status
+from runtime.compute_service import _build_subscriber_message
+from runtime.healthchecks import resolve_build_status as _resolve_build_status
 from runtime.domain.compute.schemas import BuildStatus
 
 

@@ -515,13 +515,13 @@
 	// away immediately after creation/import.
 	$effect(() => {
 		if (!validAnalysisId) {
-			analysisStore.setPreviewPaused(false);
+			analysisStore.previews.paused = false;
 			warmedEngineIdentityCache = null;
 			return;
 		}
 		const nextKey = `${validAnalysisId}:${JSON.stringify(analysisStore.resourceConfig ?? {})}`;
 		if (warmedEngineIdentityCache === nextKey) {
-			analysisStore.setPreviewPaused(false);
+			analysisStore.previews.paused = false;
 			return;
 		}
 		warmedEngineIdentityCache = nextKey;
@@ -531,7 +531,7 @@
 			spawnAnalysisEngine(validAnalysisId, analysisStore.resourceConfig ?? undefined).match(
 				() => {
 					if (!alive) return;
-					analysisStore.setPreviewPaused(false);
+					analysisStore.previews.paused = false;
 				},
 				(err) => {
 					if (!alive) return;
@@ -541,7 +541,7 @@
 						target: validAnalysisId,
 						meta: { message: err.message }
 					});
-					analysisStore.setPreviewPaused(false);
+					analysisStore.previews.paused = false;
 				}
 			);
 		}, 300);
@@ -1150,7 +1150,7 @@
 			return;
 		}
 		schemaStore.reset();
-		analysisStore.previewRuns.clear();
+		analysisStore.previews.runs.clear();
 		analysisStore.applyAnalysis(result.value.analysis);
 		analysisStore.currentRevision = result.value.version;
 		lastLoadedVersion = result.value.version;

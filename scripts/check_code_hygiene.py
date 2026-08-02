@@ -12,6 +12,10 @@ PYTHON_SOURCE_ROOTS = [
     ROOT / 'packages/worker',
     ROOT / 'packages/scheduler',
 ]
+TRANSPORT_PATHS = [
+    ROOT / 'packages/backend/backend_grpc/server.py',
+    *sorted((ROOT / 'packages/backend/modules').glob('*/routes.py')),
+]
 
 TODO_PATTERN = re.compile(r'\b(TODO|FIXME|HACK)\b')
 CONSOLE_LOG_PATTERN = re.compile(r'\bconsole\.log\s*\(')
@@ -64,6 +68,16 @@ def _private_all_exports(tree: ast.AST) -> list[tuple[int, str]]:
     return exports
 
 
+def _transaction_call_lines(tree: ast.AST) -> list[tuple[int, str]]:
+    calls: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr in {'commit', 'rollback'}:
+            calls.append((node.lineno, node.func.attr))
+    return calls
+
+
 def _iter_files(root: Path, suffixes: set[str]):
     for path in root.rglob('*'):
         if not path.is_file() or path.suffix not in suffixes:
@@ -99,11 +113,19 @@ def _check_python_sources(errors: list[str]) -> None:
                 errors.append(f'{path.relative_to(ROOT)}:{line_number}: __all__ must not export private name {name}')
 
 
+def _check_transport_transactions(errors: list[str]) -> None:
+    for path in TRANSPORT_PATHS:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for line_number, operation in _transaction_call_lines(tree):
+            errors.append(f'{path.relative_to(ROOT)}:{line_number}: transport must call an application command instead of {operation}()')
+
+
 def main() -> int:
     errors: list[str] = []
 
     _check_frontend_sources(errors)
     _check_python_sources(errors)
+    _check_transport_transactions(errors)
 
     if errors:
         print('Code hygiene violations:')
