@@ -2,13 +2,13 @@
 
 ## Document Status
 
-- **Status:** In progress
+- **Status:** Implemented
 - **Scope:** Concurrency correctness, deterministic behavior, runtime ownership, transaction boundaries, maintainability, and verification
 - **Applies to:** Backend API, worker runtime, scheduler, frontend state, protocol contracts, persistence, and CI
 - **Supersedes:** Runtime correctness claims in `distributed-runtime-v2-progress.md` where those claims conflict with verified implementation behavior
 - **Does not supersede:** Product requirements or user-facing feature PRDs
 
-### Implementation progress — through 2026-07-31
+### Implementation completed — 2026-08-02
 
 Completed in the first P0 build-job slice:
 
