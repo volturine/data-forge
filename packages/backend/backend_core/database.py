@@ -206,7 +206,7 @@ def _tenant_tables():
     from backend_core.persistence.engine_runs.models import EngineRun
     from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
     from backend_core.persistence.locks.models import ResourceLock
-    from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
+    from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxEvent
     from backend_core.persistence.scheduler.models import Schedule
     from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
     from backend_core.persistence.udfs.models import Udf
@@ -227,6 +227,7 @@ def _tenant_tables():
         HealthCheckResult.__tablename__,
         ResourceLock.__tablename__,
         RuntimeOutboxEvent.__tablename__,
+        NotificationDeliveryReceipt.__tablename__,
         Schedule.__tablename__,
         TelegramListener.__tablename__,
         TelegramSubscriber.__tablename__,

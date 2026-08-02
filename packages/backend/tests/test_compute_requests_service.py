@@ -16,6 +16,7 @@ from backend_core.domain.compute_requests.models import (
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
+from backend_core.transitions import TransitionOutcome
 from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2, errors_pb2
 from modules.analysis.step_schemas import normalize_step_config_for_protocol
 
@@ -661,7 +662,8 @@ def test_reclaimed_request_rejects_stale_completion(test_db_session) -> None:
         claim_token=claimed.claim_token,
         lease_generation=claimed.lease_generation,
     )
-    assert renewed is not None
+    assert renewed.outcome is TransitionOutcome.APPLIED
+    assert renewed.value is not None
 
 
 def test_expired_request_is_failed_after_attempt_exhaustion(test_db_session) -> None:

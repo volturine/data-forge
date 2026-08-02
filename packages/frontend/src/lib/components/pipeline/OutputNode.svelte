@@ -417,7 +417,7 @@
 
 	async function handleManualBuild() {
 		if (!analysisId || buildBusy || readOnly) return;
-		analysisStore.setPreviewPaused(true);
+		analysisStore.previews.paused = true;
 		previewOpen = false;
 		buildStore.reset();
 		buildStarting = true;
@@ -427,7 +427,7 @@
 		if (analysisStore.isDirty()) {
 			const saveResult = await analysisStore.save();
 			if (saveResult.isErr()) {
-				analysisStore.setPreviewPaused(false);
+				analysisStore.previews.paused = false;
 				error = saveResult.error.message;
 				buildStarting = false;
 				return;
@@ -440,7 +440,7 @@
 			datasourceStore.datasources
 		);
 		if (!pipeline) {
-			analysisStore.setPreviewPaused(false);
+			analysisStore.previews.paused = false;
 			error = datasourceStore.loaded
 				? 'Unable to build analysis payload.'
 				: 'Datasources are still loading. Please try again.';
@@ -448,7 +448,7 @@
 			return;
 		}
 		if (!outputConfig) {
-			analysisStore.setPreviewPaused(false);
+			analysisStore.previews.paused = false;
 			error =
 				'Output configuration is incomplete. Fill in explicit output settings before building.';
 			buildStarting = false;
@@ -463,7 +463,7 @@
 
 	$effect(() => {
 		if (buildBusy) return;
-		analysisStore.setPreviewPaused(false);
+		analysisStore.previews.paused = false;
 	});
 
 	$effect(() => {

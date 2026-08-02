@@ -1,7 +1,6 @@
 from fastapi import Depends
 from sqlmodel import Session
 
-from backend_core import runtime_ipc
 from backend_core.database import get_db
 from backend_core.domain.scheduler import schemas
 from backend_core.error_handlers import handle_errors
@@ -11,7 +10,7 @@ from backend_core.validation import (
     parse_schedule_id,
 )
 from modules.mcp.router import MCPRouter
-from modules.scheduler import service
+from modules.scheduler import commands, service
 
 router = MCPRouter(prefix='/schedules', tags=['schedules'])
 
@@ -49,9 +48,7 @@ def create_schedule(payload: schemas.ScheduleCreate, session: Session = Depends(
     Optional: depends_on (another schedule ID to run after), trigger_on_datasource_id
     (run when that datasource is updated instead of on cron).
     """
-    response = service.create_schedule(session, payload)
-    runtime_ipc.notify_build_job()
-    return response
+    return commands.create_schedule(session, payload)
 
 
 @router.put('/{schedule_id}', response_model=schemas.ScheduleResponse, mcp=True)
@@ -62,13 +59,11 @@ def update_schedule(
     session: Session = Depends(get_db),
 ):
     """Update a schedule's cron expression, enabled state, or dependencies. Use GET /schedules to find schedule IDs."""
-    response = service.update_schedule(session, parse_schedule_id(schedule_id), payload)
-    runtime_ipc.notify_build_job()
-    return response
+    return commands.update_schedule(session, parse_schedule_id(schedule_id), payload)
 
 
 @router.delete('/{schedule_id}', status_code=204, mcp=True)
 @handle_errors(operation='delete schedule')
 def delete_schedule(schedule_id: ScheduleId, session: Session = Depends(get_db)):
     """Delete a schedule by ID. Use GET /schedules to find schedule IDs."""
-    service.delete_schedule(session, parse_schedule_id(schedule_id))
+    commands.delete_schedule(session, parse_schedule_id(schedule_id))

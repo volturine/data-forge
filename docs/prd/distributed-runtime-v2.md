@@ -63,36 +63,36 @@ That design can work for one API process. It is not safe for multiple Uvicorn wo
 ## Target Runtime Topology
 
 ```text
-Browser
+Browser / frontend app container
+  - namespace epoch + abort lifecycle
+  - scoped server projections and feature stores
   |
-  | HTTP requests and websockets
+  | HTTP requests and DB-backed websocket replay
   v
-API worker(s)
-  - validate requests
-  - create durable build/job rows
-  - read snapshots from DB
-  - stream DB-backed events over websockets
-  - never own build execution
+API worker(s) / internal gRPC handlers
+  - parse, authorize, and map representations
+  - invoke application commands that own transactions
+  - enqueue work and request cancellation
+  - never execute claimed data workloads
   |
-  | SQL, LISTEN/NOTIFY
+  | SQL transactions + LISTEN/NOTIFY wakeups
   v
-PostgreSQL
-  - build_runs
-  - build_events
-  - build_jobs
-  - engine_runs
-  - runtime_workers
-  - engine_instances
-  - schedules and scheduler leases
+PostgreSQL (authoritative state)
+  - fenced build jobs and compute requests
+  - build runs, ordered events, projections, engine runs
+  - scheduler triggers and datasource resource claims
+  - runtime outbox claims and notification receipts
+  - runtime workers, engine instances, analysis revisions
   |
-  | SKIP LOCKED leases
-  v
-Build worker(s)
-  - claim jobs
-  - own local ProcessManager
-  - execute Polars engine work
-  - persist progress/events/state
-  - heartbeat and renew leases
+  +---- SKIP LOCKED claims ----> scheduler process(es)
+  +---- SKIP LOCKED claims ----> build/compute worker process(es)
+  +---- SKIP LOCKED claims ----> outbox dispatcher process(es)
+                                      |
+                                      +---- idempotent external notifications
+
+Worker-owned execution writes fenced publication commands; object data is
+stored in the configured Iceberg catalog/object store and metadata authority
+remains in PostgreSQL.
 ```
 
 ## Production Database Decision

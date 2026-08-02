@@ -79,3 +79,33 @@ async def test_scheduler_loop_registers_runs_due_work_and_stops() -> None:
         ("run_due", "scheduler-1"),
         ("stop", "scheduler-1"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_scheduler_loop_retries_after_backend_restart() -> None:
+    class FlakySchedulerClient(FakeSchedulerClient):
+        def run_due(self, *, worker_id: str) -> scheduler_main.SchedulerRunDueResult:
+            if self.run_due_calls == 0:
+                self.run_due_calls += 1
+                raise RuntimeError("backend unavailable")
+            return super().run_due(worker_id=worker_id)
+
+    client = FlakySchedulerClient()
+    stop_event = asyncio.Event()
+
+    async def stop_after_recovery() -> None:
+        while client.run_due_calls < 2:
+            await asyncio.sleep(0)
+        stop_event.set()
+
+    stopper = asyncio.create_task(stop_after_recovery())
+    await scheduler_main.scheduler_loop(
+        stop_event,
+        "scheduler-restart",
+        client=cast(scheduler_main.SchedulerApiClient, client),
+        check_interval_seconds=1,
+        heartbeat_seconds=60,
+    )
+    await stopper
+
+    assert client.run_due_calls == 2

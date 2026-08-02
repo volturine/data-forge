@@ -531,7 +531,7 @@ describe('AnalysisStore.reset', () => {
 		};
 		store.error = 'something';
 		store.loading = true;
-		store.setPreviewPaused(true);
+		store.previews.paused = true;
 
 		store.reset();
 
@@ -541,7 +541,7 @@ describe('AnalysisStore.reset', () => {
 		expect(store.activeTabId).toBeNull();
 		expect(store.error).toBeNull();
 		expect(store.loading).toBe(false);
-		expect(store.previewPaused).toBe(false);
+		expect(store.previews.paused).toBe(false);
 	});
 });
 

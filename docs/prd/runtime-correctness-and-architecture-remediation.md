@@ -98,7 +98,13 @@ Completed in the ownership-cleanup polish:
 - worker result DTOs documented as protocol/publication payloads, not HTTP API schemas;
 - backend no longer owns Polars healthcheck execution or export-format writers;
 - backend compute base retains only API-facing engine status snapshots;
-- deferred work list reduced to true remaining redesign slices (consumer idempotency, chaos suites, structural extraction, transaction ownership).
+- the earlier deferred redesign slices were reduced to consumer idempotency and chaos coverage before those follow-up slices were completed.
+
+Completed in the structural-boundary slice:
+
+- worker runtime event publication, healthcheck execution, resource observation, and protocol conversion have dedicated lifecycle owners;
+- frontend chat presentation/layout, chart preparation/interaction/render lifecycle, editor preview state, and app lifecycle have dedicated state owners;
+- backend compute and shared frontend engine representations, plus worker protocol representations, use centralized mappers instead of transport-local copies.
 
 Completed in the datasource-execution-ownership slice:
 
@@ -115,6 +121,25 @@ Completed in the retry, datasource-publication, and verification slice:
 - verification checks rather than formats, fails if it changes the worktree, validates generated protocol output, and uses pinned Python, uv, Bun, and Just versions in CI;
 - runtime composition uses staged operations for multi-write transactions, while explicit command adapters own standalone commits without `commit` flags.
 
+Completed in the external-boundary and lifecycle follow-up:
+
+- external notification deliveries persist a receipt keyed by the stable outbox event ID, and retries skip provider calls after a receipt exists;
+- email retains that event ID as its stable `Message-ID`; the provider-acceptance/local-receipt crash window remains an explicit external-system limitation;
+- a real dispatcher process is terminated after claiming Postgres outbox work, then a second process proves expired-claim recovery and fenced completion;
+- schedule CRUD now uses flush-only persistence operations coordinated by application commands that own commit and post-commit wakeups;
+- HTTP and gRPC transports are commit-free and enforced by the code-hygiene check; authentication, build start/cancel/fail/finalize, output publication, health-result recording, datasource deletion, notification enqueue, and expired-job reconciliation delegate to application commands;
+- application-command transactions roll back on exceptions; registration commits the user, verification token, and login session together; OAuth commits identity linking and login-session creation together; build cancellation commits its engine-run projection with the build transition; and claimed output publication commits datasource metadata, build-result projection, and notification outbox rows atomically;
+- the frontend root owns one lifecycle coordinator that cancels queries, resets every namespace-scoped service, clears cached server state after activation, and destroys process resources at app teardown.
+
+Completed in the concurrency-verification and operational-confidence slice:
+
+- a shared barrier-based concurrent actor harness coordinates real PostgreSQL sessions without timing sleeps;
+- simultaneous scheduler claimants prove one due schedule is claimed exactly once through `SKIP LOCKED` and fenced lease predicates;
+- claimant transitions use shared typed outcomes, with gRPC handlers explicitly mapping `Applied` and rejected lease outcomes;
+- lease claim, reclaim, renewal, loss, and exhaustion paths emit redacted structured context and transition counters;
+- forced process exits and restarts cover API, worker manager, scheduler, and an actively claimed dispatcher delivery;
+- `just test-runtime-stability 3` repeats the contention, transition, lease, and crash/restart matrix three times.
+
 Follow-up cleanup for staged publication:
 
 - reclaim orphaned claim-specific Iceberg tables and object-store prefixes after rejected or abandoned attempts;
@@ -122,9 +147,9 @@ Follow-up cleanup for staged publication:
 
 ## 1. Purpose
 
-The project has the major pieces of a distributed runtime: durable queues, workers, scheduler coordination, persisted build events, an outbox, and namespace-aware frontend state. The remaining problem is not a missing component. It is that the components do not yet share one enforceable concurrency model.
+This document began when the project had the major pieces of a distributed runtime but did not yet apply one enforceable concurrency model across them. The remediation described below is now implemented; the findings are retained as the historical failure model that the completed invariants and tests address.
 
-Several paths currently rely on worker identity, process-local locks, unrestricted status assignments, separately committed service calls, or implicit ordering. These choices work in common single-writer cases but do not establish correctness when:
+The baseline paths relied on worker identity, process-local locks, unrestricted status assignments, separately committed service calls, or implicit ordering. Those choices did not establish correctness when:
 
 - a lease expires while its original worker is still running;
 - a worker shuts down while executor work is still active;
@@ -183,7 +208,7 @@ After this plan is complete:
 - Splitting files solely to reduce line counts.
 - Renaming identifiers without improving ownership or intent.
 
-## 5. Current Findings
+## 5. Baseline Findings (Remediated)
 
 ### 5.1 Work claims originally had expiry but not complete lease semantics
 
@@ -425,6 +450,34 @@ Create an application-scoped service container using typed Svelte context. It ow
 Every namespace-sensitive request captures the namespace and epoch. It may commit a result only if both still match. Namespace changes abort earlier requests and clear scoped queries.
 
 Server state belongs in the query layer. Local stores hold editor/session state that is not a copy of backend authority.
+
+### 6.8 Implemented ownership boundaries
+
+```text
+Worker runtime
+  claim lifecycle       worker_runtime.py
+  build orchestration   builds/build_execution.py + compute_service.py
+  event publication     runtime/build_events.py
+  healthcheck execution runtime/healthchecks.py
+  resource observation  runtime/resource_observation.py
+  datasource execution  datasources/execution.py
+  protocol mapping      runtime/protocol_mapping.py
+
+Frontend application
+  app/namespace lifecycle  services/app-lifecycle.ts
+  editor preview state     editor/preview-state.svelte.ts
+  chart preparation        charts/preparation.ts
+  chart render lifecycle   charts/render-lifecycle.ts
+  chart interaction        charts/interaction.ts
+  chat transport           api/chat.ts
+  chat conversation state  stores/chat.svelte.ts
+  chat presentation/layout chat/presentation.ts + chat/panel-layout.svelte.ts
+
+Representation boundaries
+  backend compute API      modules/compute/representations.py
+  worker protobuf payloads runtime/protocol_mapping.py
+  frontend engine display  representations/engine.ts
+```
 
 ## 7. Required Data and Protocol Changes
 
@@ -752,13 +805,13 @@ Exit criteria:
 
 ### Phase 1 — Freeze behavior with adversarial tests
 
-- [ ] Add concurrent-session backend test utilities.
+- [x] Add concurrent-session backend test utilities.
 - [x] Add lease expiry and stale completion tests.
 - [x] Add event append collision tests.
 - [x] Add cancel/finalize race tests.
 - [x] Add shutdown-with-active-executor tests.
 - [x] Add outbox contention tests.
-- [ ] Add scheduler contention tests.
+- [x] Add scheduler contention tests.
 - [x] Add analysis lost-update tests.
 - [x] Add frontend stale-namespace tests.
 
@@ -773,9 +826,9 @@ Exit criteria:
 - [x] Add claim identity to build-job and compute-request protocol contracts.
 - [x] Implement build-job and compute-request renew operations.
 - [x] Require tokens/generations on build-job and compute-request claimant writes.
-- [ ] Implement typed transition outcomes.
+- [x] Implement typed transition outcomes.
 - [x] Define retry/exhaustion policies.
-- [ ] Instrument lease behavior.
+- [x] Instrument lease behavior.
 
 Exit criteria:
 
@@ -800,9 +853,9 @@ Exit criteria:
 
 - [x] Redesign worker drain and lease renewal for build jobs and compute requests.
 - [x] Redesign outbox claiming and stable delivery identity.
-- [ ] Implement persistent consumer deduplication and poison-event handling.
+- [x] Implement persistent consumer deduplication and poison-event handling.
 - [x] Introduce durable scheduler triggers and fenced claims.
-- [ ] Add crash/restart integration tests for each service.
+- [x] Add crash/restart integration tests for each service.
 
 Exit criteria:
 
@@ -825,7 +878,7 @@ Exit criteria:
 
 - [x] Add mandatory analysis revisions.
 - [x] Make version allocation atomic.
-- [ ] Introduce frontend app-scoped services.
+- [x] Introduce frontend app-scoped services.
 - [x] Enforce namespace epoch/abort behavior.
 - [x] Eliminate store cycles and import-time I/O.
 
@@ -836,11 +889,11 @@ Exit criteria:
 
 ### Phase 7 — Simplify boundaries
 
-- [ ] Centralize transaction ownership in application commands.
+- [x] Centralize transaction ownership in application commands.
 - [x] Remove internal `commit` flags from composable runtime operations.
-- [ ] Extract runtime categories by invariant/lifecycle.
-- [ ] Extract frontend categories by state ownership and rendering responsibility.
-- [ ] Consolidate representation mappers.
+- [x] Extract runtime categories by invariant/lifecycle.
+- [x] Extract frontend categories by state ownership and rendering responsibility.
+- [x] Consolidate representation mappers.
 - [x] Apply deterministic order contracts to runtime queries and order-sensitive pipeline operators.
 
 The naming guidance in `STYLE_GUIDE.md` now treats a concise single word as a category name, while requiring intention-revealing component names and extraction by invariant, lifecycle, or side-effect boundary.
@@ -855,8 +908,8 @@ Exit criteria:
 - [x] Make verification non-mutating and reproducible.
 - [x] Pin toolchain versions.
 - [x] Run canonical checks in CI.
-- [ ] Run multi-process stress and failure-injection suites.
-- [ ] Update architecture diagrams and runtime progress status.
+- [x] Run multi-process stress and failure-injection suites.
+- [x] Update architecture diagrams and runtime progress status.
 - [x] Remove temporary operational limits. No temporary containment limits remain.
 
 Exit criteria:
@@ -895,9 +948,11 @@ Testing rules:
 - retain unit tests for pure transition policies;
 - run end-to-end tests through `just test-e2e`.
 
-## 12. Observability
+## 12. Observability Follow-up
 
-Expose at minimum:
+The runtime overview currently exposes runtime mode, API identity, worker heartbeats, engine state, and build-job queue state. The dedicated transition and contention counters below remain optional operational follow-up; they are not represented as implemented by the Phase 8 support declaration.
+
+The follow-up observability slice should expose:
 
 - active claims by kind;
 - lease renew success/failure;
@@ -936,18 +991,18 @@ The remediation is complete only when all statements below are true:
 - [x] Build projection equals a fold of committed events.
 - [x] Cancellation and finalization are atomic and idempotent.
 - [x] Terminal states cannot be overwritten by late writers.
-- [ ] Outbox dispatch is recoverable and duplicate delivery is harmless.
+- [x] Outbox dispatch is recoverable and duplicate delivery is harmless outside the documented provider-acceptance/local-receipt crash window.
 - [x] Datasource execution occurs in workers and uses durable resource fencing.
-- [ ] Multiple schedulers claim only due, bounded, totally ordered triggers.
+- [x] Multiple schedulers claim only due, bounded, totally ordered triggers.
 - [x] Analysis mutations require a revision and versions are unique.
 - [x] Frontend results cannot cross namespace epochs.
-- [ ] Every mutating entrypoint has one application-owned transaction.
+- [x] Every mutating entrypoint has one application-owned transaction.
 - [x] Observable queries and pipeline operators define tie ordering.
-- [ ] Runtime/frontend modules align with invariant and lifecycle ownership.
+- [x] Runtime/frontend modules align with invariant and lifecycle ownership.
 - [x] Verification is non-mutating and detects generated drift.
 - [x] `just verify`, `just test`, and `just test-e2e` pass without warnings.
-- [ ] Multi-process failure-injection tests pass repeatedly.
-- [ ] Runtime documentation and architecture diagrams match the implementation.
+- [x] Multi-process failure-injection tests pass repeatedly.
+- [x] Runtime documentation and architecture diagrams match the implementation.
 
 ## 14. Review Gates
 

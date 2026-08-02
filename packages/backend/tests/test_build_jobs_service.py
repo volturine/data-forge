@@ -6,6 +6,7 @@ from sqlmodel import Session
 from backend_core import build_jobs_service
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.persistence.build_jobs.models import BuildJob
+from backend_core.transitions import TransitionOutcome
 
 
 def test_claim_assigns_unique_fencing_identity(test_db_session: Session) -> None:
@@ -53,12 +54,13 @@ def test_renew_extends_only_the_active_claim(test_db_session: Session) -> None:
         lease_generation=claimed.lease_generation,
     )
 
-    assert renewed is not None
-    assert renewed.lease_expires_at is not None
-    assert renewed.lease_expires_at > previous_expiry
-    assert renewed.claim_token == claimed.claim_token
-    assert renewed.lease_generation == claimed.lease_generation
-    assert renewed.attempts == claimed.attempts
+    assert renewed.outcome is TransitionOutcome.APPLIED
+    assert renewed.value is not None
+    assert renewed.value.lease_expires_at is not None
+    assert renewed.value.lease_expires_at > previous_expiry
+    assert renewed.value.claim_token == claimed.claim_token
+    assert renewed.value.lease_generation == claimed.lease_generation
+    assert renewed.value.attempts == claimed.attempts
 
 
 def test_stale_claim_cannot_renew_or_complete_after_reclaim(test_db_session: Session) -> None:
@@ -84,16 +86,14 @@ def test_stale_claim_cannot_renew_or_complete_after_reclaim(test_db_session: Ses
     assert second.claim_token != first_token
     assert second.lease_generation == first_generation + 1
     assert second.lease_owner == 'worker:two'
-    assert (
-        build_jobs_service.renew_job_lease(
-            test_db_session,
-            second.id,
-            worker_id='worker:one',
-            claim_token=first_token,
-            lease_generation=first_generation,
-        )
-        is None
+    stale_renewal = build_jobs_service.renew_job_lease(
+        test_db_session,
+        second.id,
+        worker_id='worker:one',
+        claim_token=first_token,
+        lease_generation=first_generation,
     )
+    assert stale_renewal.outcome is TransitionOutcome.LEASE_LOST
     assert (
         build_jobs_service.finish_claimed_job(
             test_db_session,

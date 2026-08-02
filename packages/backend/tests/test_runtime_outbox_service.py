@@ -4,7 +4,7 @@ from backend_core import runtime_outbox_service
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.notification_delivery import EMAIL_DELIVERY_KIND
-from backend_core.persistence.runtime_events.models import RuntimeOutboxStatus
+from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxStatus
 
 
 def test_dispatch_pending_events_marks_event_dispatched(test_db_session, monkeypatch) -> None:
@@ -73,6 +73,30 @@ def test_dispatch_notification_delivery_uses_stable_outbox_id(test_db_session, m
 
     assert runtime_outbox_service.dispatch_pending_events(test_db_session) == 1
     assert deliveries == [({**event.payload_json, 'event_id': event.id}, event.id)]
+    receipt = test_db_session.get(NotificationDeliveryReceipt, event.id)
+    assert receipt is not None
+    assert receipt.kind == EMAIL_DELIVERY_KIND
+
+
+def test_dispatch_notification_delivery_skips_external_replay_with_receipt(test_db_session, monkeypatch) -> None:
+    event = runtime_outbox_service.enqueue_notification_delivery(
+        test_db_session,
+        {'kind': EMAIL_DELIVERY_KIND, 'to': 'test@example.com', 'subject': 'Ready', 'body': 'Done', 'attachments': []},
+    )
+    test_db_session.commit()
+    test_db_session.add(NotificationDeliveryReceipt(event_id=event.id, kind=EMAIL_DELIVERY_KIND, delivered_at=datetime.now(UTC)))
+    event.status = RuntimeOutboxStatus.FAILED
+    test_db_session.add(event)
+    test_db_session.commit()
+
+    deliveries: list[str] = []
+    monkeypatch.setattr(
+        'backend_core.runtime_outbox_service.notification_delivery.deliver',
+        lambda _payload, *, event_id: deliveries.append(event_id),
+    )
+
+    assert runtime_outbox_service.dispatch_pending_events(test_db_session) == 1
+    assert deliveries == []
 
 
 def test_expired_dispatch_claim_is_reclaimed_and_stale_finalizer_is_rejected(test_db_session) -> None:

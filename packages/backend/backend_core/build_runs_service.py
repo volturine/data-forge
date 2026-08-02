@@ -384,7 +384,7 @@ def mark_build_running(session: Session, build_id: str, *, execution_generation:
     )
 
 
-def update_build_result_json(session: Session, build_id: str, result_json: dict[str, Any] | None) -> BuildRun:
+def stage_build_result_json(session: Session, build_id: str, result_json: dict[str, Any] | None) -> BuildRun:
     run = session.get(BuildRun, build_id)
     if run is None:
         raise ValueError(f'Build run {build_id} not found')
@@ -392,9 +392,11 @@ def update_build_result_json(session: Session, build_id: str, result_json: dict[
     run.updated_at = _utcnow()
     run.version += 1
     session.add(run)
-    session.commit()
-    session.refresh(run)
+    session.flush()
     return run
+
+
+update_build_result_json = committed(stage_build_result_json, refresh=True)
 
 
 def stage_build_event(

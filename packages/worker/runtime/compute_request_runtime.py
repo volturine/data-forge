@@ -220,11 +220,11 @@ def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload:
         if isinstance(schema_cache, dict):
             proto_payload["schema_info"] = schema_cache
         if "source_type" in proto_payload:
-            from runtime.internal_api import enum_to_proto_value
+            from runtime.protocol_mapping import enum_to_proto_value
 
             proto_payload["source_type"] = enum_to_proto_value("DATA_SOURCE_TYPE", str(proto_payload["source_type"]))
         if "created_by" in proto_payload:
-            from runtime.internal_api import enum_to_proto_value
+            from runtime.protocol_mapping import enum_to_proto_value
 
             proto_payload["created_by"] = enum_to_proto_value("DATA_SOURCE_CREATED_BY", str(proto_payload["created_by"]))
         result.datasource.CopyFrom(json_format.ParseDict(proto_payload, datasource_pb2.DataSourceRecord()))
@@ -247,7 +247,7 @@ def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload:
                 diff = dict(raw_diff)
                 status = diff.get("status")
                 if isinstance(status, str):
-                    from runtime.internal_api import enum_to_proto_value
+                    from runtime.protocol_mapping import enum_to_proto_value
 
                     diff["status"] = enum_to_proto_value("SCHEMA_DIFF_STATUS", status)
                 converted.append(diff)
@@ -258,7 +258,7 @@ def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload:
 
 
 def _execute_datasource_command(client: WorkerInternalApiClient, claimed: ClaimedComputeRequest, command) -> datasource_pb2.DatasourceResult:
-    from runtime.internal_api import proto_value_to_enum_name, struct_to_dict
+    from runtime.protocol_mapping import proto_value_to_enum_name, struct_to_dict
 
     kind = claimed.kind
     namespace = claimed.namespace

@@ -26,12 +26,14 @@ from backend_core.exceptions import (
     datasource_not_found,
     schedule_not_found,
 )
+from backend_core.lease_observability import record_lease_transition
 from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
 from backend_core.sqlmodel_typing import col
 from backend_core.time import utc_now as _utcnow
+from backend_core.transitions import TransitionOutcome
 from modules.analysis.step_schemas import normalize_pipeline_step_configs_for_protocol
 
 logger = logging.getLogger(__name__)
@@ -397,7 +399,7 @@ def _build_schedule_response(
     return ScheduleResponse.model_validate(data)
 
 
-def _enrich_schedule_response(session: Session, schedule: Schedule) -> ScheduleResponse:
+def enrich_schedule_response(session: Session, schedule: Schedule) -> ScheduleResponse:
     """Enrich schedule with resolved analysis/tab info from datasource provenance."""
     datasource = session.get(DataSource, schedule.datasource_id)
     analysis = None
@@ -468,7 +470,7 @@ def list_schedules(
     return _enrich_schedule_response_batch(schedules, ds_map, analysis_map)
 
 
-def create_schedule(session: Session, payload: ScheduleCreate) -> ScheduleResponse:
+def stage_create_schedule(session: Session, payload: ScheduleCreate) -> Schedule:
     """Create a new schedule targeting a specific datasource.
 
     analysis_id and tab_id are resolved from datasource provenance at execution time.
@@ -511,12 +513,11 @@ def create_schedule(session: Session, payload: ScheduleCreate) -> ScheduleRespon
         created_at=datetime.now(UTC),
     )
     session.add(record)
-    session.commit()
-    session.refresh(record)
-    return _enrich_schedule_response(session, record)
+    session.flush()
+    return record
 
 
-def update_schedule(session: Session, schedule_id: str, payload: ScheduleUpdate) -> ScheduleResponse:
+def stage_update_schedule(session: Session, schedule_id: str, payload: ScheduleUpdate) -> Schedule:
     schedule = session.get(Schedule, schedule_id)
     if not schedule:
         raise schedule_not_found(schedule_id)
@@ -550,17 +551,15 @@ def update_schedule(session: Session, schedule_id: str, payload: ScheduleUpdate)
         schedule.next_run = Schedule.compute_next_run(payload.cron_expression)
 
     session.add(schedule)
-    session.commit()
-    session.refresh(schedule)
-    return _enrich_schedule_response(session, schedule)
+    session.flush()
+    return schedule
 
 
-def delete_schedule(session: Session, schedule_id: str) -> None:
+def stage_delete_schedule(session: Session, schedule_id: str) -> None:
     schedule = session.get(Schedule, schedule_id)
     if not schedule:
         raise schedule_not_found(schedule_id)
     session.delete(schedule)
-    session.commit()
 
 
 def get_build_order(session: Session, analysis_id: str) -> list[str]:
@@ -756,6 +755,16 @@ def claim_due_schedules(
         )
         if not claimed_schedule:
             continue
+        record_lease_transition(
+            kind='schedule',
+            transition='reclaim' if schedule.lease_owner is not None else 'claim',
+            outcome=TransitionOutcome.APPLIED,
+            entity_id=schedule.id,
+            owner_id=worker_id,
+            claim_token=claim_token,
+            generation=schedule.lease_generation + 1,
+            attempt=schedule.attempts + 1,
+        )
         claimed.append(schedule)
     if not claimed:
         session.rollback()

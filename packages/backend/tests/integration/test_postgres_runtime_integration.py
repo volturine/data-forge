@@ -18,6 +18,7 @@ from backend_core.migrations import _PUBLIC_REVISION, _TENANT_REVISION
 from tests.harness.postgres_harness import (
     BACKEND_ROOT,
     CORE_ROOT,
+    SCHEDULER_ROOT,
     WORKER_ROOT,
     ManagedProcess,
     PostgresContainer,
@@ -300,9 +301,11 @@ def test_init_db_bootstraps_public_and_tenant_schemas_in_postgres(monkeypatch, t
             assert _table_exists(connection, 'default', 'build_runs')
             assert _table_exists(connection, 'default', 'build_jobs')
             assert _table_exists(connection, 'default', 'runtime_outbox_events')
+            assert _table_exists(connection, 'default', 'notification_delivery_receipts')
             assert _table_exists(connection, 'alpha', 'build_runs')
             assert _table_exists(connection, 'alpha', 'build_jobs')
             assert _table_exists(connection, 'alpha', 'runtime_outbox_events')
+            assert _table_exists(connection, 'alpha', 'notification_delivery_receipts')
             assert _query_value(connection, 'SELECT count(*) FROM public.app_settings') == 1
             assert _query_value(connection, 'SELECT version_num FROM public.alembic_version') == _PUBLIC_REVISION
             assert _query_value(connection, 'SELECT version_num FROM "default".alembic_version') == _TENANT_REVISION
@@ -368,6 +371,98 @@ def test_postgres_outbox_dispatchers_do_not_share_unclaimed_batch_rows(monkeypat
 
         assert sorted(delivered) == sorted(event_ids)
         _clear_database_state()
+
+
+@pytest.mark.timeout(300)
+def test_postgres_outbox_claim_recovers_after_dispatcher_process_crash(monkeypatch, tmp_path: Path) -> None:
+    require_docker()
+
+    from backend_core import database, runtime_outbox_service
+    from backend_core.config import settings
+
+    with PostgresContainer() as container:
+        _clear_database_state()
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+        database.set_settings_engine_override(database._create_public_engine())
+        asyncio.run(database.init_db())
+
+        with Session(database._get_tenant_engine()) as session:
+            event = runtime_outbox_service.enqueue_build_job_notification(session)
+            session.commit()
+            event_id = event.id
+
+        env = docker_env({'ENV_FILE': '', 'DATABASE_URL': container.url, 'DEFAULT_NAMESPACE': 'default', 'DISTRIBUTED_RUNTIME_ENABLED': 'true'})
+        claimant = ManagedProcess(
+            name='outbox-claimant',
+            command=[
+                'uv',
+                'run',
+                'python',
+                '-c',
+                (
+                    'import time; from sqlmodel import Session; from backend_core import database, runtime_outbox_service; '
+                    'session = Session(database._get_tenant_engine()); '
+                    'assert runtime_outbox_service._claim_next_event(session) is not None; time.sleep(300)'
+                ),
+            ],
+            cwd=CORE_ROOT,
+            env=env,
+        )
+        try:
+            claimant.start()
+            wait_for_condition(
+                lambda: _outbox_status(container, event_id) == 'dispatching',
+                timeout=30,
+                description='outbox event to be claimed by crash target',
+            )
+        finally:
+            claimant.crash()
+
+        with container.connect() as connection:
+            connection.execute(
+                'UPDATE "default".runtime_outbox_events SET lease_expires_at = CURRENT_TIMESTAMP - INTERVAL \'1 second\' WHERE id = %s',
+                (event_id,),
+            )
+            connection.commit()
+
+        run_command(
+            [
+                'uv',
+                'run',
+                'python',
+                '-c',
+                (
+                    'from sqlmodel import Session; from backend_core import database, runtime_outbox_service; '
+                    'session = Session(database._get_tenant_engine()); '
+                    'assert runtime_outbox_service.dispatch_pending_events(session, limit=1) == 1'
+                ),
+            ],
+            cwd=CORE_ROOT,
+            env=env,
+            timeout=60,
+        )
+
+        with container.connect() as connection:
+            row = connection.execute(
+                'SELECT status, attempts FROM "default".runtime_outbox_events WHERE id = %s',
+                (event_id,),
+            ).fetchone()
+        assert row == ('dispatched', 2)
+        _clear_database_state()
+
+
+def _outbox_status(container: PostgresContainer, event_id: str) -> str | None:
+    with container.connect() as connection:
+        value = _query_value(
+            connection,
+            'SELECT status FROM "default".runtime_outbox_events WHERE id = %s',
+            (event_id,),
+        )
+    return str(value) if value is not None else None
 
 
 @pytest.mark.timeout(300)
@@ -608,6 +703,88 @@ async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(task, timeout=5)
             await runtime_ipc.stop_api_server(server)
+
+
+@pytest.mark.timeout(300)
+def test_postgres_runtime_roles_restart_after_forced_process_exit(
+    tmp_path: Path,
+    rustfs_container: RustfsContainer,
+) -> None:
+    require_docker()
+
+    with PostgresContainer() as container:
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        api_port = free_port()
+        grpc_port = free_port()
+        data_plane_port = free_port()
+        base_env = _runtime_env(
+            data_dir=data_dir,
+            database_url=container.url,
+            port=api_port,
+            grpc_port=grpc_port,
+            rustfs=rustfs_container,
+            data_plane_port=data_plane_port,
+        )
+        base_env['SCHEDULER_CHECK_INTERVAL'] = '1'
+        _init_runtime_db(base_env)
+
+        api = ManagedProcess(
+            name='restart-api',
+            command=['uv', 'run', '--no-env-file', str(BACKEND_ROOT / 'main.py')],
+            cwd=CORE_ROOT,
+            env=base_env,
+        )
+        worker = ManagedProcess(
+            name='restart-worker',
+            command=['uv', 'run', '--no-env-file', str(WORKER_ROOT / 'main.py')],
+            cwd=CORE_ROOT,
+            env=base_env,
+        )
+        scheduler = ManagedProcess(
+            name='restart-scheduler',
+            command=['uv', 'run', '--no-env-file', str(SCHEDULER_ROOT / 'main.py')],
+            cwd=SCHEDULER_ROOT,
+            env=base_env,
+        )
+        try:
+            api.start()
+            wait_for_http_ready(f'http://127.0.0.1:{api_port}/health/ready')
+            worker.start()
+            scheduler.start()
+            wait_for_condition(
+                lambda: _registered_worker_count(container, 'build_manager') >= 1,
+                timeout=90,
+                description='build manager registration before crash',
+            )
+            wait_for_condition(
+                lambda: _registered_worker_count(container, 'scheduler') >= 1,
+                timeout=90,
+                description='scheduler registration before crash',
+            )
+
+            api.restart()
+            wait_for_http_ready(f'http://127.0.0.1:{api_port}/health/ready')
+
+            worker.restart()
+            wait_for_condition(
+                lambda: _registered_worker_count(container, 'build_manager') >= 2,
+                timeout=90,
+                description='replacement build manager registration',
+            )
+
+            scheduler.restart()
+            wait_for_condition(
+                lambda: _registered_worker_count(container, 'scheduler') >= 2,
+                timeout=90,
+                description='replacement scheduler registration',
+            )
+        except AssertionError as exc:
+            raise AssertionError(f'{exc}\napi tail:\n{api.tail()}\nworker tail:\n{worker.tail()}\nscheduler tail:\n{scheduler.tail()}') from exc
+        finally:
+            scheduler.stop()
+            worker.stop()
+            api.stop()
 
 
 @pytest.mark.asyncio

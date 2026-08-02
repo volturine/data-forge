@@ -1,6 +1,6 @@
 import datetime as dt
 
-from sqlalchemy import JSON, Column, DateTime, Enum as SAEnum, Integer, String
+from sqlalchemy import JSON, Column, DateTime, Enum as SAEnum, ForeignKey, Integer, String
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.enums import DataForgeStrEnum
@@ -32,3 +32,11 @@ class RuntimeOutboxEvent(SQLModel, table=True):  # type: ignore[call-arg, assign
     created_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     updated_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     dispatched_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
+
+
+class NotificationDeliveryReceipt(SQLModel, table=True):  # type: ignore[call-arg, assignment]
+    __tablename__ = 'notification_delivery_receipts'  # type: ignore[assignment]
+
+    event_id: str = Field(sa_column=Column(String, ForeignKey('runtime_outbox_events.id', ondelete='CASCADE'), primary_key=True))
+    kind: str = Field(sa_column=Column(String, nullable=False))
+    delivered_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))

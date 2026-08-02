@@ -37,7 +37,9 @@ Residual audit note:
 - The implementation covers stale-owner rejection, active lease renewal, atomic build transitions, durable outbox recovery, scheduler claim ordering, analysis lost-update prevention, frontend namespace isolation, and worker-owned datasource execution.
 - The runtime/admin surface exposes runtime mode, API process identity, worker heartbeats, engine rows, and queue status through `/api/v1/runtime/overview`.
 - Backend packages no longer own dataframe execution for datasources or healthchecks; remaining backend Polars mentions are code-export string generation only.
-- Still deferred as separate redesign slices: durable external-notification consumer idempotency, broad multi-process crash/failure injection, deeper runtime/frontend module extraction, and centralized application-command transaction ownership.
+- Durable external-notification receipts, dispatcher-process crash/reclaim coverage, centralized application-command transaction ownership, and an app-owned frontend namespace lifecycle are implemented.
+- Runtime lifecycle categories, frontend state/rendering categories, and transport representation mappers now have explicit module owners.
+- Shared concurrent-session tests, typed lease transition outcomes, structured lease diagnostics, and forced API/worker/scheduler/dispatcher restart coverage are implemented and have a repeated stability gate.
 - Lower-level metric counters such as lease renew outcomes, fenced-write rejection, attempt exhaustion, scheduler duplicate prevention, and datasource contention are not yet exposed as dedicated metrics.
 
 
@@ -220,16 +222,18 @@ The repository currently supports:
 - migration-first Postgres bootstrap
 - Docker-native runtime validation with the fixed-role image topology
 - release-confidence runtime/admin overview endpoint for runtime mode, API process identity, worker heartbeats, engine state, and queue status
+- application-command transaction ownership across mutating HTTP and internal gRPC entrypoints
+- explicit runtime/frontend lifecycle modules and consolidated representation mappers
 
 The repository still should not claim:
 
 - any non-Postgres distributed runtime claim
 
-## Remaining Work
+## Optional Operational Follow-up
 
 Distributed runtime v2 implementation is functionally complete enough to run and validate as a Postgres-backed multi-process runtime.
 
-Remaining optional follow-up from the PRD observability section:
+Optional follow-up from the PRD observability section does not gate the implemented distributed-runtime support claim:
 
 - add dedicated metric counters/endpoints for build-event insert failures
 - add websocket connected-client counts

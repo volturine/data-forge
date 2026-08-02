@@ -19,10 +19,9 @@ from backend_core.exceptions import AppError
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
+from modules.scheduler.commands import create_schedule, delete_schedule, update_schedule
 from modules.scheduler.service import (
     claim_due_schedules,
-    create_schedule,
-    delete_schedule,
     enqueue_schedule_run,
     get_build_order,
     get_due_schedules,
@@ -31,8 +30,8 @@ from modules.scheduler.service import (
     mark_schedule_run,
     reconcile_schedule_run,
     should_run,
-    update_schedule,
 )
+from tests.harness.postgres_harness import run_concurrently
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -568,6 +567,36 @@ class TestMarkScheduleRun:
 
 
 class TestScheduleClaiming:
+    def test_concurrent_schedulers_claim_due_schedule_once(
+        self,
+        test_db_session: Session,
+        test_engine,
+        output_datasource: DataSource,
+    ) -> None:
+        schedule = create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=output_datasource.id, cron_expression='* * * * *'),
+        )
+        row = test_db_session.get(Schedule, schedule.id)
+        assert row is not None
+        row.next_run = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=1)
+        test_db_session.add(row)
+        test_db_session.commit()
+
+        def claim(worker_id: str) -> list[str]:
+            with Session(test_engine) as session:
+                return [item.id for item in claim_due_schedules(session, worker_id=worker_id, limit=1)]
+
+        claims = run_concurrently(
+            [lambda: claim('scheduler:one'), lambda: claim('scheduler:two')],
+        )
+
+        assert sorted(item for claim_ids in claims for item in claim_ids) == [schedule.id]
+        test_db_session.expire_all()
+        stored = test_db_session.get(Schedule, schedule.id)
+        assert stored is not None
+        assert stored.lease_owner in {'scheduler:one', 'scheduler:two'}
+
     def test_claim_due_schedule_sets_lease(self, test_db_session: Session, output_datasource: DataSource):
         schedule = create_schedule(
             test_db_session,

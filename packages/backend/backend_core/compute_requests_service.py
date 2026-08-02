@@ -18,10 +18,12 @@ from backend_core.domain.compute_requests.models import (
     response_payload as proto_response_payload,
     status_from_proto,
 )
+from backend_core.lease_observability import record_lease_transition
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
 from backend_core.transactions import committed
+from backend_core.transitions import TransitionOutcome, TransitionResult, applied, rejected
 from dataforge_protocol import compute_pb2, enums_pb2
 
 _BLOCKING_REQUEST_KINDS = frozenset(
@@ -150,6 +152,10 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
     )
     exhausted = list(session.execute(exhausted_statement).scalars().all())
     for request in exhausted:
+        owner_id = request.lease_owner or 'unowned'
+        claim_token = request.claim_token or ''
+        generation = request.lease_generation
+        attempt = request.attempts
         error_message = f'Compute request exhausted {request.max_attempts} execution attempts'
         request.status = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
         request.response_envelope = response_envelope(
@@ -169,6 +175,16 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
         request.last_renewed_at = None
         session.add(request)
         runtime_outbox_service.enqueue_compute_response_notification(session, request_id=request.id)
+        record_lease_transition(
+            kind='compute_request',
+            transition='exhaust',
+            outcome=TransitionOutcome.APPLIED,
+            entity_id=request.id,
+            owner_id=owner_id,
+            claim_token=claim_token,
+            generation=generation,
+            attempt=attempt,
+        )
     if exhausted:
         session.commit()
     queued_clause = table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
@@ -211,6 +227,17 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
         return None
     session.commit()
     claimed = session.get(ComputeRequest, row.id)
+    if claimed is not None:
+        record_lease_transition(
+            kind='compute_request',
+            transition='reclaim' if previous_owner is not None else 'claim',
+            outcome=TransitionOutcome.APPLIED,
+            entity_id=claimed.id,
+            owner_id=worker_id,
+            claim_token=claim_token,
+            generation=claimed.lease_generation,
+            attempt=claimed.attempts,
+        )
     return claimed
 
 
@@ -221,7 +248,7 @@ def renew_request_lease(
     worker_id: str,
     claim_token: str,
     lease_generation: int,
-) -> ComputeRequest | None:
+) -> TransitionResult[ComputeRequest]:
     now = _database_now(session)
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
     statement = (
@@ -241,9 +268,32 @@ def renew_request_lease(
     result = cast(CursorResult[Any], session.execute(statement))
     if result.rowcount != 1:
         session.rollback()
-        return None
+        outcome = TransitionOutcome.NOT_FOUND if session.get(ComputeRequest, request_id) is None else TransitionOutcome.LEASE_LOST
+        record_lease_transition(
+            kind='compute_request',
+            transition='renew',
+            outcome=outcome,
+            entity_id=request_id,
+            owner_id=worker_id,
+            claim_token=claim_token,
+            generation=lease_generation,
+        )
+        return rejected(outcome)
     session.commit()
-    return session.get(ComputeRequest, request_id)
+    request = session.get(ComputeRequest, request_id)
+    if request is None:
+        raise RuntimeError(f'Renewed compute request {request_id} disappeared after commit')
+    record_lease_transition(
+        kind='compute_request',
+        transition='renew',
+        outcome=TransitionOutcome.APPLIED,
+        entity_id=request_id,
+        owner_id=worker_id,
+        claim_token=claim_token,
+        generation=lease_generation,
+        attempt=request.attempts,
+    )
+    return applied(request)
 
 
 def lock_active_request_claim(

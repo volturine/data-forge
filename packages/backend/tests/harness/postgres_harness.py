@@ -8,6 +8,8 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -120,6 +122,19 @@ def wait_for_condition(predicate, *, timeout: float = 60, interval: float = 0.5,
     raise AssertionError(f'Timed out waiting for {description}')
 
 
+def run_concurrently[T](actions: Sequence[Callable[[], T]], *, timeout: float = 30) -> list[T]:
+    """Release database actors together and return results in input order."""
+    barrier = threading.Barrier(len(actions), timeout=timeout)
+
+    def coordinated(action: Callable[[], T]) -> T:
+        barrier.wait()
+        return action()
+
+    with ThreadPoolExecutor(max_workers=len(actions), thread_name_prefix='db-actor') as pool:
+        futures = [pool.submit(coordinated, action) for action in actions]
+        return [future.result(timeout=timeout) for future in futures]
+
+
 def _drain_stream(stream, chunks: list[str]) -> None:
     if stream is None:
         return
@@ -161,6 +176,19 @@ class ManagedProcess:
             with contextlib.suppress(subprocess.TimeoutExpired):
                 self.proc.wait(timeout=5)
         self._join_threads()
+
+    def crash(self) -> None:
+        if self.proc is None or self.proc.poll() is not None:
+            self._join_threads()
+            return
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(self.proc.pid, signal.SIGKILL)
+        self.proc.wait(timeout=10)
+        self._join_threads()
+
+    def restart(self) -> None:
+        self.crash()
+        self.start()
 
     def tail(self, *, limit: int = 80) -> str:
         lines = [*self.stdout_chunks, *self.stderr_chunks]

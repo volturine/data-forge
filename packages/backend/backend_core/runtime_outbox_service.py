@@ -8,9 +8,9 @@ from backend_core import notification_delivery, runtime_ipc
 from backend_core.claiming import with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
-from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
+from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxEvent, RuntimeOutboxStatus
 from backend_core.sqlmodel_typing import sa
-from backend_core.time import utc_now as _utcnow
+from backend_core.transactions import committed
 
 
 def _database_now(session: Session) -> datetime:
@@ -26,7 +26,7 @@ def enqueue_runtime_event(session: Session, payload: dict[str, object]) -> Runti
     kind = RuntimePayloadKind.from_payload(payload)
     if kind is None:
         raise ValueError(f'Unsupported runtime outbox payload kind: {payload.get("kind")!r}')
-    now = _utcnow()
+    now = _database_now(session)
     event = RuntimeOutboxEvent(
         id=str(uuid.uuid4()),
         kind=kind.value,
@@ -46,7 +46,7 @@ def enqueue_notification_delivery(session: Session, payload: dict[str, object]) 
     kind = payload.get('kind')
     if kind not in {notification_delivery.EMAIL_DELIVERY_KIND, notification_delivery.TELEGRAM_DELIVERY_KIND}:
         raise ValueError(f'Unsupported notification delivery kind: {kind!r}')
-    now = _utcnow()
+    now = _database_now(session)
     event = RuntimeOutboxEvent(
         id=str(uuid.uuid4()),
         kind=str(kind),
@@ -60,6 +60,9 @@ def enqueue_notification_delivery(session: Session, payload: dict[str, object]) 
     session.add(event)
     session.flush()
     return event
+
+
+enqueue_notification_delivery_command = committed(enqueue_notification_delivery, refresh=True)
 
 
 def enqueue_api_build_notification(session: Session, *, namespace: str, build_id: str, latest_sequence: int) -> RuntimeOutboxEvent:
@@ -102,7 +105,9 @@ def dispatch_pending_events(session: Session, *, limit: int = 100) -> int:
         delivery_payload = {**payload, 'event_id': event_id}
         try:
             if event_kind in {notification_delivery.EMAIL_DELIVERY_KIND, notification_delivery.TELEGRAM_DELIVERY_KIND}:
-                notification_delivery.deliver(delivery_payload, event_id=event_id)
+                if not _notification_was_delivered(session, event_id):
+                    notification_delivery.deliver(delivery_payload, event_id=event_id)
+                    _record_notification_delivery(session, event_id=event_id, kind=event_kind)
             else:
                 runtime_ipc.notify_runtime_payload(delivery_payload)
         except Exception as exc:  # noqa: BLE001 - outbox must preserve retry state for transport failures.
@@ -111,6 +116,17 @@ def dispatch_pending_events(session: Session, *, limit: int = 100) -> int:
         if _finalize_claim(session, event_id, claim_token=claim_token, lease_generation=lease_generation, error=None):
             dispatched += 1
     return dispatched
+
+
+def _notification_was_delivered(session: Session, event_id: str) -> bool:
+    return session.get(NotificationDeliveryReceipt, event_id) is not None
+
+
+def _record_notification_delivery(session: Session, *, event_id: str, kind: str) -> None:
+    if _notification_was_delivered(session, event_id):
+        return
+    session.add(NotificationDeliveryReceipt(event_id=event_id, kind=kind, delivered_at=_database_now(session)))
+    session.commit()
 
 
 def _claim_next_event(session: Session) -> tuple[str, str, int, str, dict[str, object]] | None:

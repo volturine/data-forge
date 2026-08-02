@@ -677,6 +677,81 @@ async def test_internal_worker_grpc_rejects_stale_output_publication_without_mut
 
 
 @pytest.mark.asyncio
+async def test_internal_worker_grpc_rolls_back_output_publication_when_notification_staging_fails(
+    test_db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = _context(monkeypatch)
+    datasource_id = str(uuid.uuid4())
+    build_id = str(uuid.uuid4())
+    analysis_id = str(uuid.uuid4())
+    build_runs_service.create_build_run(
+        test_db_session,
+        build_id=build_id,
+        namespace='default',
+        analysis_id=analysis_id,
+        analysis_name='Atomic publication test',
+        request_json={'analysis_pipeline': {'analysis_id': analysis_id, 'tabs': []}},
+        starter_json={'triggered_by': 'test'},
+        status=BuildRunStatus.RUNNING,
+        execution_generation=1,
+        created_at=datetime.now(UTC),
+    )
+    build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
+    claimed = build_jobs_service.claim_next_job(test_db_session, worker_id='worker:publisher')
+    assert claimed is not None
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='Published output',
+            source_type=DataSourceType.ICEBERG.value,
+            config={'metadata_path': 's3://bucket/published'},
+            is_hidden=False,
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    def reject_notification(_session: Session, _payload: dict[str, object]) -> RuntimeOutboxEvent:
+        raise RuntimeError('notification staging failed')
+
+    monkeypatch.setattr('modules.datasource.commands.runtime_outbox_service.enqueue_notification_delivery', reject_notification)
+
+    with pytest.raises(RuntimeError, match='notification staging failed'):
+        await WorkerRuntimeServicer().UpsertOutputDatasource(
+            worker_runtime_pb2.WorkerUpsertOutputDatasourceRequest(
+                namespace='default',
+                result_id=datasource_id,
+                name='Uncommitted output',
+                source_type=enums_pb2.DATA_SOURCE_TYPE_ICEBERG,
+                config=dict_to_struct({'metadata_path': 's3://bucket/uncommitted'}),
+                schema_info=datasource_pb2.SchemaInfo(),
+                job_id=claimed.id,
+                build_id=build_id,
+                worker_id='worker:publisher',
+                claim_token=claimed.claim_token,
+                lease_generation=claimed.lease_generation,
+                build_result=dict_to_struct({'current_output_id': datasource_id}),
+                notification_delivery=[
+                    worker_runtime_pb2.WorkerNotificationDelivery(
+                        email=worker_runtime_pb2.WorkerEmailDelivery(to='owner@example.com', subject='Ready', body='Must roll back')
+                    )
+                ],
+            ),
+            cast(Any, context),
+        )
+
+    test_db_session.expire_all()
+    datasource = test_db_session.get(DataSource, datasource_id)
+    build = build_runs_service.get_build_run(test_db_session, build_id)
+    assert datasource is not None
+    assert datasource.name == 'Published output'
+    assert datasource.config == {'metadata_path': 's3://bucket/published'}
+    assert build is not None
+    assert build.result_json is None
+    assert list(test_db_session.execute(select(RuntimeOutboxEvent)).scalars().all()) == []
+
+
+@pytest.mark.asyncio
 async def test_internal_worker_grpc_returns_udf_codes_by_id(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     udf_id = str(uuid.uuid4())
