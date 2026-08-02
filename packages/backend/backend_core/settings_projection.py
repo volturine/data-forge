@@ -16,7 +16,6 @@ DEFAULT_OPENAI_ENDPOINT_URL = 'https://api.openai.com'
 DEFAULT_OPENAI_MODEL = 'gpt-4o-mini'
 DEFAULT_OLLAMA_ENDPOINT_URL = 'http://localhost:11434'
 DEFAULT_OLLAMA_MODEL = 'llama3.2'
-DEFAULT_HUGGINGFACE_MODEL = 'google/flan-t5-base'
 
 _RESOLVED_LOCK = Lock()
 _RESOLVED_CACHE: dict[int, ResolvedSettingsSnapshot] = {}
@@ -39,8 +38,6 @@ class ResolvedSettingsSnapshot:
     openai_organization_id: str = ''
     ollama_endpoint_url: str = DEFAULT_OLLAMA_ENDPOINT_URL
     ollama_default_model: str = DEFAULT_OLLAMA_MODEL
-    huggingface_api_token: str = ''
-    huggingface_default_model: str = DEFAULT_HUGGINGFACE_MODEL
 
     @classmethod
     def from_row(cls, row: AppSettings) -> ResolvedSettingsSnapshot:
@@ -60,8 +57,6 @@ class ResolvedSettingsSnapshot:
             openai_organization_id=row.openai_organization_id or '',
             ollama_endpoint_url=row.ollama_endpoint_url or DEFAULT_OLLAMA_ENDPOINT_URL,
             ollama_default_model=row.ollama_default_model or DEFAULT_OLLAMA_MODEL,
-            huggingface_api_token=_read_secret(row, 'huggingface_api_token'),
-            huggingface_default_model=row.huggingface_default_model or DEFAULT_HUGGINGFACE_MODEL,
         )
 
     def smtp_settings(self) -> dict[str, object]:
@@ -93,12 +88,6 @@ class ResolvedSettingsSnapshot:
 
     def ollama_settings(self) -> dict[str, str]:
         return {'endpoint_url': self.ollama_endpoint_url, 'default_model': self.ollama_default_model}
-
-    def huggingface_settings(self) -> dict[str, str]:
-        return {
-            'api_token': self.huggingface_api_token if self.exists else '',
-            'default_model': self.huggingface_default_model,
-        }
 
     def default_model(self) -> str:
         return self.openrouter_default_model if self.exists else ''
@@ -167,10 +156,6 @@ def get_resolved_openai_settings() -> dict[str, str]:
 
 def get_resolved_ollama_settings() -> dict[str, str]:
     return _get_resolved_snapshot().ollama_settings()
-
-
-def get_resolved_huggingface_settings() -> dict[str, str]:
-    return _get_resolved_snapshot().huggingface_settings()
 
 
 def get_resolved_default_model() -> str:

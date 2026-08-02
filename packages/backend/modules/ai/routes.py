@@ -77,23 +77,10 @@ def resolve_ollama_status() -> AIProviderStatus:
     )
 
 
-def resolve_huggingface_status() -> AIProviderStatus:
-    from backend_core.settings_store import get_resolved_huggingface_settings
-
-    huggingface = get_resolved_huggingface_settings()
-    return AIProviderStatus(
-        provider=ai_provider_name(enums_pb2.AI_PROVIDER_HUGGINGFACE),
-        configured=bool(huggingface['api_token']),
-        endpoint_url='https://api-inference.huggingface.co',
-        default_model=huggingface['default_model'],
-    )
-
-
 AI_PROVIDER_STATUS_DEFINITIONS: tuple[AIProviderStatusDefinition, ...] = (
     AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OPENROUTER, resolve_openrouter_status),
     AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OPENAI, resolve_openai_status),
     AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OLLAMA, resolve_ollama_status),
-    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_HUGGINGFACE, resolve_huggingface_status),
 )
 
 

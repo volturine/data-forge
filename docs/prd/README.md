@@ -43,7 +43,6 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Build Length Tracking](active/build-length-tracking.md)
 - [Docker Release](active/docker-release.md)
 - [Hot-Path Profiling Plan](active/hot-path-request-map.md) — direct timing, occupancy, and request measurements deferred
-- [Hugging Face Connection](active/hugging-face-connection.md)
 - [Lineage Revamp](active/lineage-revamp.md)
 - [Performance Regression Investigation](active/performance-violation-checklist.md) — +54.0% regression attribution and optimization deferred
 - [S3 Storage Support](active/s3-storage-support.md)

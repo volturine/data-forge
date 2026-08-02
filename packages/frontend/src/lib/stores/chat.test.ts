@@ -81,8 +81,6 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
 		openai_organization_id: '',
 		ollama_endpoint_url: 'http://localhost:11434',
 		ollama_default_model: 'llama3.2',
-		huggingface_api_token: '',
-		huggingface_default_model: 'google/flan-t5-base',
 		public_idb_debug: false,
 		...overrides
 	};

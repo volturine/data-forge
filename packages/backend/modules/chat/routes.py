@@ -71,11 +71,6 @@ CHAT_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, ChatProviderDefinition] = 
     ),
     enums_pb2.AI_PROVIDER_OPENAI: ChatProviderDefinition(provider=enums_pb2.AI_PROVIDER_OPENAI),
     enums_pb2.AI_PROVIDER_OLLAMA: ChatProviderDefinition(provider=enums_pb2.AI_PROVIDER_OLLAMA),
-    enums_pb2.AI_PROVIDER_HUGGINGFACE: ChatProviderDefinition(
-        provider=enums_pb2.AI_PROVIDER_HUGGINGFACE,
-        requires_session_api_key=True,
-        requires_model_list_api_key=True,
-    ),
 }
 
 

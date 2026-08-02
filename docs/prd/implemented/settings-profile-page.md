@@ -57,7 +57,7 @@ Historically, settings and profile were separate destinations in the app. Users 
 2. The profile page has a tab bar with sections:
    - **Account** — Display name, email, avatar, password change, active sessions.
    - **Notifications** — SMTP configuration, Telegram bot settings.
-   - **AI Providers** — OpenRouter, OpenAI, Ollama, Hugging Face configuration.
+   - **AI Providers** — OpenRouter, OpenAI, and Ollama configuration.
    - **System** — General app settings, encryption key status, debug toggles.
 3. The old `/settings` route redirects to `/profile#system` (or whichever tab is appropriate).
 4. Tabs are deep-linkable: `/profile#notifications` opens the notifications tab.
@@ -90,7 +90,7 @@ Historically, settings and profile were separate destinations in the app. Users 
 
 **Acceptance Criteria:**
 
-1. AI Providers tab shows expandable panels per provider (OpenRouter, OpenAI, Ollama, Hugging Face).
+1. AI Providers tab shows expandable panels per provider (OpenRouter, OpenAI, and Ollama).
 2. Each panel: API key (masked), endpoint URL, default model, "Test Connection" button.
 3. Test validates connectivity and returns available models.
 4. Settings persist via existing `PUT /settings` API.

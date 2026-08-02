@@ -30,11 +30,8 @@ _AI_PROVIDER_NAMES: dict[enums_pb2.AIProvider, str] = {
     enums_pb2.AI_PROVIDER_OLLAMA: "ollama",
     enums_pb2.AI_PROVIDER_OPENAI: "openai",
     enums_pb2.AI_PROVIDER_OPENROUTER: "openrouter",
-    enums_pb2.AI_PROVIDER_HUGGINGFACE: "huggingface",
 }
-_AI_PROVIDER_BY_NAME = {name: provider for provider, name in _AI_PROVIDER_NAMES.items()} | {
-    "huggingface-api": enums_pb2.AI_PROVIDER_HUGGINGFACE,
-}
+_AI_PROVIDER_BY_NAME = {name: provider for provider, name in _AI_PROVIDER_NAMES.items()}
 
 
 def ai_provider_name(provider: enums_pb2.AIProvider) -> str:

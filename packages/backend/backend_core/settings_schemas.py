@@ -20,8 +20,6 @@ class SettingsResponse(BaseModel):
     openai_organization_id: str
     ollama_endpoint_url: str
     ollama_default_model: str
-    huggingface_api_token: str
-    huggingface_default_model: str
     public_idb_debug: bool
 
 
@@ -40,8 +38,6 @@ class SettingsUpdate(BaseModel):
     openai_organization_id: str | None = None
     ollama_endpoint_url: str | None = None
     ollama_default_model: str | None = None
-    huggingface_api_token: str | None = None
-    huggingface_default_model: str | None = None
     public_idb_debug: bool | None = None
 
 

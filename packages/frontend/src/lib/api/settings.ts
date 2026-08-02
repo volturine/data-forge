@@ -23,8 +23,6 @@ export interface AppSettings {
 	openai_organization_id: string;
 	ollama_endpoint_url: string;
 	ollama_default_model: string;
-	huggingface_api_token: string;
-	huggingface_default_model: string;
 	public_idb_debug: boolean;
 }
 

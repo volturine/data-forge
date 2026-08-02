@@ -22,10 +22,10 @@ from sqlalchemy.exc import IntegrityError
 
 from datasources.datasource_loading import load_datasource
 from datasources.schemas import (
-    CSVOptions,
     ColumnSchema,
     ColumnStats,
     ColumnStatsResponse,
+    CSVOptions,
     DataSourceDescriptionModel,
     DataSourceRecord,
     SchemaDiff,

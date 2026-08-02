@@ -313,14 +313,13 @@ test.describe('Profile – Notifications tab', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Profile – AI Providers tab', () => {
-	test('ai providers tab shows all four provider panels', async ({ page }) => {
+	test('ai providers tab shows all provider panels', async ({ page }) => {
 		await page.goto('/profile#ai-providers');
 		await waitForProfileTab(page, 'AI Providers');
 
 		await expect(page.getByText('OpenRouter')).toBeVisible();
 		await expect(page.getByText('OpenAI')).toBeVisible();
 		await expect(page.getByText('Ollama')).toBeVisible();
-		await expect(page.getByText('Hugging Face')).toBeVisible();
 
 		await screenshot(page, 'profile', 'ai-providers-tab');
 	});
@@ -332,7 +331,6 @@ test.describe('Profile – AI Providers tab', () => {
 		await expect(page.getByRole('button', { name: 'Test OpenRouter' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Test OpenAI' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Test Ollama' })).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Test Hugging Face' })).toBeVisible();
 	});
 
 	test('ai providers save shows success feedback on 200', async ({ page }) => {

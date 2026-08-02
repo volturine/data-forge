@@ -18,11 +18,8 @@ _AI_PROVIDER_NAMES: dict[enums_pb2.AIProvider, str] = {
     enums_pb2.AI_PROVIDER_OLLAMA: 'ollama',
     enums_pb2.AI_PROVIDER_OPENAI: 'openai',
     enums_pb2.AI_PROVIDER_OPENROUTER: 'openrouter',
-    enums_pb2.AI_PROVIDER_HUGGINGFACE: 'huggingface',
 }
-_AI_PROVIDER_BY_NAME = {name: provider for provider, name in _AI_PROVIDER_NAMES.items()} | {
-    'huggingface-api': enums_pb2.AI_PROVIDER_HUGGINGFACE,
-}
+_AI_PROVIDER_BY_NAME = {name: provider for provider, name in _AI_PROVIDER_NAMES.items()}
 
 
 def ai_provider_name(provider: enums_pb2.AIProvider) -> str:
@@ -201,70 +198,6 @@ class OpenRouterClient(AIClient):
             return {'ok': False, 'detail': str(exc)}
 
 
-class HuggingFaceClient(AIClient):
-    def __init__(self, api_token: str = '', base_url: str = 'https://api-inference.huggingface.co') -> None:
-        self.api_token = api_token
-        self.base_url = base_url.rstrip('/')
-
-    def _headers(self) -> dict[str, str]:
-        headers = {'Content-Type': 'application/json'}
-        if self.api_token:
-            headers['Authorization'] = f'Bearer {self.api_token}'
-        return headers
-
-    @staticmethod
-    def _extract_generated_text(payload: object) -> str:
-        if isinstance(payload, list):
-            first = payload[0] if payload else None
-            if isinstance(first, dict):
-                if isinstance(first.get('generated_text'), str):
-                    return first['generated_text']
-                if isinstance(first.get('summary_text'), str):
-                    return first['summary_text']
-                if isinstance(first.get('translation_text'), str):
-                    return first['translation_text']
-        if isinstance(payload, dict):
-            if isinstance(payload.get('generated_text'), str):
-                return payload['generated_text']
-            if isinstance(payload.get('summary_text'), str):
-                return payload['summary_text']
-            if isinstance(payload.get('translation_text'), str):
-                return payload['translation_text']
-            if isinstance(payload.get('error'), str):
-                raise AIError(payload['error'])
-        return ''
-
-    def generate(self, prompt: str, *, model: str, options: dict | None = None) -> str:
-        payload: dict[str, object] = {'inputs': prompt}
-        if options:
-            payload['parameters'] = options
-        response = _retry_request('POST', f'{self.base_url}/models/{model}', headers=self._headers(), payload=payload)
-        return self._extract_generated_text(response.json())
-
-    def list_models(self) -> list[dict]:
-        hub_url = 'https://huggingface.co/api/models?sort=downloads&direction=-1&limit=100'
-        try:
-            response = _retry_request('GET', hub_url, headers=self._headers(), retries=0)
-            models = response.json()
-            if not isinstance(models, list):
-                return []
-            return [{'name': m.get('id', ''), 'pipeline_tag': m.get('pipeline_tag', ''), 'downloads': m.get('downloads', 0)} for m in models]
-        except AIError:
-            return []
-
-    def test_connection(self) -> dict:
-        if not self.api_token:
-            return {'ok': False, 'detail': 'Hugging Face API token is required'}
-        try:
-            response = http_client.get('https://huggingface.co/api/whoami-v2', headers=self._headers(), timeout=_TIMEOUT)
-            response.raise_for_status()
-            data = response.json()
-            name = data.get('name') or data.get('fullname') or 'authenticated'
-            return {'ok': True, 'detail': f'Connected as {name}'}
-        except Exception as exc:
-            return {'ok': False, 'detail': str(exc)}
-
-
 class AIClientBuilder(Protocol):
     def __call__(
         self,
@@ -327,17 +260,6 @@ def build_openrouter_client(*, endpoint_url: str | None, api_key: str | None, or
     return OpenRouterClient(resolved_key)
 
 
-def build_huggingface_client(*, endpoint_url: str | None, api_key: str | None, organization_id: str | None) -> AIClient:
-    del organization_id
-    from backend_core.settings_projection import get_resolved_huggingface_settings
-
-    resolved = get_resolved_huggingface_settings()
-    return HuggingFaceClient(
-        api_token=api_key if api_key is not None else resolved['api_token'] or settings.huggingface_api_token,
-        base_url=endpoint_url or settings.huggingface_api_base_url,
-    )
-
-
 AI_CLIENT_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AIClientProviderDefinition] = {
     enums_pb2.AI_PROVIDER_OLLAMA: AIClientProviderDefinition(
         provider=enums_pb2.AI_PROVIDER_OLLAMA,
@@ -353,11 +275,6 @@ AI_CLIENT_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AIClientProviderDefin
         provider=enums_pb2.AI_PROVIDER_OPENROUTER,
         aliases=(),
         build=build_openrouter_client,
-    ),
-    enums_pb2.AI_PROVIDER_HUGGINGFACE: AIClientProviderDefinition(
-        provider=enums_pb2.AI_PROVIDER_HUGGINGFACE,
-        aliases=('huggingface-api',),
-        build=build_huggingface_client,
     ),
 }
 

@@ -11,9 +11,9 @@ from typing import Any, cast
 from google.protobuf import json_format, message
 
 from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2, errors_pb2
-from operations.step_converter import analysis_pipeline_to_execution_payload
 from datasources import execution as datasource_execution
 from datasources.schemas import CSVOptions
+from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
 from runtime.compute_manager import ProcessManager
 from runtime.config import settings
@@ -203,6 +203,7 @@ async def _renew_compute_lease(claimed: ClaimedComputeRequest, *, stop_event: as
 
 def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
     from google.protobuf import json_format
+
     from dataforge_protocol import datasource_pb2
 
     result = datasource_pb2.DatasourceResult()

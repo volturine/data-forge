@@ -7,11 +7,11 @@
 
 ## Overview
 
-Expand Data-Forge's AI capabilities to support multiple LLM providers for both in-app chat and per-row pipeline transformations. Add support for OpenRouter (remote), OpenAI (local/self-hosted and remote), Ollama (local/self-hosted and remote), and Hugging Face Inference API (remote) as unified AI providers.
+Expand Data-Forge's AI capabilities to support multiple LLM providers for both in-app chat and per-row pipeline transformations. Unify OpenRouter (remote), OpenAI (local/self-hosted and remote), and Ollama (local/self-hosted and remote) behind one provider contract.
 
 ## Problem Statement
 
-Data-Forge now has broader AI provider support than this original baseline described: chat/provider settings already expose OpenRouter, OpenAI, Ollama, and Hugging Face paths, while deeper unification work remains. However, these integrations are fragmented — each has its own client, configuration, and error handling patterns. Users cannot easily switch providers, there is no unified provider abstraction, and some combinations (e.g., using Ollama for chat, or OpenAI self-hosted for pipeline transforms) are not supported.
+Data-Forge now has broader AI provider support than this original baseline described: chat/provider settings expose OpenRouter, OpenAI, and Ollama paths, while deeper unification work remains. However, these integrations are fragmented — each has its own client, configuration, and error handling patterns. Users cannot easily switch providers, there is no unified provider abstraction, and some combinations (e.g., using Ollama for chat, or OpenAI self-hosted for pipeline transforms) are not supported.
 
 ### Current State
 
@@ -20,7 +20,6 @@ Data-Forge now has broader AI provider support than this original baseline descr
 | OpenRouter | ✅ | ✅ | Global settings + provider selection exist |
 | OpenAI | ✅ | ✅ | Global settings + provider selection exist |
 | Ollama | ✅ | ✅ | Global settings + provider selection exist |
-| Hugging Face | ✅ | ✅ | Global settings + provider selection exist |
 
 ### Target State
 
@@ -31,7 +30,6 @@ Data-Forge now has broader AI provider support than this original baseline descr
 | OpenAI (local/self-hosted) | ✅ | ✅ | Custom endpoint URL |
 | Ollama (local) | ✅ | ✅ | `AppSettings` + per-step override |
 | Ollama (remote) | ✅ | ✅ | Custom endpoint URL |
-| Hugging Face API | ✅ | ✅ | `AppSettings` + per-step override |
 
 ## Goals
 
@@ -41,7 +39,7 @@ Data-Forge now has broader AI provider support than this original baseline descr
 | G-2 | Provider switching without data loss | User can change provider mid-conversation or mid-pipeline |
 | G-3 | Self-hosted support for OpenAI-compatible APIs | Custom endpoint URLs work for LocalAI, vLLM, text-gen-webui, etc. |
 | G-4 | Per-row LLM transformation at scale | Batch processing with rate limiting, retries, and progress |
-| G-5 | In-app chat with any provider | Chat panel works with all 4 provider families |
+| G-5 | In-app chat with any supported provider | Chat panel works with all supported provider families |
 
 ## Non-Goals
 
@@ -64,7 +62,6 @@ Data-Forge now has broader AI provider support than this original baseline descr
    - **OpenRouter**: API key, default model.
    - **OpenAI**: API key, endpoint URL (default: `https://api.openai.com`), default model, organization ID (optional).
    - **Ollama**: Endpoint URL (default: `http://localhost:11434`), default model.
-   - **Hugging Face**: API token, default model.
 4. Test button validates connectivity and lists available models.
 5. Settings persist in `AppSettings` DB record.
 
@@ -133,7 +130,6 @@ modules/ai/providers/
 ├── openrouter.py     # OpenRouter provider
 ├── openai_provider.py # OpenAI (local + remote)
 ├── ollama_provider.py # Ollama (local + remote)
-├── huggingface.py    # Hugging Face Inference API
 └── factory.py        # Provider factory
 ```
 
@@ -196,10 +192,6 @@ def get_provider(
             return OllamaProvider(
                 endpoint_url=endpoint_url or settings.ollama_endpoint_url,
             )
-        case "huggingface":
-            return HuggingFaceProvider(
-                api_token=api_key or settings.hf_api_token,
-            )
 ```
 
 #### Updated AI Pipeline Operation
@@ -208,7 +200,7 @@ Refactor `backend/modules/compute/operations/ai.py`:
 
 ```python
 class AIParams(OperationParams):
-    provider: Literal['openrouter', 'openai', 'ollama', 'huggingface'] = 'ollama'
+    provider: Literal['openrouter', 'openai', 'ollama'] = 'ollama'
     model: str = 'llama2'
     input_columns: list[str] = []
     output_column: str = 'ai_result'
@@ -262,13 +254,13 @@ async def send_message(
 #### Chat Panel Updates
 
 - Add provider/model selector to chat header.
-- Show provider icon (Ollama, OpenAI, OpenRouter, HF logos).
+- Show provider icon (Ollama, OpenAI, and OpenRouter logos).
 - Persist last-used provider/model in session.
 - Handle provider-specific streaming differences transparently.
 
 #### AI Step Config Updates
 
-- Provider dropdown with all 4 options + icons.
+- Provider dropdown with the supported options and icons.
 - Conditional fields per provider (endpoint URL, API key overrides).
 - Advanced section: batch size, rate limit, max retries, temperature, max tokens.
 - Error column configuration.
@@ -287,10 +279,6 @@ openai_organization: str = ""
 # Ollama
 ollama_endpoint_url: str = "http://localhost:11434"
 ollama_default_model: str = ""
-
-# Hugging Face (if not already added via HF Connection PRD)
-hf_api_token: str = ""
-hf_default_model: str = ""
 ```
 
 ### Security Considerations
@@ -314,7 +302,7 @@ hf_default_model: str = ""
 |-------|-------|----------|
 | 1 | Backend: Provider abstraction, factory, interface | 2 days |
 | 2 | Backend: OpenRouter + OpenAI providers (migrate existing) | 2 days |
-| 3 | Backend: Ollama + HF providers | 2 days |
+| 3 | Backend: Ollama provider | 2 days |
 | 4 | Backend: Updated AI operation with retries, rate limiting, error column | 3 days |
 | 5 | Backend: Updated chat with provider selection | 2 days |
 | 6 | Frontend: Settings page provider panels | 2 days |
@@ -326,4 +314,4 @@ hf_default_model: str = ""
 1. Should we support multiple simultaneous providers in a single pipeline (e.g., use GPT-4 for classification and Ollama for summarization in different steps)?
 2. How do we handle provider-specific features (e.g., OpenAI function calling vs. Ollama's different tool format)?
 3. Should per-step API key overrides be encrypted in the pipeline definition or must users always use global settings?
-4. Do we want a cost tracking/estimation feature for paid providers (OpenRouter, OpenAI, HF)?
+4. Do we want a cost tracking/estimation feature for paid providers (OpenRouter and OpenAI)?

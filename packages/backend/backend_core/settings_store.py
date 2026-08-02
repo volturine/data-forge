@@ -7,7 +7,6 @@ from backend_core.persistence.settings.models import AppSettings
 from backend_core.secrets import decrypt_secret, encrypt_secret, is_masked_secret, mask_secret
 from backend_core.settings_projection import (
     get_resolved_default_model as get_resolved_default_model,
-    get_resolved_huggingface_settings as get_resolved_huggingface_settings,
     get_resolved_ollama_settings as get_resolved_ollama_settings,
     get_resolved_openai_settings as get_resolved_openai_settings,
     get_resolved_openrouter_key as get_resolved_openrouter_key,
@@ -25,7 +24,6 @@ _SECRET_FIELDS = (
     'telegram_bot_token',
     'openrouter_api_key',
     'openai_api_key',
-    'huggingface_api_token',
 )
 _RESPONSE_VALUE_FIELDS = (
     'smtp_host',
@@ -38,7 +36,6 @@ _RESPONSE_VALUE_FIELDS = (
     'openai_organization_id',
     'ollama_endpoint_url',
     'ollama_default_model',
-    'huggingface_default_model',
     'public_idb_debug',
 )
 _UPDATE_VALUE_FIELDS = _RESPONSE_VALUE_FIELDS
@@ -51,14 +48,12 @@ _BOOTSTRAP_STRING_FIELDS = (
     ('openai_organization_id', 'openai_organization_id'),
     ('ollama_endpoint_url', 'ollama_base_url'),
     ('ollama_default_model', 'ollama_default_model'),
-    ('huggingface_default_model', 'huggingface_default_model'),
 )
 _BOOTSTRAP_SECRET_FIELDS = (
     ('smtp_password', 'smtp_password', 'SMTP password'),
     ('telegram_bot_token', 'telegram_bot_token', 'Telegram token'),
     ('openrouter_api_key', 'openrouter_api_key', 'OpenRouter key'),
     ('openai_api_key', 'openai_api_key', 'OpenAI key'),
-    ('huggingface_api_token', 'huggingface_api_token', 'Hugging Face token'),
 )
 
 

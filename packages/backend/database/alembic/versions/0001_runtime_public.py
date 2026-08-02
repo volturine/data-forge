@@ -47,8 +47,6 @@ def upgrade() -> None:
         sa.Column('openai_organization_id', sa.String(), nullable=False, server_default=''),
         sa.Column('ollama_endpoint_url', sa.String(), nullable=False, server_default='http://localhost:11434'),
         sa.Column('ollama_default_model', sa.String(), nullable=False, server_default='llama3.2'),
-        sa.Column('huggingface_api_token', sa.String(), nullable=False, server_default=''),
-        sa.Column('huggingface_default_model', sa.String(), nullable=False, server_default='google/flan-t5-base'),
         sa.Column('env_bootstrap_complete', sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column('public_idb_debug', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.PrimaryKeyConstraint('id'),

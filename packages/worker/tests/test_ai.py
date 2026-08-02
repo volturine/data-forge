@@ -187,10 +187,6 @@ class TestGetAIClient:
         client = get_ai_client("openai", api_key="sk-test", endpoint_url="https://custom.api.com/")
         assert isinstance(client, InternalAIClient)
 
-    def test_huggingface_api_alias_uses_internal_client(self):
-        client = get_ai_client("huggingface-api")
-        assert isinstance(client, InternalAIClient)
-
     def test_unknown_provider_raises(self):
         with pytest.raises(ValueError, match="Unknown AI provider"):
             get_ai_client("anthropic")

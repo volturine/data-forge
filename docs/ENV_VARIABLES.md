@@ -235,25 +235,21 @@ These variables configure the gRPC channel that the scheduler and worker use to 
 
 ### AI and provider settings
 
-| Variable                       | Default                                | Notes                                             |
-| ------------------------------ | -------------------------------------- | ------------------------------------------------- |
-| `OLLAMA_BASE_URL`              | `http://localhost:11434`               | Base URL for Ollama.                              |
-| `OLLAMA_DEFAULT_MODEL`         | `llama3.2`                             | Default Ollama chat model.                        |
-| `OPENAI_API_KEY`               | empty                                  | OpenAI API key.                                   |
-| `OPENAI_BASE_URL`              | `https://api.openai.com`               | OpenAI-compatible API base URL.                   |
-| `OPENAI_DEFAULT_MODEL`         | `gpt-4o-mini`                          | Default OpenAI model.                             |
-| `OPENAI_ORGANIZATION_ID`       | empty                                  | Optional OpenAI org id.                           |
-| `HUGGINGFACE_API_TOKEN`        | empty                                  | Hugging Face token.                               |
-| `HUGGINGFACE_DEFAULT_MODEL`    | `google/flan-t5-base`                  | Default Hugging Face model.                       |
-| `HUGGINGFACE_API_BASE_URL`     | `https://api-inference.huggingface.co` | Hugging Face inference base URL.                  |
-| `OPENROUTER_API_KEY`           | empty                                  | Seeded into DB on first run if DB field is empty. |
-| `OPENROUTER_DEFAULT_MODEL`     | empty                                  | Seeded into DB on first run if DB field is empty. |
-| `OPENAI_DEFAULT_MODEL_DB`      | empty                                  | DB-seeded default model override.                 |
-| `OPENAI_ENDPOINT_URL_DB`       | empty                                  | DB-seeded endpoint override.                      |
-| `OPENAI_ORGANIZATION_ID_DB`    | empty                                  | DB-seeded organization override.                  |
-| `OLLAMA_ENDPOINT_URL_DB`       | empty                                  | DB-seeded Ollama endpoint override.               |
-| `OLLAMA_DEFAULT_MODEL_DB`      | empty                                  | DB-seeded Ollama model override.                  |
-| `HUGGINGFACE_DEFAULT_MODEL_DB` | empty                                  | DB-seeded Hugging Face model override.            |
+| Variable                      | Default                  | Notes                                             |
+| ----------------------------- | ------------------------ | ------------------------------------------------- |
+| `OLLAMA_BASE_URL`             | `http://localhost:11434` | Base URL for Ollama.                              |
+| `OLLAMA_DEFAULT_MODEL`        | `llama3.2`               | Default Ollama chat model.                        |
+| `OPENAI_API_KEY`              | empty                    | OpenAI API key.                                   |
+| `OPENAI_BASE_URL`             | `https://api.openai.com` | OpenAI-compatible API base URL.                   |
+| `OPENAI_DEFAULT_MODEL`        | `gpt-4o-mini`            | Default OpenAI model.                             |
+| `OPENAI_ORGANIZATION_ID`      | empty                    | Optional OpenAI org id.                           |
+| `OPENROUTER_API_KEY`          | empty                    | Seeded into DB on first run if DB field is empty. |
+| `OPENROUTER_DEFAULT_MODEL`    | empty                    | Seeded into DB on first run if DB field is empty. |
+| `OPENAI_DEFAULT_MODEL_DB`     | empty                    | DB-seeded default model override.                 |
+| `OPENAI_ENDPOINT_URL_DB`      | empty                    | DB-seeded endpoint override.                      |
+| `OPENAI_ORGANIZATION_ID_DB`   | empty                    | DB-seeded organization override.                  |
+| `OLLAMA_ENDPOINT_URL_DB`      | empty                    | DB-seeded Ollama endpoint override.               |
+| `OLLAMA_DEFAULT_MODEL_DB`     | empty                    | DB-seeded Ollama model override.                  |
 
 ### Notifications and encrypted settings
 
