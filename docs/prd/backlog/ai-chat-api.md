@@ -1,7 +1,7 @@
 # PRD: AI Chat API Support
 
-> **Status (audited 2026-08-02): Active — partially implemented.**
-> **Current truth:** Provider settings and multi-provider chat support exist today, but this PRD still overstates missing baseline support and should be read as backlog/reference for deeper unification work.
+> **Status (audited 2026-08-02): Backlog — baseline support is shipped; deeper unification remains future work.**
+> **Current truth:** Provider settings and multi-provider chat support exist today. This document tracks the remaining consolidation and product-expansion work.
 > **Portfolio:** [PRD index](../README.md)
 
 

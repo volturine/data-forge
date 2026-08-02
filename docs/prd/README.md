@@ -14,9 +14,11 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 ## Implemented
 
 - [Build Preview Checklist](implemented/build-preview-checklist.md) — archived rollout checklist
+- [Build Preview](implemented/build-preview.md)
 - [Cancel Build](implemented/cancel-build.md)
 - [Dataset Column Descriptions](implemented/dataset-column-descriptions.md)
 - [Dataset Descriptions](implemented/dataset-descriptions.md)
+- [Core Product Specification](implemented/data-forge.md)
 - [Distributed Runtime v2](implemented/distributed-runtime-v2.md)
 - [Distributed Runtime v2 Progress](implemented/distributed-runtime-v2-progress.md) — archived progress record
 - [Duplicate Analysis Tab](implemented/duplicate-analysis-tab.md)
@@ -34,10 +36,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 
 ## Active
 
-- [AI Chat API](active/ai-chat-api.md)
 - [Build Length Tracking](active/build-length-tracking.md)
-- [Build Preview](active/build-preview.md)
-- [Core Product Specification](active/data-forge.md)
 - [Docker Release](active/docker-release.md)
 - [Documentation Update](active/documentation-update.md)
 - [Hot-Path Request Map](active/hot-path-request-map.md)
@@ -50,9 +49,11 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 ## Backlog
 
 - [Analytical Dashboards](backlog/analytical-dashboards.md)
+- [AI Chat API](backlog/ai-chat-api.md)
 - [Application Shell and Shared Panels](backlog/application-shell.md)
 - [Authentication and Identity](backlog/authentication-and-identity.md)
 - [Authorization, Ownership, and Collaboration](backlog/authorization-ownership-and-collaboration.md)
+- [Build Observability](backlog/build-observability.md)
 - [Feature-overhaul Portfolio](backlog/data-forge-2.md)
 - [Horizontal Node Configuration](backlog/horizontal-node-config.md)
 - [Kaggle Connection](backlog/kaggle-connection.md)

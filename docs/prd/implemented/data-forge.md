@@ -3,7 +3,7 @@
 ## Document Control
 
 - **Product:** Data-Forge Analysis Platform
-- **Status:** Active product specification (audited 2026-08-02)
+- **Status:** Implemented product baseline (audited 2026-08-02)
 - **Portfolio:** [PRD index](../README.md)
 - **Last Updated:** 2026-02-23
 - **Owner:** Product + Engineering

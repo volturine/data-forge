@@ -1,7 +1,7 @@
 # PRD: Build Preview (Live Progress)
 
-> **Status (audited 2026-08-02): Active — partially implemented.**
-> **Current truth:** Live build preview, monitoring integration, and cancellation are shipped, but this PRD still includes unshipped extras like full resource charts/log streaming as if they were core scope.
+> **Status (audited 2026-08-02): Implemented — live preview, monitoring integration, and cancellation are shipped.**
+> **Current truth:** The core build-preview capability is complete. Resource charts and log-streaming expansion are tracked separately in [Build Observability](../backlog/build-observability.md).
 > **Portfolio:** [PRD index](../README.md)
 
 
