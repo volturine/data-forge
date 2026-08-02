@@ -1,6 +1,6 @@
 # PRD: PostgreSQL Backend Support
 
-> **Status (audited 2026-08-02): Historical — implemented and superseded by Postgres-only runtime documentation.**
+> **Status (audited 2026-08-02): Implemented — superseded by Postgres-only runtime documentation.**
 > **Portfolio:** [PRD index](../README.md)
 
 ## Status

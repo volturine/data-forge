@@ -1,6 +1,6 @@
 # MCP Tool Contract
 
-> **Status (audited 2026-08-02): Reference.**
+> **Status (audited 2026-08-02): Implemented — current MCP route contract.**
 > **Current truth:** This is a maintainer/reference doc for a shipped capability.
 > **Portfolio:** [PRD index](../README.md)
 

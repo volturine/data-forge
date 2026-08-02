@@ -5,7 +5,7 @@
 - **Status:** Implemented (audited 2026-08-02)
 - **Scope:** Concurrency correctness, deterministic behavior, runtime ownership, transaction boundaries, maintainability, and verification
 - **Applies to:** Backend API, worker runtime, scheduler, frontend state, protocol contracts, persistence, and CI
-- **Supersedes:** Runtime correctness claims in [the runtime progress record](../reference/distributed-runtime-v2-progress.md) where those claims conflict with verified implementation behavior
+- **Supersedes:** Runtime correctness claims in [the runtime progress record](distributed-runtime-v2-progress.md) where those claims conflict with verified implementation behavior
 - **Does not supersede:** Product requirements or user-facing feature PRDs
 
 ### Implementation completed — 2026-08-02

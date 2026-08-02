@@ -1,6 +1,6 @@
 # E2E runtime baseline
 
-> **Status (audited 2026-08-02): Active — re-baselining required.**
+> **Status (audited 2026-08-02): Implemented — archived baseline; remeasure before making a current claim.**
 > **Portfolio:** [PRD index](../README.md)
 
 _Last audited: 2026-08-02_
@@ -15,8 +15,8 @@ It is intentionally strict:
 - stability claims require repeated clean `just test-e2e` runs
 
 Related documents:
-- [`./hot-path-request-map.md`](./hot-path-request-map.md)
-- [`./violation-checklist.md`](./violation-checklist.md)
+- [Hot-path request map](../active/hot-path-request-map.md)
+- [Performance violation checklist](../active/performance-violation-checklist.md)
 
 ## Historical baseline — 2026-05-21
 

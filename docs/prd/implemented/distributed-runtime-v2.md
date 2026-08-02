@@ -1,6 +1,6 @@
 # PRD: Distributed Runtime v2
 
-> **Status (audited 2026-08-02): Reference — implemented architecture.**
+> **Status (audited 2026-08-02): Implemented — current distributed-runtime architecture.**
 > **Current truth:** The durable Postgres runtime is now the shipped architecture. Remaining work is mainly observability polish and cleanup, not the original core migration.
 > **Portfolio:** [PRD index](../README.md)
 

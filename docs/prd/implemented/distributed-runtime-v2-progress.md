@@ -1,6 +1,6 @@
 # Distributed Runtime v2 Progress
 
-> **Status (audited 2026-08-02): Reference — implemented runtime progress record.**
+> **Status (audited 2026-08-02): Implemented — archived runtime progress record.**
 > **Portfolio:** [PRD index](../README.md)
 
 ## Status Summary

@@ -40,6 +40,14 @@ just dev             # start API, worker, scheduler, and frontend
 5. **Reviewer** — Ask for review and address feedback
 6. **Finish** — Clean up, ensure tests pass
 
+## Documentation
+
+- `README.md` is the concise project overview and entry point for people.
+- `AGENTS.md` is the authoritative repository workflow and maintenance guide for agents.
+- `docs/prd/` contains detailed product and architecture records, organized only by delivery status: `implemented/`, `active/`, and `backlog/`.
+- Place a document according to its audited delivery status, not its technical subject. Current contracts, architecture, completed audits, and archived/superseded completion records belong in `implemented/`; active measurement or investigation belongs in `active/`.
+- Update the [PRD index](docs/prd/README.md) whenever adding, moving, or materially changing a PRD.
+
 ## Principles
 
 1. Don't assume. Don't hide confusion. Surface tradeoffs.

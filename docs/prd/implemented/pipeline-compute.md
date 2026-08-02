@@ -1,6 +1,6 @@
 # Pipeline Compute Architecture
 
-> **Status (audited 2026-08-02): Historical — superseded by the durable worker runtime.**
+> **Status (audited 2026-08-02): Implemented — superseded by the durable worker runtime.**
 > **Portfolio:** [PRD index](../README.md)
 
 ## Overview

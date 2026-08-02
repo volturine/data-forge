@@ -1,6 +1,6 @@
 # Build Scheduling Architecture
 
-> **Status (audited 2026-08-02): Historical — superseded by the dedicated scheduler service.**
+> **Status (audited 2026-08-02): Implemented — superseded by the dedicated scheduler service.**
 > **Portfolio:** [PRD index](../README.md)
 
 ## Overview

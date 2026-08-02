@@ -1,6 +1,6 @@
 # Build Preview PRD Checklist
 
-> **Status (audited 2026-08-02): Historical.**
+> **Status (audited 2026-08-02): Implemented — archived rollout checklist.**
 > **Current truth:** The checklist reflects the original build-preview rollout. Use the [PRD index](../README.md) and [active build-preview PRD](../active/build-preview.md) for current status.
 > **Portfolio:** [PRD index](../README.md)
 

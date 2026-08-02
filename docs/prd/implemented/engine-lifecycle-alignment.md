@@ -1,6 +1,6 @@
 # Engine Lifecycle Alignment
 
-> **Status (audited 2026-08-02): Historical — superseded by the Docker-native runtime.**
+> **Status (audited 2026-08-02): Implemented — superseded by the Docker-native runtime.**
 > **Portfolio:** [PRD index](../README.md)
 
 Owner: AI implementation pass on 2026-05-23

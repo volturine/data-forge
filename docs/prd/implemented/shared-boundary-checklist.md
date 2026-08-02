@@ -1,6 +1,6 @@
 # Package boundary cleanup checklist
 
-> **Status (audited 2026-08-02): Reference — completed boundary audit.**
+> **Status (audited 2026-08-02): Implemented — archived completed boundary audit.**
 > **Portfolio:** [PRD index](../README.md)
 
 Goal: no production package imports another owner package's internals. Owner-specific behavior lives in its owning package, and cross-package coordination happens through PostgreSQL-backed state, notifications, and internal HTTP/RPC boundaries.
