@@ -167,6 +167,25 @@ describe('ConfigStore', () => {
 		});
 	});
 
+	describe('refresh', () => {
+		test('invalidates cache and refetches without clearing current config', async () => {
+			mockSuccess(makeConfig({ public_idb_debug: false }));
+			await store.fetch();
+			expect(store.publicIdbDebug).toBe(false);
+			expect(store.config).not.toBeNull();
+			expect(mockGetConfig).toHaveBeenCalledTimes(1);
+
+			mockSuccess(makeConfig({ public_idb_debug: true }));
+			const refreshPromise = store.refresh();
+			// Keep the previous config available while the refresh is in flight.
+			expect(store.config).not.toBeNull();
+			await refreshPromise;
+
+			expect(mockGetConfig).toHaveBeenCalledTimes(2);
+			expect(store.publicIdbDebug).toBe(true);
+		});
+	});
+
 	describe('fetch deduplication', () => {
 		test('second fetch after success is a no-op', async () => {
 			mockSuccess(makeConfig());

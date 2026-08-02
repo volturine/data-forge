@@ -62,6 +62,11 @@
 		searchDelay?: number;
 		emptyLabel?: string;
 		listAriaLabel?: string;
+		/**
+		 * Keep the options list visible without a focus/click open step.
+		 * Used by discovery-first pickers (e.g. analysis wizard datasource step).
+		 */
+		alwaysOpen?: boolean;
 		renderOption: Snippet<[OptionRenderPayload]>;
 		renderTrigger?: Snippet<[TriggerRenderPayload]>;
 		menuAction?: Action<MenuActionValue>;
@@ -92,6 +97,7 @@
 		searchDelay = 120,
 		emptyLabel = 'No results',
 		listAriaLabel = 'Options',
+		alwaysOpen = false,
 		menuAction,
 		menuActionValue = { left: 0, top: 0, width: 0 },
 		searchValue = $bindable(''),
@@ -112,6 +118,7 @@
 	const resolvedMenuAction = $derived(menuAction ?? noopAction);
 
 	let menuOpen = $state(false);
+	const isMenuVisible = $derived(alwaysOpen || menuOpen);
 	let menuRef = $state<HTMLElement>();
 	let menuContainerRef = $state<HTMLElement>();
 	let triggerRef = $state<HTMLButtonElement | HTMLInputElement>();
@@ -141,9 +148,11 @@
 	function handleSelect(id: string) {
 		if (mode === 'single') {
 			updateValue(id);
-			menuOpen = false;
-			searchValue = '';
-			onClose?.();
+			if (!alwaysOpen) {
+				menuOpen = false;
+				searchValue = '';
+				onClose?.();
+			}
 			return;
 		}
 		const current = new SvelteSet(selectedSet);
@@ -166,7 +175,7 @@
 	}
 
 	function openMenu() {
-		if (disabled) return;
+		if (disabled || alwaysOpen) return;
 		menuOpen = true;
 		onOpen?.(triggerRef);
 	}
@@ -176,6 +185,7 @@
 	}
 
 	function closeMenu() {
+		if (alwaysOpen) return;
 		menuOpen = false;
 		searchValue = '';
 		onClose?.();
@@ -206,7 +216,7 @@
 	};
 
 	const triggerPayload = $derived({
-		open: menuOpen,
+		open: isMenuVisible,
 		selectedCount,
 		selectedOption: options.find((option) => option.id === value),
 		displayLabel,
@@ -216,7 +226,7 @@
 	});
 
 	const outsideClickOverlayConfig = $derived<OverlayConfig>(
-		closeOnOutside
+		closeOnOutside && !alwaysOpen
 			? {
 					onEscape: closeMenu,
 					onOutsideClick: (target: Node) => {
@@ -250,6 +260,7 @@
 			{placeholder}
 			onfocus={openMenu}
 			aria-haspopup="listbox"
+			aria-controls={isMenuVisible ? `${uid}-listbox` : undefined}
 			use:setTriggerRef={undefined}
 			{disabled}
 		/>
@@ -278,7 +289,8 @@
 				triggerClass
 			]}
 			onclick={openMenu}
-			aria-expanded={menuOpen ? 'true' : 'false'}
+			aria-expanded={isMenuVisible ? 'true' : 'false'}
+			aria-controls={isMenuVisible ? `${uid}-listbox` : undefined}
 			use:setTriggerRef={undefined}
 			{disabled}
 		>
@@ -330,12 +342,13 @@
 			{/if}
 		</button>
 	{/if}
-	{#if menuOpen}
+	{#if isMenuVisible}
 		<div
+			id="{uid}-listbox"
 			class={[
 				css({
-					position: 'absolute',
-					zIndex: 'dropdown',
+					position: alwaysOpen ? 'relative' : 'absolute',
+					zIndex: alwaysOpen ? undefined : 'dropdown',
 					left: '0',
 					minWidth: '100%',
 					width: '100%',

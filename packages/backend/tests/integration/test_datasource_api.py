@@ -385,6 +385,10 @@ class TestDataSourceList:
         assert result[0]['description'] == 'CSV DataSource description'
         assert result[1]['name'] == 'Parquet DataSource'
         assert result[1]['description'] == 'Parquet DataSource description'
+        # Lightweight list payload: scalar row_count present, no schema_cache blob.
+        for item in result:
+            assert 'row_count' in item
+            assert 'schema_cache' not in item
 
 
 class TestDataSourceGet:

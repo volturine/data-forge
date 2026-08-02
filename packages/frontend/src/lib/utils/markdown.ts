@@ -14,6 +14,7 @@ export function renderMarkdown(text: string): string {
 }
 
 export function timeAgo(ts: number): string {
+	if (!Number.isFinite(ts)) return 'Unknown time';
 	const now = nowEpochMs();
 	const time = formatEpoch(ts, { hour: '2-digit', minute: '2-digit' });
 	if (isSameLocalDay(ts, now)) return time;

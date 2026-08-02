@@ -127,6 +127,13 @@ describe('timeAgo', () => {
 		expect(result).toMatch(/Jun|10/);
 	});
 
+	test('handles non-finite timestamps without throwing', () => {
+		expect(() => timeAgo(Number.NaN)).not.toThrow();
+		expect(() => timeAgo(Number.POSITIVE_INFINITY)).not.toThrow();
+		expect(timeAgo(Number.NaN)).toBe('Unknown time');
+		expect(timeAgo(Number.POSITIVE_INFINITY)).toBe('Unknown time');
+	});
+
 	test('handles timestamps at midnight boundary', () => {
 		const midnight = Temporal.Instant.from('2025-06-15T00:00:00.000Z').epochMilliseconds;
 		const result = timeAgo(midnight);

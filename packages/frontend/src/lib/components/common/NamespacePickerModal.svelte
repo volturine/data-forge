@@ -147,12 +147,24 @@
 		})}
 		role="dialog"
 		aria-modal="false"
-		aria-labelledby="namespace-picker-search"
+		aria-labelledby="namespace-picker-title"
 		tabindex="-1"
 		use:portal={popoverRect}
 		use:overlayStack.action={overlayConfig}
 	>
 		<div class={css({ display: 'flex', flexDirection: 'column', gap: '2', padding: '2' })}>
+			<h2
+				id="namespace-picker-title"
+				class={css({
+					margin: '0',
+					paddingX: '1',
+					fontSize: 'sm',
+					fontWeight: 'semibold',
+					color: 'fg.primary'
+				})}
+			>
+				Switch namespace
+			</h2>
 			<input
 				id="namespace-picker-search"
 				class={css({

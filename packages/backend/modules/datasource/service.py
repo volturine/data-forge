@@ -169,6 +169,27 @@ def _apply_display_name[DatasourceResponseT: (DataSourceResponse, DataSourceList
     return response
 
 
+def _coerce_row_count(raw: object | None) -> int | None:
+    """Normalize a projected schema_cache.row_count value to a finite int."""
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        if not raw.is_integer():
+            return None
+        return int(raw)
+    if isinstance(raw, str):
+        cleaned = raw.strip()
+        if not cleaned:
+            return None
+        try:
+            return int(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
 def list_internal_postgres_tables(session: Session) -> list[InternalPostgresTable]:
     return InternalPostgresOnboarding(session).list_tables()
 
@@ -753,13 +774,16 @@ def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
 
 
 def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceListItem]:
-    query = select(DataSource).options(defer(sa(DataSource.schema_cache))).where(col(DataSource.is_pending_delete).is_(False))
+    # Project only the scalar row_count path so list stays lightweight while
+    # still deferring the full schema_cache (column metadata) payload.
+    row_count_expr = sa(DataSource.schema_cache)['row_count'].as_string().label('list_row_count')
+    query = select(DataSource, row_count_expr).options(defer(sa(DataSource.schema_cache))).where(col(DataSource.is_pending_delete).is_(False))
     if not include_hidden:
         query = query.where(col(DataSource.is_hidden).is_(False))
-    datasources = session.execute(query).scalars().all()
     results: list[DataSourceListItem] = []
-    for ds in datasources:
+    for ds, list_row_count in session.execute(query).all():
         item = _apply_display_name(DataSourceListItem.model_validate(ds), ds)
+        item.row_count = _coerce_row_count(list_row_count)
         item.output_of_tab_id = ds.config.get('analysis_tab_id') if isinstance(ds.config, dict) else None
         results.append(item)
     return results

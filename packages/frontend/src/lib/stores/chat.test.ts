@@ -513,6 +513,26 @@ describe('ChatStore — pure local logic', () => {
 			expect(store.maxTurns).toBeNull();
 		});
 
+		test('assistant completion remains on the timeline after done', () => {
+			store.loading = true;
+			store.currentTurn = 1;
+			store.maxTurns = 5;
+			handle({ type: 'message', role: 'user', content: 'ping', ts: 1000 });
+			handle({ type: 'message', role: 'assistant', content: 'OK', ts: 1001 });
+			handle({ type: 'done' });
+			expect(store.loading).toBe(false);
+			expect(store.currentTurn).toBe(0);
+			expect(store.messages.map((m) => m.content)).toEqual(['ping', 'OK']);
+			expect(store.timeline.filter((e) => e.kind === 'message')).toHaveLength(2);
+			const assistant = store.timeline.find(
+				(e) => e.kind === 'message' && e.item.role === 'assistant'
+			);
+			expect(assistant).toBeDefined();
+			if (assistant?.kind === 'message') {
+				expect(assistant.item.content).toBe('OK');
+			}
+		});
+
 		test('error event sets error string', () => {
 			handle({ type: 'error', content: 'Something went wrong' });
 			expect(store.error).toBe('Something went wrong');

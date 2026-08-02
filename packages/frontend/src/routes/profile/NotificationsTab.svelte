@@ -126,8 +126,7 @@
 		result.match(
 			() => {
 				feedback = { type: 'success', message: 'Notification settings saved' };
-				configStore['fetched'] = false;
-				configStore.fetch();
+				void configStore.refresh();
 				queryClient.invalidateQueries({ queryKey: ['telegram-status'] });
 				queryClient.invalidateQueries({ queryKey: ['telegram-subscribers'] });
 			},

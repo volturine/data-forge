@@ -98,20 +98,16 @@ export async function uploadDatasourceViaUi(
 			await expect(
 				page,
 				`Upload did not redirect to the created datasource list for ${name}`
-			).toHaveURL(
-				(url) =>
-					url.pathname === '/datasources' &&
-					(url.searchParams.has('created_id') || url.searchParams.has('id')),
-				{ timeout: 5_000 }
-			);
+			).toHaveURL((url) => url.pathname === '/datasources' && url.searchParams.has('id'), {
+				timeout: 5_000
+			});
 			break;
 		} catch (error) {
 			if (attempt === 2) throw error;
 		}
 	}
 	const currentUrl = new URL(page.url());
-	const datasourceId =
-		currentUrl.searchParams.get('created_id') ?? currentUrl.searchParams.get('id');
+	const datasourceId = currentUrl.searchParams.get('id');
 	if (!datasourceId) {
 		throw new Error(`Could not extract browser-visible datasource id after upload for ${name}`);
 	}

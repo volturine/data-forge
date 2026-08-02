@@ -5,6 +5,7 @@ import {
 	datasourceFileConfig,
 	datasourceIsAnalysisOutput,
 	datasourceIsCsv,
+	datasourceRowCount,
 	datasourceIsSchedulableRaw,
 	datasourceNeedsExternalIngest,
 	datasourceSupportsSchemaRefresh
@@ -29,6 +30,30 @@ function makeDatasource(overrides: Partial<DataSource>): DataSource {
 		...overrides
 	} as DataSource;
 }
+
+describe('datasourceRowCount', () => {
+	it('prefers the list scalar over schema_cache', () => {
+		const datasource = makeDatasource({
+			row_count: 42,
+			schema_cache: { row_count: 99, columns: [] }
+		});
+		expect(datasourceRowCount(datasource)).toBe(42);
+	});
+
+	it('falls back to schema_cache when list scalar is absent', () => {
+		const datasource = makeDatasource({
+			schema_cache: { row_count: 17, columns: [] }
+		});
+		expect(datasourceRowCount(datasource)).toBe(17);
+	});
+
+	it('returns null when neither source has a finite count', () => {
+		expect(datasourceRowCount(makeDatasource({ schema_cache: null }))).toBeNull();
+		expect(
+			datasourceRowCount(makeDatasource({ row_count: null, schema_cache: { row_count: 'x' } }))
+		).toBeNull();
+	});
+});
 
 describe('datasource ownership helpers', () => {
 	it('owns direct file classification', () => {

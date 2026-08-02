@@ -35,6 +35,13 @@ vi.mock('$lib/stores/namespace.svelte', () => ({
 	})
 }));
 
+const mockConfigRefresh = vi.fn().mockResolvedValue(undefined);
+vi.mock('$lib/stores/config.svelte', () => ({
+	configStore: {
+		refresh: (...args: unknown[]) => mockConfigRefresh(...args)
+	}
+}));
+
 vi.mock('@lucide/svelte', () => {
 	const Icon = () => '';
 	return {

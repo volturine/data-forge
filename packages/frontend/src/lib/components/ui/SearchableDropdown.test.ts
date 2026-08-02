@@ -79,6 +79,11 @@ describe('SearchableDropdown', () => {
 			expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
 		});
 
+		test('keeps menu visible when alwaysOpen is true', () => {
+			renderDropdown({ alwaysOpen: true });
+			expect(screen.getByRole('listbox')).toBeInTheDocument();
+		});
+
 		test('opens menu on trigger click', async () => {
 			renderDropdown();
 			await fireEvent.click(screen.getByRole('button'));

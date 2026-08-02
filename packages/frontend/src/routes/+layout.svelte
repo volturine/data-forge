@@ -8,6 +8,7 @@
 	import { css, spinner } from '$lib/styles/panda';
 	import { PanelLeftClose } from '@lucide/svelte';
 	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
+	import IndexedDbButton from '$lib/components/common/IndexedDbButton.svelte';
 	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
 	import Sidebar from '$lib/components/shell/Sidebar.svelte';
 	import { chatStore } from '$lib/stores/chat.svelte';
@@ -374,6 +375,7 @@
 
 			<main
 				class={css({
+					position: 'relative',
 					minHeight: '0',
 					minWidth: '0',
 					flex: '1',
@@ -381,6 +383,24 @@
 					backgroundColor: 'bg.secondary'
 				})}
 			>
+				{#if configStore.publicIdbDebug}
+					<div
+						class={css({
+							position: 'sticky',
+							top: '0',
+							zIndex: 'nav',
+							display: 'flex',
+							justifyContent: 'flex-end',
+							paddingX: '3',
+							paddingY: '2',
+							pointerEvents: 'none'
+						})}
+					>
+						<div class={css({ pointerEvents: 'auto' })}>
+							<IndexedDbButton />
+						</div>
+					</div>
+				{/if}
 				{@render children()}
 			</main>
 		</div>

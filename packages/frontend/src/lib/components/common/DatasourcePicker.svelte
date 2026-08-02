@@ -31,6 +31,8 @@
 		highlightId?: string;
 		searchFields?: ('name' | 'source_type' | 'file_type')[];
 		modeSource?: 'datasource' | 'analysis';
+		/** Keep options visible without a focus/click open step (wizard-style pickers). */
+		alwaysOpen?: boolean;
 		onSelect?: (id: string, name: string) => void;
 		onDeselect?: (id: string) => void;
 	}
@@ -48,6 +50,7 @@
 		highlightId,
 		searchFields = ['name', 'source_type'],
 		modeSource = 'datasource',
+		alwaysOpen = false,
 		onSelect,
 		onDeselect
 	}: Props = $props();
@@ -156,6 +159,16 @@
 		selected = arr.filter((value) => value !== id);
 		onDeselect?.(id);
 	}
+
+	const emptyLabel = $derived.by(() => {
+		if (modeSource === 'analysis') {
+			if (!analysesLoaded) return 'Loading analyses...';
+			if (options.length === 0) return 'No analyses available';
+			return 'No analyses match your search';
+		}
+		if (options.length === 0) return 'No datasources available';
+		return 'No datasources match your search';
+	});
 </script>
 
 <SearchableDropdown
@@ -168,6 +181,7 @@
 	showSelectAll={showBulkActions}
 	showSelectedList={false}
 	triggerType="input"
+	{alwaysOpen}
 	inputClass={css({
 		width: 'full',
 		borderWidth: '1',
@@ -179,7 +193,7 @@
 		_focus: { borderColor: 'border.accent', outline: 'none' }
 	})}
 	{searchValue}
-	emptyLabel="No datasources found"
+	{emptyLabel}
 	listAriaLabel={label ?? 'Available datasources'}
 	{renderOption}
 />

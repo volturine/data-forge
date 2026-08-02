@@ -277,7 +277,11 @@ class DataSourceResponse(BaseModel):
 
 
 class DataSourceListItem(BaseModel):
-    """Lightweight schema for list endpoints — excludes heavy schema_cache."""
+    """Lightweight schema for list endpoints — excludes heavy schema_cache.
+
+    ``row_count`` is projected from ``schema_cache.row_count`` so list consumers
+    (e.g. the analysis wizard) can show size without loading full column metadata.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -286,6 +290,7 @@ class DataSourceListItem(BaseModel):
     description: str | None
     source_type: DataSourceType
     config: dict
+    row_count: int | None = None
     created_by_analysis_id: str | None = None
     created_by: str = 'import'
     is_hidden: bool = False

@@ -136,6 +136,24 @@
 			Profile
 		</h2>
 
+		{#if !editable}
+			<div
+				class={css({
+					backgroundColor: 'bg.secondary',
+					borderWidth: '1',
+					borderColor: 'border.primary',
+					color: 'fg.secondary',
+					paddingX: '3',
+					paddingY: '2',
+					fontSize: 'sm'
+				})}
+				data-testid="account-auth-off-notice"
+			>
+				Authentication is disabled for this runtime. Account editing, password changes, and linked
+				providers are unavailable.
+			</div>
+		{/if}
+
 		{#if message}
 			<div class={alert(message.kind)}>{message.text}</div>
 		{/if}

@@ -32,6 +32,16 @@ export class ConfigStore {
 		return this.pending;
 	}
 
+	/**
+	 * Invalidate the cache and refetch without clearing the current config.
+	 * Clearing would unmount the app shell (ready depends on config !== null).
+	 */
+	async refresh(): Promise<void> {
+		this.fetched = false;
+		this.pending = null;
+		return this.fetch();
+	}
+
 	get timezone(): string {
 		return this.config?.timezone ?? 'UTC';
 	}
