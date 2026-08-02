@@ -31,7 +31,6 @@ from backend_core.exceptions import (
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.settings_store import (
-    get_resolved_huggingface_settings,
     get_resolved_ollama_settings,
     get_resolved_openai_settings,
     get_resolved_openrouter_key,
@@ -244,6 +243,12 @@ def _rewrite_import_payload(
             step['is_applied'] = True
 
     for tab in tabs:
+        parent_id = tab.get('parent_id')
+        if parent_id is not None:
+            mapped_parent_id = tab_id_map.get(str(parent_id))
+            if not mapped_parent_id:
+                raise ValueError(f"Imported tab references missing parent tab '{parent_id}'")
+            tab['parent_id'] = mapped_parent_id
         datasource = tab.get('datasource')
         if not isinstance(datasource, dict):
             raise ValueError('Imported pipeline tabs must include datasource')
@@ -425,28 +430,6 @@ def resolve_default_ollama_generation_provider() -> GenerationProviderResolution
     )
 
 
-def resolve_requested_huggingface_generation_provider() -> GenerationProviderResolution:
-    resolved = get_resolved_huggingface_settings()
-    if not resolved['api_token']:
-        raise ValueError('Hugging Face is not configured')
-    return GenerationProviderResolution(
-        provider=enums_pb2.AI_PROVIDER_HUGGINGFACE,
-        model=str(resolved['default_model']),
-        client_kwargs={'api_key': str(resolved['api_token'])},
-    )
-
-
-def resolve_default_huggingface_generation_provider() -> GenerationProviderResolution | None:
-    resolved = get_resolved_huggingface_settings()
-    if not resolved['api_token']:
-        return None
-    return GenerationProviderResolution(
-        provider=enums_pb2.AI_PROVIDER_HUGGINGFACE,
-        model=str(resolved['default_model']),
-        client_kwargs={'api_key': str(resolved['api_token'])},
-    )
-
-
 ANALYSIS_GENERATION_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AnalysisGenerationProviderDefinition] = {
     enums_pb2.AI_PROVIDER_OPENROUTER: AnalysisGenerationProviderDefinition(
         provider=enums_pb2.AI_PROVIDER_OPENROUTER,
@@ -463,18 +446,12 @@ ANALYSIS_GENERATION_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AnalysisGen
         resolve_requested=resolve_requested_ollama_generation_provider,
         resolve_default=resolve_default_ollama_generation_provider,
     ),
-    enums_pb2.AI_PROVIDER_HUGGINGFACE: AnalysisGenerationProviderDefinition(
-        provider=enums_pb2.AI_PROVIDER_HUGGINGFACE,
-        resolve_requested=resolve_requested_huggingface_generation_provider,
-        resolve_default=resolve_default_huggingface_generation_provider,
-    ),
 }
 
 ANALYSIS_GENERATION_PROVIDER_PRIORITY: tuple[enums_pb2.AIProvider, ...] = (
     enums_pb2.AI_PROVIDER_OPENROUTER,
     enums_pb2.AI_PROVIDER_OPENAI,
     enums_pb2.AI_PROVIDER_OLLAMA,
-    enums_pb2.AI_PROVIDER_HUGGINGFACE,
 )
 
 
@@ -793,6 +770,12 @@ def duplicate_analysis(
     for tab in tabs:
         if not isinstance(tab, dict):
             continue
+        parent_id = tab.get('parent_id')
+        if parent_id is not None:
+            mapped_parent_id = tab_id_map.get(str(parent_id))
+            if not mapped_parent_id:
+                raise ValueError(f"Duplicate source references missing parent tab '{parent_id}'")
+            tab['parent_id'] = mapped_parent_id
         datasource = tab.get('datasource')
         if isinstance(datasource, dict):
             upstream_tab_id = datasource.get('analysis_tab_id')

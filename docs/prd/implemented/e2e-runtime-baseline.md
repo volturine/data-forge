@@ -1,11 +1,11 @@
 # E2E runtime baseline
 
-> **Status (audited 2026-08-02): Implemented — archived baseline; remeasure before making a current claim.**
+> **Status (audited 2026-08-02): Implemented — current five-run baseline published.**
 > **Portfolio:** [PRD index](../README.md)
 
 _Last audited: 2026-08-02_
 
-This document records historical e2e measurements and the requirements for a new proven baseline. It must not be read as the current performance claim until the re-baselining checklist is completed.
+This document records the current five-run e2e baseline and retains the historical May measurement for comparison.
 It is intentionally strict:
 
 - `packages/frontend/playwright.config.ts` uses **`retries: 0`**
@@ -15,8 +15,63 @@ It is intentionally strict:
 - stability claims require repeated clean `just test-e2e` runs
 
 Related documents:
-- [Hot-path request map](../active/hot-path-request-map.md)
-- [Performance violation checklist](../active/performance-violation-checklist.md)
+- [Implemented hot-path ownership map](hot-path-ownership-map.md)
+- [Implemented performance stability gate](performance-stability-gate.md)
+- [Active hot-path profiling plan](../active/hot-path-request-map.md)
+- [Active performance regression investigation](../active/performance-violation-checklist.md)
+
+## Current baseline — 2026-08-02
+
+Five consecutive clean `just test-e2e` runs on a worktree based on commit
+`053c8f945c7876b520500e9aa9b8e6395896f862`, including the documentation and
+analysis-creation changes recorded by this PRD batch. The base commit is
+recorded for provenance; it is not presented as the final artifact commit.
+
+| Run | Playwright result | Total command wall-clock |
+| --- | ---: | ---: |
+| 1 | 351 passed in 6.3m | 411.98s |
+| 2 | 351 passed in 7.0m | 452.59s |
+| 3 | 351 passed in 7.2m | 460.99s |
+| 4 | 351 passed in 7.0m | 450.03s |
+| 5 | 351 passed in 7.0m | 453.94s |
+
+### Current summary
+
+- Mean: **445.91s**
+- Median: **452.59s**
+- Best: **411.98s**
+- Worst: **460.99s**
+- Range: **49.01s**
+- Tests per run: **351**
+- Retries: **0**
+- Consecutive clean runs: **5**
+- Compared with the May mean of 289.55s: **+156.36s / +54.0%**
+
+The command-level measurement includes protocol generation, service and
+infrastructure startup, browser execution, and cleanup. The Playwright-only
+reported envelope was 6.3–7.2 minutes.
+
+### Measurement environment
+
+- Apple M4, 10 logical CPUs, 24 GiB RAM
+- macOS/Darwin arm64 25.5.0
+- Docker 29.5.2
+- Bun 1.3.11
+- uv 0.10.4
+- Python runtime under the canonical harness: 3.14.2
+- Playwright: 4 workers, `fullyParallel: false`, `retries: 0`
+
+### Current interpretation
+
+The suite is stable but materially slower than the historical baseline. The
+largest test-file populations remain `analysis-editor` (49), `profile` (44),
+`datasources` (36), `monitoring` (34), `analysis-pipeline` (28), and
+`analysis-operations` (28). Those flows remain the first profiling targets;
+this baseline does not convert their test counts into per-file timing claims.
+
+Each run emitted one drained compute-request lease warning during intentional
+route/namespace lifecycle churn. No publication occurred after the lost lease,
+all visible behavior passed, and no build starvation or retry was observed.
 
 ## Historical baseline — 2026-05-21
 
@@ -36,7 +91,7 @@ Five consecutive clean `just test-e2e` runs on the then-current state:
 - Best run: **284.26s**
 - Worst run: **293.76s**
 - Historical target: **~280s**
-- Current gap to 280s target: **~4s to ~14s**, depending on run
+- Historical gap to 280s target: **~4s to ~14s**, depending on run
 - Flaky retries: **0**
 - Clean runs in a row: **5**
 
@@ -56,11 +111,10 @@ Practical takeaway:
 - The slowest wall-clock is now set mostly by the **62-test** and **84-test** shards.
 - Additional gains should come from reducing the cost of a few hot user flows, not from weakening coverage.
 
-## Current audit — 2026-08-02
+## Superseded single-run audit — 2026-08-02
 
-- The latest canonical `just test-e2e` run passed all **350** tests with zero retries in approximately **6.6 minutes**.
-- That is one valid measurement, not a replacement baseline.
-- The May 2026 284–294 second figures are therefore historical only; the current suite needs five consecutive clean runs before a new target or regression claim is made.
+An earlier single 350-test pass motivated the five-run measurement above. It is
+retained only as audit context and is superseded by the current baseline.
 
 ## What got us back here
 

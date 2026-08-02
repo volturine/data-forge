@@ -35,12 +35,6 @@ def test_default_generation_provider_follows_priority(monkeypatch: pytest.Monkey
         'get_resolved_ollama_settings',
         lambda: {'endpoint_url': 'http://ollama.local', 'default_model': 'llama-test'},
     )
-    monkeypatch.setattr(
-        service,
-        'get_resolved_huggingface_settings',
-        lambda: {'api_token': 'hf-test', 'default_model': 'hf-model'},
-    )
-
     provider, model, kwargs = service._resolved_generation_provider()
 
     assert provider == 'ollama'

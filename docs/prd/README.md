@@ -21,11 +21,15 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Core Product Specification](implemented/data-forge.md)
 - [Distributed Runtime v2](implemented/distributed-runtime-v2.md)
 - [Distributed Runtime v2 Progress](implemented/distributed-runtime-v2-progress.md) — archived progress record
+- [Documentation Update](implemented/documentation-update.md)
 - [Duplicate Analysis Tab](implemented/duplicate-analysis-tab.md)
 - [Duplicate Analysis](implemented/duplicate-analysis.md)
-- [E2E Runtime Baseline](implemented/e2e-runtime-baseline.md) — archived measurement record
+- [E2E Runtime Baseline](implemented/e2e-runtime-baseline.md) — current five-run measurement record
 - [Engine Lifecycle Alignment](implemented/engine-lifecycle-alignment.md) — superseded design
+- [Hot-Path Ownership Map](implemented/hot-path-ownership-map.md) — current product-path ownership contract
 - [MCP Tool Contract](implemented/mcp-tool-contract.md)
+- [New Analysis Creation Flow](implemented/new-analysis-creation-flow.md)
+- [Performance Stability Gate](implemented/performance-stability-gate.md) — current repeated-run safeguards and evidence
 - [Pipeline Compute](implemented/pipeline-compute.md) — superseded design
 - [PostgreSQL Backend Support](implemented/postgresql-backend-support.md) — superseded design
 - [Runtime Correctness and Architecture Remediation](implemented/runtime-correctness-and-architecture-remediation.md)
@@ -38,12 +42,9 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 
 - [Build Length Tracking](active/build-length-tracking.md)
 - [Docker Release](active/docker-release.md)
-- [Documentation Update](active/documentation-update.md)
-- [Hot-Path Request Map](active/hot-path-request-map.md)
-- [Hugging Face Connection](active/hugging-face-connection.md)
+- [Hot-Path Profiling Plan](active/hot-path-request-map.md) — direct timing, occupancy, and request measurements deferred
 - [Lineage Revamp](active/lineage-revamp.md)
-- [New Analysis Creation Flow](active/new-analysis-creation-flow.md)
-- [Performance Violation Checklist](active/performance-violation-checklist.md)
+- [Performance Regression Investigation](active/performance-violation-checklist.md) — +54.0% regression attribution and optimization deferred
 - [S3 Storage Support](active/s3-storage-support.md)
 
 ## Backlog

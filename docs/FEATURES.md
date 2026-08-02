@@ -64,7 +64,6 @@
 - ✅ Provenance indicator — shows whether a datasource was uploaded or built by an analysis
 - ✅ Direct link from an analysis-built datasource back to its owning analysis
 - ⬜ Kaggle connection — browse, search, and ingest Kaggle datasets directly
-- ⬜ Hugging Face datasets — browse, search, and ingest HF datasets directly
 - ⬜ Monitored import folder — auto-ingest files or partitioned Parquet folders added to a watched directory
 
 ## Scheduling
@@ -116,10 +115,8 @@
 - ✅ Connect to Ollama (local/self-hosted and remote)
 - ✅ Connect to OpenAI (local/self-hosted and remote)
 - ✅ Connect to OpenRouter (remote)
-- ✅ Connect to Hugging Face Inference API (remote)
 - ✅ Use AI inside the pipeline to assist with expressions and per-row LLM transformations
 - ✅ Test provider connectivity and browse available models from within the app
-- ⬜ Hugging Face model hub — pull models to local storage and load onto GPU
 - ⬜ In-app AI chat for conversational analysis assistance
 
 ## Namespaces & Branches

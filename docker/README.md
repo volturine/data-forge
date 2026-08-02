@@ -3,10 +3,13 @@
 Data-Forge has one Docker runtime model:
 
 ```text
-Postgres + API + Scheduler + Worker
+Postgres + RustFS + API + Scheduler + Worker
 ```
 
 The API container serves the backend API and built frontend. Scheduler and worker are separate Python role containers built from the same source tree.
+
+See [Deployment](../docs/DEPLOYMENT.md) for production prerequisites, TLS,
+health checks, upgrades, backup, restore, and secret rotation.
 
 ## Files
 
@@ -41,5 +44,26 @@ just docker-dev-logs
 Use the base compose file directly with `docker/env/prod.env`:
 
 ```bash
+docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/docker-compose.yml pull
 docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/docker-compose.yml up -d
 ```
+
+All three `DF_*_IMAGE` values must refer to the same Data-Forge release. Replace
+the example passwords, internal token, encryption key, and object-store
+credentials before starting the stack.
+
+Inspect the deployment:
+
+```bash
+docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/docker-compose.yml ps
+docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/docker-compose.yml logs -f
+```
+
+Stop the deployment while preserving volumes:
+
+```bash
+docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/docker-compose.yml down
+```
+
+Do not pass `-v` for production unless permanent deletion of all three durable
+volumes is intentional and verified.

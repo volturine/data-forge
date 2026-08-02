@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -10,6 +11,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.locks.models import ResourceLock
 from backend_core.sqlmodel_typing import sa
 from main import app
+from modules.analysis import service as analysis_service
 from modules.analysis.schemas import AnalysisResponseSchema
 from modules.auth.dependencies import get_optional_user
 from tests.http_client import TestClient
@@ -526,6 +528,136 @@ class TestAnalysisGet:
         assert 'not found' in response.json()['detail']
 
 
+class TestAnalysisCreationTemplates:
+    def test_lists_complete_builtin_template_catalog(self, client):
+        response = client.get('/api/v1/analysis/templates')
+
+        assert response.status_code == 200
+        templates = response.json()
+        assert [template['id'] for template in templates] == [
+            'blank',
+            'data_quality_audit',
+            'elt_transform',
+            'aggregation_report',
+            'time_series_analysis',
+            'join_and_enrich',
+        ]
+        assert all({'name', 'description', 'icon', 'step_count'} <= template.keys() for template in templates)
+
+    def test_gets_template_detail_with_preview_metadata(self, client):
+        response = client.get('/api/v1/analysis/templates/data_quality_audit')
+
+        assert response.status_code == 200
+        template = response.json()
+        assert template['name'] == 'Data Quality Audit'
+        assert template['required_input_columns']
+        assert [step['type'] for step in template['steps']] == ['view', 'filter', 'with_columns', 'groupby']
+        assert template['step_count'] == len(template['steps'])
+
+    def test_rejects_unknown_template(self, client):
+        response = client.get('/api/v1/analysis/templates/not-a-template')
+
+        assert response.status_code == 404
+        assert "Unknown analysis template 'not-a-template'" in response.json()['detail']
+
+
+class TestAnalysisGeneration:
+    class FakeClient:
+        def __init__(self, response: str):
+            self.response = response
+
+        def generate(self, prompt: str, *, model: str, options: dict[str, object]) -> str:
+            assert 'Operations:' in prompt
+            assert model == 'test-model'
+            assert options == {'temperature': 0.2}
+            return self.response
+
+    @staticmethod
+    def _payload(datasource_id: str) -> dict[str, object]:
+        return {
+            'name': 'Generated Analysis',
+            'description': 'Keep adults and select their names',
+            'datasources': [{'id': datasource_id, 'branch': 'feature/generated'}],
+            'provider': 'openai',
+            'model': 'test-model',
+        }
+
+    def test_generates_valid_pipeline_with_controlled_provider(
+        self,
+        client,
+        sample_datasource: DataSource,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        generated = {
+            'explanation': 'Filter to adults and select the useful columns.',
+            'tabs': [
+                {
+                    'name': 'Adults',
+                    'datasource_id': sample_datasource.id,
+                    'steps': [
+                        {'type': 'filter', 'config': _filter_config('age', '>', 18)},
+                        {'type': 'select', 'config': {'columns': ['name', 'age'], 'cast_map': {}}},
+                    ],
+                }
+            ],
+        }
+        fake_client = self.FakeClient(json.dumps(generated))
+        monkeypatch.setattr(
+            analysis_service,
+            '_resolved_generation_provider',
+            lambda _provider=None: ('openai', 'test-model', {'api_key': 'test'}),
+        )
+        monkeypatch.setattr(analysis_service, 'get_ai_client', lambda *_args, **_kwargs: fake_client)
+
+        response = client.post('/api/v1/analysis/generate', json=self._payload(sample_datasource.id))
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['provider'] == 'openai'
+        assert body['model'] == 'test-model'
+        assert body['explanation'] == generated['explanation']
+        tab = body['pipeline']['tabs'][0]
+        assert tab['datasource']['id'] == sample_datasource.id
+        assert tab['datasource']['config']['branch'] == 'feature/generated'
+        assert [step['type'] for step in tab['steps']] == ['filter', 'select']
+        assert body['validation']['valid'] is True
+
+    @pytest.mark.parametrize(
+        ('generated', 'detail'),
+        [
+            ('not json', 'AI response did not contain JSON'),
+            (
+                '{"tabs":[{"name":"Bad source","datasource_id":"unknown","steps":[]}]}',
+                'AI response referenced an unknown datasource',
+            ),
+            (
+                '{"tabs":[{"name":"Bad operation","datasource_id":"DATASOURCE_ID","steps":[{"type":"unknown_operation","config":{}}]}]}',
+                'Unknown step type',
+            ),
+        ],
+    )
+    def test_rejects_invalid_generated_pipeline(
+        self,
+        client,
+        sample_datasource: DataSource,
+        monkeypatch: pytest.MonkeyPatch,
+        generated: str,
+        detail: str,
+    ):
+        fake_client = self.FakeClient(generated.replace('DATASOURCE_ID', sample_datasource.id))
+        monkeypatch.setattr(
+            analysis_service,
+            '_resolved_generation_provider',
+            lambda _provider=None: ('openai', 'test-model', {'api_key': 'test'}),
+        )
+        monkeypatch.setattr(analysis_service, 'get_ai_client', lambda *_args, **_kwargs: fake_client)
+
+        response = client.post('/api/v1/analysis/generate', json=self._payload(sample_datasource.id))
+
+        assert response.status_code == 400
+        assert detail in response.json()['detail']
+
+
 class TestAnalysisList:
     def test_list_empty_analyses(self, client):
         response = client.get('/api/v1/analysis')
@@ -652,6 +784,89 @@ class TestAnalysisImport:
         tab = body['pipeline_definition']['tabs'][0]
         assert tab['datasource']['id'] == sample_datasource.id
         assert tab['steps'][0]['config']['right_source'] == sample_datasource.id
+
+
+class TestAnalysisDuplicate:
+    def test_duplicate_regenerates_pipeline_identities_and_preserves_source_mapping(
+        self,
+        client,
+        sample_analysis: Analysis,
+        sample_datasource: DataSource,
+    ):
+        source_tab = sample_analysis.pipeline_definition['tabs'][0]
+
+        response = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/duplicate',
+            json={'name': 'Copy of Test Analysis', 'description': 'Independent copy'},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        duplicate_tab = body['pipeline_definition']['tabs'][0]
+        assert body['id'] != sample_analysis.id
+        assert body['name'] == 'Copy of Test Analysis'
+        assert body['description'] == 'Independent copy'
+        assert duplicate_tab['id'] != source_tab['id']
+        assert duplicate_tab['output']['result_id'] != source_tab['output']['result_id']
+        assert duplicate_tab['steps'][0]['id'] != source_tab['steps'][0]['id']
+        assert duplicate_tab['datasource']['id'] == sample_datasource.id
+
+    def test_duplicate_rewrites_derived_tab_and_step_references(
+        self,
+        client,
+        sample_analysis: Analysis,
+        test_db_session: Session,
+    ):
+        source_tab = sample_analysis.pipeline_definition['tabs'][0]
+        source_tab['steps'].append(
+            {
+                'id': 'step2',
+                'type': 'sort',
+                'config': {'columns': ['age'], 'descending': [False]},
+                'depends_on': ['step1'],
+            }
+        )
+        derived_output_id = str(uuid.uuid4())
+        derived_tab = {
+            'id': 'tab-derived',
+            'name': 'Derived',
+            'parent_id': source_tab['id'],
+            'datasource': {
+                'id': source_tab['output']['result_id'],
+                'analysis_tab_id': source_tab['id'],
+                'config': {'branch': 'master'},
+            },
+            'output': {
+                'result_id': derived_output_id,
+                'datasource_type': 'iceberg',
+                'format': 'parquet',
+                'filename': 'derived_output',
+            },
+            'steps': [],
+        }
+        sample_analysis.pipeline_definition = {'tabs': [source_tab, derived_tab]}
+        test_db_session.add(sample_analysis)
+        test_db_session.commit()
+
+        response = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/duplicate',
+            json={'name': 'Copy with derived tab'},
+        )
+
+        assert response.status_code == 200
+        duplicated_tabs = response.json()['pipeline_definition']['tabs']
+        duplicated_source, duplicated_derived = duplicated_tabs
+        assert duplicated_source['id'] != source_tab['id']
+        assert duplicated_derived['id'] != derived_tab['id']
+        assert duplicated_source['output']['result_id'] != source_tab['output']['result_id']
+        assert duplicated_derived['output']['result_id'] != derived_output_id
+        assert duplicated_derived['parent_id'] == duplicated_source['id']
+        assert duplicated_derived['datasource']['analysis_tab_id'] == duplicated_source['id']
+        assert duplicated_derived['datasource']['id'] == duplicated_source['output']['result_id']
+        duplicated_steps = duplicated_source['steps']
+        assert duplicated_steps[0]['id'] != 'step1'
+        assert duplicated_steps[1]['id'] != 'step2'
+        assert duplicated_steps[1]['depends_on'] == [duplicated_steps[0]['id']]
 
 
 class TestAnalysisUpdate:

@@ -209,9 +209,6 @@ class Settings(BaseSettings):
     openai_base_url: str = Field(default='https://api.openai.com', alias='OPENAI_BASE_URL')
     openai_default_model: str = Field(default='gpt-4o-mini', alias='OPENAI_DEFAULT_MODEL')
     openai_organization_id: str = Field(default='', alias='OPENAI_ORGANIZATION_ID')
-    huggingface_api_token: str = Field(default='', alias='HUGGINGFACE_API_TOKEN')
-    huggingface_default_model: str = Field(default='google/flan-t5-base', alias='HUGGINGFACE_DEFAULT_MODEL')
-    huggingface_api_base_url: str = Field(default='https://api-inference.huggingface.co', alias='HUGGINGFACE_API_BASE_URL')
 
     # DB-persisted settings — seeded into app_settings on first run if the DB field is empty.
     # Users may later override these via the UI; ENV values are never re-applied after that.
@@ -228,7 +225,6 @@ class Settings(BaseSettings):
     openai_organization_id_db: str = Field(default='', alias='OPENAI_ORGANIZATION_ID_DB')
     ollama_endpoint_url_db: str = Field(default='', alias='OLLAMA_ENDPOINT_URL_DB')
     ollama_default_model_db: str = Field(default='', alias='OLLAMA_DEFAULT_MODEL_DB')
-    huggingface_default_model_db: str = Field(default='', alias='HUGGINGFACE_DEFAULT_MODEL_DB')
 
     trusted_proxy_hops: int = Field(default=0, alias='TRUSTED_PROXY_HOPS')
 

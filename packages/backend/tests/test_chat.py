@@ -368,18 +368,6 @@ class TestChatRoutes:
         assert live.system_prompt == 'Be brief.'
         assert live.messages[0] == {'role': 'system', 'content': 'Be brief.'}
 
-    def test_create_session_normalizes_provider_alias(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/sessions',
-            json={
-                'provider': 'huggingface-api',
-                'model': 'hf-model',
-                'api_key': 'hf-key',
-            },
-        )
-        assert resp.status_code == 200
-        assert resp.json()['provider'] == 'huggingface'
-
     def test_create_session_rejects_unknown_provider(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
@@ -431,21 +419,6 @@ class TestChatRoutes:
         assert live is not None
         assert live.system_prompt == 'Updated prompt.'
         assert live.messages[0] == {'role': 'system', 'content': 'Updated prompt.'}
-
-    def test_update_session_normalizes_provider_alias(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/sessions',
-            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'key'},
-        )
-        sid = resp.json()['session_id']
-
-        patch_resp = client.patch(
-            f'/api/v1/ai/chat/sessions/{sid}',
-            json={'provider': 'huggingface-api'},
-        )
-
-        assert patch_resp.status_code == 200
-        assert patch_resp.json()['provider'] == 'huggingface'
 
     def test_update_session_not_found(self, client: TestClient) -> None:
         resp = client.patch(
@@ -761,23 +734,6 @@ class TestModelsRoute:
             )
         assert resp.status_code == 200
         mock_list.assert_awaited_once_with('sk-session')
-
-    def test_models_huggingface_alias_requires_key(self, client: TestClient) -> None:
-        resp = client.post('/api/v1/ai/chat/models', json={'provider': 'huggingface-api'})
-        assert resp.status_code == 400
-        assert 'API key is required' in resp.json()['detail']
-
-    def test_models_huggingface_alias_uses_generic_client(self, client: TestClient) -> None:
-        mock_client = MagicMock()
-        mock_client.list_models.return_value = [{'name': 'hf/model'}]
-        with patch('modules.chat.routes.get_ai_client', return_value=mock_client) as mock_get:
-            resp = client.post(
-                '/api/v1/ai/chat/models',
-                json={'provider': 'huggingface-api', 'api_key': 'hf-key'},
-            )
-        assert resp.status_code == 200
-        assert resp.json() == [{'name': 'hf/model'}]
-        mock_get.assert_called_once()
 
     def test_models_route_requires_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         from main import app

@@ -34,9 +34,6 @@ class AppSettings(SQLModel, table=True):
     ollama_endpoint_url: str = Field(default='http://localhost:11434')
     ollama_default_model: str = Field(default='llama3.2')
 
-    # Hugging Face Inference API
-    huggingface_api_token: str = Field(default='')
-    huggingface_default_model: str = Field(default='google/flan-t5-base')
     env_bootstrap_complete: bool = Field(default=True)
 
     # Display

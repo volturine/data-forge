@@ -26,18 +26,12 @@
 	let ollama_endpoint_url = $state('http://localhost:11434');
 	let ollama_default_model = $state('llama3.2');
 
-	// Hugging Face
-	let huggingface_api_token = $state('');
-	let huggingface_default_model = $state('google/flan-t5-base');
-	let huggingface_api_token_dirty = $state(false);
-
 	// Network: load settings on mount.
 	$effect(() => {
 		loading = true;
 		feedback = null;
 		openrouter_api_key_dirty = false;
 		openai_api_key_dirty = false;
-		huggingface_api_token_dirty = false;
 		let aborted = false;
 		getSettings().match(
 			(s) => {
@@ -50,8 +44,6 @@
 				openai_organization_id = s.openai_organization_id;
 				ollama_endpoint_url = s.ollama_endpoint_url;
 				ollama_default_model = s.ollama_default_model;
-				huggingface_api_token = isMasked(s.huggingface_api_token) ? '' : s.huggingface_api_token;
-				huggingface_default_model = s.huggingface_default_model;
 				loading = false;
 			},
 			() => {
@@ -73,12 +65,10 @@
 			openai_default_model,
 			openai_organization_id,
 			ollama_endpoint_url,
-			ollama_default_model,
-			huggingface_default_model
+			ollama_default_model
 		};
 		if (openrouter_api_key_dirty) payload.openrouter_api_key = openrouter_api_key;
 		if (openai_api_key_dirty) payload.openai_api_key = openai_api_key;
-		if (huggingface_api_token_dirty) payload.huggingface_api_token = huggingface_api_token;
 		const result = await updateSettings(payload);
 		result.match(
 			() => {
@@ -91,9 +81,7 @@
 		saving = false;
 	}
 
-	async function handleTestAIProvider(
-		provider: 'openrouter' | 'openai' | 'ollama' | 'huggingface'
-	) {
+	async function handleTestAIProvider(provider: 'openrouter' | 'openai' | 'ollama') {
 		testingProvider = provider;
 		feedback = null;
 		const endpoint =
@@ -101,17 +89,13 @@
 				? openai_endpoint_url
 				: provider === 'ollama'
 					? ollama_endpoint_url
-					: provider === 'huggingface'
-						? 'https://api-inference.huggingface.co'
-						: null;
+					: null;
 		const apiKey =
 			provider === 'openrouter'
 				? openrouter_api_key || null
 				: provider === 'openai'
 					? openai_api_key || null
-					: provider === 'huggingface'
-						? huggingface_api_token || null
-						: null;
+					: null;
 		const organizationId = provider === 'openai' ? openai_organization_id || null : null;
 
 		const testResult = await testAIConnection(provider, endpoint, apiKey, organizationId);
@@ -337,50 +321,6 @@
 					<input type="text" class={input()} bind:value={ollama_default_model} />
 				</label>
 			</div>
-		</div>
-
-		<div
-			class={css({
-				backgroundColor: 'bg.panel',
-				borderWidth: '1',
-				padding: '6',
-				display: 'flex',
-				flexDirection: 'column',
-				gap: '4'
-			})}
-		>
-			<div
-				class={css({
-					display: 'flex',
-					alignItems: 'center',
-					justifyContent: 'space-between'
-				})}
-			>
-				<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Hugging Face</span>
-				<button
-					class={button({ variant: 'secondary', size: 'sm' })}
-					onclick={() => void handleTestAIProvider('huggingface')}
-					disabled={testingProvider === 'huggingface'}
-					aria-label="Test Hugging Face"
-					type="button"
-				>
-					{testingProvider === 'huggingface' ? 'Testing…' : 'Test'}
-				</button>
-			</div>
-			<label class={label({ variant: 'wrapper' })}>
-				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>API token</span>
-				<input
-					type="password"
-					class={input()}
-					bind:value={huggingface_api_token}
-					oninput={() => (huggingface_api_token_dirty = true)}
-					placeholder={MASKED_PLACEHOLDER}
-				/>
-			</label>
-			<label class={label({ variant: 'wrapper' })}>
-				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Default model</span>
-				<input type="text" class={input()} bind:value={huggingface_default_model} />
-			</label>
 		</div>
 
 		<div class={css({ display: 'flex', justifyContent: 'flex-end' })}>

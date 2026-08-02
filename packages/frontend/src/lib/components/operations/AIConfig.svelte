@@ -49,7 +49,6 @@
 			<option value="ollama">Ollama (Local)</option>
 			<option value="openai">OpenAI</option>
 			<option value="openrouter">OpenRouter</option>
-			<option value="huggingface">Hugging Face API</option>
 		</select>
 	</div>
 
@@ -64,9 +63,7 @@
 				? 'gpt-4o-mini'
 				: config.provider === 'openrouter'
 					? 'openai/gpt-4o-mini'
-					: config.provider === 'huggingface'
-						? 'google/flan-t5-base'
-						: 'llama3.2'}
+					: 'llama3.2'}
 		/>
 	</div>
 
@@ -79,13 +76,11 @@
 			bind:value={config.endpoint_url}
 			placeholder={config.provider === 'openai'
 				? 'https://api.openai.com'
-				: config.provider === 'huggingface'
-					? 'https://api-inference.huggingface.co'
-					: 'http://localhost:11434'}
+				: 'http://localhost:11434'}
 		/>
 	</div>
 
-	{#if config.provider === 'openai' || config.provider === 'openrouter' || config.provider === 'huggingface'}
+	{#if config.provider === 'openai' || config.provider === 'openrouter'}
 		<div class={css({ marginBottom: '5' })}>
 			<label class={label()} for="ai-api-key">API Key</label>
 			<input

@@ -33,7 +33,6 @@ _SENSITIVE_FIELDS = {
     'telegram_bot_token',
     'openrouter_api_key',
     'openai_api_key',
-    'huggingface_api_token',
     'kaggle_api_key',
     'api_key',
     'authorization',

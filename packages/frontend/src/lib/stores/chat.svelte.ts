@@ -26,7 +26,7 @@ const MAX_BACKOFF = 30_000;
 const BASE_BACKOFF = 1_000;
 const MAX_RETRIES = 10;
 
-export type ChatProvider = 'openrouter' | 'openai' | 'ollama' | 'huggingface';
+export type ChatProvider = 'openrouter' | 'openai' | 'ollama';
 
 export type AgentMode = 'plan' | 'execute';
 
@@ -304,10 +304,7 @@ export class ChatStore {
 
 	async loadModels(): Promise<void> {
 		this.modelsLoading = true;
-		if (
-			(this.provider === 'openrouter' || this.provider === 'huggingface') &&
-			this.apiKey.length === 0
-		) {
+		if (this.provider === 'openrouter' && this.apiKey.length === 0) {
 			this.models = [];
 			this.modelsLoading = false;
 			this.error = 'API key is required';
@@ -356,8 +353,6 @@ export class ChatStore {
 				this.settings.openrouter_api_key = apiKey;
 			} else if (this.provider === 'openai') {
 				this.settings.openai_api_key = apiKey;
-			} else if (this.provider === 'huggingface') {
-				this.settings.huggingface_api_token = apiKey;
 			}
 		}
 		this._refreshConfigured();
@@ -365,8 +360,6 @@ export class ChatStore {
 			await updateSettings({ openrouter_api_key: apiKey });
 		} else if (this.provider === 'openai') {
 			await updateSettings({ openai_api_key: apiKey });
-		} else if (this.provider === 'huggingface') {
-			await updateSettings({ huggingface_api_token: apiKey });
 		}
 	}
 
@@ -387,13 +380,12 @@ export class ChatStore {
 		if (!this.settings) return false;
 		if (provider === 'openrouter') return this.settings.openrouter_api_key.length > 0;
 		if (provider === 'openai') return this.settings.openai_api_key.length > 0;
-		if (provider === 'huggingface') return this.settings.huggingface_api_token.length > 0;
 		return provider === 'ollama';
 	}
 
 	private _providerCanStart(provider: ChatProvider): boolean {
 		if (!this.settings) return provider === 'openai' || provider === 'ollama';
-		if (provider === 'openrouter' || provider === 'huggingface') {
+		if (provider === 'openrouter') {
 			return this._hasStoredProviderKey(provider);
 		}
 		if (provider === 'openai') {
@@ -403,13 +395,7 @@ export class ChatStore {
 	}
 
 	private _pickPreferredProvider(): ChatProvider {
-		const candidates: ChatProvider[] = [
-			this.provider,
-			'openrouter',
-			'openai',
-			'ollama',
-			'huggingface'
-		];
+		const candidates: ChatProvider[] = [this.provider, 'openrouter', 'openai', 'ollama'];
 		for (const candidate of candidates) {
 			if (this._providerCanStart(candidate)) return candidate;
 		}
@@ -422,10 +408,6 @@ export class ChatStore {
 			return;
 		}
 		if (this.provider === 'openrouter') {
-			this.configured = this.apiKey.length > 0 || this._hasStoredProviderKey();
-			return;
-		}
-		if (this.provider === 'huggingface') {
 			this.configured = this.apiKey.length > 0 || this._hasStoredProviderKey();
 			return;
 		}
@@ -450,18 +432,10 @@ export class ChatStore {
 			this.apiKey = s.openai_api_key && !isMasked(s.openai_api_key) ? s.openai_api_key : '';
 			this.endpointUrl = s.openai_endpoint_url || 'https://api.openai.com';
 			this.organizationId = s.openai_organization_id || '';
-		} else if (this.provider === 'ollama') {
+		} else {
 			this.model = s.ollama_default_model || 'llama3.2';
 			this.apiKey = '';
 			this.endpointUrl = s.ollama_endpoint_url || 'http://localhost:11434';
-			this.organizationId = '';
-		} else {
-			this.model = s.huggingface_default_model || 'google/flan-t5-base';
-			this.apiKey =
-				s.huggingface_api_token && !isMasked(s.huggingface_api_token)
-					? s.huggingface_api_token
-					: '';
-			this.endpointUrl = 'https://api-inference.huggingface.co';
 			this.organizationId = '';
 		}
 		this._refreshConfigured();

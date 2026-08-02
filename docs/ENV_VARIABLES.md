@@ -13,6 +13,9 @@ dev-server settings (`FRONTEND_PORT`, `BACKEND_HOST`) — lives in `config/env/d
 Understanding the two topologies helps you know which variables matter and
 which are irrelevant for your context.
 
+For end-to-end production setup, TLS, health checks, backup, restore, and
+upgrades, see [Deployment](DEPLOYMENT.md).
+
 ### Production — single port
 
 ```
@@ -34,8 +37,7 @@ Browser  ──►  FastAPI (PORT 8000)
 
 **Templates for this topology:**
 
-- Customer install: copy `docker/docker-compose.yml` to `compose.yml` plus `docker/env/prod.env` to `.env`, then run `docker compose pull && docker compose up -d`
-- Maintainer local smoke test: `just docker-prod` uses the same `docker/env/prod.env` but overrides image tags to local builds at runtime
+- Docker: use `docker/docker-compose.yml` with `docker/env/prod.env`.
 - Bare-metal (`just prod`): edit `config/env/prod.env`
 
 ### Development — local runtime
@@ -103,15 +105,16 @@ If you only want the high-value knobs, start with these:
 ### Production — Docker / compose
 
 ```bash
-# From the repository root
-# Customer install bundle
-cp docker/env/prod.env .env
-# Edit .env with your host, secrets, and release tags
-docker compose -f docker/docker-compose.yml pull
-docker compose -f docker/docker-compose.yml up -d
+# From the repository root, after editing docker/env/prod.env
+docker compose --env-file docker/env/prod.env \
+  -p dataforge-prod -f docker/docker-compose.yml pull
+docker compose --env-file docker/env/prod.env \
+  -p dataforge-prod -f docker/docker-compose.yml up -d
 ```
 
-`docker/docker-compose.yml` is the single production compose file. `docker/env/prod.env` is the single production env template. `just docker-prod` uses that same env file but overrides image tags to local builds at runtime. GHCR-published images are for production releases only.
+`docker/docker-compose.yml` is the single production compose file and
+`docker/env/prod.env` is its production env template. GHCR-published images are
+for production releases only.
 `docker/docker-compose.yml` uses published fixed-role images and does not build application images during `up`.
 The compose topology uses separate `api`, `scheduler`, and `worker` containers from the same codebase release.
 The checked-in Docker topology still includes `postgres` because the supported Docker runtime path is Postgres-backed. `DF_DATABASE_URL` in the Docker env files points at that service.
@@ -121,14 +124,14 @@ The checked-in Docker production env defaults to `DF_WORKERS=4` for the API proc
 ### Production — bare-metal (`just prod`)
 
 ```bash
-# Build the frontend first
-cd packages/frontend && bun run build && cd ../..
-# Configure the backend
-# Edit config/env/prod.env with your host, secrets, resource limits
+# Provision PostgreSQL and S3-compatible storage, then edit
+# config/env/prod.env with endpoints, secrets, and resource limits.
 just prod
 ```
 
-The checked-in `config/env/prod.env` now defaults to `WORKERS=4` and dynamic build-worker scaling with zero warm workers.
+`just prod` generates protocol bindings, builds the frontend, and runs the API,
+scheduler, and worker together. The checked-in `config/env/prod.env` defaults to
+`WORKERS=4` and dynamic build-worker scaling with zero warm workers.
 
 ### Local development
 
@@ -159,6 +162,26 @@ just dev
 | `CORS_ORIGINS`               | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed browser origins. Required in dev (Vite server is cross-origin). In prod (single port) same-origin applies and this can be left unset. |
 | `UPLOAD_CHUNK_SIZE`          | `5242880`                                                                                 | Upload chunk size in bytes. Valid range: `1024` to `104857600`.                                                                                               |
 | `UPLOAD_MAX_FILE_SIZE_BYTES` | `2147483648`                                                                              | Maximum upload size in bytes.                                                                                                                                 |
+
+### Object storage
+
+These values configure the S3-compatible store used for uploaded datasource
+objects, Iceberg tables, exported results, and compute artifacts. The current
+runtime still needs a local `DATA_DIR`; it does not treat an `s3://` URL as the
+local data directory.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `OBJECT_STORE_ENDPOINT` | `http://127.0.0.1:9000` | S3-compatible HTTP(S) endpoint. Use the internal service URL from every application role. |
+| `OBJECT_STORE_REGION` | `us-east-1` | S3 signing region. Must match the provider configuration. |
+| `OBJECT_STORE_ACCESS_KEY` | `rustfsadmin` | Access key with read, write, list, delete, and bucket-creation permissions for the managed bucket. Replace the development default in production. |
+| `OBJECT_STORE_SECRET_KEY` | `rustfsadmin` | Secret key paired with `OBJECT_STORE_ACCESS_KEY`. Replace the development default in production. |
+| `OBJECT_STORE_BUCKET` | `dataforge` | Bucket containing Data-Forge-managed objects. The runtime creates it on first write when credentials permit. |
+| `OBJECT_STORE_PREFIX` | `dataforge` | Non-empty key prefix owned by one deployment. Use a distinct value for every deployment sharing a bucket. |
+
+All object-store settings are process-start configuration. Change them for the
+API, scheduler, and worker together, then restart the complete runtime. Changing
+the bucket or prefix does not migrate existing objects.
 
 ### Internal runtime (gRPC)
 
@@ -212,25 +235,21 @@ These variables configure the gRPC channel that the scheduler and worker use to 
 
 ### AI and provider settings
 
-| Variable                       | Default                                | Notes                                             |
-| ------------------------------ | -------------------------------------- | ------------------------------------------------- |
-| `OLLAMA_BASE_URL`              | `http://localhost:11434`               | Base URL for Ollama.                              |
-| `OLLAMA_DEFAULT_MODEL`         | `llama3.2`                             | Default Ollama chat model.                        |
-| `OPENAI_API_KEY`               | empty                                  | OpenAI API key.                                   |
-| `OPENAI_BASE_URL`              | `https://api.openai.com`               | OpenAI-compatible API base URL.                   |
-| `OPENAI_DEFAULT_MODEL`         | `gpt-4o-mini`                          | Default OpenAI model.                             |
-| `OPENAI_ORGANIZATION_ID`       | empty                                  | Optional OpenAI org id.                           |
-| `HUGGINGFACE_API_TOKEN`        | empty                                  | Hugging Face token.                               |
-| `HUGGINGFACE_DEFAULT_MODEL`    | `google/flan-t5-base`                  | Default Hugging Face model.                       |
-| `HUGGINGFACE_API_BASE_URL`     | `https://api-inference.huggingface.co` | Hugging Face inference base URL.                  |
-| `OPENROUTER_API_KEY`           | empty                                  | Seeded into DB on first run if DB field is empty. |
-| `OPENROUTER_DEFAULT_MODEL`     | empty                                  | Seeded into DB on first run if DB field is empty. |
-| `OPENAI_DEFAULT_MODEL_DB`      | empty                                  | DB-seeded default model override.                 |
-| `OPENAI_ENDPOINT_URL_DB`       | empty                                  | DB-seeded endpoint override.                      |
-| `OPENAI_ORGANIZATION_ID_DB`    | empty                                  | DB-seeded organization override.                  |
-| `OLLAMA_ENDPOINT_URL_DB`       | empty                                  | DB-seeded Ollama endpoint override.               |
-| `OLLAMA_DEFAULT_MODEL_DB`      | empty                                  | DB-seeded Ollama model override.                  |
-| `HUGGINGFACE_DEFAULT_MODEL_DB` | empty                                  | DB-seeded Hugging Face model override.            |
+| Variable                      | Default                  | Notes                                             |
+| ----------------------------- | ------------------------ | ------------------------------------------------- |
+| `OLLAMA_BASE_URL`             | `http://localhost:11434` | Base URL for Ollama.                              |
+| `OLLAMA_DEFAULT_MODEL`        | `llama3.2`               | Default Ollama chat model.                        |
+| `OPENAI_API_KEY`              | empty                    | OpenAI API key.                                   |
+| `OPENAI_BASE_URL`             | `https://api.openai.com` | OpenAI-compatible API base URL.                   |
+| `OPENAI_DEFAULT_MODEL`        | `gpt-4o-mini`            | Default OpenAI model.                             |
+| `OPENAI_ORGANIZATION_ID`      | empty                    | Optional OpenAI org id.                           |
+| `OPENROUTER_API_KEY`          | empty                    | Seeded into DB on first run if DB field is empty. |
+| `OPENROUTER_DEFAULT_MODEL`    | empty                    | Seeded into DB on first run if DB field is empty. |
+| `OPENAI_DEFAULT_MODEL_DB`     | empty                    | DB-seeded default model override.                 |
+| `OPENAI_ENDPOINT_URL_DB`      | empty                    | DB-seeded endpoint override.                      |
+| `OPENAI_ORGANIZATION_ID_DB`   | empty                    | DB-seeded organization override.                  |
+| `OLLAMA_ENDPOINT_URL_DB`      | empty                    | DB-seeded Ollama endpoint override.               |
+| `OLLAMA_DEFAULT_MODEL_DB`     | empty                    | DB-seeded Ollama model override.                  |
 
 ### Notifications and encrypted settings
 
@@ -249,6 +268,7 @@ These variables configure the gRPC channel that the scheduler and worker use to 
 | Variable                | Default                                             | Notes                                                                                                                                                                                                                     |
 | ----------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AUTH_REQUIRED`         | `false`                                             | Enables authenticated routes.                                                                                                                                                                                             |
+| `VERIFY_EMAIL_ADDRESS`  | `true`                                              | Require email verification before password login. Set explicitly for production according to the deployment's mail flow.                                                                                                  |
 | `DEFAULT_USER_EMAIL`    | `default@example.com`                               | Default env-managed account email.                                                                                                                                                                                        |
 | `DEFAULT_USER_PASSWORD` | `ChangeMe123`                                       | Must contain upper, lower, and digit, and be at least 8 chars.                                                                                                                                                            |
 | `DEFAULT_USER_NAME`     | `Default User`                                      | Default env-managed account name.                                                                                                                                                                                         |

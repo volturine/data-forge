@@ -333,7 +333,7 @@
 	}
 
 	async function saveConfig() {
-		chatStore.setProvider(providerDraft as 'openrouter' | 'openai' | 'ollama' | 'huggingface');
+		chatStore.setProvider(providerDraft as 'openrouter' | 'openai' | 'ollama');
 		chatStore.model = modelDraft;
 		chatStore.systemPrompt = systemPromptDraft;
 		await chatStore.configure(apiKeyDraft);
@@ -341,7 +341,7 @@
 	}
 
 	function handleLoadModels() {
-		chatStore.setProvider(providerDraft as 'openrouter' | 'openai' | 'ollama' | 'huggingface');
+		chatStore.setProvider(providerDraft as 'openrouter' | 'openai' | 'ollama');
 		chatStore.apiKey = apiKeyDraft;
 		void chatStore.loadModels();
 	}
@@ -737,7 +737,6 @@
 						<option value="openrouter">OpenRouter</option>
 						<option value="openai">OpenAI</option>
 						<option value="ollama">Ollama</option>
-						<option value="huggingface">Hugging Face</option>
 					</select>
 				</div>
 
@@ -2192,8 +2191,7 @@
 						const provider = (event.currentTarget as HTMLSelectElement).value as
 							| 'openrouter'
 							| 'openai'
-							| 'ollama'
-							| 'huggingface';
+							| 'ollama';
 						chatStore.setProvider(provider);
 						if (chatStore.models.length === 0) {
 							void chatStore.loadModels();
@@ -2204,7 +2202,6 @@
 					<option value="openrouter">OpenRouter</option>
 					<option value="openai">OpenAI</option>
 					<option value="ollama">Ollama</option>
-					<option value="huggingface">HF</option>
 				</select>
 
 				<button
