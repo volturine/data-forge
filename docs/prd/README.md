@@ -1,57 +1,65 @@
-# PRD Portfolio Status Index
+# Product and Architecture Documentation
 
-This index is the fastest way to understand which PRDs reflect current product truth, which are backlog, and which are now historical.
+> **Portfolio audited 2026-08-02.** The PRD tree communicates only delivery status: shipped work, work in progress, and future work. Implemented includes archived checklists and superseded designs as completion context.
 
-## Status legend
+```
+docs/prd/
+├── implemented/  # shipped features, completed architecture, and archived completion context
+├── active/       # work in progress, partial features, and active performance investigation
+└── backlog/      # approved future work and product decisions
+```
 
-- **Implemented** — shipped in the current product/runtime
-- **Partial** — some meaningful implementation exists, but the PRD still contains unshipped scope
-- **Not implemented** — backlog / design intent only
-- **Superseded** — historical design that should not be used as current implementation truth
-- **Reference** — maintained as an implementation/maintainer reference rather than a future feature spec
+The root [README](../../README.md) is the human-facing project overview. [AGENTS.md](../../AGENTS.md) defines repository workflow and the documentation maintenance rule. PRDs carry detailed feature requirements only.
 
-## Current truth summary
+## Implemented
 
-- The supported metadata/runtime backend is **PostgreSQL**.
-- The distributed runtime v2 (durable Postgres-backed builds, scheduler, and websocket state) is **shipped**.
-- Build preview, build cancellation, settings-under-profile, SQL/Polars snippet export, datasource descriptions, and column descriptions are shipped.
-- Several older architecture PRDs still exist for history, but they describe pre-runtime-v2 behavior and should not be read as live truth.
+- [Build Preview Checklist](implemented/build-preview-checklist.md) — archived rollout checklist
+- [Build Preview](implemented/build-preview.md)
+- [Cancel Build](implemented/cancel-build.md)
+- [Dataset Column Descriptions](implemented/dataset-column-descriptions.md)
+- [Dataset Descriptions](implemented/dataset-descriptions.md)
+- [Core Product Specification](implemented/data-forge.md)
+- [Distributed Runtime v2](implemented/distributed-runtime-v2.md)
+- [Distributed Runtime v2 Progress](implemented/distributed-runtime-v2-progress.md) — archived progress record
+- [Duplicate Analysis Tab](implemented/duplicate-analysis-tab.md)
+- [Duplicate Analysis](implemented/duplicate-analysis.md)
+- [E2E Runtime Baseline](implemented/e2e-runtime-baseline.md) — archived measurement record
+- [Engine Lifecycle Alignment](implemented/engine-lifecycle-alignment.md) — superseded design
+- [MCP Tool Contract](implemented/mcp-tool-contract.md)
+- [Pipeline Compute](implemented/pipeline-compute.md) — superseded design
+- [PostgreSQL Backend Support](implemented/postgresql-backend-support.md) — superseded design
+- [Runtime Correctness and Architecture Remediation](implemented/runtime-correctness-and-architecture-remediation.md)
+- [Scheduling](implemented/scheduling.md) — superseded design
+- [Settings Profile Page](implemented/settings-profile-page.md)
+- [Shared Boundary Checklist](implemented/shared-boundary-checklist.md) — archived completed audit
+- [SQL/Polars Snippet Export](implemented/sql-polars-snippet-export.md)
 
-## PRD status matrix
+## Active
 
-| PRD | Status | Current truth / note | Next action |
-|---|---|---|---|
-| `ai-chat-api.md` | Partial | Multi-provider AI settings/chat support exists; deeper unification remains | Keep as backlog/reference |
-| `analytical-dashboards.md` | Not implemented | No shipped dashboard runtime layer | Keep as backlog |
-| `build-length-tracking.md` | Partial | Duration/timing data exists; dedicated duration UX/trends/alerts do not | Keep as backlog |
-| `build-preview-checklist.md` | Superseded | Historical rollout checklist for build preview | Keep only as historical companion |
-| `build-preview.md` | Partial | Live build preview is shipped; some aspirational subfeatures remain backlog | Keep and trim against current truth over time |
-| `cancel-build.md` | Implemented | Build cancellation is shipped; detailed endpoint/process language is partly historical | Keep as implemented feature record |
-| `data-forge-2.md` | Not implemented | Future overhaul roadmap, not current product state | Keep as roadmap |
-| `data-forge.md` | Partial | Still useful as product vision, but some runtime details are historical | Keep, continue truth cleanup |
-| `dataset-column-descriptions.md` | Implemented | Column description read/write flows exist | Keep as implemented feature record |
-| `dataset-descriptions.md` | Implemented | Datasource description flows are shipped | Keep as implemented feature record |
-| `distributed-runtime-v2-progress.md` | Reference | Best high-level runtime progress tracker, though some path references are older | Keep as runtime reference |
-| `distributed-runtime-v2.md` | Partial | Core durable Postgres runtime is shipped; remaining work is follow-up polish/observability | Keep as architecture record + backlog |
-| `documentation-update.md` | Partial | Docs surface now exists, but cleanup/truth alignment remains | Keep as docs backlog |
-| `duplicate-analysis-tab.md` | Implemented | Tab duplication exists | Keep as implemented feature record |
-| `duplicate-analysis.md` | Implemented | Whole-analysis duplication exists | Keep as implemented feature record |
-| `engine-lifecycle-alignment.md` | Superseded | Engine lifecycle alignment is now historical; the Docker-native swap was completed elsewhere | Keep as historical lifecycle rationale |
-| `horizontal-node-config.md` | Not implemented | Horizontal scaling config remains backlog | Keep as backlog |
-| `hugging-face-connection.md` | Not implemented | Hugging Face integration remains backlog | Keep as backlog |
-| `kaggle-connection.md` | Not implemented | Kaggle integration remains backlog | Keep as backlog |
-| `lineage-revamp.md` | Not implemented | Lineage revamp remains backlog | Keep as backlog |
-| `local-subdomain-serving.md` | Not implemented | Local subdomain serving is not the current dev model | Keep as backlog |
-| `mcp-tool-contract.md` | Not implemented | MCP tool contract remains backlog | Keep as backlog |
-| `mobile-first-ui.md` | Not implemented | Mobile-first UI remains backlog | Keep as backlog |
-| `pipeline-compute.md` | Superseded | Describes the earlier multiprocessing engine architecture; now superseded by the durable runtime | Keep as historical architecture record |
-| `runtime-correctness-and-architecture-remediation.md` | Implemented | Correctness, failure injection, typed transitions, lease diagnostics, ownership, namespace lifecycle, structural extraction, and representation consolidation are implemented | Keep as the completed remediation architecture record |
-| `s3-storage-support.md` | Not implemented | S3 storage support remains backlog | Keep as backlog |
-| `schedule-descriptions.md` | Not implemented | Schedule descriptions remain backlog | Keep as backlog |
-| `scheduling.md` | Superseded | Describes the earlier in-process scheduler; now superseded by the dedicated scheduler service | Keep as historical architecture record |
-| `settings-profile-page.md` | Implemented | Profile/settings consolidation is shipped | Keep as implemented feature record |
-| `shared-boundary-checklist.md` | Reference | Package boundary checklist; mostly historical after package reshaping | Keep as reference |
-| `snapshot-rollback.md` | Not implemented | Snapshot rollback is not a shipped feature | Keep as backlog |
-| `sql-polars-snippet-export.md` | Implemented | SQL/Polars snippet export is shipped | Keep as implemented feature record |
-| `tauri-hybrid-desktop.md` | Not implemented | Tauri hybrid desktop remains backlog | Keep as backlog |
-| `time-since-last-updated.md` | Not implemented | Time-since-last-updated remains backlog | Keep as backlog |
+- [Build Length Tracking](active/build-length-tracking.md)
+- [Docker Release](active/docker-release.md)
+- [Documentation Update](active/documentation-update.md)
+- [Hot-Path Request Map](active/hot-path-request-map.md)
+- [Hugging Face Connection](active/hugging-face-connection.md)
+- [Lineage Revamp](active/lineage-revamp.md)
+- [New Analysis Creation Flow](active/new-analysis-creation-flow.md)
+- [Performance Violation Checklist](active/performance-violation-checklist.md)
+- [S3 Storage Support](active/s3-storage-support.md)
+
+## Backlog
+
+- [Analytical Dashboards](backlog/analytical-dashboards.md)
+- [AI Chat API](backlog/ai-chat-api.md)
+- [Application Shell and Shared Panels](backlog/application-shell.md)
+- [Authentication and Identity](backlog/authentication-and-identity.md)
+- [Authorization, Ownership, and Collaboration](backlog/authorization-ownership-and-collaboration.md)
+- [Build Observability](backlog/build-observability.md)
+- [Feature-overhaul Portfolio](backlog/data-forge-2.md)
+- [Horizontal Node Configuration](backlog/horizontal-node-config.md)
+- [Kaggle Connection](backlog/kaggle-connection.md)
+- [Local Subdomain Serving](backlog/local-subdomain-serving.md)
+- [Mobile-first UI](backlog/mobile-first-ui.md)
+- [Schedule Descriptions](backlog/schedule-descriptions.md)
+- [Snapshot Rollback](backlog/snapshot-rollback.md)
+- [Tauri Hybrid Desktop](backlog/tauri-hybrid-desktop.md)
+- [Time Since Last Updated](backlog/time-since-last-updated.md)
