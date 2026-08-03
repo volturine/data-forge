@@ -569,7 +569,16 @@ def _validate_analysis_payload(
 
     unknown = referenced_source_ids - tab_ids
     for src_id in unknown:
-        _require_visible_analysis_input(session, src_id)
+        # Step sources that are not tab ids must resolve to a real, visible datasource.
+        # Missing → 400 (unknown source); hidden → validation error (not a usable input).
+        datasource_row = session.get(DataSource, src_id)
+        if not datasource_row:
+            raise ValueError(f"Step references unknown source '{src_id}'")
+        if datasource_row.is_hidden:
+            raise AnalysisValidationError(
+                f"Hidden datasource '{src_id}' cannot be used as an analysis input",
+                details={'datasource_id': src_id},
+            )
         datasource_ids.append(src_id)
 
     for tab in tabs_payload:

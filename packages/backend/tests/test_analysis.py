@@ -1694,6 +1694,51 @@ class TestStepValidation:
         response = client.post('/api/v1/analysis', json=payload)
         assert response.status_code == 400
 
+    def test_rejects_join_with_hidden_datasource(
+        self,
+        client,
+        sample_datasource: DataSource,
+        test_db_session: Session,
+    ):
+        hidden = DataSource(
+            id=str(uuid.uuid4()),
+            name='hidden-join-source',
+            description=None,
+            source_type='file',
+            config={'file_path': 's3://bucket/x.csv', 'file_type': 'csv'},
+            schema_cache=None,
+            created_by='analysis',
+            is_hidden=True,
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+        test_db_session.add(hidden)
+        test_db_session.commit()
+
+        payload = self._make_payload(
+            sample_datasource.id,
+            [
+                {
+                    'id': 's1',
+                    'type': 'join',
+                    'config': {
+                        'right_source': hidden.id,
+                        'how': 'inner',
+                        'join_columns': [
+                            {
+                                'id': 'j1',
+                                'left_column': 'id',
+                                'right_column': 'id',
+                            }
+                        ],
+                    },
+                    'depends_on': [],
+                },
+            ],
+        )
+        response = client.post('/api/v1/analysis', json=payload)
+        assert response.status_code == 400
+        assert 'hidden' in response.json()['detail'].lower()
+
     def test_accepts_valid_steps(self, client, sample_datasource: DataSource):
         payload = self._make_payload(
             sample_datasource.id,
