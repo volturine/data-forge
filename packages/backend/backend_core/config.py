@@ -339,23 +339,14 @@ class Settings(BaseSettings):
         return self
 
 
-def _resolve_polars_max_threads(configured: int) -> int:
-    """Default Polars threads = all logical CPUs on this machine.
+settings = Settings()
 
-    Config may use 0/omit as "use every core". Polars requires a positive
-    POLARS_MAX_THREADS env value (0 panics in polars-async), so resolve once
-    at startup and publish the concrete count.
-    """
-    if configured > 0:
-        return configured
-    return os.cpu_count() or 1
-
-
-_settings = Settings()
-settings = _settings.model_copy(
-    update={'polars_max_threads': _resolve_polars_max_threads(_settings.polars_max_threads)},
-)
-os.environ['POLARS_MAX_THREADS'] = str(settings.polars_max_threads)
+# POLARS_MAX_THREADS in env/settings is the *app* default (0 = all cores, overridable
+# per analysis). Polars itself also reads that same env name and panics on 0, so once
+# settings are loaded, drop it from the process env. Compute engines re-apply a
+# positive override only for their own subprocess when max_threads is pinned.
+if os.environ.get('POLARS_MAX_THREADS') in {'0', ''}:
+    os.environ.pop('POLARS_MAX_THREADS', None)
 
 
 def _configure_runtime_ipc() -> None:
