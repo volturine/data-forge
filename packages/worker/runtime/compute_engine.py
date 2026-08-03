@@ -169,9 +169,7 @@ class PolarsComputeEngine:
         # 0 = use all cores Polars can take (leave POLARS_MAX_THREADS unset in subprocess).
         max_threads = self.resource_config.get("max_threads", settings.polars_cores_available)
         max_memory_mb = self.resource_config.get("max_memory_mb", settings.polars_max_memory_mb)
-        streaming_chunk_size = self.resource_config.get(
-            "streaming_chunk_size", settings.polars_streaming_chunk_size
-        )
+        streaming_chunk_size = self.resource_config.get("streaming_chunk_size", settings.polars_streaming_chunk_size)
         if not isinstance(max_threads, int) or max_threads < 0:
             max_threads = 0
         if not isinstance(max_memory_mb, int) or max_memory_mb < 0:

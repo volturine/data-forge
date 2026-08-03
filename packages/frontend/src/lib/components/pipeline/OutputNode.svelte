@@ -175,7 +175,6 @@
 		// Optional enrichment — do not keep retrying forever if the data-plane is degraded.
 		retry: 1
 	}));
-	const hasOutputDatasource = $derived(canUseOutput);
 	const hidden = $derived(hiddenOverride ?? outputDatasourceQuery.data?.is_hidden ?? true);
 
 	const healthChecksQuery = createQuery(() => ({
