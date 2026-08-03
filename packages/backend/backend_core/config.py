@@ -339,22 +339,23 @@ class Settings(BaseSettings):
         return self
 
 
-settings = Settings()
+def _resolve_polars_max_threads(configured: int) -> int:
+    """Default Polars threads = all logical CPUs on this machine.
 
-
-def _scrub_polars_auto_env() -> None:
-    """Map app '0 = auto' config to Polars env semantics.
-
-    Data Forge uses POLARS_MAX_THREADS=0 to mean auto-detect. Polars itself
-    treats the env var as a hard thread-pool size and panics in polars-async
-    when it is 0 ('Worker threads cannot be set to 0'). After settings have
-    been loaded, drop the auto sentinel so native Polars never sees it.
+    Config may use 0/omit as "use every core". Polars requires a positive
+    POLARS_MAX_THREADS env value (0 panics in polars-async), so resolve once
+    at startup and publish the concrete count.
     """
-    if os.environ.get('POLARS_MAX_THREADS') in {'0', ''}:
-        os.environ.pop('POLARS_MAX_THREADS', None)
+    if configured > 0:
+        return configured
+    return os.cpu_count() or 1
 
 
-_scrub_polars_auto_env()
+_settings = Settings()
+settings = _settings.model_copy(
+    update={'polars_max_threads': _resolve_polars_max_threads(_settings.polars_max_threads)},
+)
+os.environ['POLARS_MAX_THREADS'] = str(settings.polars_max_threads)
 
 
 def _configure_runtime_ipc() -> None:

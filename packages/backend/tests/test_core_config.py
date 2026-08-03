@@ -88,6 +88,17 @@ class TestSettings:
         assert settings.polars_max_threads == 8
         assert settings.polars_streaming_chunk_size == 100000
 
+    def test_polars_max_threads_zero_resolves_to_cpu_count(self, monkeypatch, tmp_path):
+        import os
+
+        from backend_core.config import _resolve_polars_max_threads
+
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('POLARS_MAX_THREADS', '0')
+
+        assert _resolve_polars_max_threads(0) == (os.cpu_count() or 1)
+        assert _resolve_polars_max_threads(4) == 4
+
     def test_preview_run_persistence_setting(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('PERSIST_PREVIEW_RUNS', 'false')

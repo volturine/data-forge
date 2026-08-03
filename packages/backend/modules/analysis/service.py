@@ -491,6 +491,24 @@ def validate_stored_pipeline_definition(
     _validate_analysis_payload(session, payload, analysis_id)
 
 
+def _require_visible_analysis_input(session: Session, datasource_id: str) -> DataSource:
+    """External analysis inputs must be real, non-hidden datasources.
+
+    Hidden analysis outputs may exist for the owning pipeline (membership / own
+    OutputNode), but must not be selected as tab inputs or join/union sources.
+    Derived tabs (analysis_tab_id) are validated separately and never go through this.
+    """
+    datasource_row = session.get(DataSource, datasource_id)
+    if not datasource_row:
+        raise datasource_not_found(datasource_id)
+    if datasource_row.is_hidden:
+        raise AnalysisValidationError(
+            f"Hidden datasource '{datasource_id}' cannot be used as an analysis input",
+            details={'datasource_id': datasource_id},
+        )
+    return datasource_row
+
+
 def _validate_analysis_payload(
     session: Session,
     data: AnalysisCreateSchema | AnalysisUpdateSchema,
@@ -528,14 +546,11 @@ def _validate_analysis_payload(
             if expected != ds.id:
                 raise ValueError(f"Datasource id '{ds.id}' does not match output.result_id of tab '{ds.analysis_tab_id}'")
             continue
-        datasource_row = session.get(DataSource, ds.id)
-        if datasource_row:
-            datasource_ids.append(ds.id)
-            if datasource_row.is_analysis_source and analysis_id:
-                source_id = datasource_row.analysis_source_id()
-                assert_no_analysis_cycle(session, analysis_id, source_id)
-            continue
-        raise datasource_not_found(ds.id)
+        datasource_row = _require_visible_analysis_input(session, ds.id)
+        datasource_ids.append(ds.id)
+        if datasource_row.is_analysis_source and analysis_id:
+            source_id = datasource_row.analysis_source_id()
+            assert_no_analysis_cycle(session, analysis_id, source_id)
 
     tab_ids = {tab.id for tab in tabs_payload if tab.id}
 
@@ -554,8 +569,7 @@ def _validate_analysis_payload(
 
     unknown = referenced_source_ids - tab_ids
     for src_id in unknown:
-        if not session.get(DataSource, src_id):
-            raise ValueError(f"Step references unknown source '{src_id}'")
+        _require_visible_analysis_input(session, src_id)
         datasource_ids.append(src_id)
 
     for tab in tabs_payload:
@@ -846,9 +860,7 @@ def generate_analysis_pipeline(
     selected_datasources: list[DataSource] = []
     datasource_schemas: list[dict[str, Any]] = []
     for item in data.datasources:
-        datasource = session.get(DataSource, item.id)
-        if not datasource:
-            raise datasource_not_found(item.id)
+        datasource = _require_visible_analysis_input(session, item.id)
         selected_datasources.append(datasource)
         schema_cache = datasource.schema_cache if isinstance(datasource.schema_cache, dict) else {}
         datasource_schemas.append(
