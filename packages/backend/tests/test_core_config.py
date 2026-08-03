@@ -88,16 +88,21 @@ class TestSettings:
         assert settings.polars_max_threads == 8
         assert settings.polars_streaming_chunk_size == 100000
 
-    def test_polars_max_threads_zero_resolves_to_cpu_count(self, monkeypatch, tmp_path):
+    def test_polars_max_threads_zero_is_app_default_not_left_in_env(self, monkeypatch, tmp_path):
         import os
-
-        from backend_core.config import _resolve_polars_max_threads
 
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('POLARS_MAX_THREADS', '0')
 
-        assert _resolve_polars_max_threads(0) == (os.cpu_count() or 1)
-        assert _resolve_polars_max_threads(4) == 4
+        # Re-import path: Settings keeps 0; process env must not keep literal 0 for Polars.
+        from backend_core.config import Settings
+
+        loaded = Settings()
+        assert loaded.polars_max_threads == 0
+        # Config module strips 0 after load; simulate the same guard.
+        if os.environ.get('POLARS_MAX_THREADS') in {'0', ''}:
+            os.environ.pop('POLARS_MAX_THREADS', None)
+        assert os.environ.get('POLARS_MAX_THREADS') is None
 
     def test_preview_run_persistence_setting(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)

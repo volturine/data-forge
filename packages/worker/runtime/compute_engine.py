@@ -165,9 +165,17 @@ class PolarsComputeEngine:
         if self.is_running:
             return
 
+        # Per-engine: resource_config overrides app default (settings.polars_max_threads).
+        # 0 / missing = all cores (Polars default when env is unset).
         max_threads = self.resource_config.get("max_threads", settings.polars_max_threads)
         max_memory_mb = self.resource_config.get("max_memory_mb", settings.polars_max_memory_mb)
         streaming_chunk_size = self.resource_config.get("streaming_chunk_size", settings.polars_streaming_chunk_size)
+        if not isinstance(max_threads, int) or max_threads < 0:
+            max_threads = 0
+        if not isinstance(max_memory_mb, int) or max_memory_mb < 0:
+            max_memory_mb = 0
+        if not isinstance(streaming_chunk_size, int) or streaming_chunk_size < 0:
+            streaming_chunk_size = 0
 
         # Store effective resources for status reporting
         self.effective_resources = {
@@ -483,8 +491,9 @@ class PolarsComputeEngine:
         streaming_chunk_size: int = 0,
     ) -> None:
         """Main compute loop running in subprocess."""
-        # Set Polars env vars here before any Polars computation — the thread pool is
-        # created lazily, so this takes effect even though polars is already imported.
+        # Apply *this engine's* thread limit for Polars. App default 0 means leave
+        # unset so Polars uses all available cores; a positive value pins the pool.
+        # Thread pool is lazy — safe even if polars was imported already.
         if max_threads > 0:
             os.environ["POLARS_MAX_THREADS"] = str(max_threads)
         else:

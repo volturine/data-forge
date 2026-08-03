@@ -58,12 +58,6 @@ def _read_bool(name: str, default: bool) -> bool:
     raise RuntimeError(f"{name} must be a boolean value")
 
 
-_polars_max_threads = _read_int("POLARS_MAX_THREADS", 0, min_value=0)
-if _polars_max_threads <= 0:
-    # Default: all logical CPUs. Polars requires a positive POLARS_MAX_THREADS.
-    _polars_max_threads = os.cpu_count() or 1
-os.environ["POLARS_MAX_THREADS"] = str(_polars_max_threads)
-
 settings = WorkerSettings(
     data_dir=Path(os.environ.get("DATA_DIR", str(Path(tempfile.gettempdir()) / "data-forge"))),
     default_namespace=os.environ.get("DEFAULT_NAMESPACE", "default").strip() or "default",
@@ -75,7 +69,8 @@ settings = WorkerSettings(
     engine_idle_ttl_seconds=_read_int("ENGINE_IDLE_TTL_SECONDS", 300, min_value=1),
     engine_idle_reap_interval_seconds=_read_int("ENGINE_IDLE_REAP_INTERVAL_SECONDS", 30, min_value=1),
     max_concurrent_engines=_read_int("MAX_CONCURRENT_ENGINES", 10, min_value=1, max_value=100),
-    polars_max_threads=_polars_max_threads,
+    # 0 = app default "all cores"; per-analysis resource_config can override.
+    polars_max_threads=_read_int("POLARS_MAX_THREADS", 0, min_value=0),
     polars_max_memory_mb=_read_int("POLARS_MAX_MEMORY_MB", 0, min_value=0),
     polars_streaming_chunk_size=_read_int("POLARS_STREAMING_CHUNK_SIZE", 0, min_value=0),
     normalize_tz=_read_bool("NORMALIZE_TZ", False),
@@ -92,3 +87,7 @@ settings = WorkerSettings(
     data_plane_grpc_host=os.environ.get("WORKER_DATA_PLANE_GRPC_HOST", "127.0.0.1").strip() or "127.0.0.1",
     data_plane_grpc_port=_read_int("WORKER_DATA_PLANE_GRPC_PORT", 50052, min_value=1, max_value=65535),
 )
+
+# Same env name is also read by Polars; 0 panics there. Keep 0 only in settings.
+if os.environ.get("POLARS_MAX_THREADS") in {"0", ""}:
+    os.environ.pop("POLARS_MAX_THREADS", None)
