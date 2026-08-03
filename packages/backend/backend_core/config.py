@@ -342,6 +342,21 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+def _scrub_polars_auto_env() -> None:
+    """Map app '0 = auto' config to Polars env semantics.
+
+    Data Forge uses POLARS_MAX_THREADS=0 to mean auto-detect. Polars itself
+    treats the env var as a hard thread-pool size and panics in polars-async
+    when it is 0 ('Worker threads cannot be set to 0'). After settings have
+    been loaded, drop the auto sentinel so native Polars never sees it.
+    """
+    if os.environ.get('POLARS_MAX_THREADS') in {'0', ''}:
+        os.environ.pop('POLARS_MAX_THREADS', None)
+
+
+_scrub_polars_auto_env()
+
+
 def _configure_runtime_ipc() -> None:
     from backend_core import runtime_ipc
 

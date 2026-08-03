@@ -159,7 +159,9 @@
 		!!outputDatasourceId &&
 			(datasourcesMembershipQuery.data ?? []).some((ds) => ds.id === outputDatasourceId)
 	);
-	const canQueryOutput = $derived(hasReservedOutputId && outputExists);
+	// Membership alone means the published row exists (including hidden). Health/schedules
+	// need only the id; GET is enrichment (visibility, branches) and must not gate existence.
+	const canUseOutput = $derived(hasReservedOutputId && outputExists);
 
 	const outputDatasourceQuery = createQuery(() => ({
 		queryKey: ['datasource', outputDatasourceId],
@@ -169,9 +171,11 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: canQueryOutput
+		enabled: canUseOutput,
+		// Optional enrichment — do not keep retrying forever if the data-plane is degraded.
+		retry: 1
 	}));
-	const hasOutputDatasource = $derived(outputDatasourceQuery.data != null);
+	const hasOutputDatasource = $derived(canUseOutput);
 	const hidden = $derived(hiddenOverride ?? outputDatasourceQuery.data?.is_hidden ?? true);
 
 	const healthChecksQuery = createQuery(() => ({
@@ -182,7 +186,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: canQueryOutput && hasOutputDatasource
+		enabled: canUseOutput
 	}));
 
 	const healthResultsQuery = createQuery(() => ({
@@ -193,7 +197,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: canQueryOutput && hasOutputDatasource
+		enabled: canUseOutput
 	}));
 
 	const healthCount = $derived(healthChecksQuery.data?.length ?? 0);
@@ -220,7 +224,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: canQueryOutput && hasOutputDatasource
+		enabled: canUseOutput
 	}));
 
 	const scheduleCount = $derived(schedulesQuery.data?.length ?? 0);
@@ -1492,7 +1496,7 @@
 						>
 							Analysis is locked. Health checks are read-only from this view.
 						</div>
-					{:else if canQueryOutput && hasOutputDatasource}
+					{:else if canUseOutput}
 						<div
 							class={css({
 								marginTop: '2',
@@ -1577,7 +1581,7 @@
 					>
 						Analysis is locked. Schedules are read-only from this view.
 					</div>
-				{:else if scheduleOpen && canQueryOutput && hasOutputDatasource}
+				{:else if scheduleOpen && canUseOutput}
 					<div
 						class={css({
 							marginTop: '2',

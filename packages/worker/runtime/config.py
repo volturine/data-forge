@@ -86,3 +86,7 @@ settings = WorkerSettings(
     data_plane_grpc_host=os.environ.get("WORKER_DATA_PLANE_GRPC_HOST", "127.0.0.1").strip() or "127.0.0.1",
     data_plane_grpc_port=_read_int("WORKER_DATA_PLANE_GRPC_PORT", 50052, min_value=1, max_value=65535),
 )
+
+# App config uses 0 = auto. Polars panics if POLARS_MAX_THREADS is literally 0.
+if os.environ.get("POLARS_MAX_THREADS") in {"0", ""}:
+    os.environ.pop("POLARS_MAX_THREADS", None)
