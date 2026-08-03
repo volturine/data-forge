@@ -11,7 +11,6 @@
 	import { getEngineDefaults } from '$lib/api/compute';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { track } from '$lib/utils/audit-log';
-	import { canQueryTabDatasource } from '$lib/utils/analysis-output-materialization';
 	import {
 		Copy,
 		FileText,
@@ -122,16 +121,16 @@
 	});
 
 	const isIceberg = $derived(datasource?.source_type === 'iceberg');
-	// Derived tabs use another tab's output.result_id as datasource.id. That id is only
-	// fetchable after the upstream output is materialized (first successful build).
+	// Derived tabs read another tab's output.result_id. Only fetch when that
+	// upstream output is materialized; otherwise the row does not exist yet.
 	const sourceDatasourceId = $derived(datasource?.id ?? activeTab?.datasource?.id ?? null);
-	const canQueryDatasource = $derived(
-		canQueryTabDatasource({
-			datasourceId: sourceDatasourceId,
-			analysisTabId: activeTab?.datasource?.analysis_tab_id ?? null,
-			tabs: analysisStore.tabs
-		})
-	);
+	const upstreamTabId = $derived(activeTab?.datasource?.analysis_tab_id ?? null);
+	const canQueryDatasource = $derived.by(() => {
+		if (!sourceDatasourceId) return false;
+		if (!upstreamTabId) return true;
+		const upstream = analysisStore.tabs.find((tab) => tab.id === upstreamTabId);
+		return upstream?.output?.materialized === true;
+	});
 	const datasourceQuery = createQuery(() => ({
 		queryKey: [
 			'datasource',
@@ -141,11 +140,7 @@
 		queryFn: async () => {
 			if (!sourceDatasourceId) return null;
 			const result = await getDatasource(sourceDatasourceId);
-			if (result.isErr()) {
-				// Unmaterialized / deleted analysis outputs must not surface as hard errors.
-				if (result.error.status === 404) return null;
-				throw new Error(result.error.message);
-			}
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		enabled: canQueryDatasource
