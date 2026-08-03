@@ -271,6 +271,7 @@ def _get_latest_build_namespace_update(namespace: str) -> str | None:
 
 
 def _resolved_default_max_threads() -> int:
+    # settings.polars_max_threads is resolved at process start (all CPUs when unset/0).
     if settings.polars_max_threads > 0:
         return settings.polars_max_threads
     return os.cpu_count() or 1

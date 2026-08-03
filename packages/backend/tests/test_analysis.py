@@ -227,6 +227,55 @@ class TestAnalysisCreate:
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
 
+    def test_create_analysis_rejects_hidden_datasource_input(
+        self,
+        client,
+        test_db_session: Session,
+    ):
+        hidden = DataSource(
+            id=str(uuid.uuid4()),
+            name='hidden-output',
+            description=None,
+            source_type='iceberg',
+            config={'branch': 'master'},
+            schema_cache=None,
+            created_by='analysis',
+            is_hidden=True,
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+        test_db_session.add(hidden)
+        test_db_session.commit()
+
+        payload = {
+            'name': 'Hidden Input Analysis',
+            'description': 'Must reject hidden datasources as tab inputs',
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': hidden.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_hidden',
+                    },
+                    'steps': [],
+                },
+            ],
+        }
+
+        response = client.post('/api/v1/analysis', json=payload)
+
+        assert response.status_code == 400
+        body = response.json()
+        assert 'hidden' in body['detail'].lower()
+
     def test_create_analysis_without_description(self, client, sample_datasource: DataSource):
         payload = {
             'name': 'Analysis Without Description',
