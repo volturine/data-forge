@@ -17,7 +17,6 @@
 	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import type { ActiveBuildDetail } from '$lib/types/build-stream';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
-	import { canQueryOutputDatasource } from '$lib/utils/analysis-output-materialization';
 	import { isUuid } from '$lib/utils/analysis-tab';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
@@ -140,26 +139,16 @@
 	const outputDefaults = $derived.by(() => {
 		return outputConfig;
 	});
-	// result_id is a reserved identity; only query once the server (or a local
-	// build completion) marks the output as materialized.
+	// result_id is reserved at create time; only fetch after materialization.
 	const hasReservedOutputId = $derived(isUuid(outputDatasourceId));
-	const canQueryOutput = $derived(
-		canQueryOutputDatasource({
-			resultId: outputDatasourceId,
-			materialized: activeTab?.output?.materialized
-		})
-	);
+	const canQueryOutput = $derived(hasReservedOutputId && activeTab?.output?.materialized === true);
 
 	const outputDatasourceQuery = createQuery(() => ({
 		queryKey: ['datasource', outputDatasourceId],
 		queryFn: async () => {
 			if (!outputDatasourceId) return null;
 			const result = await getDatasource(outputDatasourceId);
-			if (result.isErr()) {
-				// Should not happen when gated on materialized; keep fail-soft.
-				if (result.error.status === 404) return null;
-				throw new Error(result.error.message);
-			}
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		enabled: canQueryOutput
