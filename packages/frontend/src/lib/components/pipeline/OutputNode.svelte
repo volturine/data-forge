@@ -9,11 +9,12 @@
 	import { getSubscribers } from '$lib/api/settings';
 	import { cancelBuild } from '$lib/api/compute';
 	import { apiRequest } from '$lib/api/client';
-	import { getDatasource, updateDatasource } from '$lib/api/datasource';
+	import { getDatasource, listDatasources, updateDatasource } from '$lib/api/datasource';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import type { ActiveBuildDetail } from '$lib/types/build-stream';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
@@ -62,6 +63,7 @@
 	}: Props = $props();
 
 	const queryClient = useQueryClient();
+	const ns = useNamespace();
 	const analysisPipeline = $derived.by(() => {
 		if (!analysisId) return null;
 		return buildAnalysisPipelinePayload(
@@ -139,9 +141,25 @@
 	const outputDefaults = $derived.by(() => {
 		return outputConfig;
 	});
-	// result_id is reserved at create time; only fetch after materialization.
+	// result_id is reserved at create time. Gate GET on hidden-inclusive list membership
+	// (a row exists only after the first successful build — often still is_hidden).
 	const hasReservedOutputId = $derived(isUuid(outputDatasourceId));
-	const canQueryOutput = $derived(hasReservedOutputId && activeTab?.output?.materialized === true);
+	const datasourcesMembershipQuery = createQuery(() => ({
+		queryKey: ['datasources', ns.value, true],
+		queryFn: async () => {
+			const result = await listDatasources(true, { cache: 'no-store' });
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		staleTime: 0,
+		refetchOnMount: 'always',
+		enabled: hasReservedOutputId && !ns.switching
+	}));
+	const outputExists = $derived(
+		!!outputDatasourceId &&
+			(datasourcesMembershipQuery.data ?? []).some((ds) => ds.id === outputDatasourceId)
+	);
+	const canQueryOutput = $derived(hasReservedOutputId && outputExists);
 
 	const outputDatasourceQuery = createQuery(() => ({
 		queryKey: ['datasource', outputDatasourceId],
@@ -484,13 +502,9 @@
 		if (buildStore.status !== 'completed' || !buildStore.buildId) return;
 		if (lastCompletedBuildId === buildStore.buildId) return;
 		lastCompletedBuildId = buildStore.buildId;
-		// First successful build materializes the reserved result_id as a datasource.
-		analysisStore.markOutputMaterialized(outputDatasourceId);
-		void queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
+		// First successful build creates the output datasource row (often hidden).
 		void queryClient.invalidateQueries({ queryKey: ['datasources'] });
-		if (analysisId) {
-			void queryClient.invalidateQueries({ queryKey: ['analysis', analysisId] });
-		}
+		void queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
 	});
 
 	function closeBuildPreview() {
@@ -1503,7 +1517,7 @@
 							data-testid="output-health-empty-state"
 						>
 							{#if hasReservedOutputId}
-								Build this output once to materialize its datasource before adding health checks.
+								Build this output once to create its datasource before adding health checks.
 							{:else}
 								Save this analysis to create an output datasource before adding health checks.
 							{/if}
@@ -1587,7 +1601,7 @@
 						})}
 					>
 						{#if hasReservedOutputId}
-							Build this output once to materialize its datasource before adding schedules.
+							Build this output once to create its datasource before adding schedules.
 						{:else}
 							Save this analysis to create an output datasource before adding schedules.
 						{/if}

@@ -53,67 +53,13 @@ from modules.analysis.templates import AnalysisTemplate, get_template, list_temp
 from modules.analysis_versions import service as version_service
 
 
-def _materialized_output_ids(session: Session, result_ids: set[str]) -> set[str]:
-    """Return the subset of result_ids that currently exist as datasources."""
-    valid = {result_id for result_id in result_ids if result_id}
-    if not valid:
-        return set()
-    stmt = select(col(DataSource.id)).where(col(DataSource.id).in_(valid))
-    return {str(row[0]) for row in session.execute(stmt).all()}
-
-
-def _annotate_pipeline_materialization(
-    session: Session,
-    pipeline_definition: object,
-) -> dict[str, Any]:
-    """Copy pipeline_definition and mark each tab output as materialized or not.
-
-    ``result_id`` is a reserved future identity; a datasource row is only present
-    after the first successful build. Callers must not GET /datasource/{result_id}
-    until ``materialized`` is true.
-    """
-    if not isinstance(pipeline_definition, dict):
-        return {}
-    annotated = deepcopy(pipeline_definition)
-    tabs = annotated.get('tabs')
-    if not isinstance(tabs, list):
-        return annotated
-
-    result_ids: set[str] = set()
-    for tab in tabs:
-        if not isinstance(tab, dict):
-            continue
-        output = tab.get('output')
-        if isinstance(output, dict) and isinstance(output.get('result_id'), str):
-            result_ids.add(output['result_id'])
-
-    existing = _materialized_output_ids(session, result_ids)
-    for tab in tabs:
-        if not isinstance(tab, dict):
-            continue
-        output = tab.get('output')
-        if not isinstance(output, dict):
-            continue
-        result_id = output.get('result_id')
-        output['materialized'] = isinstance(result_id, str) and result_id in existing
-    return annotated
-
-
-def _to_response(
-    session: Session,
-    analysis: Analysis,
-    *,
-    is_favorite: bool = False,
-) -> AnalysisResponseSchema:
+def _to_response(analysis: Analysis, *, is_favorite: bool = False) -> AnalysisResponseSchema:
     return AnalysisResponseSchema.model_validate(
         {
             'id': analysis.id,
             'name': analysis.name,
             'description': analysis.description,
-            'pipeline_definition': _annotate_pipeline_materialization(
-                session,
-                analysis.pipeline_definition,
-            ),
+            'pipeline_definition': analysis.pipeline_definition,
             'created_at': analysis.created_at,
             'updated_at': analysis.updated_at,
             'revision': analysis.revision,
@@ -681,7 +627,7 @@ def create_analysis(
     session.commit()
 
     session.refresh(analysis)
-    return _to_response(session, analysis)
+    return _to_response(analysis)
 
 
 def get_analysis(
@@ -693,7 +639,7 @@ def get_analysis(
     if not analysis:
         raise analysis_not_found(analysis_id)
 
-    return _to_response(session, analysis)
+    return _to_response(analysis)
 
 
 def list_analyses(
@@ -1074,7 +1020,7 @@ def update_analysis(
 
     session.commit()
     session.refresh(analysis)
-    return _to_response(session, analysis)
+    return _to_response(analysis)
 
 
 def set_favorite(

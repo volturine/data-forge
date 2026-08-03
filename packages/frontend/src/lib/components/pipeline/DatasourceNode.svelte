@@ -121,16 +121,11 @@
 	});
 
 	const isIceberg = $derived(datasource?.source_type === 'iceberg');
-	// Derived tabs read another tab's output.result_id. Only fetch when that
-	// upstream output is materialized; otherwise the row does not exist yet.
+	// Derived tabs chain the upstream tab's dataframe in the same pipeline — they
+	// do not read the published datasource for that tab's result_id.
+	const isDerived = $derived(!!activeTab?.datasource?.analysis_tab_id);
 	const sourceDatasourceId = $derived(datasource?.id ?? activeTab?.datasource?.id ?? null);
-	const upstreamTabId = $derived(activeTab?.datasource?.analysis_tab_id ?? null);
-	const canQueryDatasource = $derived.by(() => {
-		if (!sourceDatasourceId) return false;
-		if (!upstreamTabId) return true;
-		const upstream = analysisStore.tabs.find((tab) => tab.id === upstreamTabId);
-		return upstream?.output?.materialized === true;
-	});
+	const canQueryDatasource = $derived(!!sourceDatasourceId && !isDerived);
 	const datasourceQuery = createQuery(() => ({
 		queryKey: [
 			'datasource',
@@ -246,7 +241,6 @@
 	}
 
 	const analysisSourceId = $derived(resolvedDatasource?.created_by_analysis_id ?? null);
-	const isDerived = $derived(!!activeTab?.datasource?.analysis_tab_id);
 	type DatasourceBadgeType = SourceType | 'analysis' | 'derived';
 	function getDatasourceBranches(ds: DataSource | null | undefined): string[] {
 		const raw = ds?.config?.branches;

@@ -74,8 +74,7 @@ class TabOutput:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TabOutput:
-        # `materialized` is response-only (computed on read); never persist it.
-        extra = {k: v for k, v in data.items() if k not in {'result_id', 'format', 'filename', 'materialized'}}
+        extra = {k: v for k, v in data.items() if k not in {'result_id', 'format', 'filename'}}
         return cls(
             result_id=str(data.get('result_id', '')),
             format=str(data.get('format', '')),
@@ -84,12 +83,11 @@ class TabOutput:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        extra = {k: v for k, v in self.extra.items() if k != 'materialized'}
         return {
             'result_id': self.result_id,
             'format': self.format,
             'filename': self.filename,
-            **extra,
+            **self.extra,
         }
 
 

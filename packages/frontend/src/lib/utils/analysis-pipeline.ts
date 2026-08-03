@@ -151,13 +151,11 @@ export function buildAnalysisPipelinePayload(
 			return null;
 		}
 		if (!outputId) return null;
-		// Drop response-only UI fields that protobuf pipeline codecs reject.
-		const { materialized: _materialized, ...outputFields } = tab.output;
 		return {
 			id: tab.id,
 			name: tab.name,
 			datasource,
-			output: { ...outputFields, result_id: outputId },
+			output: { ...tab.output, result_id: outputId },
 			steps: applySteps(tab.steps ?? []).map((step) => ({
 				...step,
 				config: normalizeConfig(step.type, step.config)

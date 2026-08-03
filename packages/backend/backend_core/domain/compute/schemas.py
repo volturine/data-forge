@@ -160,10 +160,7 @@ class AnalysisPipelineTab(BaseModel):
         export_format = value.get('format')
         if not isinstance(export_format, str) or not export_format.strip():
             raise ValueError('Analysis pipeline tab output.format is required')
-        # Response-only analysis UI field; protobuf pipeline codecs reject unknown keys.
-        cleaned = dict(value)
-        cleaned.pop('materialized', None)
-        return cleaned
+        return dict(value)
 
 
 class AnalysisPipelinePayload(BaseModel):

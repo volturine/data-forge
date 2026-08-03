@@ -607,53 +607,6 @@ describe('AnalysisStore.reorderSteps', () => {
 	});
 });
 
-describe('AnalysisStore.markOutputMaterialized', () => {
-	let store: InstanceType<typeof AnalysisStore>;
-	const resultId = '550e8400-e29b-41d4-a716-446655440000';
-
-	beforeEach(() => {
-		store = new AnalysisStore();
-		const tab = makeTab({
-			id: 'tab-1',
-			output: {
-				result_id: resultId,
-				format: 'parquet',
-				filename: 'source_1',
-				build_mode: 'full',
-				materialized: false,
-				iceberg: { namespace: 'outputs', table_name: 'source_1', branch: 'master' }
-			}
-		});
-		store.current = {
-			id: 'a-1',
-			name: 'Test',
-			description: null,
-			pipeline_definition: {},
-			created_at: '',
-			updated_at: '',
-			revision: 1,
-			result_path: null,
-			thumbnail: null
-		};
-		store.lastSaved = { name: 'Test', description: null };
-		store.tabs = [tab];
-		store.savedTabs = [JSON.parse(JSON.stringify(tab))];
-	});
-
-	test('sets materialized on matching result_id without dirtying', () => {
-		expect(store.isDirty()).toBe(false);
-		store.markOutputMaterialized(resultId);
-		expect(store.tabs[0].output.materialized).toBe(true);
-		expect(store.savedTabs[0].output.materialized).toBe(true);
-		expect(store.isDirty()).toBe(false);
-	});
-
-	test('ignores unknown result ids', () => {
-		store.markOutputMaterialized('00000000-0000-4000-8000-000000000000');
-		expect(store.tabs[0].output.materialized).toBe(false);
-	});
-});
-
 describe('AnalysisStore.updateTab', () => {
 	let store: InstanceType<typeof AnalysisStore>;
 

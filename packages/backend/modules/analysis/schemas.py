@@ -68,21 +68,12 @@ class TabOutputSchema(BaseModel):
             description=(
                 "UUID v4 for this tab's output. When creating a new analysis, call generate_uuid to get one. "
                 'When updating an existing analysis, reuse the current result_id from the analysis response. '
-                'This is a reserved identity, not proof a datasource row exists yet.'
+                'This is a reserved publish identity; a datasource row exists only after a successful build.'
             ),
         ),
     ]
     format: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
     filename: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
-    # Response-only: computed when serializing analyses. Clients must not rely on
-    # writing this field; persistence strips it.
-    materialized: bool | None = Field(
-        default=None,
-        description=(
-            'True when a datasource row exists for result_id (after first successful build). '
-            'False for reserved-but-unmaterialized outputs. Omitted/ignored on write.'
-        ),
-    )
 
     @field_validator('result_id')
     @classmethod
