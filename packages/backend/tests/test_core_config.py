@@ -80,29 +80,23 @@ class TestSettings:
 
     def test_polars_settings(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('POLARS_MAX_THREADS', '8')
+        monkeypatch.setenv('POLARS_CORES_AVAILABLE', '8')
         monkeypatch.setenv('POLARS_STREAMING_CHUNK_SIZE', '100000')
 
         settings = Settings()
 
-        assert settings.polars_max_threads == 8
+        assert settings.polars_cores_available == 8
         assert settings.polars_streaming_chunk_size == 100000
 
-    def test_polars_max_threads_zero_is_app_default_not_left_in_env(self, monkeypatch, tmp_path):
-        import os
-
+    def test_polars_cores_available_zero_means_all_host_cores(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('POLARS_MAX_THREADS', '0')
+        monkeypatch.setenv('POLARS_CORES_AVAILABLE', '0')
 
-        # Re-import path: Settings keeps 0; process env must not keep literal 0 for Polars.
-        from backend_core.config import Settings
+        settings = Settings()
 
-        loaded = Settings()
-        assert loaded.polars_max_threads == 0
-        # Config module strips 0 after load; simulate the same guard.
-        if os.environ.get('POLARS_MAX_THREADS') in {'0', ''}:
-            os.environ.pop('POLARS_MAX_THREADS', None)
-        assert os.environ.get('POLARS_MAX_THREADS') is None
+        assert settings.polars_cores_available == 0
+        # App config name must not collide with Polars' native env.
+        assert Settings.model_fields['polars_cores_available'].alias == 'POLARS_CORES_AVAILABLE'
 
     def test_preview_run_persistence_setting(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)

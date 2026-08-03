@@ -81,7 +81,7 @@ If you only want the high-value knobs, start with these:
 - `CORS_ORIGINS` — allowed browser origins (only needed in dev or multi-origin setups)
 - `AUTH_REQUIRED` — turn login on/off
 - `SETTINGS_ENCRYPTION_KEY` — strongly recommended when auth is enabled
-- `POLARS_MAX_THREADS`, `POLARS_MAX_MEMORY_MB`, `MAX_CONCURRENT_ENGINES` — performance limits
+- `POLARS_CORES_AVAILABLE`, `POLARS_MAX_MEMORY_MB`, `MAX_CONCURRENT_ENGINES` — performance limits
 - **Dev-only:** `BACKEND_HOST`, `BACKEND_PORT`, `FRONTEND_PORT` — Vite proxy wiring (Bun/Vite only, not exposed to browser)
 
 ## How configuration is loaded
@@ -201,7 +201,7 @@ These variables configure the gRPC channel that the scheduler and worker use to 
 | `SCHEDULER_CHECK_INTERVAL`        | `60`    | Seconds between scheduler polls.                                |
 | `LOCK_TTL_SECONDS`                | `30`    | Lock lease duration.                                            |
 | `LOCK_HEARTBEAT_INTERVAL_SECONDS` | `10`    | Must stay lower than `LOCK_TTL_SECONDS`.                        |
-| `POLARS_MAX_THREADS`              | `0`     | `0` means auto-detect.                                          |
+| `POLARS_CORES_AVAILABLE`          | `0`     | Total cores for analysis engines; `0` = all host logical CPUs. Not Polars' native `POLARS_MAX_THREADS`. |
 | `POLARS_MAX_MEMORY_MB`            | `0`     | `0` means unlimited.                                            |
 | `POLARS_STREAMING_CHUNK_SIZE`     | `0`     | `0` means automatic chunk sizing.                               |
 | `MAX_CONCURRENT_ENGINES`          | `10`    | Valid range: `1` to `100`.                                      |

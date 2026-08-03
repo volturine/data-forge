@@ -32,7 +32,8 @@ if TYPE_CHECKING:
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
-    os.environ.pop('POLARS_MAX_THREADS', None)
+    os.environ.pop('POLARS_CORES_AVAILABLE', None)
+    os.environ.pop('POLARS_MAX_THREADS', None)  # Polars native; keep tests isolated
     os.environ.pop('POLARS_STREAMING_CHUNK_SIZE', None)
     os.environ.setdefault('ENV_FILE', '')
     os.environ.setdefault('SETTINGS_ENCRYPTION_KEY', 'test-key')

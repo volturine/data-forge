@@ -15,7 +15,7 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('scheduler_check_interval', 1, None),
     ('lock_ttl_seconds', 1, None),
     ('lock_heartbeat_interval_seconds', 1, None),
-    ('polars_max_threads', 0, None),
+    ('polars_cores_available', 0, None),
     ('polars_max_memory_mb', 0, None),
     ('polars_streaming_chunk_size', 0, None),
     ('max_concurrent_engines', 1, 100),
@@ -117,9 +117,10 @@ class Settings(BaseSettings):
     lock_ttl_seconds: int = Field(default=30, alias='LOCK_TTL_SECONDS')
     lock_heartbeat_interval_seconds: int = Field(default=10, alias='LOCK_HEARTBEAT_INTERVAL_SECONDS')
 
-    # Polars Engine Resource Configuration
-    # Maximum threads per engine (0 = auto-detect, uses all available cores)
-    polars_max_threads: int = Field(default=0, alias='POLARS_MAX_THREADS')
+    # Polars engine resource defaults (app config — not Polars' native env names).
+    # Total cores available for compute engines (0 = all logical CPUs on this host).
+    # Per-analysis resource_config.max_threads may override within this budget.
+    polars_cores_available: int = Field(default=0, alias='POLARS_CORES_AVAILABLE')
 
     # Memory limit per engine in MB (0 = unlimited)
     polars_max_memory_mb: int = Field(default=0, alias='POLARS_MAX_MEMORY_MB')
@@ -340,13 +341,6 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-# POLARS_MAX_THREADS in env/settings is the *app* default (0 = all cores, overridable
-# per analysis). Polars itself also reads that same env name and panics on 0, so once
-# settings are loaded, drop it from the process env. Compute engines re-apply a
-# positive override only for their own subprocess when max_threads is pinned.
-if os.environ.get('POLARS_MAX_THREADS') in {'0', ''}:
-    os.environ.pop('POLARS_MAX_THREADS', None)
 
 
 def _configure_runtime_ipc() -> None:

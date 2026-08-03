@@ -18,7 +18,7 @@ class WorkerSettings:
     engine_idle_ttl_seconds: int
     engine_idle_reap_interval_seconds: int
     max_concurrent_engines: int
-    polars_max_threads: int
+    polars_cores_available: int
     polars_max_memory_mb: int
     polars_streaming_chunk_size: int
     normalize_tz: bool
@@ -69,8 +69,8 @@ settings = WorkerSettings(
     engine_idle_ttl_seconds=_read_int("ENGINE_IDLE_TTL_SECONDS", 300, min_value=1),
     engine_idle_reap_interval_seconds=_read_int("ENGINE_IDLE_REAP_INTERVAL_SECONDS", 30, min_value=1),
     max_concurrent_engines=_read_int("MAX_CONCURRENT_ENGINES", 10, min_value=1, max_value=100),
-    # 0 = app default "all cores"; per-analysis resource_config can override.
-    polars_max_threads=_read_int("POLARS_MAX_THREADS", 0, min_value=0),
+    # Total cores available for engines (0 = all logical CPUs). Not Polars' native env.
+    polars_cores_available=_read_int("POLARS_CORES_AVAILABLE", 0, min_value=0),
     polars_max_memory_mb=_read_int("POLARS_MAX_MEMORY_MB", 0, min_value=0),
     polars_streaming_chunk_size=_read_int("POLARS_STREAMING_CHUNK_SIZE", 0, min_value=0),
     normalize_tz=_read_bool("NORMALIZE_TZ", False),
@@ -87,7 +87,3 @@ settings = WorkerSettings(
     data_plane_grpc_host=os.environ.get("WORKER_DATA_PLANE_GRPC_HOST", "127.0.0.1").strip() or "127.0.0.1",
     data_plane_grpc_port=_read_int("WORKER_DATA_PLANE_GRPC_PORT", 50052, min_value=1, max_value=65535),
 )
-
-# Same env name is also read by Polars; 0 panics there. Keep 0 only in settings.
-if os.environ.get("POLARS_MAX_THREADS") in {"0", ""}:
-    os.environ.pop("POLARS_MAX_THREADS", None)

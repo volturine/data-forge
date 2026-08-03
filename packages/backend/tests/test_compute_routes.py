@@ -119,7 +119,7 @@ def test_shutdown_engine_returns_not_found_for_unknown_identity(client) -> None:
 
 
 def test_get_engine_defaults_resolves_auto_values(client, monkeypatch) -> None:
-    monkeypatch.setattr(compute_routes.settings, 'polars_max_threads', 0)
+    monkeypatch.setattr(compute_routes.settings, 'polars_cores_available', 0)
     monkeypatch.setattr(compute_routes.settings, 'polars_max_memory_mb', 0)
     monkeypatch.setattr(compute_routes.settings, 'polars_streaming_chunk_size', 4096)
     monkeypatch.setattr(compute_routes.os, 'cpu_count', lambda: 12)
