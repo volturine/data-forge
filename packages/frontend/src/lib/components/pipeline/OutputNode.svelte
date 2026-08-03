@@ -17,6 +17,7 @@
 	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import type { ActiveBuildDetail } from '$lib/types/build-stream';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
+	import { canQueryOutputDatasource } from '$lib/utils/analysis-output-materialization';
 	import { isUuid } from '$lib/utils/analysis-tab';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
@@ -142,8 +143,12 @@
 	// result_id is a reserved identity; only query once the server (or a local
 	// build completion) marks the output as materialized.
 	const hasReservedOutputId = $derived(isUuid(outputDatasourceId));
-	const outputMaterialized = $derived(activeTab?.output?.materialized === true);
-	const canQueryOutput = $derived(hasReservedOutputId && outputMaterialized);
+	const canQueryOutput = $derived(
+		canQueryOutputDatasource({
+			resultId: outputDatasourceId,
+			materialized: activeTab?.output?.materialized
+		})
+	);
 
 	const outputDatasourceQuery = createQuery(() => ({
 		queryKey: ['datasource', outputDatasourceId],

@@ -89,8 +89,74 @@ test.describe('Analyses – output visibility toggle', () => {
 			await expect(page.locator('[data-testid="output-visibility-toggle"]')).toBeVisible({
 				timeout: 5_000
 			});
+			// Explicit unbuilt UI for health checks.
+			await page.locator('[data-testid="output-health-toggle"]').click();
+			await expect(page.locator('[data-testid="output-health-empty-state"]')).toContainText(
+				/Build this output once to materialize/i,
+				{ timeout: 5_000 }
+			);
+			// Settle network so a late probe would still be observed.
+			await page.waitForLoadState('networkidle').catch(() => undefined);
+			await page.waitForTimeout(500);
 			// Reserved result_id must not be fetched before first build.
 			expect(probedIds.has(resultId)).toBe(false);
+		} finally {
+			await cleanupAnalysis(page, aId);
+		}
+	});
+
+	test('OutputNode: successful build materializes output and allows GET', async ({
+		page,
+		request
+	}) => {
+		const aName = `E2E Materialize Build ${uid()}`;
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
+		const probedIds = new Set<string>();
+		page.on('request', (req) => {
+			const match = req.url().match(/\/api\/v1\/datasource\/([0-9a-f-]{36})(?:\?|$)/i);
+			if (match && req.method() === 'GET') {
+				probedIds.add(match[1]);
+			}
+		});
+		try {
+			const before = await page.request.get(`/api/v1/analysis/${aId}`);
+			expect(before.ok()).toBeTruthy();
+			const beforeBody = await before.json();
+			const resultId = beforeBody.pipeline_definition?.tabs?.[0]?.output?.result_id as string;
+			expect(beforeBody.pipeline_definition.tabs[0].output.materialized).toBe(false);
+
+			await gotoAnalysisEditor(page, aId);
+			// No probe of the reserved output before build.
+			await expect(page.locator('[data-testid="output-visibility-toggle"]')).toBeVisible({
+				timeout: 5_000
+			});
+			expect(probedIds.has(resultId)).toBe(false);
+
+			const buildBtn = page.locator('[data-testid="output-build-button"]');
+			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
+			await buildBtn.click({ timeout: 5_000 });
+			const buildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(buildTrigger).toBeVisible({ timeout: 5_000 });
+			await expectCompletedEventually(buildTrigger);
+
+			// Wait until the reserved output exists as a real datasource.
+			await expect
+				.poll(
+					async () => {
+						const ds = await page.request.get(`/api/v1/datasource/${resultId}`);
+						return ds.status();
+					},
+					{ timeout: 15_000 }
+				)
+				.toBe(200);
+
+			const after = await page.request.get(`/api/v1/analysis/${aId}`);
+			expect(after.ok()).toBeTruthy();
+			const afterBody = await after.json();
+			expect(afterBody.pipeline_definition.tabs[0].output.materialized).toBe(true);
+
+			// After materialization, the editor must be allowed to fetch the output datasource.
+			await expect.poll(() => probedIds.has(resultId), { timeout: 15_000 }).toBe(true);
 		} finally {
 			await cleanupAnalysis(page, aId);
 		}
