@@ -253,11 +253,12 @@
 		const result = await listDatasources(true, { cache: 'no-store' });
 		if (result.isErr()) throw new Error(result.error.message);
 		queryClient.setQueryData(['datasources-lookup', ns.value, 'include-hidden'], result.value);
-		createDatasources = result.value;
+		// Hidden outputs must not appear in the create target picker.
+		createDatasources = result.value.filter((ds) => !ds.is_hidden);
 		if (
 			!datasourceId &&
 			targetDatasourceId &&
-			!result.value.some((ds) => ds.id === targetDatasourceId)
+			!createDatasources.some((ds) => ds.id === targetDatasourceId)
 		) {
 			targetDatasourceId = '';
 		}

@@ -54,12 +54,6 @@ export interface AnalysisTabOutput {
 	build_mode?: string;
 	iceberg?: AnalysisTabIcebergConfig;
 	notification?: AnalysisTabNotificationConfig | null;
-	/**
-	 * Server-computed: true when a datasource row exists for result_id.
-	 * Reserved result_ids are not fetchable until the first successful build.
-	 * Response-only — not authoritative on write.
-	 */
-	materialized?: boolean;
 	[key: string]: unknown;
 }
 

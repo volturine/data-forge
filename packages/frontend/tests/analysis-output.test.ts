@@ -62,11 +62,8 @@ async function cleanupAnalysis(page: Page, analysisId: string): Promise<void> {
 }
 
 test.describe('Analyses – output visibility toggle', () => {
-	test('OutputNode: unmaterialized output does not GET reserved result_id', async ({
-		page,
-		request
-	}) => {
-		const aName = `E2E Unmaterialized ${uid()}`;
+	test('OutputNode: unbuilt output does not GET reserved result_id', async ({ page, request }) => {
+		const aName = `E2E Unbuilt Output ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		const probedIds = new Set<string>();
 		page.on('request', (req) => {
@@ -83,7 +80,8 @@ test.describe('Analyses – output visibility toggle', () => {
 			expect(resultId).toMatch(
 				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 			);
-			expect(analysisBody.pipeline_definition.tabs[0].output.materialized).toBe(false);
+			// No materialization flag on the analysis contract.
+			expect(analysisBody.pipeline_definition.tabs[0].output).not.toHaveProperty('materialized');
 
 			await gotoAnalysisEditor(page, aId);
 			await expect(page.locator('[data-testid="output-visibility-toggle"]')).toBeVisible({
@@ -92,24 +90,24 @@ test.describe('Analyses – output visibility toggle', () => {
 			// Explicit unbuilt UI for health checks.
 			await page.locator('[data-testid="output-health-toggle"]').click();
 			await expect(page.locator('[data-testid="output-health-empty-state"]')).toContainText(
-				/Build this output once to materialize/i,
+				/Build this output once to create its datasource/i,
 				{ timeout: 5_000 }
 			);
 			// Settle network so a late probe would still be observed.
 			await page.waitForLoadState('networkidle').catch(() => undefined);
 			await page.waitForTimeout(500);
-			// Reserved result_id must not be fetched before first build.
+			// Reserved result_id must not be fetched before first build (list-membership gate).
 			expect(probedIds.has(resultId)).toBe(false);
 		} finally {
 			await cleanupAnalysis(page, aId);
 		}
 	});
 
-	test('OutputNode: successful build materializes output and allows GET', async ({
+	test('OutputNode: successful build creates output datasource and allows GET', async ({
 		page,
 		request
 	}) => {
-		const aName = `E2E Materialize Build ${uid()}`;
+		const aName = `E2E Build Creates Output ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		const probedIds = new Set<string>();
 		page.on('request', (req) => {
@@ -123,7 +121,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			expect(before.ok()).toBeTruthy();
 			const beforeBody = await before.json();
 			const resultId = beforeBody.pipeline_definition?.tabs?.[0]?.output?.result_id as string;
-			expect(beforeBody.pipeline_definition.tabs[0].output.materialized).toBe(false);
+			expect(beforeBody.pipeline_definition.tabs[0].output).not.toHaveProperty('materialized');
 
 			await gotoAnalysisEditor(page, aId);
 			// No probe of the reserved output before build.
@@ -150,12 +148,7 @@ test.describe('Analyses – output visibility toggle', () => {
 				)
 				.toBe(200);
 
-			const after = await page.request.get(`/api/v1/analysis/${aId}`);
-			expect(after.ok()).toBeTruthy();
-			const afterBody = await after.json();
-			expect(afterBody.pipeline_definition.tabs[0].output.materialized).toBe(true);
-
-			// After materialization, the editor must be allowed to fetch the output datasource.
+			// After the row exists, list membership enables GET of the output datasource.
 			await expect.poll(() => probedIds.has(resultId), { timeout: 15_000 }).toBe(true);
 		} finally {
 			await cleanupAnalysis(page, aId);
@@ -362,10 +355,10 @@ test.describe('Analyses – output node interactions', () => {
 			await notifyToggle.click();
 			await expect(notifyPanel).not.toBeVisible({ timeout: 3_000 });
 
-			// Open Health Checks section — prompts to build first when output datasource is not materialized
+			// Open Health Checks section — prompts to build first when output datasource row is missing
 			await healthToggle.click();
 			await expect(healthEmptyState).toContainText(
-				'Build this output once to materialize its datasource before adding health checks.',
+				'Build this output once to create its datasource before adding health checks.',
 				{
 					timeout: 5_000
 				}
@@ -429,9 +422,7 @@ test.describe('Analyses – output node interactions', () => {
 			// Open schedule section
 			await scheduleToggle.click();
 			await expect(
-				page.getByText(
-					/Build this output once to materialize its datasource before adding schedules/i
-				)
+				page.getByText(/Build this output once to create its datasource before adding schedules/i)
 			).toBeVisible({
 				timeout: 5_000
 			});
@@ -439,9 +430,7 @@ test.describe('Analyses – output node interactions', () => {
 			// Close it
 			await scheduleToggle.click();
 			await expect(
-				page.getByText(
-					/Build this output once to materialize its datasource before adding schedules/i
-				)
+				page.getByText(/Build this output once to create its datasource before adding schedules/i)
 			).not.toBeVisible({
 				timeout: 3_000
 			});

@@ -61,18 +61,21 @@
 
 	const excludedSet = $derived(new SvelteSet(excludeIds));
 
-	const availableOptions = $derived(datasources.filter((ds) => !excludedSet.has(ds.id)));
+	// Hidden analysis outputs must not appear in pickers (selectors / join / union / wizard).
+	const visibleDatasources = $derived(datasources.filter((ds) => !ds.is_hidden));
+
+	const availableOptions = $derived(visibleDatasources.filter((ds) => !excludedSet.has(ds.id)));
 
 	const selectedDatasources = $derived.by(() => {
 		if (modeSource !== 'datasource') return [];
 		if (mode === 'single') {
 			const s = selected as string | undefined;
-			return s ? datasources.filter((ds) => ds.id === s) : [];
+			return s ? visibleDatasources.filter((ds) => ds.id === s) : [];
 		}
 		const arr = selected as string[] | undefined;
 		if (!arr?.length) return [];
 		const set = new SvelteSet(arr);
-		return datasources.filter((ds) => set.has(ds.id));
+		return visibleDatasources.filter((ds) => set.has(ds.id));
 	});
 
 	let analyses = $state.raw<AnalysisGalleryItem[]>([]);

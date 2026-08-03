@@ -105,7 +105,8 @@
 		new SvelteMap((datasourcesQuery.data ?? []).map((ds) => [ds.id, ds] as [string, DataSource]))
 	);
 
-	const allDatasources = $derived(datasourcesQuery.data ?? []);
+	// Lookups may include hidden outputs (existing schedules); pickers never list them.
+	const pickerDatasources = $derived((datasourcesQuery.data ?? []).filter((ds) => !ds.is_hidden));
 
 	const schedules = $derived(schedulesQuery.data ?? []);
 	const allSchedules = $derived(allSchedulesQuery.data ?? []);
@@ -351,11 +352,11 @@
 		void listDatasources(true, { cache: 'no-store' }).match(
 			(datasources) => {
 				queryClient.setQueryData(['datasources-lookup', ns.value, 'include-hidden'], datasources);
-				createDatasources = datasources;
+				createDatasources = datasources.filter((ds) => !ds.is_hidden);
 				creating = true;
 			},
 			() => {
-				createDatasources = datasourcesQuery.data ?? [];
+				createDatasources = pickerDatasources;
 				creating = true;
 			}
 		);
@@ -1311,7 +1312,7 @@
 												onclick={(e) => e.stopPropagation()}
 											>
 												<option value="">None</option>
-												{#each allDatasources as ds (ds.id)}
+												{#each pickerDatasources as ds (ds.id)}
 													<option value={ds.id}>{ds.name}</option>
 												{/each}
 											</select>
@@ -1800,7 +1801,7 @@
 															onclick={(e) => e.stopPropagation()}
 														>
 															<option value="">None</option>
-															{#each allDatasources as ds (ds.id)}
+															{#each pickerDatasources as ds (ds.id)}
 																<option value={ds.id}>{ds.name}</option>
 															{/each}
 														</select>

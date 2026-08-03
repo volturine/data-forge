@@ -293,25 +293,6 @@ export class AnalysisStore {
 		this.tabs = this.tabs.map((tab) => (tab.id === id ? { ...tab, ...updates } : tab));
 	}
 
-	/**
-	 * Mark a reserved output result_id as materialized without dirtying the editor.
-	 * Used after the first successful build creates the datasource row.
-	 */
-	markOutputMaterialized(resultId: string): void {
-		if (!resultId) return;
-		const apply = (tabs: AnalysisTab[]): AnalysisTab[] =>
-			tabs.map((tab) => {
-				if (tab.output?.result_id !== resultId) return tab;
-				if (tab.output.materialized === true) return tab;
-				return {
-					...tab,
-					output: { ...tab.output, materialized: true }
-				};
-			});
-		this.tabs = apply(this.tabs);
-		this.savedTabs = apply(this.savedTabs);
-	}
-
 	updateTabSteps(tabId: string, steps: PipelineStep[]): void {
 		this.tabs = this.tabs.map((tab) => (tab.id === tabId ? { ...tab, steps } : tab));
 	}
