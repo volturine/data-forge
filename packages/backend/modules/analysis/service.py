@@ -1114,22 +1114,23 @@ def add_step(
             raise ValueError(f"depends_on references unknown step '{dep_id}'")
 
     tab_ids = {t.id for t in pipeline.tabs if t.id}
-    ds_ids = {t.datasource.id for t in pipeline.tabs if t.datasource.id}
-    valid_source_ids = tab_ids | ds_ids
+    # Pipeline-local ids (tabs / tab datasources already on this analysis) are always
+    # in-scope. External ids must be in the visible input catalog (404 if outside).
+    pipeline_source_ids = tab_ids | {t.datasource.id for t in pipeline.tabs if t.datasource.id}
 
-    def _is_valid_source(src_id: str) -> bool:
-        if src_id in valid_source_ids:
-            return True
-        return session.get(DataSource, src_id) is not None
+    def _assert_step_source(src_id: str) -> None:
+        if src_id in pipeline_source_ids:
+            return
+        _require_visible_analysis_input(session, src_id)
 
     right_source = config.get('right_source')
-    if right_source and not _is_valid_source(str(right_source)):
-        raise ValueError(f"Step references unknown source '{right_source}'")
+    if right_source:
+        _assert_step_source(str(right_source))
     sources = config.get('sources')
     if isinstance(sources, list):
         for src in sources:
-            if isinstance(src, str) and not _is_valid_source(src):
-                raise ValueError(f"Step references unknown source '{src}'")
+            if isinstance(src, str):
+                _assert_step_source(src)
 
     step = PipelineStep(
         id=str(uuid.uuid4()),
