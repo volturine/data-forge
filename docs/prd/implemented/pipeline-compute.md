@@ -199,8 +199,9 @@ class PolarsComputeEngine:
 
 | Config | Env Variable | Default | Description |
 |--------|--------------|---------|-------------|
-| `max_threads` | `POLARS_MAX_THREADS` | 0 (auto) | CPU threads |
-| `max_memory_mb` | - | 0 (unlimited) | Memory limit in MB |
+| platform cores | `POLARS_CORES_AVAILABLE` | 0 (all host CPUs) | Total cores budget for engines |
+| `max_threads` (per analysis) | — | platform cores | Engine thread pin; overridable per analysis |
+| `max_memory_mb` | `POLARS_MAX_MEMORY_MB` | 0 (unlimited) | Memory limit in MB |
 | `streaming_chunk_size` | `POLARS_STREAMING_CHUNK_SIZE` | 0 (auto) | Streaming batch size |
 
 ### 3. Pipeline Builder (`modules/compute/engine.py` - `_build_pipeline`)
@@ -401,7 +402,7 @@ def build_analysis_pipeline_payload(
 ```python
 engine = PolarsComputeEngine(analysis_id, resource_config)
 # 1. Spawns subprocess with spawn context
-# 2. Sets POLARS_MAX_THREADS env var
+# 2. Pins Polars via native POLARS_MAX_THREADS only when max_threads > 0
 # 3. Starts command/result queues
 # 4. Runs _run_compute loop
 ```
@@ -490,7 +491,7 @@ Key settings in `backend/core/config.py`:
 max_concurrent_engines: int = Field(default=10)
 
 # Resource limits
-polars_max_threads: int = Field(default=0)  # 0 = auto
+polars_cores_available: int = Field(default=0)  # 0 = all host logical CPUs
 polars_max_memory_mb: int = Field(default=0)  # 0 = unlimited
 polars_streaming_chunk_size: int = Field(default=0)  # 0 = auto
 

@@ -271,12 +271,12 @@ def _get_latest_build_namespace_update(namespace: str) -> str | None:
 
 
 def _resolved_default_max_threads() -> int:
-    """App default for analyses with no per-analysis max_threads override.
+    """Default engine threads when an analysis does not set max_threads.
 
-    settings.polars_max_threads comes from env (0 / unset = all logical CPUs).
+    POLARS_CORES_AVAILABLE is the platform budget (0 = all logical CPUs on host).
     """
-    if settings.polars_max_threads > 0:
-        return settings.polars_max_threads
+    if settings.polars_cores_available > 0:
+        return settings.polars_cores_available
     return os.cpu_count() or 1
 
 
@@ -305,7 +305,7 @@ async def _send_engine_snapshot(websocket: WebSocket) -> None:
     session = next(session_gen)
     try:
         defaults: dict[str, object] = {
-            'max_threads': settings.polars_max_threads,
+            'max_threads': settings.polars_cores_available,
             'max_memory_mb': settings.polars_max_memory_mb,
             'streaming_chunk_size': settings.polars_streaming_chunk_size,
         }

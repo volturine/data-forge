@@ -273,7 +273,7 @@ class ProcessManager:
 
     def _get_defaults(self) -> dict:
         return {
-            "max_threads": settings.polars_max_threads,
+            "max_threads": settings.polars_cores_available,
             "max_memory_mb": settings.polars_max_memory_mb,
             "streaming_chunk_size": settings.polars_streaming_chunk_size,
         }
