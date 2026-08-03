@@ -248,7 +248,7 @@ class TestAnalysisCreate:
 
         payload = {
             'name': 'Hidden Input Analysis',
-            'description': 'Must reject hidden datasources as tab inputs',
+            'description': 'Hidden datasources are outside the analysis input catalog',
             'tabs': [
                 {
                     'id': 'tab1',
@@ -272,9 +272,9 @@ class TestAnalysisCreate:
 
         response = client.post('/api/v1/analysis', json=payload)
 
-        assert response.status_code == 400
-        body = response.json()
-        assert 'hidden' in body['detail'].lower()
+        # Input catalog is non-hidden only — hidden is not found as an input.
+        assert response.status_code == 404
+        assert 'not found' in response.json()['detail'].lower()
 
     def test_create_analysis_without_description(self, client, sample_datasource: DataSource):
         payload = {
@@ -1692,7 +1692,8 @@ class TestStepValidation:
             ],
         )
         response = client.post('/api/v1/analysis', json=payload)
-        assert response.status_code == 400
+        # Not a tab id and not in the visible input catalog → not found.
+        assert response.status_code == 404
 
     def test_rejects_join_with_hidden_datasource(
         self,
@@ -1736,8 +1737,9 @@ class TestStepValidation:
             ],
         )
         response = client.post('/api/v1/analysis', json=payload)
-        assert response.status_code == 400
-        assert 'hidden' in response.json()['detail'].lower()
+        # Hidden is outside the input catalog — same as missing.
+        assert response.status_code == 404
+        assert 'not found' in response.json()['detail'].lower()
 
     def test_accepts_valid_steps(self, client, sample_datasource: DataSource):
         payload = self._make_payload(
