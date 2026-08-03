@@ -770,11 +770,21 @@ def get_datasource(
 ):
     """Get a single datasource by ID with full config and metadata. Use GET /datasource to find IDs."""
     response = service.get_datasource(session, parse_datasource_id(datasource_id))
+    # Branch listing is optional enrichment for analysis outputs (data-plane / object store).
+    # Existence of the row is a DB fact — never fail GET when the data-plane is unavailable.
     if response.source_type == DataSourceType.ICEBERG and response.created_by == DataSourceCreatedBy.ANALYSIS.value:
         metadata_path = response.config.get('metadata_path')
         branch_name = response.config.get('branch') if isinstance(response.config.get('branch'), str) else None
         if isinstance(metadata_path, str):
-            response.config['branches'] = _list_export_branches(metadata_path, branch_name)
+            try:
+                response.config['branches'] = _list_export_branches(metadata_path, branch_name)
+            except Exception:
+                logger.warning(
+                    'Failed to list export branches for analysis output %s; returning row without live branches',
+                    response.id,
+                    exc_info=True,
+                )
+                response.config['branches'] = [branch_name] if branch_name else ['master']
     return response
 
 
