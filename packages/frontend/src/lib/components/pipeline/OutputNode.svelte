@@ -139,7 +139,11 @@
 	const outputDefaults = $derived.by(() => {
 		return outputConfig;
 	});
-	const canQueryOutput = $derived(isUuid(outputDatasourceId));
+	// result_id is a reserved identity; only query once the server (or a local
+	// build completion) marks the output as materialized.
+	const hasReservedOutputId = $derived(isUuid(outputDatasourceId));
+	const outputMaterialized = $derived(activeTab?.output?.materialized === true);
+	const canQueryOutput = $derived(hasReservedOutputId && outputMaterialized);
 
 	const outputDatasourceQuery = createQuery(() => ({
 		queryKey: ['datasource', outputDatasourceId],
@@ -147,6 +151,7 @@
 			if (!outputDatasourceId) return null;
 			const result = await getDatasource(outputDatasourceId);
 			if (result.isErr()) {
+				// Should not happen when gated on materialized; keep fail-soft.
 				if (result.error.status === 404) return null;
 				throw new Error(result.error.message);
 			}
@@ -485,8 +490,13 @@
 		if (buildStore.status !== 'completed' || !buildStore.buildId) return;
 		if (lastCompletedBuildId === buildStore.buildId) return;
 		lastCompletedBuildId = buildStore.buildId;
+		// First successful build materializes the reserved result_id as a datasource.
+		analysisStore.markOutputMaterialized(outputDatasourceId);
 		void queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
 		void queryClient.invalidateQueries({ queryKey: ['datasources'] });
+		if (analysisId) {
+			void queryClient.invalidateQueries({ queryKey: ['analysis', analysisId] });
+		}
 	});
 
 	function closeBuildPreview() {
@@ -1498,7 +1508,7 @@
 							})}
 							data-testid="output-health-empty-state"
 						>
-							{#if canQueryOutput}
+							{#if hasReservedOutputId}
 								Build this output once to materialize its datasource before adding health checks.
 							{:else}
 								Save this analysis to create an output datasource before adding health checks.
@@ -1582,7 +1592,7 @@
 							color: 'fg.tertiary'
 						})}
 					>
-						{#if canQueryOutput}
+						{#if hasReservedOutputId}
 							Build this output once to materialize its datasource before adding schedules.
 						{:else}
 							Save this analysis to create an output datasource before adding schedules.

@@ -62,6 +62,40 @@ async function cleanupAnalysis(page: Page, analysisId: string): Promise<void> {
 }
 
 test.describe('Analyses – output visibility toggle', () => {
+	test('OutputNode: unmaterialized output does not GET reserved result_id', async ({
+		page,
+		request
+	}) => {
+		const aName = `E2E Unmaterialized ${uid()}`;
+		const aId = await createAnalysis(request, aName, sharedDatasourceId);
+		const probedIds = new Set<string>();
+		page.on('request', (req) => {
+			const match = req.url().match(/\/api\/v1\/datasource\/([0-9a-f-]{36})(?:\?|$)/i);
+			if (match && req.method() === 'GET') {
+				probedIds.add(match[1]);
+			}
+		});
+		try {
+			const analysisResp = await page.request.get(`/api/v1/analysis/${aId}`);
+			expect(analysisResp.ok()).toBeTruthy();
+			const analysisBody = await analysisResp.json();
+			const resultId = analysisBody.pipeline_definition?.tabs?.[0]?.output?.result_id as string;
+			expect(resultId).toMatch(
+				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+			);
+			expect(analysisBody.pipeline_definition.tabs[0].output.materialized).toBe(false);
+
+			await gotoAnalysisEditor(page, aId);
+			await expect(page.locator('[data-testid="output-visibility-toggle"]')).toBeVisible({
+				timeout: 5_000
+			});
+			// Reserved result_id must not be fetched before first build.
+			expect(probedIds.has(resultId)).toBe(false);
+		} finally {
+			await cleanupAnalysis(page, aId);
+		}
+	});
+
 	test('OutputNode: visibility toggle button shows initial state', async ({ page, request }) => {
 		const aName = `E2E Vis Toggle ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);

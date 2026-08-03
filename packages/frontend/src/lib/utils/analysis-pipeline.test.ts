@@ -65,6 +65,23 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(result!.tabs[0].steps).toEqual([]);
 	});
 
+	test('strips response-only materialized flag from compute payload', () => {
+		const t = tab({
+			output: {
+				result_id: 'out-1',
+				format: 'parquet',
+				filename: 'out',
+				build_mode: 'full',
+				materialized: false,
+				iceberg: { namespace: 'outputs', table_name: 'out', branch: 'master' }
+			}
+		});
+		const result = buildAnalysisPipelinePayload('a-1', [t], [datasource()]);
+		expect(result).not.toBeNull();
+		expect(result!.tabs[0].output).not.toHaveProperty('materialized');
+		expect(result!.tabs[0].output.result_id).toBe('out-1');
+	});
+
 	test('marks derived outputs through tab datasource metadata', () => {
 		const result = buildAnalysisPipelinePayload('a-1', [tab()], [datasource()]);
 		expect(result!.tabs[0].output.result_id).toBe('out-1');
