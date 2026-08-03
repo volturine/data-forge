@@ -492,20 +492,17 @@ def validate_stored_pipeline_definition(
 
 
 def _require_visible_analysis_input(session: Session, datasource_id: str) -> DataSource:
-    """External analysis inputs must be real, non-hidden datasources.
+    """Resolve a datasource in the analysis *input* catalog.
 
-    Hidden analysis outputs may exist for the owning pipeline (membership / own
-    OutputNode), but must not be selected as tab inputs or join/union sources.
-    Derived tabs (analysis_tab_id) are validated separately and never go through this.
+    The input catalog is non-hidden datasources only. Missing and hidden rows
+    are the same outcome for this path: not available as an input → 404.
+    Hidden outputs still exist for their owning analysis UI (membership/GET);
+    they are simply outside the input space. Derived tabs (analysis_tab_id)
+    never use this helper.
     """
     datasource_row = session.get(DataSource, datasource_id)
-    if not datasource_row:
+    if not datasource_row or datasource_row.is_hidden:
         raise datasource_not_found(datasource_id)
-    if datasource_row.is_hidden:
-        raise AnalysisValidationError(
-            f"Hidden datasource '{datasource_id}' cannot be used as an analysis input",
-            details={'datasource_id': datasource_id},
-        )
     return datasource_row
 
 
@@ -569,16 +566,7 @@ def _validate_analysis_payload(
 
     unknown = referenced_source_ids - tab_ids
     for src_id in unknown:
-        # Step sources that are not tab ids must resolve to a real, visible datasource.
-        # Missing → 400 (unknown source); hidden → validation error (not a usable input).
-        datasource_row = session.get(DataSource, src_id)
-        if not datasource_row:
-            raise ValueError(f"Step references unknown source '{src_id}'")
-        if datasource_row.is_hidden:
-            raise AnalysisValidationError(
-                f"Hidden datasource '{src_id}' cannot be used as an analysis input",
-                details={'datasource_id': src_id},
-            )
+        _require_visible_analysis_input(session, src_id)
         datasource_ids.append(src_id)
 
     for tab in tabs_payload:
