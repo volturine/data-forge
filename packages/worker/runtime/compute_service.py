@@ -280,6 +280,35 @@ def _preflight_datasource_for_compute(
     config["metadata_path"] = resolved_metadata_path
 
 
+def _output_timeout_warning_ms(analysis_pipeline: dict | None, tab_id: str | None) -> int | None:
+    if not isinstance(analysis_pipeline, dict):
+        return None
+    tabs = analysis_pipeline.get("tabs")
+    if not isinstance(tabs, list):
+        return None
+    selected = None
+    if isinstance(tab_id, str) and tab_id:
+        selected = next((tab for tab in tabs if isinstance(tab, dict) and tab.get("id") == tab_id), None)
+    if selected is None:
+        selected = next((tab for tab in tabs if isinstance(tab, dict)), None)
+    if not isinstance(selected, dict):
+        return None
+    output = selected.get("output")
+    if not isinstance(output, dict):
+        return None
+    raw = output.get("build_timeout_warning_ms")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    value = int(raw)
+    if value <= 0:
+        return None
+    return value
+
+
+def _duration_exceeded_warning(*, duration_ms: int, timeout_warning_ms: int | None) -> bool:
+    return timeout_warning_ms is not None and duration_ms > timeout_warning_ms
+
+
 def _build_subscriber_message(context: BuildContext) -> str:
     status = BuildStatus.coerce(context.get("status", BuildStatus.SUCCESS))
     analysis_name = str(context.get("analysis_name", ""))
@@ -287,6 +316,7 @@ def _build_subscriber_message(context: BuildContext) -> str:
     duration = str(context.get("duration_ms", ""))
     hc_summary = context.get("healthcheck_summary")
     hc_details = context.get("healthcheck_details")
+    duration_warning = bool(context.get("duration_exceeded_warning"))
 
     if status == BuildStatus.WARNING:
         msg = f"Build complete: {analysis_name}\nStatus: built successfully, health checks failed"
@@ -297,6 +327,10 @@ def _build_subscriber_message(context: BuildContext) -> str:
         msg += f"\nHealth checks: {hc_summary}"
 
     msg += f"\nRows: {row_count}\nDuration: {duration}ms"
+    if duration_warning:
+        threshold = context.get("build_timeout_warning_ms")
+        threshold_text = f" (threshold {threshold}ms)" if threshold is not None else ""
+        msg += f"\nWarning: build exceeded duration threshold{threshold_text}"
 
     max_len = 3800
     if len(msg) <= max_len:
@@ -1942,11 +1976,16 @@ def export_data(
 
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        timeout_warning_ms = _output_timeout_warning_ms(analysis_pipeline, tab_id)
+        duration_exceeded = _duration_exceeded_warning(duration_ms=duration_ms, timeout_warning_ms=timeout_warning_ms)
 
         result_meta = _build_export_result_metadata(
             data=data,
             file_size_bytes=os.path.getsize(tmp_output),
         )
+        if timeout_warning_ms is not None:
+            result_meta["build_timeout_warning_ms"] = timeout_warning_ms
+            result_meta["duration_exceeded_warning"] = duration_exceeded
 
         hc_datasource_id = str(result_id)
         hc_checks = client_from_env().list_healthchecks(namespace=get_namespace(), datasource_id=hc_datasource_id)
@@ -1992,6 +2031,17 @@ def export_data(
         analysis_name = client_from_env().analysis_name(namespace=get_namespace(), analysis_id=analysis_id_value) if analysis_id_value else None
 
         output_notification = datasource_config.get("notification")
+        if not isinstance(output_notification, dict) and isinstance(analysis_pipeline, dict):
+            tabs = analysis_pipeline.get("tabs")
+            if isinstance(tabs, list):
+                selected_tab = next(
+                    (tab for tab in tabs if isinstance(tab, dict) and tab.get("id") == tab_id),
+                    next((tab for tab in tabs if isinstance(tab, dict)), None),
+                )
+                if isinstance(selected_tab, dict):
+                    output_cfg = selected_tab.get("output")
+                    if isinstance(output_cfg, dict) and isinstance(output_cfg.get("notification"), dict):
+                        output_notification = output_cfg.get("notification")
         excluded = datasource_config.get("excluded_recipients")
         if output_notification and excluded is not None:
             output_notification = {
@@ -2116,6 +2166,9 @@ def export_data(
             "current_tab_id": tab_id,
             "current_tab_name": tab_name,
             "branch": branch_name,
+            "duration_ms": duration_ms,
+            "duration_exceeded_warning": duration_exceeded,
+            "build_timeout_warning_ms": timeout_warning_ms,
         }
         notification_deliveries = _prepare_pipeline_notifications(
             context={
@@ -2128,6 +2181,8 @@ def export_data(
                 "destination": "datasource",
                 "healthcheck_summary": hc_summary,
                 "healthcheck_details": hc_details,
+                "duration_exceeded_warning": duration_exceeded,
+                "build_timeout_warning_ms": timeout_warning_ms,
             },
             output_notification=output_notification,
         )

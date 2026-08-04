@@ -79,3 +79,49 @@ export function listEngineRuns(
 export function getEngineRun(id: string): ResultAsync<EngineRun, ApiError> {
 	return apiRequest<EngineRun>(`/v1/engine-runs/${id}`);
 }
+
+export interface DurationStatsRun {
+	id: string;
+	started_at: string;
+	duration_ms: number | null;
+	status: string;
+}
+
+export interface DurationTrend {
+	direction: 'decreasing' | 'stable' | 'increasing' | 'insufficient_data';
+	change_pct: number | null;
+	older_avg_ms: number | null;
+	recent_avg_ms: number | null;
+	older_count: number;
+	recent_count: number;
+	sample_size: number;
+	threshold_pct: number;
+	summary: string;
+}
+
+export interface DurationStatsResponse {
+	runs: DurationStatsRun[];
+	avg_duration_ms: number | null;
+	p50_duration_ms: number | null;
+	p95_duration_ms: number | null;
+	trend: DurationTrend;
+}
+
+export interface DurationStatsParams {
+	analysis_id?: string;
+	datasource_id?: string;
+	kind?: string;
+	limit?: number;
+}
+
+export function getDurationStats(
+	params?: DurationStatsParams
+): ResultAsync<DurationStatsResponse, ApiError> {
+	const query = new URLSearchParams();
+	if (params?.analysis_id) query.set('analysis_id', params.analysis_id);
+	if (params?.datasource_id) query.set('datasource_id', params.datasource_id);
+	if (params?.kind) query.set('kind', params.kind);
+	if (params?.limit !== undefined) query.set('limit', String(params.limit));
+	const qs = query.toString();
+	return apiRequest<DurationStatsResponse>(`/v1/engine-runs/stats${qs ? `?${qs}` : ''}`);
+}

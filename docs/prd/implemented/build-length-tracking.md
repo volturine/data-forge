@@ -1,7 +1,7 @@
 # PRD: Build Length Tracking
 
-> **Status (audited 2026-08-02): Active — partially implemented.**
-> **Current truth:** Build duration data exists and some timing/build-preview surfaces ship today, but the dedicated duration UX/trends/alerts described here are not fully implemented.
+> **Status (2026-08-04): Implemented.**
+> **Current truth:** Build history shows formatted duration with a live elapsed timer for running builds; detail view includes per-step timing bars with slowest-step highlight; analysis/datasource-filtered views load a duration trend chart via `GET /engine-runs/stats`; optional `build_timeout_warning_ms` on output config flags long builds in the UI and notification text.
 > **Portfolio:** [PRD index](../README.md)
 
 
@@ -26,10 +26,10 @@ Data-Forge already records `duration_ms` and `step_timings` on the `EngineRun` m
 | `EngineRun.step_timings` | ✅ Dict of step_id → duration_ms |
 | `EngineRun.progress` | ✅ 0.0–1.0 during execution |
 | Build history list | ✅ Shows status, timestamp |
-| Duration in build list | ❌ Not displayed |
-| Per-step timing breakdown | ❌ Not displayed |
-| Duration trend chart | ❌ Not available |
-| Duration alerts | ❌ Not available |
+| Duration in build list | ✅ Displayed (human-readable) |
+| Per-step timing breakdown | ✅ Bar chart with share % |
+| Duration trend chart | ✅ Last 20 builds + avg/p50/p95 |
+| Duration alerts | ✅ Optional `build_timeout_warning_ms` |
 
 ## Goals
 
@@ -126,9 +126,27 @@ Response: {
   avg_duration_ms: number,
   p50_duration_ms: number,
   p95_duration_ms: number,
-  trend: "improving" | "stable" | "degrading"
+  trend: {
+    direction: "decreasing" | "stable" | "increasing" | "insufficient_data",
+    change_pct: number | null,       // signed on duration: + = increasing, - = decreasing
+    older_avg_ms: number | null,     // average of the earlier half of the window
+    recent_avg_ms: number | null,    // average of the more recent half
+    older_count: number,
+    recent_count: number,
+    sample_size: number,
+    threshold_pct: 10,               // ± band treated as "stable"
+    summary: string                  // plain-language sentence for the UI
+  }
 }
 ```
+
+Trend semantics (build length / duration):
+
+- **decreasing** — recent builds finish sooner (duration down ≥ 10%)
+- **increasing** — recent builds take longer (duration up ≥ 10%)
+- **stable** — change within ±10%
+- **insufficient_data** — fewer than 4 timed builds in the window
+
 
 **Duration threshold:**
 
@@ -161,11 +179,11 @@ build_timeout_warning_ms: int | None = None
 
 ## Acceptance Criteria
 
-- [ ] Build history list shows formatted duration for all completed/errored builds
-- [ ] Running builds show a live-updating elapsed timer
-- [ ] Build detail view shows per-step timing breakdown as a bar chart
-- [ ] Slowest step is visually highlighted
-- [ ] Duration trend chart shows last 20 builds with trend indicator
-- [ ] Optional duration threshold triggers a warning indicator
-- [ ] Duration stats endpoint returns avg, p50, p95 metrics
-- [ ] `just verify` passes
+- [x] Build history list shows formatted duration for all completed/errored builds
+- [x] Running builds show a live-updating elapsed timer
+- [x] Build detail view shows per-step timing breakdown as a bar chart
+- [x] Slowest step is visually highlighted
+- [x] Duration trend chart shows last 20 builds with trend indicator
+- [x] Optional duration threshold triggers a warning indicator
+- [x] Duration stats endpoint returns avg, p50, p95 metrics
+- [x] `just verify` passes

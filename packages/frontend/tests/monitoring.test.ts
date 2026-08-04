@@ -777,6 +777,67 @@ test.describe('Monitoring – Builds tab', () => {
 		}
 	});
 
+	test('build history shows duration and duration trend for analysis builds', async ({
+		page,
+		request
+	}) => {
+		const ds = `e2e-duration-${uid()}`;
+		const analysisName = `E2E Duration ${uid()}`;
+		const dsId = await createDatasource(request, ds);
+		const analysisId = await createMultiStepAnalysis(request, analysisName, dsId);
+		try {
+			const buildId = await startBuildFromAnalysisPage(page, analysisId);
+			await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
+			const panel = page.locator('#panel-builds');
+			await expect(panel).toBeVisible({ timeout: 5_000 });
+
+			await expect(page.locator('[data-testid="duration-trend-chart"]')).toBeVisible({
+				timeout: 10_000
+			});
+
+			const buildRow = await waitForBuildRowEventually(page, panel, buildId, [
+				'completed',
+				'failed',
+				'cancelled',
+				'running',
+				'queued'
+			]);
+			const durationCell = panel.locator(`[data-testid="build-row-duration-${buildId}"]`);
+			await expect(durationCell).toBeVisible({ timeout: 5_000 });
+			await expect(durationCell).not.toHaveText('-');
+
+			const status = await buildRow.getAttribute('data-build-status');
+			if (status === 'running' || status === 'queued') {
+				await expect(durationCell).toBeVisible();
+			} else {
+				// Terminal builds should show a formatted duration value.
+				await expect(durationCell).toHaveText(/(ms|s|m|h)/);
+			}
+
+			// Expand for step timing bars when the build has finished.
+			if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+				await buildRow.click();
+				const detail = panel.locator(`[data-build-detail="${buildId}"]`);
+				await expect(detail.locator('[data-testid="build-preview"]')).toBeVisible({
+					timeout: 5_000
+				});
+				await expect(detail.locator('[data-testid="build-elapsed-timer"]')).toBeVisible();
+				await expect(detail.getByRole('tab', { name: 'Steps' })).toBeVisible();
+			}
+
+			const statsResponse = await page.request.get(
+				`/api/v1/engine-runs/stats?analysis_id=${analysisId}&kind=build&limit=20`
+			);
+			expect(statsResponse.ok()).toBe(true);
+			const stats = await statsResponse.json();
+			expect(stats).toHaveProperty('trend');
+			expect(stats).toHaveProperty('runs');
+		} finally {
+			await deleteAnalysisViaUI(page, analysisName);
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+
 	test('build detail shows Request Payload JSON', async ({ page, request }) => {
 		const ds = `e2e-payload-${uid()}`;
 		const analysisName = `E2E Builds Payload ${uid()}`;

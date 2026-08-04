@@ -1,7 +1,8 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from backend_core import engine_runs_service as engine_run_service
+from backend_core import build_runs_service, engine_runs_service as engine_run_service
+from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.engine_runs.models import EngineRun
@@ -356,3 +357,171 @@ def test_engine_runs_http_respects_namespace(client, test_db_session) -> None:
     assert default_response.json()[0]['analysis_id'] == 'analysis-default'
     assert beta_response.status_code == 200
     assert beta_response.json() == []
+
+
+def _completed_build_run(
+    test_db_session,
+    *,
+    analysis_id: str,
+    duration_ms: int,
+    started_at: datetime,
+    datasource_id: str = 'ds-1',
+):
+    run = build_runs_service.create_build_run(
+        test_db_session,
+        build_id=str(uuid.uuid4()),
+        namespace='default',
+        analysis_id=analysis_id,
+        analysis_name='Duration Analysis',
+        request_json={'analysis_id': analysis_id},
+        starter_json={'triggered_by': 'test'},
+        status=BuildRunStatus.COMPLETED,
+        current_kind=EngineRunKind.BUILD,
+        current_datasource_id=datasource_id,
+        created_at=started_at,
+        started_at=started_at,
+    )
+    run.duration_ms = duration_ms
+    run.elapsed_ms = duration_ms
+    run.completed_at = started_at + timedelta(milliseconds=duration_ms)
+    test_db_session.add(run)
+    test_db_session.commit()
+    test_db_session.refresh(run)
+    return run
+
+
+def test_duration_stats_for_builds_uses_build_runs(test_db_session) -> None:
+    analysis_id = 'analysis-duration-stats'
+    now = datetime.now(UTC)
+    for index, duration in enumerate((1000, 2000, 3000, 4000)):
+        run = _completed_build_run(
+            test_db_session,
+            analysis_id=analysis_id,
+            duration_ms=duration,
+            started_at=now + timedelta(seconds=index),
+            datasource_id=f'ds-{index}',
+        )
+        assert run.duration_ms == duration
+
+    stats = engine_run_service.duration_stats(
+        test_db_session,
+        analysis_id=analysis_id,
+        kind=EngineRunKind.BUILD,
+        limit=20,
+    )
+
+    assert len(stats.runs) == 4
+    assert stats.avg_duration_ms == 2500.0
+    assert stats.p50_duration_ms == 2500.0
+    assert stats.p95_duration_ms is not None
+    assert stats.trend.direction in {'decreasing', 'stable', 'increasing'}
+    assert stats.trend.sample_size == 4
+    assert stats.trend.summary
+    assert [run.duration_ms for run in stats.runs] == [1000, 2000, 3000, 4000]
+
+
+def test_duration_stats_http_endpoint(client, test_db_session) -> None:
+    analysis_id = str(uuid.uuid4())
+    now = datetime.now(UTC)
+    _completed_build_run(
+        test_db_session,
+        analysis_id=analysis_id,
+        duration_ms=1500,
+        started_at=now,
+        datasource_id='ds-http',
+    )
+
+    response = client.get(
+        '/api/v1/engine-runs/stats',
+        params={'analysis_id': analysis_id, 'kind': 'build', 'limit': 20},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload['runs']) == 1
+    assert payload['runs'][0]['duration_ms'] == 1500
+    assert payload['avg_duration_ms'] == 1500.0
+    assert payload['trend']['direction'] == 'insufficient_data'
+    assert '4' in payload['trend']['summary']
+
+
+def test_duration_stats_trend_reports_increasing_when_recent_runs_take_longer(
+    test_db_session,
+) -> None:
+    analysis_id = 'analysis-duration-increasing'
+    now = datetime.now(UTC)
+    # Older half short, newer half long → increasing duration
+    for index, duration in enumerate((1000, 1100, 5000, 5200)):
+        _completed_build_run(
+            test_db_session,
+            analysis_id=analysis_id,
+            duration_ms=duration,
+            started_at=now + timedelta(seconds=index),
+            datasource_id=f'ds-inc-{index}',
+        )
+
+    stats = engine_run_service.duration_stats(
+        test_db_session,
+        analysis_id=analysis_id,
+        kind=EngineRunKind.BUILD,
+        limit=20,
+    )
+    assert stats.trend.direction == 'increasing'
+    assert stats.trend.change_pct is not None and stats.trend.change_pct >= 10
+    assert stats.trend.older_count == 2
+    assert stats.trend.recent_count == 2
+    assert 'increasing' in stats.trend.summary.lower()
+
+
+def test_duration_stats_trend_reports_decreasing_when_recent_runs_are_shorter(
+    test_db_session,
+) -> None:
+    analysis_id = 'analysis-duration-decreasing'
+    now = datetime.now(UTC)
+    for index, duration in enumerate((5000, 5200, 1000, 1100)):
+        _completed_build_run(
+            test_db_session,
+            analysis_id=analysis_id,
+            duration_ms=duration,
+            started_at=now + timedelta(seconds=index),
+            datasource_id=f'ds-dec-{index}',
+        )
+
+    stats = engine_run_service.duration_stats(
+        test_db_session,
+        analysis_id=analysis_id,
+        kind=EngineRunKind.BUILD,
+        limit=20,
+    )
+    assert stats.trend.direction == 'decreasing'
+    assert stats.trend.change_pct is not None and stats.trend.change_pct <= -10
+    assert 'decreasing' in stats.trend.summary.lower()
+
+
+def test_duration_stats_for_preview_kind_uses_engine_runs(test_db_session) -> None:
+    analysis_id = 'analysis-preview-stats'
+    now = datetime.now(UTC)
+    for duration in (500, 1500):
+        engine_run_service.create_engine_run(
+            test_db_session,
+            engine_run_service.create_engine_run_payload(
+                analysis_id=analysis_id,
+                datasource_id='ds-preview-stats',
+                kind=EngineRunKind.PREVIEW,
+                status=EngineRunStatus.SUCCESS,
+                request_json={'kind': 'preview'},
+                result_json={'row_count': 1},
+                created_at=now,
+                duration_ms=duration,
+            ),
+        )
+
+    stats = engine_run_service.duration_stats(
+        test_db_session,
+        analysis_id=analysis_id,
+        kind=EngineRunKind.PREVIEW,
+        limit=20,
+    )
+
+    assert len(stats.runs) == 2
+    assert stats.avg_duration_ms == 1000.0

@@ -293,6 +293,11 @@ def _pipeline_payload_for_proto(payload: dict[str, object]) -> dict[str, object]
                     proto_output['build_mode'],
                     field_name='build_mode',
                 )
+            timeout_warning = proto_output.get('build_timeout_warning_ms')
+            if timeout_warning is None or isinstance(timeout_warning, bool) or not isinstance(timeout_warning, (int, float)) or int(timeout_warning) <= 0:
+                proto_output.pop('build_timeout_warning_ms', None)
+            else:
+                proto_output['build_timeout_warning_ms'] = int(timeout_warning)
             notification = proto_output.get('notification')
             if isinstance(notification, Mapping):
                 proto_notification = dict(notification)
@@ -302,6 +307,8 @@ def _pipeline_payload_for_proto(payload: dict[str, object]) -> dict[str, object]
                     field_name='notification.method',
                 )
                 proto_output['notification'] = proto_notification
+            if proto_output.get('notification') is None:
+                proto_output.pop('notification', None)
             proto_tab['output'] = proto_output
         steps = proto_tab.get('steps')
         if isinstance(steps, list):

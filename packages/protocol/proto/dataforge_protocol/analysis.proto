@@ -66,6 +66,8 @@ message AnalysisPipelineOutput {
   }];
   optional AnalysisPipelineIcebergOutput iceberg = 7;
   optional AnalysisPipelineOutputNotification notification = 8;
+  // Optional build duration warning threshold in milliseconds.
+  optional int64 build_timeout_warning_ms = 9 [(buf.validate.field).int64.gt = 0];
 }
 
 message AnalysisPipelineTab {

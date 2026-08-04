@@ -52,6 +52,8 @@ export interface AnalysisTabOutput {
 	format: string;
 	filename: string;
 	build_mode?: string;
+	/** Optional threshold (ms). Builds exceeding this duration show a warning. */
+	build_timeout_warning_ms?: number | null;
 	iceberg?: AnalysisTabIcebergConfig;
 	notification?: AnalysisTabNotificationConfig | null;
 	[key: string]: unknown;

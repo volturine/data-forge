@@ -295,3 +295,27 @@ docker-dev-down:
 
 docker-dev-logs:
     docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/docker-compose.yml -f docker/docker-compose.dev.yml logs -f
+
+# Build local fixed-role images and smoke-test the production compose topology.
+# Overrides only DF_*_IMAGE tags; still uses docker/docker-compose.yml + docker/env/prod.env.
+docker-prod:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just generate-protocol
+    TAG="${DF_LOCAL_TAG:-local}"
+    docker build -f docker/Dockerfile --target api -t "data-forge-api:${TAG}" .
+    docker build -f docker/Dockerfile --target scheduler -t "data-forge-scheduler:${TAG}" .
+    docker build -f docker/Dockerfile --target worker -t "data-forge-worker:${TAG}" .
+    DF_API_IMAGE="data-forge-api:${TAG}" \
+    DF_SCHEDULER_IMAGE="data-forge-scheduler:${TAG}" \
+    DF_WORKER_IMAGE="data-forge-worker:${TAG}" \
+      docker compose --env-file docker/env/prod.env \
+        -p dataforge-prod \
+        -f docker/docker-compose.yml \
+        up -d "$@"
+
+docker-prod-down:
+    docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/docker-compose.yml down -v --remove-orphans
+
+docker-prod-logs:
+    docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/docker-compose.yml logs -f
