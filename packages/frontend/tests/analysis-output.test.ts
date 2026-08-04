@@ -609,13 +609,16 @@ test.describe('Analyses – row count action', () => {
 			const badge = viewNode.locator('[data-testid="step-row-count"]');
 			const error = viewNode.locator('[data-testid="step-row-count-error"]');
 			await expect
-				.poll(async () => {
-					if (await badge.isVisible().catch(() => false)) return 'ok';
-					if (await error.isVisible().catch(() => false)) {
-						return `error:${(await error.textContent()) ?? ''}`;
-					}
-					return 'pending';
-				}, { timeout: 30_000 })
+				.poll(
+					async () => {
+						if (await badge.isVisible().catch(() => false)) return 'ok';
+						if (await error.isVisible().catch(() => false)) {
+							return `error:${(await error.textContent()) ?? ''}`;
+						}
+						return 'pending';
+					},
+					{ timeout: 15_000 }
+				)
 				.toBe('ok');
 			await expect(badge).toContainText('rows');
 
@@ -656,13 +659,16 @@ test.describe('Analyses – row count on non-view steps', () => {
 			const badge = filterNode.locator('[data-testid="step-row-count"]');
 			const error = filterNode.locator('[data-testid="step-row-count-error"]');
 			await expect
-				.poll(async () => {
-					if (await badge.isVisible().catch(() => false)) return 'ok';
-					if (await error.isVisible().catch(() => false)) {
-						return `error:${(await error.textContent()) ?? ''}`;
-					}
-					return 'pending';
-				}, { timeout: 30_000 })
+				.poll(
+					async () => {
+						if (await badge.isVisible().catch(() => false)) return 'ok';
+						if (await error.isVisible().catch(() => false)) {
+							return `error:${(await error.textContent()) ?? ''}`;
+						}
+						return 'pending';
+					},
+					{ timeout: 15_000 }
+				)
 				.toBe('ok');
 			await expect(badge).toContainText('rows');
 
@@ -697,13 +703,16 @@ test.describe('Analyses – row count on non-view steps', () => {
 			const badge = limitNode.locator('[data-testid="step-row-count"]');
 			const error = limitNode.locator('[data-testid="step-row-count-error"]');
 			await expect
-				.poll(async () => {
-					if (await badge.isVisible().catch(() => false)) return 'ok';
-					if (await error.isVisible().catch(() => false)) {
-						return `error:${(await error.textContent()) ?? ''}`;
-					}
-					return 'pending';
-				}, { timeout: 30_000 })
+				.poll(
+					async () => {
+						if (await badge.isVisible().catch(() => false)) return 'ok';
+						if (await error.isVisible().catch(() => false)) {
+							return `error:${(await error.textContent()) ?? ''}`;
+						}
+						return 'pending';
+					},
+					{ timeout: 15_000 }
+				)
 				.toBe('ok');
 			await expect(badge).toContainText('rows');
 
