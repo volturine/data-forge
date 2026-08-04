@@ -174,9 +174,11 @@ test.describe('Cancel Build – e2e', () => {
 			await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 			await expect(page.locator('[data-testid="build-cancel-error"]')).not.toBeVisible();
 
-			// Status chip and error banner both render "Build cancelled"; assert the
-			// stable error surface to avoid strict-mode double-match failures.
-			await expect(preview.getByTestId('build-error')).toHaveText('Build cancelled', {
+			// Error banner text varies ("Build cancelled" vs "Cancelled by <user>");
+			// status chip uses exact "Cancelled". Avoid free-text match that hits both.
+			await expect(preview.getByTestId('build-error')).toBeVisible({ timeout: 5_000 });
+			await expect(preview.getByTestId('build-error')).toHaveText(/cancelled/i);
+			await expect(preview.getByText('Cancelled', { exact: true })).toBeVisible({
 				timeout: 5_000
 			});
 			await expect(preview.locator('[data-testid="build-cancel-button"]')).not.toBeVisible({
