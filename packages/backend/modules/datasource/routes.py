@@ -87,9 +87,7 @@ async def _stage_upload_to_object_store(file: UploadFile, target_name: str) -> s
     try:
         await _save_upload_file(file, temp_path, settings.upload_max_file_size_bytes)
         data_plane = client_from_settings()
-        target_url = await asyncio.to_thread(
-            lambda: data_plane.build_object_url('uploads', target_name, namespace=get_namespace())
-        )
+        target_url = await asyncio.to_thread(lambda: data_plane.build_object_url('uploads', target_name, namespace=get_namespace()))
         await asyncio.to_thread(data_plane.upload_object_bytes, temp_path.read_bytes(), target_url)
         return target_url
     finally:
@@ -373,9 +371,7 @@ async def preflight_excel(
     try:
         await _save_upload_file(file, temp_path, settings.upload_max_file_size_bytes)
         data_plane = client_from_settings()
-        source_path = await asyncio.to_thread(
-            lambda: data_plane.build_object_url('uploads', unique_filename, namespace=get_namespace())
-        )
+        source_path = await asyncio.to_thread(lambda: data_plane.build_object_url('uploads', unique_filename, namespace=get_namespace()))
         await asyncio.to_thread(data_plane.upload_object_bytes, temp_path.read_bytes(), source_path)
     except HTTPException:
         with contextlib.suppress(FileNotFoundError):

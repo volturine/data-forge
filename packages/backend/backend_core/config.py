@@ -336,10 +336,7 @@ class Settings(BaseSettings):
 
         default_ns = self.default_namespace.strip()
         if not is_valid_namespace_name(default_ns):
-            raise ValueError(
-                'DEFAULT_NAMESPACE must be a valid bucket name '
-                '(3–63 lowercase letters, digits, hyphens, underscores; start/end alphanumeric)'
-            )
+            raise ValueError('DEFAULT_NAMESPACE must be a valid bucket name (3–63 lowercase letters, digits, hyphens, underscores; start/end alphanumeric)')
         return self
 
 
