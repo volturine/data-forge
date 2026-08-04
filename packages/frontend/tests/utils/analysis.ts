@@ -90,10 +90,13 @@ async function waitForCurrentAnalysisEditorByState(
 	accessState: EditorAccessState,
 	timeout: number
 ): Promise<string> {
-	const deadline = Date.now() + timeout;
-	const analysisId = await waitForCurrentAnalysisId(page, deadline);
-	await waitForLayoutReady(page, Math.max(deadline - Date.now(), 1_000));
-	await waitForAnalysisEditor(page, deadline, accessState);
+	// URL resolution (create/import redirect) can take most of a shared budget under
+	// parallel CI load. Give layout + editor a fresh full timeout once the analysis
+	// id is known so later stages are not starved down to the 1s floor.
+	const analysisId = await waitForCurrentAnalysisId(page, Date.now() + timeout);
+	const stageDeadline = Date.now() + timeout;
+	await waitForLayoutReady(page, Math.max(stageDeadline - Date.now(), 1_000));
+	await waitForAnalysisEditor(page, stageDeadline, accessState);
 	return analysisId;
 }
 
