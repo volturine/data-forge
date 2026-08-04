@@ -21,8 +21,17 @@ def test_normalize_namespace_default():
 
 
 def test_normalize_namespace_rejects_invalid():
-    with pytest.raises(ValueError, match='Namespace must be alphanumeric'):
+    with pytest.raises(ValueError, match='Invalid namespace'):
         normalize_namespace('bad name')
+    with pytest.raises(ValueError, match='Invalid namespace'):
+        normalize_namespace('Team_A')
+    with pytest.raises(ValueError, match='Invalid namespace'):
+        normalize_namespace('ab')
+
+
+def test_normalize_namespace_allows_underscores():
+    assert normalize_namespace('team_a') == 'team_a'
+    assert normalize_namespace('my_namespace') == 'my_namespace'
 
 
 def test_namespace_paths_creates_dirs(tmp_path: Path, monkeypatch):
@@ -88,9 +97,11 @@ def test_list_namespaces_endpoint_merges_filesystem_and_runtime_namespaces(monke
 def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     created: list[str] = []
     registered: list[str] = []
+    provisioned: list[str] = []
 
     monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda name: created.append(name))
     monkeypatch.setattr(namespace_routes, 'register_namespace', lambda session, name: registered.append(name))
+    monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', lambda name: provisioned.append(name))
 
     from main import app
 
@@ -98,6 +109,28 @@ def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.Monke
     response = client.post('/api/v1/namespaces', json={'name': 'test'})
 
     assert response.status_code == 200
-    assert response.json() == {'name': 'test'}
+    body = response.json()
+    assert body['name'] == 'test'
+    assert body['created_bucket'] is True
+    assert body['storage']['bucket'] == 'test'
+    assert body['storage']['uploads_root'].startswith('s3://test/')
     assert created == ['test']
     assert registered == ['test']
+    assert provisioned == ['test']
+
+
+def test_namespace_storage_plan_endpoint_previews_exact_roots() -> None:
+    from main import app
+
+    client = TestClient(app)
+    response = client.get('/api/v1/namespaces/storage-plan', params={'name': 'analytics'})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['name'] == 'analytics'
+    assert body['bucket'] == 'analytics'
+    assert body['uploads_root'] == 's3://analytics/uploads'
+    assert body['clean_root'] == 's3://analytics/clean'
+    assert body['exports_root'] == 's3://analytics/exports'
+    assert 'rules' in body
+    assert 'key_prefix' not in body

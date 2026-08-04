@@ -165,23 +165,32 @@ just dev
 
 ### Object storage
 
-These values configure the S3-compatible store used for uploaded datasource
-objects, Iceberg tables, exported results, and compute artifacts. The current
-runtime still needs a local `DATA_DIR`; it does not treat an `s3://` URL as the
-local data directory.
+S3-compatible store for uploads, Iceberg tables, exports, and compute artifacts.
+
+**The namespace is the bucket.** Name `analytics` means bucket `analytics`.
+Nothing is rewritten. Keys sit directly in the bucket:
+
+```text
+s3://{namespace}/uploads/...
+s3://{namespace}/clean/...
+s3://{namespace}/exports/...
+```
+
+Namespace names must be valid bucket names (3–63 chars; lowercase letters,
+digits, hyphens, underscores; start and end alphanumeric). Invalid names are
+rejected; nothing is rewritten.
+
+`DATA_DIR` remains a local directory for process scratch only.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `OBJECT_STORE_ENDPOINT` | `http://127.0.0.1:9000` | S3-compatible HTTP(S) endpoint. Use the internal service URL from every application role. |
 | `OBJECT_STORE_REGION` | `us-east-1` | S3 signing region. Must match the provider configuration. |
-| `OBJECT_STORE_ACCESS_KEY` | `rustfsadmin` | Access key with read, write, list, delete, and bucket-creation permissions for the managed bucket. Replace the development default in production. |
+| `OBJECT_STORE_ACCESS_KEY` | `rustfsadmin` | Access key with read, write, list, delete, and bucket-creation permissions for namespace buckets. Replace the development default in production. |
 | `OBJECT_STORE_SECRET_KEY` | `rustfsadmin` | Secret key paired with `OBJECT_STORE_ACCESS_KEY`. Replace the development default in production. |
-| `OBJECT_STORE_BUCKET` | `dataforge` | Bucket containing Data-Forge-managed objects. The runtime creates it on first write when credentials permit. |
-| `OBJECT_STORE_PREFIX` | `dataforge` | Non-empty key prefix owned by one deployment. Use a distinct value for every deployment sharing a bucket. |
 
 All object-store settings are process-start configuration. Change them for the
-API, scheduler, and worker together, then restart the complete runtime. Changing
-the bucket or prefix does not migrate existing objects.
+API, scheduler, and worker together, then restart the complete runtime.
 
 ### Internal runtime (gRPC)
 

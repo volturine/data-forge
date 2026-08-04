@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import re
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 
 from backend_core.config import settings
+from backend_core.namespace_storage import is_valid_namespace_name, validate_namespace_name
 
 _NAMESPACE = ContextVar('namespace', default='')
-_NAMESPACE_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 _PUBLIC_NAMESPACE_DATABASE_SCHEMA = 'df$tenant$public'
 
 
@@ -25,9 +24,7 @@ def normalize_namespace(value: str | None) -> str:
     raw = (value or '').strip()
     if not raw:
         return settings.default_namespace
-    if not _NAMESPACE_RE.match(raw):
-        raise ValueError('Namespace must be alphanumeric with dashes/underscores')
-    return raw
+    return validate_namespace_name(raw)
 
 
 def namespace_database_schema(value: str | None) -> str:
@@ -69,5 +66,9 @@ def list_namespaces() -> list[str]:
     base_dir = settings.data_dir / 'namespaces'
     if not base_dir.exists():
         return []
-    entries = [entry.name for entry in base_dir.iterdir() if entry.is_dir() and _NAMESPACE_RE.match(entry.name) and entry.name != 'logs']
+    entries = [
+        entry.name
+        for entry in base_dir.iterdir()
+        if entry.is_dir() and is_valid_namespace_name(entry.name) and entry.name != 'logs'
+    ]
     return sorted(entries)

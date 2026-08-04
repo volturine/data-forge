@@ -117,7 +117,13 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
 
     async def BuildUrl(self, request: object_store_pb2.ObjectStorePathParts, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreUrl:
         await _require_internal_token(context)
-        return object_store_pb2.ObjectStoreUrl(url=object_store.object_store_url(*request.parts, bucket=request.bucket if request.HasField("bucket") else None))
+        return object_store_pb2.ObjectStoreUrl(
+            url=object_store.object_store_url(
+                *request.parts,
+                bucket=request.bucket if request.HasField("bucket") else None,
+                namespace=request.namespace if request.HasField("namespace") else None,
+            )
+        )
 
     async def JoinUrl(self, request: object_store_pb2.ObjectStoreJoinRequest, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreUrl:
         await _require_internal_token(context)

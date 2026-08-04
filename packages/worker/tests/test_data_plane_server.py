@@ -22,8 +22,6 @@ class FakeGrpcContext:
 def _context(monkeypatch: pytest.MonkeyPatch) -> FakeGrpcContext:
     token = "test-internal-token"
     monkeypatch.setattr(settings, "internal_api_token", token)
-    monkeypatch.setattr(settings, "object_store_bucket", "owned-bucket")
-    monkeypatch.setattr(settings, "object_store_prefix", "managed")
     return FakeGrpcContext(token)
 
 
@@ -32,21 +30,49 @@ async def test_object_store_classification_is_worker_owned(monkeypatch: pytest.M
     context = _context(monkeypatch)
     servicer = ObjectStoreServicer()
 
-    managed = await servicer.ClassifyUrl(object_store_pb2.ObjectStoreUrlClassificationRequest(value="s3://owned-bucket/managed/file.csv"), context)
-    external = await servicer.ClassifyUrl(object_store_pb2.ObjectStoreUrlClassificationRequest(value="s3://external-bucket/file.csv"), context)
-    bucket_only = await servicer.ClassifyUrl(object_store_pb2.ObjectStoreUrlClassificationRequest(value="s3://owned-bucket"), context)
-    local = await servicer.ClassifyUrl(object_store_pb2.ObjectStoreUrlClassificationRequest(value="/tmp/file.csv"), context)
+    managed = await servicer.ClassifyUrl(
+        object_store_pb2.ObjectStoreUrlClassificationRequest(value="s3://default/uploads/file.csv"),
+        context,
+    )
+    external = await servicer.ClassifyUrl(
+        object_store_pb2.ObjectStoreUrlClassificationRequest(value="s3://External-Bucket/file.csv"),
+        context,
+    )
+    other_ns = await servicer.ClassifyUrl(
+        object_store_pb2.ObjectStoreUrlClassificationRequest(value="s3://analytics/clean/file.csv"),
+        context,
+    )
+    bucket_only = await servicer.ClassifyUrl(
+        object_store_pb2.ObjectStoreUrlClassificationRequest(value="s3://default"),
+        context,
+    )
+    local = await servicer.ClassifyUrl(
+        object_store_pb2.ObjectStoreUrlClassificationRequest(value="/tmp/file.csv"),
+        context,
+    )
 
     assert managed.is_object_store is True
     assert managed.is_managed is True
-    assert managed.object_url.url == "s3://owned-bucket/managed/file.csv"
+    assert managed.object_url.url == "s3://default/uploads/file.csv"
     assert external.is_object_store is True
     assert external.is_managed is False
+    assert other_ns.is_object_store is True
+    assert other_ns.is_managed is True
     assert bucket_only.is_object_store is False
-    assert not bucket_only.HasField("object_url")
     assert local.is_object_store is False
     assert local.is_managed is False
-    assert not local.HasField("object_url")
+
+
+@pytest.mark.asyncio
+async def test_object_store_build_url_namespace_is_bucket(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    servicer = ObjectStoreServicer()
+
+    built = await servicer.BuildUrl(
+        object_store_pb2.ObjectStorePathParts(parts=["uploads", "file.csv"], namespace="analytics"),
+        context,
+    )
+    assert built.url == "s3://analytics/uploads/file.csv"
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,7 @@ from sqlmodel import Session, text
 from api import router
 from backend_core import build_runs_service as build_run_service, runtime_ipc, runtime_workers_service as runtime_worker_service
 from backend_core.config import settings
+from backend_core.data_plane_client import client_from_settings
 from backend_core.database import (
     get_settings_db,
     init_db,
@@ -319,17 +320,24 @@ async def readiness(session: Session = Depends(get_settings_db)) -> JSONResponse
         checks['database'] = f'error: {e!s}'
         is_ready = False
 
-    # Check filesystem (data directories)
+    # Local DATA_DIR remains for process-local scratch; product data lives in object storage.
     try:
         paths = namespace_paths(settings.default_namespace)
-        checks['upload_dir'] = 'ok' if paths.upload_dir.exists() else 'missing'
-        checks['clean_dir'] = 'ok' if paths.clean_dir.exists() else 'missing'
-        checks['exports_dir'] = 'ok' if paths.exports_dir.exists() else 'missing'
-
-        if not all(d.exists() for d in [paths.upload_dir, paths.clean_dir, paths.exports_dir]):
+        checks['data_dir'] = 'ok' if paths.base_dir.exists() else 'missing'
+        if not paths.base_dir.exists():
             is_ready = False
     except Exception as e:
-        checks['filesystem'] = f'error: {e!s}'
+        checks['data_dir'] = f'error: {e!s}'
+        is_ready = False
+
+    # Fail fast when the S3-compatible object store is unreachable or misconfigured.
+    try:
+        data_plane = client_from_settings()
+        probe_url = data_plane.build_object_url('health', 'ready', namespace=settings.default_namespace)
+        data_plane.upload_object_bytes(b'ready', probe_url, content_type='text/plain')
+        checks['object_store'] = 'ok'
+    except Exception as e:
+        checks['object_store'] = f'error: {e!s}'
         is_ready = False
 
     status_code = 200 if is_ready else 503

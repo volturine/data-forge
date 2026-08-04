@@ -545,7 +545,7 @@ async def start_active_build(
             safe_branch = re.sub(r'[^a-zA-Z0-9_]+', '_', branch_name).strip('_')
             table_name = f'{result_id}_{safe_branch}'
             data_plane = client_from_settings()
-            warehouse_path = data_plane.build_object_url('namespaces', get_namespace(), 'exports')
+            warehouse_path = data_plane.build_object_url('exports', namespace=get_namespace())
             placeholder_source_type = datasource_service.DataSourceType.ICEBERG
             placeholder_config = {
                 'catalog_type': 'sql',
@@ -554,7 +554,7 @@ async def start_active_build(
                 'namespace': namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else 'outputs',
                 'table': table_name,
                 'table_name': output_name if isinstance(output_name, str) and output_name.strip() else table_name,
-                'metadata_path': data_plane.build_object_url('namespaces', get_namespace(), 'exports', str(result_id)),
+                'metadata_path': data_plane.build_object_url('exports', str(result_id), namespace=get_namespace()),
                 'branch': branch_name,
                 'namespace_name': get_namespace(),
                 'reader': 'native',

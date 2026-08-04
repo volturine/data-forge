@@ -2053,7 +2053,7 @@ def export_data(
         branch_name = iceberg_options["branch"]
         safe_branch = re.sub(r"[^a-zA-Z0-9_]+", "_", branch_name).strip("_")
         published_table_name = f"{result_id}_{safe_branch}"
-        published_export_base = object_store_url("namespaces", get_namespace(), "exports", str(result_id))
+        published_export_base = object_store_url("exports", str(result_id), namespace=get_namespace())
         if publication_claim is None:
             table_name = published_table_name
             export_base = published_export_base
@@ -2062,7 +2062,7 @@ def export_data(
             table_name = f"{published_table_name}_claim_{safe_claim_token}"
             export_base = join_object_store_url(published_export_base, "claims", publication_claim.claim_token)
         table_path = join_object_store_url(export_base, branch_name)
-        warehouse_path = object_store_url("namespaces", get_namespace(), "exports")
+        warehouse_path = object_store_url("exports", namespace=get_namespace())
         ensure_bucket_exists()
 
         catalog_config = {

@@ -132,7 +132,7 @@
 - ✅ Apache Iceberg format for all managed outputs with snapshot and time-travel support
 - ✅ Powered by Polars for fast, memory-efficient computation
 - ✅ Isolated compute subprocess per analysis for safe parallel execution
-- ⬜ S3 storage support — use an S3 path as `DATA_DIR` for cloud-based storage
+- ✅ S3-compatible object storage — per-namespace buckets for uploads, Iceberg tables, exports, and runtime artifacts
 - ✅ PostgreSQL backend — supported metadata storage runtime
 
 ## Dashboards

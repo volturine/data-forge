@@ -65,7 +65,7 @@ def _ensure_catalog_namespace(catalog, namespace: str) -> None:
 
 
 def _prepare_clean_target(datasource_id: str, branch: str) -> str:
-    return object_store_url("namespaces", get_namespace(), "clean", datasource_id, branch)
+    return object_store_url("clean", datasource_id, branch, namespace=get_namespace())
 
 
 def _coerce_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.LazyFrame:
@@ -166,7 +166,7 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: str, build_mode: str, *
         "local",
         type="sql",
         uri=database_url,
-        warehouse=object_store_url("namespaces", get_namespace(), "clean"),
+        warehouse=object_store_url("clean", namespace=get_namespace()),
         **object_store_storage_options(),
     )
     namespace = "clean"
@@ -202,7 +202,7 @@ def _build_iceberg_config(
     return {
         "catalog_type": "sql",
         "catalog_uri": database_url,
-        "warehouse": object_store_url("namespaces", get_namespace(), "clean"),
+        "warehouse": object_store_url("clean", namespace=get_namespace()),
         "namespace": "clean",
         "table": parts[-2],
         "metadata_path": cleaned,

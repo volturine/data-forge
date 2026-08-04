@@ -1,12 +1,9 @@
 import { describe, test, expect } from 'vitest';
-import { normalizeNamespace } from './namespace';
+import { isValidNamespace, normalizeNamespace } from './namespace';
 
 describe('normalizeNamespace', () => {
-	test('returns valid alphanumeric string as-is', () => {
+	test('returns valid lowercase name as-is', () => {
 		expect(normalizeNamespace('outputs')).toBe('outputs');
-	});
-
-	test('allows underscores and hyphens', () => {
 		expect(normalizeNamespace('my-namespace')).toBe('my-namespace');
 		expect(normalizeNamespace('my_namespace')).toBe('my_namespace');
 	});
@@ -31,13 +28,15 @@ describe('normalizeNamespace', () => {
 		expect(normalizeNamespace('my namespace')).toBe('');
 	});
 
-	test('returns empty string for input with special characters', () => {
+	test('returns empty string for special characters and uppercase', () => {
 		expect(normalizeNamespace('ns@123')).toBe('');
 		expect(normalizeNamespace('ns.foo')).toBe('');
 		expect(normalizeNamespace('ns/bar')).toBe('');
+		expect(normalizeNamespace('MyNamespace')).toBe('');
 	});
 
-	test('allows mixed case', () => {
-		expect(normalizeNamespace('MyNamespace')).toBe('MyNamespace');
+	test('rejects too-short names', () => {
+		expect(normalizeNamespace('ab')).toBe('');
+		expect(isValidNamespace('ab')).toBe(false);
 	});
 });
