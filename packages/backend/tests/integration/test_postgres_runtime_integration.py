@@ -104,8 +104,6 @@ def _runtime_env(
             'OBJECT_STORE_REGION': 'us-east-1',
             'OBJECT_STORE_ACCESS_KEY': rustfs.access_key,
             'OBJECT_STORE_SECRET_KEY': rustfs.secret_key,
-            'OBJECT_STORE_BUCKET': rustfs.bucket,
-            'OBJECT_STORE_PREFIX': 'dataforge-runtime-tests',
             'INTERNAL_API_TOKEN': INTERNAL_API_TOKEN,
             'INTERNAL_GRPC_HOST': '127.0.0.1',
             'INTERNAL_GRPC_PORT': str(grpc_port),

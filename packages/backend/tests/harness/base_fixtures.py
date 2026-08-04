@@ -206,8 +206,6 @@ def isolate_data_dir(tmp_path: Path, monkeypatch, postgres_container: PostgresCo
     monkeypatch.setenv('OBJECT_STORE_REGION', 'us-east-1')
     monkeypatch.setenv('OBJECT_STORE_ACCESS_KEY', rustfs_container.access_key)
     monkeypatch.setenv('OBJECT_STORE_SECRET_KEY', rustfs_container.secret_key)
-    monkeypatch.setenv('OBJECT_STORE_BUCKET', rustfs_container.bucket)
-    monkeypatch.setenv('OBJECT_STORE_PREFIX', 'dataforge-tests')
     monkeypatch.setattr(settings, 'settings_encryption_key', 'test-key', raising=False)
     monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
     monkeypatch.setattr(settings, 'database_url', postgres_container.url, raising=False)
@@ -215,8 +213,6 @@ def isolate_data_dir(tmp_path: Path, monkeypatch, postgres_container: PostgresCo
     monkeypatch.setattr(settings, 'object_store_region', 'us-east-1', raising=False)
     monkeypatch.setattr(settings, 'object_store_access_key', rustfs_container.access_key, raising=False)
     monkeypatch.setattr(settings, 'object_store_secret_key', rustfs_container.secret_key, raising=False)
-    monkeypatch.setattr(settings, 'object_store_bucket', rustfs_container.bucket, raising=False)
-    monkeypatch.setattr(settings, 'object_store_prefix', 'dataforge-tests', raising=False)
 
 
 class _TestWorkerDataPlaneClient:
@@ -239,16 +235,28 @@ class _TestWorkerDataPlaneClient:
             )
         return self._client
 
-    def _ensure_bucket_exists(self) -> None:
-        settings = self._settings()
+    def _namespace_bucket(self, namespace: str | None = None) -> str:
+        from backend_core.namespace import get_namespace, normalize_namespace
+
+        resolved = normalize_namespace(namespace) if namespace is not None else get_namespace()
+        return resolved
+
+    def _is_managed_bucket(self, bucket: str) -> bool:
+        from backend_core.namespace_storage import is_valid_namespace_name
+
+        return is_valid_namespace_name(bucket)
+
+    def _ensure_bucket_exists(self, bucket: str | None = None) -> str:
+        resolved = bucket or self._namespace_bucket()
         try:
-            self._s3().head_bucket(Bucket=settings.object_store_bucket)
+            self._s3().head_bucket(Bucket=resolved)
         except ClientError as exc:
             error = exc.response.get('Error', {}) if isinstance(exc.response, dict) else {}
             code = str(error.get('Code') or '')
             if code not in {'404', 'NoSuchBucket', 'NotFound'}:
                 raise
-            self._s3().create_bucket(Bucket=settings.object_store_bucket)
+            self._s3().create_bucket(Bucket=resolved)
+        return resolved
 
     @staticmethod
     def _parse_object_url(url: str) -> tuple[str, str]:
@@ -264,16 +272,16 @@ class _TestWorkerDataPlaneClient:
             bucket, key = self._parse_object_url(value)
         except ValueError:
             return ObjectStoreUrlClassification(is_object_store=False, is_managed=False, object_url=None)
-        settings = self._settings()
-        prefix = settings.object_store_prefix.strip('/').strip()
-        is_managed = bucket == settings.object_store_bucket and (key == prefix or key.startswith(prefix + '/'))
+        root = key.split('/', 1)[0]
+        managed_roots = {'uploads', 'clean', 'exports', 'runtime-artifacts', 'health', 'tests'}
+        is_managed = self._is_managed_bucket(bucket) and root in managed_roots
         return ObjectStoreUrlClassification(is_object_store=True, is_managed=is_managed, object_url=value)
 
-    def build_object_url(self, *parts: str, bucket: str | None = None) -> str:
-        settings = self._settings()
-        cleaned = [settings.object_store_prefix.strip('/').strip(), *(part.strip('/') for part in parts if part.strip('/'))]
-        key = '/'.join(part for part in cleaned if part)
-        return f's3://{bucket or settings.object_store_bucket}/{key}'
+    def build_object_url(self, *parts: str, bucket: str | None = None, namespace: str | None = None) -> str:
+        cleaned = [part.strip('/') for part in parts if part.strip('/')]
+        key = '/'.join(cleaned)
+        resolved_bucket = bucket or self._namespace_bucket(namespace)
+        return f's3://{resolved_bucket}/{key}'
 
     def join_object_url(self, base_url: str, *parts: str) -> str:
         bucket, key = self._parse_object_url(base_url)
@@ -292,8 +300,8 @@ class _TestWorkerDataPlaneClient:
         }
 
     def upload_object_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
-        self._ensure_bucket_exists()
         bucket, key = self._parse_object_url(target_url)
+        self._ensure_bucket_exists(bucket)
         kwargs: dict[str, object] = {'Bucket': bucket, 'Key': key, 'Body': data}
         if content_type is not None:
             kwargs['ContentType'] = content_type

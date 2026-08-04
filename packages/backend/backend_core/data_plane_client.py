@@ -75,10 +75,12 @@ class WorkerDataPlaneClient:
             object_url=response.object_url.url if response.HasField('object_url') else None,
         )
 
-    def build_object_url(self, *parts: str, bucket: str | None = None) -> str:
+    def build_object_url(self, *parts: str, bucket: str | None = None, namespace: str | None = None) -> str:
         request = object_store_pb2.ObjectStorePathParts(parts=parts)
         if bucket is not None:
             request.bucket = bucket
+        if namespace is not None:
+            request.namespace = namespace
         return self._call(lambda: self._object_store.BuildUrl(request, timeout=self._timeout_seconds, metadata=self._metadata())).url
 
     def join_object_url(self, base_url: str, *parts: str) -> str:

@@ -37,6 +37,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Settings Profile Page](implemented/settings-profile-page.md)
 - [Shared Boundary Checklist](implemented/shared-boundary-checklist.md) — archived completed audit
 - [SQL/Polars Snippet Export](implemented/sql-polars-snippet-export.md)
+- [S3 Storage Support](implemented/s3-storage-support.md) — per-namespace object-store buckets
 
 ## Active
 
@@ -45,7 +46,6 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Hot-Path Profiling Plan](active/hot-path-request-map.md) — direct timing, occupancy, and request measurements deferred
 - [Lineage Revamp](active/lineage-revamp.md)
 - [Performance Regression Investigation](active/performance-violation-checklist.md) — +54.0% regression attribution and optimization deferred
-- [S3 Storage Support](active/s3-storage-support.md)
 
 ## Backlog
 

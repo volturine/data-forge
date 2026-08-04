@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from threading import Lock
 from urllib.parse import urlparse
@@ -12,8 +13,24 @@ from runtime.config import settings
 
 _S3_CLIENT = None
 _S3_CLIENT_LOCK = Lock()
-_BUCKET_READY = False
-_BUCKET_READY_LOCK = Lock()
+_BUCKETS_READY: set[str] = set()
+_BUCKETS_READY_LOCK = Lock()
+
+# Namespace name == bucket name. No rewriting.
+# Lowercase letters, digits, hyphens, underscores; start/end alphanumeric.
+_NAMESPACE_BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,61}[a-z0-9]$")
+
+# Product key roots inside a namespace bucket. Managed deletes only apply here.
+_MANAGED_KEY_ROOTS = frozenset(
+    {
+        "uploads",
+        "clean",
+        "exports",
+        "runtime-artifacts",
+        "health",
+        "tests",
+    }
+)
 
 
 def is_object_store_url(value: str | None) -> bool:
@@ -30,22 +47,54 @@ def parse_object_store_url(url: str) -> tuple[str, str]:
     return parsed.netloc, parsed.path.lstrip("/")
 
 
-def object_store_bucket() -> str:
-    return settings.object_store_bucket.strip()
+def is_valid_namespace_bucket_name(name: str) -> bool:
+    """True when ``name`` is a legal S3 bucket name and a legal product namespace."""
+    if not name or len(name) < 3 or len(name) > 63:
+        return False
+    if ".." in name or name.startswith("xn--"):
+        return False
+    return _NAMESPACE_BUCKET_RE.match(name) is not None
 
 
-def object_store_prefix() -> str:
-    return settings.object_store_prefix.strip("/").strip()
+def namespace_bucket(namespace: str) -> str:
+    """The namespace is the bucket. Identity only — no prefix or folding."""
+    name = namespace.strip()
+    if not is_valid_namespace_bucket_name(name):
+        raise ValueError(
+            f"Namespace {namespace!r} is not a valid bucket name. "
+            "Use 3–63 lowercase letters, digits, hyphens, or underscores; "
+            "must start and end with a letter or digit."
+        )
+    return name
 
 
 def object_store_key(*parts: str) -> str:
-    cleaned = [object_store_prefix(), *(part.strip("/") for part in parts if part and part.strip("/"))]
-    return "/".join(part for part in cleaned if part)
+    cleaned = [part.strip("/") for part in parts if part and part.strip("/")]
+    return "/".join(cleaned)
 
 
-def object_store_url(*parts: str, bucket: str | None = None) -> str:
+def object_store_url(*parts: str, namespace: str | None = None, bucket: str | None = None) -> str:
+    """Build ``s3://{namespace}/{parts...}`` — namespace is the bucket."""
+    if bucket is not None:
+        resolved_bucket = bucket.strip()
+        if not resolved_bucket:
+            raise ValueError("bucket must not be empty")
+        if not is_valid_namespace_bucket_name(resolved_bucket):
+            raise ValueError(f"Invalid bucket name: {bucket!r}")
+    else:
+        if namespace is None:
+            from runtime.namespace import get_namespace
+
+            resolved_namespace = get_namespace()
+        else:
+            from runtime.namespace import normalize_namespace
+
+            resolved_namespace = normalize_namespace(namespace)
+        resolved_bucket = namespace_bucket(resolved_namespace)
     key = object_store_key(*parts)
-    return f"s3://{bucket or object_store_bucket()}/{key}"
+    if not key:
+        raise ValueError("object store key must not be empty")
+    return f"s3://{resolved_bucket}/{key}"
 
 
 def join_object_store_url(base_url: str, *parts: str) -> str:
@@ -56,13 +105,14 @@ def join_object_store_url(base_url: str, *parts: str) -> str:
 
 
 def is_managed_object_store_url(url: str) -> bool:
+    """Managed product objects live in a namespace bucket under known key roots."""
     if not is_object_store_url(url):
         return False
     bucket, key = parse_object_store_url(url)
-    if bucket != object_store_bucket():
+    if not is_valid_namespace_bucket_name(bucket):
         return False
-    managed_prefix = object_store_prefix()
-    return key == managed_prefix or key.startswith(managed_prefix + "/")
+    root = key.split("/", 1)[0]
+    return root in _MANAGED_KEY_ROOTS
 
 
 def object_store_storage_options() -> dict[str, object]:
@@ -93,29 +143,43 @@ def _client():
         return _S3_CLIENT
 
 
-def ensure_bucket_exists() -> None:
-    global _BUCKET_READY
-    if _BUCKET_READY:
-        return
-    with _BUCKET_READY_LOCK:
-        if _BUCKET_READY:
-            return
+def ensure_bucket_exists(bucket: str | None = None) -> str:
+    """Ensure a namespace bucket exists. Defaults to the current namespace bucket."""
+    if bucket is None:
+        from runtime.namespace import get_namespace
+
+        resolved = namespace_bucket(get_namespace())
+    else:
+        resolved = namespace_bucket(bucket.strip())
+    if resolved in _BUCKETS_READY:
+        return resolved
+    with _BUCKETS_READY_LOCK:
+        if resolved in _BUCKETS_READY:
+            return resolved
         client = _client()
-        bucket = object_store_bucket()
         try:
-            client.head_bucket(Bucket=bucket)
+            client.head_bucket(Bucket=resolved)
         except ClientError as exc:
             error = exc.response.get("Error", {}) if isinstance(exc.response, dict) else {}
             code = str(error.get("Code") or "")
             if code not in {"404", "NoSuchBucket", "NotFound"}:
                 raise
-            client.create_bucket(Bucket=bucket)
-        _BUCKET_READY = True
+            client.create_bucket(Bucket=resolved)
+        _BUCKETS_READY.add(resolved)
+    return resolved
+
+
+def probe_object_store(*, namespace: str | None = None) -> None:
+    """Fail-fast connectivity check: create/head the namespace bucket."""
+    from runtime.namespace import get_namespace, normalize_namespace
+
+    resolved = normalize_namespace(namespace) if namespace is not None else get_namespace()
+    ensure_bucket_exists(namespace_bucket(resolved))
 
 
 def upload_bytes(data: bytes, target_url: str, *, content_type: str | None = None) -> str:
-    ensure_bucket_exists()
     bucket, key = parse_object_store_url(target_url)
+    ensure_bucket_exists(bucket)
     kwargs: dict[str, object] = {"Bucket": bucket, "Key": key, "Body": data}
     if content_type is not None:
         kwargs["ContentType"] = content_type

@@ -107,9 +107,10 @@ just install
 Edit `config/env/prod.env`:
 
 - set `DATABASE_URL` to PostgreSQL;
-- set all six `OBJECT_STORE_*` values;
+- set the four `OBJECT_STORE_*` values (endpoint, region, access key, secret).
+  Each product namespace is an S3 bucket (name == bucket);
 - replace `INTERNAL_API_TOKEN` and `SETTINGS_ENCRYPTION_KEY`;
-- set `DATA_DIR` to a writable, durable local directory;
+- set `DATA_DIR` to a writable, durable local directory for process scratch;
 - set the public auth and OAuth URLs;
 - keep `DISTRIBUTED_RUNTIME_ENABLED=true` and `PROD_MODE_ENABLED=true`.
 

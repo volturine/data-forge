@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Debounced } from 'runed';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { listNamespaces } from '$lib/api/namespaces';
-	import { normalizeNamespace } from '$lib/utils/namespace';
+	import { listNamespaces, previewNamespaceStorage } from '$lib/api/namespaces';
+	import { NAMESPACE_NAME_RULES, normalizeNamespace } from '$lib/utils/namespace';
 	import { css } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
@@ -19,7 +19,7 @@
 
 	let searchQuery = $state('');
 	const debouncedSearch = new Debounced(() => searchQuery, 200);
-	let popoverRect = $state({ left: 0, top: 0, width: 320 });
+	let popoverRect = $state({ left: 0, top: 0, width: 360 });
 	let lastAnchor = $state<HTMLElement | null>(null);
 
 	const namespacesQuery = createQuery(() => ({
@@ -43,9 +43,21 @@
 
 	const trimmedSearch = $derived(debouncedSearch.current.trim());
 	const normalizedCandidate = $derived(trimmedSearch ? normalizeNamespace(trimmedSearch) : '');
+	const invalidCandidate = $derived(!!trimmedSearch && !normalizedCandidate);
 	const canCreate = $derived(
 		!!normalizedCandidate && !rawNamespaces.some((name) => name === normalizedCandidate)
 	);
+
+	const storagePlanQuery = createQuery(() => ({
+		queryKey: ['namespace-storage-plan', normalizedCandidate],
+		queryFn: async () => {
+			const result = await previewNamespaceStorage(normalizedCandidate);
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		staleTime: 30_000,
+		enabled: open && canCreate
+	}));
 
 	let popupRef = $state<HTMLElement | null>(null);
 
@@ -187,10 +199,16 @@
 				type="text"
 				{@attach focusInput}
 				bind:value={searchQuery}
-				placeholder="Search namespaces..."
+				placeholder="Search or create (lowercase)..."
 				aria-label="Search namespaces"
 				autocomplete="off"
 			/>
+
+			{#if invalidCandidate}
+				<div class={css({ paddingX: '1', fontSize: '2xs', color: 'error', lineHeight: 'snug' })}>
+					{NAMESPACE_NAME_RULES}
+				</div>
+			{/if}
 
 			<div
 				class={css({
@@ -206,7 +224,7 @@
 					<div class={css({ padding: '2', fontSize: 'xs', color: 'error' })}>
 						Error loading namespaces
 					</div>
-				{:else if filteredNamespaces.length === 0 && !canCreate}
+				{:else if filteredNamespaces.length === 0 && !canCreate && !invalidCandidate}
 					<div class={css({ padding: '2', fontSize: 'xs', color: 'fg.muted' })}>No results</div>
 				{:else}
 					{#if canCreate}
@@ -216,8 +234,9 @@
 								display: 'flex',
 								width: '100%',
 								cursor: 'pointer',
-								alignItems: 'center',
-								justifyContent: 'space-between',
+								flexDirection: 'column',
+								alignItems: 'stretch',
+								gap: '1',
 								borderBottomWidth: '1',
 								paddingX: '2',
 								paddingY: '1.5',
@@ -230,17 +249,55 @@
 							onclick={() => void handleCreate()}
 							type="button"
 						>
-							<span class={css({ fontSize: 'xs' })}>Create "{normalizedCandidate}"</span>
-							<span
+							<div
 								class={css({
-									fontSize: '2xs',
-									color: 'fg.muted',
-									textTransform: 'uppercase',
-									letterSpacing: 'wider'
+									display: 'flex',
+									width: '100%',
+									alignItems: 'center',
+									justifyContent: 'space-between'
 								})}
 							>
-								New
-							</span>
+								<span class={css({ fontSize: 'xs', fontWeight: 'semibold' })}>
+									Create "{normalizedCandidate}"
+								</span>
+								<span
+									class={css({
+										fontSize: '2xs',
+										color: 'fg.muted',
+										textTransform: 'uppercase',
+										letterSpacing: 'wider'
+									})}
+								>
+									New
+								</span>
+							</div>
+							{#if storagePlanQuery.data}
+								{@const plan = storagePlanQuery.data}
+								<div
+									class={css({
+										display: 'flex',
+										flexDirection: 'column',
+										gap: '0.5',
+										fontSize: '2xs',
+										color: 'fg.muted',
+										fontFamily: 'mono',
+										lineHeight: 'snug'
+									})}
+								>
+									<span>S3 bucket (root): {plan.bucket}</span>
+									<span>uploads: {plan.uploads_root}/…</span>
+									<span>clean: {plan.clean_root}/…</span>
+									<span>exports: {plan.exports_root}/…</span>
+								</div>
+							{:else if storagePlanQuery.isLoading}
+								<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+									Loading storage plan…
+								</span>
+							{:else if storagePlanQuery.isError}
+								<span class={css({ fontSize: '2xs', color: 'error' })}>
+									Could not load storage plan
+								</span>
+							{/if}
 						</button>
 					{/if}
 

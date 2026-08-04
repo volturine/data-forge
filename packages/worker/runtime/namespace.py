@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import re
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 
 from runtime.config import settings
+from runtime.object_store import namespace_bucket
 
 _NAMESPACE = ContextVar("namespace", default="")
-_NAMESPACE_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 @dataclass(frozen=True)
@@ -24,9 +23,8 @@ def normalize_namespace(value: str | None) -> str:
     raw = (value or "").strip()
     if not raw:
         return settings.default_namespace
-    if not _NAMESPACE_RE.match(raw):
-        raise ValueError("Namespace must be alphanumeric with dashes/underscores")
-    return raw
+    # Identity check — same rules as the S3 bucket root for this namespace.
+    return namespace_bucket(raw)
 
 
 def set_namespace_context(value: str | None) -> Token:
