@@ -1,9 +1,5 @@
 /** Half-window build-length direction (duration down / flat / up / not enough data). */
-export type DurationTrendDirection =
-	| 'decreasing'
-	| 'stable'
-	| 'increasing'
-	| 'insufficient_data';
+export type DurationTrendDirection = 'decreasing' | 'stable' | 'increasing' | 'insufficient_data';
 
 export interface DurationTrend {
 	direction: DurationTrendDirection;

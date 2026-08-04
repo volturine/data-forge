@@ -605,10 +605,7 @@ def _duration_trend(durations: list[float]) -> DurationTrend:
             direction='insufficient_data',
             sample_size=sample_size,
             threshold_pct=_TREND_THRESHOLD_PCT,
-            summary=(
-                f'Need at least {_TREND_MIN_SAMPLES} timed builds to judge a trend '
-                f'({sample_size} so far).'
-            ),
+            summary=(f'Need at least {_TREND_MIN_SAMPLES} timed builds to judge a trend ({sample_size} so far).'),
         )
 
     half = sample_size // 2
@@ -643,21 +640,11 @@ def _duration_trend(durations: list[float]) -> DurationTrend:
     recent_label = _format_duration_ms_short(recent_avg)
     abs_pct = abs(change_pct)
     if direction == 'decreasing':
-        summary = (
-            f'Recent {len(recent)} builds average {recent_label} '
-            f'(duration decreasing {abs_pct:.0f}% vs previous {len(older)}, avg {older_label}).'
-        )
+        summary = f'Recent {len(recent)} builds average {recent_label} (duration decreasing {abs_pct:.0f}% vs previous {len(older)}, avg {older_label}).'
     elif direction == 'increasing':
-        summary = (
-            f'Recent {len(recent)} builds average {recent_label} '
-            f'(duration increasing {abs_pct:.0f}% vs previous {len(older)}, avg {older_label}).'
-        )
+        summary = f'Recent {len(recent)} builds average {recent_label} (duration increasing {abs_pct:.0f}% vs previous {len(older)}, avg {older_label}).'
     else:
-        summary = (
-            f'Recent {len(recent)} builds average {recent_label}, '
-            f'about the same as the previous {len(older)} (avg {older_label}, '
-            f'{change_pct:+.0f}%).'
-        )
+        summary = f'Recent {len(recent)} builds average {recent_label}, about the same as the previous {len(older)} (avg {older_label}, {change_pct:+.0f}%).'
 
     return DurationTrend(
         direction=direction,
