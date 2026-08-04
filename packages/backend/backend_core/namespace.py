@@ -66,9 +66,5 @@ def list_namespaces() -> list[str]:
     base_dir = settings.data_dir / 'namespaces'
     if not base_dir.exists():
         return []
-    entries = [
-        entry.name
-        for entry in base_dir.iterdir()
-        if entry.is_dir() and is_valid_namespace_name(entry.name) and entry.name != 'logs'
-    ]
+    entries = [entry.name for entry in base_dir.iterdir() if entry.is_dir() and is_valid_namespace_name(entry.name) and entry.name != 'logs']
     return sorted(entries)
