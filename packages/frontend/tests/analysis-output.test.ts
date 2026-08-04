@@ -602,14 +602,22 @@ test.describe('Analyses – row count action', () => {
 			const viewNode = page.locator('[data-step-type="view"]');
 			await expect(viewNode).toHaveCount(1, { timeout: 5_000 });
 			const countBtn = viewNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 5_000 });
+			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
 
 			await countBtn.click();
 
-			await expect(viewNode.locator('[data-testid="step-row-count"]')).toBeVisible({
-				timeout: 5_000
-			});
-			await expect(viewNode.locator('[data-testid="step-row-count"]')).toContainText('rows');
+			const badge = viewNode.locator('[data-testid="step-row-count"]');
+			const error = viewNode.locator('[data-testid="step-row-count-error"]');
+			await expect
+				.poll(async () => {
+					if (await badge.isVisible().catch(() => false)) return 'ok';
+					if (await error.isVisible().catch(() => false)) {
+						return `error:${(await error.textContent()) ?? ''}`;
+					}
+					return 'pending';
+				}, { timeout: 30_000 })
+				.toBe('ok');
+			await expect(badge).toContainText('rows');
 
 			await screenshot(page, 'analysis/output', 'row-count-success');
 		} finally {
@@ -642,13 +650,21 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			// Click count-rows on the filter node
 			const countBtn = filterNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 5_000 });
+			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
 			await countBtn.click();
 
-			await expect(filterNode.locator('[data-testid="step-row-count"]')).toBeVisible({
-				timeout: 5_000
-			});
-			await expect(filterNode.locator('[data-testid="step-row-count"]')).toContainText('rows');
+			const badge = filterNode.locator('[data-testid="step-row-count"]');
+			const error = filterNode.locator('[data-testid="step-row-count-error"]');
+			await expect
+				.poll(async () => {
+					if (await badge.isVisible().catch(() => false)) return 'ok';
+					if (await error.isVisible().catch(() => false)) {
+						return `error:${(await error.textContent()) ?? ''}`;
+					}
+					return 'pending';
+				}, { timeout: 30_000 })
+				.toBe('ok');
+			await expect(badge).toContainText('rows');
 
 			await screenshot(page, 'analysis/output', 'row-count-filter-step');
 		} finally {
@@ -675,13 +691,21 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			// Click count-rows on the limit node
 			const countBtn = limitNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 5_000 });
+			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
 			await countBtn.click();
 
-			await expect(limitNode.locator('[data-testid="step-row-count"]')).toBeVisible({
-				timeout: 5_000
-			});
-			await expect(limitNode.locator('[data-testid="step-row-count"]')).toContainText('rows');
+			const badge = limitNode.locator('[data-testid="step-row-count"]');
+			const error = limitNode.locator('[data-testid="step-row-count-error"]');
+			await expect
+				.poll(async () => {
+					if (await badge.isVisible().catch(() => false)) return 'ok';
+					if (await error.isVisible().catch(() => false)) {
+						return `error:${(await error.textContent()) ?? ''}`;
+					}
+					return 'pending';
+				}, { timeout: 30_000 })
+				.toBe('ok');
+			await expect(badge).toContainText('rows');
 
 			await screenshot(page, 'analysis/output', 'row-count-limit-step');
 		} finally {

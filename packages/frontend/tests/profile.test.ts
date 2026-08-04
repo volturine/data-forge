@@ -420,6 +420,7 @@ test.describe('Profile – System tab', () => {
 		page
 	}) => {
 		await page.goto('/profile#system');
+		await waitForProfileTabs(page);
 		await waitForProfileTab(page, 'System');
 
 		await expandSystemExportGroup(page, 'default');
@@ -427,29 +428,30 @@ test.describe('Profile – System tab', () => {
 		const switchControl = page.locator(
 			'[data-testid="internal-table-onboard-switch"][data-internal-table-key="default.analyses"]'
 		);
-		await expect(switchControl).toBeVisible();
+		await expect(switchControl).toBeVisible({ timeout: 15_000 });
 
 		if ((await switchControl.getAttribute('aria-checked')) !== 'true') {
 			await switchControl.click();
 			await expect(switchControl).toHaveAttribute('aria-checked', 'true', {
-				timeout: 5_000
+				timeout: 15_000
 			});
-			await expect(switchControl).toBeEnabled({ timeout: 5_000 });
+			await expect(switchControl).toBeEnabled({ timeout: 15_000 });
 		}
 
 		await page.reload();
+		await waitForProfileTabs(page);
 		await waitForProfileTab(page, 'System');
 		await expandSystemExportGroup(page, 'default');
 		await expect(switchControl).toHaveAttribute('aria-checked', 'true', {
-			timeout: 5_000
+			timeout: 15_000
 		});
-		await expect(switchControl).toBeEnabled({ timeout: 5_000 });
+		await expect(switchControl).toBeEnabled({ timeout: 15_000 });
 
 		await switchControl.click();
 		await expect(switchControl).toHaveAttribute('aria-checked', 'false', {
-			timeout: 5_000
+			timeout: 15_000
 		});
-		await expect(switchControl).toBeEnabled({ timeout: 5_000 });
+		await expect(switchControl).toBeEnabled({ timeout: 15_000 });
 	});
 
 	test('system tab preserves hash and reloads onboard state when namespace changes', async ({

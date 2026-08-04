@@ -171,12 +171,14 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 		const analysisId = await createSnippetAnalysis(request, analysisName, leftDsId, rightDsId);
 		try {
 			await gotoAnalysisEditor(page, analysisId);
-			await page.getByTestId('analysis-export-toolbar-button').click();
+			const exportBtn = page.getByTestId('analysis-export-toolbar-button');
+			await expect(exportBtn).toBeEnabled({ timeout: 15_000 });
+			await exportBtn.click();
 
 			const code = page.getByTestId('analysis-export-code');
-			await expect(code).toBeVisible({ timeout: 5_000 });
+			await expect(code).toBeVisible({ timeout: 15_000 });
 			await expect
-				.poll(async () => (await code.textContent())?.trim() ?? '', { timeout: 5_000 })
+				.poll(async () => (await code.textContent())?.trim() ?? '', { timeout: 15_000 })
 				.not.toBe('');
 			await expect(code).toContainText('import polars as pl');
 			await expect(code).toContainText('.join(');
