@@ -73,3 +73,114 @@ jobs:
             VCS_REF=${{ github.sha }}
             BUILD_DATE=${{ github.run_id }}
             UV_VERSION=${{ env.UV_VERSION }}
+
+  release:
+    needs: publish
+    if: success() && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          REGISTRY: ${{ env.REGISTRY }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${TAG#v}"
+          OWNER_LC="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          API_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-api"
+          SCHEDULER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-scheduler"
+          WORKER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-worker"
+          COMPOSE_URL="https://github.com/${REPO}/blob/${TAG}/docker/docker-compose.yml"
+          PROD_ENV_URL="https://github.com/${REPO}/blob/${TAG}/docker/env/prod.env"
+          DEPLOY_URL="https://github.com/${REPO}/blob/${TAG}/docs/DEPLOYMENT.md"
+
+          NOTES_FILE="$(mktemp)"
+          {
+            echo "## Container images"
+            echo
+            echo "Multi-arch (\`linux/amd64\`, \`linux/arm64\`) images published to GHCR:"
+            echo
+            echo "| Role | Image |"
+            echo "| --- | --- |"
+            echo "| API | \`${API_IMAGE}:${VERSION}\` |"
+            echo "| Scheduler | \`${SCHEDULER_IMAGE}:${VERSION}\` |"
+            echo "| Worker | \`${WORKER_IMAGE}:${VERSION}\` |"
+            echo
+            echo "Also tagged as \`${TAG}\`, \`latest\`, and major/minor aliases."
+            echo
+            echo "### Pull"
+            echo
+            echo '```bash'
+            echo "docker pull ${API_IMAGE}:${VERSION}"
+            echo "docker pull ${SCHEDULER_IMAGE}:${VERSION}"
+            echo "docker pull ${WORKER_IMAGE}:${VERSION}"
+            echo '```'
+            echo
+            echo "## Deploy with Docker Compose"
+            echo
+            echo "Recommended production path uses the checked-in stack:"
+            echo
+            echo "- Compose file: [\`docker/docker-compose.yml\`](${COMPOSE_URL})"
+            echo "- Env template: [\`docker/env/prod.env\`](${PROD_ENV_URL})"
+            echo "- Full guide: [\`docs/DEPLOYMENT.md\`](${DEPLOY_URL})"
+            echo
+            echo "1. Copy \`docker/env/prod.env\` and replace every \`replace-with-...\` value."
+            echo "2. Pin all three application images to this release:"
+            echo
+            echo '```env'
+            echo "DF_API_IMAGE=${API_IMAGE}:${VERSION}"
+            echo "DF_SCHEDULER_IMAGE=${SCHEDULER_IMAGE}:${VERSION}"
+            echo "DF_WORKER_IMAGE=${WORKER_IMAGE}:${VERSION}"
+            echo '```'
+            echo
+            echo "3. Start the stack:"
+            echo
+            echo '```bash'
+            echo "docker compose --env-file docker/env/prod.env \\"
+            echo "  -p dataforge-prod \\"
+            echo "  -f docker/docker-compose.yml \\"
+            echo "  pull"
+            echo "docker compose --env-file docker/env/prod.env \\"
+            echo "  -p dataforge-prod \\"
+            echo "  -f docker/docker-compose.yml \\"
+            echo "  up -d"
+            echo '```'
+            echo
+            echo "Keep API, scheduler, and worker on the same release tag."
+            echo
+          } > "$NOTES_FILE"
+
+          PREV_TAG="$(gh release list --limit 20 --json tagName,isDraft,isPrerelease \
+            --jq "[.[] | select(.isDraft == false and .isPrerelease == false and .tagName != \"${TAG}\")][0].tagName // empty")"
+
+          if [ -n "$PREV_TAG" ]; then
+            gh api "repos/${REPO}/releases/generate-notes" \
+              -f tag_name="$TAG" \
+              -f previous_tag_name="$PREV_TAG" \
+              --jq .body >> "$NOTES_FILE"
+          else
+            gh api "repos/${REPO}/releases/generate-notes" \
+              -f tag_name="$TAG" \
+              --jq .body >> "$NOTES_FILE"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "Release ${TAG}" \
+              --notes-file "$NOTES_FILE" \
+              --latest
+          else
+            gh release create "$TAG" \
+              --title "Release ${TAG}" \
+              --notes-file "$NOTES_FILE" \
+              --latest \
+              --verify-tag
+          fi
