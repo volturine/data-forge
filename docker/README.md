@@ -67,3 +67,19 @@ docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/docker
 
 Do not pass `-v` for production unless permanent deletion of all three durable
 volumes is intentional and verified.
+
+## Maintainer local production smoke test
+
+`just docker-prod` builds local `api` / `scheduler` / `worker` images and starts
+the same production compose file and env file, overriding only the three
+`DF_*_IMAGE` tags:
+
+```bash
+just docker-prod
+just docker-prod-logs
+just docker-prod-down
+```
+
+Optional: set `DF_LOCAL_TAG` to control the local image tag (default `local`).
+Replace every `replace-with-...` value in `docker/env/prod.env` (or export
+overrides) before a successful smoke start.

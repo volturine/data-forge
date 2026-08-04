@@ -134,7 +134,7 @@ describe('BuildPreview', () => {
 			renderPreview(
 				makeDetail({ status: 'completed', progress: 1, duration_ms: 4500, error: null })
 			);
-			expect(screen.getByText('Finished in 4.50s')).toBeInTheDocument();
+			expect(screen.getByText('Finished in 4.5s')).toBeInTheDocument();
 		});
 	});
 

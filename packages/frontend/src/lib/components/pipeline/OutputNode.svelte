@@ -109,10 +109,16 @@
 		) {
 			return null;
 		}
+		const timeoutRaw = output.build_timeout_warning_ms;
+		const timeoutMs =
+			typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw) && timeoutRaw > 0
+				? Math.round(timeoutRaw)
+				: null;
 		return {
 			format: 'parquet',
 			filename: output.filename,
 			build_mode: output.build_mode,
+			build_timeout_warning_ms: timeoutMs,
 			iceberg: {
 				namespace: icebergRaw.namespace,
 				table_name: icebergRaw.table_name,
@@ -908,6 +914,25 @@
 								<span class={css({ color: 'fg.muted' })}>Branch</span>
 								<span>{branchValue}</span>
 							</div>
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									borderWidth: '1',
+									backgroundColor: 'bg.secondary',
+									paddingX: '3',
+									paddingY: '2',
+									fontSize: 'sm'
+								})}
+							>
+								<span class={css({ color: 'fg.muted' })}>Duration warning</span>
+								<span data-testid="output-timeout-warning-readonly">
+									{outputConfig.build_timeout_warning_ms
+										? `${outputConfig.build_timeout_warning_ms} ms`
+										: 'Off'}
+								</span>
+							</div>
 						{:else}
 							<div
 								class={css({
@@ -1035,6 +1060,47 @@
 								allowCreate={true}
 								onChange={applyGlobalBranchValue}
 							/>
+							<label
+								class={css({
+									display: 'flex',
+									flexDirection: 'column',
+									gap: '1',
+									fontSize: 'xs',
+									color: 'fg.muted'
+								})}
+							>
+								<span>Duration warning (ms, optional)</span>
+								<input
+									type="number"
+									min="0"
+									step="1000"
+									placeholder="No threshold"
+									class={css({
+										width: '100%',
+										borderWidth: '1',
+										backgroundColor: 'bg.secondary',
+										paddingX: '3',
+										paddingY: '2',
+										fontSize: 'sm',
+										color: 'fg.primary'
+									})}
+									value={outputConfig.build_timeout_warning_ms ?? ''}
+									oninput={(event) => {
+										const raw = (event.currentTarget as HTMLInputElement).value.trim();
+										if (!raw) {
+											updateOutputConfig({ build_timeout_warning_ms: null });
+											return;
+										}
+										const parsed = Number(raw);
+										if (!Number.isFinite(parsed) || parsed <= 0) {
+											updateOutputConfig({ build_timeout_warning_ms: null });
+											return;
+										}
+										updateOutputConfig({ build_timeout_warning_ms: Math.round(parsed) });
+									}}
+									data-testid="output-timeout-warning-input"
+								/>
+							</label>
 						{/if}
 					</div>
 				</div>

@@ -28,6 +28,7 @@
 	} from '@lucide/svelte';
 	import { css, tabButton, chip, spinner } from '$lib/styles/panda';
 	import { buildStepLabel } from '$lib/utils/build-step-label';
+	import { formatDuration } from '$lib/utils/format-duration';
 
 	interface Props {
 		store: BuildStreamStore;
@@ -59,11 +60,37 @@
 
 	const MEMORY_WARN_THRESHOLD = 80;
 
-	const elapsedSec = $derived(store.elapsed > 0 ? (store.elapsed / 1000).toFixed(1) : '0.0');
-	const remainingSec = $derived(
-		store.remaining !== null && store.remaining > 0 ? (store.remaining / 1000).toFixed(0) : null
+	const elapsedLabel = $derived(formatDuration(store.elapsed > 0 ? store.elapsed : 0));
+	const remainingLabel = $derived(
+		store.remaining !== null && store.remaining > 0 ? formatDuration(store.remaining) : null
 	);
-	const durationSec = $derived(store.duration !== null ? (store.duration / 1000).toFixed(2) : null);
+	const durationLabel = $derived(store.duration !== null ? formatDuration(store.duration) : null);
+	const maxStepDuration = $derived.by(() => {
+		let max = 0;
+		for (const step of store.steps) {
+			if (step.duration !== null && step.duration > max) max = step.duration;
+		}
+		return max;
+	});
+	const slowestStepIndex = $derived.by(() => {
+		let max = -1;
+		let index = -1;
+		for (let i = 0; i < store.steps.length; i += 1) {
+			const duration = store.steps[i].duration;
+			if (duration !== null && duration > max) {
+				max = duration;
+				index = i;
+			}
+		}
+		return index;
+	});
+	const totalStepDuration = $derived.by(() => {
+		let total = 0;
+		for (const step of store.steps) {
+			if (step.duration !== null) total += step.duration;
+		}
+		return total;
+	});
 	const hasConfig = $derived(store.resourceConfig !== null);
 	const hasResources = $derived(store.latestResources !== null || store.resourceHistory.length > 0);
 	const hasPlans = $derived(store.queryPlans.length > 0);
@@ -290,7 +317,7 @@
 		>
 			<span class={css({ fontSize: 'xs', color: 'fg.secondary' })}>
 				{#if store.status === 'completed'}
-					Finished in {durationSec}s
+					Finished in {durationLabel}
 				{:else if store.status === 'running'}
 					Step {store.currentStepIndex !== null
 						? store.currentStepIndex + 1
@@ -314,13 +341,16 @@
 					color: 'fg.muted'
 				})}
 			>
-				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+				<span
+					class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
+					data-testid="build-elapsed-timer"
+				>
 					<Clock size={11} />
-					{elapsedSec}s
+					{elapsedLabel}
 				</span>
-				{#if remainingSec}
+				{#if remainingLabel}
 					<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
-						~{remainingSec}s left
+						~{remainingLabel} left
 					</span>
 				{/if}
 			</div>
@@ -508,7 +538,7 @@
 					{/if}
 				{:else}
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-						{#each tabSteps as step (step.buildStepIndex)}
+						{#each tabSteps as step, stepIdx (step.buildStepIndex)}
 							{#if step.showTabHeader}
 								<div
 									class={css({
@@ -529,91 +559,141 @@
 									{step.tabName}
 								</div>
 							{/if}
+							{@const isSlowest = stepIdx === slowestStepIndex && step.duration !== null}
+							{@const sharePct =
+								step.duration !== null && totalStepDuration > 0
+									? Math.round((step.duration / totalStepDuration) * 1000) / 10
+									: null}
+							{@const barPct =
+								step.duration !== null && maxStepDuration > 0
+									? Math.max((step.duration / maxStepDuration) * 100, 2)
+									: 0}
 							<div
 								class={css(
 									{
 										display: 'flex',
-										alignItems: 'center',
-										gap: '3',
+										flexDirection: 'column',
+										gap: '1',
 										paddingY: '1.5',
 										paddingX: '2',
 										fontSize: 'sm'
 									},
-									step.state === 'running' && { backgroundColor: 'bg.accent' }
+									step.state === 'running' && { backgroundColor: 'bg.accent' },
+									isSlowest && { backgroundColor: 'bg.warning' }
 								)}
 								data-testid={`build-step-${step.buildStepIndex}`}
 								data-step-state={step.state}
+								data-step-slowest={isSlowest ? 'true' : 'false'}
 							>
-								<div
-									class={css({
-										width: 'iconMd',
-										flexShrink: '0',
-										display: 'flex',
-										alignItems: 'center',
-										justifyContent: 'center'
-									})}
-								>
-									{#if step.state === 'pending' || step.state === 'skipped'}
-										<div
-											class={css({ width: 'dot', height: 'dot', backgroundColor: 'bg.muted' })}
-										></div>
-									{:else if step.state === 'running'}
-										<Loader
-											size={12}
-											class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
-										/>
-									{:else if step.state === 'completed'}
-										<CircleCheckBig size={12} class={css({ color: 'fg.success' })} />
-									{:else}
-										<CircleX size={12} class={css({ color: 'fg.error' })} />
+								<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
+									<div
+										class={css({
+											width: 'iconMd',
+											flexShrink: '0',
+											display: 'flex',
+											alignItems: 'center',
+											justifyContent: 'center'
+										})}
+									>
+										{#if step.state === 'pending' || step.state === 'skipped'}
+											<div
+												class={css({ width: 'dot', height: 'dot', backgroundColor: 'bg.muted' })}
+											></div>
+										{:else if step.state === 'running'}
+											<Loader
+												size={12}
+												class={css({
+													color: 'accent.primary',
+													animation: 'spin 1s linear infinite'
+												})}
+											/>
+										{:else if step.state === 'completed'}
+											<CircleCheckBig size={12} class={css({ color: 'fg.success' })} />
+										{:else}
+											<CircleX size={12} class={css({ color: 'fg.error' })} />
+										{/if}
+									</div>
+									<span
+										class={css({
+											flex: '1',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap',
+											fontSize: 'sm',
+											fontWeight: 'medium'
+										})}
+										title={buildStepLabel(step.name, step.stepType)}
+									>
+										{buildStepLabel(step.name, step.stepType)}
+										{#if isSlowest}
+											<span class={css({ color: 'fg.warning', fontSize: '2xs', marginLeft: '1' })}
+												>slowest</span
+											>
+										{/if}
+									</span>
+									{#if step.rowCount !== null}
+										<span
+											class={css({
+												flexShrink: '0',
+												fontFamily: 'mono',
+												fontSize: 'xs',
+												color: 'fg.muted'
+											})}
+										>
+											{step.rowCount.toLocaleString()} rows
+										</span>
+									{/if}
+									{#if step.duration !== null}
+										<span
+											class={css({
+												flexShrink: '0',
+												fontFamily: 'mono',
+												fontSize: 'xs',
+												color: isSlowest ? 'fg.warning' : 'fg.muted'
+											})}
+											data-testid={`build-step-duration-${step.buildStepIndex}`}
+											title={sharePct !== null ? `${sharePct}% of timed steps` : undefined}
+										>
+											{formatDuration(step.duration)}
+											{#if sharePct !== null}
+												<span class={css({ color: 'fg.faint' })}>({sharePct}%)</span>
+											{/if}
+										</span>
+									{/if}
+									{#if step.error}
+										<span
+											class={css({ flexShrink: '0', fontSize: 'xs', color: 'fg.error' })}
+											title={step.error}
+										>
+											error
+										</span>
 									{/if}
 								</div>
-								<span
-									class={css({
-										flex: '1',
-										overflow: 'hidden',
-										textOverflow: 'ellipsis',
-										whiteSpace: 'nowrap',
-										fontSize: 'sm',
-										fontWeight: 'medium'
-									})}
-									title={buildStepLabel(step.name, step.stepType)}
-								>
-									{buildStepLabel(step.name, step.stepType)}
-								</span>
-								{#if step.rowCount !== null}
-									<span
+								{#if step.duration !== null && maxStepDuration > 0}
+									<div
 										class={css({
-											flexShrink: '0',
-											fontFamily: 'mono',
-											fontSize: 'xs',
-											color: 'fg.muted'
+											marginLeft: 'iconMd',
+											height: '1',
+											backgroundColor: 'bg.tertiary',
+											overflow: 'hidden'
 										})}
+										data-testid={`build-step-bar-${step.buildStepIndex}`}
+										role="meter"
+										aria-valuenow={step.duration}
+										aria-valuemin={0}
+										aria-valuemax={maxStepDuration}
+										aria-label={`${buildStepLabel(step.name, step.stepType)} duration`}
 									>
-										{step.rowCount.toLocaleString()} rows
-									</span>
-								{/if}
-								{#if step.duration !== null}
-									<span
-										class={css({
-											flexShrink: '0',
-											fontFamily: 'mono',
-											fontSize: 'xs',
-											color: 'fg.muted'
-										})}
-									>
-										{step.duration < 1000
-											? `${step.duration}ms`
-											: `${(step.duration / 1000).toFixed(2)}s`}
-									</span>
-								{/if}
-								{#if step.error}
-									<span
-										class={css({ flexShrink: '0', fontSize: 'xs', color: 'fg.error' })}
-										title={step.error}
-									>
-										error
-									</span>
+										<div
+											class={css({
+												height: '100%',
+												backgroundColor: isSlowest ? 'fg.warning' : 'accent.primary',
+												transitionProperty: 'width',
+												transitionDuration: '200ms'
+											})}
+											style={`width: ${barPct}%`}
+										></div>
+									</div>
 								{/if}
 							</div>
 						{/each}

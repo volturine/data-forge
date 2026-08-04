@@ -38,6 +38,28 @@ async def compare_runs(
     )
 
 
+@router.get('/stats', response_model=schemas.DurationStatsResponse, mcp=True)
+@handle_errors(operation='get duration stats')
+async def duration_stats(
+    analysis_id: str | None = None,
+    datasource_id: str | None = None,
+    kind: EngineRunKind | None = None,
+    limit: int = 20,
+    session: Session = Depends(get_db),
+):
+    """Duration aggregates for the last N terminal runs (avg, p50, p95, trend).
+
+    For kind=BUILD (default when omitted), uses build_runs. Other kinds use engine_runs.
+    """
+    return service.duration_stats(
+        session,
+        analysis_id=parse_analysis_id(analysis_id) if analysis_id else None,
+        datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
+        kind=kind,
+        limit=limit,
+    )
+
+
 @router.get('', response_model=list[schemas.EngineRunResponseSchema], mcp=True)
 @handle_errors(operation='list engine runs')
 async def list_runs(

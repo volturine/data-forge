@@ -195,3 +195,36 @@ class BuildComparisonResponse(BaseModel):
     schema_diff: list[ColumnDiff] = Field(default_factory=list)
     timing_diff: list[TimingDiff] = Field(default_factory=list)
     total_duration_delta_ms: int | None = None
+
+
+class DurationStatsRun(BaseModel):
+    id: str
+    started_at: dt.datetime
+    duration_ms: int | None
+    status: str
+
+
+class DurationTrend(BaseModel):
+    """Half-window comparison of build length (older runs vs more recent runs).
+
+    ``change_pct`` is signed on duration: positive means duration is increasing,
+    negative means duration is decreasing.
+    """
+
+    direction: str = 'insufficient_data'
+    change_pct: float | None = None
+    older_avg_ms: float | None = None
+    recent_avg_ms: float | None = None
+    older_count: int = 0
+    recent_count: int = 0
+    sample_size: int = 0
+    threshold_pct: float = 10.0
+    summary: str = 'Not enough builds to judge a trend yet.'
+
+
+class DurationStatsResponse(BaseModel):
+    runs: list[DurationStatsRun] = Field(default_factory=list)
+    avg_duration_ms: float | None = None
+    p50_duration_ms: float | None = None
+    p95_duration_ms: float | None = None
+    trend: DurationTrend = Field(default_factory=DurationTrend)

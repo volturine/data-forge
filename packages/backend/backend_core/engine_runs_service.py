@@ -13,6 +13,9 @@ from backend_core.domain.compute.schemas import BuildLogLevel, BuildStepState
 from backend_core.domain.engine_runs.schemas import (
     BuildComparisonResponse,
     ColumnDiff,
+    DurationStatsResponse,
+    DurationStatsRun,
+    DurationTrend,
     EngineRunExecutionCategory,
     EngineRunExecutionEntry,
     EngineRunKind,
@@ -551,3 +554,214 @@ def _compute_timing_diff(timings_a: dict[str, float], timings_b: dict[str, float
             delta_pct = round((delta_ms / ms_a) * 100, 1)
         diffs.append(TimingDiff(step=step, ms_a=ms_a, ms_b=ms_b, delta_ms=delta_ms, delta_pct=delta_pct))
     return diffs
+
+
+def _percentile(sorted_values: list[float], pct: float) -> float | None:
+    if not sorted_values:
+        return None
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    rank = (len(sorted_values) - 1) * pct
+    low = int(rank)
+    high = min(low + 1, len(sorted_values) - 1)
+    weight = rank - low
+    return sorted_values[low] * (1 - weight) + sorted_values[high] * weight
+
+
+_TREND_MIN_SAMPLES = 4
+_TREND_THRESHOLD_PCT = 10.0
+
+
+def _format_duration_ms_short(ms: float) -> str:
+    if ms < 1000:
+        return f'{int(round(ms))}ms'
+    total_sec = ms / 1000
+    if total_sec < 60:
+        if total_sec < 10:
+            return f'{total_sec:.1f}s'
+        return f'{int(round(total_sec))}s'
+    total_min = int(total_sec // 60)
+    sec = int(round(total_sec % 60))
+    if total_min < 60:
+        if sec == 0:
+            return f'{total_min}m'
+        return f'{total_min}m {sec}s'
+    hours = total_min // 60
+    minutes = total_min % 60
+    if minutes == 0:
+        return f'{hours}h'
+    return f'{hours}h {minutes}m'
+
+
+def _duration_trend(durations: list[float]) -> DurationTrend:
+    """Compare average duration of the older half vs the more recent half of runs.
+
+    Chronological order is oldest → newest. A positive ``change_pct`` means
+    duration is increasing; negative means duration is decreasing.
+    """
+    sample_size = len(durations)
+    if sample_size < _TREND_MIN_SAMPLES:
+        return DurationTrend(
+            direction='insufficient_data',
+            sample_size=sample_size,
+            threshold_pct=_TREND_THRESHOLD_PCT,
+            summary=(
+                f'Need at least {_TREND_MIN_SAMPLES} timed builds to judge a trend '
+                f'({sample_size} so far).'
+            ),
+        )
+
+    half = sample_size // 2
+    older = durations[:half]
+    recent = durations[half:]
+    older_avg = sum(older) / len(older)
+    recent_avg = sum(recent) / len(recent)
+    if older_avg <= 0:
+        return DurationTrend(
+            direction='stable',
+            change_pct=0.0,
+            older_avg_ms=round(older_avg, 1),
+            recent_avg_ms=round(recent_avg, 1),
+            older_count=len(older),
+            recent_count=len(recent),
+            sample_size=sample_size,
+            threshold_pct=_TREND_THRESHOLD_PCT,
+            summary='Not enough signal in earlier builds to compare duration.',
+        )
+
+    change = (recent_avg - older_avg) / older_avg
+    change_pct = round(change * 100, 1)
+    threshold = _TREND_THRESHOLD_PCT / 100
+    if change <= -threshold:
+        direction = 'decreasing'
+    elif change >= threshold:
+        direction = 'increasing'
+    else:
+        direction = 'stable'
+
+    older_label = _format_duration_ms_short(older_avg)
+    recent_label = _format_duration_ms_short(recent_avg)
+    abs_pct = abs(change_pct)
+    if direction == 'decreasing':
+        summary = (
+            f'Recent {len(recent)} builds average {recent_label} '
+            f'(duration decreasing {abs_pct:.0f}% vs previous {len(older)}, avg {older_label}).'
+        )
+    elif direction == 'increasing':
+        summary = (
+            f'Recent {len(recent)} builds average {recent_label} '
+            f'(duration increasing {abs_pct:.0f}% vs previous {len(older)}, avg {older_label}).'
+        )
+    else:
+        summary = (
+            f'Recent {len(recent)} builds average {recent_label}, '
+            f'about the same as the previous {len(older)} (avg {older_label}, '
+            f'{change_pct:+.0f}%).'
+        )
+
+    return DurationTrend(
+        direction=direction,
+        change_pct=change_pct,
+        older_avg_ms=round(older_avg, 1),
+        recent_avg_ms=round(recent_avg, 1),
+        older_count=len(older),
+        recent_count=len(recent),
+        sample_size=sample_size,
+        threshold_pct=_TREND_THRESHOLD_PCT,
+        summary=summary,
+    )
+
+
+def _duration_stats_response(runs: list[DurationStatsRun], durations: list[float]) -> DurationStatsResponse:
+    sorted_durations = sorted(durations)
+    p50 = _percentile(sorted_durations, 0.5)
+    p95 = _percentile(sorted_durations, 0.95)
+    return DurationStatsResponse(
+        runs=runs,
+        avg_duration_ms=round(sum(durations) / len(durations), 1) if durations else None,
+        p50_duration_ms=round(p50, 1) if p50 is not None else None,
+        p95_duration_ms=round(p95, 1) if p95 is not None else None,
+        trend=_duration_trend(durations),
+    )
+
+
+def duration_stats(
+    session: Session,
+    *,
+    analysis_id: str | None = None,
+    datasource_id: str | None = None,
+    kind: EngineRunKind | str | None = None,
+    limit: int = 20,
+) -> DurationStatsResponse:
+    """Return duration aggregates for recent terminal builds or engine runs."""
+    from backend_core.domain.build_runs.models import BuildRunStatus
+    from backend_core.persistence.build_runs.models import BuildRun
+
+    capped = max(1, min(limit, 100))
+    coerced_kind = EngineRunKind.require(kind) if kind is not None else None
+
+    # Build runs own full pipeline build durations; engine_runs exclude kind=BUILD.
+    if coerced_kind is None or coerced_kind == EngineRunKind.BUILD:
+        build_stmt = select(BuildRun).where(sa(BuildRun.namespace == get_namespace()))
+        if analysis_id is not None:
+            build_stmt = build_stmt.where(sa(BuildRun.analysis_id == analysis_id))
+        if datasource_id is not None:
+            build_stmt = build_stmt.where(
+                or_(
+                    sa(BuildRun.current_datasource_id == datasource_id),
+                    sa(BuildRun.current_output_id == datasource_id),
+                )
+            )
+        build_stmt = build_stmt.where(
+            col(BuildRun.status).in_(
+                [
+                    BuildRunStatus.COMPLETED,
+                    BuildRunStatus.FAILED,
+                    BuildRunStatus.CANCELLED,
+                ]
+            )
+        )
+        build_stmt = build_stmt.order_by(desc(sa(BuildRun.started_at)), sa(BuildRun.id)).limit(capped)
+        build_rows = list(session.execute(build_stmt).scalars().all())
+        chronological_builds = list(reversed(build_rows))
+        build_runs = [
+            DurationStatsRun(
+                id=row.id,
+                started_at=row.started_at,
+                duration_ms=row.duration_ms,
+                status=str(row.status),
+            )
+            for row in chronological_builds
+        ]
+        build_durations = [float(row.duration_ms) for row in chronological_builds if row.duration_ms is not None]
+        return _duration_stats_response(build_runs, build_durations)
+
+    engine_stmt = select(EngineRun).where(sa(EngineRun.namespace == get_namespace()))
+    if analysis_id is not None:
+        engine_stmt = engine_stmt.where(sa(EngineRun.analysis_id == analysis_id))
+    if datasource_id is not None:
+        engine_stmt = engine_stmt.where(sa(EngineRun.datasource_id == datasource_id))
+    engine_stmt = engine_stmt.where(sa(EngineRun.kind == coerced_kind.value))
+    engine_stmt = engine_stmt.where(
+        col(EngineRun.status).in_(
+            [
+                EngineRunStatus.SUCCESS,
+                EngineRunStatus.FAILED,
+                EngineRunStatus.CANCELLED,
+            ]
+        )
+    )
+    engine_stmt = engine_stmt.order_by(desc(sa(EngineRun.created_at)), sa(EngineRun.id)).limit(capped)
+    engine_rows = list(session.execute(engine_stmt).scalars().all())
+    chronological_engines = list(reversed(engine_rows))
+    engine_runs = [
+        DurationStatsRun(
+            id=row.id,
+            started_at=row.created_at,
+            duration_ms=row.duration_ms,
+            status=str(row.status),
+        )
+        for row in chronological_engines
+    ]
+    engine_durations = [float(row.duration_ms) for row in chronological_engines if row.duration_ms is not None]
+    return _duration_stats_response(engine_runs, engine_durations)

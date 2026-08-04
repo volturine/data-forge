@@ -27,14 +27,18 @@
 		CalendarClock,
 		Database,
 		RefreshCw,
-		Hash
+		Hash,
+		TriangleAlert
 	} from '@lucide/svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import DurationTrendChart from '$lib/components/common/DurationTrendChart.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { getDurationStats, type DurationStatsResponse } from '$lib/api/engine-runs';
 	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
+	import { elapsedSince, formatDuration } from '$lib/utils/format-duration';
 	import { endOfDayEpoch, startOfDayEpoch } from '$lib/utils/temporal';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { css, spinner, button, emptyText, input } from '$lib/styles/panda';
@@ -74,6 +78,9 @@
 	let sortColumn = $state<string>('created_at');
 	let sortDir = $state<'asc' | 'desc'>('desc');
 	let syncingExpandedId: string | null = null;
+	let nowMs = $state(Date.now());
+	let durationStats = $state<DurationStatsResponse | null>(null);
+	let durationStatsLoading = $state(false);
 	const detailStores = new SvelteMap<string, BuildStreamStore>();
 	const detailSnapshots = new SvelteMap<string, ActiveBuildDetail>();
 	const detailPayloads = new SvelteMap<string, BuildPayloadData>();
@@ -249,12 +256,6 @@
 		sortDir = col === 'created_at' || col === 'duration_ms' ? 'desc' : 'asc';
 	}
 
-	function formatDuration(ms: number | null): string {
-		if (ms === null) return '-';
-		if (ms < 1000) return `${ms}ms`;
-		return `${(ms / 1000).toFixed(2)}s`;
-	}
-
 	function formatDate(isoDate: string): string {
 		return formatDateTimeDisplay(isoDate);
 	}
@@ -320,8 +321,56 @@
 		if (cancelled?.duration_ms !== null && cancelled?.duration_ms !== undefined) {
 			return cancelled.duration_ms;
 		}
+		const status = currentStatus(run);
+		if (status === 'running' || status === 'queued') {
+			return elapsedSince(run.started_at, nowMs) || run.elapsed_ms || 0;
+		}
 		return run.elapsed_ms ?? 0;
 	}
+
+	function runDurationExceeded(run: ActiveBuildSummary): boolean {
+		const result = run.result_json;
+		if (!result || typeof result !== 'object') return false;
+		return result.duration_exceeded_warning === true;
+	}
+
+	const statsAnalysisId = $derived(
+		(pageState.url.searchParams.get('analysis_id') ?? undefined) || undefined
+	);
+	const statsDatasourceId = $derived(
+		(pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined
+	);
+
+	$effect(() => {
+		const analysisId = statsAnalysisId;
+		const datasourceId = statsDatasourceId;
+		if (!analysisId && !datasourceId) {
+			durationStats = null;
+			return;
+		}
+		let cancelled = false;
+		durationStatsLoading = true;
+		void getDurationStats({
+			analysis_id: analysisId,
+			datasource_id: datasourceId,
+			kind: 'build',
+			limit: 20
+		}).match(
+			(stats) => {
+				if (cancelled) return;
+				durationStats = stats;
+				durationStatsLoading = false;
+			},
+			() => {
+				if (cancelled) return;
+				durationStats = null;
+				durationStatsLoading = false;
+			}
+		);
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	function currentStatus(
 		run: ActiveBuildSummary
@@ -329,6 +378,19 @@
 		if (pendingCancelled.has(run.build_id)) return 'cancelled';
 		return run.status;
 	}
+
+	// Live clock for running build elapsed timers
+	$effect(() => {
+		const hasRunning = runs.some((run) => {
+			const status = currentStatus(run);
+			return status === 'running' || status === 'queued';
+		});
+		if (!hasRunning) return;
+		const timer = setInterval(() => {
+			nowMs = Date.now();
+		}, 1000);
+		return () => clearInterval(timer);
+	});
 
 	function cancelledAt(run: ActiveBuildSummary): string | null {
 		return pendingCancelled.get(run.build_id)?.cancelled_at ?? run.cancelled_at ?? null;
@@ -804,192 +866,136 @@
 		>
 			{buildsStore.error ?? 'Failed to load builds'}
 		</div>
-	{:else if !hasAnyBuildRows}
-		<div
-			class={css({
-				borderWidth: '1',
-				borderStyle: 'dashed',
-				padding: '8',
-				textAlign: 'center'
-			})}
-		>
-			<p class={emptyText({ size: 'panel' })}>No builds yet.</p>
-			<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
-				Runs will appear here when you preview, export, or ingest data from external sources.
-				Compare snapshots from the Datasources tab.
-			</p>
-		</div>
 	{:else}
-		<div
-			class={css({
-				overflowX: 'auto',
-				borderWidth: '1'
-			})}
-		>
-			<table
+		{#if statsAnalysisId || statsDatasourceId}
+			<div class={css({ marginBottom: '3' })}>
+				<DurationTrendChart stats={durationStats} loading={durationStatsLoading} />
+			</div>
+		{/if}
+
+		{#if !hasAnyBuildRows}
+			<div
 				class={css({
-					width: '100%',
-					borderCollapse: 'collapse',
-					tableLayout: 'fixed',
-					fontSize: 'sm'
+					borderWidth: '1',
+					borderStyle: 'dashed',
+					padding: '8',
+					textAlign: 'center'
 				})}
 			>
-				<colgroup>
-					<col style="width: 40px;" />
-					<col style="width: 180px;" />
-					<col style="width: 130px;" />
-					<col style="width: 240px;" />
-					<col style="width: 120px;" />
-					<col style="width: 220px;" />
-					<col style="width: 110px;" />
-					<col style="width: 190px;" />
-				</colgroup>
-				<thead>
-					<tr class={css({ backgroundColor: 'bg.tertiary' })}>
-						<th
-							class={css({
-								width: 'rowLg',
-								borderBottomWidth: '1',
-								paddingX: '3',
-								paddingY: '2',
-								textAlign: 'left',
-								fontWeight: 'medium'
-							})}
-						></th>
-						{#each [{ key: 'kind', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'datasource', label: 'Datasource' }, { key: 'analysis', label: 'Analysis' }, { key: 'output', label: 'Output' }, { key: 'duration_ms', label: 'Duration' }, { key: 'created_at', label: 'Created' }] as col (col.key)}
+				<p class={emptyText({ size: 'panel' })}>No builds yet.</p>
+				<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
+					Runs will appear here when you preview, export, or ingest data from external sources.
+					Compare snapshots from the Datasources tab.
+				</p>
+			</div>
+		{:else}
+			<div
+				class={css({
+					overflowX: 'auto',
+					borderWidth: '1'
+				})}
+			>
+				<table
+					class={css({
+						width: '100%',
+						borderCollapse: 'collapse',
+						tableLayout: 'fixed',
+						fontSize: 'sm'
+					})}
+				>
+					<colgroup>
+						<col style="width: 40px;" />
+						<col style="width: 180px;" />
+						<col style="width: 130px;" />
+						<col style="width: 240px;" />
+						<col style="width: 120px;" />
+						<col style="width: 220px;" />
+						<col style="width: 110px;" />
+						<col style="width: 190px;" />
+					</colgroup>
+					<thead>
+						<tr class={css({ backgroundColor: 'bg.tertiary' })}>
 							<th
 								class={css({
-									cursor: 'pointer',
+									width: 'rowLg',
 									borderBottomWidth: '1',
 									paddingX: '3',
 									paddingY: '2',
 									textAlign: 'left',
-									fontWeight: 'medium',
-									transition: 'background-color 160ms ease',
-									_hover: {
-										backgroundColor: 'bg.hover'
-									}
+									fontWeight: 'medium'
 								})}
-								onclick={() => toggleSort(col.key)}
-							>
-								<span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1' })}>
-									{col.label}
-									{#if sortColumn === col.key}
-										{#if sortDir === 'asc'}
-											<ArrowUp size={12} />
-										{:else}
-											<ArrowDown size={12} />
-										{/if}
-									{/if}
-								</span>
-							</th>
-						{/each}
-					</tr>
-				</thead>
-				<tbody>
-					{#each filteredRuns as run (run.build_id)}
-						<tr
-							data-build-row={run.build_id}
-							data-build-source="history"
-							data-build-status={currentStatus(run)}
-							data-build-kind={effectiveKind(run)}
-							data-build-datasource-id={buildDatasourceId(run)}
-							data-build-datasource-name={buildDatasourceName(run) ??
-								resolveName(buildDatasourceId(run), dsNames)}
-							data-build-analysis-id={run.analysis_id}
-							data-build-analysis-name={resolveName(run.analysis_id, analysisNames)}
-							data-build-output-name={buildOutputName(run) ?? ''}
-							class={css(
-								{
-									cursor: 'pointer',
-									_hover: { backgroundColor: 'bg.hover' }
-								},
-								expandedId === run.build_id && { backgroundColor: 'bg.secondary' }
-							)}
-							onclick={() => toggleExpand(run.build_id)}
-						>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2'
-								})}
-							>
-								<ChevronDown
-									size={14}
-									class={expandedId === run.build_id
-										? undefined
-										: css({ transform: 'rotate(-90deg)' })}
-								/>
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2'
-								})}
-							>
-								<span
-									class={[
-										css({
-											display: 'block',
-											overflow: 'hidden',
-											textOverflow: 'ellipsis',
-											whiteSpace: 'nowrap'
-										}),
-										css({
-											display: 'inline-flex',
-											alignItems: 'center',
-											gap: '1.5'
-										})
-									]}
-								>
-									{#if effectiveKind(run) === 'build'}
-										<Database size={14} class={css({ color: 'accent.primary' })} />
-										<span>{engineRunKindLabel(effectiveKind(run))}</span>
-									{:else if effectiveKind(run) === 'download'}
-										<Download size={14} class={css({ color: 'fg.success' })} />
-										<span>{engineRunKindLabel(effectiveKind(run))}</span>
-									{:else if effectiveKind(run) === 'row_count'}
-										<Hash size={14} class={css({ color: 'fg.muted' })} />
-										<span>{engineRunKindLabel(effectiveKind(run))}</span>
-									{:else}
-										<Database size={14} class={css({ color: 'fg.muted' })} />
-										<span>{engineRunKindLabel(effectiveKind(run))}</span>
-									{/if}
-									{#if run.starter.triggered_by === 'schedule'}
-										<span
-											class={css({
-												marginLeft: '1',
-												display: 'inline-flex',
-												alignItems: 'center',
-												gap: '0.5',
-												backgroundColor: 'bg.accent',
-												paddingX: '1',
-												paddingY: '0.5',
-												fontSize: 'xs',
-												color: 'accent.primary'
-											})}
-											title="Triggered by schedule"
-										>
-											<CalendarClock size={11} />
-										</span>
-									{/if}
-								</span>
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2'
-								})}
-							>
-								<div
+							></th>
+							{#each [{ key: 'kind', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'datasource', label: 'Datasource' }, { key: 'analysis', label: 'Analysis' }, { key: 'output', label: 'Output' }, { key: 'duration_ms', label: 'Duration' }, { key: 'created_at', label: 'Created' }] as col (col.key)}
+								<th
 									class={css({
-										display: 'flex',
-										alignItems: 'center',
-										justifyContent: 'space-between',
-										gap: '2'
+										cursor: 'pointer',
+										borderBottomWidth: '1',
+										paddingX: '3',
+										paddingY: '2',
+										textAlign: 'left',
+										fontWeight: 'medium',
+										transition: 'background-color 160ms ease',
+										_hover: {
+											backgroundColor: 'bg.hover'
+										}
+									})}
+									onclick={() => toggleSort(col.key)}
+								>
+									<span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1' })}>
+										{col.label}
+										{#if sortColumn === col.key}
+											{#if sortDir === 'asc'}
+												<ArrowUp size={12} />
+											{:else}
+												<ArrowDown size={12} />
+											{/if}
+										{/if}
+									</span>
+								</th>
+							{/each}
+						</tr>
+					</thead>
+					<tbody>
+						{#each filteredRuns as run (run.build_id)}
+							<tr
+								data-build-row={run.build_id}
+								data-build-source="history"
+								data-build-status={currentStatus(run)}
+								data-build-kind={effectiveKind(run)}
+								data-build-datasource-id={buildDatasourceId(run)}
+								data-build-datasource-name={buildDatasourceName(run) ??
+									resolveName(buildDatasourceId(run), dsNames)}
+								data-build-analysis-id={run.analysis_id}
+								data-build-analysis-name={resolveName(run.analysis_id, analysisNames)}
+								data-build-output-name={buildOutputName(run) ?? ''}
+								class={css(
+									{
+										cursor: 'pointer',
+										_hover: { backgroundColor: 'bg.hover' }
+									},
+									expandedId === run.build_id && { backgroundColor: 'bg.secondary' }
+								)}
+								onclick={() => toggleExpand(run.build_id)}
+							>
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '3',
+										paddingY: '2'
+									})}
+								>
+									<ChevronDown
+										size={14}
+										class={expandedId === run.build_id
+											? undefined
+											: css({ transform: 'rotate(-90deg)' })}
+									/>
+								</td>
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '3',
+										paddingY: '2'
 									})}
 								>
 									<span
@@ -1007,257 +1013,339 @@
 											})
 										]}
 									>
-										{#if currentStatus(run) === 'queued'}
-											<Loader
-												size={14}
-												class={css({
-													color: 'fg.secondary',
-													animation: 'spin 1s linear infinite'
-												})}
-											/>
-											<span class={css({ color: 'fg.secondary' })}
-												>{activeBuildStatusLabel(currentStatus(run))}</span
-											>
-										{:else if currentStatus(run) === 'running'}
-											<Loader
-												size={14}
-												class={css({
-													color: 'accent.primary',
-													animation: 'spin 1s linear infinite'
-												})}
-											/>
-											<span class={css({ color: 'accent.primary' })}
-												>{activeBuildStatusLabel(currentStatus(run))}</span
-											>
-										{:else if currentStatus(run) === 'completed'}
-											<CircleCheck size={14} class={css({ color: 'fg.success' })} />
-											<span class={css({ color: 'fg.success' })}
-												>{activeBuildStatusLabel(currentStatus(run))}</span
-											>
-										{:else if currentStatus(run) === 'cancelled'}
-											<CircleX size={14} class={css({ color: 'fg.warning' })} />
-											<span class={css({ color: 'fg.warning' })}
-												>{activeBuildStatusLabel(currentStatus(run))}</span
-											>
+										{#if effectiveKind(run) === 'build'}
+											<Database size={14} class={css({ color: 'accent.primary' })} />
+											<span>{engineRunKindLabel(effectiveKind(run))}</span>
+										{:else if effectiveKind(run) === 'download'}
+											<Download size={14} class={css({ color: 'fg.success' })} />
+											<span>{engineRunKindLabel(effectiveKind(run))}</span>
+										{:else if effectiveKind(run) === 'row_count'}
+											<Hash size={14} class={css({ color: 'fg.muted' })} />
+											<span>{engineRunKindLabel(effectiveKind(run))}</span>
 										{:else}
-											<CircleX size={14} class={css({ color: 'fg.error' })} />
-											<span class={css({ color: 'fg.error' })}
-												>{activeBuildStatusLabel(currentStatus(run))}</span
+											<Database size={14} class={css({ color: 'fg.muted' })} />
+											<span>{engineRunKindLabel(effectiveKind(run))}</span>
+										{/if}
+										{#if run.starter.triggered_by === 'schedule'}
+											<span
+												class={css({
+													marginLeft: '1',
+													display: 'inline-flex',
+													alignItems: 'center',
+													gap: '0.5',
+													backgroundColor: 'bg.accent',
+													paddingX: '1',
+													paddingY: '0.5',
+													fontSize: 'xs',
+													color: 'accent.primary'
+												})}
+												title="Triggered by schedule"
 											>
+												<CalendarClock size={11} />
+											</span>
 										{/if}
 									</span>
-									{#if canCancelRun(run)}
-										<button
-											type="button"
-											class={button({ variant: 'ghost', size: 'sm' })}
-											onclick={(event) => {
-												event.stopPropagation();
-												requestCancelRun(run);
-											}}
-											disabled={cancelPending}
-											aria-label="Cancel build"
-											data-testid={`build-row-cancel-${run.build_id}`}
-										>
-											<CircleX size={12} />
-										</button>
-									{/if}
-								</div>
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2'
-								})}
-							>
-								<span
-									class={css({
-										display: 'block',
-										overflow: 'hidden',
-										textOverflow: 'ellipsis',
-										whiteSpace: 'nowrap',
-										fontSize: 'xs',
-										color: 'fg.secondary'
-									})}
-									title={buildDatasourceId(run)}
-								>
-									{buildDatasourceName(run) ?? resolveName(buildDatasourceId(run), dsNames)}
-								</span>
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2'
-								})}
-							>
-								{#if run.analysis_id}
-									<span
-										class={css({
-											display: 'block',
-											overflow: 'hidden',
-											textOverflow: 'ellipsis',
-											whiteSpace: 'nowrap',
-											fontSize: 'xs',
-											color: 'fg.secondary'
-										})}
-										title={run.analysis_id}
-									>
-										{resolveName(run.analysis_id, analysisNames)}
-									</span>
-								{:else}
-									<span class={css({ color: 'fg.muted' })}>-</span>
-								{/if}
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2'
-								})}
-							>
-								{#if buildOutputName(run)}
-									<span
-										class={css({
-											display: 'block',
-											overflow: 'hidden',
-											textOverflow: 'ellipsis',
-											whiteSpace: 'nowrap',
-											fontSize: 'xs',
-											color: 'fg.secondary'
-										})}
-										title={buildOutputName(run) ?? ''}
-									>
-										{buildOutputName(run)}
-									</span>
-								{:else}
-									<span class={css({ color: 'fg.muted' })}>-</span>
-								{/if}
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2',
-									fontFamily: 'mono',
-									fontSize: 'xs',
-									whiteSpace: 'nowrap'
-								})}
-							>
-								{formatDuration(summaryDurationMs(run))}
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2',
-									color: 'fg.secondary',
-									whiteSpace: 'nowrap'
-								})}
-							>
-								{formatDate(run.started_at)}
-							</td>
-						</tr>
-						{#if expandedId === run.build_id}
-							<tr data-build-detail={run.build_id}>
+								</td>
 								<td
-									colspan="8"
 									class={css({
 										borderBottomWidth: '1',
-										backgroundColor: 'bg.primary',
-										padding: '0',
-										overflow: 'hidden'
+										paddingX: '3',
+										paddingY: '2'
 									})}
 								>
 									<div
 										class={css({
-											padding: '4',
 											display: 'flex',
-											flexDirection: 'column',
-											gap: '3'
+											alignItems: 'center',
+											justifyContent: 'space-between',
+											gap: '2'
+										})}
+									>
+										<span
+											class={[
+												css({
+													display: 'block',
+													overflow: 'hidden',
+													textOverflow: 'ellipsis',
+													whiteSpace: 'nowrap'
+												}),
+												css({
+													display: 'inline-flex',
+													alignItems: 'center',
+													gap: '1.5'
+												})
+											]}
+										>
+											{#if currentStatus(run) === 'queued'}
+												<Loader
+													size={14}
+													class={css({
+														color: 'fg.secondary',
+														animation: 'spin 1s linear infinite'
+													})}
+												/>
+												<span class={css({ color: 'fg.secondary' })}
+													>{activeBuildStatusLabel(currentStatus(run))}</span
+												>
+											{:else if currentStatus(run) === 'running'}
+												<Loader
+													size={14}
+													class={css({
+														color: 'accent.primary',
+														animation: 'spin 1s linear infinite'
+													})}
+												/>
+												<span class={css({ color: 'accent.primary' })}
+													>{activeBuildStatusLabel(currentStatus(run))}</span
+												>
+											{:else if currentStatus(run) === 'completed'}
+												<CircleCheck size={14} class={css({ color: 'fg.success' })} />
+												<span class={css({ color: 'fg.success' })}
+													>{activeBuildStatusLabel(currentStatus(run))}</span
+												>
+											{:else if currentStatus(run) === 'cancelled'}
+												<CircleX size={14} class={css({ color: 'fg.warning' })} />
+												<span class={css({ color: 'fg.warning' })}
+													>{activeBuildStatusLabel(currentStatus(run))}</span
+												>
+											{:else}
+												<CircleX size={14} class={css({ color: 'fg.error' })} />
+												<span class={css({ color: 'fg.error' })}
+													>{activeBuildStatusLabel(currentStatus(run))}</span
+												>
+											{/if}
+										</span>
+										{#if canCancelRun(run)}
+											<button
+												type="button"
+												class={button({ variant: 'ghost', size: 'sm' })}
+												onclick={(event) => {
+													event.stopPropagation();
+													requestCancelRun(run);
+												}}
+												disabled={cancelPending}
+												aria-label="Cancel build"
+												data-testid={`build-row-cancel-${run.build_id}`}
+											>
+												<CircleX size={12} />
+											</button>
+										{/if}
+									</div>
+								</td>
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '3',
+										paddingY: '2'
+									})}
+								>
+									<span
+										class={css({
+											display: 'block',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap',
+											fontSize: 'xs',
+											color: 'fg.secondary'
+										})}
+										title={buildDatasourceId(run)}
+									>
+										{buildDatasourceName(run) ?? resolveName(buildDatasourceId(run), dsNames)}
+									</span>
+								</td>
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '3',
+										paddingY: '2'
+									})}
+								>
+									{#if run.analysis_id}
+										<span
+											class={css({
+												display: 'block',
+												overflow: 'hidden',
+												textOverflow: 'ellipsis',
+												whiteSpace: 'nowrap',
+												fontSize: 'xs',
+												color: 'fg.secondary'
+											})}
+											title={run.analysis_id}
+										>
+											{resolveName(run.analysis_id, analysisNames)}
+										</span>
+									{:else}
+										<span class={css({ color: 'fg.muted' })}>-</span>
+									{/if}
+								</td>
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '3',
+										paddingY: '2'
+									})}
+								>
+									{#if buildOutputName(run)}
+										<span
+											class={css({
+												display: 'block',
+												overflow: 'hidden',
+												textOverflow: 'ellipsis',
+												whiteSpace: 'nowrap',
+												fontSize: 'xs',
+												color: 'fg.secondary'
+											})}
+											title={buildOutputName(run) ?? ''}
+										>
+											{buildOutputName(run)}
+										</span>
+									{:else}
+										<span class={css({ color: 'fg.muted' })}>-</span>
+									{/if}
+								</td>
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '3',
+										paddingY: '2',
+										fontFamily: 'mono',
+										fontSize: 'xs',
+										whiteSpace: 'nowrap'
+									})}
+									data-testid={`build-row-duration-${run.build_id}`}
+								>
+									<span
+										class={css({
+											display: 'inline-flex',
+											alignItems: 'center',
+											gap: '1'
+										})}
+									>
+										{formatDuration(summaryDurationMs(run))}
+										{#if runDurationExceeded(run)}
+											<span
+												class={css({ color: 'fg.warning', display: 'inline-flex' })}
+												title="Build exceeded duration warning threshold"
+												data-testid={`build-duration-warning-${run.build_id}`}
+											>
+												<TriangleAlert size={12} />
+											</span>
+										{/if}
+									</span>
+								</td>
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '3',
+										paddingY: '2',
+										color: 'fg.secondary',
+										whiteSpace: 'nowrap'
+									})}
+								>
+									{formatDate(run.started_at)}
+								</td>
+							</tr>
+							{#if expandedId === run.build_id}
+								<tr data-build-detail={run.build_id}>
+									<td
+										colspan="8"
+										class={css({
+											borderBottomWidth: '1',
+											backgroundColor: 'bg.primary',
+											padding: '0',
+											overflow: 'hidden'
 										})}
 									>
 										<div
-											class={css({ display: 'flex', flexWrap: 'wrap', gap: '4', fontSize: 'sm' })}
+											class={css({
+												padding: '4',
+												display: 'flex',
+												flexDirection: 'column',
+												gap: '3'
+											})}
 										>
-											<span class={css({ color: 'fg.secondary' })}>
-												<strong>Build ID:</strong>
-												{run.build_id}
-											</span>
-											{#if run.current_engine_run_id}
+											<div
+												class={css({ display: 'flex', flexWrap: 'wrap', gap: '4', fontSize: 'sm' })}
+											>
 												<span class={css({ color: 'fg.secondary' })}>
-													<strong>Engine Run ID:</strong>
-													{run.current_engine_run_id}
+													<strong>Build ID:</strong>
+													{run.build_id}
 												</span>
-											{/if}
-											{#if currentStatus(run) === 'cancelled'}
-												<span class={css({ color: 'fg.warning' })}>
-													<strong>Cancelled At:</strong>
-													{cancelledAt(run) ? formatDate(cancelledAt(run) ?? '') : '-'}
-												</span>
-												<span class={css({ color: 'fg.warning' })}>
-													<strong>Cancelled By:</strong>
-													{cancelledBy(run) ?? '-'}
-												</span>
-												<span class={css({ color: 'fg.warning' })}>
-													<strong>Last Completed Step:</strong>
-													{lastCompletedStep(run) ?? '-'}
-												</span>
-											{/if}
+												{#if run.current_engine_run_id}
+													<span class={css({ color: 'fg.secondary' })}>
+														<strong>Engine Run ID:</strong>
+														{run.current_engine_run_id}
+													</span>
+												{/if}
+												{#if currentStatus(run) === 'cancelled'}
+													<span class={css({ color: 'fg.warning' })}>
+														<strong>Cancelled At:</strong>
+														{cancelledAt(run) ? formatDate(cancelledAt(run) ?? '') : '-'}
+													</span>
+													<span class={css({ color: 'fg.warning' })}>
+														<strong>Cancelled By:</strong>
+														{cancelledBy(run) ?? '-'}
+													</span>
+													<span class={css({ color: 'fg.warning' })}>
+														<strong>Last Completed Step:</strong>
+														{lastCompletedStep(run) ?? '-'}
+													</span>
+												{/if}
+											</div>
 										</div>
-									</div>
 
-									{#if expandedStore}
-										<div class={css({ width: '100%', overflowX: 'hidden' })}>
-											<BuildPreview
-												store={expandedStore}
-												title={engineRunKindLabel(effectiveKind(run))}
-												requestJson={expandedPayload?.requestJson ?? null}
-												resultJson={expandedPayload?.resultJson ?? null}
-											/>
-										</div>
-									{/if}
-								</td>
-							</tr>
-						{/if}
-					{/each}
-				</tbody>
-			</table>
-		</div>
-
-		<div
-			class={css({
-				display: 'flex',
-				alignItems: 'center',
-				marginTop: '4',
-				justifyContent: 'space-between'
-			})}
-		>
-			<span class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
-				Page {page}
-				{#if filteredRuns.length < runs.length}
-					({filteredRuns.length} of {runs.length} shown)
-				{/if}
-			</span>
-			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-				<button
-					class={button({ variant: 'ghost', size: 'sm' })}
-					onclick={prevPage}
-					disabled={page === 1}
-				>
-					<ChevronLeft size={14} />
-					Previous
-				</button>
-				<button
-					class={button({ variant: 'ghost', size: 'sm' })}
-					onclick={nextPage}
-					disabled={filteredRuns.length < limit}
-				>
-					Next
-					<ChevronRight size={14} />
-				</button>
+										{#if expandedStore}
+											<div class={css({ width: '100%', overflowX: 'hidden' })}>
+												<BuildPreview
+													store={expandedStore}
+													title={engineRunKindLabel(effectiveKind(run))}
+													requestJson={expandedPayload?.requestJson ?? null}
+													resultJson={expandedPayload?.resultJson ?? null}
+												/>
+											</div>
+										{/if}
+									</td>
+								</tr>
+							{/if}
+						{/each}
+					</tbody>
+				</table>
 			</div>
-		</div>
+
+			<div
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					marginTop: '4',
+					justifyContent: 'space-between'
+				})}
+			>
+				<span class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
+					Page {page}
+					{#if filteredRuns.length < runs.length}
+						({filteredRuns.length} of {runs.length} shown)
+					{/if}
+				</span>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+					<button
+						class={button({ variant: 'ghost', size: 'sm' })}
+						onclick={prevPage}
+						disabled={page === 1}
+					>
+						<ChevronLeft size={14} />
+						Previous
+					</button>
+					<button
+						class={button({ variant: 'ghost', size: 'sm' })}
+						onclick={nextPage}
+						disabled={filteredRuns.length < limit}
+					>
+						Next
+						<ChevronRight size={14} />
+					</button>
+				</div>
+			</div>
+		{/if}
 	{/if}
 </div>
 

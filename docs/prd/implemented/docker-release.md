@@ -1,6 +1,7 @@
 # PRD: Docker Release
 
-> **Status (audited 2026-08-02): Active — release distribution remains incomplete.**
+> **Status (2026-08-04): Implemented.**
+> **Current truth:** Production compose/env, multi-arch GHCR publish on `v*` tags, fixed-role images (`api`/`scheduler`/`worker`), and `just docker-prod` for local smoke tests that override only image tags against the production compose topology.
 > **Portfolio:** [PRD index](../README.md)
 
 ## Overview
@@ -201,13 +202,13 @@ DF_SETTINGS_ENCRYPTION_KEY=replace-with-long-random-secret
 
 ## Acceptance Criteria
 
-- [ ] `docker/docker-compose.yml` is the only production compose file in the repository
-- [ ] `docker/env/prod.env` is the only production env file in the repository
-- [ ] Customer install requires only `docker compose pull` and `docker compose up -d`
-- [ ] Customer install does not require source build
-- [ ] `just docker-prod` uses the same production compose file and same production env file
-- [ ] `just docker-prod` overrides only image tags to local builds
-- [ ] Production runtime is split into `api`, `scheduler`, and `worker`
-- [ ] GHCR publishes only production release images
-- [ ] Published images are multi-arch
-- [ ] Production env template uses placeholder secrets and credentials that must be replaced
+- [x] `docker/docker-compose.yml` is the only production compose file in the repository
+- [x] `docker/env/prod.env` is the only production env file in the repository
+- [x] Customer install requires only `docker compose pull` and `docker compose up -d`
+- [x] Customer install does not require source build
+- [x] `just docker-prod` uses the same production compose file and same production env file
+- [x] `just docker-prod` overrides only image tags to local builds
+- [x] Production runtime is split into `api`, `scheduler`, and `worker`
+- [x] GHCR publishes only production release images
+- [x] Published images are multi-arch
+- [x] Production env template uses placeholder secrets and credentials that must be replaced

@@ -13,9 +13,11 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 
 ## Implemented
 
+- [Build Length Tracking](implemented/build-length-tracking.md)
 - [Build Preview Checklist](implemented/build-preview-checklist.md) — archived rollout checklist
 - [Build Preview](implemented/build-preview.md)
 - [Cancel Build](implemented/cancel-build.md)
+- [Docker Release](implemented/docker-release.md)
 - [Dataset Column Descriptions](implemented/dataset-column-descriptions.md)
 - [Dataset Descriptions](implemented/dataset-descriptions.md)
 - [Core Product Specification](implemented/data-forge.md)
@@ -40,8 +42,6 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 
 ## Active
 
-- [Build Length Tracking](active/build-length-tracking.md)
-- [Docker Release](active/docker-release.md)
 - [Hot-Path Profiling Plan](active/hot-path-request-map.md) — direct timing, occupancy, and request measurements deferred
 - [Lineage Revamp](active/lineage-revamp.md)
 - [Performance Regression Investigation](active/performance-violation-checklist.md) — +54.0% regression attribution and optimization deferred
