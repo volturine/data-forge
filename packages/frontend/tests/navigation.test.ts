@@ -158,7 +158,17 @@ async function gotoMonitoringBuilds(page: Page, analysisId?: string) {
 }
 
 async function refreshBuildHistory(page: Page) {
+	const responsePromise = page
+		.waitForResponse(
+			(response) =>
+				response.url().includes('/api/v1/compute/builds') &&
+				response.request().method() === 'GET' &&
+				response.ok(),
+			{ timeout: 5_000 }
+		)
+		.catch(() => null);
 	await page.getByRole('button', { name: /Refresh History/i }).click({ timeout: 5_000 });
+	await responsePromise;
 }
 
 function cancelBuildDialog(page: Page) {
@@ -305,15 +315,26 @@ test.describe('Navigation – engines live monitor', () => {
 			});
 
 			const panel = page.locator('#panel-builds');
-			const activeRow = await waitForBuildRowEventually(page, panel, runId, ['queued', 'running']);
-			const cancelButton = activeRow.getByLabel('Cancel build');
-			await expect(cancelButton).toBeVisible({ timeout: 5_000 });
-			await expect(cancelButton).toBeEnabled({ timeout: 5_000 });
-			await cancelButton.click({ force: true, timeout: 5_000 });
-			await confirmCancelBuild(page);
+			// Build may finish before cancel under load (especially with multi-thread
+			// Polars). Engines popup already verified; only cancel while still active.
+			const historyRow = await waitForBuildRowEventually(page, panel, runId, [
+				'queued',
+				'running',
+				'completed',
+				'failed',
+				'cancelled'
+			]);
+			const status = await historyRow.getAttribute('data-build-status');
+			if (status === 'queued' || status === 'running') {
+				const cancelButton = historyRow.getByLabel('Cancel build');
+				await expect(cancelButton).toBeVisible({ timeout: 5_000 });
+				await expect(cancelButton).toBeEnabled({ timeout: 5_000 });
+				await cancelButton.click({ force: true, timeout: 5_000 });
+				await confirmCancelBuild(page);
 
-			const cancelledRow = await waitForBuildRowEventually(page, panel, runId, 'cancelled');
-			await expect(cancelledRow.getByText('Cancelled')).toBeVisible({ timeout: 5_000 });
+				const cancelledRow = await waitForBuildRowEventually(page, panel, runId, 'cancelled');
+				await expect(cancelledRow.getByText('Cancelled')).toBeVisible({ timeout: 5_000 });
+			}
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, dsName);

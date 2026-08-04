@@ -180,7 +180,21 @@ export async function importAnalysisViaUi(
 	await page.getByRole('button', { name: /Next/i }).click();
 	await expect(page.getByRole('heading', { name: /Review Import/i })).toBeVisible();
 	await page.getByRole('button', { name: /Create Analysis/i }).click();
-	return waitForCurrentAnalysisEditor(page);
+
+	// After create, editor mount can lag under parallel CI load. Retry once with a
+	// fresh readiness budget (same pattern as gotoAnalysisEditor).
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		try {
+			return await waitForCurrentAnalysisEditor(page);
+		} catch (error) {
+			lastError = error;
+			if (attempt === 1) break;
+			await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
+			await page.waitForTimeout(500);
+		}
+	}
+	throw lastError;
 }
 
 export async function createUdfViaUi(page: Page, name: string): Promise<string> {
