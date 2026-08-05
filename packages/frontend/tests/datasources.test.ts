@@ -624,15 +624,14 @@ test.describe('Datasources – schema refresh', () => {
 		const ds = `e2e-refresh-idle-${uid()}`;
 		await createDatasource(request, ds);
 		try {
-			await page.goto('/datasources');
-			await page.locator(`[data-ds-row="${ds}"]`).click();
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
 
 			const config = page.locator('[data-ds-config]');
-			await expect(config).toBeVisible({ timeout: 5_000 });
-
 			const refreshBtn = config.getByRole('button', {
 				name: /Refresh schema|Re-ingest from source/i
 			});
+			await expect(refreshBtn).toBeVisible({ timeout: 5_000 });
 			await refreshBtn.click();
 
 			// Loading state appears

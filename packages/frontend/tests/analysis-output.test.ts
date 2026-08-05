@@ -1,7 +1,12 @@
-import type { Locator, Page } from '@playwright/test';
+import type { Locator } from '@playwright/test';
 
 import { test, expect } from './fixtures.js';
-import { createDatasource, createAnalysis, deleteAnalysisByApi } from './utils/api.js';
+import {
+	createDatasource,
+	createAnalysis,
+	deleteAnalysisByApi,
+	type E2ERequest
+} from './utils/api.js';
 import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
 import { uid } from './utils/uid.js';
@@ -37,23 +42,9 @@ async function expectCompletedEventually(locator: Locator) {
 	throw lastError;
 }
 
-async function deleteBestEffort(
-	page: Page,
-	endpoint: string,
-	expectedStatuses: Set<number>
-): Promise<void> {
-	const response = await page.request.delete(endpoint, { timeout: 5_000 }).catch(() => null);
-	if (!response || expectedStatuses.has(response.status())) return;
-	throw new Error(`Cleanup DELETE ${endpoint} returned HTTP ${response.status()}`);
-}
-
-async function cleanupAnalysis(page: Page, analysisId: string): Promise<void> {
-	await deleteBestEffort(
-		page,
-		`/api/v1/compute/engine/analysis/${analysisId}`,
-		new Set([204, 404, 409])
-	);
-	const analysisDeleteStatus = await deleteAnalysisByApi(page, analysisId);
+/** Cleanup via worker helper context — safe after test-page timeout/teardown. */
+async function cleanupAnalysis(request: E2ERequest, analysisId: string): Promise<void> {
+	const analysisDeleteStatus = await deleteAnalysisByApi(request, analysisId);
 	if (![204, 404].includes(analysisDeleteStatus)) {
 		throw new Error(
 			`Cleanup DELETE /api/v1/analysis/${analysisId} returned HTTP ${analysisDeleteStatus}`
@@ -99,7 +90,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			// Reserved result_id must not be fetched before first build (list-membership gate).
 			expect(probedIds.has(resultId)).toBe(false);
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -151,7 +142,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			// After the row exists, list membership enables GET of the output datasource.
 			await expect.poll(() => probedIds.has(resultId), { timeout: 15_000 }).toBe(true);
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -171,7 +162,7 @@ test.describe('Analyses – output visibility toggle', () => {
 
 			await screenshot(page, 'analysis/output', 'output-visibility-toggle');
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -201,7 +192,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			await toggleBtn.click();
 			await expect(toggleBtn).toContainText('hidden', { timeout: 5_000 });
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -246,7 +237,7 @@ test.describe('Analyses – output visibility toggle', () => {
 			await rebuiltToggleBtn.click();
 			await expect(rebuiltToggleBtn).toContainText('hidden', { timeout: 5_000 });
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 });
@@ -282,7 +273,7 @@ test.describe('Analyses – output node interactions', () => {
 
 			await screenshot(page, 'analysis/output', 'output-node-mode-dropdown');
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -322,7 +313,7 @@ test.describe('Analyses – output node interactions', () => {
 
 			await screenshot(page, 'analysis/output', 'output-mode-recreate');
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -370,7 +361,7 @@ test.describe('Analyses – output node interactions', () => {
 			await healthToggle.click();
 			await expect(healthEmptyState).not.toBeVisible({ timeout: 3_000 });
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -401,7 +392,7 @@ test.describe('Analyses – output node interactions', () => {
 			// Chip should disappear
 			await expect(notifyToggle).not.toContainText('/', { timeout: 3_000 });
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -435,7 +426,7 @@ test.describe('Analyses – output node interactions', () => {
 				timeout: 3_000
 			});
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -466,7 +457,7 @@ test.describe('Analyses – output node interactions', () => {
 
 			await screenshot(page, 'analysis/output', 'output-table-renamed');
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 });
@@ -498,7 +489,7 @@ test.describe('Analyses – output node table name edit', () => {
 
 			await screenshot(page, 'analysis/output', 'output-name-edited');
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 });
@@ -539,7 +530,7 @@ test.describe('Analyses – output node persistence', () => {
 
 			await screenshot(page, 'analysis/output', 'output-mode-persisted');
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -585,7 +576,7 @@ test.describe('Analyses – output node persistence', () => {
 
 			await screenshot(page, 'analysis/output', 'output-tablename-persisted');
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 });
@@ -624,7 +615,7 @@ test.describe('Analyses – row count action', () => {
 
 			await screenshot(page, 'analysis/output', 'row-count-success');
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 });
@@ -674,7 +665,7 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			await screenshot(page, 'analysis/output', 'row-count-filter-step');
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 
@@ -718,7 +709,7 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			await screenshot(page, 'analysis/output', 'row-count-limit-step');
 		} finally {
-			await cleanupAnalysis(page, aId);
+			await cleanupAnalysis(request, aId);
 		}
 	});
 });

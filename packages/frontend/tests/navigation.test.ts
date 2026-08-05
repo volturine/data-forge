@@ -128,8 +128,7 @@ test.describe('Navigation – theme toggle', () => {
 
 test.describe('Navigation – profile access', () => {
 	test('profile link navigates to profile page', async ({ page }) => {
-		await page.goto('/');
-		await waitForAppShell(page);
+		await gotoAuthedRoute(page, '/');
 		await page.getByRole('link', { name: 'Profile' }).click();
 
 		await page.waitForURL(/\/profile/, { timeout: 5_000 });
