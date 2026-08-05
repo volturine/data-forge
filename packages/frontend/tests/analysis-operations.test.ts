@@ -24,18 +24,10 @@ let sharedDateDatasourceId = '';
 
 function workerRequest(
 	browser: Browser,
-	workerAuth: {
-		authFile: string;
-		workerIndex: number;
-		sessionState: E2ERequest['sessionState'] | null;
-	}
+	workerAuth: { workerIndex: number; sessionState: E2ERequest['sessionState'] }
 ): E2ERequest {
-	if (!workerAuth.sessionState) {
-		throw new Error(`workerAuth.sessionState missing for worker ${workerAuth.workerIndex}`);
-	}
 	return {
 		browser,
-		authFile: workerAuth.authFile,
 		sessionState: workerAuth.sessionState,
 		workerIndex: workerAuth.workerIndex,
 		baseURL
@@ -62,11 +54,7 @@ test.beforeAll(async ({ browser, workerAuth }) => {
 });
 
 test.afterAll(async ({ browser, workerAuth }) => {
-	const { context } = await createCleanupPage(
-		browser,
-		workerAuth.workerIndex,
-		workerAuth.sessionState
-	);
+	const { context } = await createCleanupPage(browser, workerAuth.sessionState);
 	await context.close();
 });
 

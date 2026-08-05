@@ -512,11 +512,7 @@ test.describe('Analyses – detail page', () => {
 	});
 
 	test.afterAll(async ({ browser, workerAuth }) => {
-		const { page, context } = await createCleanupPage(
-			browser,
-			workerAuth.workerIndex,
-			workerAuth.sessionState
-		);
+		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteAnalysisViaUI(page, aName);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();

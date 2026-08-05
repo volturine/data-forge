@@ -16,11 +16,7 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.afterAll(async ({ browser, workerAuth }) => {
-	const { page, context } = await createCleanupPage(
-		browser,
-		workerAuth.workerIndex,
-		workerAuth.sessionState
-	);
+	const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 	await deleteDatasourceViaUI(page, sharedDatasourceName);
 	await page.close();
 	await context.close();

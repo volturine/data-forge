@@ -1,4 +1,3 @@
-import path from 'node:path';
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 import {
@@ -15,14 +14,12 @@ import { deleteDatasourceViaUI } from './ui-cleanup.js';
 import { waitForLayoutReady } from './readiness.js';
 import { switchNamespace } from './namespace.js';
 
-export const AUTH_DIR = path.resolve('tests/.artifacts/auth');
-export const META_FILE = path.join(AUTH_DIR, 'meta.json');
 export const E2E_RUN_STAMP =
 	process.env.E2E_RUN_STAMP || `${Date.now().toString(36)}-${process.pid}`;
 
 export { E2E_PASSWORD };
 
-/** In-memory Playwright storage state — source of truth for e2e auth contexts. */
+/** Playwright storage state held in memory for the worker lifetime. */
 export type E2EStorageState = {
 	cookies: Array<{
 		name: string;
@@ -41,15 +38,12 @@ export type E2EStorageState = {
 };
 
 export interface WorkerAuth {
-	authFile: string;
 	workerIndex: number;
-	/** Populated by fixtures; never open contexts from authFile path at runtime. */
-	sessionState: E2EStorageState | null;
+	sessionState: E2EStorageState;
 }
 
 export interface E2ERequest extends APIRequestContext {
 	browser: Browser;
-	authFile: string;
 	/**
 	 * In-memory Playwright storage state for newContext().
 	 * Named sessionState (not storageState) to avoid clashing with
@@ -64,16 +58,7 @@ const datasourceRegistry = new Map<string, { name: string; namespace?: string }>
 const analysisRegistry = new Map<string, { name: string }>();
 const udfRegistry = new Map<string, { name: string }>();
 
-export function workerAuthFile(workerIndex: number): string {
-	return path.join(AUTH_DIR, `state-${E2E_RUN_STAMP}-w${workerIndex}.json`);
-}
-
 async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promise<T>): Promise<T> {
-	if (!request.sessionState) {
-		throw new Error(
-			`withAuthedPage requires in-memory sessionState (worker ${request.workerIndex})`
-		);
-	}
 	const context = await request.browser.newContext({
 		baseURL: request.baseURL,
 		storageState: request.sessionState
@@ -85,11 +70,6 @@ async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promis
 		await page.close().catch(() => undefined);
 		await context.close().catch(() => undefined);
 	}
-}
-
-export async function disposeWorkerSetupContexts(_authFile: string): Promise<void> {
-	// Setup helpers now use isolated auth contexts per call, so there is no
-	// worker-level setup context to dispose.
 }
 
 function buildOutput(filename: string) {
@@ -438,49 +418,6 @@ export async function shutdownEngine(
 	await withAuthedPage(request, async (page) => {
 		await shutdownEngineViaUi(page, analysisId, { timeoutMs: options?.waitForIdleMs ?? 5_000 });
 	});
-}
-
-export async function registerUser(_email: string, _displayName: string): Promise<string> {
-	throw new Error('registerUser should not be used in pure UI e2e helpers');
-}
-
-export async function deleteAccount(_token: string): Promise<'error'> {
-	throw new Error('deleteAccount should not be used in pure UI e2e helpers');
-}
-
-export function buildStorageState(_sessionToken: string | undefined): never {
-	throw new Error('buildStorageState should not be used in pure UI e2e helpers');
-}
-
-export async function shutdownEngineByToken(_token: string, _analysisId: string): Promise<void> {
-	// No-op in pure UI e2e.
-}
-
-export async function waitForNoEngineJobByToken(
-	_token: string,
-	_analysisId: string
-): Promise<void> {
-	// No-op in pure UI e2e.
-}
-
-export async function loginAs(_email: string): Promise<never> {
-	throw new Error('loginAs should not be used in pure UI e2e helpers');
-}
-
-export async function registerWorker(_workerIndex: number): Promise<never> {
-	throw new Error('registerWorker should not be used in pure UI e2e helpers');
-}
-
-export async function ensureWorkerClean(_workerIndex: number): Promise<void> {
-	// No-op in pure UI e2e.
-}
-
-export function readStoredSessionToken(_authFile: string): string | undefined {
-	return undefined;
-}
-
-export function readMeta(): { authRequired: boolean; stamp: string } {
-	return { authRequired: true, stamp: Date.now().toString(36) };
 }
 
 export function nameForDatasourceId(datasourceId: string): string | undefined {
