@@ -220,7 +220,7 @@ just test
 just test-e2e
 ```
 
-For code or config changes, run all three commands before opening a PR. For targeted local work, the tests live under `packages/shared/tests/`, `packages/backend/tests/`, `packages/scheduler/tests/`, `packages/worker/tests/`, and `packages/frontend/tests/`.
+For code or config changes, run all three commands before opening a PR. For targeted local work, the tests live under `packages/backend/tests/`, `packages/scheduler/tests/`, `packages/worker/tests/`, and `packages/frontend/tests/` (unit) plus `packages/frontend/src/**/*.test.ts` (Vitest).
 
 ### Code Style
 
@@ -237,13 +237,14 @@ For code or config changes, run all three commands before opening a PR. For targ
 ```
 data-forge/
 ├── packages/
-│   ├── shared/               # Shared Python runtime, contracts, tests, and env files
-│   ├── backend/              # FastAPI API service
-│   ├── scheduler/            # Scheduler runtime
-│   ├── worker/       # Dynamic build worker runtime
-│   └── frontend/             # SvelteKit frontend + Playwright/Vitest tests
+│   ├── backend/              # FastAPI API service + domain/persistence
+│   ├── scheduler/            # Schedule evaluation runtime
+│   ├── worker/               # Build/compute workers + data plane
+│   ├── frontend/             # SvelteKit frontend + Playwright/Vitest tests
+│   └── protocol/             # Protobuf contracts (shared wire types)
+├── config/env/               # Local/runtime env files (dev, prod, e2e)
 ├── docs/                     # Product docs, PRDs, and references
-├── docker/                   # Docker image targets, compose, and env files
+├── docker/                   # Docker images, compose, and env files
 ├── scripts/                  # Repo maintenance and validation scripts
 ├── Justfile                  # Task runner commands
 ├── AGENTS.md                 # Assistant workflow and repo rules
@@ -254,14 +255,24 @@ data-forge/
 
 ## Architecture
 
+### Runtime topology
+
+Production and local development use the same role split:
+
+- **API** — FastAPI HTTP/WebSocket surface, auth, metadata, build enqueue
+- **Scheduler** — evaluates cron/dependency/event schedules and enqueues builds
+- **Worker** — claims build/compute work, runs Polars engines, Iceberg I/O, data-plane gRPC
+
+Coordination is Postgres-backed (claims, leases, outbox, run history). Process-to-process control uses internal gRPC; product data lives in S3-compatible object storage (Iceberg tables, uploads, exports).
+
 ### Compute Engine
 
-Each analysis runs in an **isolated subprocess** (the "compute engine"). The main FastAPI process communicates with engines via multiprocessing queues. This provides:
+Each analysis preview or build runs in an **isolated engine subprocess** owned by a worker. That provides:
 
 - Memory isolation between analyses
 - Configurable resource limits per engine
 - Automatic cleanup of idle engines after a timeout
-- WebSocket streaming of real-time compute status
+- WebSocket streaming of real-time build and engine status through the API
 
 ### Pipeline Execution
 
@@ -277,14 +288,14 @@ This means schedule logic automatically picks up the latest analysis recipe with
 ### Storage Layout
 
 ```
-DATA_DIR/
-├── app.db                          # Global settings database
-└── namespaces/
-    └── {namespace}/
-        ├── namespace.db            # Per-namespace database
-        ├── uploads/                # Raw uploaded files
-        ├── clean/{uuid}/{branch}/  # Iceberg tables
-        └── exports/                # Analysis output tables
+PostgreSQL
+├── public schema                 # Runtime workers, outbox, shared settings
+└── tenant schemas (namespaces)   # Analyses, datasources, builds, schedules
+
+S3-compatible object store (per-namespace bucket)
+├── uploads/                      # Raw uploaded files
+├── iceberg tables                # Materialized dataset snapshots
+└── exports/                      # One-off export artifacts
 ```
 
 ---

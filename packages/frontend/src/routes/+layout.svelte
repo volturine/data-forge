@@ -38,7 +38,6 @@
 		typeof document === 'undefined' ? null : document.documentElement.getAttribute('data-theme');
 	const initialTheme = themeAttribute === 'dark' ? 'dark' : 'light';
 	let theme = $state<'light' | 'dark'>(initialTheme);
-	// settingsOpen removed — settings now live under /profile tabs
 	let sidebarCollapsed = $state(false);
 	let sidebarHovered = $state(false);
 	let shellInteractive = $state(false);

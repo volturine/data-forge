@@ -193,7 +193,6 @@ just test-e2e   # End-to-end tests with the managed local runtime
 ### Writing Tests
 
 - Backend: Write pytest tests in `packages/backend/tests/`, `packages/scheduler/tests/`, or `packages/worker/tests/` as appropriate
-- Shared Python logic: Write tests in `packages/shared/tests/`
 - Frontend: Write Vitest tests as `*.test.ts` under `packages/frontend/src/`
 - E2E: Write Playwright tests under `packages/frontend/tests/`
 - Do not run Playwright directly for repository e2e validation; use `just test-e2e`

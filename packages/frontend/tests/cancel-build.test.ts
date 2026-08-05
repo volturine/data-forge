@@ -21,14 +21,9 @@ async function startBuildFromAnalysisPage(
 	const started = page.waitForResponse(
 		(response) => {
 			if (response.request().method() !== 'POST' || !response.ok()) return false;
-			// Match /builds and legacy /builds/active start endpoints, not cancel.
+			// Match POST /builds start, not cancel.
 			const path = new URL(response.url()).pathname;
-			return (
-				path === '/api/v1/compute/builds' ||
-				path === '/api/v1/compute/builds/' ||
-				path === '/api/v1/compute/builds/active' ||
-				path === '/api/v1/compute/builds/active/'
-			);
+			return path === '/api/v1/compute/builds' || path === '/api/v1/compute/builds/';
 		},
 		{ timeout: readyTimeoutMs() }
 	);

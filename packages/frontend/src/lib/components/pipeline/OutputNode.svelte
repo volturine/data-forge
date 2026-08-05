@@ -317,7 +317,7 @@
 		if (!hasBuildSession) return;
 		previewOpen = true;
 		if (!buildStore.buildId) return;
-		void apiRequest<ActiveBuildDetail>(`/v1/compute/builds/active/${buildStore.buildId}`).match(
+		void apiRequest<ActiveBuildDetail>(`/v1/compute/builds/${buildStore.buildId}`).match(
 			(build: ActiveBuildDetail) => {
 				buildStore.applySnapshot(build);
 			},

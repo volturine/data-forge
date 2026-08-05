@@ -9,10 +9,10 @@
 - ✅ Browse, search, and sort all analyses from the gallery view
 - ✅ Create new analyses and open them in the visual editor
 - ✅ Delete individual analyses or bulk-delete a selection
-- ⬜ Duplicate an existing analysis to reuse its pipeline structure
-- ⬜ Duplicate a single tab within an analysis
-- ⬜ New analysis creation flow with templates and AI-assisted generation
-- ⬜ Import/export pipeline definitions as JSON
+- ✅ Duplicate an existing analysis to reuse its pipeline structure
+- ✅ Duplicate a single tab within an analysis
+- ✅ New analysis creation flow with templates and AI-assisted generation
+- ✅ Import/export pipeline definitions as JSON
 
 ## Pipeline Editor
 

@@ -51,7 +51,7 @@ def _psql_value(sql: str) -> str:
 def _wait_for_build_detail(client: httpx.Client, build_id: str, *, timeout: float = 180) -> dict[str, object]:
     deadline = datetime.now(UTC) + timedelta(seconds=timeout)
     while datetime.now(UTC) < deadline:
-        response = client.get(f'/api/v1/compute/builds/active/{build_id}')
+        response = client.get(f'/api/v1/compute/builds/{build_id}')
         if response.status_code == 200:
             detail = dict(response.json())
             if detail.get('status') in {'completed', 'failed', 'cancelled'}:
@@ -216,7 +216,7 @@ def _start_build(client: httpx.Client, analysis: dict[str, object]) -> str:
     first_tab = tabs[0]
     assert isinstance(first_tab, dict)
     response = client.post(
-        '/api/v1/compute/builds/active',
+        '/api/v1/compute/builds',
         json={
             'analysis_pipeline': {
                 'analysis_id': analysis_id,

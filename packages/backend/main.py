@@ -85,15 +85,7 @@ def _stop_api_worker(worker_id: str) -> None:
     run_settings_db(_stop)
 
 
-# Detect Nuitka compiled binary vs running from source.
-# In Nuitka-compiled code, __compiled__ is a C-level built-in constant set to True.
-# In a regular Python interpreter it is not defined, raising NameError.
-try:
-    _NUITKA_COMPILED: bool = __compiled__  # type: ignore[name-defined]  # noqa: F821
-except NameError:
-    _NUITKA_COMPILED = False
-
-frontend_build_dir = Path(__file__).parent / 'frontend' / 'build' if _NUITKA_COMPILED else ROOT / 'packages' / 'frontend' / 'build'
+frontend_build_dir = ROOT / 'packages' / 'frontend' / 'build'
 
 
 def _resolve_uvicorn_workers() -> int:
@@ -289,7 +281,11 @@ async def root() -> FileResponse | dict[str, str]:
     if settings.prod_mode_enabled and index_path.exists():
         return FileResponse(str(index_path))
 
-    return {'message': 'Welcome to Svelte-FastAPI Template'}
+    return {
+        'message': settings.app_name,
+        'version': settings.app_version,
+        'docs': '/docs',
+    }
 
 
 # Health Check Endpoints
@@ -385,23 +381,16 @@ async def serve_static_or_index(full_path: str) -> FileResponse:
 
 
 if __name__ == '__main__':
-    import multiprocessing
-
     import uvicorn
 
     workers = _guard_runtime_workers(_resolve_uvicorn_workers())
 
-    # Required for multiprocessing 'spawn' context in frozen (Nuitka onefile) executables.
-    multiprocessing.freeze_support()
-
-    # In a Nuitka compiled binary there are no source files for uvicorn to watch,
-    # so pass the app object directly and disable hot reload.
-    # In source mode, the string form 'main:app' is required for --reload to work.
+    # String form 'main:app' is required for --reload to work.
     uvicorn.run(
-        app if _NUITKA_COMPILED else 'main:app',
+        'main:app',
         host='0.0.0.0',
         port=settings.port,
-        reload=False if _NUITKA_COMPILED else settings.debug,
+        reload=settings.debug,
         workers=workers,
         limit_concurrency=_resolve_uvicorn_limit_concurrency(),
         log_level=settings.log_level,

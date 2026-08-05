@@ -248,7 +248,7 @@ async def _send_build_snapshot(websocket: WebSocket, build_id: str) -> None:
         session.close()
         session_gen.close()
     if message is None:
-        raise HTTPException(status_code=404, detail='Active build not found')
+        raise HTTPException(status_code=404, detail='Build not found')
     await safe_send_json(websocket, message.model_dump(mode='json'))
 
 
@@ -483,9 +483,8 @@ def delete_iceberg_snapshot(
 
 
 @router.post('/builds', response_model=schemas.ActiveBuildDetail)
-@router.post('/builds/active', response_model=schemas.ActiveBuildDetail)
-@handle_errors(operation='start active build')
-async def start_active_build(
+@handle_errors(operation='start build')
+async def start_build(
     request: schemas.BuildRequest,
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -600,11 +599,6 @@ async def start_active_build(
 
 
 @router.post('/builds/{build_id}/cancel', response_model=schemas.CancelBuildResponse, mcp=True)
-@router.post(
-    '/builds/active/{build_id}/cancel',
-    response_model=schemas.CancelBuildResponse,
-    mcp=True,
-)
 @handle_errors(operation='cancel build')
 async def cancel_build(
     build_id: str,
@@ -693,39 +687,9 @@ async def list_builds(
     return schemas.ActiveBuildListResponse(builds=paged, total=len(visible))
 
 
-@router.get('/builds/active', response_model=schemas.ActiveBuildListResponse, mcp=True)
-@handle_errors(operation='list active builds')
-async def list_active_builds(
-    request: Request,
-    status: schemas.ActiveBuildStatus | None = None,
-    session: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
-):
-    del request
-    if status not in {
-        None,
-        schemas.ActiveBuildStatus.QUEUED,
-        schemas.ActiveBuildStatus.RUNNING,
-    }:
-        return schemas.ActiveBuildListResponse(builds=[], total=0)
-    runs = build_run_service.list_build_runs(session)
-    visible = [
-        build_run_service.build_summary(run)
-        for run in runs
-        if run.namespace == get_namespace()
-        and run.status
-        in {
-            build_run_service.BuildRunStatus.QUEUED,
-            build_run_service.BuildRunStatus.RUNNING,
-        }
-    ]
-    return schemas.ActiveBuildListResponse(builds=visible, total=len(visible))
-
-
 @router.get('/builds/{build_id}', response_model=schemas.ActiveBuildDetail, mcp=True)
-@router.get('/builds/active/{build_id}', response_model=schemas.ActiveBuildDetail, mcp=True)
-@handle_errors(operation='get active build')
-async def get_active_build(
+@handle_errors(operation='get build')
+async def get_build(
     build_id: str,
     session: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
@@ -736,7 +700,7 @@ async def get_active_build(
     engine_run = engine_run_service.get_engine_run(session, build_id)
     if engine_run is not None:
         return representations.engine_run_detail(engine_run, namespace=get_namespace())
-    raise HTTPException(status_code=404, detail='Active build not found')
+    raise HTTPException(status_code=404, detail='Build not found')
 
 
 # Engine lifecycle endpoints
@@ -1071,7 +1035,7 @@ async def active_build_stream(websocket: WebSocket, build_id: str) -> None:
                 session.close()
                 session_gen.close()
             if message is None or message.build.namespace != get_namespace():
-                raise HTTPException(status_code=404, detail='Active build not found')
+                raise HTTPException(status_code=404, detail='Build not found')
             if message.last_sequence <= last_sequence:
                 break
             if last_sequence > 0:

@@ -43,8 +43,19 @@ FORBIDDEN_OWNER_DUPLICATES = [
     Path('packages/backend/backend_core/domain/protocol_enums.py'),
     Path('packages/backend/modules/analysis/models.py'),
     Path('packages/backend/modules/datasource/models.py'),
+    Path('packages/backend/modules/health'),
     Path('packages/backend/modules/health/models.py'),
+    Path('packages/backend/modules/health/routes.py'),
     Path('packages/backend/modules/healthcheck/models.py'),
+    Path('packages/backend/modules/notification'),
+    Path('packages/backend/modules/worker'),
+    Path('packages/backend/modules/compute/core'),
+    Path('packages/frontend/src/routes/settings'),
+    Path('packages/frontend/src/lib/api/health.ts'),
+    Path('packages/frontend/src/lib/components/common/ToolArgsForm.svelte'),
+    Path('packages/frontend/src/lib/components/common/EngineMonitor.svelte'),
+    Path('packages/frontend/src/lib/components/common/ColumnTypeSelect.svelte'),
+    Path('packages/frontend/src/lib/components/common/SchemaViewer.svelte'),
     Path('packages/backend/modules/settings/models.py'),
     Path('packages/backend/modules/telegram/models.py'),
     Path('packages/backend/modules/udf/models.py'),
@@ -75,6 +86,7 @@ PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
 
 LEGACY_IMPORT_ROOTS = {'backend_contracts', 'worker_models'}
 FORBIDDEN_SOURCE_TOKENS = {
+    "'/builds/active'": 'legacy build path aliases must be removed; use /builds only',
     'backend_contracts': 'deleted legacy backend contract package',
     'backend_core.contracts': 'renamed backend-owned domain package',
     'runtime.models': 'renamed worker-owned domain package',

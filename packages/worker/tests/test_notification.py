@@ -11,7 +11,7 @@ from operations.notification import NotificationHandler, NotificationParams
 from operations.template_placeholders import render_template_placeholders
 from runtime.compute_service import _prepare_pipeline_notifications
 from runtime.notification_delivery import (
-    NotificationService,
+    NotificationDelivery,
     extract_staged_deliveries,
     render_template,
     staged_column_name,
@@ -193,10 +193,10 @@ class TestRenderTemplate:
         assert render_template("{{name}} is {{status}}", {"name": "Build", "status": "ready"}) == "Build is ready"
 
 
-class TestNotificationService:
+class TestNotificationDelivery:
     def test_delegates_explicit_email_and_telegram_commands(self) -> None:
         client = MagicMock()
-        service = NotificationService(client)
+        service = NotificationDelivery(client)
 
         with patch("runtime.notification_delivery.get_namespace", return_value="default"):
             service.send_email(to="a@example.com", subject="Subject", body="Body")

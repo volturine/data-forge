@@ -216,7 +216,7 @@ def _start_build(client, analysis: dict[str, object]) -> str:
     tab_id = first_tab.get('id')
     assert isinstance(tab_id, str)
     response = client.post(
-        '/api/v1/compute/builds/active',
+        '/api/v1/compute/builds',
         json={
             'analysis_pipeline': {
                 'analysis_id': analysis_id,
@@ -232,7 +232,7 @@ def _start_build(client, analysis: dict[str, object]) -> str:
 def _wait_for_running_build(client, build_id: str, *, timeout: float = 180) -> dict[str, object]:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        response = client.get(f'/api/v1/compute/builds/active/{build_id}')
+        response = client.get(f'/api/v1/compute/builds/{build_id}')
         if response.status_code == 200:
             detail = dict(response.json())
             if detail.get('status') == 'running':
@@ -885,7 +885,7 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
                 detail = wait_for_condition(
                     lambda: (
                         response.json()
-                        if (response := client_two.get(f'/api/v1/compute/builds/active/{build_id}')).status_code == 200
+                        if (response := client_two.get(f'/api/v1/compute/builds/{build_id}')).status_code == 200
                         and response.json().get('status') in {'completed', 'failed', 'cancelled'}
                         else None
                     ),
@@ -1016,7 +1016,7 @@ def test_postgres_runtime_supports_cross_api_cancellation(tmp_path: Path, rustfs
                 _wait_for_running_build(client_one, build_id, timeout=180)
 
             with httpx.Client(base_url=f'http://127.0.0.1:{api_two_port}', timeout=30) as client_two:
-                cancelled = client_two.post(f'/api/v1/compute/builds/active/{build_id}/cancel')
+                cancelled = client_two.post(f'/api/v1/compute/builds/{build_id}/cancel')
 
                 assert cancelled.status_code == 200, cancelled.text
                 payload = dict(cancelled.json())
@@ -1027,7 +1027,7 @@ def test_postgres_runtime_supports_cross_api_cancellation(tmp_path: Path, rustfs
                 detail = wait_for_condition(
                     lambda: (
                         response.json()
-                        if (response := client_two.get(f'/api/v1/compute/builds/active/{build_id}')).status_code == 200
+                        if (response := client_two.get(f'/api/v1/compute/builds/{build_id}')).status_code == 200
                         and response.json().get('status') == 'cancelled'
                         else None
                     ),
