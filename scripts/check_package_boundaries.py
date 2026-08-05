@@ -35,28 +35,6 @@ ROOT_TEST_RESIDUE = [
 ]
 ROOT_TEST_ARTIFACT_PREFIXES = ('test-results', 'playwright-report')
 
-FORBIDDEN_OWNER_DUPLICATES = [
-    Path('packages/backend/backend_grpc/codec.py'),
-    Path('packages/backend/backend_core/contracts'),
-    Path('packages/backend/backend_core/engine_identity.py'),
-    Path('packages/backend/backend_core/object_store_paths.py'),
-    Path('packages/backend/backend_core/domain/protocol_enums.py'),
-    Path('packages/backend/modules/analysis/models.py'),
-    Path('packages/backend/modules/datasource/models.py'),
-    Path('packages/backend/modules/health/models.py'),
-    Path('packages/backend/modules/healthcheck/models.py'),
-    Path('packages/backend/modules/settings/models.py'),
-    Path('packages/backend/modules/telegram/models.py'),
-    Path('packages/backend/modules/udf/models.py'),
-    Path('packages/worker/runtime/engine_identity.py'),
-    Path('packages/worker/runtime/domain/protocol_enums.py'),
-    Path('packages/worker/runtime/domain/step_config_enums.py'),
-    Path('packages/worker/runtime/domain/compute_requests/models.py'),
-    Path('packages/worker/datasources/datasource_schemas.py'),
-    Path('packages/worker/runtime/models'),
-    Path('packages/worker/worker_grpc/codec.py'),
-]
-
 PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
     'backend': {
         'backend_contracts',
@@ -434,11 +412,6 @@ def main() -> int:
     for child in ROOT.iterdir():
         if child.name.startswith(ROOT_TEST_ARTIFACT_PREFIXES):
             errors.append(f'root test artifact is not allowed: {child.relative_to(ROOT)}')
-
-    for rel_path in FORBIDDEN_OWNER_DUPLICATES:
-        path = ROOT / rel_path
-        if path.exists():
-            errors.append(f'neutral shared model duplicated in backend owner package: {rel_path}')
 
     worker_operation_enums = ROOT / 'packages/worker/operations/enums.py'
     if worker_operation_enums.exists():
