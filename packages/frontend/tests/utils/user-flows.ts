@@ -175,7 +175,21 @@ export async function importAnalysisViaUi(
 	}
 	await page.getByRole('button', { name: /Next/i }).click();
 	await expect(page.getByRole('heading', { name: /Review Import/i })).toBeVisible();
-	await page.getByRole('button', { name: /Create Analysis/i }).click();
+	const createButton = page.getByRole('button', { name: /Create Analysis/i });
+	const createResponsePromise = page.waitForResponse(
+		(response) =>
+			response.url().includes('/api/v1/analysis') &&
+			response.request().method() === 'POST' &&
+			response.status() !== 0
+	);
+	await createButton.click();
+	const createResponse = await createResponsePromise;
+	if (!createResponse.ok()) {
+		const body = await createResponse.text().catch(() => '');
+		throw new Error(
+			`Analysis import create failed: HTTP ${createResponse.status()} ${body.slice(0, 300)}`
+		);
+	}
 	return waitForCurrentAnalysisEditor(page);
 }
 

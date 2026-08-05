@@ -60,6 +60,9 @@ const datasourceRegistry = new Map<string, { name: string; namespace?: string }>
 const analysisRegistry = new Map<string, { name: string }>();
 const udfRegistry = new Map<string, { name: string }>();
 
+/** Default app namespace used by helpers unless a test passes another. */
+const DEFAULT_HELPER_NAMESPACE = 'public';
+
 /**
  * Run setup work on the worker's long-lived helper context.
  * One page at a time: workers run tests serially, so no lock is required.
@@ -74,6 +77,23 @@ async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promis
 	} finally {
 		await page.close();
 	}
+}
+
+/**
+ * Shared helper context reuses IndexedDB across calls. Always pin namespace
+ * before mutating data so a prior namespaced helper call cannot leak into
+ * the next (fresh contexts used to default to public every time).
+ */
+async function prepareHelperNamespace(
+	page: Page,
+	namespace = DEFAULT_HELPER_NAMESPACE
+): Promise<void> {
+	await page.goto('/');
+	await waitForLayoutReady(page);
+	const sidebar = page.locator('aside[aria-label="Main navigation"]');
+	const active = sidebar.getByText(namespace, { exact: true });
+	if (await active.isVisible().catch(() => false)) return;
+	await switchNamespace(page, namespace);
 }
 
 function buildOutput(filename: string) {
@@ -98,13 +118,9 @@ export async function createDatasource(
 	description?: string
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
-		if (namespace) {
-			await page.goto('/');
-			await waitForLayoutReady(page);
-			await switchNamespace(page, namespace);
-		}
+		await prepareHelperNamespace(page, namespace ?? DEFAULT_HELPER_NAMESPACE);
 		const { id } = await uploadDatasourceViaUi(page, name, { description });
-		datasourceRegistry.set(id, { name, namespace });
+		datasourceRegistry.set(id, { name, namespace: namespace ?? DEFAULT_HELPER_NAMESPACE });
 		return id;
 	});
 }
@@ -115,8 +131,9 @@ export async function createLargeDatasource(
 	rows: number
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
+		await prepareHelperNamespace(page);
 		const { id } = await uploadDatasourceViaUi(page, name, { rows });
-		datasourceRegistry.set(id, { name });
+		datasourceRegistry.set(id, { name, namespace: DEFAULT_HELPER_NAMESPACE });
 		return id;
 	});
 }
@@ -126,8 +143,9 @@ export async function createDatasourceWithDates(
 	name: string
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
+		await prepareHelperNamespace(page);
 		const { id } = await uploadDatasourceWithDatesViaUi(page, name);
-		datasourceRegistry.set(id, { name });
+		datasourceRegistry.set(id, { name, namespace: DEFAULT_HELPER_NAMESPACE });
 		return id;
 	});
 }
@@ -140,27 +158,40 @@ export async function deleteDatasource(
 	const entry = datasourceRegistry.get(id);
 	if (!entry) return;
 	await withAuthedPage(request, async (page) => {
-		if (namespace) {
-			await page.goto('/');
-			await waitForLayoutReady(page);
-			await switchNamespace(page, namespace);
-		}
+		await prepareHelperNamespace(page, namespace ?? entry.namespace ?? DEFAULT_HELPER_NAMESPACE);
 		await deleteDatasourceViaUI(page, entry.name);
 	});
 }
 
-export async function deleteAnalysisByApi(page: Page, analysisId: string): Promise<number> {
-	const endpoint = `/api/v1/analysis/${analysisId}`;
-	const current = await page.request.get(endpoint, { timeout: 5_000 });
-	if (current.status() === 404) return 404;
-	if (!current.ok()) throw new Error(`Cleanup GET ${endpoint} returned HTTP ${current.status()}`);
-	const revision = current.headers()['x-analysis-version'];
-	if (!revision) throw new Error(`Cleanup GET ${endpoint} did not return X-Analysis-Version`);
-	const response = await page.request.delete(endpoint, {
-		timeout: 5_000,
-		headers: { 'If-Match': revision }
-	});
-	return response.status();
+/**
+ * Delete an analysis via the authenticated API.
+ * Prefer a live Page (same session cookies). When the test page is already
+ * closed (timeout teardown), pass the worker E2ERequest helper context.
+ */
+export async function deleteAnalysisByApi(
+	source: Page | E2ERequest,
+	analysisId: string
+): Promise<number> {
+	const run = async (page: Page): Promise<number> => {
+		const endpoint = `/api/v1/analysis/${analysisId}`;
+		const current = await page.request.get(endpoint, { timeout: 5_000 });
+		if (current.status() === 404) return 404;
+		if (!current.ok()) {
+			throw new Error(`Cleanup GET ${endpoint} returned HTTP ${current.status()}`);
+		}
+		const revision = current.headers()['x-analysis-version'];
+		if (!revision) throw new Error(`Cleanup GET ${endpoint} did not return X-Analysis-Version`);
+		const response = await page.request.delete(endpoint, {
+			timeout: 5_000,
+			headers: { 'If-Match': revision }
+		});
+		return response.status();
+	};
+
+	if ('helperContext' in source) {
+		return withAuthedPage(source, run);
+	}
+	return run(source);
 }
 
 export async function createAnalysis(
@@ -201,9 +232,9 @@ export async function createImportedAnalysis(
 	description?: string
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
+		await prepareHelperNamespace(page);
 		const id = await importAnalysisViaUi(page, { name, description, pipeline, datasourceRemap });
 		analysisRegistry.set(id, { name });
-		await page.goto('/', { waitUntil: 'domcontentloaded' }).catch(() => undefined);
 		return id;
 	});
 }
@@ -333,6 +364,7 @@ export async function createLongRunningAnalysis(
 
 export async function createUdf(request: E2ERequest, name: string): Promise<string> {
 	return withAuthedPage(request, async (page) => {
+		await prepareHelperNamespace(page);
 		const id = await createUdfViaUi(page, name);
 		udfRegistry.set(id, { name });
 		return id;
@@ -344,7 +376,10 @@ export async function createSchedule(
 	datasourceId: string,
 	cron = '0 9 * * *'
 ): Promise<string> {
-	return withAuthedPage(request, async (page) => createScheduleViaUi(page, datasourceId, cron));
+	return withAuthedPage(request, async (page) => {
+		await prepareHelperNamespace(page);
+		return createScheduleViaUi(page, datasourceId, cron);
+	});
 }
 
 export async function createHealthCheck(
@@ -352,7 +387,10 @@ export async function createHealthCheck(
 	datasourceId: string,
 	name: string
 ): Promise<string> {
-	return withAuthedPage(request, async (page) => createHealthCheckViaUi(page, datasourceId, name));
+	return withAuthedPage(request, async (page) => {
+		await prepareHelperNamespace(page);
+		return createHealthCheckViaUi(page, datasourceId, name);
+	});
 }
 
 export async function waitForNoRuntimeBuild(
