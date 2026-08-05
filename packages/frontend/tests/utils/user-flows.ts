@@ -47,9 +47,9 @@ export async function registerViaUi(page: Page, email: string, name: string): Pr
 	const createButton = page.getByRole('button', { name: 'Create account', exact: true });
 	await expect(createButton).toBeEnabled({ timeout: 5_000 });
 	await createButton.click();
-	// Register stays on the success panel; Continue is a button that navigates home.
+	// Cookie is set on the register response; hard-load home for a settled session.
 	await expect(page.getByText(/Account created\./i)).toBeVisible({ timeout: 15_000 });
-	await page.getByRole('button', { name: 'Continue', exact: true }).click();
+	await page.goto('/', { waitUntil: 'networkidle' });
 	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 15_000 });
 }
 
@@ -77,14 +77,24 @@ export async function uploadDatasourceViaUi(
 	}
 	const uploadBtn = page.getByRole('button', { name: 'Upload', exact: true });
 	await expect(uploadBtn).toBeEnabled({ timeout: 5_000 });
-	const uploadResponse = page.waitForResponse(
+	// Match any finished upload response (not only 200) so non-OK statuses fail
+	// fast instead of hanging until the 120s test timeout.
+	const uploadResponsePromise = page.waitForResponse(
 		(response) =>
 			response.url().includes('/api/v1/datasource/upload') &&
 			!response.url().includes('/bulk') &&
-			response.status() === 200
+			response.request().method() === 'POST' &&
+			response.status() !== 0,
+		{ timeout: 30_000 }
 	);
 	await uploadBtn.click();
-	await uploadResponse;
+	const uploadResponse = await uploadResponsePromise;
+	if (!uploadResponse.ok()) {
+		const body = await uploadResponse.text().catch(() => '');
+		throw new Error(
+			`Datasource upload failed for ${name}: HTTP ${uploadResponse.status()} ${body.slice(0, 300)}`
+		);
+	}
 	for (let attempt = 0; attempt < 3; attempt += 1) {
 		try {
 			await expect(
@@ -196,10 +206,17 @@ export async function createUdfViaUi(page: Page, name: string): Promise<string> 
 	await page.locator('#udf-tags').fill('test');
 	const [response] = await Promise.all([
 		page.waitForResponse(
-			(resp) => resp.url().includes('/api/v1/udf') && resp.request().method() === 'POST'
+			(resp) =>
+				resp.url().includes('/api/v1/udf') &&
+				resp.request().method() === 'POST' &&
+				resp.status() !== 0,
+			{ timeout: 30_000 }
 		),
 		page.getByTestId('udf-save-button').click()
 	]);
+	if (!response.ok()) {
+		throw new Error(`UDF create failed: HTTP ${response.status()}`);
+	}
 	const payload = (await response.json()) as { id: string };
 	await expect(page).toHaveURL(new RegExp(`/udfs/${payload.id}$`), { timeout: 5_000 });
 	return payload.id;
@@ -223,10 +240,17 @@ export async function createScheduleViaUi(
 	}
 	const [response] = await Promise.all([
 		page.waitForResponse(
-			(resp) => resp.url().includes('/api/v1/schedules') && resp.request().method() === 'POST'
+			(resp) =>
+				resp.url().includes('/api/v1/schedules') &&
+				resp.request().method() === 'POST' &&
+				resp.status() !== 0,
+			{ timeout: 30_000 }
 		),
 		page.getByRole('button', { name: 'Create Schedule' }).click()
 	]);
+	if (!response.ok()) {
+		throw new Error(`Schedule create failed: HTTP ${response.status()}`);
+	}
 	const payload = (await response.json()) as { id: string };
 	return payload.id;
 }
@@ -245,10 +269,17 @@ export async function createHealthCheckViaUi(
 	await page.locator('#hc-min-rows').fill('1');
 	const [response] = await Promise.all([
 		page.waitForResponse(
-			(resp) => resp.url().includes('/api/v1/healthchecks') && resp.request().method() === 'POST'
+			(resp) =>
+				resp.url().includes('/api/v1/healthchecks') &&
+				resp.request().method() === 'POST' &&
+				resp.status() !== 0,
+			{ timeout: 30_000 }
 		),
 		page.getByRole('button', { name: 'Save Check' }).click()
 	]);
+	if (!response.ok()) {
+		throw new Error(`Health check create failed: HTTP ${response.status()}`);
+	}
 	const payload = (await response.json()) as { id: string };
 	return payload.id;
 }

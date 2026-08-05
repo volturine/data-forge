@@ -70,7 +70,7 @@ export async function createCleanupPage(browser: Browser, sessionState: E2EStora
 	const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
 	const context = await browser.newContext({
 		baseURL,
-		storageState: sessionState
+		storageState: structuredClone(sessionState)
 	});
 	const page = await context.newPage();
 	return { page, context };
