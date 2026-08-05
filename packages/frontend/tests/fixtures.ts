@@ -48,17 +48,9 @@ async function createSessionState(browser: Browser, workerIndex: number): Promis
 			const createButton = page.getByRole('button', { name: 'Create account', exact: true });
 			await expect(createButton).toBeEnabled({ timeout: 5_000 });
 			await createButton.click();
-			const continueLink = page.getByRole('link', { name: /Continue/i });
-			const signedIn = page.getByLabel('Main navigation');
-			const created = page.getByText(/Account created\./i);
-			await Promise.race([
-				continueLink.waitFor({ state: 'visible', timeout: 5_000 }),
-				signedIn.waitFor({ state: 'visible', timeout: 5_000 }),
-				created.waitFor({ state: 'visible', timeout: 5_000 })
-			]);
-			if (await continueLink.isVisible()) {
-				await continueLink.click();
-			}
+			// Register stays on the success panel; Continue is a button that navigates home.
+			await expect(page.getByText(/Account created\./i)).toBeVisible({ timeout: 15_000 });
+			await page.getByRole('button', { name: 'Continue', exact: true }).click();
 			await expectSignedIn(page);
 		}
 		return (await context.storageState()) as E2EStorageState;
