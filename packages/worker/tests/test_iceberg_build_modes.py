@@ -9,7 +9,7 @@ from pyiceberg.types import NestedField, StringType
 
 from runtime.compute_service import _schema_cache_payload_from_arrow, _sync_iceberg_schema, export_data
 from runtime.domain.compute.base import EngineResult
-from runtime.internal_api import ClaimedBuildJob
+from runtime.worker_runtime_client import ClaimedBuildJob
 from runtime.namespace import namespace_paths
 
 

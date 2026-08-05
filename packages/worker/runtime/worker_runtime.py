@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
-from runtime.internal_api import BuildJobLeaseLost, ClaimedBuildJob, WorkerInternalApiClient, client_from_env
+from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ async def build_worker_loop(
     worker_id: str,
     run_job: Callable[[ClaimedBuildJob], Awaitable[None]],
     *,
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     capacity: int = 1,
     heartbeat_seconds: float = 5.0,
     idle_exit_seconds: float | None = None,
@@ -90,7 +90,7 @@ async def _run_once(
     *,
     worker_id: str,
     run_job: Callable[[ClaimedBuildJob], Awaitable[None]],
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     lease_renewal_seconds: float,
 ) -> bool:
     clock = asyncio.get_running_loop().time
@@ -147,7 +147,7 @@ async def _run_with_lease(
     job: ClaimedBuildJob,
     worker_id: str,
     run_job: Callable[[ClaimedBuildJob], Awaitable[None]],
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     lease_renewal_seconds: float,
     lease_deadline: float,
 ) -> None:
@@ -182,7 +182,7 @@ async def _renew_lease(
     *,
     job: ClaimedBuildJob,
     worker_id: str,
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     stop_event: asyncio.Event,
     renewal_seconds: float,
     lease_deadline: float,
@@ -218,7 +218,7 @@ async def _renew_lease(
         delay = renewal_seconds
 
 
-def _heartbeat_loop_sync(*, client: WorkerInternalApiClient, stop_signal: threading.Event, worker_id: str, heartbeat_seconds: float) -> None:
+def _heartbeat_loop_sync(*, client: WorkerRuntimeClient, stop_signal: threading.Event, worker_id: str, heartbeat_seconds: float) -> None:
     while not stop_signal.wait(heartbeat_seconds):
         try:
             client.heartbeat_worker(worker_id=worker_id)

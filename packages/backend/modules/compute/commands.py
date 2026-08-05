@@ -84,7 +84,7 @@ def start_build(session: Session, command: StartBuildCommand) -> None:
 def cancel_build(
     session: Session,
     *,
-    detail: schemas.ActiveBuildDetail,
+    detail: schemas.BuildRunDetail,
     event: schemas.BuildCancelledEvent,
 ) -> BuildEvent:
     job = build_jobs_service.get_job_by_build_id(session, detail.build_id)

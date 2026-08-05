@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import type { ActiveBuildDetail } from '$lib/types/build-stream';
+import type { BuildRunDetail } from '$lib/types/build-stream';
 import type { BuildRequest } from '$lib/api/compute';
 
-const mockStartActiveBuild = vi.fn();
-const mockGetActiveBuild = vi.fn();
+const mockStartRuntimeBuild = vi.fn();
+const mockGetRuntimeBuild = vi.fn();
 const mockRetainActivity = vi.fn();
 const mockReleaseActivity = vi.fn();
 
 vi.mock('$lib/api/build-stream', () => ({
-	startActiveBuild: (...args: unknown[]) => mockStartActiveBuild(...args),
-	getActiveBuild: (...args: unknown[]) => mockGetActiveBuild(...args),
+	startRuntimeBuild: (...args: unknown[]) => mockStartRuntimeBuild(...args),
+	getRuntimeBuild: (...args: unknown[]) => mockGetRuntimeBuild(...args),
 	connectBuildDetailStream: (
 		buildId: string,
 		_lastSequence: number,
@@ -112,7 +112,7 @@ function msg(socket: MockWebSocket, payload: Record<string, unknown>) {
 
 const STARTER = { user_id: null, display_name: null, email: null, triggered_by: null };
 
-const DETAIL_BASE: ActiveBuildDetail = {
+const DETAIL_BASE: BuildRunDetail = {
 	build_id: 'build-1',
 	analysis_id: 'analysis-1',
 	analysis_name: 'My Analysis',
@@ -161,7 +161,7 @@ const BUILD_REQUEST_WITH_NULL_TAB = {
 	tab_id: null
 } satisfies BuildRequest;
 
-function makeDetail(overrides: Partial<ActiveBuildDetail> = {}): ActiveBuildDetail {
+function makeDetail(overrides: Partial<BuildRunDetail> = {}): BuildRunDetail {
 	return { ...DETAIL_BASE, ...overrides };
 }
 
@@ -173,9 +173,9 @@ async function flushAsyncWork() {
 	await Promise.resolve();
 }
 
-function mockStartSuccess(detail: ActiveBuildDetail = makeDetail()) {
-	mockStartActiveBuild.mockReturnValue({
-		match: (onOk: (build: ActiveBuildDetail) => void) => {
+function mockStartSuccess(detail: BuildRunDetail = makeDetail()) {
+	mockStartRuntimeBuild.mockReturnValue({
+		match: (onOk: (build: BuildRunDetail) => void) => {
 			onOk(detail);
 			return Promise.resolve();
 		}
@@ -183,7 +183,7 @@ function mockStartSuccess(detail: ActiveBuildDetail = makeDetail()) {
 }
 
 function mockStartError(message: string) {
-	mockStartActiveBuild.mockReturnValue({
+	mockStartRuntimeBuild.mockReturnValue({
 		match: (_onOk: unknown, onErr: (err: { message: string }) => void) => {
 			onErr({ message });
 			return Promise.resolve();
@@ -191,8 +191,8 @@ function mockStartError(message: string) {
 	});
 }
 
-function mockGetActiveBuildError(message = 'missing build') {
-	mockGetActiveBuild.mockReturnValue({
+function mockGetRuntimeBuildError(message = 'missing build') {
+	mockGetRuntimeBuild.mockReturnValue({
 		match: (_onOk: unknown, onErr: (err: { message: string }) => void) => {
 			onErr({ message });
 			return Promise.resolve(false);
@@ -200,9 +200,9 @@ function mockGetActiveBuildError(message = 'missing build') {
 	});
 }
 
-function mockGetActiveBuildSuccess(detail: ActiveBuildDetail) {
-	mockGetActiveBuild.mockReturnValue({
-		match: (onOk: (build: ActiveBuildDetail) => boolean) => Promise.resolve(onOk(detail))
+function mockGetRuntimeBuildSuccess(detail: BuildRunDetail) {
+	mockGetRuntimeBuild.mockReturnValue({
+		match: (onOk: (build: BuildRunDetail) => boolean) => Promise.resolve(onOk(detail))
 	});
 }
 
@@ -213,7 +213,7 @@ describe('BuildStreamStore', () => {
 		MockWebSocket.instances = [];
 		vi.clearAllMocks();
 		mockStartSuccess();
-		mockGetActiveBuildError();
+		mockGetRuntimeBuildError();
 		vi.useFakeTimers();
 	});
 
@@ -240,7 +240,7 @@ describe('BuildStreamStore', () => {
 		store.start(BUILD_REQUEST_WITH_NULL_TAB);
 
 		expect(mockRetainActivity).toHaveBeenCalledTimes(1);
-		expect(mockStartActiveBuild).toHaveBeenCalledWith({
+		expect(mockStartRuntimeBuild).toHaveBeenCalledWith({
 			analysis_pipeline: {
 				analysis_id: 'analysis-1',
 				tabs: []
@@ -355,7 +355,7 @@ describe('BuildStreamStore', () => {
 		const socket = MockWebSocket.instances[0];
 		socket.emit('open');
 
-		const snapshot: { type: string; build: ActiveBuildDetail } = {
+		const snapshot: { type: string; build: BuildRunDetail } = {
 			type: 'snapshot',
 			build: {
 				build_id: 'build-1',
@@ -975,10 +975,10 @@ describe('BuildStreamStore', () => {
 		expect(MockWebSocket.instances[1].url).toContain('/v1/compute/ws/builds/build-1');
 	});
 
-	test('polls active build detail while build remains non-terminal', async () => {
+	test('polls build-run detail while build remains non-terminal', async () => {
 		const store = new BuildStreamStore();
 		store.start(MINIMAL_BUILD_REQUEST);
-		mockGetActiveBuildSuccess(
+		mockGetRuntimeBuildSuccess(
 			makeDetail({
 				status: 'completed',
 				duration_ms: 1750,
@@ -990,39 +990,39 @@ describe('BuildStreamStore', () => {
 		await vi.advanceTimersByTimeAsync(250);
 		await flushAsyncWork();
 
-		expect(mockGetActiveBuild).toHaveBeenCalledWith('build-1');
+		expect(mockGetRuntimeBuild).toHaveBeenCalledWith('build-1');
 		expect(store.status).toBe('completed');
 		expect(store.duration).toBe(1750);
 		expect(store.done).toBe(true);
 	});
 
 	test('continues polling until build id becomes available from delayed start response', async () => {
-		mockStartActiveBuild.mockReturnValue({
-			match: (onOk: (build: ActiveBuildDetail) => void) => {
+		mockStartRuntimeBuild.mockReturnValue({
+			match: (onOk: (build: BuildRunDetail) => void) => {
 				setTimeout(() => onOk(makeDetail()), 500);
 				return Promise.resolve();
 			}
 		});
-		mockGetActiveBuildSuccess(makeDetail({ status: 'running', current_step: 'Load' }));
+		mockGetRuntimeBuildSuccess(makeDetail({ status: 'running', current_step: 'Load' }));
 
 		const store = new BuildStreamStore();
 		store.start(MINIMAL_BUILD_REQUEST);
 
 		await vi.advanceTimersByTimeAsync(250);
 		await flushAsyncWork();
-		expect(mockGetActiveBuild).not.toHaveBeenCalled();
+		expect(mockGetRuntimeBuild).not.toHaveBeenCalled();
 
 		await vi.advanceTimersByTimeAsync(500);
 		await flushAsyncWork();
 
-		expect(mockGetActiveBuild).toHaveBeenCalledWith('build-1');
+		expect(mockGetRuntimeBuild).toHaveBeenCalledWith('build-1');
 		expect(store.buildId).toBe('build-1');
 	});
 
 	test('hydrates terminal build detail after socket close before final event arrives', async () => {
 		const store = new BuildStreamStore();
 		store.start(MINIMAL_BUILD_REQUEST);
-		mockGetActiveBuildSuccess(
+		mockGetRuntimeBuildSuccess(
 			makeDetail({
 				status: 'completed',
 				duration_ms: 1750,
@@ -1036,7 +1036,7 @@ describe('BuildStreamStore', () => {
 		socket.emit('close', { code: 1006, reason: 'Connection lost' });
 		await Promise.resolve();
 
-		expect(mockGetActiveBuild).toHaveBeenCalledWith('build-1');
+		expect(mockGetRuntimeBuild).toHaveBeenCalledWith('build-1');
 		expect(store.status).toBe('completed');
 		expect(store.duration).toBe(1750);
 		expect(store.done).toBe(true);
@@ -1127,7 +1127,7 @@ describe('BuildStreamStore', () => {
 	test('applySnapshot and applyEvent are callable directly', () => {
 		const store = new BuildStreamStore();
 
-		const detail: ActiveBuildDetail = {
+		const detail: BuildRunDetail = {
 			build_id: 'b-1',
 			analysis_id: 'a-1',
 			analysis_name: 'Direct',
@@ -1225,7 +1225,7 @@ describe('BuildStreamStore', () => {
 	test('applySnapshot populates resourceHistory and resourceConfig', () => {
 		const store = new BuildStreamStore();
 
-		const detail: ActiveBuildDetail = {
+		const detail: BuildRunDetail = {
 			build_id: 'b-2',
 			analysis_id: 'a-2',
 			analysis_name: 'Snapshot Test',

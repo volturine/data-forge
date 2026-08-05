@@ -11,19 +11,19 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from builds.build_live import ActiveBuild
+from builds.build_live import RuntimeBuild
 from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2
 from operations.download import DownloadParams
 from operations.export import ExportParams
 from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from operations.step_converter import analysis_pipeline_to_execution_payload
-from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, internal_api
+from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, worker_runtime_client
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
-from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
+from runtime.worker_runtime_client import BackendWorkerRpcError, PendingDatasourceDelete
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -31,7 +31,7 @@ from runtime.internal_api import BackendWorkerRpcError, PendingDatasourceDelete
 
 
 def test_engine_run_execution_entry_proto_uses_typed_fields() -> None:
-    entry = internal_api._engine_run_execution_entry_proto(
+    entry = worker_runtime_client._engine_run_execution_entry_proto(
         {
             "key": "filter",
             "label": "Filter",
@@ -75,7 +75,7 @@ def test_download_operation_params_accept_generated_enum_numbers() -> None:
 
 
 def test_engine_run_update_proto_uses_typed_patch_fields() -> None:
-    update = internal_api._engine_run_update_proto(
+    update = worker_runtime_client._engine_run_update_proto(
         {
             "status": "success",
             "result_json": {"row_count": 2},
@@ -107,7 +107,7 @@ def test_engine_run_update_proto_uses_typed_patch_fields() -> None:
 
 
 def test_engine_status_result_proto_uses_typed_snapshot_fields() -> None:
-    status = internal_api._engine_status_result_proto(
+    status = worker_runtime_client._engine_status_result_proto(
         {
             "analysis_id": "analysis-1",
             "resource_id": "datasource-1",
@@ -363,7 +363,7 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         def dispatch_runtime_outbox(self):
             return 0
 
-    monkeypatch.setattr(compute_request_runtime, "worker_internal_api_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
     monkeypatch.setattr(compute_request_runtime.service, "preview_step", fake_preview_step)
 
     claimed = compute_request_runtime.ClaimedComputeRequest(
@@ -390,7 +390,7 @@ async def test_compute_request_renewal_reports_lost_claim(monkeypatch) -> None:
         def renew_compute_request_lease(self, **_kwargs):
             return None
 
-    monkeypatch.setattr(compute_request_runtime, "worker_internal_api_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-lost",
         namespace="default",
@@ -432,7 +432,7 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
             dispatched.append(True)
             return 0
 
-    monkeypatch.setattr(compute_request_runtime, "worker_internal_api_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
 
     manager = SimpleNamespace(
         get_engine=lambda engine_identity: engine,
@@ -471,7 +471,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
 
     class _Client:
         def datasource_metadata(self, **_kwargs):
-            from runtime.internal_api import DatasourceMetadata
+            from runtime.worker_runtime_client import DatasourceMetadata
 
             return DatasourceMetadata(
                 found=False,
@@ -486,7 +486,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
         def complete_compute_request(self, **kwargs):
             completed.append(kwargs["response"])
 
-    monkeypatch.setattr(compute_request_runtime, "worker_internal_api_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
 
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-404",
@@ -548,7 +548,7 @@ async def test_pending_datasource_delete_waits_for_busy_preview_engine(monkeypat
         finalize_datasource_delete=finalize_delete,
     )
 
-    monkeypatch.setattr(datasource_delete_runtime, "worker_internal_api_client", lambda: client)
+    monkeypatch.setattr(datasource_delete_runtime, "worker_runtime_client", lambda: client)
 
     handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager))
 
@@ -581,7 +581,7 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(m
         finalize_datasource_delete=finalize_delete,
     )
 
-    monkeypatch.setattr(datasource_delete_runtime, "worker_internal_api_client", lambda: client)
+    monkeypatch.setattr(datasource_delete_runtime, "worker_runtime_client", lambda: client)
 
     handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager))
 
@@ -622,7 +622,7 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
             }
         ],
     }
-    build = ActiveBuild(
+    build = RuntimeBuild(
         build_id="build-1",
         analysis_id="analysis-1",
         analysis_name="Analysis 1",

@@ -9,7 +9,7 @@ from backend_core.domain.compute.schemas import EngineReusePolicy, EngineScope
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 
-RuntimeMode = Literal['single_process', 'durable_single_node', 'distributed']
+RuntimeMode = Literal['durable_single_node', 'distributed']
 
 
 class ApiProcessSummary(BaseModel):

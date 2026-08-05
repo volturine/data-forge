@@ -1,6 +1,6 @@
 import {
 	AIProvider as ProtocolAIProvider,
-	ActiveBuildStatus as ProtocolActiveBuildStatus,
+	BuildLifecycleStatus as ProtocolBuildLifecycleStatus,
 	AxisScale as ProtocolAxisScale,
 	BuildLogLevel as ProtocolBuildLogLevel,
 	BuildLogLevelSchema as ProtocolBuildLogLevelSchema,
@@ -431,13 +431,13 @@ export const BUILD_STEP_STATE_TOKENS = {
 	[ProtocolBuildStepState.SKIPPED]: 'skipped'
 } as const satisfies Partial<Record<ProtocolBuildStepState, string>>;
 
-export const ACTIVE_BUILD_STATUS_TOKENS = {
-	[ProtocolActiveBuildStatus.QUEUED]: 'queued',
-	[ProtocolActiveBuildStatus.RUNNING]: 'running',
-	[ProtocolActiveBuildStatus.COMPLETED]: 'completed',
-	[ProtocolActiveBuildStatus.FAILED]: 'failed',
-	[ProtocolActiveBuildStatus.CANCELLED]: 'cancelled'
-} as const satisfies Partial<Record<ProtocolActiveBuildStatus, string>>;
+export const BUILD_LIFECYCLE_STATUS_TOKENS = {
+	[ProtocolBuildLifecycleStatus.QUEUED]: 'queued',
+	[ProtocolBuildLifecycleStatus.RUNNING]: 'running',
+	[ProtocolBuildLifecycleStatus.COMPLETED]: 'completed',
+	[ProtocolBuildLifecycleStatus.FAILED]: 'failed',
+	[ProtocolBuildLifecycleStatus.CANCELLED]: 'cancelled'
+} as const satisfies Partial<Record<ProtocolBuildLifecycleStatus, string>>;
 
 export const BUILD_TAB_STATUS_TOKENS = {
 	[ProtocolBuildTabStatus.SUCCESS]: 'success',
@@ -534,7 +534,7 @@ export type EngineStatus = EnumToken<typeof ENGINE_STATUS_TOKENS>;
 export type EngineScope = EnumToken<typeof ENGINE_SCOPE_TOKENS>;
 export type EngineReusePolicy = EnumToken<typeof ENGINE_REUSE_POLICY_TOKENS>;
 export type BuildStepState = EnumToken<typeof BUILD_STEP_STATE_TOKENS>;
-export type ActiveBuildStatus = EnumToken<typeof ACTIVE_BUILD_STATUS_TOKENS>;
+export type BuildLifecycleStatus = EnumToken<typeof BUILD_LIFECYCLE_STATUS_TOKENS>;
 export type BuildTabStatus = EnumToken<typeof BUILD_TAB_STATUS_TOKENS>;
 export type BuildLogLevel = EnumToken<typeof BUILD_LOG_LEVEL_TOKENS>;
 export type EngineRunExecutionCategory = EnumToken<typeof ENGINE_RUN_EXECUTION_CATEGORY_TOKENS>;

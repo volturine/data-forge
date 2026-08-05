@@ -1275,7 +1275,7 @@ class TestProductionHardening:
 
     async def test_openrouter_error_pushes_error_event(self, client: TestClient) -> None:
         """OpenRouterError during agent turn emits error+done events and clears busy."""
-        from modules.chat.openrouter import OpenRouterError
+        from modules.chat.chat_http import OpenRouterError
 
         resp = client.post(
             '/api/v1/ai/chat/sessions',
@@ -1404,7 +1404,7 @@ class TestProductionHardening:
 
     def test_models_raises_on_api_error(self, client: TestClient) -> None:
         """list_models raising OpenRouterError returns 502."""
-        from modules.chat.openrouter import OpenRouterError
+        from modules.chat.chat_http import OpenRouterError
 
         with patch(
             'modules.chat.routes.list_models',
@@ -1420,23 +1420,23 @@ class TestProductionHardening:
     @pytest.mark.asyncio
     async def test_chat_with_tools_rejects_non_object_provider_json(self) -> None:
         """OpenRouter chat completions must return a JSON object."""
-        from modules.chat.openrouter import OpenRouterError, chat_with_tools
+        from modules.chat.chat_http import OpenRouterError, chat_with_tools
 
         transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=[]))
         async with httpx.AsyncClient(transport=transport) as async_client:
-            with patch('modules.chat.openrouter.http_client.get_async_client', return_value=async_client):
+            with patch('modules.chat.chat_http.http_client.get_async_client', return_value=async_client):
                 with pytest.raises(OpenRouterError, match='non-object JSON response'):
                     await chat_with_tools('sk-test', 'gpt-test', [{'role': 'user', 'content': 'hello'}], [])
 
     @pytest.mark.asyncio
     async def test_chat_with_tools_returns_provider_json_object(self) -> None:
         """OpenRouter chat completions preserve valid provider response objects."""
-        from modules.chat.openrouter import chat_with_tools
+        from modules.chat.chat_http import chat_with_tools
 
         payload = {'id': 'completion-1', 'choices': [{'message': {'content': 'hello'}}]}
         transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
         async with httpx.AsyncClient(transport=transport) as async_client:
-            with patch('modules.chat.openrouter.http_client.get_async_client', return_value=async_client):
+            with patch('modules.chat.chat_http.http_client.get_async_client', return_value=async_client):
                 result = await chat_with_tools('sk-test', 'gpt-test', [{'role': 'user', 'content': 'hello'}], [])
 
         assert result == payload
@@ -1707,7 +1707,7 @@ class TestToolSystemMessage:
 
 class TestOpenRouterToolMapping:
     def test_mcp_tool_to_openai_appends_expected_output_hint(self) -> None:
-        from modules.chat.openrouter import _mcp_tool_to_openai
+        from modules.chat.chat_http import _mcp_tool_to_openai
 
         tool = {
             'id': 'get_item',
@@ -1742,7 +1742,7 @@ class TestOpenRouterToolMapping:
         assert 'fields: id, name, created_at' in desc
 
     def test_mcp_tool_to_openai_keeps_description_when_no_output_schema(self) -> None:
-        from modules.chat.openrouter import _mcp_tool_to_openai
+        from modules.chat.chat_http import _mcp_tool_to_openai
 
         tool = {
             'id': 'get_item',

@@ -19,18 +19,18 @@ class BuildRunStatus(ApiEnumValue):
     def is_terminal(self) -> bool:
         return self in {BuildRunStatus.COMPLETED, BuildRunStatus.FAILED, BuildRunStatus.CANCELLED, BuildRunStatus.ORPHANED}
 
-    def to_active_build_status(self) -> tuple[compute_schemas.ActiveBuildStatus, str | None]:
+    def to_build_lifecycle_status(self) -> tuple[compute_schemas.BuildLifecycleStatus, str | None]:
         if self == BuildRunStatus.QUEUED:
-            return compute_schemas.ActiveBuildStatus.QUEUED, None
+            return compute_schemas.BuildLifecycleStatus.QUEUED, None
         if self == BuildRunStatus.RUNNING:
-            return compute_schemas.ActiveBuildStatus.RUNNING, None
+            return compute_schemas.BuildLifecycleStatus.RUNNING, None
         if self == BuildRunStatus.COMPLETED:
-            return compute_schemas.ActiveBuildStatus.COMPLETED, None
+            return compute_schemas.BuildLifecycleStatus.COMPLETED, None
         if self == BuildRunStatus.CANCELLED:
-            return compute_schemas.ActiveBuildStatus.CANCELLED, None
+            return compute_schemas.BuildLifecycleStatus.CANCELLED, None
         if self == BuildRunStatus.FAILED:
-            return compute_schemas.ActiveBuildStatus.FAILED, None
-        return compute_schemas.ActiveBuildStatus.FAILED, 'Build orphaned during startup recovery'
+            return compute_schemas.BuildLifecycleStatus.FAILED, None
+        return compute_schemas.BuildLifecycleStatus.FAILED, 'Build orphaned during startup recovery'
 
 
 BuildRunStatus.QUEUED = BuildRunStatus(enums_pb2.BUILD_RUN_STATUS_QUEUED, api_token('BuildRunStatus', enums_pb2.BUILD_RUN_STATUS_QUEUED))

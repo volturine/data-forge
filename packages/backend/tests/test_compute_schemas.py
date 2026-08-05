@@ -6,12 +6,12 @@ from protovalidate import ValidationError as ProtoValidationError, Validator
 from pydantic import ValidationError
 
 from backend_core.domain.compute.schemas import (
-    ActiveBuildStatus,
     BuildCancelledEvent,
     BuildCompleteEvent,
     BuildEventAdapter,
     BuildEventType,
     BuildFailedEvent,
+    BuildLifecycleStatus,
     BuildRequest,
     BuildStarter,
     BuildStepState,
@@ -193,11 +193,11 @@ def test_build_event_type_owns_live_build_mappings() -> None:
     assert BuildEventType.STEP_START.step_state == BuildStepState.RUNNING
     assert BuildEventType.STEP_COMPLETE.step_state == BuildStepState.COMPLETED
     assert BuildEventType.STEP_FAILED.step_state == BuildStepState.FAILED
-    assert BuildEventType.COMPLETE.terminal_build_status == ActiveBuildStatus.COMPLETED
-    assert BuildEventType.CANCELLED.terminal_build_status == ActiveBuildStatus.CANCELLED
+    assert BuildEventType.COMPLETE.terminal_build_status == BuildLifecycleStatus.COMPLETED
+    assert BuildEventType.CANCELLED.terminal_build_status == BuildLifecycleStatus.CANCELLED
     assert BuildEventType.CANCELLED.terminal_error_message == 'Build cancelled'
-    assert ActiveBuildStatus.RUNNING.is_terminal is False
-    assert ActiveBuildStatus.FAILED.is_terminal is True
+    assert BuildLifecycleStatus.RUNNING.is_terminal is False
+    assert BuildLifecycleStatus.FAILED.is_terminal is True
 
 
 def test_build_event_union_validates_terminal_events() -> None:

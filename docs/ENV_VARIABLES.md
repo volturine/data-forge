@@ -194,7 +194,7 @@ API, scheduler, and worker together, then restart the complete runtime.
 
 ### Internal runtime (gRPC)
 
-These variables configure the gRPC channel that the scheduler and worker use to communicate with the backend API process. They replace the legacy HTTP internal-runtime path.
+These variables configure the gRPC channel that the scheduler and worker use to communicate with the backend API process. They configure the internal gRPC control plane between API, scheduler, and worker.
 
 | Variable               | Default                   | Notes                                                                                                 |
 | ---------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -219,7 +219,6 @@ These variables configure the gRPC channel that the scheduler and worker use to 
 | `BUILD_WORKER_MIN_PROCESSES`      | `0`     | Minimum warm build-worker subprocesses to keep alive.           |
 | `BUILD_WORKER_MAX_PROCESSES`      | `10`    | Maximum dynamic build-worker subprocesses. Must be <= `MAX_CONCURRENT_ENGINES`. |
 | `BUILD_WORKER_IDLE_EXIT_SECONDS`  | `30`    | Seconds an idle build worker waits before exiting.              |
-| `EMBEDDED_BUILD_WORKER_ENABLED`   | `false` | Debug-only local override. It is incompatible with distributed runtime mode. |
 | `DATABASE_POOL_SIZE`              | `10`    | SQLAlchemy pool size for Postgres runtime.                      |
 | `DATABASE_MAX_OVERFLOW`           | `20`    | Extra Postgres connections allowed above pool size.             |
 | `DATABASE_POOL_TIMEOUT`           | `30`    | Seconds to wait for a Postgres pooled connection.               |

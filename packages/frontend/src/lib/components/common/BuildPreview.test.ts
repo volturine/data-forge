@@ -2,11 +2,11 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import BuildPreview from './BuildPreview.svelte';
 import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-import type { ActiveBuildDetail } from '$lib/types/build-stream';
+import type { BuildRunDetail } from '$lib/types/build-stream';
 
 vi.mock('$lib/api/build-stream', () => ({
-	startActiveBuild: () => ({
-		match: async (onOk: (build: ActiveBuildDetail) => void) => {
+	startRuntimeBuild: () => ({
+		match: async (onOk: (build: BuildRunDetail) => void) => {
 			onOk(makeDetail());
 		}
 	}),
@@ -24,7 +24,7 @@ vi.mock('$lib/stores/namespace.svelte', () => ({
 
 const STARTER = { user_id: null, display_name: null, email: null, triggered_by: null };
 
-function makeDetail(overrides: Partial<ActiveBuildDetail> = {}): ActiveBuildDetail {
+function makeDetail(overrides: Partial<BuildRunDetail> = {}): BuildRunDetail {
 	return {
 		build_id: 'build-1',
 		analysis_id: 'analysis-1',
@@ -65,7 +65,7 @@ function makeDetail(overrides: Partial<ActiveBuildDetail> = {}): ActiveBuildDeta
 }
 
 function renderPreview(
-	detail?: ActiveBuildDetail,
+	detail?: BuildRunDetail,
 	props?: {
 		requestJson?: Record<string, unknown> | null;
 		resultJson?: Record<string, unknown> | null;

@@ -511,7 +511,7 @@ def serialize_event_row(row: BuildEvent) -> dict[str, object]:
     )
 
 
-def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.ActiveBuildDetail:
+def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.BuildRunDetail:
     steps: dict[tuple[str | None, str], compute_schemas.BuildStepSnapshot] = {}
     plans: dict[tuple[str | None, str | None], compute_schemas.BuildQueryPlanSnapshot] = {}
     resources: list[compute_schemas.BuildResourceSnapshot] = []
@@ -592,14 +592,14 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
         if isinstance(event, compute_schemas.BuildCompleteEvent | compute_schemas.BuildFailedEvent | compute_schemas.BuildCancelledEvent):
             results = list(event.results)
 
-    status, orphan_error = build_run.status_kind().to_active_build_status()
+    status, orphan_error = build_run.status_kind().to_build_lifecycle_status()
     error = build_run.error_message or orphan_error
     resource_config = (
         compute_schemas.BuildResourceConfigSummary.model_validate(build_run.resource_config_json) if isinstance(build_run.resource_config_json, dict) else None
     )
     starter = compute_schemas.BuildStarter.model_validate(build_run.starter_json)
     result_json = copy_json_dict(build_run.result_json) if isinstance(build_run.result_json, dict) else None
-    return compute_schemas.ActiveBuildDetail(
+    return compute_schemas.BuildRunDetail(
         build_id=build_run.id,
         analysis_id=build_run.analysis_id,
         analysis_name=build_run.analysis_name,
@@ -637,13 +637,13 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
     )
 
 
-def build_summary(build_run: BuildRun) -> compute_schemas.ActiveBuildSummary:
-    status, _orphan_error = build_run.status_kind().to_active_build_status()
+def build_summary(build_run: BuildRun) -> compute_schemas.BuildRunSummary:
+    status, _orphan_error = build_run.status_kind().to_build_lifecycle_status()
     resource_config = (
         compute_schemas.BuildResourceConfigSummary.model_validate(build_run.resource_config_json) if isinstance(build_run.resource_config_json, dict) else None
     )
     starter = compute_schemas.BuildStarter.model_validate(build_run.starter_json)
-    return compute_schemas.ActiveBuildSummary(
+    return compute_schemas.BuildRunSummary(
         build_id=build_run.id,
         analysis_id=build_run.analysis_id,
         analysis_name=build_run.analysis_name,

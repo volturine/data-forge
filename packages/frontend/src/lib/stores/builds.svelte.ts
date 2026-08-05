@@ -1,19 +1,19 @@
 import { listBuilds, type ListBuildsParams } from '$lib/api/builds';
-import type { ActiveBuildSummary } from '$lib/types/build-stream';
+import type { BuildRunSummary } from '$lib/types/build-stream';
 import { PaginatedStore, type PaginatedStatus } from './paginated-store.svelte';
 
 export type BuildsStatus = PaginatedStatus;
 
 interface BuildsPage {
-	builds: ActiveBuildSummary[];
+	builds: BuildRunSummary[];
 	total: number;
 }
 
 export class BuildsStore extends PaginatedStore<ListBuildsParams, BuildsPage> {
-	builds = $state.raw<ActiveBuildSummary[]>([]);
+	builds = $state.raw<BuildRunSummary[]>([]);
 	total = $state(0);
 
-	replaceBuild(next: ActiveBuildSummary): void {
+	replaceBuild(next: BuildRunSummary): void {
 		this.builds = this.builds.map((build) => (build.build_id === next.build_id ? next : build));
 	}
 

@@ -34,8 +34,6 @@ def _age_seconds(value: datetime, *, now: datetime | None = None) -> float:
 def runtime_mode() -> schemas.RuntimeMode:
     if supports_distributed_runtime():
         return 'distributed'
-    if settings.embedded_build_worker_enabled:
-        return 'single_process'
     return 'durable_single_node'
 
 

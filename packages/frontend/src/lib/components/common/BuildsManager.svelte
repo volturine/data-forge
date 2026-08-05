@@ -4,10 +4,10 @@
 	import { getBuild } from '$lib/api/builds';
 	import { getDatasource, listDatasources } from '$lib/api/datasource';
 	import { listAnalyses } from '$lib/api/analysis';
-	import type { ActiveBuildDetail, ActiveBuildSummary } from '$lib/types/build-stream';
+	import type { BuildRunDetail, BuildRunSummary } from '$lib/types/build-stream';
 	import {
-		activeBuildStatusLabel,
-		canCancelActiveBuildStatus,
+		buildLifecycleStatusLabel,
+		canCancelBuildLifecycleStatus,
 		engineRunDisplayKind,
 		engineRunKindLabel
 	} from '$lib/types/build-stream';
@@ -82,7 +82,7 @@
 	let durationStats = $state<DurationStatsResponse | null>(null);
 	let durationStatsLoading = $state(false);
 	const detailStores = new SvelteMap<string, BuildStreamStore>();
-	const detailSnapshots = new SvelteMap<string, ActiveBuildDetail>();
+	const detailSnapshots = new SvelteMap<string, BuildRunDetail>();
 	const detailPayloads = new SvelteMap<string, BuildPayloadData>();
 	const pendingCancelled = new SvelteMap<string, CancelBuildResponse>();
 	const limit = 50;
@@ -211,7 +211,7 @@
 
 	const hasAnyBuildRows = $derived(filteredRuns.length > 0);
 
-	function sortRuns(list: ActiveBuildSummary[]): ActiveBuildSummary[] {
+	function sortRuns(list: BuildRunSummary[]): BuildRunSummary[] {
 		const dir = sortDir === 'asc' ? 1 : -1;
 		return [...list].sort((a, b) => {
 			if (sortColumn === 'created_at') {
@@ -277,29 +277,29 @@
 		return map.get(id) ?? `${id.slice(0, 8)}...`;
 	}
 
-	function effectiveKind(run: ActiveBuildSummary): string {
+	function effectiveKind(run: BuildRunSummary): string {
 		return engineRunDisplayKind(run.current_kind ?? '');
 	}
 
-	function buildDatasourceId(run: ActiveBuildSummary): string {
+	function buildDatasourceId(run: BuildRunSummary): string {
 		return run.current_datasource_id ?? run.current_output_id ?? '';
 	}
 
-	function buildDatasourceName(run: ActiveBuildSummary): string | null {
+	function buildDatasourceName(run: BuildRunSummary): string | null {
 		const datasourceId = buildDatasourceId(run);
 		if (!datasourceId) return null;
 		return dsNames.get(datasourceId) ?? null;
 	}
 
-	function buildCurrentTabName(run: ActiveBuildSummary): string | null {
+	function buildCurrentTabName(run: BuildRunSummary): string | null {
 		return run.current_tab_name ?? null;
 	}
 
-	function buildOutputName(run: ActiveBuildSummary): string | null {
+	function buildOutputName(run: BuildRunSummary): string | null {
 		return run.current_output_name ?? null;
 	}
 
-	function getRunBranch(run: ActiveBuildSummary): string | null {
+	function getRunBranch(run: BuildRunSummary): string | null {
 		const payload = detailPayloads.get(run.build_id)?.requestJson;
 		if (!payload) return null;
 		const opts = payload.iceberg_options as Record<string, unknown> | undefined;
@@ -316,7 +316,7 @@
 		return null;
 	}
 
-	function summaryDurationMs(run: ActiveBuildSummary): number {
+	function summaryDurationMs(run: BuildRunSummary): number {
 		const cancelled = pendingCancelled.get(run.build_id);
 		if (cancelled?.duration_ms !== null && cancelled?.duration_ms !== undefined) {
 			return cancelled.duration_ms;
@@ -328,7 +328,7 @@
 		return run.elapsed_ms ?? 0;
 	}
 
-	function runDurationExceeded(run: ActiveBuildSummary): boolean {
+	function runDurationExceeded(run: BuildRunSummary): boolean {
 		const result = run.result_json;
 		if (!result || typeof result !== 'object') return false;
 		return result.duration_exceeded_warning === true;
@@ -373,7 +373,7 @@
 	});
 
 	function currentStatus(
-		run: ActiveBuildSummary
+		run: BuildRunSummary
 	): 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' {
 		if (pendingCancelled.has(run.build_id)) return 'cancelled';
 		return run.status;
@@ -392,15 +392,15 @@
 		return () => clearInterval(timer);
 	});
 
-	function cancelledAt(run: ActiveBuildSummary): string | null {
+	function cancelledAt(run: BuildRunSummary): string | null {
 		return pendingCancelled.get(run.build_id)?.cancelled_at ?? run.cancelled_at ?? null;
 	}
 
-	function cancelledBy(run: ActiveBuildSummary): string | null {
+	function cancelledBy(run: BuildRunSummary): string | null {
 		return pendingCancelled.get(run.build_id)?.cancelled_by ?? run.cancelled_by ?? null;
 	}
 
-	function lastCompletedStep(run: ActiveBuildSummary): string | null {
+	function lastCompletedStep(run: BuildRunSummary): string | null {
 		const detail = detailSnapshots.get(run.build_id);
 		if (!detail) return null;
 		for (let index = detail.steps.length - 1; index >= 0; index -= 1) {
@@ -409,11 +409,11 @@
 		return null;
 	}
 
-	function canCancelRun(run: ActiveBuildSummary): boolean {
-		return canCancelActiveBuildStatus(currentStatus(run));
+	function canCancelRun(run: BuildRunSummary): boolean {
+		return canCancelBuildLifecycleStatus(currentStatus(run));
 	}
 
-	function requestCancelRun(run: ActiveBuildSummary): void {
+	function requestCancelRun(run: BuildRunSummary): void {
 		if (!canCancelRun(run) || cancelPending) return;
 		cancelError = null;
 		cancelTarget = { id: run.build_id };
@@ -444,7 +444,7 @@
 				pendingCancelled.delete(buildId);
 				continue;
 			}
-			if (!canCancelActiveBuildStatus(run.status)) {
+			if (!canCancelBuildLifecycleStatus(run.status)) {
 				pendingCancelled.delete(buildId);
 			}
 		}
@@ -482,7 +482,7 @@
 		return store;
 	}
 
-	function summaryDetail(run: ActiveBuildSummary): ActiveBuildDetail {
+	function summaryDetail(run: BuildRunSummary): BuildRunDetail {
 		return {
 			...run,
 			steps: [],
@@ -498,11 +498,11 @@
 		};
 	}
 
-	function replaceRun(next: ActiveBuildSummary): void {
+	function replaceRun(next: BuildRunSummary): void {
 		buildsStore.replaceBuild(next);
 	}
 
-	function setDetailPayload(build: ActiveBuildDetail): void {
+	function setDetailPayload(build: BuildRunDetail): void {
 		detailSnapshots.set(build.build_id, build);
 		detailPayloads.set(build.build_id, {
 			requestJson: (build.request_json as Record<string, unknown> | null) ?? null,
@@ -531,14 +531,14 @@
 		}
 		syncingExpandedId = buildId;
 		const detail = await getBuild(buildId).match(
-			(response: ActiveBuildDetail) => response,
+			(response: BuildRunDetail) => response,
 			() => null
 		);
 		if (syncingExpandedId === buildId) syncingExpandedId = null;
 		if (expandedId !== buildId || !detail) return;
 		replaceRun(detail);
 		setDetailPayload(detail);
-		if (canCancelActiveBuildStatus(detail.status)) {
+		if (canCancelBuildLifecycleStatus(detail.status)) {
 			store.watch(detail.build_id);
 			store.applySnapshot(detail);
 			expandedLiveId = detail.build_id;
@@ -1085,7 +1085,7 @@
 													})}
 												/>
 												<span class={css({ color: 'fg.secondary' })}
-													>{activeBuildStatusLabel(currentStatus(run))}</span
+													>{buildLifecycleStatusLabel(currentStatus(run))}</span
 												>
 											{:else if currentStatus(run) === 'running'}
 												<Loader
@@ -1096,22 +1096,22 @@
 													})}
 												/>
 												<span class={css({ color: 'accent.primary' })}
-													>{activeBuildStatusLabel(currentStatus(run))}</span
+													>{buildLifecycleStatusLabel(currentStatus(run))}</span
 												>
 											{:else if currentStatus(run) === 'completed'}
 												<CircleCheck size={14} class={css({ color: 'fg.success' })} />
 												<span class={css({ color: 'fg.success' })}
-													>{activeBuildStatusLabel(currentStatus(run))}</span
+													>{buildLifecycleStatusLabel(currentStatus(run))}</span
 												>
 											{:else if currentStatus(run) === 'cancelled'}
 												<CircleX size={14} class={css({ color: 'fg.warning' })} />
 												<span class={css({ color: 'fg.warning' })}
-													>{activeBuildStatusLabel(currentStatus(run))}</span
+													>{buildLifecycleStatusLabel(currentStatus(run))}</span
 												>
 											{:else}
 												<CircleX size={14} class={css({ color: 'fg.error' })} />
 												<span class={css({ color: 'fg.error' })}
-													>{activeBuildStatusLabel(currentStatus(run))}</span
+													>{buildLifecycleStatusLabel(currentStatus(run))}</span
 												>
 											{/if}
 										</span>

@@ -166,13 +166,13 @@ FRONTEND_BUILD_STREAM_ADAPTER_FORBIDDEN_PATTERNS = {
     re.compile(r'\bconst\s+BUILD_LOG_LEVEL_TOKENS\s*:'): 'build-stream generated JSON enum tokens must live in protocol-enum-tokens.ts',
 }
 FRONTEND_BUILD_STREAM_TYPES_REQUIRED_TOKENS = {
-    'ActiveBuildSummaryJson as ProtocolActiveBuildSummaryJson': 'active build summary type must be anchored to generated protocol JSON',
-    'ActiveBuildDetailJson as ProtocolActiveBuildDetailJson': 'active build detail type must be anchored to generated protocol JSON',
+    'BuildRunSummaryJson as ProtocolBuildRunSummaryJson': 'build-run summary type must be anchored to generated protocol JSON',
+    'BuildRunDetailJson as ProtocolBuildRunDetailJson': 'build-run detail type must be anchored to generated protocol JSON',
     'BuildSnapshotMessageJson as ProtocolBuildSnapshotMessageJson': 'build snapshot websocket type must be anchored to generated protocol JSON',
-    'ActiveBuildListResponseJson as ProtocolActiveBuildListResponseJson': 'active build list response must be anchored to generated protocol JSON',
+    'BuildRunListResponseJson as ProtocolBuildRunListResponseJson': 'build-run list response must be anchored to generated protocol JSON',
 }
 FRONTEND_BUILD_API_FORBIDDEN_PATTERNS = {
-    re.compile(r'\binterface\s+ActiveBuildListResponse\b'): 'build list response must be imported from protocol-anchored build-stream types',
+    re.compile(r'\binterface\s+BuildRunListResponse\b'): 'build list response must be imported from protocol-anchored build-stream types',
 }
 FRONTEND_COMPUTE_TYPES_REQUIRED_TOKENS = {
     'EngineIdentityJson as ProtocolEngineIdentityJson': 'engine identity payload must be anchored to generated protocol JSON',
@@ -192,8 +192,8 @@ FRONTEND_COMPUTE_TYPES_FORBIDDEN_PATTERNS = {
     re.compile(r"export\s+type\s+EngineReusePolicy\s*=\s*'shared'"): 'engine reuse policy literals must come from generated protocol enum tokens',
 }
 PROTOCOL_COMPUTE_REQUIRED_TOKENS = {
-    'message ActiveBuildSummary': 'protocol must own active build summary DTOs',
-    'message ActiveBuildDetail': 'protocol must own active build detail DTOs',
+    'message BuildRunSummary': 'protocol must own build-run summary DTOs',
+    'message BuildRunDetail': 'protocol must own build-run detail DTOs',
     'message BuildSnapshotMessage': 'protocol must own build snapshot websocket DTOs',
     'message BuildWebsocketErrorMessage': 'protocol must own build websocket error DTOs',
     'string resource_id = 6': 'protocol EngineIdentity must explicitly carry resource_id',
@@ -258,8 +258,8 @@ PROTO_STRUCT_ALLOWLIST = {
     'proto/dataforge_protocol/compute.proto:StepPreviewResult.rows': 'preview rows are arbitrary datasource result objects',
     'proto/dataforge_protocol/compute.proto:StepPreviewResult.metadata': 'preview metadata is engine/provider-specific',
     'proto/dataforge_protocol/compute.proto:ComputeErrorResult.details': 'error details are intentionally extensible diagnostics',
-    'proto/dataforge_protocol/compute.proto:ActiveBuildSummary.result_json': 'active build summaries expose persisted runtime result JSON at the API boundary',
-    'proto/dataforge_protocol/compute.proto:ActiveBuildDetail.request_json': 'active build details expose persisted runtime request JSON at the API boundary',
+    'proto/dataforge_protocol/compute.proto:BuildRunSummary.result_json': 'build-run summaries expose persisted runtime result JSON at the API boundary',
+    'proto/dataforge_protocol/compute.proto:BuildRunDetail.request_json': 'build-run details expose persisted runtime request JSON at the API boundary',
     'proto/dataforge_protocol/datasource.proto:DatasourceMetadata.config': 'datasource configs are provider/user-defined JSON escape hatches',
     'proto/dataforge_protocol/datasource.proto:CreateFileDatasourceCommand.options': 'file datasource options are format-specific JSON escape hatches',
     'proto/dataforge_protocol/datasource.proto:CreateIcebergDatasourceCommand.source': 'Iceberg source descriptors are provider-specific JSON escape hatches',
@@ -587,7 +587,7 @@ def main() -> int:
 
     for rel_path in (
         Path('packages/backend/backend_grpc/server.py'),
-        Path('packages/worker/runtime/internal_api.py'),
+        Path('packages/worker/runtime/worker_runtime_client.py'),
     ):
         path = ROOT / rel_path
         if not path.exists():

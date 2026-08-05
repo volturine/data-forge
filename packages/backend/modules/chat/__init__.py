@@ -1,4 +1,4 @@
-"""Chat module — OpenRouter-powered chat with MCP tool execution."""
+"""Chat module — AI-powered chat with MCP tool execution."""
 
 from modules.chat.routes import router
 

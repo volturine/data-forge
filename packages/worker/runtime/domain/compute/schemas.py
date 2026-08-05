@@ -292,7 +292,7 @@ class BuildTabResult(BaseModel):
     error: str | None = None
 
 
-class ActiveBuildStatus(DomainEnumValue):
+class BuildLifecycleStatus(DomainEnumValue):
     QUEUED: ClassVar[Self]
     RUNNING: ClassVar[Self]
     COMPLETED: ClassVar[Self]
@@ -301,21 +301,32 @@ class ActiveBuildStatus(DomainEnumValue):
 
     @property
     def is_terminal(self) -> bool:
-        return self in {ActiveBuildStatus.COMPLETED, ActiveBuildStatus.FAILED, ActiveBuildStatus.CANCELLED}
+        return self in {BuildLifecycleStatus.COMPLETED, BuildLifecycleStatus.FAILED, BuildLifecycleStatus.CANCELLED}
 
     @classmethod
-    def coerce(cls, value: object) -> ActiveBuildStatus:
+    def coerce(cls, value: object) -> BuildLifecycleStatus:
         return cls.read(value, default=cls.QUEUED) or cls.QUEUED
 
 
-ActiveBuildStatus.QUEUED = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_QUEUED, domain_token("ActiveBuildStatus", enums_pb2.ACTIVE_BUILD_STATUS_QUEUED))
-ActiveBuildStatus.RUNNING = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_RUNNING, domain_token("ActiveBuildStatus", enums_pb2.ACTIVE_BUILD_STATUS_RUNNING))
-ActiveBuildStatus.COMPLETED = ActiveBuildStatus(
-    enums_pb2.ACTIVE_BUILD_STATUS_COMPLETED, domain_token("ActiveBuildStatus", enums_pb2.ACTIVE_BUILD_STATUS_COMPLETED)
+BuildLifecycleStatus.QUEUED = BuildLifecycleStatus(
+    enums_pb2.BUILD_LIFECYCLE_STATUS_QUEUED,
+    domain_token("BuildLifecycleStatus", enums_pb2.BUILD_LIFECYCLE_STATUS_QUEUED),
 )
-ActiveBuildStatus.FAILED = ActiveBuildStatus(enums_pb2.ACTIVE_BUILD_STATUS_FAILED, domain_token("ActiveBuildStatus", enums_pb2.ACTIVE_BUILD_STATUS_FAILED))
-ActiveBuildStatus.CANCELLED = ActiveBuildStatus(
-    enums_pb2.ACTIVE_BUILD_STATUS_CANCELLED, domain_token("ActiveBuildStatus", enums_pb2.ACTIVE_BUILD_STATUS_CANCELLED)
+BuildLifecycleStatus.RUNNING = BuildLifecycleStatus(
+    enums_pb2.BUILD_LIFECYCLE_STATUS_RUNNING,
+    domain_token("BuildLifecycleStatus", enums_pb2.BUILD_LIFECYCLE_STATUS_RUNNING),
+)
+BuildLifecycleStatus.COMPLETED = BuildLifecycleStatus(
+    enums_pb2.BUILD_LIFECYCLE_STATUS_COMPLETED,
+    domain_token("BuildLifecycleStatus", enums_pb2.BUILD_LIFECYCLE_STATUS_COMPLETED),
+)
+BuildLifecycleStatus.FAILED = BuildLifecycleStatus(
+    enums_pb2.BUILD_LIFECYCLE_STATUS_FAILED,
+    domain_token("BuildLifecycleStatus", enums_pb2.BUILD_LIFECYCLE_STATUS_FAILED),
+)
+BuildLifecycleStatus.CANCELLED = BuildLifecycleStatus(
+    enums_pb2.BUILD_LIFECYCLE_STATUS_CANCELLED,
+    domain_token("BuildLifecycleStatus", enums_pb2.BUILD_LIFECYCLE_STATUS_CANCELLED),
 )
 
 
@@ -427,14 +438,14 @@ class BuildLogEntry(BaseModel):
     tab_name: str | None = None
 
 
-class ActiveBuildSummary(BaseModel):
+class BuildRunSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     build_id: str
     analysis_id: str
     analysis_name: str
     namespace: str
-    status: ActiveBuildStatus
+    status: BuildLifecycleStatus
     started_at: datetime
     starter: BuildStarter
     resource_config: BuildResourceConfigSummary | None = None
@@ -457,7 +468,7 @@ class ActiveBuildSummary(BaseModel):
     result_json: dict[str, object] | None = None
 
 
-class ActiveBuildDetail(ActiveBuildSummary):
+class BuildRunDetail(BuildRunSummary):
     steps: list[BuildStepSnapshot] = Field(default_factory=list)
     query_plans: list[BuildQueryPlanSnapshot] = Field(default_factory=list)
     latest_resources: BuildResourceSnapshot | None = None
@@ -525,14 +536,14 @@ class BuildEventType(DomainEnumValue):
                 return None
 
     @property
-    def terminal_build_status(self) -> ActiveBuildStatus | None:
+    def terminal_build_status(self) -> BuildLifecycleStatus | None:
         match self:
             case BuildEventType.COMPLETE:
-                return ActiveBuildStatus.COMPLETED
+                return BuildLifecycleStatus.COMPLETED
             case BuildEventType.FAILED:
-                return ActiveBuildStatus.FAILED
+                return BuildLifecycleStatus.FAILED
             case BuildEventType.CANCELLED:
-                return ActiveBuildStatus.CANCELLED
+                return BuildLifecycleStatus.CANCELLED
             case _:
                 return None
 
@@ -704,4 +715,4 @@ class BuildListSnapshotMessage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     type: Literal["snapshot"] = "snapshot"
-    builds: list[ActiveBuildSummary]
+    builds: list[BuildRunSummary]

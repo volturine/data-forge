@@ -4,9 +4,9 @@ import type {
 	ListEngineRunsParams
 } from '$lib/api/engine-runs';
 import type {
-	ActiveBuildDetailJson as ProtocolActiveBuildDetailJson,
-	ActiveBuildListResponseJson as ProtocolActiveBuildListResponseJson,
-	ActiveBuildSummaryJson as ProtocolActiveBuildSummaryJson,
+	BuildRunDetailJson as ProtocolBuildRunDetailJson,
+	BuildRunListResponseJson as ProtocolBuildRunListResponseJson,
+	BuildRunSummaryJson as ProtocolBuildRunSummaryJson,
 	BuildListSnapshotMessageJson as ProtocolBuildListSnapshotMessageJson,
 	BuildLogEntryJson as ProtocolBuildLogEntryJson,
 	BuildQueryPlanSnapshotJson as ProtocolBuildQueryPlanSnapshotJson,
@@ -20,14 +20,14 @@ import type {
 	BuildWebsocketErrorMessageJson as ProtocolBuildWebsocketErrorMessageJson
 } from '$lib/protocol/dataforge_protocol/compute_pb';
 import type {
-	ActiveBuildStatus,
+	BuildLifecycleStatus,
 	BuildLogLevel,
 	BuildStepState,
 	BuildTabStatus,
 	EngineRunKind
 } from '$lib/types/protocol-enum-tokens';
 
-export type { ActiveBuildStatus, BuildLogLevel, BuildStepState, BuildTabStatus, EngineRunKind };
+export type { BuildLifecycleStatus, BuildLogLevel, BuildStepState, BuildTabStatus, EngineRunKind };
 
 type Field<T, K extends keyof T> = NonNullable<T[K]>;
 type StringField<T, K extends keyof T> = Extract<Field<T, K>, string>;
@@ -290,35 +290,32 @@ export interface BuildResourceConfigSummary {
 	>;
 }
 
-export interface ActiveBuildSummary {
-	build_id: StringField<ProtocolActiveBuildSummaryJson, 'buildId'>;
-	analysis_id: StringField<ProtocolActiveBuildSummaryJson, 'analysisId'>;
-	analysis_name: StringField<ProtocolActiveBuildSummaryJson, 'analysisName'>;
-	namespace: StringField<ProtocolActiveBuildSummaryJson, 'namespace'>;
-	status: ActiveBuildStatus;
-	started_at: StringField<ProtocolActiveBuildSummaryJson, 'startedAt'>;
+export interface BuildRunSummary {
+	build_id: StringField<ProtocolBuildRunSummaryJson, 'buildId'>;
+	analysis_id: StringField<ProtocolBuildRunSummaryJson, 'analysisId'>;
+	analysis_name: StringField<ProtocolBuildRunSummaryJson, 'analysisName'>;
+	namespace: StringField<ProtocolBuildRunSummaryJson, 'namespace'>;
+	status: BuildLifecycleStatus;
+	started_at: StringField<ProtocolBuildRunSummaryJson, 'startedAt'>;
 	starter: BuildStarter;
 	resource_config: BuildResourceConfigSummary | null;
-	progress: NumberField<ProtocolActiveBuildSummaryJson, 'progress'>;
-	elapsed_ms: NumberField<ProtocolActiveBuildSummaryJson, 'elapsedMs'>;
-	estimated_remaining_ms: OptionalNumberField<
-		ProtocolActiveBuildSummaryJson,
-		'estimatedRemainingMs'
-	>;
-	current_step: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentStep'>;
-	current_step_index: OptionalNumberField<ProtocolActiveBuildSummaryJson, 'currentStepIndex'>;
-	total_steps: NumberField<ProtocolActiveBuildSummaryJson, 'totalSteps'>;
+	progress: NumberField<ProtocolBuildRunSummaryJson, 'progress'>;
+	elapsed_ms: NumberField<ProtocolBuildRunSummaryJson, 'elapsedMs'>;
+	estimated_remaining_ms: OptionalNumberField<ProtocolBuildRunSummaryJson, 'estimatedRemainingMs'>;
+	current_step: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentStep'>;
+	current_step_index: OptionalNumberField<ProtocolBuildRunSummaryJson, 'currentStepIndex'>;
+	total_steps: NumberField<ProtocolBuildRunSummaryJson, 'totalSteps'>;
 	current_kind: EngineRunKind | null;
-	current_datasource_id: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentDatasourceId'>;
-	current_tab_id: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentTabId'>;
-	current_tab_name: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentTabName'>;
-	current_output_id: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentOutputId'>;
-	current_output_name: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentOutputName'>;
-	current_engine_run_id: OptionalStringField<ProtocolActiveBuildSummaryJson, 'currentEngineRunId'>;
-	total_tabs: NumberField<ProtocolActiveBuildSummaryJson, 'totalTabs'>;
-	cancelled_at: OptionalStringField<ProtocolActiveBuildSummaryJson, 'cancelledAt'>;
-	cancelled_by: OptionalStringField<ProtocolActiveBuildSummaryJson, 'cancelledBy'>;
-	result_json: OptionalStructHttpField<ProtocolActiveBuildSummaryJson, 'resultJson'>;
+	current_datasource_id: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentDatasourceId'>;
+	current_tab_id: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentTabId'>;
+	current_tab_name: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentTabName'>;
+	current_output_id: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentOutputId'>;
+	current_output_name: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentOutputName'>;
+	current_engine_run_id: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentEngineRunId'>;
+	total_tabs: NumberField<ProtocolBuildRunSummaryJson, 'totalTabs'>;
+	cancelled_at: OptionalStringField<ProtocolBuildRunSummaryJson, 'cancelledAt'>;
+	cancelled_by: OptionalStringField<ProtocolBuildRunSummaryJson, 'cancelledBy'>;
+	result_json: OptionalStructHttpField<ProtocolBuildRunSummaryJson, 'resultJson'>;
 }
 
 export interface BuildStepSnapshot {
@@ -361,36 +358,34 @@ export interface BuildLogEntry {
 	tab_name: OptionalStringField<ProtocolBuildLogEntryJson, 'tabName'>;
 }
 
-export interface ActiveBuildDetail extends ActiveBuildSummary {
-	steps: Field<ProtocolActiveBuildDetailJson, 'steps'> extends unknown[]
-		? BuildStepSnapshot[]
-		: never;
-	query_plans: Field<ProtocolActiveBuildDetailJson, 'queryPlans'> extends unknown[]
+export interface BuildRunDetail extends BuildRunSummary {
+	steps: Field<ProtocolBuildRunDetailJson, 'steps'> extends unknown[] ? BuildStepSnapshot[] : never;
+	query_plans: Field<ProtocolBuildRunDetailJson, 'queryPlans'> extends unknown[]
 		? BuildQueryPlanSnapshot[]
 		: never;
 	latest_resources: BuildResourceSnapshot | null;
-	resources: Field<ProtocolActiveBuildDetailJson, 'resources'> extends unknown[]
+	resources: Field<ProtocolBuildRunDetailJson, 'resources'> extends unknown[]
 		? BuildResourceSnapshot[]
 		: never;
-	logs: Field<ProtocolActiveBuildDetailJson, 'logs'> extends unknown[] ? BuildLogEntry[] : never;
-	results: Field<ProtocolActiveBuildDetailJson, 'results'> extends unknown[]
+	logs: Field<ProtocolBuildRunDetailJson, 'logs'> extends unknown[] ? BuildLogEntry[] : never;
+	results: Field<ProtocolBuildRunDetailJson, 'results'> extends unknown[]
 		? BuildTabResult[]
 		: never;
-	duration_ms: OptionalNumberField<ProtocolActiveBuildDetailJson, 'durationMs'>;
-	error: OptionalStringField<ProtocolActiveBuildDetailJson, 'error'>;
-	request_json: OptionalStructHttpField<ProtocolActiveBuildDetailJson, 'requestJson'>;
+	duration_ms: OptionalNumberField<ProtocolBuildRunDetailJson, 'durationMs'>;
+	error: OptionalStringField<ProtocolBuildRunDetailJson, 'error'>;
+	request_json: OptionalStructHttpField<ProtocolBuildRunDetailJson, 'requestJson'>;
 }
 
 export interface BuildDetailSnapshot {
 	type: 'snapshot';
-	build: ActiveBuildDetail;
+	build: BuildRunDetail;
 	last_sequence?: NumberField<ProtocolBuildSnapshotMessageJson, 'lastSequence'>;
 }
 
 export interface BuildsSnapshot {
 	type: 'snapshot';
 	builds: Field<ProtocolBuildListSnapshotMessageJson, 'builds'> extends unknown[]
-		? ActiveBuildSummary[]
+		? BuildRunSummary[]
 		: never;
 }
 
@@ -400,11 +395,11 @@ export interface BuildWebsocketErrorMessage {
 	status_code: NumberField<ProtocolBuildWebsocketErrorMessageJson, 'statusCode'>;
 }
 
-export interface ActiveBuildListResponse {
-	builds: Field<ProtocolActiveBuildListResponseJson, 'builds'> extends unknown[]
-		? ActiveBuildSummary[]
+export interface BuildRunListResponse {
+	builds: Field<ProtocolBuildRunListResponseJson, 'builds'> extends unknown[]
+		? BuildRunSummary[]
 		: never;
-	total: NumberField<ProtocolActiveBuildListResponseJson, 'total'>;
+	total: NumberField<ProtocolBuildRunListResponseJson, 'total'>;
 }
 
 export type BuildStatus =
@@ -417,7 +412,7 @@ export type BuildStatus =
 	| 'disconnected';
 
 export type BuildStatusTone = 'accent' | 'success' | 'warning' | 'error';
-export type ActiveBuildStatusTone = 'success' | 'active' | 'warning' | 'error';
+export type BuildLifecycleStatusTone = 'success' | 'active' | 'warning' | 'error';
 export type MonitoringStatusFilter = 'all' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export type StepInfo = {
@@ -455,7 +450,7 @@ const BUILD_STEP_STATES = new Set<BuildStepState>([
 	'failed',
 	'skipped'
 ]);
-const ACTIVE_BUILD_STATUSES = new Set<ActiveBuildStatus>([
+const BUILD_LIFECYCLE_STATUSES = new Set<BuildLifecycleStatus>([
 	'queued',
 	'running',
 	'completed',
@@ -472,14 +467,14 @@ const BUILD_STATUS_TONES: Record<BuildStatus, BuildStatusTone> = {
 	cancelled: 'warning',
 	disconnected: 'error'
 };
-const ACTIVE_BUILD_STATUS_LABELS: Record<ActiveBuildStatus, string> = {
+const BUILD_LIFECYCLE_STATUS_LABELS: Record<BuildLifecycleStatus, string> = {
 	queued: 'Queued',
 	running: 'Running',
 	completed: 'Success',
 	failed: 'Failed',
 	cancelled: 'Cancelled'
 };
-const ACTIVE_BUILD_STATUS_TONES: Record<ActiveBuildStatus, ActiveBuildStatusTone> = {
+const BUILD_LIFECYCLE_STATUS_TONES: Record<BuildLifecycleStatus, BuildLifecycleStatusTone> = {
 	queued: 'active',
 	running: 'active',
 	completed: 'success',
@@ -518,9 +513,9 @@ export function coerceBuildStepState(value: unknown): BuildStepState {
 	return readBuildStepState(value) ?? 'pending';
 }
 
-export function readActiveBuildStatus(value: unknown): ActiveBuildStatus | null {
-	return typeof value === 'string' && ACTIVE_BUILD_STATUSES.has(value as ActiveBuildStatus)
-		? (value as ActiveBuildStatus)
+export function readBuildLifecycleStatus(value: unknown): BuildLifecycleStatus | null {
+	return typeof value === 'string' && BUILD_LIFECYCLE_STATUSES.has(value as BuildLifecycleStatus)
+		? (value as BuildLifecycleStatus)
 		: null;
 }
 
@@ -528,7 +523,7 @@ export function isTerminalBuildStatus(status: BuildStatus): boolean {
 	return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
-export function buildStatusFromActiveBuild(status: ActiveBuildStatus): BuildStatus {
+export function buildResultStatusFromLifecycle(status: BuildLifecycleStatus): BuildStatus {
 	return status;
 }
 
@@ -555,25 +550,25 @@ export function buildStatusTone(status: BuildStatus): BuildStatusTone {
 	return BUILD_STATUS_TONES[status];
 }
 
-export function activeBuildStatusLabel(status: ActiveBuildStatus): string {
-	return ACTIVE_BUILD_STATUS_LABELS[status];
+export function buildLifecycleStatusLabel(status: BuildLifecycleStatus): string {
+	return BUILD_LIFECYCLE_STATUS_LABELS[status];
 }
 
-export function activeBuildStatusTone(status: ActiveBuildStatus): ActiveBuildStatusTone {
-	return ACTIVE_BUILD_STATUS_TONES[status];
+export function buildLifecycleStatusTone(status: BuildLifecycleStatus): BuildLifecycleStatusTone {
+	return BUILD_LIFECYCLE_STATUS_TONES[status];
 }
 
-export function isTerminalActiveBuildStatus(status: ActiveBuildStatus): boolean {
+export function isTerminalBuildLifecycleStatus(status: BuildLifecycleStatus): boolean {
 	return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
-export function canCancelActiveBuildStatus(status: ActiveBuildStatus): boolean {
+export function canCancelBuildLifecycleStatus(status: BuildLifecycleStatus): boolean {
 	return status === 'queued' || status === 'running';
 }
 
-export function engineRunStatusToActiveBuildStatus(
+export function engineRunStatusToBuildLifecycleStatus(
 	status: EngineRun['status']
-): Exclude<ActiveBuildStatus, 'queued'> {
+): Exclude<BuildLifecycleStatus, 'queued'> {
 	return status === 'success' ? 'completed' : status;
 }
 

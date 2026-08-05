@@ -2,7 +2,7 @@ import { apiRequest } from './client';
 import type { ApiError } from './client';
 import type { ResultAsync } from 'neverthrow';
 import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
-import type { ActiveBuildDetail, ActiveBuildListResponse } from '$lib/types/build-stream';
+import type { BuildRunDetail, BuildRunListResponse } from '$lib/types/build-stream';
 import { shareInFlight } from './in-flight';
 
 export interface ListBuildsParams {
@@ -29,7 +29,7 @@ function buildQueryString(params?: ListBuildsParams): string {
 	return str ? `?${str}` : '';
 }
 
-const inFlight = new Map<string, ResultAsync<ActiveBuildListResponse, ApiError>>();
+const inFlight = new Map<string, ResultAsync<BuildRunListResponse, ApiError>>();
 
 function namespaceKey(): string {
 	if (!isNamespaceReady()) return '';
@@ -39,14 +39,14 @@ function namespaceKey(): string {
 export function listBuilds(
 	params?: ListBuildsParams,
 	signal?: AbortSignal
-): ResultAsync<ActiveBuildListResponse, ApiError> {
+): ResultAsync<BuildRunListResponse, ApiError> {
 	const endpoint = `/v1/compute/builds${buildQueryString(params)}`;
-	if (signal) return apiRequest<ActiveBuildListResponse>(endpoint, { signal });
+	if (signal) return apiRequest<BuildRunListResponse>(endpoint, { signal });
 	return shareInFlight(inFlight, `${namespaceKey()}:${endpoint}`, () =>
-		apiRequest<ActiveBuildListResponse>(endpoint)
+		apiRequest<BuildRunListResponse>(endpoint)
 	);
 }
 
-export function getBuild(buildId: string): ResultAsync<ActiveBuildDetail, ApiError> {
-	return apiRequest<ActiveBuildDetail>(`/v1/compute/builds/${buildId}`);
+export function getBuild(buildId: string): ResultAsync<BuildRunDetail, ApiError> {
+	return apiRequest<BuildRunDetail>(`/v1/compute/builds/${buildId}`);
 }

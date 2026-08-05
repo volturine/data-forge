@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from builds.build_live import ActiveBuild
+from builds.build_live import RuntimeBuild
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.time import utc_now
 
@@ -25,7 +25,7 @@ class BuildEventContext:
     @classmethod
     def from_build(
         cls,
-        build: ActiveBuild,
+        build: RuntimeBuild,
         analysis_id: str,
         *,
         emitted_at: datetime | None = None,
@@ -84,7 +84,7 @@ def event_model(payload: dict[str, object]) -> compute_schemas.BuildEvent:
 
 
 def build_event(
-    build: ActiveBuild,
+    build: RuntimeBuild,
     analysis_id: str,
     payload: dict[str, object],
 ) -> compute_schemas.BuildEvent:
@@ -109,7 +109,7 @@ def estimate_remaining(elapsed_ms: int, completed_steps: int, total_steps: int) 
 async def emit_progress(
     emitter: BuildEmitter | None,
     *,
-    build: ActiveBuild,
+    build: RuntimeBuild,
     analysis_id: str,
     progress: float,
     elapsed_ms: int,

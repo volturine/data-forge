@@ -335,7 +335,7 @@ export async function createHealthCheck(
 	return withAuthedPage(request, async (page) => createHealthCheckViaUi(page, datasourceId, name));
 }
 
-export async function waitForNoActiveBuild(
+export async function waitForNoRuntimeBuild(
 	request: E2ERequest,
 	analysisId: string,
 	timeoutMs = 5_000
@@ -398,7 +398,7 @@ export async function shutdownEngine(
 	analysisId: string,
 	options?: { waitForIdleMs?: number }
 ): Promise<void> {
-	await waitForNoActiveBuild(request, analysisId, options?.waitForIdleMs ?? 5_000).catch(() => {});
+	await waitForNoRuntimeBuild(request, analysisId, options?.waitForIdleMs ?? 5_000).catch(() => {});
 	await withAuthedPage(request, async (page) => {
 		await shutdownEngineViaUi(page, analysisId, { timeoutMs: options?.waitForIdleMs ?? 5_000 });
 	});

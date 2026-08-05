@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { BuildsStore } from './builds.svelte';
-import type { ActiveBuildSummary } from '$lib/types/build-stream';
+import type { BuildRunSummary } from '$lib/types/build-stream';
 
 const mockListBuilds = vi.fn();
 
@@ -8,7 +8,7 @@ vi.mock('$lib/api/builds', () => ({
 	listBuilds: (...args: unknown[]) => mockListBuilds(...args)
 }));
 
-function makeBuild(overrides: Partial<ActiveBuildSummary> = {}): ActiveBuildSummary {
+function makeBuild(overrides: Partial<BuildRunSummary> = {}): BuildRunSummary {
 	return {
 		build_id: 'build-1',
 		analysis_id: 'analysis-1',
@@ -39,10 +39,10 @@ function makeBuild(overrides: Partial<ActiveBuildSummary> = {}): ActiveBuildSumm
 	};
 }
 
-function mockOk(builds: ActiveBuildSummary[], total: number = builds.length) {
+function mockOk(builds: BuildRunSummary[], total: number = builds.length) {
 	return {
 		match: (
-			onOk: (v: { builds: ActiveBuildSummary[]; total: number }) => void,
+			onOk: (v: { builds: BuildRunSummary[]; total: number }) => void,
 			_onErr: (e: unknown) => void
 		) => onOk({ builds, total })
 	};
@@ -57,12 +57,12 @@ function mockErr(message: string) {
 
 function mockPending() {
 	const pending: {
-		resolve: ((value: { builds: ActiveBuildSummary[]; total: number }) => void) | null;
+		resolve: ((value: { builds: BuildRunSummary[]; total: number }) => void) | null;
 		reject: ((error: { message: string }) => void) | null;
 	} = { resolve: null, reject: null };
 	const result = {
 		match: (
-			onOk: (value: { builds: ActiveBuildSummary[]; total: number }) => void,
+			onOk: (value: { builds: BuildRunSummary[]; total: number }) => void,
 			onErr: (error: { message: string }) => void
 		) => {
 			pending.resolve = onOk;

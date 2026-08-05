@@ -169,15 +169,6 @@ class TestSettings:
         with pytest.raises(ValidationError, match='DATABASE_URL must be a PostgreSQL connection string'):
             Settings()
 
-    def test_distributed_runtime_rejects_embedded_build_worker(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('DATABASE_URL', 'postgresql+psycopg://user:pass@host:5432/db')
-        monkeypatch.setenv('DISTRIBUTED_RUNTIME_ENABLED', 'true')
-        monkeypatch.setenv('EMBEDDED_BUILD_WORKER_ENABLED', 'true')
-
-        with pytest.raises(ValidationError, match='EMBEDDED_BUILD_WORKER_ENABLED cannot be enabled'):
-            Settings()
-
     def test_build_worker_process_range_rejects_min_above_max(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('BUILD_WORKER_MIN_PROCESSES', '2')

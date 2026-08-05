@@ -1,3 +1,5 @@
+"""gRPC client from worker processes to the API WorkerRuntime service."""
+
 from __future__ import annotations
 
 import base64
@@ -136,7 +138,7 @@ class BuildJobLeaseLost(RuntimeError):
     pass
 
 
-class WorkerInternalApiClient:
+class WorkerRuntimeClient:
     def __init__(self, *, target: str, token: str, timeout_seconds: float = 120.0, registration_retry_seconds: float = 90.0) -> None:
         self._target = target
         self._token = token
@@ -1553,8 +1555,8 @@ def _compute_response_envelope(
     return envelope
 
 
-def client_from_env() -> WorkerInternalApiClient:
-    return WorkerInternalApiClient(
+def client_from_env() -> WorkerRuntimeClient:
+    return WorkerRuntimeClient(
         target=_required_env("INTERNAL_GRPC_TARGET"),
         token=_required_env("INTERNAL_API_TOKEN"),
     )
