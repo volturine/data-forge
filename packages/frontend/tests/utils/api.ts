@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
@@ -38,6 +39,10 @@ export function workerAuthFile(workerIndex: number): string {
 }
 
 async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promise<T>): Promise<T> {
+	// Worker teardown can race storage-state cleanup; skip rather than fail the suite.
+	if (!fs.existsSync(request.authFile)) {
+		throw new Error(`auth storage state missing: ${request.authFile}`);
+	}
 	const context = await request.browser.newContext({
 		baseURL: request.baseURL,
 		storageState: request.authFile
@@ -398,10 +403,21 @@ export async function shutdownEngine(
 	analysisId: string,
 	options?: { waitForIdleMs?: number }
 ): Promise<void> {
-	await waitForNoRuntimeBuild(request, analysisId, options?.waitForIdleMs ?? 5_000).catch(() => {});
-	await withAuthedPage(request, async (page) => {
-		await shutdownEngineViaUi(page, analysisId, { timeoutMs: options?.waitForIdleMs ?? 5_000 });
-	});
+	// Best-effort cleanup only: missing auth files or timed-out UI teardown must not
+	// fail tests that already finished their assertions.
+	try {
+		if (!fs.existsSync(request.authFile)) return;
+		await waitForNoRuntimeBuild(request, analysisId, options?.waitForIdleMs ?? 5_000).catch(
+			() => {}
+		);
+		await withAuthedPage(request, async (page) => {
+			await shutdownEngineViaUi(page, analysisId, {
+				timeoutMs: options?.waitForIdleMs ?? 5_000
+			});
+		});
+	} catch {
+		// ignore cleanup races
+	}
 }
 
 export async function registerUser(_email: string, _displayName: string): Promise<string> {
