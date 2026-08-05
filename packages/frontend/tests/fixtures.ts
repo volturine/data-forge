@@ -15,9 +15,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
 const authRequired = process.env.AUTH_REQUIRED !== 'false';
 
 async function expectSignedIn(page: Page): Promise<void> {
-	// Under CI load the shell can take longer to hydrate after navigation,
-	// and the Vite dev server can occasionally reload a route module while
-	// auth bootstrap is still warming a fresh worker session.
+	// Under CI load the shell can take longer to hydrate after navigation.
 	const timeout = process.env.CI ? 15_000 : 5_000;
 	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout });
 }
@@ -48,12 +46,17 @@ async function createSessionState(browser: Browser, workerIndex: number): Promis
 			const createButton = page.getByRole('button', { name: 'Create account', exact: true });
 			await expect(createButton).toBeEnabled({ timeout: 5_000 });
 			await createButton.click();
-			// Register stays on the success panel; Continue is a button that navigates home.
+			// Cookie is set on the register response; hard-load home so storageState
+			// captures a fully settled authenticated document (not the success panel).
 			await expect(page.getByText(/Account created\./i)).toBeVisible({ timeout: 15_000 });
-			await page.getByRole('button', { name: 'Continue', exact: true }).click();
+			await page.goto('/', { waitUntil: 'networkidle' });
 			await expectSignedIn(page);
 		}
-		return (await context.storageState()) as E2EStorageState;
+		const sessionState = (await context.storageState()) as E2EStorageState;
+		if (authRequired && !sessionState.cookies.some((cookie) => cookie.name === 'session_token')) {
+			throw new Error(`worker ${workerIndex}: session_token cookie missing after registration`);
+		}
+		return sessionState;
 	} finally {
 		await context.close();
 	}
@@ -74,7 +77,8 @@ export const test = base.extend<{ page: Page; request: E2ERequest }, { workerAut
 	page: async ({ browser, workerAuth }, use) => {
 		const context = await browser.newContext({
 			baseURL,
-			storageState: workerAuth.sessionState
+			// Clone so Playwright cannot mutate the worker-owned session snapshot.
+			storageState: structuredClone(workerAuth.sessionState)
 		});
 		const page = await context.newPage();
 		await use(page);

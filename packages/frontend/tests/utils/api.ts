@@ -61,7 +61,8 @@ const udfRegistry = new Map<string, { name: string }>();
 async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promise<T>): Promise<T> {
 	const context = await request.browser.newContext({
 		baseURL: request.baseURL,
-		storageState: request.sessionState
+		// Clone so Playwright cannot mutate the worker-owned session snapshot.
+		storageState: structuredClone(request.sessionState)
 	});
 	const page = await context.newPage();
 	try {
