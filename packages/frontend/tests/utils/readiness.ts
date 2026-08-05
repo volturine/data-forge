@@ -452,16 +452,7 @@ export async function openSchemaTabAndWait(page: Page, timeout = readyTimeoutMs(
  * Call after `page.goto('/profile')` or navigating to a specific hash tab.
  */
 export async function waitForProfileTabs(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	const tablist = page.getByRole('tablist', { name: 'Profile sections' });
-	// Under parallel CI load the first navigation can land before the shell hydrates.
-	// Retry once with a hard reload rather than failing immediately.
-	try {
-		await expect(tablist).toBeVisible({ timeout });
-	} catch {
-		await page.goto(page.url(), { waitUntil: 'domcontentloaded' });
-		await page.waitForLoadState('networkidle').catch(() => undefined);
-		await expect(tablist).toBeVisible({ timeout });
-	}
+	await expect(page.getByRole('tablist', { name: 'Profile sections' })).toBeVisible({ timeout });
 	await expect(page.getByRole('tab', { selected: true })).toBeVisible({ timeout });
 }
 
