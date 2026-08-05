@@ -23,7 +23,7 @@ from backend_core.namespace import get_namespace
 from dataforge_protocol import enums_pb2
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
-from modules.chat.chat_http import OpenRouterError, chat_with_tools, list_models
+from modules.chat.chat_http import ChatHttpError, chat_with_tools, list_models
 from modules.chat.sessions import LiveSession, session_store
 from modules.mcp.executor import build_tool_context, call_tool
 from modules.mcp.models import MCPToolDefinition, MCPToolSafety
@@ -563,8 +563,8 @@ async def _run_agent_turn(
                 )
 
         session.push_event({'type': 'usage', **turn_usage})
-    except OpenRouterError as exc:
-        logger.error('OpenRouter error session=%s: %s', session.id, exc)
+    except ChatHttpError as exc:
+        logger.error('Chat HTTP error session=%s: %s', session.id, exc)
         session.push_event({'type': 'error', 'content': f'AI provider error: {exc}'})
     except AIError as exc:
         logger.error('AI client error session=%s: %s', session.id, exc)
@@ -778,5 +778,5 @@ async def get_models(body: ChatModelsRequest, user: User = Depends(get_current_u
         raise HTTPException(status_code=400, detail='API key is required')
     try:
         return await provider.list_models(body)
-    except (OpenRouterError, ValueError) as exc:
+    except (ChatHttpError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

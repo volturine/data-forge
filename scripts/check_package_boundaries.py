@@ -58,6 +58,7 @@ FORBIDDEN_OWNER_DUPLICATES = [
     Path('packages/frontend/src/lib/components/common/SchemaViewer.svelte'),
     Path('packages/frontend/src/lib/components/datasources/HealthChecksTab.svelte'),
     Path('packages/frontend/src/lib/types/api-responses.ts'),
+    Path('packages/frontend/src/lib/components/ui/MenuItem.svelte'),
 
     Path('packages/backend/modules/settings/models.py'),
     Path('packages/backend/modules/telegram/models.py'),
