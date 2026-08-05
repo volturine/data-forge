@@ -446,25 +446,6 @@ export async function openSchemaTabAndWait(page: Page, timeout = readyTimeoutMs(
 }
 
 /**
- * Wait for the settings popup form to finish loading.
- *
- * The SettingsPopup component shows a spinner while fetching GET /settings
- * and only renders the form (including the Save button) once loading
- * completes — success or failure. The Save button is the strongest
- * readiness signal: it sits at the bottom of the form branch and proves
- * the entire settings form tree has rendered.
- *
- * @deprecated Settings now live under the profile page tabs. Use
- * {@link waitForProfileTab} instead.
- */
-export async function waitForSettingsForm(
-	dialog: Locator,
-	timeout = readyTimeoutMs()
-): Promise<void> {
-	await expect(dialog.getByRole('button', { name: 'Save' })).toBeVisible({ timeout });
-}
-
-/**
  * Wait for the profile page tabbed interface to be ready.
  *
  * Readiness signal: the tab list renders and at least one tab is selected.

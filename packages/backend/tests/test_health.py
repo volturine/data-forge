@@ -1,28 +1,24 @@
-"""Tests for health check endpoints."""
+"""Tests for process health and readiness endpoints."""
 
 from backend_core.config import settings
 
 
 class TestHealthEndpoints:
-    def test_health_check(self, client):
-        response = client.get('/api/v1/health/')
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data['status'] == 'ok'
-        assert 'version' in data
-
     def test_health_liveness(self, client):
-        response = client.get('/health/ready')
+        response = client.get('/health')
 
         assert response.status_code == 200
         data = response.json()
-        assert 'status' in data
+        assert data['status'] == 'healthy'
+        assert data['version'] == settings.app_version
+        assert data['service'] == settings.app_name
 
     def test_health_readiness(self, client):
         response = client.get('/health/ready')
 
         assert response.status_code == 200
+        data = response.json()
+        assert 'status' in data
 
     def test_health_startup(self, client):
         response = client.get('/health/startup')
@@ -36,13 +32,14 @@ class TestHealthEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert 'message' in data or 'version' in data or 'status' in data
+        assert data['message'] == settings.app_name
+        assert data['version'] == settings.app_version
 
     def test_health_check_response_time(self, client):
         import time
 
         start = time.time()
-        response = client.get('/api/v1/health/')
+        response = client.get('/health')
         duration = time.time() - start
 
         assert response.status_code == 200
@@ -50,11 +47,11 @@ class TestHealthEndpoints:
 
     def test_multiple_health_checks(self, client):
         for _ in range(5):
-            response = client.get('/api/v1/health/')
+            response = client.get('/health')
             assert response.status_code == 200
 
     def test_health_check_headers(self, client):
-        response = client.get('/api/v1/health/')
+        response = client.get('/health')
 
         assert response.status_code == 200
         assert 'content-type' in response.headers

@@ -1,7 +1,7 @@
 # PRD: Migrate Settings Under Profile Page
 
 > **Status (audited 2026-08-02): Implemented.**
-> **Current truth:** Profile/settings consolidation is shipped and covered by frontend tests.
+> **Current truth:** Profile/settings consolidation is shipped and covered by frontend tests. The temporary `/settings` redirect has been removed; settings live only under `/profile` tabs.
 > **Portfolio:** [PRD index](../README.md)
 
 
@@ -21,14 +21,7 @@ Historically, settings and profile were separate destinations in the app. Users 
 
 | Page | Contains | Route |
 |------|----------|-------|
-| Profile | Account, notifications, AI providers, and system tabs | `/profile` |
-| Settings | Redirects to profile system tab | `/settings` |
-
-### Target State
-
-| Page | Contains | Route |
-|------|----------|-------|
-| Profile (unified) | All of the above, organized in tabs | `/profile` |
+| Profile (unified) | Account, notifications, AI providers, and system tabs | `/profile` |
 
 ## Goals
 
@@ -125,7 +118,7 @@ No backend changes required — the existing `/auth/profile`, `/auth/password`, 
 ### Migration
 
 1. Move settings components from the settings page into the profile route.
-2. Add redirect from `/settings` → `/profile#system`.
+2. Remove the standalone `/settings` route (no compatibility redirect).
 3. Update all navigation links that pointed to `/settings`.
 4. Update header profile dropdown menu items.
 
@@ -133,7 +126,7 @@ No backend changes required — the existing `/auth/profile`, `/auth/password`, 
 
 - [x] `/profile` shows a tabbed interface with Account, Notifications, AI Providers, System tabs
 - [x] Each tab hash is deep-linkable (`/profile#notifications`)
-- [x] Old `/settings` route redirects to `/profile` with appropriate tab
+- [x] Standalone `/settings` route is removed (profile is the only settings entry)
 - [x] All settings from the old page are accessible in the new layout
 - [x] Profile updates (name, avatar, password) work from the Account tab
 - [x] SMTP and Telegram test buttons work from the Notifications tab

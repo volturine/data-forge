@@ -9,7 +9,6 @@ from modules.compute.routes import router as compute_router
 from modules.config import router as config_router
 from modules.datasource.routes import router as datasource_router
 from modules.engine_runs.routes import router as engine_runs_router
-from modules.health.routes import router as health_router
 from modules.healthcheck import router as healthcheck_router
 from modules.locks import router as locks_router
 from modules.logs import router as logs_router
@@ -34,7 +33,6 @@ router.include_router(config_router)
 router.include_router(datasource_router)
 router.include_router(engine_runs_router)
 router.include_router(healthcheck_router)
-router.include_router(health_router)
 router.include_router(logs_router)
 router.include_router(locks_router)
 router.include_router(mcp_router)

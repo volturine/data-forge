@@ -115,14 +115,14 @@ describe('audit-log', () => {
 		});
 
 		test('uses page from setAuditPage when not specified', () => {
-			setAuditPage('/settings');
+			setAuditPage('/profile');
 			flush();
 			fetchSpy.mockClear();
 			track({ event: 'page_inherit' });
 			flush();
 			const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
 			const match = body.logs.find((l: Record<string, unknown>) => l.event === 'page_inherit');
-			expect(match.page).toBe('/settings');
+			expect(match.page).toBe('/profile');
 		});
 
 		test('allows overriding page per event', () => {

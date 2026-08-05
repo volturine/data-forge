@@ -348,8 +348,7 @@ Column trace (click column in Output DS):
 
 ## Migration
 
-- Migrate existing `/api/v1/datasource/lineage` to new `/api/v1/lineage` endpoint.
-- Keep old endpoint as deprecated redirect for backward compatibility.
+- Replace existing `/api/v1/datasource/lineage` with the new `/api/v1/lineage` surface in the same release (no deprecated redirect or dual path).
 - Optional: Alembic migration for `lineage_snapshots` table if implementing historical lineage.
 
 ## Rollout Plan

@@ -110,7 +110,3 @@ class NotificationDelivery:
             bot_token=bot_token,
             attachments=[attachment.__dict__ for attachment in attachments or []],
         )
-
-
-NotificationService = NotificationDelivery
-notification_service = NotificationDelivery()

@@ -544,18 +544,6 @@ test.describe('Profile – System tab', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Profile – Settings redirect
-// ────────────────────────────────────────────────────────────────────────────────
-
-test.describe('Profile – settings redirect', () => {
-	test('/settings redirects to /profile with system tab', async ({ page }) => {
-		await page.goto('/settings');
-		await page.waitForURL(/\/profile/, { timeout: 5_000 });
-		await expect(page).toHaveURL(/profile/);
-	});
-});
-
-// ────────────────────────────────────────────────────────────────────────────────
 // Profile – sidebar navigation
 // ────────────────────────────────────────────────────────────────────────────────
 
