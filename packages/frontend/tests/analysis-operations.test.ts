@@ -24,11 +24,13 @@ let sharedDateDatasourceId = '';
 
 function workerRequest(
 	browser: Browser,
-	workerAuth: { workerIndex: number; sessionState: E2ERequest['sessionState'] }
+	workerAuth: { workerIndex: number; sessionState: E2ERequest['sessionState'] },
+	helperContext: E2ERequest['helperContext']
 ): E2ERequest {
 	return {
 		browser,
 		sessionState: workerAuth.sessionState,
+		helperContext,
 		workerIndex: workerAuth.workerIndex,
 		baseURL
 	} as unknown as E2ERequest;
@@ -42,8 +44,8 @@ async function createTrackedAnalysis(
 	return createAnalysis(request, analysisName, datasourceId);
 }
 
-test.beforeAll(async ({ browser, workerAuth }) => {
-	const request = workerRequest(browser, workerAuth);
+test.beforeAll(async ({ browser, workerAuth, helperContext }) => {
+	const request = workerRequest(browser, workerAuth, helperContext);
 	const id = uid();
 	sharedBaseDatasourceName = `e2e-ops-base-${id}`;
 	sharedAuxDatasourceName = `e2e-ops-aux-${id}`;

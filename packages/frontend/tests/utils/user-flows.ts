@@ -77,15 +77,16 @@ export async function uploadDatasourceViaUi(
 	}
 	const uploadBtn = page.getByRole('button', { name: 'Upload', exact: true });
 	await expect(uploadBtn).toBeEnabled({ timeout: 5_000 });
-	// Match any finished upload response (not only 200) so non-OK statuses fail
-	// fast instead of hanging until the 120s test timeout.
+	// Wait for any finished upload response (not only 200). No short timeout:
+	// upload runs through the compute runtime and can exceed 15s under parallel
+	// CI load; the Playwright test timeout bounds the wait. Non-OK statuses
+	// fail immediately with the response body.
 	const uploadResponsePromise = page.waitForResponse(
 		(response) =>
 			response.url().includes('/api/v1/datasource/upload') &&
 			!response.url().includes('/bulk') &&
 			response.request().method() === 'POST' &&
-			response.status() !== 0,
-		{ timeout: 15_000 }
+			response.status() !== 0
 	);
 	await uploadBtn.click();
 	const uploadResponse = await uploadResponsePromise;
@@ -95,19 +96,12 @@ export async function uploadDatasourceViaUi(
 			`Datasource upload failed for ${name}: HTTP ${uploadResponse.status()} ${body.slice(0, 300)}`
 		);
 	}
-	for (let attempt = 0; attempt < 3; attempt += 1) {
-		try {
-			await expect(
-				page,
-				`Upload did not redirect to the created datasource list for ${name}`
-			).toHaveURL((url) => url.pathname === '/datasources' && url.searchParams.has('id'), {
-				timeout: 5_000
-			});
-			break;
-		} catch (error) {
-			if (attempt === 2) throw error;
-		}
-	}
+	await expect(
+		page,
+		`Upload did not redirect to the created datasource list for ${name}`
+	).toHaveURL((url) => url.pathname === '/datasources' && url.searchParams.has('id'), {
+		timeout: 15_000
+	});
 	const currentUrl = new URL(page.url());
 	const datasourceId = currentUrl.searchParams.get('id');
 	if (!datasourceId) {
@@ -182,21 +176,7 @@ export async function importAnalysisViaUi(
 	await page.getByRole('button', { name: /Next/i }).click();
 	await expect(page.getByRole('heading', { name: /Review Import/i })).toBeVisible();
 	await page.getByRole('button', { name: /Create Analysis/i }).click();
-
-	// After create, editor mount can lag under parallel CI load. Retry once with a
-	// fresh readiness budget (same pattern as gotoAnalysisEditor).
-	let lastError: unknown;
-	for (let attempt = 0; attempt < 2; attempt += 1) {
-		try {
-			return await waitForCurrentAnalysisEditor(page);
-		} catch (error) {
-			lastError = error;
-			if (attempt === 1) break;
-			await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
-			await page.waitForTimeout(500);
-		}
-	}
-	throw lastError;
+	return waitForCurrentAnalysisEditor(page);
 }
 
 export async function createUdfViaUi(page: Page, name: string): Promise<string> {
@@ -209,8 +189,7 @@ export async function createUdfViaUi(page: Page, name: string): Promise<string> 
 			(resp) =>
 				resp.url().includes('/api/v1/udf') &&
 				resp.request().method() === 'POST' &&
-				resp.status() !== 0,
-			{ timeout: 15_000 }
+				resp.status() !== 0
 		),
 		page.getByTestId('udf-save-button').click()
 	]);
@@ -243,8 +222,7 @@ export async function createScheduleViaUi(
 			(resp) =>
 				resp.url().includes('/api/v1/schedules') &&
 				resp.request().method() === 'POST' &&
-				resp.status() !== 0,
-			{ timeout: 15_000 }
+				resp.status() !== 0
 		),
 		page.getByRole('button', { name: 'Create Schedule' }).click()
 	]);
@@ -272,8 +250,7 @@ export async function createHealthCheckViaUi(
 			(resp) =>
 				resp.url().includes('/api/v1/healthchecks') &&
 				resp.request().method() === 'POST' &&
-				resp.status() !== 0,
-			{ timeout: 15_000 }
+				resp.status() !== 0
 		),
 		page.getByRole('button', { name: 'Save Check' }).click()
 	]);
