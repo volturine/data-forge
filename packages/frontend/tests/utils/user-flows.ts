@@ -47,18 +47,10 @@ export async function registerViaUi(page: Page, email: string, name: string): Pr
 	const createButton = page.getByRole('button', { name: 'Create account', exact: true });
 	await expect(createButton).toBeEnabled({ timeout: 5_000 });
 	await createButton.click();
-	const continueLink = page.getByRole('link', { name: /Continue/i });
-	await Promise.race([
-		continueLink.waitFor({ state: 'visible', timeout: 5_000 }),
-		page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 5_000 }),
-		page.getByText(/Account created\./i).waitFor({ state: 'visible', timeout: 5_000 })
-	]).catch(() => undefined);
-	if (await continueLink.isVisible().catch(() => false)) {
-		await continueLink.click();
-	} else {
-		await page.goto('/', { waitUntil: 'domcontentloaded' });
-	}
-	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 5_000 });
+	// Register stays on the success panel; Continue is a button that navigates home.
+	await expect(page.getByText(/Account created\./i)).toBeVisible({ timeout: 15_000 });
+	await page.getByRole('button', { name: 'Continue', exact: true }).click();
+	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 15_000 });
 }
 
 export async function uploadDatasourceViaUi(
