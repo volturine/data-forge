@@ -448,29 +448,55 @@ export async function openSchemaTabAndWait(page: Page, timeout = readyTimeoutMs(
 /**
  * Wait for the profile page tabbed interface to be ready.
  *
- * Readiness signal: the tab list renders and at least one tab is selected.
- * Call after `page.goto('/profile')` or navigating to a specific hash tab.
+ * Readiness chain:
+ *  1. Layout ready (shell hydrated, `<main>` mounted) — profile route content
+ *     only mounts after auth/config resolve; waiting on the tablist alone races
+ *     cold navigations under CI load.
+ *  2. Tab list visible with a selected tab.
+ *
+ * Prefer `gotoProfile` / `gotoProfileTab` for navigation; call this after a
+ * manual `page.goto` only when the shell gate has already been satisfied.
  */
 export async function waitForProfileTabs(page: Page, timeout = readyTimeoutMs()): Promise<void> {
+	await waitForLayoutReady(page, timeout);
 	await expect(page.getByRole('tablist', { name: 'Profile sections' })).toBeVisible({ timeout });
 	await expect(page.getByRole('tab', { selected: true })).toBeVisible({ timeout });
 }
 
 /**
+ * Navigate to `/profile` (optionally with a hash tab) using the shared cold-start
+ * shell warm-up, then wait for the profile tablist.
+ */
+export async function gotoProfile(
+	page: Page,
+	hash?: string,
+	timeout = readyTimeoutMs()
+): Promise<void> {
+	const path = hash ? `/profile#${hash}` : '/profile';
+	await gotoAuthedRoute(page, path, timeout);
+	await waitForProfileTabs(page, timeout);
+}
+
+/**
  * Navigate to a specific profile tab and wait for it to load.
  *
- * Clicks the tab button and waits for the corresponding panel to be visible
- * and for any loading spinners to clear. For settings tabs (notifications,
- * ai-providers, system) the Save button is the readiness signal.
+ * Ensures the profile shell/tablist is ready, selects the tab if needed, and
+ * for settings tabs (Notifications, AI Providers, System) waits for the Save
+ * button as the data-loaded signal.
  */
 export async function waitForProfileTab(
 	page: Page,
 	tabName: string,
 	timeout = readyTimeoutMs()
 ): Promise<void> {
+	await waitForProfileTabs(page, timeout);
+
 	const tab = page.getByRole('tab', { name: tabName });
 	await expect(tab).toBeVisible({ timeout });
-	await tab.click();
+	const selected = (await tab.getAttribute('aria-selected')) === 'true';
+	if (!selected) {
+		await tab.click();
+	}
 	await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout });
 
 	// For settings tabs, wait for Save button (proves data loaded)

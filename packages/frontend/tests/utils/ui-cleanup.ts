@@ -1,7 +1,7 @@
 import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 import fs from 'node:fs';
-import { findAnalysisIdByName, workerAuthFile } from './api.js';
+import { findAnalysisIdByName, workerAuthFile, type E2EStorageState } from './api.js';
 import {
 	gotoAnalysesGallery,
 	gotoUdfLibrary,
@@ -66,13 +66,19 @@ async function waitForHealthChecksList(page: Page, timeout: number): Promise<voi
 		.toBe(true);
 }
 
-export async function createCleanupPage(browser: Browser, workerIndex: number) {
+export async function createCleanupPage(
+	browser: Browser,
+	workerIndex: number,
+	storageState?: E2EStorageState | null
+) {
 	const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
 	const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
 	const authFile = workerAuthFile(workerIndex);
+	const state: E2EStorageState | string | undefined =
+		storageState ?? (fs.existsSync(authFile) ? authFile : undefined);
 	const context = await browser.newContext({
 		baseURL,
-		...(fs.existsSync(authFile) ? { storageState: authFile } : {})
+		...(state ? { storageState: state } : {})
 	});
 	const page = await context.newPage();
 	return { page, context };

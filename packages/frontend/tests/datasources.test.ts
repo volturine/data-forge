@@ -26,7 +26,11 @@ test.describe('Datasources – list & management', () => {
 	});
 
 	test.afterAll(async ({ browser, workerAuth }) => {
-		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+		const { page, context } = await createCleanupPage(
+			browser,
+			workerAuth.workerIndex,
+			workerAuth.sessionState
+		);
 		await deleteDatasourceViaUI(page, sharedListDatasource);
 		await page.close();
 		await context.close();
@@ -216,7 +220,11 @@ test.describe('Datasources – detail view', () => {
 	});
 
 	test.afterAll(async ({ browser, workerAuth }) => {
-		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+		const { page, context } = await createCleanupPage(
+			browser,
+			workerAuth.workerIndex,
+			workerAuth.sessionState
+		);
 		await deleteDatasourceViaUI(page, ds);
 		await page.close();
 		await context.close();

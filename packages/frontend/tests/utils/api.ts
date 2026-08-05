@@ -22,9 +22,40 @@ export const E2E_RUN_STAMP =
 
 export { E2E_PASSWORD };
 
+/** In-memory Playwright storage state — source of truth for e2e auth contexts. */
+export type E2EStorageState = {
+	cookies: Array<{
+		name: string;
+		value: string;
+		domain: string;
+		path: string;
+		expires: number;
+		httpOnly: boolean;
+		secure: boolean;
+		sameSite: 'Strict' | 'Lax' | 'None';
+	}>;
+	origins: Array<{
+		origin: string;
+		localStorage: Array<{ name: string; value: string }>;
+	}>;
+};
+
+export interface WorkerAuth {
+	authFile: string;
+	workerIndex: number;
+	/** Populated by fixtures; never open contexts from authFile path at runtime. */
+	sessionState: E2EStorageState | null;
+}
+
 export interface E2ERequest extends APIRequestContext {
 	browser: Browser;
 	authFile: string;
+	/**
+	 * In-memory Playwright storage state for newContext().
+	 * Named sessionState (not storageState) to avoid clashing with
+	 * APIRequestContext.storageState().
+	 */
+	sessionState: E2EStorageState;
 	workerIndex: number;
 	baseURL: string;
 }
@@ -38,9 +69,14 @@ export function workerAuthFile(workerIndex: number): string {
 }
 
 async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promise<T>): Promise<T> {
+	if (!request.sessionState) {
+		throw new Error(
+			`withAuthedPage requires in-memory sessionState (worker ${request.workerIndex})`
+		);
+	}
 	const context = await request.browser.newContext({
 		baseURL: request.baseURL,
-		storageState: request.authFile
+		storageState: request.sessionState
 	});
 	const page = await context.newPage();
 	try {

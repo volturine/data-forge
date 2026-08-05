@@ -1,6 +1,11 @@
 import { test, expect } from './fixtures.js';
 import { switchNamespace } from './utils/namespace.js';
-import { waitForAppShell, waitForProfileTabs, waitForProfileTab } from './utils/readiness.js';
+import {
+	waitForAppShell,
+	waitForProfileTabs,
+	waitForProfileTab,
+	gotoProfile
+} from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import { E2E_PASSWORD } from './utils/user-flows.js';
@@ -21,8 +26,7 @@ async function expandSystemExportGroup(page: import('@playwright/test').Page, sc
 
 test.describe('Profile – tabbed interface', () => {
 	test('profile page renders with Account tab active by default', async ({ page }) => {
-		await page.goto('/profile');
-		await waitForProfileTabs(page);
+		await gotoProfile(page);
 
 		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
 		await expect(page.getByText('Manage your account and application settings')).toBeVisible();
@@ -43,8 +47,7 @@ test.describe('Profile – tabbed interface', () => {
 	});
 
 	test('profile page shows Account tab content', async ({ page }) => {
-		await page.goto('/profile');
-		await waitForProfileTabs(page);
+		await gotoProfile(page);
 
 		const panel = page.locator('#panel-account');
 		await expect(panel).toBeVisible();
@@ -61,8 +64,7 @@ test.describe('Profile – tabbed interface', () => {
 
 test.describe('Profile – deep-link tabs', () => {
 	test('navigating to /profile#notifications opens Notifications tab', async ({ page }) => {
-		await page.goto('/profile#notifications');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'notifications');
 
 		await expect(page.getByRole('tab', { name: 'Notifications' })).toHaveAttribute(
 			'aria-selected',
@@ -74,8 +76,7 @@ test.describe('Profile – deep-link tabs', () => {
 	});
 
 	test('navigating to /profile#ai-providers opens AI Providers tab', async ({ page }) => {
-		await page.goto('/profile#ai-providers');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'ai-providers');
 
 		await expect(page.getByRole('tab', { name: 'AI Providers' })).toHaveAttribute(
 			'aria-selected',
@@ -87,8 +88,7 @@ test.describe('Profile – deep-link tabs', () => {
 	});
 
 	test('navigating to /profile#system opens System tab', async ({ page }) => {
-		await page.goto('/profile#system');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'system');
 
 		await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
 			'aria-selected',
@@ -100,8 +100,7 @@ test.describe('Profile – deep-link tabs', () => {
 	});
 
 	test('invalid hash defaults to Account tab', async ({ page }) => {
-		await page.goto('/profile#nonexistent');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'nonexistent');
 
 		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
 			'aria-selected',
@@ -116,8 +115,7 @@ test.describe('Profile – deep-link tabs', () => {
 
 test.describe('Profile – tab switching', () => {
 	test('clicking each tab switches content and updates URL hash', async ({ page }) => {
-		await page.goto('/profile');
-		await waitForProfileTabs(page);
+		await gotoProfile(page);
 
 		// Switch to Notifications
 		await page.getByRole('tab', { name: 'Notifications' }).click();
@@ -159,8 +157,7 @@ test.describe('Profile – tab switching', () => {
 	});
 
 	test('keyboard navigation between tabs works (ArrowRight, ArrowLeft)', async ({ page }) => {
-		await page.goto('/profile');
-		await waitForProfileTabs(page);
+		await gotoProfile(page);
 
 		const accountTab = page.getByRole('tab', { name: 'Account' });
 		await accountTab.focus();
@@ -208,8 +205,7 @@ test.describe('Profile – tab switching', () => {
 
 test.describe('Profile – Account tab', () => {
 	test('account tab shows email (read-only), display name, and save button', async ({ page }) => {
-		await page.goto('/profile#account');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
 		const emailInput = panel.locator('#email');
@@ -223,8 +219,7 @@ test.describe('Profile – Account tab', () => {
 	});
 
 	test('account tab shows password change form', async ({ page }) => {
-		await page.goto('/profile#account');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
 		await expect(panel.locator('#current')).toBeVisible();
@@ -234,8 +229,7 @@ test.describe('Profile – Account tab', () => {
 	});
 
 	test('account tab shows connected accounts section', async ({ page }) => {
-		await page.goto('/profile#account');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
 		await expect(panel.getByText('Connected accounts')).toBeVisible();
@@ -244,8 +238,7 @@ test.describe('Profile – Account tab', () => {
 	});
 
 	test('profile save shows success feedback on 200', async ({ page }) => {
-		await page.goto('/profile#account');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
 		const nameInput = panel.locator('#name');
@@ -266,7 +259,7 @@ test.describe('Profile – Account tab', () => {
 
 test.describe('Profile – Notifications tab', () => {
 	test('notifications tab shows SMTP and Telegram sections', async ({ page }) => {
-		await page.goto('/profile#notifications');
+		await gotoProfile(page, 'notifications');
 		await waitForProfileTab(page, 'Notifications');
 
 		await expect(page.getByText('SMTP', { exact: true })).toBeVisible();
@@ -280,7 +273,7 @@ test.describe('Profile – Notifications tab', () => {
 	});
 
 	test('notifications tab SMTP test button exists', async ({ page }) => {
-		await page.goto('/profile#notifications');
+		await gotoProfile(page, 'notifications');
 		await waitForProfileTab(page, 'Notifications');
 
 		await expect(page.locator('[data-testid="settings-smtp-test-button"]')).toBeVisible();
@@ -288,7 +281,7 @@ test.describe('Profile – Notifications tab', () => {
 	});
 
 	test('notifications tab has Telegram toggle', async ({ page }) => {
-		await page.goto('/profile#notifications');
+		await gotoProfile(page, 'notifications');
 		await waitForProfileTab(page, 'Notifications');
 
 		// Expand Telegram section
@@ -298,7 +291,7 @@ test.describe('Profile – Notifications tab', () => {
 	});
 
 	test('notifications save shows success feedback on 200', async ({ page }) => {
-		await page.goto('/profile#notifications');
+		await gotoProfile(page, 'notifications');
 		await waitForProfileTab(page, 'Notifications');
 
 		await page.getByRole('button', { name: 'Save' }).click();
@@ -314,7 +307,7 @@ test.describe('Profile – Notifications tab', () => {
 
 test.describe('Profile – AI Providers tab', () => {
 	test('ai providers tab shows all provider panels', async ({ page }) => {
-		await page.goto('/profile#ai-providers');
+		await gotoProfile(page, 'ai-providers');
 		await waitForProfileTab(page, 'AI Providers');
 
 		await expect(page.getByText('OpenRouter')).toBeVisible();
@@ -325,7 +318,7 @@ test.describe('Profile – AI Providers tab', () => {
 	});
 
 	test('ai providers tab has test buttons for each provider', async ({ page }) => {
-		await page.goto('/profile#ai-providers');
+		await gotoProfile(page, 'ai-providers');
 		await waitForProfileTab(page, 'AI Providers');
 
 		await expect(page.getByRole('button', { name: 'Test OpenRouter' })).toBeVisible();
@@ -334,7 +327,7 @@ test.describe('Profile – AI Providers tab', () => {
 	});
 
 	test('ai providers save shows success feedback on 200', async ({ page }) => {
-		await page.goto('/profile#ai-providers');
+		await gotoProfile(page, 'ai-providers');
 		await waitForProfileTab(page, 'AI Providers');
 
 		await page.getByRole('button', { name: 'Save' }).click();
@@ -350,7 +343,7 @@ test.describe('Profile – AI Providers tab', () => {
 
 test.describe('Profile – System tab', () => {
 	test('system tab shows debug section with IndexedDB toggle', async ({ page }) => {
-		await page.goto('/profile#system');
+		await gotoProfile(page, 'system');
 		await waitForProfileTab(page, 'System');
 
 		await expect(page.getByRole('heading', { name: 'Debug' })).toBeVisible();
@@ -361,7 +354,7 @@ test.describe('Profile – System tab', () => {
 	});
 
 	test('IndexedDB toggle persists after save and reload', async ({ page }) => {
-		await page.goto('/profile#system');
+		await gotoProfile(page, 'system');
 		await waitForProfileTab(page, 'System');
 
 		const toggle = page.getByRole('switch', { name: 'Toggle IndexedDB inspector' });
@@ -389,7 +382,7 @@ test.describe('Profile – System tab', () => {
 	});
 
 	test('system tab shows collapsible schema groups for export options', async ({ page }) => {
-		await page.goto('/profile#system');
+		await gotoProfile(page, 'system');
 		await waitForProfileTab(page, 'System');
 
 		await expect(page.getByText('What you can export')).toBeVisible();
@@ -419,8 +412,7 @@ test.describe('Profile – System tab', () => {
 	test('system internal postgres switch persists on refresh and can toggle off again', async ({
 		page
 	}) => {
-		await page.goto('/profile#system');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'system');
 		await waitForProfileTab(page, 'System');
 
 		await expandSystemExportGroup(page, 'default');
@@ -465,7 +457,7 @@ test.describe('Profile – System tab', () => {
 		);
 
 		try {
-			await page.goto('/profile#system');
+			await gotoProfile(page, 'system');
 			await waitForProfileTab(page, 'System');
 
 			await switchNamespace(page, nsA);
@@ -516,7 +508,7 @@ test.describe('Profile – System tab', () => {
 	});
 
 	test('system tab keeps public namespace distinct from app schema public', async ({ page }) => {
-		await page.goto('/profile#system');
+		await gotoProfile(page, 'system');
 		await waitForProfileTab(page, 'System');
 		await switchNamespace(page, 'public');
 		await expect(page).toHaveURL((url) => url.pathname === '/profile' && url.hash === '#system', {
@@ -533,7 +525,7 @@ test.describe('Profile – System tab', () => {
 	});
 
 	test('system save shows success feedback on 200', async ({ page }) => {
-		await page.goto('/profile#system');
+		await gotoProfile(page, 'system');
 		await waitForProfileTab(page, 'System');
 
 		await page.getByRole('button', { name: 'Save' }).click();
@@ -570,8 +562,7 @@ test.describe('Profile – sidebar navigation', () => {
 
 test.describe('Profile – accessibility', () => {
 	test('tab panel has correct ARIA attributes', async ({ page }) => {
-		await page.goto('/profile');
-		await waitForProfileTabs(page);
+		await gotoProfile(page);
 
 		// Tablist has aria-label
 		await expect(page.getByRole('tablist', { name: 'Profile sections' })).toBeVisible();
@@ -592,8 +583,7 @@ test.describe('Profile – accessibility', () => {
 	});
 
 	test('Home and End keys navigate to first and last tab', async ({ page }) => {
-		await page.goto('/profile');
-		await waitForProfileTabs(page);
+		await gotoProfile(page);
 
 		// Focus Account tab and press End
 		const accountTab = page.getByRole('tab', { name: 'Account' });
@@ -619,8 +609,7 @@ test.describe('Profile – accessibility', () => {
 
 test.describe('Profile – Account tab functional', () => {
 	test('password change with correct current password succeeds', async ({ page }) => {
-		await page.goto('/profile#account');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
 		await panel.locator('#current').fill(E2E_PASSWORD);
@@ -638,8 +627,7 @@ test.describe('Profile – Account tab functional', () => {
 	});
 
 	test('password change with wrong current password shows error', async ({ page }) => {
-		await page.goto('/profile#account');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
 		await panel.locator('#current').fill('WrongPassword123!');
@@ -653,8 +641,7 @@ test.describe('Profile – Account tab functional', () => {
 	});
 
 	test('password change with mismatched new passwords shows error', async ({ page }) => {
-		await page.goto('/profile#account');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
 		await panel.locator('#current').fill(E2E_PASSWORD);
@@ -669,8 +656,7 @@ test.describe('Profile – Account tab functional', () => {
 	test('password change with short new password is blocked by HTML5 validation', async ({
 		page
 	}) => {
-		await page.goto('/profile#account');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
 		await panel.locator('#current').fill(E2E_PASSWORD);
@@ -687,8 +673,7 @@ test.describe('Profile – Account tab functional', () => {
 	});
 
 	test('display name can be edited and persists after save and reload', async ({ page }) => {
-		await page.goto('/profile#account');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
 		const newName = `E2E Display ${uid()}`;
@@ -711,7 +696,7 @@ test.describe('Profile – Account tab functional', () => {
 
 test.describe('Profile – AI Providers tab functional', () => {
 	test('clicking Test Ollama button triggers feedback message', async ({ page }) => {
-		await page.goto('/profile#ai-providers');
+		await gotoProfile(page, 'ai-providers');
 		await waitForProfileTab(page, 'AI Providers');
 
 		const testBtn = page.getByRole('button', { name: 'Test Ollama' });
@@ -725,7 +710,7 @@ test.describe('Profile – AI Providers tab functional', () => {
 	});
 
 	test('clicking Test OpenRouter without key triggers error feedback', async ({ page }) => {
-		await page.goto('/profile#ai-providers');
+		await gotoProfile(page, 'ai-providers');
 		await waitForProfileTab(page, 'AI Providers');
 
 		const testBtn = page.getByRole('button', { name: 'Test OpenRouter' });
@@ -738,7 +723,7 @@ test.describe('Profile – AI Providers tab functional', () => {
 	});
 
 	test('AI provider model and key dirty state persists after save and reload', async ({ page }) => {
-		await page.goto('/profile#ai-providers');
+		await gotoProfile(page, 'ai-providers');
 		await waitForProfileTab(page, 'AI Providers');
 
 		const modelInput = page.locator('input[placeholder="openai/gpt-4o-mini"]');
@@ -764,7 +749,7 @@ test.describe('Profile – AI Providers tab functional', () => {
 	});
 
 	test('AI provider OpenAI endpoint edit persists after save and reload', async ({ page }) => {
-		await page.goto('/profile#ai-providers');
+		await gotoProfile(page, 'ai-providers');
 		await waitForProfileTab(page, 'AI Providers');
 
 		const endpointInput = page.locator('#openai-endpoint-url');
@@ -791,7 +776,7 @@ test.describe('Profile – AI Providers tab functional', () => {
 
 test.describe('Profile – Notifications tab functional', () => {
 	test('SMTP test button is disabled when recipient is empty', async ({ page }) => {
-		await page.goto('/profile#notifications');
+		await gotoProfile(page, 'notifications');
 		await waitForProfileTab(page, 'Notifications');
 
 		const testBtn = page.locator('[data-testid="settings-smtp-test-button"]');
@@ -799,7 +784,7 @@ test.describe('Profile – Notifications tab functional', () => {
 	});
 
 	test('SMTP test with recipient triggers feedback', async ({ page }) => {
-		await page.goto('/profile#notifications');
+		await gotoProfile(page, 'notifications');
 		await waitForProfileTab(page, 'Notifications');
 
 		await page.locator('[data-testid="settings-smtp-test-recipient"]').fill('test@example.com');
@@ -812,7 +797,7 @@ test.describe('Profile – Notifications tab functional', () => {
 	});
 
 	test('SMTP test button toggles enabled state with recipient input', async ({ page }) => {
-		await page.goto('/profile#notifications');
+		await gotoProfile(page, 'notifications');
 		await waitForProfileTab(page, 'Notifications');
 
 		const testBtn = page.locator('[data-testid="settings-smtp-test-button"]');
@@ -831,7 +816,7 @@ test.describe('Profile – Notifications tab functional', () => {
 	});
 
 	test('Telegram toggle on/off persists after save and reload', async ({ page }) => {
-		await page.goto('/profile#notifications');
+		await gotoProfile(page, 'notifications');
 		await waitForProfileTab(page, 'Notifications');
 
 		// Expand Telegram section
@@ -876,8 +861,7 @@ test.describe('Profile – Notifications tab functional', () => {
 
 test.describe('Profile – Connected accounts', () => {
 	test('Google and GitHub connect buttons are present when not connected', async ({ page }) => {
-		await page.goto('/profile#account');
-		await waitForProfileTabs(page);
+		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
 

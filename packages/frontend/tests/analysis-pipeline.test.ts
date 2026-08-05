@@ -158,7 +158,11 @@ test.describe('Pipeline data verification', () => {
 	});
 
 	test.afterAll(async ({ browser, workerAuth }) => {
-		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+		const { page, context } = await createCleanupPage(
+			browser,
+			workerAuth.workerIndex,
+			workerAuth.sessionState
+		);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
 		await context.close();
@@ -744,7 +748,11 @@ test.describe('Pipeline data – pass-through operations', () => {
 	});
 
 	test.afterAll(async ({ browser, workerAuth }) => {
-		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+		const { page, context } = await createCleanupPage(
+			browser,
+			workerAuth.workerIndex,
+			workerAuth.sessionState
+		);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
 		await context.close();
@@ -929,7 +937,11 @@ test.describe('Pipeline data – timeseries', () => {
 	});
 
 	test.afterAll(async ({ browser, workerAuth }) => {
-		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+		const { page, context } = await createCleanupPage(
+			browser,
+			workerAuth.workerIndex,
+			workerAuth.sessionState
+		);
 		await deleteDatasourceViaUI(page, dateDsName);
 		await page.close();
 		await context.close();
@@ -1035,7 +1047,11 @@ test.describe('Pipeline data – union by name', () => {
 	});
 
 	test.afterAll(async ({ browser, workerAuth }) => {
-		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
+		const { page, context } = await createCleanupPage(
+			browser,
+			workerAuth.workerIndex,
+			workerAuth.sessionState
+		);
 		await deleteDatasourceViaUI(page, dsName1);
 		await deleteDatasourceViaUI(page, dsName2);
 		await page.close();
