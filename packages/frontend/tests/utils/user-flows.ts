@@ -85,7 +85,7 @@ export async function uploadDatasourceViaUi(
 			!response.url().includes('/bulk') &&
 			response.request().method() === 'POST' &&
 			response.status() !== 0,
-		{ timeout: 30_000 }
+		{ timeout: 15_000 }
 	);
 	await uploadBtn.click();
 	const uploadResponse = await uploadResponsePromise;
@@ -210,7 +210,7 @@ export async function createUdfViaUi(page: Page, name: string): Promise<string> 
 				resp.url().includes('/api/v1/udf') &&
 				resp.request().method() === 'POST' &&
 				resp.status() !== 0,
-			{ timeout: 30_000 }
+			{ timeout: 15_000 }
 		),
 		page.getByTestId('udf-save-button').click()
 	]);
@@ -244,7 +244,7 @@ export async function createScheduleViaUi(
 				resp.url().includes('/api/v1/schedules') &&
 				resp.request().method() === 'POST' &&
 				resp.status() !== 0,
-			{ timeout: 30_000 }
+			{ timeout: 15_000 }
 		),
 		page.getByRole('button', { name: 'Create Schedule' }).click()
 	]);
@@ -273,7 +273,7 @@ export async function createHealthCheckViaUi(
 				resp.url().includes('/api/v1/healthchecks') &&
 				resp.request().method() === 'POST' &&
 				resp.status() !== 0,
-			{ timeout: 30_000 }
+			{ timeout: 15_000 }
 		),
 		page.getByRole('button', { name: 'Save Check' }).click()
 	]);
