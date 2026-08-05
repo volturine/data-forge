@@ -19,19 +19,19 @@ _OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
 _TIMEOUT = httpx.Timeout(connect=10, read=120, write=10, pool=10)
 
 
-class OpenRouterError(Exception):
-    """Raised on OpenRouter API failures."""
+class ChatHttpError(Exception):
+    """Raised on chat HTTP / OpenAI-compatible provider failures."""
 
 
 def _response_json_object(resp: httpx.Response, *, operation: str) -> dict[str, Any]:
     data: object = resp.json()
     if not isinstance(data, dict):
-        raise OpenRouterError(f'OpenRouter {operation} returned a non-object JSON response')
+        raise ChatHttpError(f'OpenRouter {operation} returned a non-object JSON response')
 
     result: dict[str, Any] = {}
     for key, value in data.items():
         if not isinstance(key, str):
-            raise OpenRouterError(f'OpenRouter {operation} returned a JSON object with a non-string key')
+            raise ChatHttpError(f'OpenRouter {operation} returned a JSON object with a non-string key')
         result[key] = value
     return result
 
@@ -91,7 +91,7 @@ async def chat_with_tools(
         timeout=_TIMEOUT,
     )
     if not resp.is_success:
-        raise OpenRouterError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
+        raise ChatHttpError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
     return _response_json_object(resp, operation='chat completion')
 
 
@@ -101,7 +101,7 @@ async def list_models(api_key: str) -> list[dict]:
     resp = await client.get(f'{_OPENROUTER_BASE}/models', headers=_headers(api_key), timeout=_TIMEOUT)
     if not resp.is_success:
         logger.error('list_models failed: %d %s', resp.status_code, resp.text[:500])
-        raise OpenRouterError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
+        raise ChatHttpError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
     data = resp.json()
     return [
         {

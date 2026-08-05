@@ -1274,8 +1274,8 @@ class TestProductionHardening:
         assert s.busy is True
 
     async def test_openrouter_error_pushes_error_event(self, client: TestClient) -> None:
-        """OpenRouterError during agent turn emits error+done events and clears busy."""
-        from modules.chat.chat_http import OpenRouterError
+        """ChatHttpError during agent turn emits error+done events and clears busy."""
+        from modules.chat.chat_http import ChatHttpError
 
         resp = client.post(
             '/api/v1/ai/chat/sessions',
@@ -1288,7 +1288,7 @@ class TestProductionHardening:
         sid = resp.json()['session_id']
 
         async def mock_chat(*_args, **_kwargs):
-            raise OpenRouterError('rate limited')
+            raise ChatHttpError('rate limited')
 
         with (
             patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
@@ -1403,12 +1403,12 @@ class TestProductionHardening:
         assert any('RuntimeError' in e.get('content', '') for e in error_events)
 
     def test_models_raises_on_api_error(self, client: TestClient) -> None:
-        """list_models raising OpenRouterError returns 502."""
-        from modules.chat.chat_http import OpenRouterError
+        """list_models raising ChatHttpError returns 502."""
+        from modules.chat.chat_http import ChatHttpError
 
         with patch(
             'modules.chat.routes.list_models',
-            new=AsyncMock(side_effect=OpenRouterError('bad gateway')),
+            new=AsyncMock(side_effect=ChatHttpError('bad gateway')),
         ):
             resp = client.post(
                 '/api/v1/ai/chat/models',
@@ -1420,12 +1420,12 @@ class TestProductionHardening:
     @pytest.mark.asyncio
     async def test_chat_with_tools_rejects_non_object_provider_json(self) -> None:
         """OpenRouter chat completions must return a JSON object."""
-        from modules.chat.chat_http import OpenRouterError, chat_with_tools
+        from modules.chat.chat_http import ChatHttpError, chat_with_tools
 
         transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=[]))
         async with httpx.AsyncClient(transport=transport) as async_client:
             with patch('modules.chat.chat_http.http_client.get_async_client', return_value=async_client):
-                with pytest.raises(OpenRouterError, match='non-object JSON response'):
+                with pytest.raises(ChatHttpError, match='non-object JSON response'):
                     await chat_with_tools('sk-test', 'gpt-test', [{'role': 'user', 'content': 'hello'}], [])
 
     @pytest.mark.asyncio
