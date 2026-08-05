@@ -90,9 +90,10 @@ async function createIsolatedCleanupSession(
 	if (!browser) {
 		throw new Error('Cleanup isolation requires an attached browser');
 	}
+	// storageState() throws if the context was already closed by test teardown.
+	const storageState = await sourceContext.storageState();
 	const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
 	const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
-	const storageState = await sourceContext.storageState();
 	const context = await browser.newContext({ baseURL, storageState });
 	const page = await context.newPage();
 	const cleanup = async () => {

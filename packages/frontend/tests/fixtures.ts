@@ -1,4 +1,4 @@
-import type { Browser, Page } from '@playwright/test';
+import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { expect, test as base } from '@playwright/test';
 import {
 	E2E_PASSWORD,
@@ -15,11 +15,15 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
 const authRequired = process.env.AUTH_REQUIRED !== 'false';
 
 async function expectSignedIn(page: Page): Promise<void> {
-	// Under CI load the shell can take longer to hydrate after navigation.
 	const timeout = process.env.CI ? 15_000 : 5_000;
 	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout });
 }
 
+/**
+ * Register once per worker and return Playwright storage state.
+ * Session cookies are set by the register API; we hard-navigate home so the
+ * captured state is a settled authenticated document.
+ */
 async function createSessionState(browser: Browser, workerIndex: number): Promise<E2EStorageState> {
 	const context = await browser.newContext({ baseURL });
 	const page = await context.newPage();
@@ -27,8 +31,6 @@ async function createSessionState(browser: Browser, workerIndex: number): Promis
 		if (authRequired) {
 			const email = `e2e-ui-${E2E_RUN_STAMP}-w${workerIndex}@example.com`;
 			await page.goto('/register', { waitUntil: 'domcontentloaded' });
-			// Wait for SvelteKit hydration to complete before interacting;
-			// under CI load hydration can lag behind DOMContentLoaded.
 			await page.waitForLoadState('networkidle');
 			await page.locator('[data-auth-form-ready="true"]').waitFor({ timeout: 10_000 });
 			const nameInput = page.locator('#name');
@@ -46,8 +48,6 @@ async function createSessionState(browser: Browser, workerIndex: number): Promis
 			const createButton = page.getByRole('button', { name: 'Create account', exact: true });
 			await expect(createButton).toBeEnabled({ timeout: 5_000 });
 			await createButton.click();
-			// Cookie is set on the register response; hard-load home so storageState
-			// captures a fully settled authenticated document (not the success panel).
 			await expect(page.getByText(/Account created\./i)).toBeVisible({ timeout: 15_000 });
 			await page.goto('/', { waitUntil: 'networkidle' });
 			await expectSignedIn(page);
@@ -62,7 +62,18 @@ async function createSessionState(browser: Browser, workerIndex: number): Promis
 	}
 }
 
-export const test = base.extend<{ page: Page; request: E2ERequest }, { workerAuth: WorkerAuth }>({
+type WorkerFixtures = {
+	workerAuth: WorkerAuth;
+	/** One BrowserContext per worker for setup helpers (upload, import, shutdown). */
+	helperContext: BrowserContext;
+};
+
+type TestFixtures = {
+	page: Page;
+	request: E2ERequest;
+};
+
+export const test = base.extend<TestFixtures, WorkerFixtures>({
 	workerAuth: [
 		async ({ browser }, use, workerInfo) => {
 			const sessionState = await createSessionState(browser, workerInfo.workerIndex);
@@ -74,10 +85,24 @@ export const test = base.extend<{ page: Page; request: E2ERequest }, { workerAut
 		{ scope: 'worker' }
 	],
 
+	helperContext: [
+		async ({ browser, workerAuth }, use) => {
+			// Reuse one context for all withAuthedPage work on this worker.
+			// Creating a fresh context per helper call thrashs Chromium under
+			// parallel workers and starves runtime-worker heartbeats → 503s.
+			const context = await browser.newContext({
+				baseURL,
+				storageState: structuredClone(workerAuth.sessionState)
+			});
+			await use(context);
+			await context.close();
+		},
+		{ scope: 'worker' }
+	],
+
 	page: async ({ browser, workerAuth }, use) => {
 		const context = await browser.newContext({
 			baseURL,
-			// Clone so Playwright cannot mutate the worker-owned session snapshot.
 			storageState: structuredClone(workerAuth.sessionState)
 		});
 		const page = await context.newPage();
@@ -85,10 +110,11 @@ export const test = base.extend<{ page: Page; request: E2ERequest }, { workerAut
 		await context.close();
 	},
 
-	request: async ({ browser, workerAuth }, use) => {
+	request: async ({ browser, workerAuth, helperContext }, use) => {
 		await use({
 			browser,
 			sessionState: workerAuth.sessionState,
+			helperContext,
 			workerIndex: workerAuth.workerIndex,
 			baseURL
 		} as unknown as E2ERequest);

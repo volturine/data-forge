@@ -1,4 +1,4 @@
-import type { APIRequestContext, Browser, Page } from '@playwright/test';
+import type { APIRequestContext, Browser, BrowserContext, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 import {
 	createHealthCheckViaUi,
@@ -45,11 +45,13 @@ export interface WorkerAuth {
 export interface E2ERequest extends APIRequestContext {
 	browser: Browser;
 	/**
-	 * In-memory Playwright storage state for newContext().
+	 * In-memory Playwright storage state.
 	 * Named sessionState (not storageState) to avoid clashing with
 	 * APIRequestContext.storageState().
 	 */
 	sessionState: E2EStorageState;
+	/** Worker-scoped context reused for setup helpers — never open a new context per call. */
+	helperContext: BrowserContext;
 	workerIndex: number;
 	baseURL: string;
 }
@@ -58,18 +60,19 @@ const datasourceRegistry = new Map<string, { name: string; namespace?: string }>
 const analysisRegistry = new Map<string, { name: string }>();
 const udfRegistry = new Map<string, { name: string }>();
 
+/**
+ * Run setup work on the worker's long-lived helper context.
+ * One page at a time: workers run tests serially, so no lock is required.
+ */
 async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promise<T>): Promise<T> {
-	const context = await request.browser.newContext({
-		baseURL: request.baseURL,
-		// Clone so Playwright cannot mutate the worker-owned session snapshot.
-		storageState: structuredClone(request.sessionState)
-	});
-	const page = await context.newPage();
+	if (!request.helperContext) {
+		throw new Error(`withAuthedPage requires helperContext (worker ${request.workerIndex})`);
+	}
+	const page = await request.helperContext.newPage();
 	try {
 		return await fn(page);
 	} finally {
-		await page.close().catch(() => undefined);
-		await context.close().catch(() => undefined);
+		await page.close();
 	}
 }
 
@@ -363,28 +366,21 @@ export async function waitForNoRuntimeBuild(
 		await waitForLayoutReady(page);
 		const panel = page.locator('#panel-builds');
 		await expect(panel).toBeVisible({ timeout: 5_000 });
+		const running = panel.locator(
+			`[data-build-analysis-id="${analysisId}"][data-build-status="running"]`
+		);
 		while (Date.now() - started < timeoutMs) {
-			const running = panel.locator(
-				`[data-build-analysis-id="${analysisId}"][data-build-status="running"]`
-			);
-			const terminal = panel.locator(
-				`[data-build-analysis-id="${analysisId}"][data-build-status="completed"], ` +
-					`[data-build-analysis-id="${analysisId}"][data-build-status="failed"], ` +
-					`[data-build-analysis-id="${analysisId}"][data-build-status="cancelled"]`
-			);
+			// Idle when nothing is running for this analysis — no prior terminal
+			// row is required (many tests never start a build).
 			if (
 				!(await running
 					.first()
 					.isVisible()
-					.catch(() => false)) &&
-				(await terminal.count()) > 0
+					.catch(() => false))
 			) {
 				return;
 			}
-			await page
-				.getByRole('button', { name: /Refresh History/i })
-				.click()
-				.catch(() => undefined);
+			await page.getByRole('button', { name: /Refresh History/i }).click();
 			await page.waitForTimeout(1_000);
 		}
 		throw new Error(`Timed out waiting for active build to finish for analysis ${analysisId}`);
@@ -415,7 +411,9 @@ export async function shutdownEngine(
 	analysisId: string,
 	options?: { waitForIdleMs?: number }
 ): Promise<void> {
-	await waitForNoRuntimeBuild(request, analysisId, options?.waitForIdleMs ?? 5_000).catch(() => {});
+	// Wait for builds to leave "running" when possible, then shut down via UI.
+	// Missing engines are a no-op inside shutdownEngineViaUi (row never appears).
+	await waitForNoRuntimeBuild(request, analysisId, options?.waitForIdleMs ?? 5_000);
 	await withAuthedPage(request, async (page) => {
 		await shutdownEngineViaUi(page, analysisId, { timeoutMs: options?.waitForIdleMs ?? 5_000 });
 	});
