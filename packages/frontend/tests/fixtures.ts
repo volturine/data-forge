@@ -1,15 +1,11 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import type { Browser, Page } from '@playwright/test';
 import { expect, test as base } from '@playwright/test';
 import {
-	disposeWorkerSetupContexts,
 	E2E_PASSWORD,
 	E2E_RUN_STAMP,
 	type E2ERequest,
 	type E2EStorageState,
-	type WorkerAuth,
-	workerAuthFile
+	type WorkerAuth
 } from './utils/api.js';
 
 export { expect } from '@playwright/test';
@@ -17,99 +13,21 @@ export { expect } from '@playwright/test';
 const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
 const authRequired = process.env.AUTH_REQUIRED !== 'false';
-const authDir = path.resolve('tests/.artifacts/auth');
-
-/** Serialize auth setup per worker so page/request fixtures never race file rewrite. */
-const authReadyByFile = new Map<string, Promise<void>>();
-
-async function withAuthReadyLock(authFile: string, fn: () => Promise<void>): Promise<void> {
-	const previous = authReadyByFile.get(authFile) ?? Promise.resolve();
-	let release!: () => void;
-	const gate = new Promise<void>((resolve) => {
-		release = resolve;
-	});
-	const chained = previous.then(() => gate);
-	authReadyByFile.set(authFile, chained);
-	await previous;
-	try {
-		await fn();
-	} finally {
-		release();
-		if (authReadyByFile.get(authFile) === chained) {
-			authReadyByFile.delete(authFile);
-		}
-	}
-}
-
-function loadStorageState(authFile: string): E2EStorageState {
-	return JSON.parse(fs.readFileSync(authFile, 'utf8')) as E2EStorageState;
-}
 
 async function expectSignedIn(page: Page): Promise<void> {
 	// Under CI load the shell can take longer to hydrate after navigation,
 	// and the Vite dev server can occasionally reload a route module while
 	// auth bootstrap is still warming a fresh worker session.
 	const timeout = process.env.CI ? 15_000 : 5_000;
-	let lastError: unknown;
-
-	for (let attempt = 0; attempt < 3; attempt += 1) {
-		try {
-			await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout });
-			return;
-		} catch (error) {
-			lastError = error;
-			if (attempt === 2) break;
-			await page.goto('/', { waitUntil: 'domcontentloaded' }).catch(() => undefined);
-			await page.waitForLoadState('networkidle', { timeout }).catch(() => undefined);
-		}
-	}
-
-	throw lastError;
+	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout });
 }
 
-async function storageStateIsValid(
-	browser: Browser,
-	storageState: E2EStorageState
-): Promise<boolean> {
-	const context = await browser.newContext({
-		baseURL,
-		storageState
-	});
-	const page = await context.newPage();
-	try {
-		await page.goto('/', { waitUntil: 'networkidle' });
-		if (
-			await page
-				.getByLabel('Main navigation')
-				.isVisible()
-				.catch(() => false)
-		) {
-			return true;
-		}
-		if (
-			await page
-				.getByRole('heading', { name: 'Sign in', level: 1 })
-				.isVisible()
-				.catch(() => false)
-		) {
-			return false;
-		}
-		await expectSignedIn(page);
-		return true;
-	} catch {
-		return false;
-	} finally {
-		await context.close();
-	}
-}
-
-async function createAuthState(browser: Browser, workerAuth: WorkerAuth): Promise<E2EStorageState> {
-	fs.mkdirSync(authDir, { recursive: true });
+async function createSessionState(browser: Browser, workerIndex: number): Promise<E2EStorageState> {
 	const context = await browser.newContext({ baseURL });
 	const page = await context.newPage();
 	try {
 		if (authRequired) {
-			const email = `e2e-ui-${E2E_RUN_STAMP}-w${workerAuth.workerIndex}@example.com`;
+			const email = `e2e-ui-${E2E_RUN_STAMP}-w${workerIndex}@example.com`;
 			await page.goto('/register', { waitUntil: 'domcontentloaded' });
 			// Wait for SvelteKit hydration to complete before interacting;
 			// under CI load hydration can lag behind DOMContentLoaded.
@@ -119,11 +37,11 @@ async function createAuthState(browser: Browser, workerAuth: WorkerAuth): Promis
 			const emailInput = page.locator('#email');
 			const passwordInput = page.locator('#password');
 			const confirmInput = page.locator('#confirm');
-			await nameInput.fill(`E2E UI Worker ${workerAuth.workerIndex}`);
+			await nameInput.fill(`E2E UI Worker ${workerIndex}`);
 			await emailInput.fill(email);
 			await passwordInput.fill(E2E_PASSWORD);
 			await confirmInput.fill(E2E_PASSWORD);
-			await expect(nameInput).toHaveValue(`E2E UI Worker ${workerAuth.workerIndex}`);
+			await expect(nameInput).toHaveValue(`E2E UI Worker ${workerIndex}`);
 			await expect(emailInput).toHaveValue(email);
 			await expect(passwordInput).toHaveValue(E2E_PASSWORD);
 			await expect(confirmInput).toHaveValue(E2E_PASSWORD);
@@ -131,79 +49,37 @@ async function createAuthState(browser: Browser, workerAuth: WorkerAuth): Promis
 			await expect(createButton).toBeEnabled({ timeout: 5_000 });
 			await createButton.click();
 			const continueLink = page.getByRole('link', { name: /Continue/i });
+			const signedIn = page.getByLabel('Main navigation');
+			const created = page.getByText(/Account created\./i);
 			await Promise.race([
 				continueLink.waitFor({ state: 'visible', timeout: 5_000 }),
-				page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout: 5_000 }),
-				page.getByText(/Account created\./i).waitFor({ state: 'visible', timeout: 5_000 })
-			]).catch(() => undefined);
-			if (await continueLink.isVisible().catch(() => false)) {
+				signedIn.waitFor({ state: 'visible', timeout: 5_000 }),
+				created.waitFor({ state: 'visible', timeout: 5_000 })
+			]);
+			if (await continueLink.isVisible()) {
 				await continueLink.click();
-			} else {
-				await page.goto('/', { waitUntil: 'networkidle' });
 			}
 			await expectSignedIn(page);
 		}
-		const storageState = (await context.storageState()) as E2EStorageState;
-		// Persist for debugging and afterAll cleanup helpers that open by path.
-		// Runtime fixtures always use the in-memory copy so file lifetime cannot race.
-		const tempAuthFile = `${workerAuth.authFile}.tmp`;
-		fs.writeFileSync(tempAuthFile, JSON.stringify(storageState));
-		fs.renameSync(tempAuthFile, workerAuth.authFile);
-		return storageState;
+		return (await context.storageState()) as E2EStorageState;
 	} finally {
 		await context.close();
 	}
 }
 
-async function ensureAuthReady(browser: Browser, workerAuth: WorkerAuth): Promise<void> {
-	await withAuthReadyLock(workerAuth.authFile, async () => {
-		if (workerAuth.sessionState && (await storageStateIsValid(browser, workerAuth.sessionState))) {
-			return;
-		}
-		if (fs.existsSync(workerAuth.authFile)) {
-			try {
-				const fromDisk = loadStorageState(workerAuth.authFile);
-				if (await storageStateIsValid(browser, fromDisk)) {
-					workerAuth.sessionState = fromDisk;
-					return;
-				}
-			} catch {
-				// Corrupt or unreadable — recreate below.
-			}
-		}
-		workerAuth.sessionState = await createAuthState(browser, workerAuth);
-	});
-}
-
 export const test = base.extend<{ page: Page; request: E2ERequest }, { workerAuth: WorkerAuth }>({
 	workerAuth: [
 		async ({ browser }, use, workerInfo) => {
-			const authFile = workerAuthFile(workerInfo.workerIndex);
-			const workerAuth: WorkerAuth = {
-				authFile,
+			const sessionState = await createSessionState(browser, workerInfo.workerIndex);
+			await use({
 				workerIndex: workerInfo.workerIndex,
-				sessionState: null
-			};
-			await ensureAuthReady(browser, workerAuth);
-			await use(workerAuth);
-			// Worker-scoped teardown runs only after every test (including finally
-			// blocks) and afterAll on this worker. Safe to dispose artifacts now.
-			await disposeWorkerSetupContexts(authFile);
-			try {
-				fs.unlinkSync(authFile);
-			} catch {
-				// already removed
-			}
-			workerAuth.sessionState = null;
+				sessionState
+			});
 		},
 		{ scope: 'worker' }
 	],
 
 	page: async ({ browser, workerAuth }, use) => {
-		await ensureAuthReady(browser, workerAuth);
-		if (!workerAuth.sessionState) {
-			throw new Error(`workerAuth.sessionState missing for worker ${workerAuth.workerIndex}`);
-		}
 		const context = await browser.newContext({
 			baseURL,
 			storageState: workerAuth.sessionState
@@ -214,23 +90,11 @@ export const test = base.extend<{ page: Page; request: E2ERequest }, { workerAut
 	},
 
 	request: async ({ browser, workerAuth }, use) => {
-		await ensureAuthReady(browser, workerAuth);
-		if (!workerAuth.sessionState) {
-			throw new Error(`workerAuth.sessionState missing for worker ${workerAuth.workerIndex}`);
-		}
-		// Prefer live workerAuth.sessionState so re-auth mid-suite is visible to helpers.
-		const request = {
+		await use({
 			browser,
-			authFile: workerAuth.authFile,
+			sessionState: workerAuth.sessionState,
 			workerIndex: workerAuth.workerIndex,
-			baseURL,
-			get sessionState(): E2EStorageState {
-				if (!workerAuth.sessionState) {
-					throw new Error(`workerAuth.sessionState missing for worker ${workerAuth.workerIndex}`);
-				}
-				return workerAuth.sessionState;
-			}
-		} as unknown as E2ERequest;
-		await use(request);
+			baseURL
+		} as unknown as E2ERequest);
 	}
 });
