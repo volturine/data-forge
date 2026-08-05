@@ -76,10 +76,6 @@ export function listEngineRuns(
 	);
 }
 
-export function getEngineRun(id: string): ResultAsync<EngineRun, ApiError> {
-	return apiRequest<EngineRun>(`/v1/engine-runs/${id}`);
-}
-
 export interface DurationStatsRun {
 	id: string;
 	started_at: string;

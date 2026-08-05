@@ -390,7 +390,3 @@ DatasourceHandler.SOURCE_LOADERS = {
 
 def load_datasource(config: dict) -> pl.LazyFrame:
     return DatasourceHandler()(pl.LazyFrame(), config)
-
-
-async def load_datasource_async(config: dict) -> pl.LazyFrame:
-    return await asyncio.to_thread(load_datasource, config)

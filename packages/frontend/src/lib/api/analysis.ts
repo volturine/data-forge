@@ -58,9 +58,6 @@ export const importAnalysis = (data: ImportAnalysisRequest): ResultAsync<Analysi
 		body: JSON.stringify(data)
 	});
 
-export const getAnalysis = (id: string): ResultAsync<Analysis, ApiError> =>
-	apiRequest<Analysis>(`/v1/analysis/${id}`);
-
 export function getAnalysisWithHeaders(
 	id: string
 ): ResultAsync<{ analysis: Analysis; etag: string; version: string }, ApiError> {
@@ -154,12 +151,6 @@ export type AnalysisVersion = {
 	created_at: string;
 };
 
-export type AnalysisPreviewResponse = {
-	schema: Record<string, string>;
-	rows: Array<Record<string, unknown>>;
-	row_count?: number;
-};
-
 export type CodeExportFormat = 'polars' | 'sql';
 
 export type CodeExportRequest = {
@@ -174,15 +165,6 @@ export type CodeExportResponse = {
 	format: CodeExportFormat;
 	tab_id?: string | null;
 };
-
-export const previewAnalysis = (
-	analysisId: string,
-	pipeline: Record<string, unknown>
-): ResultAsync<AnalysisPreviewResponse, ApiError> =>
-	apiRequest<AnalysisPreviewResponse>(`/v1/analysis/${analysisId}/preview`, {
-		method: 'POST',
-		body: JSON.stringify({ pipeline })
-	});
 
 export const validateAnalysis = (
 	data: AnalysisCreate

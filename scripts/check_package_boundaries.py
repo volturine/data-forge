@@ -56,6 +56,9 @@ FORBIDDEN_OWNER_DUPLICATES = [
     Path('packages/frontend/src/lib/components/common/EngineMonitor.svelte'),
     Path('packages/frontend/src/lib/components/common/ColumnTypeSelect.svelte'),
     Path('packages/frontend/src/lib/components/common/SchemaViewer.svelte'),
+    Path('packages/frontend/src/lib/components/datasources/HealthChecksTab.svelte'),
+    Path('packages/frontend/src/lib/types/api-responses.ts'),
+
     Path('packages/backend/modules/settings/models.py'),
     Path('packages/backend/modules/telegram/models.py'),
     Path('packages/backend/modules/udf/models.py'),
@@ -179,8 +182,6 @@ FRONTEND_COMPUTE_TYPES_REQUIRED_TOKENS = {
 FRONTEND_COMPUTE_API_REQUIRED_TOKENS = {
     'StepPreviewCommandJson as ProtocolStepPreviewCommandJson': 'step preview request must be anchored to generated protocol JSON',
     'StepPreviewResultJson as ProtocolStepPreviewResultJson': 'step preview response must be anchored to generated protocol JSON',
-    'ExportCommandJson as ProtocolExportCommandJson': 'export request must be anchored to generated protocol JSON',
-    'ExportResultJson as ProtocolExportResultJson': 'export response must be anchored to generated protocol JSON',
     'DownloadCommandJson as ProtocolDownloadCommandJson': 'download request must be anchored to generated protocol JSON',
     'StepSchemaCommandJson as ProtocolStepSchemaCommandJson': 'step schema request must be anchored to generated protocol JSON',
     'StepRowCountResultJson as ProtocolStepRowCountResultJson': 'row-count response must be anchored to generated protocol JSON',

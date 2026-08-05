@@ -49,14 +49,6 @@ export function cloneUdf(id: string, data: UdfClone): ResultAsync<Udf, ApiError>
 	});
 }
 
-export function matchUdfs(dtypes: string[]): ResultAsync<Udf[], ApiError> {
-	const params = new URLSearchParams();
-	for (const dtype of dtypes) {
-		params.append('dtypes', dtype);
-	}
-	return apiRequest<Udf[]>(`/v1/udf/match?${params.toString()}`);
-}
-
 export function exportUdfs(): ResultAsync<UdfExport, ApiError> {
 	return apiRequest<UdfExport>('/v1/udf/export');
 }

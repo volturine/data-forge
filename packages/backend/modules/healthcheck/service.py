@@ -135,19 +135,6 @@ def list_all_results(session: Session, limit: int = 10) -> list[HealthCheckResul
     return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
 
 
-def list_results_for_check(session: Session, healthcheck_id: str, limit: int = 10) -> list[HealthCheckResultResponse]:
-    check = session.get(HealthCheck, healthcheck_id)
-    if not check:
-        return []
-    results = session.execute(
-        select(HealthCheckResult)
-        .where(sa(HealthCheckResult.healthcheck_id == healthcheck_id))
-        .order_by(col(HealthCheckResult.checked_at).desc(), col(HealthCheckResult.id).asc())
-        .limit(limit),
-    )
-    return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
-
-
 def _ensure_unique_row_count(
     session: Session,
     datasource_id: str,

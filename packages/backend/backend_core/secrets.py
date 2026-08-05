@@ -19,10 +19,6 @@ def _read_key_material() -> str:
     return os.getenv('SETTINGS_ENCRYPTION_KEY') or settings.settings_encryption_key
 
 
-def encryption_available() -> bool:
-    return bool(_read_key_material())
-
-
 def _require_key_material() -> str:
     material = _read_key_material()
     if not material:
@@ -37,10 +33,6 @@ def _derive_key_for_material(material: str) -> bytes:
 
 def _derive_key() -> bytes:
     return _derive_key_for_material(_require_key_material())
-
-
-def clear_key_cache() -> None:
-    _derive_key_for_material.cache_clear()
 
 
 def _decode_payload(payload: str) -> bytes:

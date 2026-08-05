@@ -1,9 +1,4 @@
-import type {
-	CSVOptions,
-	DataSource,
-	IcebergDataSourceConfig,
-	SchemaInfo
-} from '$lib/types/datasource';
+import type { CSVOptions, DataSource, SchemaInfo } from '$lib/types/datasource';
 import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
@@ -89,34 +84,6 @@ export function connectDatabase(
 			description,
 			source_type: 'database',
 			config: { connection_string: connectionString, query }
-		})
-	});
-}
-
-export function connectIceberg(
-	name: string,
-	config: IcebergDataSourceConfig
-): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>('/v1/datasource/connect', {
-		method: 'POST',
-		body: JSON.stringify({
-			name,
-			source_type: 'iceberg',
-			config
-		})
-	});
-}
-
-export function connectAnalysisDatasource(
-	name: string,
-	analysisId: string
-): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>('/v1/datasource/connect', {
-		method: 'POST',
-		body: JSON.stringify({
-			name,
-			source_type: 'analysis',
-			config: { analysis_id: analysisId }
 		})
 	});
 }

@@ -49,24 +49,6 @@ export function testSmtp(to: string): ResultAsync<TestResult, ApiError> {
 	});
 }
 
-export interface TelegramChat {
-	chat_id: string;
-	title: string;
-}
-
-export interface DetectTelegramResponse {
-	success: boolean;
-	message: string;
-	chats: TelegramChat[];
-}
-
-export function detectCustomBotChat(token: string): ResultAsync<DetectTelegramResponse, ApiError> {
-	return apiRequest<DetectTelegramResponse>('/v1/settings/detect-chat-custom', {
-		method: 'POST',
-		body: JSON.stringify({ bot_token: token })
-	});
-}
-
 // Telegram bot status & subscriber management
 
 export interface BotStatus {
