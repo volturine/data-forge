@@ -7,22 +7,18 @@ import type {
 } from '$lib/types/compute';
 import type {
 	DownloadCommandJson as ProtocolDownloadCommandJson,
-	ExportCommandJson as ProtocolExportCommandJson,
-	ExportResultJson as ProtocolExportResultJson,
-	IcebergExportOptionsJson as ProtocolIcebergExportOptionsJson,
 	StepPreviewCommandJson as ProtocolStepPreviewCommandJson,
 	StepPreviewResultJson as ProtocolStepPreviewResultJson,
 	StepRowCountResultJson as ProtocolStepRowCountResultJson,
 	StepSchemaCommandJson as ProtocolStepSchemaCommandJson,
 	StepSchemaResultJson as ProtocolStepSchemaResultJson
 } from '$lib/protocol/dataforge_protocol/compute_pb';
-import type { ExportDestination, ExportFormat } from '$lib/types/protocol-enum-tokens';
+import type { ExportFormat } from '$lib/types/protocol-enum-tokens';
 import type { AnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 import { apiBlobRequest, apiRequest } from './client';
 import { okAsync, ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 import { createStream, type StreamHandle } from './websocket';
-import { track } from '$lib/utils/audit-log';
 import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
 import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
 import { shareInFlight } from './in-flight';
@@ -65,7 +61,6 @@ const previewInFlight = new Map<string, ResultAsync<StepPreviewResponse, ApiErro
 const schemaInFlight = new Map<string, ResultAsync<StepSchemaResponse, ApiError>>();
 const rowCountInFlight = new Map<string, ResultAsync<StepRowCountResponse, ApiError>>();
 const spawnInFlight = new Map<string, ResultAsync<EngineStatusResponse, ApiError>>();
-const configureInFlight = new Map<string, ResultAsync<EngineStatusResponse, ApiError>>();
 const shutdownInFlight = new Map<string, ResultAsync<void, ApiError>>();
 
 function namespaceKey(): string {
@@ -109,22 +104,6 @@ export function spawnAnalysisEngine(
 	);
 }
 
-export function configureAnalysisEngine(
-	analysisId: string,
-	resourceConfig: EngineResourceConfig
-): ResultAsync<EngineStatusResponse, ApiError> {
-	const body = JSON.stringify(resourceConfig);
-	const endpoint = `/v1/compute/engine/configure/analysis/${analysisId}`;
-	return shareInFlight(configureInFlight, requestKey(endpoint, body), () =>
-		computeActivityStore.track(
-			apiRequest<EngineStatusResponse>(endpoint, {
-				method: 'POST',
-				body
-			})
-		)
-	);
-}
-
 export function shutdownAnalysisEngine(analysisId: string): ResultAsync<void, ApiError> {
 	const endpoint = `/v1/compute/engine/analysis/${analysisId}`;
 	return shareInFlight(shutdownInFlight, requestKey(endpoint), () =>
@@ -156,77 +135,8 @@ export function shutdownEngineByIdentity(
 	);
 }
 
-export function shutdownEngineBestEffort(analysisId: string): void {
-	shutdownAnalysisEngine(analysisId).match(
-		() => {},
-		(error) => {
-			if (error.status === 404 || error.status === 409) return;
-			track({
-				event: 'engine_error',
-				action: 'teardown',
-				target: analysisId,
-				meta: { message: error.message, status: error.status }
-			});
-		}
-	);
-}
-
 export function getEngineDefaults(): ResultAsync<EngineDefaults, ApiError> {
 	return apiRequest<EngineDefaults>('/v1/compute/defaults');
-}
-
-export interface ExportRequest {
-	analysis_id?: OptionalStringField<ProtocolExportCommandJson, 'analysisId'>;
-	target_step_id: StringField<ProtocolExportCommandJson, 'targetStepId'>;
-	analysis_pipeline: AnalysisPipelinePayload;
-	tab_id?: OptionalStringField<ProtocolExportCommandJson, 'tabId'>;
-	format?: ExportFormat;
-	filename?: StringField<ProtocolExportCommandJson, 'filename'>;
-	destination: ExportDestination;
-	iceberg_options?: {
-		table_name?: StringField<ProtocolIcebergExportOptionsJson, 'tableName'>;
-		namespace?: StringField<ProtocolIcebergExportOptionsJson, 'namespace'>;
-		branch: StringField<ProtocolIcebergExportOptionsJson, 'branch'>;
-	};
-	result_id: StringField<ProtocolExportCommandJson, 'resultId'>;
-}
-
-export interface ExportResponse {
-	success: Field<ProtocolExportResultJson, 'success'>;
-	filename: StringField<ProtocolExportResultJson, 'filename'>;
-	format: ExportFormat;
-	destination: ExportDestination;
-	message: OptionalStringField<ProtocolExportResultJson, 'message'>;
-	datasource_id: OptionalStringField<ProtocolExportResultJson, 'datasourceId'>;
-	datasource_name?: OptionalStringField<ProtocolExportResultJson, 'datasourceName'>;
-}
-
-export function exportData(request: ExportRequest): ResultAsync<Blob | ExportResponse, ApiError> {
-	if (request.destination === 'download') {
-		return computeActivityStore
-			.track(
-				apiBlobRequest('/v1/compute/export', {
-					method: 'POST',
-					body: JSON.stringify(request)
-				})
-			)
-			.andThen((blob) => {
-				const filename = request.filename ?? 'export';
-				const ext = request.format
-					? request.format.startsWith('.')
-						? request.format
-						: `.${request.format}`
-					: '';
-				downloadBlob(blob, `${filename}${ext}`);
-				return okAsync(blob);
-			});
-	}
-	return computeActivityStore.track(
-		apiRequest<ExportResponse>('/v1/compute/export', {
-			method: 'POST',
-			body: JSON.stringify(request)
-		})
-	);
 }
 
 export interface DownloadRequest {

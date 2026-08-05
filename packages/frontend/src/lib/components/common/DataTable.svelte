@@ -24,7 +24,7 @@
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import { css, menuItem } from '$lib/styles/panda';
-	import type { TableCellValue } from '$lib/types/api-responses';
+	type TableCellValue = string | number | boolean | null | undefined;
 	import { resolveColumnType } from '$lib/utils/column-types';
 	import { formatDateTimeDisplay, formatDateDisplay } from '$lib/utils/datetime';
 	import { overlayStack } from '$lib/stores/overlay.svelte';

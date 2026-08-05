@@ -722,14 +722,6 @@ def stage_prepare_resend_verification(session: Session, user_id: str) -> tuple[s
 prepare_resend_verification = committed(stage_prepare_resend_verification)
 
 
-async def resend_verification(session: Session, user_id: str) -> bool:
-    delivery = prepare_resend_verification(session, user_id)
-    if delivery is None:
-        return False
-    email, token = delivery
-    return await send_verification_email(email, token)
-
-
 def stage_create_password_reset_token(session: Session, email: str) -> str | None:
     user = get_user_by_email(session, email)
     if not user:
