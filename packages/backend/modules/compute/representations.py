@@ -4,24 +4,24 @@ from backend_core.domain.compute import schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunResponseSchema, EngineRunStatus
 
 
-def engine_run_active_status(status: EngineRunStatus) -> schemas.ActiveBuildStatus:
+def engine_run_to_build_lifecycle_status(status: EngineRunStatus) -> schemas.BuildLifecycleStatus:
     return {
-        EngineRunStatus.RUNNING: schemas.ActiveBuildStatus.RUNNING,
-        EngineRunStatus.SUCCESS: schemas.ActiveBuildStatus.COMPLETED,
-        EngineRunStatus.FAILED: schemas.ActiveBuildStatus.FAILED,
-        EngineRunStatus.CANCELLED: schemas.ActiveBuildStatus.CANCELLED,
+        EngineRunStatus.RUNNING: schemas.BuildLifecycleStatus.RUNNING,
+        EngineRunStatus.SUCCESS: schemas.BuildLifecycleStatus.COMPLETED,
+        EngineRunStatus.FAILED: schemas.BuildLifecycleStatus.FAILED,
+        EngineRunStatus.CANCELLED: schemas.BuildLifecycleStatus.CANCELLED,
     }[status]
 
 
-def engine_run_status_filter(status: schemas.ActiveBuildStatus | None) -> EngineRunStatus | None:
+def engine_run_status_filter(status: schemas.BuildLifecycleStatus | None) -> EngineRunStatus | None:
     if status is None:
         return None
     return {
-        schemas.ActiveBuildStatus.RUNNING: EngineRunStatus.RUNNING,
-        schemas.ActiveBuildStatus.COMPLETED: EngineRunStatus.SUCCESS,
-        schemas.ActiveBuildStatus.FAILED: EngineRunStatus.FAILED,
-        schemas.ActiveBuildStatus.CANCELLED: EngineRunStatus.CANCELLED,
-        schemas.ActiveBuildStatus.QUEUED: EngineRunStatus.RUNNING,
+        schemas.BuildLifecycleStatus.RUNNING: EngineRunStatus.RUNNING,
+        schemas.BuildLifecycleStatus.COMPLETED: EngineRunStatus.SUCCESS,
+        schemas.BuildLifecycleStatus.FAILED: EngineRunStatus.FAILED,
+        schemas.BuildLifecycleStatus.CANCELLED: EngineRunStatus.CANCELLED,
+        schemas.BuildLifecycleStatus.QUEUED: EngineRunStatus.RUNNING,
     }[status]
 
 
@@ -47,14 +47,14 @@ def _result_str(result: dict[str, object], key: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def engine_run_summary(run: EngineRunResponseSchema, *, namespace: str) -> schemas.ActiveBuildSummary:
+def engine_run_summary(run: EngineRunResponseSchema, *, namespace: str) -> schemas.BuildRunSummary:
     result = _result(run)
-    return schemas.ActiveBuildSummary(
+    return schemas.BuildRunSummary(
         build_id=run.id,
         analysis_id=run.analysis_id or '',
         analysis_name=run.analysis_id or '',
         namespace=namespace,
-        status=engine_run_active_status(run.status),
+        status=engine_run_to_build_lifecycle_status(run.status),
         started_at=run.created_at,
         starter=schemas.BuildStarter(user_id=None, display_name=None, email=None, triggered_by=run.triggered_by),
         resource_config=None,
@@ -78,11 +78,11 @@ def engine_run_summary(run: EngineRunResponseSchema, *, namespace: str) -> schem
     )
 
 
-def engine_run_detail(run: EngineRunResponseSchema, *, namespace: str) -> schemas.ActiveBuildDetail:
+def engine_run_detail(run: EngineRunResponseSchema, *, namespace: str) -> schemas.BuildRunDetail:
     summary = engine_run_summary(run, namespace=namespace)
     summary_payload = summary.model_dump()
     summary_payload.pop('result_json', None)
-    return schemas.ActiveBuildDetail(
+    return schemas.BuildRunDetail(
         **summary_payload,
         steps=[],
         query_plans=[],

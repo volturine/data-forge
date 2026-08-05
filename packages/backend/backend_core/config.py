@@ -141,7 +141,6 @@ class Settings(BaseSettings):
     runtime_outbox_max_attempts: int = Field(default=10, alias='RUNTIME_OUTBOX_MAX_ATTEMPTS')
     runtime_compute_max_attempts: int = Field(default=3, alias='RUNTIME_COMPUTE_MAX_ATTEMPTS')
     runtime_work_lease_ttl_seconds: int = Field(default=300, alias='RUNTIME_WORK_LEASE_TTL_SECONDS')
-    embedded_build_worker_enabled: bool = Field(default=False, alias='EMBEDDED_BUILD_WORKER_ENABLED')
 
     # Maximum connections per worker
     worker_connections: int = Field(default=1000, alias='WORKER_CONNECTIONS')
@@ -315,8 +314,6 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def _validate_runtime_mode(self) -> Settings:
-        if self.distributed_runtime_enabled and self.embedded_build_worker_enabled:
-            raise ValueError('EMBEDDED_BUILD_WORKER_ENABLED cannot be enabled with DISTRIBUTED_RUNTIME_ENABLED')
         if self.build_worker_min_processes > self.build_worker_max_processes:
             raise ValueError('BUILD_WORKER_MIN_PROCESSES must be <= BUILD_WORKER_MAX_PROCESSES')
         if self.build_worker_max_processes > self.max_concurrent_engines:

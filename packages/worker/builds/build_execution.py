@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from builds.build_live import ActiveBuild
+from builds.build_live import RuntimeBuild
 from dataforge_protocol import enums_pb2
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
@@ -11,17 +11,17 @@ from runtime.compute_manager import ProcessManager
 from runtime.domain.compute import schemas
 from runtime.domain.datasource.models import DataSourceTargetKind
 from runtime.domain.engine_runs.schemas import EngineRunKind
-from runtime.internal_api import BuildJobLeaseLost, ClaimedBuildJob, WorkerInternalApiClient, client_from_env
+from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 from runtime.namespace import reset_namespace, set_namespace_context
 
 logger = logging.getLogger(__name__)
 
 
-def worker_internal_api_client() -> WorkerInternalApiClient:
+def worker_runtime_client() -> WorkerRuntimeClient:
     return client_from_env()
 
 
-async def _emit_active_build_event(
+async def _emit_build_event(
     claim: ClaimedBuildJob,
     worker_id: str,
     payload: schemas.BuildEvent,
@@ -31,7 +31,7 @@ async def _emit_active_build_event(
     token = set_namespace_context(claim.namespace)
     try:
         sequence = await asyncio.to_thread(
-            worker_internal_api_client().persist_build_event,
+            worker_runtime_client().persist_build_event,
             namespace=claim.namespace,
             build_id=claim.build_id,
             job_id=claim.job_id,
@@ -47,12 +47,12 @@ async def _emit_active_build_event(
         reset_namespace(token)
 
 
-async def _run_active_build_task(
+async def _run_build_task(
     *,
     manager: ProcessManager,
     claim: ClaimedBuildJob,
     worker_id: str,
-    build: ActiveBuild,
+    build: RuntimeBuild,
     pipeline: dict,
     triggered_by: str | None,
 ) -> None:
@@ -63,7 +63,7 @@ async def _run_active_build_task(
             manager=manager,
             pipeline=pipeline,
             build=build,
-            emitter=lambda payload: _emit_active_build_event(
+            emitter=lambda payload: _emit_build_event(
                 claim,
                 worker_id,
                 payload,
@@ -77,8 +77,8 @@ async def _run_active_build_task(
         raise
     except Exception as exc:
         logger.error("Active build task error: %s", exc, exc_info=True)
-        if build.status == schemas.ActiveBuildStatus.RUNNING:
-            await _emit_active_build_event(
+        if build.status == schemas.BuildLifecycleStatus.RUNNING:
+            await _emit_build_event(
                 claim,
                 worker_id,
                 schemas.BuildFailedEvent(
@@ -107,11 +107,11 @@ async def _run_active_build_task(
 
 
 async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim: ClaimedBuildJob) -> None:
-    build: ActiveBuild | None = None
+    build: RuntimeBuild | None = None
     pipeline: dict | None = None
     starter: schemas.BuildStarter | None = None
     run = await asyncio.to_thread(
-        worker_internal_api_client().start_build_run,
+        worker_runtime_client().start_build_run,
         namespace=claim.namespace,
         build_id=claim.build_id,
         job_id=claim.job_id,
@@ -123,7 +123,7 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
         raise BuildJobLeaseLost(f"Build job {claim.job_id} start was rejected because its lease is no longer active")
     pipeline = {**analysis_pipeline_to_execution_payload(run.analysis_pipeline), "tab_id": run.tab_id}
     starter = schemas.BuildStarter.model_validate(run.starter_json)
-    build = ActiveBuild(
+    build = RuntimeBuild(
         build_id=run.id,
         analysis_id=run.analysis_id,
         analysis_name=run.analysis_name,
@@ -137,7 +137,7 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
         current_output_id=run.current_output_id,
         current_output_name=run.current_output_name,
         started_at=run.started_at,
-        status=schemas.ActiveBuildStatus.RUNNING,
+        status=schemas.BuildLifecycleStatus.RUNNING,
     )
     if build is None or pipeline is None or starter is None:
         return
@@ -159,7 +159,7 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
 
             refreshed = await asyncio.to_thread(
                 datasource_execution.ingest_datasource_for_schedule,
-                worker_internal_api_client(),
+                worker_runtime_client(),
                 namespace=build.namespace,
                 database_url=worker_settings.database_url,
                 datasource_id=datasource_id,
@@ -171,7 +171,7 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
                 build_id=claim.build_id,
             )
             refreshed_name = refreshed.name or datasource_id
-            await _emit_active_build_event(
+            await _emit_build_event(
                 claim,
                 worker_id,
                 schemas.BuildCompleteEvent(
@@ -203,7 +203,7 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
             )
             return
         except Exception as exc:
-            await _emit_active_build_event(
+            await _emit_build_event(
                 claim,
                 worker_id,
                 schemas.BuildFailedEvent(
@@ -228,7 +228,7 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
                 resource_config_json=build.resource_config_json,
             )
             return
-    await _run_active_build_task(
+    await _run_build_task(
         manager=manager,
         claim=claim,
         worker_id=worker_id,

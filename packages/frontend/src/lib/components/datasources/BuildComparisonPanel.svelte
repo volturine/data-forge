@@ -7,7 +7,7 @@
 		datasourceNeedsExternalIngest,
 		type DataSource
 	} from '$lib/types/datasource';
-	import type { ActiveBuildSummary } from '$lib/types/build-stream';
+	import type { BuildRunSummary } from '$lib/types/build-stream';
 	import DataTable from '$lib/components/common/DataTable.svelte';
 	import { GitCompareArrows, RefreshCw, X, Plus, Minus, Search } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -94,7 +94,7 @@
 
 	const selectedRuns = $derived.by(() => {
 		const list = Array.from(selected).map((id) => runs.find((run) => run.build_id === id) ?? null);
-		return list.filter((run): run is ActiveBuildSummary => run !== null);
+		return list.filter((run): run is BuildRunSummary => run !== null);
 	});
 	const selectedSnapshots = $derived.by(() => {
 		const list = Array.from(selected).map(

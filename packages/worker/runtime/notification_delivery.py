@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 import pyarrow as pa  # type: ignore[import-untyped]
 
-from runtime.internal_api import WorkerInternalApiClient, client_from_env
+from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
 from runtime.namespace import get_namespace
 
 STAGED_NOTIFICATION_PREFIX = "__dataforge_notification_"
@@ -68,10 +68,10 @@ def render_template(template: str, context: dict[str, object]) -> str:
 
 
 class NotificationDelivery:
-    def __init__(self, client: WorkerInternalApiClient | None = None) -> None:
+    def __init__(self, client: WorkerRuntimeClient | None = None) -> None:
         self._client = client
 
-    def _api_client(self) -> WorkerInternalApiClient:
+    def _api_client(self) -> WorkerRuntimeClient:
         if self._client is not None:
             return self._client
         return client_from_env()

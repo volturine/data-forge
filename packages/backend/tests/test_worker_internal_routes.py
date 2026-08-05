@@ -237,7 +237,7 @@ async def test_internal_worker_grpc_does_not_finalize_job_before_build_is_termin
 
 
 @pytest.mark.asyncio
-async def test_internal_worker_grpc_fails_job_and_active_build_atomically(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_internal_worker_grpc_fails_job_and_build_run_atomically(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     worker_id = f'local-worker:{uuid.uuid4()}'
     build_id = str(uuid.uuid4())

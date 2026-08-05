@@ -2,10 +2,10 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import BuildComparisonPanel from './BuildComparisonPanel.svelte';
 import type { DataSource } from '$lib/types/datasource';
-import type { ActiveBuildSummary } from '$lib/types/build-stream';
+import type { BuildRunSummary } from '$lib/types/build-stream';
 import type { SnapshotCompareResponse } from '$lib/api/datasource';
 
-let mockStoreRuns: ActiveBuildSummary[] = [];
+let mockStoreRuns: BuildRunSummary[] = [];
 let mockStoreStatus: string = 'disconnected';
 let mockStoreError: string | null = null;
 
@@ -78,7 +78,7 @@ function makeDatasource(overrides: Partial<DataSource> = {}): DataSource {
 	} as DataSource;
 }
 
-function makeRun(overrides: Partial<ActiveBuildSummary> = {}): ActiveBuildSummary {
+function makeRun(overrides: Partial<BuildRunSummary> = {}): BuildRunSummary {
 	return {
 		build_id: 'run-1',
 		analysis_id: 'analysis-1',

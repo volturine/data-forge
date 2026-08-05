@@ -1,6 +1,6 @@
 import type { EngineRun, EngineRunExecutionEntry } from '$lib/api/engine-runs';
 import type {
-	ActiveBuildDetail,
+	BuildRunDetail,
 	BuildLogEntry,
 	BuildLogLevel,
 	BuildQueryPlanSnapshot,
@@ -13,7 +13,7 @@ import {
 	buildStepStateFromEngineRunStatus,
 	buildStepTypeFromExecutionEntry,
 	countEngineRunSteps,
-	engineRunStatusToActiveBuildStatus,
+	engineRunStatusToBuildLifecycleStatus,
 	isPlanExecutionEntry,
 	readBuildTabStatus,
 	readEngineRunKind
@@ -96,7 +96,7 @@ function readBuildResults(
 }
 
 export function engineRunStatus(run: EngineRun): 'running' | 'completed' | 'failed' | 'cancelled' {
-	return engineRunStatusToActiveBuildStatus(run.status);
+	return engineRunStatusToBuildLifecycleStatus(run.status);
 }
 
 export function engineRunOutputName(run: EngineRun): string | null {
@@ -192,7 +192,7 @@ function queryPlansFromExecutionEntries(
 		);
 }
 
-export function engineRunBuildDetail(run: EngineRun): ActiveBuildDetail {
+export function engineRunBuildDetail(run: EngineRun): BuildRunDetail {
 	const result = readObject(run.result_json);
 	const tabId = readString(result?.current_tab_id);
 	const tabName = readString(result?.current_tab_name);

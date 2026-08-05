@@ -115,14 +115,14 @@ def _resolve_websocket_user(websocket: WebSocket) -> User | None:
     return run_settings_db(_lookup)
 
 
-def _get_durable_build_detail(session: Session, build_id: str) -> schemas.ActiveBuildDetail | None:
+def _get_durable_build_detail(session: Session, build_id: str) -> schemas.BuildRunDetail | None:
     build_run = build_run_service.get_build_run(session, build_id)
     if build_run is None or build_run.namespace != get_namespace():
         return None
     return build_run_service.fold_build_detail(session, build_run)
 
 
-def _list_durable_active_builds(session: Session, namespace: str) -> list[schemas.ActiveBuildSummary]:
+def _list_durable_build_runs(session: Session, namespace: str) -> list[schemas.BuildRunSummary]:
     runs = build_run_service.list_build_runs(session)
     visible = [run for run in runs if run.namespace == namespace]
     return [
@@ -147,7 +147,7 @@ def _build_snapshot_message(session: Session, build_id: str) -> schemas.BuildSna
 
 
 def _build_list_snapshot_message(session: Session, namespace: str) -> schemas.BuildListSnapshotMessage:
-    return schemas.BuildListSnapshotMessage(builds=_list_durable_active_builds(session, namespace))
+    return schemas.BuildListSnapshotMessage(builds=_list_durable_build_runs(session, namespace))
 
 
 async def _replay_build_events(websocket: WebSocket, build_id: str, after_sequence: int) -> int | None:
@@ -197,7 +197,7 @@ async def _wait_for_namespace_build_update(websocket: WebSocket, namespace: str,
     return last_seen
 
 
-def _get_durable_build_detail_by_engine_run(session: Session, engine_run_id: str) -> schemas.ActiveBuildDetail | None:
+def _get_durable_build_detail_by_engine_run(session: Session, engine_run_id: str) -> schemas.BuildRunDetail | None:
     build_run = build_run_service.get_build_run_by_engine_run(session, engine_run_id)
     if build_run is None or build_run.namespace != get_namespace():
         return None
@@ -482,7 +482,7 @@ def delete_iceberg_snapshot(
     return delete_iceberg_snapshot_info(session, parse_datasource_id(datasource_id), str(snapshot_id))
 
 
-@router.post('/builds', response_model=schemas.ActiveBuildDetail)
+@router.post('/builds', response_model=schemas.BuildRunDetail)
 @handle_errors(operation='start build')
 async def start_build(
     request: schemas.BuildRequest,
@@ -609,8 +609,8 @@ async def cancel_build(
     if detail is None:
         raise HTTPException(status_code=404, detail='Build not found')
     if detail.status not in {
-        schemas.ActiveBuildStatus.QUEUED,
-        schemas.ActiveBuildStatus.RUNNING,
+        schemas.BuildLifecycleStatus.QUEUED,
+        schemas.BuildLifecycleStatus.RUNNING,
     }:
         raise HTTPException(status_code=400, detail='Only active builds can be cancelled')
 
@@ -641,14 +641,14 @@ async def cancel_build(
     )
 
 
-@router.get('/builds', response_model=schemas.ActiveBuildListResponse, mcp=True)
+@router.get('/builds', response_model=schemas.BuildRunListResponse, mcp=True)
 @handle_errors(operation='list builds')
 async def list_builds(
     request: Request,
     analysis_id: str | None = None,
     datasource_id: str | None = None,
     kind: str | None = None,
-    status: schemas.ActiveBuildStatus | None = None,
+    status: schemas.BuildLifecycleStatus | None = None,
     search: str | None = None,
     limit: int = 100,
     offset: int = 0,
@@ -669,8 +669,8 @@ async def list_builds(
         offset=0,
     )
     build_rows = [build_run_service.build_summary(run) for run in runs if run.namespace == namespace]
-    engine_rows: list[schemas.ActiveBuildSummary] = []
-    if status != schemas.ActiveBuildStatus.QUEUED:
+    engine_rows: list[schemas.BuildRunSummary] = []
+    if status != schemas.BuildLifecycleStatus.QUEUED:
         engine_runs = engine_run_service.list_engine_runs(
             session,
             analysis_id=analysis_id.strip() if analysis_id else None,
@@ -684,10 +684,10 @@ async def list_builds(
         engine_rows = [representations.engine_run_summary(run, namespace=namespace) for run in engine_runs]
     visible = sorted([*build_rows, *engine_rows], key=lambda run: run.started_at, reverse=True)
     paged = visible[offset : offset + limit]
-    return schemas.ActiveBuildListResponse(builds=paged, total=len(visible))
+    return schemas.BuildRunListResponse(builds=paged, total=len(visible))
 
 
-@router.get('/builds/{build_id}', response_model=schemas.ActiveBuildDetail, mcp=True)
+@router.get('/builds/{build_id}', response_model=schemas.BuildRunDetail, mcp=True)
 @handle_errors(operation='get build')
 async def get_build(
     build_id: str,
@@ -1019,7 +1019,7 @@ async def build_list_stream(websocket: WebSocket) -> None:
 
 
 @router.websocket('/ws/builds/{build_id}')
-async def active_build_stream(websocket: WebSocket, build_id: str) -> None:
+async def build_stream(websocket: WebSocket, build_id: str) -> None:
     token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
     raw_last_sequence = websocket.query_params.get('last_sequence')
     last_sequence = int(raw_last_sequence) if raw_last_sequence and raw_last_sequence.isdigit() else 0

@@ -498,12 +498,12 @@ message BuildLogEntry {
   optional string tab_name = 7;
 }
 
-message ActiveBuildSummary {
+message BuildRunSummary {
   string build_id = 1 [(buf.validate.field).string.min_len = 1];
   string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
   string analysis_name = 3;
   string namespace = 4 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  ActiveBuildStatus status = 5 [(buf.validate.field).enum = {
+  BuildLifecycleStatus status = 5 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -535,8 +535,8 @@ message ActiveBuildSummary {
   optional google.protobuf.Struct result_json = 25;
 }
 
-message ActiveBuildDetail {
-  ActiveBuildSummary summary = 1 [(buf.validate.field).required = true];
+message BuildRunDetail {
+  BuildRunSummary summary = 1 [(buf.validate.field).required = true];
   repeated BuildStepSnapshot steps = 2;
   repeated BuildQueryPlanSnapshot query_plans = 3;
   optional BuildResourceSnapshot latest_resources = 4;
@@ -548,20 +548,20 @@ message ActiveBuildDetail {
   optional google.protobuf.Struct request_json = 10;
 }
 
-message ActiveBuildListResponse {
-  repeated ActiveBuildSummary builds = 1;
+message BuildRunListResponse {
+  repeated BuildRunSummary builds = 1;
   int32 total = 2 [(buf.validate.field).int32.gte = 0];
 }
 
 message BuildSnapshotMessage {
   string type = 1 [(buf.validate.field).string.min_len = 1];
-  ActiveBuildDetail build = 2 [(buf.validate.field).required = true];
+  BuildRunDetail build = 2 [(buf.validate.field).required = true];
   int32 last_sequence = 3 [(buf.validate.field).int32.gte = 0];
 }
 
 message BuildListSnapshotMessage {
   string type = 1 [(buf.validate.field).string.min_len = 1];
-  repeated ActiveBuildSummary builds = 2;
+  repeated BuildRunSummary builds = 2;
 }
 
 message BuildWebsocketErrorMessage {

@@ -7,7 +7,7 @@ import polars as pl
 
 from runtime.domain.compute.schemas import BuildStatus
 from runtime.domain.healthcheck_models import HealthCheckType
-from runtime.internal_api import HealthCheckSpec, client_from_env
+from runtime.worker_runtime_client import HealthCheckSpec, client_from_env
 from runtime.namespace import get_namespace
 
 

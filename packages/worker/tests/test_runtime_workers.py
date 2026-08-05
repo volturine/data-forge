@@ -10,11 +10,11 @@ from typing import cast
 
 import pytest
 
-from runtime.internal_api import ClaimedBuildJob, WorkerInternalApiClient
+from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient
 from runtime.worker_runtime import build_worker_loop
 
 
-class FakeWorkerInternalApiClient:
+class FakeWorkerRuntimeClient:
     def __init__(self, jobs: list[ClaimedBuildJob] | None = None) -> None:
         self.jobs = list(jobs or [])
         self.calls: list[tuple[str, object]] = []
@@ -99,7 +99,7 @@ def _job() -> ClaimedBuildJob:
 @pytest.mark.asyncio
 async def test_build_worker_loop_tracks_runtime_worker_lifecycle() -> None:
     job = _job()
-    client = FakeWorkerInternalApiClient([job])
+    client = FakeWorkerRuntimeClient([job])
     stop_event = asyncio.Event()
     seen: list[tuple[str, str]] = []
 
@@ -113,7 +113,7 @@ async def test_build_worker_loop_tracks_runtime_worker_lifecycle() -> None:
             stop_event,
             "worker-1",
             run_job,
-            client=cast(WorkerInternalApiClient, client),
+            client=cast(WorkerRuntimeClient, client),
             heartbeat_seconds=0.01,
         )
     )
@@ -139,7 +139,7 @@ async def test_build_worker_loop_tracks_runtime_worker_lifecycle() -> None:
 async def test_build_worker_loop_exits_after_one_job_when_max_jobs_set() -> None:
     first = _job()
     second = _job()
-    client = FakeWorkerInternalApiClient([first, second])
+    client = FakeWorkerRuntimeClient([first, second])
     stop_event = asyncio.Event()
     seen: list[str] = []
 
@@ -147,7 +147,7 @@ async def test_build_worker_loop_exits_after_one_job_when_max_jobs_set() -> None
         assert claim.namespace == "default"
         seen.append(claim.build_id)
 
-    await build_worker_loop(stop_event, "worker-once", run_job, client=cast(WorkerInternalApiClient, client), max_jobs=1)
+    await build_worker_loop(stop_event, "worker-once", run_job, client=cast(WorkerRuntimeClient, client), max_jobs=1)
 
     assert len(seen) == 1
 
@@ -155,7 +155,7 @@ async def test_build_worker_loop_exits_after_one_job_when_max_jobs_set() -> None
 @pytest.mark.asyncio
 async def test_build_worker_loop_stops_execution_when_lease_is_lost() -> None:
     job = _job()
-    client = FakeWorkerInternalApiClient([job])
+    client = FakeWorkerRuntimeClient([job])
     stop_event = asyncio.Event()
     execution_stopped = asyncio.Event()
     client.lease_active = False
@@ -170,7 +170,7 @@ async def test_build_worker_loop_stops_execution_when_lease_is_lost() -> None:
         stop_event,
         "worker-lost",
         run_job,
-        client=cast(WorkerInternalApiClient, client),
+        client=cast(WorkerRuntimeClient, client),
         heartbeat_seconds=0.001,
         max_jobs=1,
     )
@@ -184,7 +184,7 @@ async def test_build_worker_loop_stops_execution_when_lease_is_lost() -> None:
 @pytest.mark.asyncio
 async def test_build_worker_loop_retries_renewal_transport_error_before_expiry() -> None:
     job = replace(_job(), lease_ttl_seconds=1)
-    client = FakeWorkerInternalApiClient([job])
+    client = FakeWorkerRuntimeClient([job])
     client.renewal_errors = 1
     stop_event = asyncio.Event()
 
@@ -196,7 +196,7 @@ async def test_build_worker_loop_retries_renewal_transport_error_before_expiry()
         stop_event,
         "worker-retry",
         run_job,
-        client=cast(WorkerInternalApiClient, client),
+        client=cast(WorkerRuntimeClient, client),
         heartbeat_seconds=0.005,
     )
 
@@ -209,7 +209,7 @@ async def test_build_worker_loop_retries_renewal_transport_error_before_expiry()
 @pytest.mark.asyncio
 async def test_build_worker_loop_does_not_start_after_claim_deadline() -> None:
     job = replace(_job(), lease_ttl_seconds=1)
-    client = FakeWorkerInternalApiClient([job])
+    client = FakeWorkerRuntimeClient([job])
     client.claim_delay_seconds = 1.05
     started = False
 
@@ -221,7 +221,7 @@ async def test_build_worker_loop_does_not_start_after_claim_deadline() -> None:
         asyncio.Event(),
         "worker-expired-claim",
         run_job,
-        client=cast(WorkerInternalApiClient, client),
+        client=cast(WorkerRuntimeClient, client),
         max_jobs=1,
     )
 
@@ -337,7 +337,7 @@ def test_next_idle_child_pid_skips_busy_workers(monkeypatch) -> None:
         ),
     }
 
-    client = FakeWorkerInternalApiClient()
+    client = FakeWorkerRuntimeClient()
     monkeypatch.setattr(client, "idle_build_worker_pids", lambda: {202})
 
     assert runtime_process._next_idle_child_pid(children, client=client) == 202
@@ -348,10 +348,10 @@ def test_next_idle_child_pid_skips_busy_workers(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_build_worker_process_passes_internal_api_client(monkeypatch) -> None:
+async def test_run_build_worker_process_passes_worker_runtime_client(monkeypatch) -> None:
     calls: list[tuple[str, object]] = []
     stop_event = asyncio.Event()
-    client = FakeWorkerInternalApiClient()
+    client = FakeWorkerRuntimeClient()
 
     async def fake_build_worker_loop(local_stop: asyncio.Event, worker_id: str, run_job, **kwargs) -> None:
         calls.append(("build_worker_loop", worker_id))
@@ -368,7 +368,7 @@ async def test_run_build_worker_process_passes_internal_api_client(monkeypatch) 
         raising=False,
     )
     monkeypatch.setattr(runtime_process, "configure_logging", lambda: None)
-    monkeypatch.setattr(runtime_process, "worker_internal_api_client", lambda: client)
+    monkeypatch.setattr(runtime_process, "worker_runtime_client", lambda: client)
     monkeypatch.setattr(runtime_process, "build_worker_loop", fake_build_worker_loop)
     monkeypatch.setattr(runtime_process, "build_worker_id", lambda: "worker-1")
     monkeypatch.setattr(
@@ -391,7 +391,7 @@ async def test_run_build_worker_process_runs_without_runtime_listener(
 ) -> None:
     calls: list[str] = []
     stop_event = asyncio.Event()
-    client = FakeWorkerInternalApiClient()
+    client = FakeWorkerRuntimeClient()
 
     async def fake_build_worker_loop(local_stop: asyncio.Event, worker_id: str, run_job, **kwargs) -> None:
         calls.append("build_worker_loop")
@@ -409,7 +409,7 @@ async def test_run_build_worker_process_runs_without_runtime_listener(
         raising=False,
     )
     monkeypatch.setattr(runtime_process, "configure_logging", lambda: None)
-    monkeypatch.setattr(runtime_process, "worker_internal_api_client", lambda: client)
+    monkeypatch.setattr(runtime_process, "worker_runtime_client", lambda: client)
 
     monkeypatch.setattr(runtime_process, "build_worker_loop", fake_build_worker_loop)
     monkeypatch.setattr(runtime_process, "build_worker_id", lambda: "worker-1")
@@ -430,7 +430,7 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
 ) -> None:
     calls: list[tuple[str, object]] = []
     stop_event = asyncio.Event()
-    client = FakeWorkerInternalApiClient()
+    client = FakeWorkerRuntimeClient()
     monkeypatch.setattr(client, "queued_build_job_count", lambda: 1)
 
     class FakeProcess:
@@ -481,7 +481,7 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
             stopped_signal=FakeStoppedSignal(stop_signal),
         )
 
-    monkeypatch.setattr(runtime_process, "worker_internal_api_client", lambda: client)
+    monkeypatch.setattr(runtime_process, "worker_runtime_client", lambda: client)
     monkeypatch.setattr(runtime_process, "manager_id", lambda: "manager-1")
     monkeypatch.setattr(runtime_process, "_spawn_worker_process", fake_spawn_worker_process)
     monkeypatch.setattr(runtime_process, "configure_logging", lambda: None)

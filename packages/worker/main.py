@@ -18,7 +18,7 @@ from runtime.config import settings
 from runtime.datasource_delete_runtime import datasource_delete_loop
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
 from runtime.engine_notifications import create_snapshot_notifier
-from runtime.internal_api import ClaimedBuildJob, WorkerInternalApiClient, client_from_env
+from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 from runtime.logging import configure_logging
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
 from runtime.worker_runtime import (
@@ -36,7 +36,7 @@ _CHILD_TERMINATE_SECONDS = 2.0
 _CHILD_KILL_SECONDS = 1.0
 
 
-def worker_internal_api_client() -> WorkerInternalApiClient:
+def worker_runtime_client() -> WorkerRuntimeClient:
     return client_from_env()
 
 
@@ -60,7 +60,7 @@ def _manager_heartbeat_loop(
     stop_signal: threading.Event,
     worker_id: str,
     *,
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     heartbeat_seconds: float = 5.0,
 ) -> None:
     while not stop_signal.wait(heartbeat_seconds):
@@ -108,7 +108,7 @@ async def run_build_worker_process(
 
     from builds.build_execution import run_queued_build_job
 
-    client = worker_internal_api_client()
+    client = worker_runtime_client()
 
     async def run_job(job: ClaimedBuildJob) -> None:
         token = set_namespace_context(job.namespace)
@@ -191,7 +191,7 @@ def _reap_dead_children(children: dict[int, ManagedWorkerProcess]) -> None:
         child.process.join()
 
 
-def _next_idle_child_pid(children: dict[int, ManagedWorkerProcess], *, client: WorkerInternalApiClient) -> int | None:
+def _next_idle_child_pid(children: dict[int, ManagedWorkerProcess], *, client: WorkerRuntimeClient) -> int | None:
     idle_pids = client.idle_build_worker_pids()
     for pid, child in children.items():
         process_pid = child.process.pid
@@ -206,7 +206,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
     configure_logging()
     logger.info("Starting build worker manager process...")
     local_stop = stop_event or asyncio.Event()
-    client = worker_internal_api_client()
+    client = worker_runtime_client()
     worker_id = manager_id()
     client.register_worker(
         worker_id=worker_id,

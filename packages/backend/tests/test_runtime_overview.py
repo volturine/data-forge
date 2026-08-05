@@ -130,24 +130,6 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
     assert body['queue']['totals']['oldest_queued_age_seconds'] is not None
 
 
-def test_runtime_overview_reports_single_process_mode(client, monkeypatch) -> None:
-    from backend_core.config import settings
-
-    monkeypatch.setattr(settings, 'distributed_runtime_enabled', False, raising=False)
-    monkeypatch.setattr(
-        settings,
-        'database_url',
-        'postgresql+psycopg://user:pass@host:5432/db',
-        raising=False,
-    )
-    monkeypatch.setattr(settings, 'embedded_build_worker_enabled', True, raising=False)
-
-    response = client.get('/api/v1/runtime/overview')
-
-    assert response.status_code == 200
-    assert response.json()['mode'] == 'single_process'
-
-
 def _set_running_job_owner(session, build_id: str, worker_id: str) -> None:
     job = build_job_service.get_job_by_build_id(session, build_id)
     assert job is not None
@@ -160,7 +142,6 @@ def _set_running_job_owner(session, build_id: str, worker_id: str) -> None:
 def test_runtime_overview_includes_filesystem_namespaces(client, monkeypatch) -> None:
     from backend_core.config import settings
 
-    monkeypatch.setattr(settings, 'embedded_build_worker_enabled', False, raising=False)
     monkeypatch.setattr(settings, 'distributed_runtime_enabled', False, raising=False)
     namespace_paths('beta')
 

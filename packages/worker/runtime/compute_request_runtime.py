@@ -21,7 +21,7 @@ from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
 from runtime.domain.domain_enums import domain_token
 from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
-from runtime.internal_api import BackendWorkerRpcError, WorkerInternalApiClient, client_from_env
+from runtime.worker_runtime_client import BackendWorkerRpcError, WorkerRuntimeClient, client_from_env
 from runtime.json_values import dict_to_struct
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
@@ -50,7 +50,7 @@ _DATASOURCE_REQUEST_KINDS = {
 }
 
 
-def worker_internal_api_client() -> WorkerInternalApiClient:
+def worker_runtime_client() -> WorkerRuntimeClient:
     return client_from_env()
 
 
@@ -80,7 +80,7 @@ class ComputeRequestLeaseLost(RuntimeError):
 
 
 def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:
-    claimed = worker_internal_api_client().claim_compute_request(worker_id=worker_id)
+    claimed = worker_runtime_client().claim_compute_request(worker_id=worker_id)
     if claimed is None:
         return None
     return ClaimedComputeRequest(
@@ -167,7 +167,7 @@ async def _renew_compute_lease(claimed: ClaimedComputeRequest, *, stop_event: as
     clock = asyncio.get_running_loop().time
     deadline = clock() + claimed.lease_ttl_seconds
     delay = claimed.lease_ttl_seconds / 3
-    client = worker_internal_api_client()
+    client = worker_runtime_client()
     while True:
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=delay)
@@ -258,7 +258,7 @@ def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload:
     raise ValueError(f"Unsupported datasource response kind: {_compute_request_kind_name(kind)}")
 
 
-def _execute_datasource_command(client: WorkerInternalApiClient, claimed: ClaimedComputeRequest, command) -> datasource_pb2.DatasourceResult:
+def _execute_datasource_command(client: WorkerRuntimeClient, claimed: ClaimedComputeRequest, command) -> datasource_pb2.DatasourceResult:
     from runtime.protocol_mapping import proto_value_to_enum_name, struct_to_dict
 
     kind = claimed.kind
@@ -388,7 +388,7 @@ def _execute_datasource_command(client: WorkerInternalApiClient, claimed: Claime
 
 
 def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManager) -> None:
-    client = worker_internal_api_client()
+    client = worker_runtime_client()
     token = set_namespace_context(claimed.namespace)
     try:
         if claimed.kind in _DATASOURCE_REQUEST_KINDS:
@@ -712,7 +712,7 @@ def _engine_status_result(value: compute_schemas.EngineStatusSchema) -> compute_
 
 
 def _complete_request(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     claimed: ClaimedComputeRequest,
     *,
     response: compute_pb2.ComputeResponse,

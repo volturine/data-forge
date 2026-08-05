@@ -5,10 +5,10 @@ from collections.abc import Callable
 from dataclasses import asdict
 
 from runtime.domain.compute.base import EngineStatusInfo
-from runtime.internal_api import WorkerInternalApiClient, client_from_env
+from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
 
 
-def worker_internal_api_client() -> WorkerInternalApiClient:
+def worker_runtime_client() -> WorkerRuntimeClient:
     return client_from_env()
 
 
@@ -18,7 +18,7 @@ def persist_engine_snapshot(
     namespace: str,
     statuses: list[EngineStatusInfo],
 ) -> None:
-    worker_internal_api_client().persist_engine_snapshot(
+    worker_runtime_client().persist_engine_snapshot(
         worker_id=worker_id,
         namespace=namespace,
         statuses=[asdict(status) for status in statuses],

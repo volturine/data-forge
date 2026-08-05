@@ -6,16 +6,20 @@ import type {
 	BuildResourceSnapshot,
 	BuildResourceConfigSummary,
 	BuildLogEntry,
-	ActiveBuildDetail,
+	BuildRunDetail,
 	BuildDetailSnapshot,
 	QueryPlan
 } from '$lib/types/build-stream';
 import {
-	buildStatusFromActiveBuild,
+	buildResultStatusFromLifecycle,
 	coerceBuildStepState,
 	isTerminalBuildStatus
 } from '$lib/types/build-stream';
-import { connectBuildDetailStream, getActiveBuild, startActiveBuild } from '$lib/api/build-stream';
+import {
+	connectBuildDetailStream,
+	getRuntimeBuild,
+	startRuntimeBuild
+} from '$lib/api/build-stream';
 import type { BuildRequest, CancelBuildResponse } from '$lib/api/compute';
 import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
 import { ReconnectionManager } from './reconnection-manager';
@@ -24,7 +28,7 @@ const MAX_LOGS = 500;
 const MAX_RESOURCE_HISTORY = 120;
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
-const ACTIVE_BUILD_REFRESH_MS = 250;
+const BUILD_REFRESH_MS = 250;
 
 export class BuildStreamStore {
 	status = $state<BuildStatus>('disconnected');
@@ -79,7 +83,7 @@ export class BuildStreamStore {
 		this.retainActivity();
 		this.status = 'connecting';
 		this.scheduleRefresh(generation);
-		void startActiveBuild(request).match(
+		void startRuntimeBuild(request).match(
 			(build) => {
 				if (generation !== this.generation) return;
 				this.applySnapshot(build);
@@ -229,7 +233,7 @@ export class BuildStreamStore {
 		this.refreshTimer = setTimeout(() => {
 			this.refreshTimer = null;
 			void this.runRefresh(generation);
-		}, ACTIVE_BUILD_REFRESH_MS);
+		}, BUILD_REFRESH_MS);
 	}
 
 	private clearRefreshTimer(): void {
@@ -251,7 +255,7 @@ export class BuildStreamStore {
 	}
 
 	private async refreshBuildDetail(buildId: string, generation: number): Promise<boolean> {
-		return getActiveBuild(buildId).match(
+		return getRuntimeBuild(buildId).match(
 			(build) => {
 				if (generation !== this.generation) return false;
 				if (this.buildId !== buildId) return false;
@@ -286,7 +290,7 @@ export class BuildStreamStore {
 		}
 	}
 
-	applySnapshot(build: ActiveBuildDetail, lastSequence = 0): void {
+	applySnapshot(build: BuildRunDetail, lastSequence = 0): void {
 		this.buildId = build.build_id;
 		this.lastSequence = lastSequence;
 		this.engineRunId = build.current_engine_run_id ?? null;
@@ -324,7 +328,7 @@ export class BuildStreamStore {
 		this.results = build.results ?? [];
 		this.duration = build.duration_ms ?? null;
 		this.error = build.error ?? null;
-		const incomingStatus = buildStatusFromActiveBuild(build.status);
+		const incomingStatus = buildResultStatusFromLifecycle(build.status);
 		if (isTerminalBuildStatus(this.status) && !isTerminalBuildStatus(incomingStatus)) {
 			return;
 		}

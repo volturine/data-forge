@@ -561,7 +561,7 @@ def test_fold_build_detail_reconstructs_snapshot(test_db_session) -> None:
     assert stored is not None
     detail = build_run_service.fold_build_detail(test_db_session, stored)
 
-    assert detail.status == compute_schemas.ActiveBuildStatus.COMPLETED
+    assert detail.status == compute_schemas.BuildLifecycleStatus.COMPLETED
     assert detail.query_plans[0].optimized_plan == 'optimized'
     assert detail.steps[0].state == compute_schemas.BuildStepState.RUNNING
     assert detail.latest_resources is not None
@@ -599,7 +599,7 @@ def test_step_failed_event_does_not_make_running_snapshot_terminal(test_db_sessi
     assert stored is not None
     detail = build_run_service.fold_build_detail(test_db_session, stored)
 
-    assert detail.status == compute_schemas.ActiveBuildStatus.RUNNING
+    assert detail.status == compute_schemas.BuildLifecycleStatus.RUNNING
     assert detail.error is None
     assert detail.steps[0].state == compute_schemas.BuildStepState.FAILED
     assert detail.steps[0].error == 'Column not found'

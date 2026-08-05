@@ -10,10 +10,10 @@
 		updateDatasourceColumnDescriptions
 	} from '$lib/api/datasource';
 	import { BuildsStore } from '$lib/stores/builds.svelte';
-	import type { ActiveBuildSummary } from '$lib/types/build-stream';
+	import type { BuildRunSummary } from '$lib/types/build-stream';
 	import {
-		activeBuildStatusLabel,
-		activeBuildStatusTone,
+		buildLifecycleStatusLabel,
+		buildLifecycleStatusTone,
 		engineRunDisplayKind,
 		engineRunKindLabel
 	} from '$lib/types/build-stream';
@@ -561,7 +561,7 @@
 	type DatasourceRunRow = {
 		id: string;
 		kind: string;
-		status: ActiveBuildSummary['status'];
+		status: BuildRunSummary['status'];
 		durationMs: number | null;
 		createdAt: string;
 		builtTag: boolean;
@@ -571,7 +571,7 @@
 	const csv = $derived(isCsv(ds));
 	const excel = $derived(isExcel(ds));
 	const filteredRuns = $derived.by((): DatasourceRunRow[] => {
-		const buildRows = buildRunsStore.builds.map((run: ActiveBuildSummary) => ({
+		const buildRows = buildRunsStore.builds.map((run: BuildRunSummary) => ({
 			id: run.build_id,
 			kind: run.current_kind ?? 'build',
 			status: run.status,
@@ -606,13 +606,13 @@
 	}
 
 	function runStatusLabel(status: DatasourceRunRow['status']): string {
-		return activeBuildStatusLabel(status);
+		return buildLifecycleStatusLabel(status);
 	}
 
 	function runStatusTone(
 		status: DatasourceRunRow['status']
 	): 'success' | 'active' | 'warning' | 'error' {
-		return activeBuildStatusTone(status);
+		return buildLifecycleStatusTone(status);
 	}
 </script>
 

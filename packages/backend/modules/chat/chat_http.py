@@ -1,4 +1,4 @@
-"""OpenRouter client — OpenAI-compatible provider for chat with tool calls."""
+"""HTTP chat client for OpenAI-compatible providers (OpenRouter and similar)."""
 
 from __future__ import annotations
 

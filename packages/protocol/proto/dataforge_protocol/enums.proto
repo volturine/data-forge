@@ -149,13 +149,13 @@ enum ComputeRunStatus {
   COMPUTE_RUN_STATUS_FAILED = 2 [(dataforge_token) = "failed"];
 }
 
-enum ActiveBuildStatus {
-  ACTIVE_BUILD_STATUS_UNSPECIFIED = 0;
-  ACTIVE_BUILD_STATUS_QUEUED = 1 [(dataforge_token) = "queued"];
-  ACTIVE_BUILD_STATUS_RUNNING = 2 [(dataforge_token) = "running"];
-  ACTIVE_BUILD_STATUS_COMPLETED = 3 [(dataforge_token) = "completed"];
-  ACTIVE_BUILD_STATUS_FAILED = 4 [(dataforge_token) = "failed"];
-  ACTIVE_BUILD_STATUS_CANCELLED = 5 [(dataforge_token) = "cancelled"];
+enum BuildLifecycleStatus {
+  BUILD_LIFECYCLE_STATUS_UNSPECIFIED = 0;
+  BUILD_LIFECYCLE_STATUS_QUEUED = 1 [(dataforge_token) = "queued"];
+  BUILD_LIFECYCLE_STATUS_RUNNING = 2 [(dataforge_token) = "running"];
+  BUILD_LIFECYCLE_STATUS_COMPLETED = 3 [(dataforge_token) = "completed"];
+  BUILD_LIFECYCLE_STATUS_FAILED = 4 [(dataforge_token) = "failed"];
+  BUILD_LIFECYCLE_STATUS_CANCELLED = 5 [(dataforge_token) = "cancelled"];
 }
 
 enum BuildStepState {

@@ -37,7 +37,7 @@ from runtime.domain.datasource.source_types import DataSourceFileType, DataSourc
 from runtime.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus, SchemaDiffStatus
 from runtime.exceptions import DataSourceConnectionError, DataSourceValidationError
 from runtime.iceberg_catalog import load_runtime_catalog
-from runtime.internal_api import BackendWorkerRpcError, DatasourceMetadata, WorkerInternalApiClient
+from runtime.worker_runtime_client import BackendWorkerRpcError, DatasourceMetadata, WorkerRuntimeClient
 from runtime.namespace import get_namespace
 from runtime.object_store import (
     download_file,
@@ -248,7 +248,7 @@ def _get_first_non_null_samples(lazy: pl.LazyFrame, max_rows: int = 1000) -> dic
     return {column: (str(result[column][0]) if result[column][0] is not None else None) for column in columns}
 
 
-def _require_metadata(client: WorkerInternalApiClient, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
+def _require_metadata(client: WorkerRuntimeClient, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
     metadata = client.datasource_metadata(namespace=namespace, datasource_id=datasource_id)
     if not metadata.found or metadata.id is None or metadata.source_type is None or metadata.config is None:
         raise DatasourceNotFound(datasource_id)
@@ -256,7 +256,7 @@ def _require_metadata(client: WorkerInternalApiClient, *, namespace: str, dataso
 
 
 def _create_ingest_run(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     *,
     namespace: str,
     datasource_id: str,
@@ -288,7 +288,7 @@ def _create_ingest_run(
 
 
 def _complete_ingest_run(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     *,
     namespace: str,
     run_id: str,
@@ -328,7 +328,7 @@ def _complete_ingest_run(
     )
 
 
-def _fail_ingest_run(client: WorkerInternalApiClient, *, namespace: str, run_id: str, started: float, exc: Exception) -> None:
+def _fail_ingest_run(client: WorkerRuntimeClient, *, namespace: str, run_id: str, started: float, exc: Exception) -> None:
     with contextlib.suppress(Exception):
         client.update_engine_run(
             namespace=namespace,
@@ -349,7 +349,7 @@ def _record_from_proto_dict(payload: dict[str, object]) -> DataSourceRecord:
 
 
 def create_file_datasource(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     *,
     namespace: str,
     database_url: str,
@@ -445,7 +445,7 @@ def create_file_datasource(
 
 
 def create_database_datasource(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     *,
     namespace: str,
     database_url: str,
@@ -523,7 +523,7 @@ def create_database_datasource(
 
 
 def create_iceberg_datasource(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     *,
     namespace: str,
     database_url: str,
@@ -643,7 +643,7 @@ def _external_source(metadata: DatasourceMetadata) -> tuple[dict[str, object], D
 
 
 def ingest_external_datasource(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     *,
     namespace: str,
     database_url: str,
@@ -779,7 +779,7 @@ def is_reingestable_raw(metadata: DatasourceMetadata) -> bool:
 
 
 def ingest_datasource_for_schedule(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     *,
     namespace: str,
     database_url: str,
@@ -903,7 +903,7 @@ def _attach_column_descriptions(metadata: DatasourceMetadata, schema_info: Schem
 
 
 def get_datasource_schema(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     *,
     namespace: str,
     datasource_id: str,
@@ -1032,7 +1032,7 @@ def _build_schema_diff(schema_a: pl.Schema, schema_b: pl.Schema) -> list[SchemaD
 
 
 def compare_iceberg_snapshots(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     *,
     namespace: str,
     datasource_id: str,
@@ -1096,7 +1096,7 @@ def _compute_histogram(series: pl.Series, bins: int = 20) -> list[dict[str, obje
 
 
 def get_column_stats(
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
     *,
     namespace: str,
     datasource_id: str,

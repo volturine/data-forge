@@ -5,14 +5,14 @@ import logging
 
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_manager import ProcessManager
-from runtime.internal_api import WorkerInternalApiClient, client_from_env
+from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
 
 logger = logging.getLogger(__name__)
 
 _DATASOURCE_DELETE_POLL_SECONDS = 0.5
 
 
-def worker_internal_api_client() -> WorkerInternalApiClient:
+def worker_runtime_client() -> WorkerRuntimeClient:
     return client_from_env()
 
 
@@ -33,7 +33,7 @@ async def datasource_delete_loop(stop_event: asyncio.Event, *, manager: ProcessM
 
 
 async def _run_once(*, manager: ProcessManager) -> bool:
-    client = worker_internal_api_client()
+    client = worker_runtime_client()
     for pending_delete in client.pending_datasource_deletes():
         if _process_pending_datasource_delete(
             pending_delete.datasource_id,
@@ -50,7 +50,7 @@ def _process_pending_datasource_delete(
     *,
     namespace: str,
     manager: ProcessManager,
-    client: WorkerInternalApiClient,
+    client: WorkerRuntimeClient,
 ) -> bool:
     identity = compute_pb2.EngineIdentity(
         scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,

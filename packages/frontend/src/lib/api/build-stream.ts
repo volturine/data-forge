@@ -11,7 +11,7 @@ import type {
 	BuildDetailSnapshot,
 	BuildWebsocketErrorMessage
 } from '$lib/types/build-stream';
-import type { ActiveBuildDetail } from '$lib/types/build-stream';
+import type { BuildRunDetail } from '$lib/types/build-stream';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
@@ -53,8 +53,8 @@ function parseBuildMessage(data: string): BuildStreamMessage | null {
 	}
 }
 
-export function startActiveBuild(request: BuildRequest): ResultAsync<ActiveBuildDetail, ApiError> {
-	return apiRequest<ActiveBuildDetail>('/v1/compute/builds', {
+export function startRuntimeBuild(request: BuildRequest): ResultAsync<BuildRunDetail, ApiError> {
+	return apiRequest<BuildRunDetail>('/v1/compute/builds', {
 		method: 'POST',
 		body: JSON.stringify(request)
 	});
@@ -98,6 +98,6 @@ export function connectBuildDetailStream(
 	});
 }
 
-export function getActiveBuild(buildId: string): ResultAsync<ActiveBuildDetail, ApiError> {
-	return apiRequest<ActiveBuildDetail>(`/v1/compute/builds/${buildId}`);
+export function getRuntimeBuild(buildId: string): ResultAsync<BuildRunDetail, ApiError> {
+	return apiRequest<BuildRunDetail>(`/v1/compute/builds/${buildId}`);
 }

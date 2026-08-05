@@ -88,7 +88,7 @@ def _normalize_payload(payload: dict) -> dict:
     return normalized
 
 
-def _should_throttle(build: ActiveBuild, payload: dict) -> bool:
+def _should_throttle(build: RuntimeBuild, payload: dict) -> bool:
     event_type = schemas.BuildEventType.read(payload.get("type"))
     if event_type is None or event_type.throttle_seconds is None:
         return False
@@ -102,7 +102,7 @@ def _should_throttle(build: ActiveBuild, payload: dict) -> bool:
     return True
 
 
-def _consume_throttled(build: ActiveBuild, payload: dict) -> list[dict]:
+def _consume_throttled(build: RuntimeBuild, payload: dict) -> list[dict]:
     event_type = schemas.BuildEventType.read(payload.get("type"))
     if event_type is None:
         return []
@@ -119,7 +119,7 @@ def _consume_throttled(build: ActiveBuild, payload: dict) -> list[dict]:
 
 
 @dataclass(slots=True)
-class ActiveBuild:
+class RuntimeBuild:
     build_id: str
     analysis_id: str
     analysis_name: str
@@ -128,7 +128,7 @@ class ActiveBuild:
     started_at: datetime
     total_steps: int = 0
     total_tabs: int = 0
-    status: schemas.ActiveBuildStatus = schemas.ActiveBuildStatus.QUEUED
+    status: schemas.BuildLifecycleStatus = schemas.BuildLifecycleStatus.QUEUED
     progress: float = 0.0
     elapsed_ms: int = 0
     estimated_remaining_ms: int | None = None
@@ -181,14 +181,14 @@ class ActiveBuild:
         self.current_step_index = current_step_index
         self.total_steps = total_steps
         if self.duration_ms is None and self.status in {
-            schemas.ActiveBuildStatus.QUEUED,
-            schemas.ActiveBuildStatus.RUNNING,
+            schemas.BuildLifecycleStatus.QUEUED,
+            schemas.BuildLifecycleStatus.RUNNING,
         }:
             self.duration_ms = elapsed_ms
 
     def update_status(
         self,
-        status: schemas.ActiveBuildStatus,
+        status: schemas.BuildLifecycleStatus,
         duration_ms: int,
         error: str | None = None,
         cancelled_at: datetime | None = None,
@@ -221,8 +221,8 @@ class ActiveBuild:
         self.updated_at = _utcnow()
         self.logs.append(item)
 
-    def context(self) -> ActiveBuildContext:
-        return ActiveBuildContext(
+    def context(self) -> RuntimeBuildContext:
+        return RuntimeBuildContext(
             current_kind=self.current_kind,
             current_datasource_id=self.current_datasource_id,
             current_tab_id=self.current_tab_id,
@@ -231,7 +231,7 @@ class ActiveBuild:
             current_output_name=self.current_output_name,
         )
 
-    def apply_event_payload(self, payload: dict) -> ActiveBuildContext:
+    def apply_event_payload(self, payload: dict) -> RuntimeBuildContext:
         event_type = schemas.BuildEventType.read(payload.get("type"))
         self.current_datasource_id = _safe_str(payload.get("current_datasource_id")) or self.current_datasource_id
         self.current_tab_id = _safe_str(payload.get("tab_id")) or self.current_tab_id
@@ -307,9 +307,9 @@ class ActiveBuild:
         if terminal_status is not None:
             self.results = [schemas.BuildTabResult.model_validate(item) for item in payload.get("results", []) if isinstance(item, dict)]
             self.update_progress(
-                progress=1.0 if terminal_status == schemas.ActiveBuildStatus.COMPLETED else _safe_float(payload.get("progress"), self.progress),
+                progress=1.0 if terminal_status == schemas.BuildLifecycleStatus.COMPLETED else _safe_float(payload.get("progress"), self.progress),
                 elapsed_ms=_safe_int(payload.get("elapsed_ms")) or self.elapsed_ms,
-                estimated_remaining_ms=0 if terminal_status == schemas.ActiveBuildStatus.COMPLETED else None,
+                estimated_remaining_ms=0 if terminal_status == schemas.BuildLifecycleStatus.COMPLETED else None,
                 current_step=self.current_step,
                 current_step_index=self.current_step_index,
                 total_steps=_safe_int(payload.get("total_steps")) or self.total_steps,
@@ -330,8 +330,8 @@ class ActiveBuild:
             return None
         return self.resource_config.model_dump(mode="json")
 
-    def summary(self) -> schemas.ActiveBuildSummary:
-        return schemas.ActiveBuildSummary(
+    def summary(self) -> schemas.BuildRunSummary:
+        return schemas.BuildRunSummary(
             build_id=self.build_id,
             analysis_id=self.analysis_id,
             analysis_name=self.analysis_name,
@@ -358,8 +358,8 @@ class ActiveBuild:
             cancelled_by=self.cancelled_by,
         )
 
-    def detail(self) -> schemas.ActiveBuildDetail:
-        return schemas.ActiveBuildDetail(
+    def detail(self) -> schemas.BuildRunDetail:
+        return schemas.BuildRunDetail(
             **self.summary().model_dump(),
             steps=sorted(self.steps.values(), key=lambda item: item.build_step_index),
             query_plans=self.query_plans,
@@ -373,7 +373,7 @@ class ActiveBuild:
 
 
 @dataclass(slots=True)
-class ActiveBuildContext:
+class RuntimeBuildContext:
     current_kind: str | None
     current_datasource_id: str | None
     current_tab_id: str | None
@@ -381,7 +381,7 @@ class ActiveBuildContext:
     current_output_id: str | None
     current_output_name: str | None
 
-    def apply(self, build: ActiveBuild) -> None:
+    def apply(self, build: RuntimeBuild) -> None:
         build.current_kind = self.current_kind
         build.current_datasource_id = self.current_datasource_id
         build.current_tab_id = self.current_tab_id
@@ -393,9 +393,9 @@ class ActiveBuildContext:
         return asdict(self)
 
 
-class ActiveBuildRegistry:
+class RuntimeBuildRegistry:
     def __init__(self) -> None:
-        self._builds: dict[str, ActiveBuild] = {}
+        self._builds: dict[str, RuntimeBuild] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._watchers: dict[str, set[WebSocket]] = {}
         self._list_watchers: dict[str, set[WebSocket]] = {}
@@ -408,11 +408,11 @@ class ActiveBuildRegistry:
         namespace: str,
         starter: schemas.BuildStarter,
         total_tabs: int = 0,
-        context: ActiveBuildContext | None = None,
+        context: RuntimeBuildContext | None = None,
         build_id: str | None = None,
         started_at: datetime | None = None,
-    ) -> ActiveBuild:
-        build = ActiveBuild(
+    ) -> RuntimeBuild:
+        build = RuntimeBuild(
             build_id=build_id or str(uuid.uuid4()),
             analysis_id=analysis_id,
             analysis_name=analysis_name,
@@ -491,12 +491,12 @@ class ActiveBuildRegistry:
         async with self._lock:
             self._prune_finished_locked()
 
-    async def get_build(self, build_id: str) -> ActiveBuild | None:
+    async def get_build(self, build_id: str) -> RuntimeBuild | None:
         async with self._lock:
             self._prune_finished_locked()
             return self._builds.get(build_id)
 
-    async def list_builds(self, status: schemas.ActiveBuildStatus | None = None) -> list[schemas.ActiveBuildSummary]:
+    async def list_builds(self, status: schemas.BuildLifecycleStatus | None = None) -> list[schemas.BuildRunSummary]:
         async with self._lock:
             self._prune_finished_locked()
             builds = list(self._builds.values())
@@ -566,7 +566,9 @@ class ActiveBuildRegistry:
     async def publish_list_snapshot(self, namespace: str) -> None:
         async with self._lock:
             self._prune_finished_locked()
-            builds = [build.summary() for build in self._builds.values() if build.namespace == namespace and build.status == schemas.ActiveBuildStatus.RUNNING]
+            builds = [
+                build.summary() for build in self._builds.values() if build.namespace == namespace and build.status == schemas.BuildLifecycleStatus.RUNNING
+            ]
             builds.sort(key=lambda item: item.started_at, reverse=True)
             sockets = list(self._list_watchers.get(namespace, set()))
         if not sockets:
@@ -587,7 +589,7 @@ class ActiveBuildRegistry:
             for websocket in stale:
                 watchers.discard(websocket)
 
-    async def apply_event(self, build_id: str, payload: dict) -> ActiveBuildContext | None:
+    async def apply_event(self, build_id: str, payload: dict) -> RuntimeBuildContext | None:
         async with self._lock:
             build = self._builds.get(build_id)
             if build is None:
@@ -598,7 +600,7 @@ class ActiveBuildRegistry:
     def _prune_finished_locked(self) -> None:
         now = _utcnow()
         removable: set[str] = set()
-        finished: list[ActiveBuild] = []
+        finished: list[RuntimeBuild] = []
         for build in self._builds.values():
             if not build.status.is_terminal:
                 continue
@@ -617,4 +619,4 @@ class ActiveBuildRegistry:
             self._watchers.pop(build_id, None)
 
 
-registry = ActiveBuildRegistry()
+registry = RuntimeBuildRegistry()

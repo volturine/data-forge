@@ -2,11 +2,11 @@ import asyncio
 import contextlib
 import logging
 
-from builds.build_live import ActiveBuild
+from builds.build_live import RuntimeBuild
 from runtime.build_events import BuildEmitter, build_event, emit_build_event
 from runtime.compute_monitor import monitor_engine_resources
 from runtime.domain.compute.base import ComputeEngine
-from runtime.internal_api import BuildJobLeaseLost
+from runtime.worker_runtime_client import BuildJobLeaseLost
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ def resource_summary(engine: ComputeEngine) -> dict[str, int | None]:
 
 async def stream_resource_events(
     *,
-    build: ActiveBuild,
+    build: RuntimeBuild,
     analysis_id: str,
     engine: ComputeEngine,
     emitter: BuildEmitter | None,

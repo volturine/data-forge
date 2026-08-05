@@ -20,7 +20,7 @@ import pyarrow.parquet as pq  # type: ignore[import-untyped]
 from pyiceberg.table import Table as IcebergTable
 from sqlalchemy.exc import IntegrityError
 
-from builds.build_live import ActiveBuild
+from builds.build_live import RuntimeBuild
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.build_events import (
     BuildCancelledError,
@@ -74,7 +74,7 @@ from runtime.healthchecks import (
 )
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
-from runtime.internal_api import ClaimedBuildJob, HealthCheckSpec, client_from_env
+from runtime.worker_runtime_client import ClaimedBuildJob, HealthCheckSpec, client_from_env
 from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import extract_staged_deliveries, render_template, strip_staged_preview
@@ -874,8 +874,8 @@ def _raise_if_engine_run_cancelled(session: object | None, run_id: str) -> None:
     )
 
 
-def _cancel_started_engine_run_if_build_cancelled(build: ActiveBuild, *, run_id: str) -> None:
-    if build.status != compute_schemas.ActiveBuildStatus.CANCELLED:
+def _cancel_started_engine_run_if_build_cancelled(build: RuntimeBuild, *, run_id: str) -> None:
+    if build.status != compute_schemas.BuildLifecycleStatus.CANCELLED:
         return
     client_from_env().update_engine_run(
         namespace=get_namespace(),
@@ -2603,7 +2603,7 @@ def _count_total_build_steps(tabs: list[dict], selected_tab_id: str | None) -> i
 
 async def _stream_engine_events(
     *,
-    build: ActiveBuild,
+    build: RuntimeBuild,
     analysis_id: str,
     engine,
     job_id: str,
@@ -2766,7 +2766,7 @@ async def _stream_engine_events(
 def _schedule_stream_tasks(
     loop: asyncio.AbstractEventLoop,
     *,
-    build: ActiveBuild,
+    build: RuntimeBuild,
     analysis_id: str,
     engine,
     job_id: str,
@@ -2832,7 +2832,7 @@ def _start_stream_tasks(
     current_output_id: str | None,
     current_output_name: str | None,
     emitter: BuildEmitter | None,
-    build: ActiveBuild,
+    build: RuntimeBuild,
     read_stage: _SyntheticBuildStage | None,
 ) -> tuple[asyncio.Task | None, asyncio.Task | None]:
     build.resource_config = compute_schemas.BuildResourceConfigSummary.model_validate(_resource_summary(engine))
@@ -2910,7 +2910,7 @@ async def run_analysis_build_stream(
     manager: ProcessManager,
     pipeline: dict | None,
     *,
-    build: ActiveBuild,
+    build: RuntimeBuild,
     emitter: BuildEmitter | None,
     triggered_by: str | None = None,
     publication_claim: ClaimedBuildJob | None = None,
@@ -3151,7 +3151,7 @@ async def run_analysis_build_stream(
                         current_engine_run_id=run_id,
                     )
                     _cancel_started_engine_run_if_build_cancelled(build, run_id=run_id)
-                    if build.status == compute_schemas.ActiveBuildStatus.CANCELLED:
+                    if build.status == compute_schemas.BuildLifecycleStatus.CANCELLED:
                         return
 
                 async def emit_run_started() -> None:

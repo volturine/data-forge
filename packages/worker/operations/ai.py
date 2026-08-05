@@ -17,7 +17,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 from dataforge_protocol import enums_pb2
 from operations.template_placeholders import render_template_placeholders
 from runtime.domain.compute.base import OperationHandler, OperationParams
-from runtime.internal_api import WorkerInternalApiClient, client_from_env
+from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +72,14 @@ class InternalAIClient:
         provider: enums_pb2.AIProvider,
         endpoint_url: str | None,
         api_key: str | None,
-        client: WorkerInternalApiClient | None = None,
+        client: WorkerRuntimeClient | None = None,
     ) -> None:
         self._provider = provider
         self._endpoint_url = endpoint_url
         self._api_key = api_key
         self._client = client
 
-    def _api_client(self) -> WorkerInternalApiClient:
+    def _api_client(self) -> WorkerRuntimeClient:
         if self._client is not None:
             return self._client
         return client_from_env()

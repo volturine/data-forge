@@ -10,14 +10,14 @@ import {
 	engineRunDisplayKind,
 	engineRunKindLabel,
 	engineRunStatusFilterValue,
-	engineRunStatusToActiveBuildStatus
+	engineRunStatusToBuildLifecycleStatus
 } from './build-stream';
 
 describe('build-stream ownership helpers', () => {
 	it('owns build and engine-run status projections', () => {
 		expect(buildStatusLabel('running', 'Apply filter')).toBe('Apply filter');
 		expect(buildStatusTone('cancelled')).toBe('warning');
-		expect(engineRunStatusToActiveBuildStatus('success')).toBe('completed');
+		expect(engineRunStatusToBuildLifecycleStatus('success')).toBe('completed');
 		expect(engineRunStatusFilterValue('completed')).toBe('success');
 	});
 

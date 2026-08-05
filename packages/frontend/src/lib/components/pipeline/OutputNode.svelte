@@ -16,7 +16,7 @@
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-	import type { ActiveBuildDetail } from '$lib/types/build-stream';
+	import type { BuildRunDetail } from '$lib/types/build-stream';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import { isUuid } from '$lib/utils/analysis-tab';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
@@ -317,8 +317,8 @@
 		if (!hasBuildSession) return;
 		previewOpen = true;
 		if (!buildStore.buildId) return;
-		void apiRequest<ActiveBuildDetail>(`/v1/compute/builds/${buildStore.buildId}`).match(
-			(build: ActiveBuildDetail) => {
+		void apiRequest<BuildRunDetail>(`/v1/compute/builds/${buildStore.buildId}`).match(
+			(build: BuildRunDetail) => {
 				buildStore.applySnapshot(build);
 			},
 			(err) => {
