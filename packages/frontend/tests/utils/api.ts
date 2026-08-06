@@ -60,8 +60,21 @@ const datasourceRegistry = new Map<string, { name: string; namespace?: string }>
 const analysisRegistry = new Map<string, { name: string }>();
 const udfRegistry = new Map<string, { name: string }>();
 
-/** Default app namespace used by helpers unless a test passes another. */
-const DEFAULT_HELPER_NAMESPACE = 'public';
+/**
+ * Default app namespace used by helpers unless a test passes another.
+ * Resolved from the backend config (DEFAULT_NAMESPACE) so it stays correct
+ * if the app default changes. Memoized per worker.
+ */
+let helperDefaultNamespace: string | undefined;
+
+async function resolveHelperDefaultNamespace(page: Page): Promise<string> {
+	if (!helperDefaultNamespace) {
+		const response = await page.request.get('/api/v1/config');
+		const config = (await response.json()) as { default_namespace?: string };
+		helperDefaultNamespace = config.default_namespace || 'default';
+	}
+	return helperDefaultNamespace;
+}
 
 /**
  * Run setup work on the worker's long-lived helper context.
@@ -82,18 +95,17 @@ async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promis
 /**
  * Shared helper context reuses IndexedDB across calls. Always pin namespace
  * before mutating data so a prior namespaced helper call cannot leak into
- * the next (fresh contexts used to default to public every time).
+ * the next. Pins to the app's configured default namespace when the caller
+ * does not require a specific one.
  */
-async function prepareHelperNamespace(
-	page: Page,
-	namespace = DEFAULT_HELPER_NAMESPACE
-): Promise<void> {
+async function prepareHelperNamespace(page: Page, namespace?: string): Promise<void> {
+	const target = namespace ?? (await resolveHelperDefaultNamespace(page));
 	await page.goto('/');
 	await waitForLayoutReady(page);
 	const sidebar = page.locator('aside[aria-label="Main navigation"]');
-	const active = sidebar.getByText(namespace, { exact: true });
+	const active = sidebar.getByText(target, { exact: true });
 	if (await active.isVisible().catch(() => false)) return;
-	await switchNamespace(page, namespace);
+	await switchNamespace(page, target);
 }
 
 function buildOutput(filename: string) {
@@ -118,9 +130,10 @@ export async function createDatasource(
 	description?: string
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
-		await prepareHelperNamespace(page, namespace ?? DEFAULT_HELPER_NAMESPACE);
+		const target = namespace ?? (await resolveHelperDefaultNamespace(page));
+		await prepareHelperNamespace(page, target);
 		const { id } = await uploadDatasourceViaUi(page, name, { description });
-		datasourceRegistry.set(id, { name, namespace: namespace ?? DEFAULT_HELPER_NAMESPACE });
+		datasourceRegistry.set(id, { name, namespace: target });
 		return id;
 	});
 }
@@ -131,9 +144,10 @@ export async function createLargeDatasource(
 	rows: number
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
-		await prepareHelperNamespace(page);
+		const target = await resolveHelperDefaultNamespace(page);
+		await prepareHelperNamespace(page, target);
 		const { id } = await uploadDatasourceViaUi(page, name, { rows });
-		datasourceRegistry.set(id, { name, namespace: DEFAULT_HELPER_NAMESPACE });
+		datasourceRegistry.set(id, { name, namespace: target });
 		return id;
 	});
 }
@@ -143,9 +157,10 @@ export async function createDatasourceWithDates(
 	name: string
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
-		await prepareHelperNamespace(page);
+		const target = await resolveHelperDefaultNamespace(page);
+		await prepareHelperNamespace(page, target);
 		const { id } = await uploadDatasourceWithDatesViaUi(page, name);
-		datasourceRegistry.set(id, { name, namespace: DEFAULT_HELPER_NAMESPACE });
+		datasourceRegistry.set(id, { name, namespace: target });
 		return id;
 	});
 }
@@ -158,7 +173,7 @@ export async function deleteDatasource(
 	const entry = datasourceRegistry.get(id);
 	if (!entry) return;
 	await withAuthedPage(request, async (page) => {
-		await prepareHelperNamespace(page, namespace ?? entry.namespace ?? DEFAULT_HELPER_NAMESPACE);
+		await prepareHelperNamespace(page, namespace ?? entry.namespace);
 		await deleteDatasourceViaUI(page, entry.name);
 	});
 }
