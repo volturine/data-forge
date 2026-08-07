@@ -90,6 +90,10 @@ interface DataSourceBase {
 	created_by: DataSourceCreatedBy;
 	is_hidden: boolean;
 	created_at: string;
+	/** ISO timestamp of the most recent successful data refresh; null when never built. */
+	last_data_update?: string | null;
+	/** Freshness threshold in minutes; null means the 24-hour default applies. */
+	freshness_threshold_minutes?: number | null;
 	output_of_tab_id?: string | null;
 }
 
