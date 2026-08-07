@@ -14,10 +14,12 @@ from sqlmodel import Session
 
 from backend_core import datasource_delete_service
 from backend_core.datasource_storage import cleanup_datasource_storage
+from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.exceptions import DataSourceValidationError, datasource_not_found
 from backend_core.persistence.analysis.models import Analysis
+from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from backend_core.sqlmodel_typing import col, sa
 from modules.datasource.schemas import (
@@ -166,6 +168,65 @@ def _apply_display_name[DatasourceResponseT: (DataSourceResponse, DataSourceList
     canonical = _canonical_internal_postgres_name(datasource)
     if canonical is not None:
         response.name = canonical
+    return response
+
+
+_SNAPSHOT_TIMESTAMP_KEYS = ('current_snapshot_timestamp_ms', 'snapshot_timestamp_ms')
+
+
+def _snapshot_timestamp_ms(config: object) -> int | None:
+    """Latest Iceberg snapshot timestamp (epoch ms) stored on the datasource config."""
+    if not isinstance(config, dict):
+        return None
+    for key in _SNAPSHOT_TIMESTAMP_KEYS:
+        value = config.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+    return None
+
+
+def _last_data_update_from_config(datasource: DataSource) -> datetime | None:
+    timestamp_ms = _snapshot_timestamp_ms(datasource.config)
+    if timestamp_ms is None:
+        return None
+    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC).replace(tzinfo=None)
+
+
+def _naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
+
+
+def _last_build_completed_at_map(session: Session, analysis_ids: set[str]) -> dict[str, datetime]:
+    """Latest successful build completion per analysis, for analysis-generated outputs."""
+    if not analysis_ids:
+        return {}
+    rows = session.execute(
+        select(col(BuildRun.analysis_id), col(BuildRun.completed_at))
+        .where(col(BuildRun.analysis_id).in_(sorted(analysis_ids)))
+        .where(col(BuildRun.status) == BuildRunStatus.COMPLETED)
+    ).all()
+    latest: dict[str, datetime] = {}
+    for analysis_id, completed_at in rows:
+        if completed_at is None:
+            continue
+        completed_at = _naive_utc(completed_at)
+        previous = latest.get(analysis_id)
+        if previous is None or completed_at > previous:
+            latest[analysis_id] = completed_at
+    return latest
+
+
+def _apply_last_data_update[DatasourceResponseT: (DataSourceResponse, DataSourceListItem)](
+    response: DatasourceResponseT,
+    datasource: DataSource,
+    last_build_completed_at: datetime | None,
+) -> DatasourceResponseT:
+    response.freshness_threshold_minutes = datasource.freshness_threshold_minutes
+    response.last_data_update = _last_data_update_from_config(datasource)
+    if response.last_data_update is None and last_build_completed_at is not None:
+        response.last_data_update = last_build_completed_at
     return response
 
 
@@ -770,7 +831,9 @@ def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
     datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
     response = _apply_display_name(DataSourceResponse.model_validate(datasource), datasource)
     response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
-    return response
+    analysis_id = datasource.created_by_analysis_id
+    last_build_completed_at = _last_build_completed_at_map(session, {analysis_id}).get(analysis_id) if analysis_id else None
+    return _apply_last_data_update(response, datasource, last_build_completed_at)
 
 
 def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceListItem]:
@@ -780,11 +843,23 @@ def list_datasources(session: Session, include_hidden: bool = False) -> list[Dat
     query = select(DataSource, row_count_expr).options(defer(sa(DataSource.schema_cache))).where(col(DataSource.is_pending_delete).is_(False))
     if not include_hidden:
         query = query.where(col(DataSource.is_hidden).is_(False))
+    rows = session.execute(query).all()
+    pending_analysis_ids: set[str] = set()
+    for ds, _ in rows:
+        if _last_data_update_from_config(ds) is None and ds.created_by_analysis_id is not None:
+            pending_analysis_ids.add(ds.created_by_analysis_id)
+    last_build_completed_at = _last_build_completed_at_map(session, pending_analysis_ids)
     results: list[DataSourceListItem] = []
-    for ds, list_row_count in session.execute(query).all():
+    for ds, list_row_count in rows:
         item = _apply_display_name(DataSourceListItem.model_validate(ds), ds)
         item.row_count = _coerce_row_count(list_row_count)
         item.output_of_tab_id = ds.config.get('analysis_tab_id') if isinstance(ds.config, dict) else None
+        analysis_id = ds.created_by_analysis_id
+        item = _apply_last_data_update(
+            item,
+            ds,
+            last_build_completed_at.get(analysis_id) if analysis_id else None,
+        )
         results.append(item)
     return results
 
@@ -806,6 +881,10 @@ def update_datasource(
     # Update is_hidden if provided
     if update.is_hidden is not None:
         datasource.is_hidden = update.is_hidden
+
+    # Update freshness threshold if provided
+    if 'freshness_threshold_minutes' in update.model_fields_set:
+        datasource.freshness_threshold_minutes = update.freshness_threshold_minutes
 
     # Update config if provided
     if update.config is not None:
@@ -938,7 +1017,9 @@ def update_datasource(
     logger.info(f'Updated datasource {datasource_id}')
     response = _apply_display_name(DataSourceResponse.model_validate(datasource), datasource)
     response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
-    return response
+    analysis_id = datasource.created_by_analysis_id
+    last_build_completed_at = _last_build_completed_at_map(session, {analysis_id}).get(analysis_id) if analysis_id else None
+    return _apply_last_data_update(response, datasource, last_build_completed_at)
 
 
 def delete_datasource(session: Session, datasource_id: str) -> None:

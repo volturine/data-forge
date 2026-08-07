@@ -101,6 +101,7 @@ class DataSource(SQLModel, table=True):  # type: ignore[call-arg]
     is_hidden: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0'))
     is_pending_delete: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0', index=True))
     owner_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
+    freshness_threshold_minutes: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     delete_requested_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True, index=True))
 

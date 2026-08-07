@@ -44,6 +44,7 @@ def upgrade() -> None:
         sa.Column('is_hidden', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('is_pending_delete', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('owner_id', sa.String(), nullable=True),
+        sa.Column('freshness_threshold_minutes', sa.Integer(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('delete_requested_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('id'),

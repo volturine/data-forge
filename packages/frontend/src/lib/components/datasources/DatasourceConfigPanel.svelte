@@ -54,6 +54,8 @@
 		datasourceSupportsSchemaRefresh
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import FreshnessBadge from '$lib/components/common/FreshnessBadge.svelte';
+	import RelativeTime from '$lib/components/common/RelativeTime.svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import ExcelTableSelector from '$lib/components/common/ExcelTableSelector.svelte';
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
@@ -123,6 +125,7 @@
 			name: string;
 			description: string | null;
 			config?: Record<string, unknown>;
+			freshness_threshold_minutes?: number | null;
 		}) => {
 			const result = await updateDatasource(datasource.id, update);
 			if (result.isErr()) throw new Error(result.error.message);
@@ -156,6 +159,7 @@
 	let descriptionError = $state<string | null>(null);
 	let descriptionExpanded = $state<Record<string, boolean>>({});
 	let currentDatasourceId = $state<string | null>(null);
+	let freshnessThreshold = $state<number | null>(null);
 
 	const descriptionMutation = createMutation(() => ({
 		mutationFn: async (payload: { columnName: string; description: string | null }) => {
@@ -202,6 +206,7 @@
 		descriptionDraft = '';
 		descriptionError = null;
 		descriptionExpanded = {};
+		freshnessThreshold = ds.freshness_threshold_minutes ?? null;
 
 		// Initialize type-specific config
 		const fileSource = getFileSource(ds);
@@ -384,6 +389,23 @@
 		hasChanges = true;
 	}
 
+	const FRESHNESS_THRESHOLD_OPTIONS: { label: string; minutes: number | null }[] = [
+		{ label: 'Default (24 hours)', minutes: null },
+		{ label: '1 hour', minutes: 60 },
+		{ label: '6 hours', minutes: 360 },
+		{ label: '12 hours', minutes: 720 },
+		{ label: '24 hours', minutes: 1440 },
+		{ label: '7 days', minutes: 10080 },
+		{ label: '30 days', minutes: 43200 }
+	];
+
+	function handleThresholdChange(value: string) {
+		const option = FRESHNESS_THRESHOLD_OPTIONS.find((opt) => opt.minutes === parseInt(value, 10));
+		if (!option) return;
+		freshnessThreshold = option.minutes;
+		hasChanges = true;
+	}
+
 	function handleCsvConfigChange<K extends keyof typeof csvConfig>(
 		key: K,
 		value: (typeof csvConfig)[K]
@@ -435,9 +457,15 @@
 	async function handleSave() {
 		if (!datasourceQuery.data) return;
 
-		const update: { name: string; description: string | null; config?: Record<string, unknown> } = {
+		const update: {
+			name: string;
+			description: string | null;
+			config?: Record<string, unknown>;
+			freshness_threshold_minutes?: number | null;
+		} = {
 			name,
-			description
+			description,
+			freshness_threshold_minutes: freshnessThreshold
 		};
 
 		if (configDirty) {
@@ -1077,6 +1105,52 @@
 									>
 								</div>
 							{/if}
+						</div>
+
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '4' })}>
+							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+								<span
+									class={css({
+										textTransform: 'uppercase',
+										letterSpacing: 'wide',
+										color: 'fg.muted'
+									})}>Last updated</span
+								>
+								{#if ds.last_data_update}
+									<FreshnessBadge
+										lastDataUpdate={ds.last_data_update}
+										thresholdMinutes={ds.freshness_threshold_minutes ?? null}
+									/>
+									<span class={css({ fontWeight: 'medium' })}>
+										<RelativeTime timestamp={ds.last_data_update} />
+									</span>
+								{:else}
+									<span class={css({ fontWeight: 'medium', color: 'fg.muted' })}>Never</span>
+								{/if}
+							</div>
+						</div>
+
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '4' })}>
+							<label
+								for="freshness-threshold-{datasource.id}"
+								class={css({
+									textTransform: 'uppercase',
+									letterSpacing: 'wide',
+									color: 'fg.muted',
+									margin: '0'
+								})}>Freshness threshold</label
+							>
+							<select
+								id="freshness-threshold-{datasource.id}"
+								value={freshnessThreshold ?? ''}
+								onchange={(e) => handleThresholdChange(e.currentTarget.value)}
+								class={input()}
+								disabled={updateMutation.isPending}
+							>
+								{#each FRESHNESS_THRESHOLD_OPTIONS as option (option.minutes)}
+									<option value={option.minutes ?? ''}>{option.label}</option>
+								{/each}
+							</select>
 						</div>
 					</div>
 				</div>
