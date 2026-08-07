@@ -372,6 +372,7 @@ def _build_schedule_response(
     data = {
         'id': schedule.id,
         'datasource_id': schedule.datasource_id,
+        'description': schedule.description,
         'cron_expression': schedule.cron_expression,
         'enabled': schedule.enabled,
         'depends_on': schedule.depends_on,
@@ -504,6 +505,7 @@ def stage_create_schedule(session: Session, payload: ScheduleCreate) -> Schedule
     record = Schedule(
         id=str(uuid.uuid4()),
         datasource_id=payload.datasource_id,
+        description=payload.description,
         cron_expression=payload.cron_expression,
         enabled=payload.enabled,
         depends_on=payload.depends_on,

@@ -1,7 +1,7 @@
 # PRD: Schedule Descriptions
 
-> **Status (audited 2026-08-02): Backlog — not implemented.**
-> **Current truth:** Schedule descriptions are still backlog, not a shipped feature.
+> **Status (audited 2026-08-07): Implemented.**
+> **Current truth:** Schedule descriptions are shipped in create, list, detail, update, and edit flows.
 > **Portfolio:** [PRD index](../README.md)
 
 
@@ -179,10 +179,10 @@ Display order:
 
 ## Acceptance Criteria
 
-- [ ] Schedule model supports nullable `description`
-- [ ] Schedule create and update APIs accept `description`
-- [ ] Schedule list/detail APIs return `description`
-- [ ] Schedule creation and edit flows include a description field
-- [ ] Monitoring/detail views display stored description separately from trigger summary
-- [ ] AI-facing read/write contracts expose the same field directly
-- [ ] `just verify` passes
+- [x] Schedule model supports nullable `description`
+- [x] Schedule create and update APIs accept `description`
+- [x] Schedule list/detail APIs return `description`
+- [x] Schedule creation and edit flows include a description field
+- [x] Monitoring/detail views display stored description separately from trigger summary
+- [x] AI-facing read/write contracts expose the same field directly
+- [x] `just verify` passes

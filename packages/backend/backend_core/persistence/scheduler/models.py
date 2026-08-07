@@ -18,6 +18,7 @@ class Schedule(SQLModel, table=True):  # type: ignore[call-arg, assignment]
 
     id: str = Field(sa_column=Column(String, primary_key=True))
     datasource_id: str = Field(sa_column=Column(String, nullable=False, index=True))
+    description: str | None = Field(default=None, sa_column=Column(String(2000), nullable=True))
     cron_expression: str = Field(sa_column=Column(String, nullable=False))
     enabled: bool = Field(default=True)
     depends_on: str | None = Field(default=None, sa_column=Column(String, nullable=True))
