@@ -530,6 +530,8 @@ def datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload: 
 
 def _datasource_record_payload_for_proto(payload: dict[str, object]) -> dict[str, object]:
     proto_payload = dict(payload)
+    # Computed enrichment not stored on the persisted record.
+    proto_payload.pop('last_data_update', None)
     schema_cache = proto_payload.pop('schema_cache', None)
     if isinstance(schema_cache, Mapping):
         proto_payload['schema_info'] = dict(schema_cache)

@@ -14,6 +14,8 @@
 	} from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
+	import FreshnessBadge from '$lib/components/common/FreshnessBadge.svelte';
+	import RelativeTime from '$lib/components/common/RelativeTime.svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
@@ -449,6 +451,12 @@
 												Import
 											</span>
 										{/if}
+										{#if datasource.last_data_update}
+											<FreshnessBadge
+												lastDataUpdate={datasource.last_data_update}
+												thresholdMinutes={datasource.freshness_threshold_minutes ?? null}
+											/>
+										{/if}
 									</div>
 									{#if datasource.description}
 										<p
@@ -475,6 +483,11 @@
 											})}
 										>
 											No description
+										</p>
+									{/if}
+									{#if datasource.last_data_update}
+										<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.subtle' })}>
+											Last updated <RelativeTime timestamp={datasource.last_data_update} />
 										</p>
 									{/if}
 								</div>
