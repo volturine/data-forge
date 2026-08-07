@@ -5,6 +5,7 @@ import type { ApiError } from './client';
 export interface Schedule {
 	id: string;
 	datasource_id: string;
+	description?: string | null;
 	trigger_on_datasource_id?: string | null;
 	cron_expression: string;
 	enabled: boolean;
@@ -20,6 +21,7 @@ export interface Schedule {
 
 export interface ScheduleCreate {
 	datasource_id: string;
+	description?: string;
 	cron_expression: string;
 	enabled?: boolean;
 	depends_on?: string;
@@ -28,6 +30,7 @@ export interface ScheduleCreate {
 
 export interface ScheduleUpdate {
 	cron_expression?: string;
+	description?: string | null;
 	enabled?: boolean;
 	datasource_id?: string;
 	depends_on?: string | null;

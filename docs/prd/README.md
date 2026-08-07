@@ -37,6 +37,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Pipeline Compute](implemented/pipeline-compute.md) — superseded design
 - [PostgreSQL Backend Support](implemented/postgresql-backend-support.md) — superseded design
 - [Runtime Correctness and Architecture Remediation](implemented/runtime-correctness-and-architecture-remediation.md)
+- [Schedule Descriptions](implemented/schedule-descriptions.md)
 - [Scheduling](implemented/scheduling.md) — superseded design
 - [Settings Profile Page](implemented/settings-profile-page.md)
 - [Shared Boundary Checklist](implemented/shared-boundary-checklist.md) — archived completed audit
@@ -61,7 +62,6 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Kaggle Connection](backlog/kaggle-connection.md)
 - [Local Subdomain Serving](backlog/local-subdomain-serving.md)
 - [Mobile-first UI](backlog/mobile-first-ui.md)
-- [Schedule Descriptions](backlog/schedule-descriptions.md)
 - [Snapshot Rollback](backlog/snapshot-rollback.md)
 - [Tauri Hybrid Desktop](backlog/tauri-hybrid-desktop.md)
 - [Time Since Last Updated](backlog/time-since-last-updated.md)
