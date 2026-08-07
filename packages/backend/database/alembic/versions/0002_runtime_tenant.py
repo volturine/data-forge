@@ -319,6 +319,7 @@ def upgrade() -> None:
         'schedules',
         sa.Column('id', sa.String(), nullable=False),
         sa.Column('datasource_id', sa.String(), nullable=False),
+        sa.Column('description', sa.String(length=2000), nullable=True),
         sa.Column('cron_expression', sa.String(), nullable=False),
         sa.Column('enabled', sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column('depends_on', sa.String(), nullable=True),
