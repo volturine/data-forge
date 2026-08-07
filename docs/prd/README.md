@@ -43,9 +43,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 
 ## Active
 
-- [Hot-Path Profiling Plan](active/hot-path-request-map.md) — direct timing, occupancy, and request measurements deferred
-- [Lineage Revamp](active/lineage-revamp.md)
-- [Performance Regression Investigation](active/performance-violation-checklist.md) — +54.0% regression attribution and optimization deferred
+- [Performance Regression Investigation](active/performance-violation-checklist.md) — +54.0% regression attribution and optimization deferred (merged Hot-Path Profiling Plan)
 
 ## Backlog
 
@@ -58,6 +56,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Feature-overhaul Portfolio](backlog/data-forge-2.md)
 - [Horizontal Node Configuration](backlog/horizontal-node-config.md)
 - [Kaggle Connection](backlog/kaggle-connection.md)
+- [Lineage Revamp](backlog/lineage-revamp.md)
 - [Local Subdomain Serving](backlog/local-subdomain-serving.md)
 - [Mobile-first UI](backlog/mobile-first-ui.md)
 - [Schedule Descriptions](backlog/schedule-descriptions.md)
