@@ -20,6 +20,7 @@
 		ArrowRight,
 		CircleQuestionMark,
 		ChartColumn,
+		FileText,
 		Search
 	} from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -47,10 +48,13 @@
 	let newDatasourceId = $state('');
 	let newDependsOn = $state('');
 	let newTrigger = $state('');
+	let newDescription = $state('');
 	let showHelp = $state(false);
 	let expandedId = $state<string | null>(null);
 	let editingCron = $state<string | null>(null);
 	let editCronValue = $state('');
+	let editingDescription = $state<string | null>(null);
+	let editDescriptionValue = $state('');
 	let searchQuery = $state('');
 	const effectiveSearch = $derived(externalSearch ?? searchQuery);
 	let schedPage = $state(1);
@@ -214,6 +218,7 @@
 			newDatasourceId = '';
 			newDependsOn = '';
 			newTrigger = '';
+			newDescription = '';
 		}
 	}));
 
@@ -242,6 +247,19 @@
 			queryClient.invalidateQueries({ queryKey: ['schedules'] });
 			editingCron = null;
 			editCronValue = '';
+		}
+	}));
+
+	const descriptionMut = createMutation(() => ({
+		mutationFn: async (args: { id: string; description: string }) => {
+			const result = await updateSchedule(args.id, { description: args.description || null });
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['schedules'] });
+			editingDescription = null;
+			editDescriptionValue = '';
 		}
 	}));
 
@@ -294,6 +312,11 @@
 			cron_expression: newCron
 		};
 
+		const description = newDescription.trim();
+		if (description) {
+			payload.description = description;
+		}
+
 		if (triggerType === 'depends' && newDependsOn) {
 			payload.depends_on = newDependsOn;
 		}
@@ -338,6 +361,20 @@
 	function cancelEditCron() {
 		editingCron = null;
 		editCronValue = '';
+	}
+
+	function startEditDescription(schedule: Schedule) {
+		editingDescription = schedule.id;
+		editDescriptionValue = schedule.description ?? '';
+	}
+
+	function saveDescription(id: string) {
+		descriptionMut.mutate({ id, description: editDescriptionValue.trim() });
+	}
+
+	function cancelEditDescription() {
+		editingDescription = null;
+		editDescriptionValue = '';
 	}
 
 	function handleDepChange(id: string, value: string) {
@@ -737,6 +774,53 @@
 				{/if}
 			</div>
 
+			<!-- Description Section -->
+			<div class={css({ marginBottom: '5' })}>
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						marginBottom: '3',
+						gap: '2',
+						borderBottomWidth: '1',
+						paddingBottom: '2'
+					})}
+				>
+					<FileText size={14} class={css({ color: 'accent.primary' })} />
+					<span class={css({ fontSize: 'xs', fontWeight: 'medium' })}>
+						Description — Why this schedule exists
+					</span>
+				</div>
+				<label for="schedule-description" class={label()}>Description (optional)</label>
+				<textarea
+					id="schedule-description"
+					rows="3"
+					bind:value={newDescription}
+					placeholder="Production nightly reporting, QA validation, or operational caveats..."
+					class={css({
+						width: 'full',
+						resize: 'vertical',
+						color: 'fg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: {
+							opacity: '0.5',
+							cursor: 'not-allowed'
+						},
+						_placeholder: { color: 'fg.muted' },
+						backgroundColor: 'transparent',
+						paddingX: '2',
+						paddingY: '1.5',
+						fontSize: 'xs'
+					})}
+				></textarea>
+			</div>
+
 			<!-- Trigger Section -->
 			<div>
 				<div
@@ -1093,6 +1177,86 @@
 			<p class={emptyText({ size: 'panel' })}>No schedules match your search.</p>
 		</div>
 	{:else if visibleSchedules.length > 0}
+		{#snippet descriptionBlock(schedule: Schedule)}
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+				<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Description</span>
+				{#if editingDescription === schedule.id}
+					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+						<textarea
+							class={input({ variant: 'micro' })}
+							rows="3"
+							id="sched-{schedule.id}-description"
+							aria-label="Schedule description"
+							bind:value={editDescriptionValue}
+							onkeydown={(e) => {
+								if (e.key === 'Escape') cancelEditDescription();
+							}}
+						></textarea>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+							<button
+								class={css({
+									display: 'inline-flex',
+									alignItems: 'center',
+									justifyContent: 'center',
+									border: 'none',
+									backgroundColor: 'transparent',
+									padding: '0.5',
+									color: 'fg.success',
+									_hover: { color: 'fg.successMuted' }
+								})}
+								onclick={() => saveDescription(schedule.id)}
+								disabled={descriptionMut.isPending}
+								title="Save"
+							>
+								<Check size={12} />
+							</button>
+							<button
+								class={css({
+									display: 'inline-flex',
+									alignItems: 'center',
+									justifyContent: 'center',
+									border: 'none',
+									backgroundColor: 'transparent',
+									padding: '0.5',
+									color: 'fg.muted',
+									_hover: { color: 'fg.primary' }
+								})}
+								onclick={cancelEditDescription}
+								title="Cancel"
+							>
+								<X size={12} />
+							</button>
+						</div>
+					</div>
+				{:else}
+					<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '1' })}>
+						{#if schedule.description}
+							<p class={css({ margin: '0', flex: '1', fontSize: '2xs', color: 'fg.secondary' })}>
+								{schedule.description}
+							</p>
+						{:else}
+							<span class={css({ flex: '1', fontSize: '2xs', color: 'fg.tertiary' })}>
+								No description
+							</span>
+						{/if}
+						<button
+							class={css({
+								flexShrink: '0',
+								border: 'none',
+								backgroundColor: 'transparent',
+								padding: '0.5',
+								color: 'fg.muted',
+								_hover: { color: 'fg.primary' }
+							})}
+							onclick={() => startEditDescription(schedule)}
+							title="Edit description"
+						>
+							<Pencil size={10} />
+						</button>
+					</div>
+				{/if}
+			</div>
+		{/snippet}
 		{#if compact}
 			<!-- Compact card list -->
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
@@ -1206,6 +1370,7 @@
 						{#if expandedId === schedule.id}
 							<div class={css({ borderTopWidth: '1', paddingX: '3', paddingY: '2' })}>
 								<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+									{@render descriptionBlock(schedule)}
 									{#if triggerTypeValue === 'cron'}
 										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
@@ -1660,6 +1825,7 @@
 													{provenanceDisplay}
 												</span>
 											</div>
+											{@render descriptionBlock(schedule)}
 											{#if triggerTypeValue === 'cron'}
 												<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}

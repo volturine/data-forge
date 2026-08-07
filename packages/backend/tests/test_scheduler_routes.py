@@ -41,6 +41,7 @@ class TestScheduleRoutes:
         assert response.status_code == 200
         data = response.json()
         assert data['datasource_id'] == output_datasource.id
+        assert data['description'] is None
         assert data['analysis_id'] == sample_analysis.id
         assert data['analysis_name'] == sample_analysis.name
         assert data['cron_expression'] == '0 * * * *'
@@ -49,6 +50,76 @@ class TestScheduleRoutes:
         response = client.get('/api/v1/schedules')
         assert response.status_code == 200
         assert len(response.json()) == 1
+        assert response.json()[0]['description'] is None
+
+    def test_create_with_description(self, client, output_datasource: DataSource):
+        payload = {
+            'datasource_id': output_datasource.id,
+            'cron_expression': '0 * * * *',
+            'description': 'Nightly production reporting for the revenue team.',
+        }
+        response = client.post('/api/v1/schedules', json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data['description'] == 'Nightly production reporting for the revenue team.'
+
+        listed = client.get('/api/v1/schedules').json()
+        assert listed[0]['description'] == 'Nightly production reporting for the revenue team.'
+
+    def test_create_blank_description_normalized_to_null(self, client, output_datasource: DataSource):
+        payload = {
+            'datasource_id': output_datasource.id,
+            'cron_expression': '0 * * * *',
+            'description': '   ',
+        }
+        response = client.post('/api/v1/schedules', json=payload)
+        assert response.status_code == 200
+        assert response.json()['description'] is None
+
+    def test_create_description_too_long_rejected(self, client, output_datasource: DataSource):
+        payload = {
+            'datasource_id': output_datasource.id,
+            'cron_expression': '0 * * * *',
+            'description': 'x' * 2001,
+        }
+        response = client.post('/api/v1/schedules', json=payload)
+        assert response.status_code == 422
+
+    def test_update_description(self, client, output_datasource: DataSource):
+        create_resp = client.post(
+            '/api/v1/schedules',
+            json={
+                'datasource_id': output_datasource.id,
+                'cron_expression': '0 * * * *',
+            },
+        )
+        schedule_id = create_resp.json()['id']
+
+        response = client.put(
+            f'/api/v1/schedules/{schedule_id}',
+            json={'description': 'Now for QA validation. Keep enabled in staging.'},
+        )
+        assert response.status_code == 200
+        assert response.json()['description'] == 'Now for QA validation. Keep enabled in staging.'
+
+    def test_clear_description(self, client, output_datasource: DataSource):
+        create_resp = client.post(
+            '/api/v1/schedules',
+            json={
+                'datasource_id': output_datasource.id,
+                'cron_expression': '0 * * * *',
+                'description': 'Temporary note',
+            },
+        )
+        schedule_id = create_resp.json()['id']
+        assert create_resp.json()['description'] == 'Temporary note'
+
+        response = client.put(f'/api/v1/schedules/{schedule_id}', json={'description': ''})
+        assert response.status_code == 200
+        assert response.json()['description'] is None
+
+        response = client.get('/api/v1/schedules')
+        assert response.json()[0]['description'] is None
 
     def test_list_filtered_by_datasource(self, client, sample_analyses: list[Analysis], test_db_session: Session):
         a1, a2, _ = sample_analyses
