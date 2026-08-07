@@ -146,6 +146,7 @@ message DataSourceRecord {
   google.protobuf.Timestamp created_at = 10;
   optional string output_of_tab_id = 11 [(buf.validate.field).string.min_len = 1];
   SchemaInfo schema_info = 12;
+  optional int32 freshness_threshold_minutes = 13 [(buf.validate.field).int32.gte = 1];
 }
 
 message ColumnSchema {

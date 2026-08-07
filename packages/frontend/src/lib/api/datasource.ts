@@ -304,6 +304,7 @@ export interface DataSourceUpdate {
 	description?: string | null;
 	config?: Record<string, unknown>;
 	is_hidden?: boolean;
+	freshness_threshold_minutes?: number | null;
 }
 
 export interface ColumnDescriptionPatch {
