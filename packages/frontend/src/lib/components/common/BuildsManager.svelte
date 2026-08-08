@@ -86,6 +86,7 @@
 	const detailPayloads = new SvelteMap<string, BuildPayloadData>();
 	const pendingCancelled = new SvelteMap<string, CancelBuildResponse>();
 	const limit = 50;
+	const HISTORY_AUTO_REFRESH_MS = 2_000;
 
 	const queryParams = $derived({
 		analysis_id: (pageState.url.searchParams.get('analysis_id') ?? undefined) || undefined,
@@ -389,6 +390,20 @@
 		const timer = setInterval(() => {
 			nowMs = Date.now();
 		}, 1000);
+		return () => clearInterval(timer);
+	});
+
+	// Keep the history list current while any build is active so rows advance
+	// from running/queued to a terminal status without a manual refresh.
+	$effect(() => {
+		const hasActiveBuild = runs.some((run) => {
+			const status = currentStatus(run);
+			return status === 'running' || status === 'queued';
+		});
+		if (!hasActiveBuild) return;
+		const timer = setInterval(() => {
+			buildsStore.silentRefresh();
+		}, HISTORY_AUTO_REFRESH_MS);
 		return () => clearInterval(timer);
 	});
 
