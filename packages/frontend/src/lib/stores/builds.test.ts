@@ -159,4 +159,54 @@ describe('BuildsStore', () => {
 		expect(mockListBuilds).toHaveBeenCalledTimes(2);
 		expect(store.status).toBe('connected');
 	});
+
+	test('silentRefresh keeps existing rows visible while refetching', async () => {
+		const first = mockPending();
+		const refreshed = mockPending();
+		mockListBuilds.mockReturnValueOnce(first.result).mockReturnValueOnce(refreshed.result);
+
+		const store = new BuildsStore();
+		store.load({ datasource_id: 'ds-1' });
+		first.pending.resolve?.({ builds: [makeBuild()], total: 1 });
+		await Promise.resolve();
+		expect(store.status).toBe('connected');
+
+		store.silentRefresh();
+		// The store must not flip to 'connecting' (which blanks the table) while the refetch is in flight.
+		expect(store.status).toBe('connected');
+		expect(store.builds).toHaveLength(1);
+
+		refreshed.pending.resolve?.({
+			builds: [makeBuild({ build_id: 'build-2' })],
+			total: 1
+		});
+		await Promise.resolve();
+		expect(store.status).toBe('connected');
+		expect(store.builds.map((build) => build.build_id)).toEqual(['build-2']);
+	});
+
+	test('silentRefresh coalesces behind an in-flight refresh and stays silent', async () => {
+		const first = mockPending();
+		const second = mockPending();
+		mockListBuilds
+			.mockReturnValueOnce(first.result)
+			.mockReturnValueOnce(second.result)
+			.mockReturnValueOnce(mockOk([makeBuild({ build_id: 'build-3' })], 1));
+
+		const store = new BuildsStore();
+		store.load({ datasource_id: 'ds-1' });
+		first.pending.resolve?.({ builds: [makeBuild()], total: 1 });
+		await Promise.resolve();
+
+		store.refresh();
+		store.silentRefresh();
+		expect(mockListBuilds).toHaveBeenCalledTimes(2);
+
+		second.pending.resolve?.({ builds: [makeBuild({ build_id: 'build-3' })], total: 1 });
+		await Promise.resolve();
+
+		expect(mockListBuilds).toHaveBeenCalledTimes(3);
+		expect(store.status).toBe('connected');
+		expect(store.builds.map((build) => build.build_id)).toEqual(['build-3']);
+	});
 });

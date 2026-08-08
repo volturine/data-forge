@@ -16,6 +16,7 @@ export abstract class PaginatedStore<TParams, TResponse> {
 
 	private inFlight = false;
 	private pendingRefresh = false;
+	private pendingSilent = false;
 	private token = 0;
 
 	load(params?: TParams): void {
@@ -27,18 +28,36 @@ export abstract class PaginatedStore<TParams, TResponse> {
 		}
 		this.params = params;
 		this.pendingRefresh = false;
+		this.pendingSilent = false;
 		this.status = 'connecting';
 		this.error = null;
 		this.fetch();
 	}
 
 	refresh(): void {
+		this.pendingSilent = false;
+		this.refreshInternal(false);
+	}
+
+	/**
+	 * Refetch without blanking the current page: keeps showing the existing
+	 * rows (and spinner-free status) until the new response lands, then swaps
+	 * them in. Use for background polling so a refresh never flashes a spinner.
+	 */
+	silentRefresh(): void {
+		this.refreshInternal(true);
+	}
+
+	private refreshInternal(silent: boolean): void {
 		if (this.params === undefined && this.status === 'disconnected') return;
 		if (this.inFlight) {
 			this.pendingRefresh = true;
+			this.pendingSilent = silent;
 			return;
 		}
-		this.status = 'connecting';
+		if (!silent) {
+			this.status = 'connecting';
+		}
 		this.error = null;
 		this.fetch();
 	}
@@ -47,6 +66,7 @@ export abstract class PaginatedStore<TParams, TResponse> {
 		this.token += 1;
 		this.inFlight = false;
 		this.pendingRefresh = false;
+		this.pendingSilent = false;
 		this.status = 'disconnected';
 		this.error = null;
 	}
@@ -91,6 +111,8 @@ export abstract class PaginatedStore<TParams, TResponse> {
 	private runPendingRefresh(): void {
 		if (!this.pendingRefresh) return;
 		this.pendingRefresh = false;
-		this.refresh();
+		const silent = this.pendingSilent;
+		this.pendingSilent = false;
+		this.refreshInternal(silent);
 	}
 }
