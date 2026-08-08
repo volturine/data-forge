@@ -732,20 +732,16 @@ test.describe('Datasources – preview table interactions', () => {
 			await page.getByText('Sort A-Z').click();
 
 			// After sorting by city A-Z, Berlin should be first
-			await expect
-				.poll(async () => await page.locator('tbody tr').first().textContent(), {
-					timeout: 5_000
-				})
-				.toContain('Berlin');
+			await expect(page.locator('tbody tr').first()).toContainText('Berlin', {
+				timeout: 5_000
+			});
 
 			// Clear sort should restore original order
 			await cityColBtn.click({ force: true });
 			await page.getByText('Clear sort').click();
-			await expect
-				.poll(async () => await page.locator('tbody tr').first().textContent(), {
-					timeout: 5_000
-				})
-				.toBe(beforeText);
+			await expect(page.locator('tbody tr').first()).toHaveText(beforeText ?? '', {
+				timeout: 5_000
+			});
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
 		}

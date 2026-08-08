@@ -12,7 +12,7 @@ import { dialogByHeading } from './utils/locators.js';
 
 async function latestNode(page: Parameters<typeof gotoAnalysisEditor>[0], stepType: string) {
 	const nodes = page.locator(`[data-step-type="${stepType}"]`);
-	await expect.poll(async () => await nodes.count(), { timeout: 5_000 }).toBeGreaterThan(0);
+	await expect(nodes.first()).toBeVisible({ timeout: 5_000 });
 	return nodes.nth((await nodes.count()) - 1);
 }
 
@@ -961,21 +961,15 @@ test.describe('Analyses – pointer drag reorder', () => {
 				clientY: endY
 			});
 
-			// Wait for the reorder to settle: limit should now precede filter in the DOM
-			await expect(async () => {
-				const nodesAfter = page.locator('[data-step-type]');
-				const countAfter = await nodesAfter.count();
-				const typesAfter: string[] = [];
-				for (let i = 0; i < countAfter; i++) {
-					const attr = await nodesAfter.nth(i).getAttribute('data-step-type');
-					if (attr) typesAfter.push(attr);
-				}
-				const newLimitIdx = typesAfter.indexOf('limit');
-				const newFilterIdx = typesAfter.indexOf('filter');
-				expect(newLimitIdx).toBeGreaterThanOrEqual(0);
-				expect(newFilterIdx).toBeGreaterThanOrEqual(0);
-				expect(newLimitIdx).toBeLessThan(newFilterIdx);
-			}).toPass({ timeout: 5_000 });
+			// After the pointerup the reorder must have applied: limit precedes filter in the DOM.
+			const typesAfter = await page
+				.locator('[data-step-type]')
+				.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-step-type') ?? ''));
+			const newLimitIdx = typesAfter.indexOf('limit');
+			const newFilterIdx = typesAfter.indexOf('filter');
+			expect(newLimitIdx).toBeGreaterThanOrEqual(0);
+			expect(newFilterIdx).toBeGreaterThanOrEqual(0);
+			expect(newLimitIdx).toBeLessThan(newFilterIdx);
 
 			await screenshot(page, 'analysis/editor', 'drag-reorder-done');
 		} finally {

@@ -16,17 +16,6 @@ export async function waitForBuildPreviewId(
 ): Promise<string> {
 	const preview = await waitForBuildPreview(page, timeout);
 	const id = preview.locator('[data-testid="build-preview-id"]');
-	let buildId = '';
-
-	await expect
-		.poll(
-			async () => {
-				buildId = ((await id.textContent().catch(() => '')) ?? '').trim();
-				return buildId || null;
-			},
-			{ timeout }
-		)
-		.toBeTruthy();
-
-	return buildId;
+	await expect(id).toHaveText(/\S/, { timeout });
+	return ((await id.textContent()) ?? '').trim();
 }

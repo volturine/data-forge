@@ -156,20 +156,6 @@ async function gotoMonitoringBuilds(page: Page, analysisId?: string) {
 	await expect(page.locator('#panel-builds')).toBeVisible({ timeout: 5_000 });
 }
 
-async function refreshBuildHistory(page: Page) {
-	const responsePromise = page
-		.waitForResponse(
-			(response) =>
-				response.url().includes('/api/v1/compute/builds') &&
-				response.request().method() === 'GET' &&
-				response.ok(),
-			{ timeout: 5_000 }
-		)
-		.catch(() => null);
-	await page.getByRole('button', { name: /Refresh History/i }).click({ timeout: 5_000 });
-	await responsePromise;
-}
-
 function cancelBuildDialog(page: Page) {
 	const title = page.getByRole('heading', { name: 'Cancel this build?' });
 	return page.getByRole('dialog').filter({ has: title });
@@ -215,32 +201,27 @@ async function waitForBuildRowById(
 	timeout = 5_000
 ) {
 	const acceptedStatuses = Array.isArray(statuses) ? statuses : [statuses];
-	const started = Date.now();
-	while (Date.now() - started < timeout) {
-		const failedToLoad = panel.getByText(/Failed to load builds/i).first();
-		if (await failedToLoad.isVisible().catch(() => false)) {
-			throw new Error(`Build history failed while waiting for build row ${runId}`);
+	const failedToLoad = panel.getByText(/Failed to load builds/i).first();
+	await expect(failedToLoad).not.toBeVisible({ timeout: 5_000 });
+	const row = panel
+		.locator(
+			acceptedStatuses
+				.map((status) => `[data-build-row="${runId}"][data-build-status="${status}"]`)
+				.join(',')
+		)
+		.first();
+	await expect(row).toBeVisible({ timeout });
+	if (acceptedStatuses.includes('cancelled')) {
+		const completed = panel.locator(`[data-build-row="${runId}"][data-build-status="completed"]`);
+		const failed = panel.locator(`[data-build-row="${runId}"][data-build-status="failed"]`);
+		if (await completed.isVisible().catch(() => false)) {
+			throw new Error(`Build row ${runId} completed after a confirmed cancellation`);
 		}
-		for (const status of acceptedStatuses) {
-			const row = panel.locator(`[data-build-row="${runId}"][data-build-status="${status}"]`);
-			if (await row.isVisible().catch(() => false)) return row;
+		if (await failed.isVisible().catch(() => false)) {
+			throw new Error(`Build row ${runId} failed after a confirmed cancellation`);
 		}
-		if (acceptedStatuses.includes('cancelled')) {
-			const completed = panel.locator(`[data-build-row="${runId}"][data-build-status="completed"]`);
-			const failed = panel.locator(`[data-build-row="${runId}"][data-build-status="failed"]`);
-			if (await completed.isVisible().catch(() => false)) {
-				throw new Error(`Build row ${runId} completed after a confirmed cancellation`);
-			}
-			if (await failed.isVisible().catch(() => false)) {
-				throw new Error(`Build row ${runId} failed after a confirmed cancellation`);
-			}
-		}
-		await refreshBuildHistory(page);
-		await page.waitForTimeout(250);
 	}
-	throw new Error(
-		`Timed out waiting for build row ${runId} to reach ${acceptedStatuses.join(' or ')}`
-	);
+	return row;
 }
 
 async function waitForBuildRowEventually(
@@ -255,18 +236,7 @@ async function waitForBuildRowEventually(
 		| 'queued'
 		| Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>
 ) {
-	let lastError: unknown;
-	for (let attempt = 0; attempt < 4; attempt += 1) {
-		try {
-			return await waitForBuildRowById(page, panel, runId, statuses, 5_000);
-		} catch (error) {
-			if (error instanceof Error && error.message.includes('after a confirmed cancellation')) {
-				throw error;
-			}
-			lastError = error;
-		}
-	}
-	throw lastError;
+	return waitForBuildRowById(page, panel, runId, statuses, 5_000);
 }
 
 test.describe('Navigation – engines live monitor', () => {
@@ -296,16 +266,8 @@ test.describe('Navigation – engines live monitor', () => {
 			const engineButton = page.getByRole('button', { name: 'Engine Monitor' });
 			await expect(engineButton).toBeVisible({ timeout: 5_000 });
 			const enginePopup = page.locator('[data-engines-popup="true"]');
-			let open = false;
-			for (let attempt = 0; attempt < 2; attempt += 1) {
-				await engineButton.click();
-				if (await enginePopup.isVisible().catch(() => false)) {
-					open = true;
-					break;
-				}
-				await page.waitForTimeout(250);
-			}
-			expect(open).toBe(true);
+			await engineButton.click();
+			await expect(enginePopup).toBeVisible({ timeout: 5_000 });
 			await expect(page.getByTestId('engine-monitor-count')).toBeVisible({ timeout: 5_000 });
 			await expect(
 				enginePopup.locator(`[data-engine-row="analysis_interactive:${analysisId}"]`)

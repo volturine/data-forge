@@ -10,16 +10,7 @@ import { screenshot } from './utils/visual.js';
 // ── Real e2e build preview tests (no WS mocking) ───────────────────────────
 
 async function expectVisibleEventually(locator: Locator) {
-	let lastError: unknown;
-	for (let attempt = 0; attempt < 3; attempt += 1) {
-		try {
-			await expect(locator).toBeVisible({ timeout: readyTimeoutMs() });
-			return;
-		} catch (error) {
-			lastError = error;
-		}
-	}
-	throw lastError;
+	await expect(locator).toBeVisible({ timeout: readyTimeoutMs() });
 }
 
 async function deleteBestEffort(

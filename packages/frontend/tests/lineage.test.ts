@@ -95,14 +95,11 @@ test.describe('Lineage – graph interaction', () => {
 		const before = await zoomLabel.textContent();
 
 		await page.locator('button[title="Zoom in"]').click();
-		await page.waitForTimeout(500);
+		await expect(zoomLabel).not.toHaveText(before ?? '', { timeout: 5_000 });
 		const afterIn = await zoomLabel.textContent();
-		expect(afterIn).not.toBe(before);
 
 		await page.locator('button[title="Zoom out"]').click();
-		await page.waitForTimeout(500);
-		const afterOut = await zoomLabel.textContent();
-		expect(afterOut).not.toBe(afterIn);
+		await expect(zoomLabel).not.toHaveText(afterIn ?? '', { timeout: 5_000 });
 	});
 
 	test('lineage graph loads without error state', async ({ page }) => {

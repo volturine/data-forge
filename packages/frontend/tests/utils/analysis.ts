@@ -51,15 +51,10 @@ async function waitForAnalysisEditor(
 		}
 	}
 
-	await expect
-		.poll(
-			async () => {
-				anyStepButton = await findVisibleLocator(stepButtons);
-				return anyStepButton !== null;
-			},
-			{ timeout: remaining() }
-		)
-		.toBe(true);
+	await expect(stepButtons.filter({ visible: true }).first()).toBeVisible({
+		timeout: remaining()
+	});
+	anyStepButton = await findVisibleLocator(stepButtons);
 	if (!anyStepButton) {
 		throw new Error('Analysis editor step library did not render a visible step button');
 	}
@@ -71,18 +66,11 @@ async function waitForAnalysisEditor(
 }
 
 async function waitForCurrentAnalysisId(page: Page, deadline: number): Promise<string> {
-	let currentAnalysisId = '';
-	await expect
-		.poll(
-			async () => {
-				const match = page.url().match(/\/analysis\/([^/?#]+)/);
-				currentAnalysisId = match?.[1] ?? '';
-				return currentAnalysisId && currentAnalysisId !== 'new' ? currentAnalysisId : null;
-			},
-			{ timeout: Math.max(deadline - Date.now(), 1_000) }
-		)
-		.toBeTruthy();
-	return currentAnalysisId;
+	await page.waitForURL(/\/analysis\/(?!new(?:\/|$))[^/?#]+/, {
+		timeout: Math.max(deadline - Date.now(), 1_000)
+	});
+	const match = page.url().match(/\/analysis\/([^/?#]+)/);
+	return match?.[1] ?? '';
 }
 
 async function waitForCurrentAnalysisEditorByState(
@@ -133,22 +121,9 @@ export async function gotoAnalysisEditor(
 	analysisId: string,
 	timeout = readyTimeoutMs()
 ): Promise<void> {
-	let lastError: unknown;
-
-	for (let attempt = 0; attempt < 2; attempt += 1) {
-		try {
-			await gotoAuthedRoute(page, `/analysis/${analysisId}`, timeout);
-			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout });
-			await waitForCurrentAnalysisEditor(page, timeout);
-			return;
-		} catch (error) {
-			lastError = error;
-			if (attempt === 1) throw error;
-			await page.waitForTimeout(500);
-		}
-	}
-
-	throw lastError;
+	await gotoAuthedRoute(page, `/analysis/${analysisId}`, timeout);
+	await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout });
+	await waitForCurrentAnalysisEditor(page, timeout);
 }
 
 export async function gotoReadOnlyAnalysisEditor(
@@ -156,22 +131,9 @@ export async function gotoReadOnlyAnalysisEditor(
 	analysisId: string,
 	timeout = readyTimeoutMs()
 ): Promise<void> {
-	let lastError: unknown;
-
-	for (let attempt = 0; attempt < 2; attempt += 1) {
-		try {
-			await gotoAuthedRoute(page, `/analysis/${analysisId}`, timeout);
-			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout });
-			await waitForCurrentReadOnlyAnalysisEditor(page, timeout);
-			return;
-		} catch (error) {
-			lastError = error;
-			if (attempt === 1) throw error;
-			await page.waitForTimeout(500);
-		}
-	}
-
-	throw lastError;
+	await gotoAuthedRoute(page, `/analysis/${analysisId}`, timeout);
+	await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout });
+	await waitForCurrentReadOnlyAnalysisEditor(page, timeout);
 }
 
 /**
@@ -199,7 +161,7 @@ export async function addStepAndOpenConfig(
 	await stepBtn.click();
 
 	const canvasNodes = page.locator(`[data-step-type="${stepType}"]`);
-	await expect.poll(async () => await canvasNodes.count(), { timeout: 5_000 }).toBeGreaterThan(0);
+	await expect(canvasNodes.filter({ visible: true }).first()).toBeVisible({ timeout: 5_000 });
 	const canvasNode = canvasNodes.nth((await canvasNodes.count()) - 1);
 	await expect(canvasNode).toBeVisible({ timeout: 5_000 });
 
@@ -210,6 +172,6 @@ export async function addStepAndOpenConfig(
 	const configPanel = page.locator(`[data-step-config="${stepType}"]`);
 	await expect(configPanel).toBeVisible({ timeout: 5_000 });
 	const configBody = configPanel.locator(':scope > *');
-	await expect.poll(async () => await configBody.count(), { timeout: 5_000 }).toBeGreaterThan(0);
+	await expect(configBody.first()).toBeVisible({ timeout: 5_000 });
 	return configPanel;
 }
