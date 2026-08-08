@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import path from 'node:path';
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices, type ReporterDescription } from '@playwright/test';
 
 function resolveE2eWorkers(): number {
 	const raw = process.env.PW_E2E_WORKERS;
@@ -31,7 +31,11 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
 const ciArgs = process.env.CI ? ['--disable-dev-shm-usage', '--disable-gpu'] : [];
 const artifactsRoot = path.resolve(process.cwd(), 'tests', '.artifacts');
 const shardSuffix = shardSuffixFromArgs();
-const reporter = [['line'] as const];
+const jsonReport = process.env.PLAYWRIGHT_JSON_REPORT;
+const reporter: ReporterDescription[] = [['line']];
+if (jsonReport) {
+	reporter.push(['json', { outputFile: jsonReport }]);
+}
 const workers = resolveE2eWorkers();
 
 export default defineConfig({

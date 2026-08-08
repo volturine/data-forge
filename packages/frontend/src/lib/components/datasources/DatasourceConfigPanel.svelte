@@ -108,7 +108,7 @@
 			runsRequested = true;
 			return;
 		}
-		buildRunsStore.refresh();
+		buildRunsStore.silentRefresh();
 	});
 
 	// Subscription: keep any in-flight runs requests alive during normal tab switches.

@@ -4,7 +4,7 @@ import { createLargeDatasource, createLongRunningAnalysis } from './utils/api.js
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
-import { waitForBuildPreview, waitForBuildPreviewId } from './utils/builds.js';
+import { waitForBuildPreviewId } from './utils/builds.js';
 import { uid } from './utils/uid.js';
 
 async function startBuildFromAnalysisPage(
@@ -58,10 +58,6 @@ async function gotoMonitoringBuilds(page: Page, analysisId?: string) {
 	await expect(page.locator('#panel-builds')).toBeVisible({ timeout: 5_000 });
 }
 
-async function refreshBuildHistory(page: Page) {
-	await page.getByRole('button', { name: /Refresh History/i }).click({ timeout: 5_000 });
-}
-
 async function openCancelDialogFromRow(page: Page, row: ReturnType<Page['locator']>) {
 	const btn = row.getByLabel('Cancel build');
 	await expect(btn).toBeVisible({ timeout: 5_000 });
@@ -73,29 +69,11 @@ async function openCancelDialogFromRow(page: Page, row: ReturnType<Page['locator
 
 async function openCancelDialogFromPreview(page: Page, preview: ReturnType<Page['locator']>) {
 	const btn = preview.locator('[data-testid="build-cancel-button"]');
-	const closeBtn = page.locator('[aria-label="Close build preview"]');
-	const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
-	const started = Date.now();
-
-	while (Date.now() - started < 5_000) {
-		if (await btn.isVisible().catch(() => false)) {
-			await expect(btn).toBeEnabled({ timeout: 5_000 });
-			await btn.scrollIntoViewIfNeeded();
-			await btn.click({ force: true, timeout: 5_000 });
-			await expect(cancelDialog(page)).toBeVisible({ timeout: 5_000 });
-			return;
-		}
-		if (await closeBtn.isVisible().catch(() => false)) {
-			await closeBtn.click({ timeout: 5_000 });
-			await expect(preview).not.toBeVisible({ timeout: readyTimeoutMs() });
-		}
-		await expect(openPreviewBtn).toBeVisible({ timeout: 5_000 });
-		await openPreviewBtn.click({ timeout: 5_000 });
-		await waitForBuildPreview(page);
-		await page.waitForTimeout(1_000);
-	}
-
-	throw new Error('Timed out waiting for preview cancel button to become available');
+	await expect(btn).toBeVisible({ timeout: 5_000 });
+	await expect(btn).toBeEnabled({ timeout: 5_000 });
+	await btn.scrollIntoViewIfNeeded();
+	await btn.click({ force: true, timeout: 5_000 });
+	await expect(cancelDialog(page)).toBeVisible({ timeout: 5_000 });
 }
 
 function cancelDialog(page: Page) {
@@ -132,16 +110,15 @@ async function waitForBuildRowById(
 	statuses: Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>,
 	timeout = 5_000
 ) {
-	const started = Date.now();
-	while (Date.now() - started < timeout) {
-		for (const status of statuses) {
-			const row = panel.locator(`[data-build-row="${buildId}"][data-build-status="${status}"]`);
-			if (await row.isVisible().catch(() => false)) return row;
-		}
-		await refreshBuildHistory(page);
-		await page.waitForTimeout(1_000);
-	}
-	throw new Error(`Timed out waiting for build ${buildId} to reach ${statuses.join(' or ')}`);
+	const row = panel
+		.locator(
+			statuses
+				.map((status) => `[data-build-row="${buildId}"][data-build-status="${status}"]`)
+				.join(',')
+		)
+		.first();
+	await expect(row).toBeVisible({ timeout });
+	return row;
 }
 
 test.describe('Cancel Build – e2e', () => {

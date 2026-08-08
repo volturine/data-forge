@@ -177,9 +177,7 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 
 			const code = page.getByTestId('analysis-export-code');
 			await expect(code).toBeVisible({ timeout: 15_000 });
-			await expect
-				.poll(async () => (await code.textContent())?.trim() ?? '', { timeout: 15_000 })
-				.not.toBe('');
+			await expect(code).not.toBeEmpty({ timeout: 15_000 });
 			await expect(code).toContainText('import polars as pl');
 			await expect(code).toContainText('.join(');
 			await expect(code).toContainText('.group_by(');
@@ -229,9 +227,7 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 			await page.getByTestId('analysis-tab-context-export').click();
 
 			const code = page.getByTestId('analysis-export-code');
-			await expect
-				.poll(async () => (await code.textContent())?.trim() ?? '', { timeout: 5_000 })
-				.not.toBe('');
+			await expect(code).not.toBeEmpty({ timeout: 5_000 });
 			await expect(code).toContainText('SOURCE_RIGHT_SOURCE_PATH');
 			await expect(code).toContainText('SOURCE_LEFT_SOURCE_PATH');
 

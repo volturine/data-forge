@@ -141,33 +141,19 @@ test.describe('Analyses – gallery interactions', () => {
 
 			// Switch to A-Z sort and verify Alpha comes first
 			await page.locator('#sort-select').selectOption('name-asc');
-			await page.waitForTimeout(200);
-			await expect
-				.poll(
-					async () => {
-						return await page
-							.locator('[data-analysis-card]')
-							.first()
-							.getAttribute('data-analysis-card');
-					},
-					{ timeout: 5_000 }
-				)
-				.toBe(alphaName);
+			await expect(page.locator('[data-analysis-card]').first()).toHaveAttribute(
+				'data-analysis-card',
+				alphaName,
+				{ timeout: 5_000 }
+			);
 
 			// Switch to Z-A sort and verify Zebra comes first
 			await page.locator('#sort-select').selectOption('name-desc');
-			await page.waitForTimeout(200);
-			await expect
-				.poll(
-					async () => {
-						return await page
-							.locator('[data-analysis-card]')
-							.first()
-							.getAttribute('data-analysis-card');
-					},
-					{ timeout: 5_000 }
-				)
-				.toBe(zebraName);
+			await expect(page.locator('[data-analysis-card]').first()).toHaveAttribute(
+				'data-analysis-card',
+				zebraName,
+				{ timeout: 5_000 }
+			);
 		} finally {
 			await deleteAnalysisViaUI(page, alphaName);
 			await deleteAnalysisViaUI(page, zebraName);

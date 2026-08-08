@@ -27,25 +27,7 @@ async function waitForHealthChecksList(page: import('@playwright/test').Page, ti
 	const terminal = panel.locator(
 		'[data-healthcheck-row], :text("No health checks configured."), :text("No health checks match your search."), :text("Failed to load health checks.")'
 	);
-	await expect
-		.poll(
-			async () => {
-				const count = await terminal.count();
-				for (let index = 0; index < count; index += 1) {
-					if (
-						await terminal
-							.nth(index)
-							.isVisible()
-							.catch(() => false)
-					) {
-						return true;
-					}
-				}
-				return false;
-			},
-			{ timeout }
-		)
-		.toBe(true);
+	await expect(terminal.filter({ visible: true }).first()).toBeVisible({ timeout });
 	return panel;
 }
 
@@ -66,20 +48,7 @@ async function waitForSelectOption(
 	value: string,
 	timeout = 5_000
 ) {
-	await expect
-		.poll(
-			async () => {
-				return select.evaluate(
-					(node, optionValue) =>
-						Array.from((node as HTMLSelectElement).options).some(
-							(option) => option.value === optionValue
-						),
-					value
-				);
-			},
-			{ timeout }
-		)
-		.toBe(true);
+	await expect(select.locator(`option[value="${value}"]`).first()).toBeAttached({ timeout });
 }
 
 async function startBuildFromAnalysisPage(
@@ -94,16 +63,11 @@ async function startBuildFromAnalysisPage(
 	await expect(page.locator('[data-testid="output-build-preview-trigger"]')).toBeVisible({
 		timeout: 5_000
 	});
-	await expect
-		.poll(
-			async () => {
-				const buildId = await previewBuildId(page);
-				return buildId && buildId !== previousBuildId ? buildId : null;
-			},
-			{ timeout: 5_000 }
-		)
-		.toBeTruthy();
-	return (await previewBuildId(page)).trim();
+	const buildId = await previewBuildId(page);
+	if (previousBuildId && buildId === previousBuildId) {
+		throw new Error(`Build preview did not advance past build ${previousBuildId}`);
+	}
+	return buildId;
 }
 
 async function openBuildPreview(page: import('@playwright/test').Page) {
@@ -215,15 +179,7 @@ async function waitForBuildRowEventually(
 	buildId: string,
 	statuses: Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>
 ) {
-	let lastError: unknown;
-	for (let attempt = 0; attempt < 3; attempt += 1) {
-		try {
-			return await waitForBuildRowById(page, panel, buildId, statuses);
-		} catch (error) {
-			lastError = error;
-		}
-	}
-	throw lastError;
+	return waitForBuildRowById(page, panel, buildId, statuses);
 }
 
 /**
@@ -478,14 +434,8 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 			await cronInput.press('Enter');
 			await expect((await saveResponse).ok()).toBe(true);
 
-			// Refetch re-renders the expanded row, so re-open it before checking persisted text.
-			await gotoMonitoringTab(page, 'schedules');
-			await expect(schedRow).toBeVisible({ timeout: 5_000 });
-			await schedRow.click();
-			await expect(page.locator(`[data-schedule-detail="${scheduleId}"] code`)).toContainText(
-				'30 12 * * 1',
-				{ timeout: 5_000 }
-			);
+			// The expanded row must keep showing the persisted expression after the refetch.
+			await expect(detailRow.locator('code')).toContainText('30 12 * * 1', { timeout: 5_000 });
 
 			await screenshot(page, 'monitoring', 'schedule-cron-edited');
 		} finally {
@@ -685,7 +635,10 @@ test.describe('Monitoring – Builds tab', () => {
 		});
 		try {
 			await page.goto(`/datasources?id=${dsId}`);
-			await expect.poll(() => previewRequests).toBe(1);
+			await page.waitForResponse((resp) => resp.url().includes('/api/v1/compute/preview'), {
+				timeout: 15_000
+			});
+			expect(previewRequests).toBe(1);
 
 			await gotoMonitoringTab(page, 'builds');
 			const panel = page.locator('#panel-builds');
@@ -769,7 +722,6 @@ test.describe('Monitoring – Builds tab', () => {
 			await detailRow.getByRole('tab', { name: 'Logs' }).click();
 			await expect(detailRow.locator('[data-testid="build-logs-panel"]')).toBeVisible();
 			await expect(detailRow.getByRole('tab', { name: 'Payload' })).toBeVisible();
-			await page.waitForTimeout(2_000);
 			expect(detailRequests).toBeLessThanOrEqual(2);
 			await screenshot(page, 'monitoring', 'build-row-expanded');
 		} finally {
@@ -932,7 +884,10 @@ test.describe('Monitoring – Builds tab', () => {
 				if (req.url().includes('/api/v1/compute/preview')) previewRequests += 1;
 			});
 			await page.goto(`/datasources?id=${dsId}`);
-			await expect.poll(() => previewRequests).toBe(1);
+			await page.waitForResponse((resp) => resp.url().includes('/api/v1/compute/preview'), {
+				timeout: 15_000
+			});
+			expect(previewRequests).toBe(1);
 
 			await gotoMonitoringTab(monitorPage, 'builds');
 			await monitorPage.getByLabel(/Search builds/i).fill(ds);

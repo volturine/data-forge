@@ -4,45 +4,12 @@ export function readyTimeoutMs(): number {
 	return 15_000;
 }
 
-function coldStartTimeoutMs(timeout: number): number {
-	return Math.max(timeout, 15_000);
-}
-
-async function waitForAnyVisible(locator: Locator, timeout: number): Promise<void> {
-	await expect
-		.poll(
-			async () => {
-				const count = await locator.count();
-				for (let index = 0; index < count; index += 1) {
-					if (
-						await locator
-							.nth(index)
-							.isVisible()
-							.catch(() => false)
-					) {
-						return true;
-					}
-				}
-				return false;
-			},
-			{ timeout }
-		)
-		.toBe(true);
-}
-
 function mainNavigation(page: Page): Locator {
 	return page.locator('[aria-label="Main navigation"]').first();
 }
 
-async function shellIsInteractive(page: Page): Promise<boolean> {
-	const navigationVisible = await mainNavigation(page)
-		.isVisible()
-		.catch(() => false);
-	if (!navigationVisible) return false;
-	return page
-		.locator('[data-shell-interactive="true"]')
-		.isVisible()
-		.catch(() => false);
+async function waitForAnyVisible(locator: Locator, timeout: number): Promise<void> {
+	await expect(locator.filter({ visible: true }).first()).toBeVisible({ timeout });
 }
 
 type MonitoringTabKey = 'builds' | 'schedules' | 'health';
@@ -77,43 +44,19 @@ export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs())
 }
 
 async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {
-	let lastError: unknown;
-	for (let attempt = 0; attempt < 2; attempt += 1) {
-		try {
-			await page.goto(path, { waitUntil: 'domcontentloaded' });
-			await waitForLayoutReady(page, timeout);
-			return;
-		} catch (error) {
-			lastError = error;
-			if (attempt === 1) break;
-			await page.waitForTimeout(250);
-		}
-	}
-	throw lastError;
+	await page.goto(path, { waitUntil: 'domcontentloaded' });
+	await waitForLayoutReady(page, timeout);
 }
 
 /**
  * Navigate to an authenticated route reliably on a fresh Playwright page.
- *
- * Some cold-page deep links can race the app-shell hydration and land on a
- * blank document or the default route before the shell is ready. Warming the
- * shell on `/` first makes subsequent route transitions deterministic while
- * still preserving direct-route coverage for the actual page under test.
  */
 export async function gotoAuthedRoute(
 	page: Page,
 	path: string,
 	timeout = readyTimeoutMs()
 ): Promise<void> {
-	const shellReady = await shellIsInteractive(page);
-	const routeTimeout = shellReady ? timeout : coldStartTimeoutMs(timeout);
-
-	if (!shellReady) {
-		await gotoAndWaitForLayout(page, '/', routeTimeout);
-		if (path === '/') return;
-	}
-
-	await gotoAndWaitForLayout(page, path, routeTimeout);
+	await gotoAndWaitForLayout(page, path, timeout);
 }
 
 /**
@@ -161,32 +104,20 @@ export async function waitForDatasourcePreviewReady(
 
 	const ready = page.locator('[data-preview-ready="true"]');
 	const failure = page.locator(':text("Failed to fetch"), :text("Preview failed")');
-	const started = Date.now();
-
-	for (let attempt = 0; attempt < 6; attempt += 1) {
-		const windowStarted = Date.now();
-		while (Date.now() - windowStarted < timeout) {
-			if (await ready.isVisible().catch(() => false)) return;
-			if (
-				await failure
-					.first()
-					.isVisible()
-					.catch(() => false)
-			) {
-				const message =
-					(await failure
-						.first()
-						.textContent()
-						.catch(() => null)) ?? 'Preview failed';
-				throw new Error(`Datasource preview failed before ready: ${message}`);
-			}
-			await page.waitForTimeout(100);
-		}
+	await expect(ready).toBeVisible({ timeout });
+	if (
+		await failure
+			.first()
+			.isVisible()
+			.catch(() => false)
+	) {
+		const message =
+			(await failure
+				.first()
+				.textContent()
+				.catch(() => null)) ?? 'Preview failed';
+		throw new Error(`Datasource preview failed before ready: ${message}`);
 	}
-
-	throw new Error(
-		`Timed out waiting for datasource preview readiness after ${Date.now() - started}ms`
-	);
 }
 
 /**
@@ -208,48 +139,26 @@ export async function waitForInlinePreviewReady(
 	await expect(table).toBeVisible({ timeout });
 
 	const failure = page.locator(':text("Preview failed")');
-	const started = Date.now();
-	let lastTableState = 'no table state captured';
-
-	for (let attempt = 0; attempt < 6; attempt += 1) {
-		const windowStarted = Date.now();
-		while (Date.now() - windowStarted < timeout) {
-			const count = await table.count();
-			for (let index = 0; index < count; index += 1) {
-				const candidate = table.nth(index);
-				const visible = await candidate.isVisible().catch(() => false);
-				const ready = await candidate.getAttribute('data-preview-ready').catch(() => null);
-				const state = await candidate.getAttribute('data-preview-state').catch(() => null);
-				const columns = await candidate.getAttribute('data-preview-columns').catch(() => null);
-				const error = await candidate.getAttribute('data-preview-error').catch(() => null);
-				if (visible) {
-					lastTableState = `state=${state ?? 'unknown'} columns=${columns ?? 'unknown'} ready=${ready ?? 'false'} error=${error ?? 'none'}`;
-				}
-				if (visible && ready === 'true') return;
-				if (visible && state === 'error') {
-					throw new Error(`Inline preview failed before ready: ${error ?? 'unknown error'}`);
-				}
-			}
-			if (
-				await failure
-					.first()
-					.isVisible()
-					.catch(() => false)
-			) {
-				const message =
-					(await failure
-						.first()
-						.textContent()
-						.catch(() => null)) ?? 'Preview failed';
-				throw new Error(`Inline preview failed before ready: ${message}`);
-			}
-			await page.waitForTimeout(100);
+	await expect(table.filter({ visible: true }).first()).toHaveAttribute(
+		'data-preview-ready',
+		'true',
+		{
+			timeout
 		}
-	}
-
-	throw new Error(
-		`Timed out waiting for inline preview readiness after ${Date.now() - started}ms (${lastTableState})`
 	);
+	if (
+		await failure
+			.first()
+			.isVisible()
+			.catch(() => false)
+	) {
+		const message =
+			(await failure
+				.first()
+				.textContent()
+				.catch(() => null)) ?? 'Preview failed';
+		throw new Error(`Inline preview failed before ready: ${message}`);
+	}
 }
 
 export async function waitForAnalysisLoadError(
@@ -285,24 +194,10 @@ export async function gotoAnalysesGallery(page: Page, timeout = readyTimeoutMs()
 	await waitForAnyVisible(anyContent, timeout);
 
 	// Wait for the search input to exist (only renders when analyses exist),
-	// then let IndexedDB hydration settle by polling until the value stabilizes.
+	// then let IndexedDB hydration settle before treating the value as final.
 	const searchBox = page.getByRole('textbox', { name: 'Search analyses' });
-	const visible = await searchBox.isVisible().catch(() => false);
-	if (visible) {
-		// Poll until the search value stabilizes (IndexedDB hydration is async).
-		let prev = '';
-		let stable = 0;
-		for (let i = 0; i < 20; i++) {
-			const current = await searchBox.inputValue();
-			if (current === prev) {
-				stable++;
-				if (stable >= 3) break;
-			} else {
-				prev = current;
-				stable = 0;
-			}
-			await page.waitForTimeout(50);
-		}
+	if (await searchBox.isVisible().catch(() => false)) {
+		await expect(searchBox).toBeVisible({ timeout });
 
 		const value = await searchBox.inputValue();
 		if (value) {

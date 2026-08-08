@@ -259,6 +259,12 @@ run_playwright() {
     local output_dir="$PWD/tests/.artifacts/playwright/test-results"
     local report_dir="$PWD/tests/.artifacts/playwright/playwright-report"
     mkdir -p "$output_dir" "$report_dir"
+    # Optional profiling subset, e.g. PLAYWRIGHT_TEST_FILES="tests/profile.test.ts tests/monitoring.test.ts".
+    local test_files=()
+    if [ -n "${PLAYWRIGHT_TEST_FILES:-}" ]; then
+        read -r -a test_files <<<"${PLAYWRIGHT_TEST_FILES}"
+        echo "Running Playwright subset: ${test_files[*]}"
+    fi
     # Suppress Node.js runtime deprecation warnings (e.g. DEP0205 module.register)
     # that come from Playwright/Vite internals on Node v26+; these are third-party
     # warnings we cannot fix without upgrading those dependencies.
@@ -269,7 +275,8 @@ run_playwright() {
     python3 ../../scripts/run_with_timeout.py \
         --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
-        -- ./node_modules/.bin/playwright test --config=playwright.config.ts
+        -- ./node_modules/.bin/playwright test --config=playwright.config.ts \
+        ${test_files[@]+"${test_files[@]}"}
 }
 
 run_playwright
