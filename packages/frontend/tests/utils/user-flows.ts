@@ -300,19 +300,9 @@ export async function shutdownEngineViaUi(
 	const identityKey = `analysis_interactive:${analysisId}`;
 	const row = popup.locator(`[data-engine-row="${identityKey}"]`);
 	const shutdownButton = popup.locator(`[data-engine-shutdown="${identityKey}"]`);
-	const started = Date.now();
-	while (Date.now() - started < timeoutMs) {
-		if (await row.isVisible().catch(() => false)) {
-			await expect(shutdownButton).toBeEnabled({ timeout: 1_000 });
-			await shutdownButton.click();
-			await expect(row).toBeHidden({
-				timeout: Math.max(timeoutMs - (Date.now() - started), 1_000)
-			});
-			await page.keyboard.press('Escape').catch(() => undefined);
-			return;
-		}
-		await page.waitForTimeout(250);
-	}
-
+	await expect(row).toBeVisible({ timeout: timeoutMs });
+	await expect(shutdownButton).toBeEnabled({ timeout: 1_000 });
+	await shutdownButton.click();
+	await expect(row).toBeHidden({ timeout: timeoutMs });
 	await page.keyboard.press('Escape').catch(() => undefined);
 }

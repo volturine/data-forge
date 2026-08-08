@@ -30,16 +30,7 @@ test.afterAll(async ({ browser, workerAuth }) => {
 // ── Output visibility toggle ────────────────────────────────────────────────
 
 async function expectCompletedEventually(locator: Locator) {
-	let lastError: unknown;
-	for (let attempt = 0; attempt < 3; attempt += 1) {
-		try {
-			await expect(locator).toContainText(/Completed/i, { timeout: 5_000 });
-			return;
-		} catch (error) {
-			lastError = error;
-		}
-	}
-	throw lastError;
+	await expect(locator).toContainText(/Completed/i, { timeout: 15_000 });
 }
 
 /** Cleanup via worker helper context — safe after test-page timeout/teardown. */
@@ -86,7 +77,6 @@ test.describe('Analyses – output visibility toggle', () => {
 			);
 			// Settle network so a late probe would still be observed.
 			await page.waitForLoadState('networkidle').catch(() => undefined);
-			await page.waitForTimeout(500);
 			// Reserved result_id must not be fetched before first build (list-membership gate).
 			expect(probedIds.has(resultId)).toBe(false);
 		} finally {
@@ -598,20 +588,7 @@ test.describe('Analyses – row count action', () => {
 			await countBtn.click();
 
 			const badge = viewNode.locator('[data-testid="step-row-count"]');
-			const error = viewNode.locator('[data-testid="step-row-count-error"]');
-			await expect
-				.poll(
-					async () => {
-						if (await badge.isVisible().catch(() => false)) return 'ok';
-						if (await error.isVisible().catch(() => false)) {
-							return `error:${(await error.textContent()) ?? ''}`;
-						}
-						return 'pending';
-					},
-					{ timeout: 15_000 }
-				)
-				.toBe('ok');
-			await expect(badge).toContainText('rows');
+			await expect(badge).toContainText('rows', { timeout: 15_000 });
 
 			await screenshot(page, 'analysis/output', 'row-count-success');
 		} finally {
@@ -648,20 +625,7 @@ test.describe('Analyses – row count on non-view steps', () => {
 			await countBtn.click();
 
 			const badge = filterNode.locator('[data-testid="step-row-count"]');
-			const error = filterNode.locator('[data-testid="step-row-count-error"]');
-			await expect
-				.poll(
-					async () => {
-						if (await badge.isVisible().catch(() => false)) return 'ok';
-						if (await error.isVisible().catch(() => false)) {
-							return `error:${(await error.textContent()) ?? ''}`;
-						}
-						return 'pending';
-					},
-					{ timeout: 15_000 }
-				)
-				.toBe('ok');
-			await expect(badge).toContainText('rows');
+			await expect(badge).toContainText('rows', { timeout: 15_000 });
 
 			await screenshot(page, 'analysis/output', 'row-count-filter-step');
 		} finally {
@@ -692,20 +656,7 @@ test.describe('Analyses – row count on non-view steps', () => {
 			await countBtn.click();
 
 			const badge = limitNode.locator('[data-testid="step-row-count"]');
-			const error = limitNode.locator('[data-testid="step-row-count-error"]');
-			await expect
-				.poll(
-					async () => {
-						if (await badge.isVisible().catch(() => false)) return 'ok';
-						if (await error.isVisible().catch(() => false)) {
-							return `error:${(await error.textContent()) ?? ''}`;
-						}
-						return 'pending';
-					},
-					{ timeout: 15_000 }
-				)
-				.toBe('ok');
-			await expect(badge).toContainText('rows');
+			await expect(badge).toContainText('rows', { timeout: 15_000 });
 
 			await screenshot(page, 'analysis/output', 'row-count-limit-step');
 		} finally {

@@ -414,7 +414,6 @@ export async function waitForNoRuntimeBuild(
 	timeoutMs = 5_000
 ): Promise<void> {
 	await withAuthedPage(request, async (page) => {
-		const started = Date.now();
 		await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
 		await waitForLayoutReady(page);
 		const panel = page.locator('#panel-builds');
@@ -422,21 +421,7 @@ export async function waitForNoRuntimeBuild(
 		const running = panel.locator(
 			`[data-build-analysis-id="${analysisId}"][data-build-status="running"]`
 		);
-		while (Date.now() - started < timeoutMs) {
-			// Idle when nothing is running for this analysis — no prior terminal
-			// row is required (many tests never start a build).
-			if (
-				!(await running
-					.first()
-					.isVisible()
-					.catch(() => false))
-			) {
-				return;
-			}
-			await page.getByRole('button', { name: /Refresh History/i }).click();
-			await page.waitForTimeout(1_000);
-		}
-		throw new Error(`Timed out waiting for active build to finish for analysis ${analysisId}`);
+		await expect(running.first()).not.toBeVisible({ timeout: timeoutMs });
 	});
 }
 
