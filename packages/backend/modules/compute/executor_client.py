@@ -18,9 +18,10 @@ from backend_core.domain.compute_requests.models import command_from_payload
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import PipelineExecutionError
 from backend_core.namespace import get_namespace
-from dataforge_protocol import compute_pb2, enums_pb2
+from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2
 from modules.analysis.step_schemas import normalize_step_config_for_protocol
 from modules.datasource import schemas as datasource_schemas
+from modules.datasource.schema_protocol import schema_info_proto
 
 EngineIdentity = compute_pb2.EngineIdentity
 
@@ -346,7 +347,7 @@ async def get_datasource_schema(
     sheet_name: str | None,
     refresh: bool,
     runtime_probe: RuntimeAvailabilityProbe,
-) -> datasource_schemas.SchemaInfo:
+) -> datasource_pb2.SchemaInfo:
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
@@ -360,7 +361,7 @@ async def get_datasource_schema(
         ),
         runtime_probe=runtime_probe,
     )
-    return datasource_schemas.SchemaInfo.model_validate(compute_requests_service.response_payload(completed))
+    return schema_info_proto(compute_requests_service.response_payload(completed))
 
 
 async def get_column_stats(

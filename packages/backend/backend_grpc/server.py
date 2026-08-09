@@ -54,7 +54,6 @@ from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import (
     common_pb2,
     compute_pb2,
-    datasource_pb2,
     enums_pb2,
     scheduler_runtime_pb2,
     scheduler_runtime_pb2_grpc,
@@ -62,7 +61,7 @@ from dataforge_protocol import (
     worker_runtime_pb2_grpc,
 )
 from modules.datasource import commands as datasource_commands, publication_service as datasource_publication_service
-from modules.datasource.schemas import SchemaInfo
+from modules.datasource.schema_protocol import schema_info_payload, schema_info_proto
 from modules.healthcheck import commands as healthcheck_commands
 from modules.scheduler import commands as scheduler_commands, service as scheduler_service
 
@@ -377,36 +376,6 @@ def _build_resource_config_payload(message: compute_pb2.BuildResourceConfigSumma
     for field in ('max_threads', 'max_memory_mb', 'streaming_chunk_size'):
         if message.HasField(field):
             payload[field] = getattr(message, field)
-    return payload
-
-
-def _schema_info_proto(payload: dict[str, object] | None) -> datasource_pb2.SchemaInfo:
-    if not isinstance(payload, dict):
-        return datasource_pb2.SchemaInfo()
-    return cast(datasource_pb2.SchemaInfo, json_format.ParseDict(payload, datasource_pb2.SchemaInfo()))
-
-
-def _schema_info_payload(message: datasource_pb2.SchemaInfo) -> dict[str, object]:
-    columns: list[dict[str, object]] = []
-    for column in message.columns:
-        column_payload: dict[str, object] = {
-            'name': column.name,
-            'dtype': column.dtype,
-            'nullable': column.nullable,
-        }
-        if column.HasField('sample_value'):
-            column_payload['sample_value'] = column.sample_value
-        if column.HasField('description'):
-            column_payload['description'] = column.description
-        columns.append(column_payload)
-
-    payload: dict[str, object] = {}
-    if columns:
-        payload['columns'] = columns
-    if message.HasField('row_count'):
-        payload['row_count'] = message.row_count
-    if message.sheet_names:
-        payload['sheet_names'] = list(message.sheet_names)
     return payload
 
 
@@ -751,7 +720,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         try:
             schema_info = None
             if request.HasField('schema_info') and len(request.schema_info.columns) > 0:
-                schema_info = SchemaInfo.model_validate(_schema_info_payload(request.schema_info))
+                schema_info = request.schema_info
             response = datasource_publication_service.create_datasource(
                 session,
                 datasource_id=request.datasource_id,
@@ -817,7 +786,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
 
             schema_info = None
             if request.HasField('schema_info') and len(request.schema_info.columns) > 0:
-                schema_info = SchemaInfo.model_validate(_schema_info_payload(request.schema_info))
+                schema_info = request.schema_info
             try:
                 response = datasource_publication_service.publish_ingest(
                     session,
@@ -852,13 +821,12 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session_gen = get_db()
         session = next(session_gen)
         try:
-            schema_info = SchemaInfo.model_validate(_schema_info_payload(request.schema_info))
             published = datasource_publication_service.publish_schema_cache(
                 session,
                 datasource_id=request.datasource_id,
-                schema_info=schema_info,
+                schema_info=request.schema_info,
             )
-            return worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheResponse(schema_info=_schema_info_proto(published.model_dump(mode='json')))
+            return worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheResponse(schema_info=published)
         except AppError as exc:
             if exc.error_code != 'DATASOURCE_NOT_FOUND':
                 raise
@@ -892,7 +860,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             if datasource.description is not None:
                 response.description = datasource.description
             if isinstance(datasource.schema_cache, dict):
-                response.schema_info.CopyFrom(_schema_info_proto(dict(datasource.schema_cache)))
+                response.schema_info.CopyFrom(schema_info_proto(dict(datasource.schema_cache)))
             descriptions = datasource_publication_service.column_description_map(session, datasource.id)
             if descriptions:
                 response.column_descriptions.update(descriptions)
@@ -1038,7 +1006,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     name=request.name,
                     source_type=proto_value_to_enum_name(enums_pb2.DataSourceType, 'DATA_SOURCE_TYPE', request.source_type),
                     config=struct_to_dict(request.config),
-                    schema_cache=_schema_info_payload(request.schema_info),
+                    schema_cache=schema_info_payload(request.schema_info),
                     keep_schema_cache=request.keep_schema_cache,
                     analysis_id=_optional_str(request, 'analysis_id'),
                     is_hidden=request.is_hidden if request.HasField('is_hidden') else None,

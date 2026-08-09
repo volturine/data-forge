@@ -19,11 +19,11 @@ from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.exceptions import datasource_not_found
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from backend_core.sqlmodel_typing import sa
+from dataforge_protocol import datasource_pb2
+from modules.datasource.schema_protocol import schema_info_payload
 from modules.datasource.schemas import (
-    ColumnSchema,
     DataSourceDescriptionModel,
     DataSourceResponse,
-    SchemaInfo,
 )
 
 
@@ -31,11 +31,16 @@ class DatasourcePublicationClaimLost(RuntimeError):
     """Raised when a fenced ingest publication loses ownership before commit."""
 
 
-def _schema_cache_payload(schema_info: SchemaInfo | None) -> dict[str, Any] | None:
+def _schema_cache_payload(schema_info: datasource_pb2.SchemaInfo | None) -> dict[str, Any] | None:
     if schema_info is None:
         return None
-    columns = [column.model_dump(exclude={'description'}) for column in schema_info.columns]
-    return schema_info.model_dump(exclude={'columns'}) | {'columns': columns}
+    payload = schema_info_payload(schema_info)
+    columns = cast(list[dict[str, object]], payload.get('columns', []))
+    for column in columns:
+        column.pop('description', None)
+    if not columns:
+        payload.pop('columns', None)
+    return payload
 
 
 def _response(datasource: DataSource) -> DataSourceResponse:
@@ -51,7 +56,7 @@ def create_datasource(
     source_type: str,
     config: Mapping[str, object],
     owner_id: str | None,
-    schema_info: SchemaInfo | None = None,
+    schema_info: datasource_pb2.SchemaInfo | None = None,
 ) -> DataSourceResponse:
     resolved_type = DataSourceType.require(source_type)
     datasource = DataSource(
@@ -77,7 +82,7 @@ def publish_ingest(
     datasource_id: str,
     config: Mapping[str, object],
     expected_revision: int,
-    schema_info: SchemaInfo | None,
+    schema_info: datasource_pb2.SchemaInfo | None,
     publication_guard: Any | None = None,
 ) -> DataSourceResponse:
     datasource = session.get(DataSource, datasource_id)
@@ -104,7 +109,7 @@ def publish_ingest(
     return _response(datasource)
 
 
-def publish_schema_cache(session: Session, *, datasource_id: str, schema_info: SchemaInfo) -> SchemaInfo:
+def publish_schema_cache(session: Session, *, datasource_id: str, schema_info: datasource_pb2.SchemaInfo) -> datasource_pb2.SchemaInfo:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
         raise datasource_not_found(datasource_id)
@@ -120,13 +125,17 @@ def column_description_map(session: Session, datasource_id: str) -> dict[str, st
     return {row.column_name: row.description for row in rows if row.description is not None}
 
 
-def attach_column_descriptions(session: Session, datasource_id: str, schema_info: SchemaInfo) -> SchemaInfo:
+def attach_column_descriptions(
+    session: Session,
+    datasource_id: str,
+    schema_info: datasource_pb2.SchemaInfo,
+) -> datasource_pb2.SchemaInfo:
     descriptions = column_description_map(session, datasource_id)
-    columns = [
-        column.model_copy(update={'description': descriptions.get(column.name)}) if isinstance(column, ColumnSchema) else column
-        for column in schema_info.columns
-    ]
-    return schema_info.model_copy(update={'columns': columns})
+    for column in schema_info.columns:
+        description = descriptions.get(column.name)
+        if description is not None:
+            column.description = description
+    return schema_info
 
 
 def get_datasource_for_worker(session: Session, datasource_id: str) -> DataSource | None:

@@ -344,6 +344,8 @@ def _execute_datasource_command(client: WorkerRuntimeClient, claimed: ClaimedCom
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
         if command.WhichOneof("command") != "schema":
             raise ValueError("datasource command must contain schema")
+        from runtime.protocol_mapping import schema_info_payload
+
         schema = command.schema
         schema_result = datasource_execution.get_datasource_schema(
             client,
@@ -352,7 +354,7 @@ def _execute_datasource_command(client: WorkerRuntimeClient, claimed: ClaimedCom
             sheet_name=schema.sheet_name if schema.HasField("sheet_name") else None,
             refresh=schema.refresh,
         )
-        return _datasource_result_from_payload(kind, cast(dict[str, object], schema_result.model_dump(mode="json")))
+        return _datasource_result_from_payload(kind, schema_info_payload(schema_result))
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
         if command.WhichOneof("command") != "column_stats":
             raise ValueError("datasource command must contain column_stats")

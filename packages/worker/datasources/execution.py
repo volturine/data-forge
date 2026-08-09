@@ -20,16 +20,15 @@ from polars.datatypes import Array, List, Struct
 from pyiceberg.table import Table
 from sqlalchemy.exc import IntegrityError
 
+from dataforge_protocol import datasource_pb2
 from datasources.datasource_loading import load_datasource
 from datasources.schemas import (
-    ColumnSchema,
     ColumnStats,
     ColumnStatsResponse,
     CSVOptions,
     DataSourceDescriptionModel,
     DataSourceRecord,
     SchemaDiff,
-    SchemaInfo,
     SnapshotCompareResponse,
     SnapshotPreview,
 )
@@ -37,6 +36,7 @@ from runtime.domain.datasource.source_types import DataSourceFileType, DataSourc
 from runtime.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus, SchemaDiffStatus
 from runtime.exceptions import DataSourceConnectionError, DataSourceValidationError
 from runtime.iceberg_catalog import load_runtime_catalog
+from runtime.protocol_mapping import schema_info_proto
 from runtime.worker_runtime_client import BackendWorkerRpcError, DatasourceMetadata, WorkerRuntimeClient
 from runtime.namespace import get_namespace
 from runtime.object_store import (
@@ -832,7 +832,7 @@ def ingest_datasource_for_schedule(
         raise
 
 
-def _schema_from_database(metadata: DatasourceMetadata, sheet_name: str | None) -> SchemaInfo:
+def _schema_from_database(metadata: DatasourceMetadata, sheet_name: str | None) -> datasource_pb2.SchemaInfo:
     del sheet_name
     config = metadata.config or {}
     connection_string = config.get("connection_string")
@@ -855,11 +855,16 @@ def _schema_from_database(metadata: DatasourceMetadata, sheet_name: str | None) 
             details={"datasource_id": metadata.id, "source_type": metadata.source_type},
         ) from exc
     sample_values = _get_first_non_null_samples(frame.lazy())
-    columns = [ColumnSchema(name=name, dtype=str(dtype), nullable=True, sample_value=sample_values.get(name)) for name, dtype in frame.schema.items()]
-    return SchemaInfo(columns=columns, row_count=frame.height)
+    schema = datasource_pb2.SchemaInfo(row_count=frame.height)
+    for name, dtype in frame.schema.items():
+        column = schema.columns.add(name=name, dtype=str(dtype), nullable=True)
+        sample_value = sample_values.get(name)
+        if sample_value is not None:
+            column.sample_value = sample_value
+    return schema
 
 
-def _schema_from_file(metadata: DatasourceMetadata, sheet_name: str | None) -> SchemaInfo:
+def _schema_from_file(metadata: DatasourceMetadata, sheet_name: str | None) -> datasource_pb2.SchemaInfo:
     config = {"source_type": metadata.source_type, **(metadata.config or {})}
     if sheet_name:
         config = {**config, "sheet_name": sheet_name}
@@ -872,11 +877,16 @@ def _schema_from_file(metadata: DatasourceMetadata, sheet_name: str | None) -> S
             details={"datasource_id": metadata.id, "source_type": metadata.source_type},
         ) from exc
     sample_values = _get_first_non_null_samples(lazy)
-    columns = [ColumnSchema(name=name, dtype=str(dtype), nullable=True, sample_value=sample_values.get(name)) for name, dtype in lazy.collect_schema().items()]
-    return SchemaInfo(columns=columns, row_count=lazy.select(pl.len()).collect().item())
+    schema = datasource_pb2.SchemaInfo(row_count=lazy.select(pl.len()).collect().item())
+    for name, dtype in lazy.collect_schema().items():
+        column = schema.columns.add(name=name, dtype=str(dtype), nullable=True)
+        sample_value = sample_values.get(name)
+        if sample_value is not None:
+            column.sample_value = sample_value
+    return schema
 
 
-def _extract_schema_from_metadata(metadata: DatasourceMetadata, sheet_name: str | None = None) -> SchemaInfo:
+def _extract_schema_from_metadata(metadata: DatasourceMetadata, sheet_name: str | None = None) -> datasource_pb2.SchemaInfo:
     try:
         if metadata.source_type is None:
             raise ValueError("Datasource metadata is missing source_type")
@@ -896,10 +906,13 @@ def _extract_schema_from_metadata(metadata: DatasourceMetadata, sheet_name: str 
     return _schema_from_file(metadata, sheet_name)
 
 
-def _attach_column_descriptions(metadata: DatasourceMetadata, schema_info: SchemaInfo) -> SchemaInfo:
+def _attach_column_descriptions(metadata: DatasourceMetadata, schema_info: datasource_pb2.SchemaInfo) -> datasource_pb2.SchemaInfo:
     descriptions = metadata.column_descriptions or {}
-    columns = [column.model_copy(update={"description": descriptions.get(column.name)}) for column in schema_info.columns]
-    return schema_info.model_copy(update={"columns": columns})
+    for column in schema_info.columns:
+        description = descriptions.get(column.name)
+        if description is not None:
+            column.description = description
+    return schema_info
 
 
 def get_datasource_schema(
@@ -909,17 +922,15 @@ def get_datasource_schema(
     datasource_id: str,
     sheet_name: str | None = None,
     refresh: bool = False,
-) -> SchemaInfo:
+) -> datasource_pb2.SchemaInfo:
     metadata = _require_metadata(client, namespace=namespace, datasource_id=datasource_id)
     if metadata.schema_cache and sheet_name is None and not refresh:
         try:
-            cached = SchemaInfo.model_validate(metadata.schema_cache)
+            cached = schema_info_proto(metadata.schema_cache)
         except Exception:
             cached = None
-        if cached is not None:
-            has_samples = cached.columns and any(column.sample_value is not None for column in cached.columns)
-            if cached.row_count is not None and has_samples:
-                return _attach_column_descriptions(metadata, cached)
+        if cached is not None and cached.columns:
+            return _attach_column_descriptions(metadata, cached)
     schema_info = _extract_schema_from_metadata(metadata, sheet_name=sheet_name)
     if sheet_name is None:
         published = client.publish_datasource_schema_cache(
