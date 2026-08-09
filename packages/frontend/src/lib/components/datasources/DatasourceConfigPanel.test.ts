@@ -55,6 +55,10 @@ vi.mock('$lib/stores/builds.svelte', () => ({
 			mockBuildLoad('refresh');
 			mockBuildStatus = 'connected';
 		}
+		silentRefresh() {
+			mockBuildLoad('silent-refresh');
+			mockBuildStatus = 'connected';
+		}
 		close() {
 			mockBuildClose();
 		}
@@ -175,5 +179,26 @@ describe('DatasourceConfigPanel', () => {
 		view.unmount();
 
 		expect(mockBuildClose).toHaveBeenCalledTimes(1);
+	});
+
+	test('clears a custom freshness threshold back to the default', async () => {
+		renderPanel({ datasource: makeDatasource({ freshness_threshold_minutes: 90 }) });
+
+		const threshold = screen.getByLabelText('Freshness threshold');
+		expect(threshold).toHaveValue('custom');
+
+		await fireEvent.change(threshold, { target: { value: '' } });
+
+		expect(threshold).toHaveValue('');
+	});
+
+	test('shows an input for a custom freshness threshold', async () => {
+		renderPanel();
+
+		await fireEvent.change(screen.getByLabelText('Freshness threshold'), {
+			target: { value: 'custom' }
+		});
+
+		expect(screen.getByLabelText('Custom freshness threshold in minutes')).toBeVisible();
 	});
 });

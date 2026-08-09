@@ -657,6 +657,20 @@ class TestDataSourceSchema:
         age_column = next(col for col in body['columns'] if col['name'] == 'age')
         assert age_column['description'] == 'Age in years'
 
+    def test_patch_column_metadata_falls_back_to_worker_on_malformed_cache_column(self, client, sample_datasource: DataSource, test_db_session):
+        sample_datasource.schema_cache = {'columns': [{'name': 'age'}]}
+        test_db_session.add(sample_datasource)
+        test_db_session.commit()
+
+        response = client.patch(
+            f'/api/v1/datasource/{sample_datasource.id}/column-metadata',
+            json={'columns': [{'column_name': 'age', 'description': 'Age in years'}]},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert {col['name'] for col in body['columns']} == {'id', 'name', 'age', 'city'}
+
     def test_get_schema_uses_cached_schema_without_worker(self, client, sample_datasource: DataSource, test_db_session, monkeypatch):
         from modules.datasource import routes
 

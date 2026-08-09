@@ -17,13 +17,17 @@ describe('freshnessStatus', () => {
 		expect(freshnessStatus(NOW - 11 * HOUR, 1440, NOW)).toBe('fresh');
 	});
 
-	it('returns stale when approaching the threshold', () => {
-		expect(freshnessStatus(NOW - 13 * HOUR, 1440, NOW)).toBe('stale');
-		expect(freshnessStatus(NOW - 23 * HOUR, 1440, NOW)).toBe('stale');
+	it('returns fresh through the configured threshold', () => {
+		expect(freshnessStatus(NOW - 13 * HOUR, 1440, NOW)).toBe('fresh');
+		expect(freshnessStatus(NOW - 23 * HOUR, 1440, NOW)).toBe('fresh');
 	});
 
-	it('returns outdated past the threshold', () => {
-		expect(freshnessStatus(NOW - 24 * HOUR, 1440, NOW)).toBe('outdated');
+	it('returns stale through twice the configured threshold', () => {
+		expect(freshnessStatus(NOW - 24 * HOUR, 1440, NOW)).toBe('stale');
+		expect(freshnessStatus(NOW - 47 * HOUR, 1440, NOW)).toBe('stale');
+	});
+
+	it('returns outdated past twice the threshold', () => {
 		expect(freshnessStatus(NOW - 48 * HOUR, 1440, NOW)).toBe('outdated');
 	});
 
@@ -33,14 +37,14 @@ describe('freshnessStatus', () => {
 
 	it('applies the default 24-hour threshold when none is configured', () => {
 		expect(DEFAULT_FRESHNESS_THRESHOLD_MINUTES).toBe(24 * 60);
-		expect(freshnessStatus(NOW - 23 * HOUR, null, NOW)).toBe('stale');
-		expect(freshnessStatus(NOW - 24 * HOUR, null, NOW)).toBe('outdated');
+		expect(freshnessStatus(NOW - 23 * HOUR, null, NOW)).toBe('fresh');
+		expect(freshnessStatus(NOW - 24 * HOUR, null, NOW)).toBe('stale');
 	});
 
 	it('honors an explicit threshold', () => {
 		const oneHour = 60;
-		expect(freshnessStatus(NOW - 29 * 60_000, oneHour, NOW)).toBe('fresh');
-		expect(freshnessStatus(NOW - 30 * 60_000, oneHour, NOW)).toBe('stale');
-		expect(freshnessStatus(NOW - 60 * 60_000, oneHour, NOW)).toBe('outdated');
+		expect(freshnessStatus(NOW - 59 * 60_000, oneHour, NOW)).toBe('fresh');
+		expect(freshnessStatus(NOW - 60 * 60_000, oneHour, NOW)).toBe('stale');
+		expect(freshnessStatus(NOW - 120 * 60_000, oneHour, NOW)).toBe('outdated');
 	});
 });

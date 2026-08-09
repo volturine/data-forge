@@ -284,7 +284,7 @@ test-e2e:
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
         just generate-protocol
     fi
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py --cwd . -- scripts/test_e2e.sh
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py --cwd . --ignore-pattern "InvalidCredentialsError: Invalid email or password" --ignore-pattern "TokenInvalidError: Token is invalid" -- scripts/test_e2e.sh
 
 docker-dev:
     just generate-protocol

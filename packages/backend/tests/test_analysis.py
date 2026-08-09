@@ -1,6 +1,7 @@
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import select
@@ -1195,6 +1196,23 @@ class TestAnalysisUpdate:
 
 
 class TestAnalysisDelete:
+    def test_request_engine_shutdown_skips_synchronous_dispatch(self, monkeypatch) -> None:
+        submitted: list[dict[str, object]] = []
+
+        def submit(*args, **kwargs) -> None:
+            submitted.append(kwargs)
+
+        monkeypatch.setattr(executor_client, '_submit', submit)
+
+        executor_client.request_engine_shutdown(
+            cast(Session, object()),
+            identity=compute_pb2.EngineIdentity(analysis_id='analysis-1', resource_id='analysis-1'),
+            runtime_probe=cast(Any, object()),
+        )
+
+        assert len(submitted) == 1
+        assert submitted[0]['dispatch'] is False
+
     def test_delete_analysis_queues_engine_shutdown_without_waiting(self, client, sample_analysis: Analysis, monkeypatch):
         shutdown_calls: list[compute_pb2.EngineIdentity] = []
 

@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe('FreshnessBadge', () => {
-	test('shows Fresh within half the threshold', () => {
+	test('shows Fresh within the threshold', () => {
 		render(FreshnessBadge, {
 			props: { lastDataUpdate: isoAgo(1 * HOUR), thresholdMinutes: 1440, live: false }
 		});
@@ -28,17 +28,17 @@ describe('FreshnessBadge', () => {
 		expect(badge).toHaveTextContent('Fresh');
 	});
 
-	test('shows Stale approaching the threshold', () => {
+	test('shows Stale between one and two thresholds', () => {
 		render(FreshnessBadge, {
-			props: { lastDataUpdate: isoAgo(13 * HOUR), thresholdMinutes: 1440, live: false }
+			props: { lastDataUpdate: isoAgo(25 * HOUR), thresholdMinutes: 1440, live: false }
 		});
 		expect(screen.getByRole('status')).toHaveAttribute('data-freshness', 'stale');
 		expect(screen.getByRole('status')).toHaveTextContent('Stale');
 	});
 
-	test('shows Outdated past the threshold', () => {
+	test('shows Outdated past twice the threshold', () => {
 		render(FreshnessBadge, {
-			props: { lastDataUpdate: isoAgo(25 * HOUR), thresholdMinutes: 1440, live: false }
+			props: { lastDataUpdate: isoAgo(49 * HOUR), thresholdMinutes: 1440, live: false }
 		});
 		expect(screen.getByRole('status')).toHaveAttribute('data-freshness', 'outdated');
 		expect(screen.getByRole('status')).toHaveTextContent('Outdated');
@@ -53,7 +53,7 @@ describe('FreshnessBadge', () => {
 	});
 
 	test('applies the default 24-hour threshold when none is configured', () => {
-		render(FreshnessBadge, { props: { lastDataUpdate: isoAgo(25 * HOUR), live: false } });
+		render(FreshnessBadge, { props: { lastDataUpdate: isoAgo(49 * HOUR), live: false } });
 		expect(screen.getByRole('status')).toHaveAttribute('data-freshness', 'outdated');
 	});
 });
