@@ -14,6 +14,8 @@ from sqlmodel import Session
 
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.persistence.datasource.models import DataSource
+from dataforge_protocol import datasource_pb2
+from modules.datasource.schema_protocol import schema_info_payload
 
 
 class FauxDatasourceRuntime:
@@ -70,7 +72,7 @@ class FauxDatasourceRuntime:
             created_by='import',
             created_at=datetime.now(UTC),
         )
-        datasource.schema_cache = self._schema_for(datasource).model_dump(exclude_none=True)
+        datasource.schema_cache = schema_info_payload(self._schema_for(datasource))
         session.add(datasource)
         session.commit()
         session.refresh(datasource)
@@ -135,7 +137,7 @@ class FauxDatasourceRuntime:
         del kwargs
         datasource = self._get_datasource(session, datasource_id)
         schema = self._schema_for(datasource)
-        datasource.schema_cache = schema.model_dump(exclude_none=True)
+        datasource.schema_cache = schema_info_payload(schema)
         session.add(datasource)
         session.commit()
         return schema
@@ -143,7 +145,7 @@ class FauxDatasourceRuntime:
     async def ingest_datasource(self, session: Session, *, datasource_id: str, **kwargs: Any):
         del kwargs
         datasource = self._get_datasource(session, datasource_id)
-        datasource.schema_cache = self._schema_for(datasource).model_dump(exclude_none=True)
+        datasource.schema_cache = schema_info_payload(self._schema_for(datasource))
         session.add(datasource)
         session.commit()
         session.refresh(datasource)
@@ -187,22 +189,14 @@ class FauxDatasourceRuntime:
             raise datasource_not_found(datasource_id)
         return datasource
 
-    def _schema_for(self, datasource: DataSource):
-        from modules.datasource import schemas
-
+    def _schema_for(self, datasource: DataSource) -> datasource_pb2.SchemaInfo:
         df = self._read_dataframe(datasource)
-        return schemas.SchemaInfo(
-            columns=[
-                schemas.ColumnSchema(
-                    name=name,
-                    dtype=str(dtype),
-                    nullable=True,
-                    sample_value=None if df.height == 0 else str(df[name][0]),
-                )
-                for name, dtype in zip(df.columns, df.dtypes, strict=True)
-            ],
-            row_count=df.height,
-        )
+        schema = datasource_pb2.SchemaInfo(row_count=df.height)
+        for name, dtype in zip(df.columns, df.dtypes, strict=True):
+            column = schema.columns.add(name=name, dtype=str(dtype), nullable=True)
+            if df.height > 0:
+                column.sample_value = str(df[name][0])
+        return schema
 
     def _response(self, datasource: DataSource):
         from modules.datasource import schemas

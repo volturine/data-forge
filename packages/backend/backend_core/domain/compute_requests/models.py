@@ -11,6 +11,7 @@ from google.protobuf import json_format, message, struct_pb2
 
 from backend_core.domain.analysis.step_types import normalize_step_type
 from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2, errors_pb2
+from modules.datasource.schema_protocol import schema_info_payload
 
 
 def _normalize_struct_decode_value(value: object) -> object:
@@ -569,30 +570,6 @@ def _snapshot_compare_payload_for_proto(payload: dict[str, object]) -> dict[str,
     return proto_payload
 
 
-def _schema_info_payload(message: datasource_pb2.SchemaInfo) -> dict[str, object]:
-    columns: list[dict[str, object]] = []
-    for column in message.columns:
-        column_payload: dict[str, object] = {
-            'name': column.name,
-            'dtype': column.dtype,
-            'nullable': column.nullable,
-        }
-        if column.HasField('sample_value'):
-            column_payload['sample_value'] = column.sample_value
-        if column.HasField('description'):
-            column_payload['description'] = column.description
-        columns.append(column_payload)
-
-    payload: dict[str, object] = {}
-    if columns:
-        payload['columns'] = columns
-    if message.HasField('row_count'):
-        payload['row_count'] = message.row_count
-    if message.sheet_names:
-        payload['sheet_names'] = list(message.sheet_names)
-    return payload
-
-
 def _response_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> compute_pb2.ComputeResponse:
     response = compute_pb2.ComputeResponse()
     if 'error' in payload:
@@ -690,10 +667,10 @@ def response_payload(envelope: compute_pb2.ComputeResponseEnvelope) -> dict[str,
             return {}
         datasource_payload = _message_to_payload(getattr(result, result_field))
         if result_field == 'schema':
-            return _schema_info_payload(result.schema)
+            return schema_info_payload(result.schema)
         if result_field == 'datasource':
             datasource_payload.pop('schema_info', None)
-            datasource_payload['schema_cache'] = _schema_info_payload(result.datasource.schema_info) if result.datasource.HasField('schema_info') else None
+            datasource_payload['schema_cache'] = schema_info_payload(result.datasource.schema_info) if result.datasource.HasField('schema_info') else None
             datasource_payload['source_type'] = _enum_token_from_number(enums_pb2.DataSourceType.DESCRIPTOR, result.datasource.source_type)
             datasource_payload['created_by'] = _enum_token_from_number(enums_pb2.DataSourceCreatedBy.DESCRIPTOR, result.datasource.created_by)
             config = datasource_payload.get('config')

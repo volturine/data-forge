@@ -22,6 +22,8 @@ from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from backend_core.sqlmodel_typing import col, sa
+from dataforge_protocol import datasource_pb2
+from modules.datasource.schema_protocol import schema_info_proto
 from modules.datasource.schemas import (
     BatchColumnDescriptionUpdate,
     ColumnDescriptionPatch,
@@ -30,7 +32,6 @@ from modules.datasource.schemas import (
     DataSourceResponse,
     DataSourceUpdate,
     InternalPostgresTable,
-    SchemaInfo,
 )
 
 logger = logging.getLogger(__name__)
@@ -765,19 +766,37 @@ def _get_column_metadata_map(session: Session, datasource_id: str) -> dict[str, 
 def attach_column_descriptions(
     session: Session,
     datasource_id: str,
-    schema_info: SchemaInfo,
-) -> SchemaInfo:
+    schema_info: datasource_pb2.SchemaInfo,
+) -> datasource_pb2.SchemaInfo:
     descriptions = _get_column_metadata_map(session, datasource_id)
-    columns = [col.model_copy(update={'description': descriptions.get(col.name)}) for col in schema_info.columns]
-    return schema_info.model_copy(update={'columns': columns})
+    for column in schema_info.columns:
+        description = descriptions.get(column.name)
+        if description is not None:
+            column.description = description
+    return schema_info
+
+
+def cached_schema(session: Session, datasource_id: str) -> datasource_pb2.SchemaInfo | None:
+    """Return the DB-cached schema when it is present and well-formed.
+
+    Cache writes are always complete extraction payloads (the worker is the
+    only writer and only publishes full schemas), so a parseable entry is
+    trusted as-is; otherwise ``None`` lets the caller fall back to the runtime.
+    """
+    datasource = session.get(DataSource, datasource_id)
+    if datasource is None or not isinstance(datasource.schema_cache, dict):
+        return None
+    if not isinstance(datasource.schema_cache.get('columns'), list):
+        return None
+    return schema_info_proto(datasource.schema_cache)
 
 
 def update_column_descriptions(
     session: Session,
     datasource_id: str,
     payload: BatchColumnDescriptionUpdate,
-    schema_info: SchemaInfo,
-) -> SchemaInfo:
+    schema_info: datasource_pb2.SchemaInfo,
+) -> datasource_pb2.SchemaInfo:
     datasource = session.get(DataSource, datasource_id)
     if not datasource:
         raise datasource_not_found(datasource_id)

@@ -6,8 +6,8 @@ from sqlmodel import Session
 
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.persistence.datasource.models import DataSource
+from dataforge_protocol import datasource_pb2
 from modules.datasource import publication_service
-from modules.datasource.schemas import ColumnSchema, SchemaInfo
 
 
 def test_create_datasource_persists_metadata(test_db_session: Session) -> None:
@@ -20,7 +20,10 @@ def test_create_datasource_persists_metadata(test_db_session: Session) -> None:
         source_type=DataSourceType.ICEBERG.value,
         config={'metadata_path': 's3://bucket/clean/ds/master', 'branch': 'master'},
         owner_id=None,
-        schema_info=SchemaInfo(columns=[ColumnSchema(name='a', dtype='Int64', nullable=True)], row_count=1),
+        schema_info=datasource_pb2.SchemaInfo(
+            columns=[datasource_pb2.ColumnSchema(name='a', dtype='Int64', nullable=True)],
+            row_count=1,
+        ),
     )
     assert response.id == datasource_id
     assert response.source_type == DataSourceType.ICEBERG
@@ -78,7 +81,10 @@ def test_publish_schema_cache(test_db_session: Session) -> None:
         )
     )
     test_db_session.commit()
-    schema = SchemaInfo(columns=[ColumnSchema(name='x', dtype='Utf8', nullable=True, sample_value='a')], row_count=2)
+    schema = datasource_pb2.SchemaInfo(
+        columns=[datasource_pb2.ColumnSchema(name='x', dtype='Utf8', nullable=True, sample_value='a')],
+        row_count=2,
+    )
     published = publication_service.publish_schema_cache(test_db_session, datasource_id=datasource_id, schema_info=schema)
     assert published.row_count == 2
     stored = test_db_session.get(DataSource, datasource_id)

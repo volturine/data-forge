@@ -45,6 +45,7 @@ from modules.datasource.preflight import (
     create_preflight,
     get_preflight,
 )
+from modules.datasource.schema_protocol import schema_info_response_payload
 from modules.mcp.router import MCPRouter
 
 logger = logging.getLogger(__name__)
@@ -814,14 +815,19 @@ async def get_datasource_schema(
                 datasource_id=datasource_id_value,
                 runtime_probe=runtime_probe,
             )
-    schema = await get_remote_datasource_schema(
-        session,
-        datasource_id=datasource_id_value,
-        sheet_name=sheet_name,
-        refresh=False,
-        runtime_probe=runtime_probe,
-    )
-    return service.attach_column_descriptions(session, datasource_id_value, schema)
+    schema = None
+    if sheet_name is None:
+        schema = service.cached_schema(session, datasource_id_value)
+    if schema is None:
+        schema = await get_remote_datasource_schema(
+            session,
+            datasource_id=datasource_id_value,
+            sheet_name=sheet_name,
+            refresh=False,
+            runtime_probe=runtime_probe,
+        )
+    schema = service.attach_column_descriptions(session, datasource_id_value, schema)
+    return schemas.SchemaInfo.model_validate(schema_info_response_payload(schema))
 
 
 @router.patch('/{datasource_id}/column-metadata', response_model=schemas.SchemaInfo, mcp=True)
@@ -835,14 +841,17 @@ async def update_datasource_column_metadata(
     """Update one or more datasource column descriptions and return the active schema."""
     datasource_id_value = parse_datasource_id(datasource_id)
     _require_active_datasource(session, datasource_id_value)
-    schema = await get_remote_datasource_schema(
-        session,
-        datasource_id=datasource_id_value,
-        sheet_name=None,
-        refresh=False,
-        runtime_probe=runtime_probe,
-    )
-    return service.update_column_descriptions(session, datasource_id_value, payload, schema)
+    schema = service.cached_schema(session, datasource_id_value)
+    if schema is None:
+        schema = await get_remote_datasource_schema(
+            session,
+            datasource_id=datasource_id_value,
+            sheet_name=None,
+            refresh=False,
+            runtime_probe=runtime_probe,
+        )
+    schema = service.update_column_descriptions(session, datasource_id_value, payload, schema)
+    return schemas.SchemaInfo.model_validate(schema_info_response_payload(schema))
 
 
 @router.post(

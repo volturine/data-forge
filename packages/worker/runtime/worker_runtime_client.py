@@ -12,7 +12,7 @@ from typing import Any, TypeVar, cast
 
 import grpc
 
-from dataforge_protocol import analysis_pb2, common_pb2, compute_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
+from dataforge_protocol import analysis_pb2, common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
 from runtime.protocol_mapping import (
     datasource_record_payload as _datasource_record_payload,
 )
@@ -353,7 +353,7 @@ class WorkerRuntimeClient:
         source_type: str,
         config: dict[str, object],
         owner_id: str | None = None,
-        schema_info: object | None = None,
+        schema_info: datasource_pb2.SchemaInfo | None = None,
     ):
         from datasources.schemas import DataSourceRecord
 
@@ -369,8 +369,7 @@ class WorkerRuntimeClient:
         if owner_id is not None:
             request.owner_id = owner_id
         if schema_info is not None:
-            payload = cast(dict[str, object], schema_info.model_dump(mode="json") if hasattr(schema_info, "model_dump") else schema_info)
-            request.schema_info.CopyFrom(_schema_info_proto(payload))
+            request.schema_info.CopyFrom(schema_info)
         response = self._call(lambda: self._stub.PublishDatasourceCreate(request, timeout=self._timeout_seconds, metadata=self._metadata()))
         return DataSourceRecord.model_validate(_datasource_record_payload(response.datasource))
 
@@ -384,7 +383,7 @@ class WorkerRuntimeClient:
         worker_id: str,
         claim_token: str,
         lease_generation: int,
-        schema_info: object | None = None,
+        schema_info: datasource_pb2.SchemaInfo | None = None,
         compute_request_id: str | None = None,
         job_id: str | None = None,
         build_id: str | None = None,
@@ -401,8 +400,7 @@ class WorkerRuntimeClient:
             lease_generation=lease_generation,
         )
         if schema_info is not None:
-            payload = cast(dict[str, object], schema_info.model_dump(mode="json") if hasattr(schema_info, "model_dump") else schema_info)
-            request.schema_info.CopyFrom(_schema_info_proto(payload))
+            request.schema_info.CopyFrom(schema_info)
         if compute_request_id is not None:
             request.compute_request_id = compute_request_id
         if job_id is not None:
@@ -417,18 +415,15 @@ class WorkerRuntimeClient:
         *,
         namespace: str,
         datasource_id: str,
-        schema_info: object,
-    ):
-        from datasources.schemas import SchemaInfo
-
-        payload = cast(dict[str, object], schema_info.model_dump(mode="json") if hasattr(schema_info, "model_dump") else schema_info)
+        schema_info: datasource_pb2.SchemaInfo,
+    ) -> datasource_pb2.SchemaInfo:
         request = worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheRequest(
             namespace=namespace,
             datasource_id=datasource_id,
-            schema_info=_schema_info_proto(payload),
+            schema_info=schema_info,
         )
         response = self._call(lambda: self._stub.PublishDatasourceSchemaCache(request, timeout=self._timeout_seconds, metadata=self._metadata()))
-        return SchemaInfo.model_validate(_schema_info_payload(response.schema_info))
+        return response.schema_info
 
     def datasource_metadata(self, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
         response = self._call(

@@ -583,6 +583,105 @@ class TestDataSourceSchema:
         assert response.status_code == 400
         assert response.json()['detail'] == 'Column descriptions must be 2,000 characters or fewer'
 
+    def test_patch_column_metadata_uses_cached_schema_without_worker(self, client, sample_datasource: DataSource, test_db_session, monkeypatch):
+        from modules.datasource import routes
+
+        sample_datasource.schema_cache = {
+            'columns': [
+                {'name': 'id', 'dtype': 'Int64', 'nullable': True, 'sample_value': '1'},
+                {'name': 'name', 'dtype': 'String', 'nullable': True, 'sample_value': 'Alice'},
+                {'name': 'age', 'dtype': 'Int64', 'nullable': True, 'sample_value': '25'},
+                {'name': 'city', 'dtype': 'String', 'nullable': True, 'sample_value': 'NYC'},
+            ],
+            'row_count': 5,
+        }
+        test_db_session.add(sample_datasource)
+        test_db_session.commit()
+
+        def _fail_worker(*args, **kwargs):
+            raise AssertionError('worker must not be contacted when schema_cache is present')
+
+        monkeypatch.setattr(routes, 'get_remote_datasource_schema', _fail_worker)
+
+        response = client.patch(
+            f'/api/v1/datasource/{sample_datasource.id}/column-metadata',
+            json={'columns': [{'column_name': 'age', 'description': 'Age in years'}]},
+        )
+
+        assert response.status_code == 200
+        age_column = next(col for col in response.json()['columns'] if col['name'] == 'age')
+        assert age_column['description'] == 'Age in years'
+
+    def test_patch_column_metadata_serves_cache_without_samples(self, client, sample_datasource: DataSource, test_db_session, monkeypatch):
+        from modules.datasource import routes
+
+        sample_datasource.schema_cache = {
+            'columns': [
+                {'name': 'id', 'dtype': 'Int64', 'nullable': True},
+                {'name': 'age', 'dtype': 'Int64', 'nullable': True},
+            ],
+            'row_count': 5,
+        }
+        test_db_session.add(sample_datasource)
+        test_db_session.commit()
+
+        def _fail_worker(*args, **kwargs):
+            raise AssertionError('worker must not be contacted when schema_cache is present')
+
+        monkeypatch.setattr(routes, 'get_remote_datasource_schema', _fail_worker)
+
+        response = client.patch(
+            f'/api/v1/datasource/{sample_datasource.id}/column-metadata',
+            json={'columns': [{'column_name': 'age', 'description': 'Age in years'}]},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert {col['name'] for col in body['columns']} == {'id', 'age'}
+        age_column = next(col for col in body['columns'] if col['name'] == 'age')
+        assert age_column['description'] == 'Age in years'
+
+    def test_patch_column_metadata_falls_back_to_worker_on_invalid_cache(self, client, sample_datasource: DataSource, test_db_session):
+        sample_datasource.schema_cache = {'columns': 'not-a-list'}
+        test_db_session.add(sample_datasource)
+        test_db_session.commit()
+
+        response = client.patch(
+            f'/api/v1/datasource/{sample_datasource.id}/column-metadata',
+            json={'columns': [{'column_name': 'age', 'description': 'Age in years'}]},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert {col['name'] for col in body['columns']} == {'id', 'name', 'age', 'city'}
+        age_column = next(col for col in body['columns'] if col['name'] == 'age')
+        assert age_column['description'] == 'Age in years'
+
+    def test_get_schema_uses_cached_schema_without_worker(self, client, sample_datasource: DataSource, test_db_session, monkeypatch):
+        from modules.datasource import routes
+
+        sample_datasource.schema_cache = {
+            'columns': [
+                {'name': 'id', 'dtype': 'Int64', 'nullable': True, 'sample_value': '1'},
+                {'name': 'name', 'dtype': 'String', 'nullable': True, 'sample_value': 'Alice'},
+                {'name': 'age', 'dtype': 'Int64', 'nullable': True, 'sample_value': '25'},
+                {'name': 'city', 'dtype': 'String', 'nullable': True, 'sample_value': 'NYC'},
+            ],
+            'row_count': 5,
+        }
+        test_db_session.add(sample_datasource)
+        test_db_session.commit()
+
+        def _fail_worker(*args, **kwargs):
+            raise AssertionError('worker must not be contacted when schema_cache is present')
+
+        monkeypatch.setattr(routes, 'get_remote_datasource_schema', _fail_worker)
+
+        response = client.get(f'/api/v1/datasource/{sample_datasource.id}/schema')
+
+        assert response.status_code == 200
+        assert {col['name'] for col in response.json()['columns']} == {'id', 'name', 'age', 'city'}
+
     def test_refresh_preserves_column_descriptions(self, client, sample_datasource: DataSource):
         update = client.patch(
             f'/api/v1/datasource/{sample_datasource.id}/column-metadata',

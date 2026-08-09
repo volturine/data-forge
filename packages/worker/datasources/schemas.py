@@ -1,8 +1,9 @@
 """Worker-local result DTOs for datasource execution.
 
-These models are not the HTTP API contract. Backend HTTP schemas live under
-`packages/backend/modules/datasource/schemas.py`. Worker results are serialized
-to protocol payloads for compute responses and publication RPCs only.
+These models are not the HTTP API contract. Datasource schemas are owned by
+``dataforge_protocol.datasource_pb2.SchemaInfo`` (see
+``runtime.protocol_mapping`` for the payload adapters). Worker results are
+serialized to protocol payloads for compute responses and publication RPCs only.
 """
 
 from __future__ import annotations
@@ -11,24 +12,6 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
-
-
-class ColumnSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    name: str
-    dtype: str
-    nullable: bool
-    sample_value: str | None = None
-    description: str | None = None
-
-
-class SchemaInfo(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    columns: list[ColumnSchema]
-    row_count: int | None = None
-    sheet_names: list[str] | None = None
 
 
 class CSVOptions(BaseModel):
