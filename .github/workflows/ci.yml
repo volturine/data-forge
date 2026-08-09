@@ -154,6 +154,12 @@ jobs:
         working-directory: packages/frontend
         run: bun x playwright install --with-deps chromium
 
+      - name: Reclaim stale Docker build cache
+        run: |
+          docker builder prune --all --force --filter until=24h
+          docker image prune --force
+          docker system df
+
       - name: Run e2e tests
         run: |
           set -o pipefail
