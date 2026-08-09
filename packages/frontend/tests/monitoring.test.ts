@@ -19,8 +19,6 @@ import { screenshot } from './utils/visual.js';
 import { dialogByHeading } from './utils/locators.js';
 import { waitForBuildPreview, waitForBuildPreviewId } from './utils/builds.js';
 
-const BUILD_HISTORY_POLL_INTERVAL_MS = 500;
-
 async function waitForHealthChecksList(page: import('@playwright/test').Page, timeout = 5_000) {
 	const panel = page.locator('#panel-health');
 	await expect(panel).toBeVisible({ timeout });
@@ -107,22 +105,25 @@ async function waitForBuildRowById(
 	statuses: Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>,
 	timeout = 15_000
 ) {
-	const started = Date.now();
-	while (Date.now() - started < timeout) {
-		const failedToLoad = panel.getByText(/Failed to load builds/i).first();
-		if (await failedToLoad.isVisible().catch(() => false)) {
-			throw new Error(`Build history failed while waiting for build row ${buildId}`);
-		}
-		for (const status of statuses) {
-			const row = panel.locator(`[data-build-row="${buildId}"][data-build-status="${status}"]`);
-			if (await row.isVisible().catch(() => false)) {
-				return row;
-			}
-		}
-		await refreshBuildHistory(page);
-		await page.waitForTimeout(BUILD_HISTORY_POLL_INTERVAL_MS);
-	}
-	throw new Error(`Timed out waiting for build row ${buildId} to reach ${statuses.join(' or ')}`);
+	const row = panel.locator(
+		statuses
+			.map((status) => `[data-build-row="${buildId}"][data-build-status="${status}"]`)
+			.join(', ')
+	);
+	await expect
+		.poll(
+			async () => {
+				const failedToLoad = panel.getByText(/Failed to load builds/i).first();
+				if (await failedToLoad.isVisible().catch(() => false)) {
+					throw new Error(`Build history failed while waiting for build row ${buildId}`);
+				}
+				await refreshBuildHistory(page);
+				return row.isVisible().catch(() => false);
+			},
+			{ timeout, intervals: [100, 250, 500] }
+		)
+		.toBe(true);
+	return row.first();
 }
 
 async function waitForDatasourceBuildRow(
@@ -131,22 +132,23 @@ async function waitForDatasourceBuildRow(
 	datasourceId: string,
 	timeout = 15_000
 ) {
-	const started = Date.now();
-	while (Date.now() - started < timeout) {
-		const failedToLoad = panel.getByText(/Failed to load builds/i).first();
-		if (await failedToLoad.isVisible().catch(() => false)) {
-			throw new Error(`Build history failed while waiting for datasource row ${datasourceId}`);
-		}
-		const row = panel
-			.locator(`[data-build-kind="build"][data-build-datasource-id="${datasourceId}"]`)
-			.first();
-		if (await row.isVisible().catch(() => false)) {
-			return row;
-		}
-		await refreshBuildHistory(page);
-		await page.waitForTimeout(BUILD_HISTORY_POLL_INTERVAL_MS);
-	}
-	throw new Error(`Timed out waiting for datasource build row ${datasourceId}`);
+	const row = panel
+		.locator(`[data-build-kind="build"][data-build-datasource-id="${datasourceId}"]`)
+		.first();
+	await expect
+		.poll(
+			async () => {
+				const failedToLoad = panel.getByText(/Failed to load builds/i).first();
+				if (await failedToLoad.isVisible().catch(() => false)) {
+					throw new Error(`Build history failed while waiting for datasource row ${datasourceId}`);
+				}
+				await refreshBuildHistory(page);
+				return row.isVisible().catch(() => false);
+			},
+			{ timeout, intervals: [100, 250, 500] }
+		)
+		.toBe(true);
+	return row;
 }
 
 async function waitForDatasourcePreviewRow(
@@ -155,22 +157,23 @@ async function waitForDatasourcePreviewRow(
 	datasourceId: string,
 	timeout = 15_000
 ) {
-	const started = Date.now();
-	while (Date.now() - started < timeout) {
-		const failedToLoad = panel.getByText(/Failed to load builds/i).first();
-		if (await failedToLoad.isVisible().catch(() => false)) {
-			throw new Error(`Build history failed while waiting for preview row ${datasourceId}`);
-		}
-		const row = panel
-			.locator(`[data-build-kind="preview"][data-build-datasource-id="${datasourceId}"]`)
-			.first();
-		if (await row.isVisible().catch(() => false)) {
-			return row;
-		}
-		await refreshBuildHistory(page);
-		await page.waitForTimeout(BUILD_HISTORY_POLL_INTERVAL_MS);
-	}
-	throw new Error(`Timed out waiting for datasource preview row ${datasourceId}`);
+	const row = panel
+		.locator(`[data-build-kind="preview"][data-build-datasource-id="${datasourceId}"]`)
+		.first();
+	await expect
+		.poll(
+			async () => {
+				const failedToLoad = panel.getByText(/Failed to load builds/i).first();
+				if (await failedToLoad.isVisible().catch(() => false)) {
+					throw new Error(`Build history failed while waiting for preview row ${datasourceId}`);
+				}
+				await refreshBuildHistory(page);
+				return row.isVisible().catch(() => false);
+			},
+			{ timeout, intervals: [100, 250, 500] }
+		)
+		.toBe(true);
+	return row;
 }
 
 async function waitForBuildRowEventually(
