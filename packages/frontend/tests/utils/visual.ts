@@ -51,9 +51,6 @@ async function waitForStableUI(page: Page, timeout = 5_000): Promise<void> {
 				// Indicator was never present or already hidden
 			});
 	}
-
-	// Brief settle for CSS transitions / paint
-	await page.waitForTimeout(200);
 }
 
 interface ScreenshotOptions {
