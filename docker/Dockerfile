@@ -96,7 +96,22 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 CMD ["python3", "../scheduler/main.py"]
 
 FROM runtime-base AS worker
+USER root
+ENV UV_PROJECT_ENVIRONMENT="/app/worker-venv"
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    uv sync --frozen --project /app/packages/worker && \
+    apt-get purge -y --auto-remove build-essential && \
+    rm -rf /var/lib/apt/lists/* && \
+    chown -R appuser:appgroup /app/worker-venv
+USER appuser
+ENV PATH="/app/worker-venv/bin:${PATH}"
 ENV PYTHONPATH="/app/packages/worker"
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD python3 -c "import main"
 CMD ["python3", "../worker/main.py"]
+
+FROM worker AS engine
+WORKDIR /app/packages/worker
+HEALTHCHECK NONE
+CMD ["python3", "engine_main.py"]

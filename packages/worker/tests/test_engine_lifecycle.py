@@ -57,8 +57,8 @@ def test_process_manager_reaps_idle_shared_engines(monkeypatch) -> None:
     monkeypatch.setattr(settings, "engine_idle_ttl_seconds", 1)
     monkeypatch.setattr(settings, "engine_idle_reap_interval_seconds", 1)
 
-    def fake_engine_factory(resource_id: str, resource_config: dict | None = None):
-        return cast(Any, _FakeEngine(resource_id, resource_config))
+    def fake_engine_factory(identity: compute_pb2.EngineIdentity, resource_config: dict | None = None):
+        return cast(Any, _FakeEngine(identity.resource_id, resource_config))
 
     manager = ProcessManager(engine_factory=fake_engine_factory)
     identity = compute_pb2.EngineIdentity(
@@ -87,7 +87,7 @@ def test_process_manager_shutdown_stops_real_engine_subprocess() -> None:
         analysis_id="analysis-shutdown",
         resource_id="analysis-shutdown",
     )
-    manager = ProcessManager(engine_factory=PolarsComputeEngine)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: PolarsComputeEngine(identity.resource_id, resource_config))
     engine = manager.spawn_engine(identity).engine
     try:
         assert engine.is_process_alive()

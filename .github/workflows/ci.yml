@@ -183,6 +183,8 @@ jobs:
             target: scheduler
           - image_name: data-forge-worker
             target: worker
+          - image_name: data-forge-polars-engine
+            target: engine
     steps:
       - uses: actions/checkout@v6
 

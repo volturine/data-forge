@@ -34,6 +34,8 @@ jobs:
             image: data-forge-scheduler
           - target: worker
             image: data-forge-worker
+          - target: engine
+            image: data-forge-polars-engine
     steps:
       - uses: actions/checkout@v6
 
@@ -98,6 +100,7 @@ jobs:
           API_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-api"
           SCHEDULER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-scheduler"
           WORKER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-worker"
+          ENGINE_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-polars-engine"
           COMPOSE_URL="https://github.com/${REPO}/blob/${TAG}/docker/docker-compose.yml"
           PROD_ENV_URL="https://github.com/${REPO}/blob/${TAG}/docker/env/prod.env"
           DEPLOY_URL="https://github.com/${REPO}/blob/${TAG}/docs/DEPLOYMENT.md"
@@ -113,6 +116,7 @@ jobs:
             echo "| API | \`${API_IMAGE}:${VERSION}\` |"
             echo "| Scheduler | \`${SCHEDULER_IMAGE}:${VERSION}\` |"
             echo "| Worker | \`${WORKER_IMAGE}:${VERSION}\` |"
+            echo "| Polars engine | \`${ENGINE_IMAGE}:${VERSION}\` |"
             echo
             echo "Also tagged as \`${TAG}\`, \`latest\`, and major/minor aliases."
             echo
@@ -122,6 +126,7 @@ jobs:
             echo "docker pull ${API_IMAGE}:${VERSION}"
             echo "docker pull ${SCHEDULER_IMAGE}:${VERSION}"
             echo "docker pull ${WORKER_IMAGE}:${VERSION}"
+            echo "docker pull ${ENGINE_IMAGE}:${VERSION}"
             echo '```'
             echo
             echo "## Deploy with Docker Compose"
@@ -139,6 +144,7 @@ jobs:
             echo "DF_API_IMAGE=${API_IMAGE}:${VERSION}"
             echo "DF_SCHEDULER_IMAGE=${SCHEDULER_IMAGE}:${VERSION}"
             echo "DF_WORKER_IMAGE=${WORKER_IMAGE}:${VERSION}"
+            echo "DF_ENGINE_IMAGE=${ENGINE_IMAGE}:${VERSION}"
             echo '```'
             echo
             echo "3. Start the stack:"

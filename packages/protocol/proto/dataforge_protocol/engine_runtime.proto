@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// The worker-to-engine transport. This service is intentionally independent of
+// the durable backend compute-request protocol: it carries already-normalized
+// Polars work to exactly one engine identity.
+service PolarsEngineService {
+  rpc Health(EngineHealthRequest) returns (EngineHealthResponse);
+  rpc SubmitJob(EngineSubmitJobRequest) returns (EngineJobReference);
+  rpc WatchJob(EngineWatchJobRequest) returns (stream EngineJobEvent);
+  rpc GetJobResult(EngineGetJobResultRequest) returns (EngineJobResult);
+  rpc Shutdown(EngineShutdownRequest) returns (EngineShutdownResponse);
+}
+
+message EngineHealthRequest {}
+
+message EngineHealthResponse {
+  string engine_identity = 1 [(buf.validate.field).string.min_len = 1];
+  int32 protocol_version = 2 [(buf.validate.field).int32.gte = 1];
+  string application_version = 3 [(buf.validate.field).string.min_len = 1];
+  bool ready = 4;
+}
+
+message EngineSubmitJobRequest {
+  int32 protocol_version = 1 [(buf.validate.field).int32.gte = 1];
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
+  string kind = 3 [(buf.validate.field).string = {
+    in: "preview"
+    in: "export"
+    in: "schema"
+    in: "row_count"
+  }];
+  google.protobuf.Struct payload = 4 [(buf.validate.field).required = true];
+}
+
+message EngineJobReference {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message EngineWatchJobRequest {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  int32 after_sequence = 2 [(buf.validate.field).int32.gte = 0];
+}
+
+message EngineGetJobResultRequest {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message EngineJobEvent {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  int32 sequence = 2 [(buf.validate.field).int32.gte = 1];
+  google.protobuf.Timestamp emitted_at = 3 [(buf.validate.field).required = true];
+  oneof event {
+    google.protobuf.Struct progress = 4;
+    EngineJobResult result = 5;
+  }
+}
+
+message EngineJobResult {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional google.protobuf.Struct data = 2;
+  optional string error = 3;
+  optional string error_kind = 4;
+  optional google.protobuf.Struct error_details = 5;
+  google.protobuf.Struct step_timings = 6 [(buf.validate.field).required = true];
+  optional string query_plan = 7;
+  optional double read_duration_ms = 8;
+  optional double write_duration_ms = 9;
+  optional double collect_duration_ms = 10;
+}
+
+message EngineShutdownRequest {}
+
+message EngineShutdownResponse {
+  bool accepted = 1;
+}

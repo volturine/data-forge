@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from dataforge_protocol import compute_pb2, enums_pb2
-from runtime.compute_engine import PolarsComputeEngine
+from runtime.docker_engine import DockerComputeEngine
 from runtime.config import settings
 from runtime.domain.compute.base import ComputeEngine, EngineStatusInfo
 from runtime.domain.compute.schemas import EngineStatus
@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 _RESOURCE_KEYS = frozenset({"max_threads", "max_memory_mb", "streaming_chunk_size"})
 
-EngineFactory = Callable[[str, dict | None], ComputeEngine]
-EngineSnapshotListener = Callable[[list[EngineStatusInfo]], None]
 EngineIdentity = compute_pb2.EngineIdentity
+EngineFactory = Callable[[EngineIdentity, dict | None], ComputeEngine]
+EngineSnapshotListener = Callable[[list[EngineStatusInfo]], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,8 +29,8 @@ class EngineIdentityKey:
     resource_id: str
 
 
-def _default_engine_factory(resource_id: str, resource_config: dict | None = None) -> ComputeEngine:
-    return PolarsComputeEngine(resource_id, resource_config=resource_config)
+def _default_engine_factory(identity: EngineIdentity, resource_config: dict | None = None) -> ComputeEngine:
+    return DockerComputeEngine(identity, resource_config=resource_config)
 
 
 def _engine_identity_analysis_id(identity: EngineIdentity) -> str | None:
@@ -111,7 +111,6 @@ class ProcessManager:
         """Spawn a new compute engine or reuse an existing one for the same identity."""
         normalized_config = self._normalize_config(resource_config)
         qualified_key = self._key(identity)
-        resource_id = qualified_key.resource_id
         namespace = qualified_key.namespace
         wait_event: threading.Event | None = None
         reused_info: EngineInfo | None = None
@@ -204,7 +203,7 @@ class ProcessManager:
                     len(self._engines) + 1,
                     settings.max_concurrent_engines,
                 )
-                engine = self._engine_factory(resource_id, normalized_config)
+                engine = self._engine_factory(identity, normalized_config)
                 engine.start()
                 if not engine.is_process_alive():
                     engine.shutdown()

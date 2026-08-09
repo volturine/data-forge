@@ -9,6 +9,9 @@ export UV_PYTHON="${E2E_PYTHON_VERSION}"
 ROOT_DIR="$(pwd)"
 DATA_DIR="${DATA_DIR}-run-$$"
 export DATA_DIR
+export ENGINE_IMAGE="data-forge-polars-engine:latest"
+export ENGINE_DOCKER_NETWORK="bridge"
+export ENGINE_CONNECT_HOST="127.0.0.1"
 LOG_DIR="${E2E_LOG_DIR:-}"
 PLAYWRIGHT_ARTIFACTS_DIR="${ROOT_DIR}/packages/frontend/tests/.artifacts/playwright"
 PG_CONTAINER="dataforge-e2e-pg-$$"
@@ -182,6 +185,8 @@ until [ "$(curl -s -o /dev/null -w '%{http_code}' "${OBJECT_STORE_ENDPOINT}" || 
 done
 
 echo "Starting e2e services"
+echo "Building e2e Polars engine image"
+docker build -q -f docker/Dockerfile --target engine -t "${ENGINE_IMAGE}" . >/dev/null
 if [ -n "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) >"$LOG_DIR/backend.log" 2>&1 & BACKEND_PID=$!
 fi

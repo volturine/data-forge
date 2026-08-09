@@ -1,6 +1,6 @@
 # PRD: Containerized Polars Engines
 
-> **Status (planned 2026-08-09): Backlog — approved implementation plan, not implemented.**
+> **Status (started 2026-08-09): Active — Docker-native engine runtime implementation in progress.**
 > **Portfolio:** [PRD index](../README.md)
 
 ## Summary

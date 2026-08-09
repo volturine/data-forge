@@ -32,6 +32,14 @@ class WorkerSettings:
     internal_api_token: str
     data_plane_grpc_host: str
     data_plane_grpc_port: int
+    engine_docker_host: str
+    engine_docker_network: str
+    engine_image: str
+    engine_connect_host: str
+    engine_rpc_port: int
+    engine_start_timeout_seconds: int
+    engine_shutdown_grace_seconds: int
+    deployment_id: str
 
 
 def _read_int(name: str, default: int, *, min_value: int | None = None, max_value: int | None = None) -> int:
@@ -82,4 +90,14 @@ settings = WorkerSettings(
     internal_api_token=os.environ.get("INTERNAL_API_TOKEN", ""),
     data_plane_grpc_host=os.environ.get("WORKER_DATA_PLANE_GRPC_HOST", "127.0.0.1").strip() or "127.0.0.1",
     data_plane_grpc_port=_read_int("WORKER_DATA_PLANE_GRPC_PORT", 50052, min_value=1, max_value=65535),
+    engine_docker_host=os.environ.get("ENGINE_DOCKER_HOST", "unix:///var/run/docker.sock").strip() or "unix:///var/run/docker.sock",
+    engine_docker_network=os.environ.get("ENGINE_DOCKER_NETWORK", "dataforge-engine-runtime").strip() or "dataforge-engine-runtime",
+    engine_image=os.environ.get("ENGINE_IMAGE", "data-forge-polars-engine:latest").strip() or "data-forge-polars-engine:latest",
+    # Empty keeps engine RPC private on the Docker network. Test harnesses that
+    # run the worker on the host can opt in to an ephemeral host port.
+    engine_connect_host=os.environ.get("ENGINE_CONNECT_HOST", "").strip(),
+    engine_rpc_port=_read_int("ENGINE_RPC_PORT", 50053, min_value=1, max_value=65535),
+    engine_start_timeout_seconds=_read_int("ENGINE_START_TIMEOUT_SECONDS", 30, min_value=1),
+    engine_shutdown_grace_seconds=_read_int("ENGINE_SHUTDOWN_GRACE_SECONDS", 10, min_value=1),
+    deployment_id=os.environ.get("DATAFORGE_DEPLOYMENT_ID", "dataforge").strip() or "dataforge",
 )

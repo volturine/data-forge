@@ -451,7 +451,7 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
 
     monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
 
-    manager = ProcessManager(engine_factory=lambda _resource_id, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
+    manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
     manager.spawn_engine(identity)
     assert manager.get_engine(identity) is engine
     claimed = compute_request_runtime.ClaimedComputeRequest(

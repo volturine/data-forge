@@ -21,6 +21,9 @@ services:
     command: ["/data"]
     volumes:
       - rustfs-data:/data
+    networks:
+      - default
+      - engine-runtime
 
   api:
     image: ${DF_API_IMAGE}
@@ -158,8 +161,21 @@ services:
       BUILD_WORKER_IDLE_EXIT_SECONDS: ${DF_BUILD_WORKER_IDLE_EXIT_SECONDS}
       LOG_LEVEL: ${DF_LOG_LEVEL}
       SETTINGS_ENCRYPTION_KEY: ${DF_SETTINGS_ENCRYPTION_KEY}
+      ENGINE_DOCKER_HOST: ${DF_ENGINE_DOCKER_HOST}
+      ENGINE_DOCKER_NETWORK: ${DF_ENGINE_DOCKER_NETWORK}
+      ENGINE_IMAGE: ${DF_ENGINE_IMAGE}
+      ENGINE_RPC_PORT: ${DF_ENGINE_RPC_PORT}
+      ENGINE_START_TIMEOUT_SECONDS: ${DF_ENGINE_START_TIMEOUT_SECONDS}
+      ENGINE_SHUTDOWN_GRACE_SECONDS: ${DF_ENGINE_SHUTDOWN_GRACE_SECONDS}
+      DATAFORGE_DEPLOYMENT_ID: ${DF_DEPLOYMENT_ID}
     volumes:
       - data:/app/data
+      - ${DF_DOCKER_SOCKET_PATH}:/var/run/docker.sock
+    group_add:
+      - "${DF_DOCKER_GID}"
+    networks:
+      - default
+      - engine-runtime
     restart: unless-stopped
 
 volumes:
@@ -169,3 +185,7 @@ volumes:
     driver: local
   rustfs-data:
     driver: local
+
+networks:
+  engine-runtime:
+    name: ${DF_ENGINE_DOCKER_NETWORK}
