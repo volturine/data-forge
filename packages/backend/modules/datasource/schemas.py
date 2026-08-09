@@ -1,11 +1,11 @@
 from datetime import datetime
 
-from dataforge_protocol import object_store_pb2
 from protovalidate import ValidationError, Validator
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.domain.engine_runs.schemas import SchemaDiffStatus
+from dataforge_protocol import object_store_pb2
 
 _PROTOCOL_VALIDATOR = Validator()
 
