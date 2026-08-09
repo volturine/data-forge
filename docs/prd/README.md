@@ -29,9 +29,11 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [E2E Runtime Baseline](implemented/e2e-runtime-baseline.md) — current five-run measurement record
 - [Engine Lifecycle Alignment](implemented/engine-lifecycle-alignment.md) — superseded design
 - [Hot-Path Ownership Map](implemented/hot-path-ownership-map.md) — current product-path ownership contract
+- [Hot-Path Profiling Record](implemented/hot-path-request-map.md) — direct timing, request, and occupancy evidence
 - [MCP Tool Contract](implemented/mcp-tool-contract.md)
 - [New Analysis Creation Flow](implemented/new-analysis-creation-flow.md)
 - [Performance Stability Gate](implemented/performance-stability-gate.md) — current repeated-run safeguards and evidence
+- [Performance Regression Investigation](implemented/performance-regression-investigation.md) — optimized 410.93s baseline and clean RustFS warning gate
 - [Pipeline Compute](implemented/pipeline-compute.md) — superseded design
 - [PostgreSQL Backend Support](implemented/postgresql-backend-support.md) — superseded design
 - [Runtime Correctness and Architecture Remediation](implemented/runtime-correctness-and-architecture-remediation.md)
@@ -43,9 +45,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 
 ## Active
 
-- [Hot-Path Profiling Plan](active/hot-path-request-map.md) — direct timing, occupancy, and request measurements deferred
 - [Lineage Revamp](active/lineage-revamp.md)
-- [Performance Regression Investigation](active/performance-violation-checklist.md) — +54.0% regression attribution and optimization deferred
 
 ## Backlog
 

@@ -51,9 +51,7 @@ def _storage_response(name: str) -> NamespaceStoragePlanResponse:
 
 def _provision_namespace_bucket(name: str) -> None:
     """Create the namespace S3 bucket if it does not exist yet."""
-    data_plane = client_from_settings()
-    marker = data_plane.build_object_url('uploads', '.namespace-root', namespace=name)
-    data_plane.upload_object_bytes(b'', marker, content_type='application/x-empty')
+    client_from_settings().ensure_object_store_bucket(name)
 
 
 @router.get('', response_model=NamespaceListResponse, mcp=True)

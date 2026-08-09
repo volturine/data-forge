@@ -299,6 +299,9 @@ class _TestWorkerDataPlaneClient:
             'py-io-impl': 'pyiceberg.io.pyarrow.PyArrowFileIO',
         }
 
+    def ensure_object_store_bucket(self, name: str) -> None:
+        self._ensure_bucket_exists(name)
+
     def upload_object_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
         bucket, key = self._parse_object_url(target_url)
         self._ensure_bucket_exists(bucket)

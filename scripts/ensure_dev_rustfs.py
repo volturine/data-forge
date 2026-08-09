@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
-IMAGE = 'rustfs/rustfs:latest'
+IMAGE = 'rustfs/rustfs:1.0.0-rc.1'
 LABEL = 'data-forge.dev-rustfs=1'
 STARTUP_TIMEOUT_SECONDS = 30.0
 LOCAL_HOSTS = {'localhost', '127.0.0.1', '::1'}

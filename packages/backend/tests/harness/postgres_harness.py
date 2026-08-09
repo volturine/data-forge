@@ -201,7 +201,7 @@ class ManagedProcess:
 
 @dataclass
 class RustfsContainer:
-    image: str = 'rustfs/rustfs:latest'
+    image: str = 'rustfs/rustfs:1.0.0-rc.1'
     access_key: str = 'dataforge-test-access'
     secret_key: str = 'dataforge-test-secret'
     bucket: str = 'dataforge'

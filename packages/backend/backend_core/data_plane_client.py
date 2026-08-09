@@ -91,6 +91,15 @@ class WorkerDataPlaneClient:
         response = self._call(lambda: self._object_store.StorageOptions(common_pb2.EmptyRequest(), timeout=self._timeout_seconds, metadata=self._metadata()))
         return _object_store_storage_options_payload(response.storage_options)
 
+    def ensure_object_store_bucket(self, name: str) -> None:
+        self._call(
+            lambda: self._object_store.EnsureBucket(
+                object_store_pb2.ObjectStoreBucket(name=name),
+                timeout=self._timeout_seconds,
+                metadata=self._metadata(),
+            )
+        )
+
     def upload_object_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
         request = object_store_pb2.ObjectStoreBytes(target=object_store_pb2.ObjectStoreUrl(url=target_url), data=data)
         if content_type is not None:

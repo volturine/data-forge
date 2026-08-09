@@ -3,7 +3,7 @@ from __future__ import annotations
 import grpc
 import pytest
 
-from dataforge_protocol import object_store_pb2
+from dataforge_protocol import common_pb2, object_store_pb2
 from runtime.config import settings
 from worker_grpc.data_plane_server import ObjectStoreServicer
 
@@ -73,6 +73,18 @@ async def test_object_store_build_url_namespace_is_bucket(monkeypatch: pytest.Mo
         context,
     )
     assert built.url == "s3://analytics/uploads/file.csv"
+
+
+@pytest.mark.asyncio
+async def test_object_store_ensure_bucket_is_worker_owned(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    ensured: list[str] = []
+    monkeypatch.setattr("worker_grpc.data_plane_server.object_store.ensure_bucket_exists", ensured.append)
+
+    response = await ObjectStoreServicer().EnsureBucket(object_store_pb2.ObjectStoreBucket(name="analytics"), context)
+
+    assert response == common_pb2.EmptyRequest()
+    assert ensured == ["analytics"]
 
 
 @pytest.mark.asyncio

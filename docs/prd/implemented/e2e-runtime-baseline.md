@@ -1,9 +1,9 @@
 # E2E runtime baseline
 
-> **Status (audited 2026-08-02): Implemented — current five-run baseline published.**
+> **Status (audited 2026-08-09): Implemented — superseded baseline retained for comparison.**
 > **Portfolio:** [PRD index](../README.md)
 
-_Last audited: 2026-08-02_
+_Last audited: 2026-08-09_
 
 This document records the current five-run e2e baseline and retains the historical May measurement for comparison.
 It is intentionally strict:
@@ -17,8 +17,12 @@ It is intentionally strict:
 Related documents:
 - [Implemented hot-path ownership map](hot-path-ownership-map.md)
 - [Implemented performance stability gate](performance-stability-gate.md)
-- [Active hot-path profiling plan](../active/hot-path-request-map.md)
-- [Active performance regression investigation](../active/performance-violation-checklist.md)
+- [Implemented hot-path profiling record](hot-path-request-map.md)
+- [Implemented performance regression investigation](performance-regression-investigation.md)
+
+The current accepted performance baseline is 410.93s and is published in the
+[Performance Regression Investigation](performance-regression-investigation.md).
+The 445.91s measurement below is retained as the before-optimization record.
 
 ## Current baseline — 2026-08-02
 

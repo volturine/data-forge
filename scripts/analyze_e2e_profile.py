@@ -53,8 +53,12 @@ def main() -> None:
             status = result["status"]
             if status not in ("passed", "failed", "timedOut", "interrupted"):
                 continue
-            per_file[file].append((title, duration, result["workerIndex"]))
-            worker_totals[result["workerIndex"]] += duration
+            # workerIndex changes when Playwright replaces a worker process;
+            # parallelIndex is the stable execution slot and therefore the
+            # correct unit for estimating the wall-clock critical path.
+            parallel_index = result.get("parallelIndex", result["workerIndex"])
+            per_file[file].append((title, duration, parallel_index))
+            worker_totals[parallel_index] += duration
             overall_ms += duration
 
     print(f"Total tests measured: {sum(len(v) for v in per_file.values())}")
@@ -77,7 +81,11 @@ def main() -> None:
         durations = [d for _, d, _ in entries]
         total = sum(durations)
         slowest_title, slowest_ms, _ = max(entries, key=lambda e: e[1])
-        p90 = statistics.quantiles(durations, n=10, method="inclusive")[8]
+        p90 = (
+            statistics.quantiles(durations, n=10, method="inclusive")[8]
+            if len(durations) >= 2
+            else durations[0]
+        )
         print(
             f"{file:<26} {len(durations):>5} {_fmt(total):>9} {_fmt(statistics.mean(durations)):>9} "
             f"{_fmt(statistics.median(durations)):>9} {_fmt(p90):>9} {_fmt(slowest_ms):>9}"

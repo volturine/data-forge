@@ -7,6 +7,7 @@ import {
 	type E2EStorageState,
 	type WorkerAuth
 } from './utils/api.js';
+import { createRequestTrace } from './utils/request-trace.js';
 
 export { expect } from '@playwright/test';
 
@@ -71,6 +72,7 @@ type WorkerFixtures = {
 type TestFixtures = {
 	page: Page;
 	request: E2ERequest;
+	requestTrace: import('./utils/request-trace.js').RequestTrace | null;
 };
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -118,5 +120,14 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 			workerIndex: workerAuth.workerIndex,
 			baseURL
 		} as unknown as E2ERequest);
-	}
+	},
+
+	requestTrace: [
+		async ({ page }, use, testInfo) => {
+			const trace = createRequestTrace(page, testInfo.workerIndex, testInfo.title, testInfo.testId);
+			await use(trace);
+			trace?.attach();
+		},
+		{ scope: 'test', auto: true }
+	]
 });
