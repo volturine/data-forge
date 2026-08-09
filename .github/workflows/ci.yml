@@ -167,6 +167,16 @@ jobs:
           fi
           exit "$status"
 
+      - name: Upload e2e diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            .artifacts/ci/e2e/
+            packages/frontend/tests/.artifacts/playwright/
+
   publish-images:
     if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'master')
     runs-on: ubuntu-latest
