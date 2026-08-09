@@ -148,7 +148,7 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 				timeout: 5_000
 			});
 
-			await page.reload({ waitUntil: 'networkidle' });
+			await page.reload();
 			await waitForEditorReload(page);
 			await expect(page.locator('header').first().getByText(nextDescription)).toBeVisible({
 				timeout: 5_000

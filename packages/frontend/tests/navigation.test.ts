@@ -400,7 +400,7 @@ test.describe('Navigation – namespace persistence', () => {
 		await page.keyboard.press('Escape');
 		await expect(reopenedDialog).not.toBeVisible({ timeout: 5_000 });
 
-		await page.reload({ waitUntil: 'networkidle' });
+		await page.reload();
 		await waitForAppShell(page);
 
 		await expect(sidebar.getByText(ns)).toBeVisible({ timeout: 5_000 });

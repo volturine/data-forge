@@ -22,6 +22,13 @@ def test_scan_warnings_fails_on_warning_output() -> None:
     assert 'DeprecationWarning: do not hide me' in result.stderr
 
 
+def test_scan_warnings_fails_on_standard_logger_warning() -> None:
+    result = run_scan([sys.executable, '-c', "print('2026-08-09 - worker - WARNING - do not hide me')"])
+
+    assert result.returncode == 1
+    assert 'WARNING - do not hide me' in result.stderr
+
+
 def test_scan_warnings_reports_nonzero_exit() -> None:
     result = run_scan([sys.executable, '-c', 'raise SystemExit(3)'])
 
