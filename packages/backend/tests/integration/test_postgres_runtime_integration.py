@@ -61,6 +61,7 @@ def _query_value(connection: psycopg.Connection, sql: str, params: tuple[object,
 
 SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n'
 INTERNAL_API_TOKEN = 'dataforge-runtime-test-internal-token'
+ENGINE_TEST_IMAGE = 'data-forge-polars-engine:integration'
 
 
 def _make_csv(rows: int) -> str:
@@ -113,6 +114,31 @@ def _runtime_env(
             'WORKER_DATA_PLANE_GRPC_TARGET': f'127.0.0.1:{worker_data_plane_port}',
         }
     )
+
+
+@pytest.fixture(scope='module')
+def engine_runtime_env() -> dict[str, str]:
+    """Build the same engine image that the runtime worker will launch."""
+    require_docker()
+    run_command(
+        ['docker', 'build', '-f', 'docker/Dockerfile', '--target', 'engine', '-t', ENGINE_TEST_IMAGE, '.'],
+        cwd=CORE_ROOT.parent.parent,
+        env=docker_env(),
+        timeout=900,
+    )
+    docker_host = run_command(
+        ['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'],
+        cwd=CORE_ROOT.parent.parent,
+        env=docker_env(),
+    ).stdout.strip()
+    if not docker_host:
+        raise RuntimeError('Docker context did not provide a daemon endpoint')
+    return {
+        'ENGINE_IMAGE': ENGINE_TEST_IMAGE,
+        'ENGINE_DOCKER_HOST': docker_host,
+        'ENGINE_DOCKER_NETWORK': 'bridge',
+        'ENGINE_CONNECT_HOST': '127.0.0.1',
+    }
 
 
 def _init_runtime_db(env: dict[str, str]) -> None:
@@ -735,8 +761,8 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
         )
         worker = ManagedProcess(
             name='restart-worker',
-            command=['uv', 'run', '--no-env-file', str(WORKER_ROOT / 'main.py')],
-            cwd=CORE_ROOT,
+            command=['uv', 'run', '--no-env-file', 'main.py'],
+            cwd=WORKER_ROOT,
             env=base_env,
         )
         scheduler = ManagedProcess(
@@ -790,6 +816,7 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
 async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
     tmp_path: Path,
     rustfs_container: RustfsContainer,
+    engine_runtime_env: dict[str, str],
 ) -> None:
     require_docker()
 
@@ -840,17 +867,20 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
         )
         worker = ManagedProcess(
             name='worker',
-            command=['uv', 'run', '--no-env-file', str(WORKER_ROOT / 'main.py')],
-            cwd=CORE_ROOT,
-            env=_runtime_env(
-                data_dir=data_dir,
-                database_url=container.url,
-                port=api_one_port,
-                grpc_port=api_one_grpc_port,
-                rustfs=rustfs_container,
-                grpc_target_port=api_one_grpc_port,
-                data_plane_port=data_plane_port,
-            ),
+            command=['uv', 'run', '--no-env-file', 'main.py'],
+            cwd=WORKER_ROOT,
+            env={
+                **_runtime_env(
+                    data_dir=data_dir,
+                    database_url=container.url,
+                    port=api_one_port,
+                    grpc_port=api_one_grpc_port,
+                    rustfs=rustfs_container,
+                    grpc_target_port=api_one_grpc_port,
+                    data_plane_port=data_plane_port,
+                ),
+                **engine_runtime_env,
+            },
         )
         try:
             api_one.start()
@@ -921,7 +951,11 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
 
 
 @pytest.mark.timeout(300)
-def test_postgres_runtime_supports_cross_api_cancellation(tmp_path: Path, rustfs_container: RustfsContainer) -> None:
+def test_postgres_runtime_supports_cross_api_cancellation(
+    tmp_path: Path,
+    rustfs_container: RustfsContainer,
+    engine_runtime_env: dict[str, str],
+) -> None:
     require_docker()
 
     with PostgresContainer() as container:
@@ -971,17 +1005,20 @@ def test_postgres_runtime_supports_cross_api_cancellation(tmp_path: Path, rustfs
         )
         worker = ManagedProcess(
             name='worker',
-            command=['uv', 'run', '--no-env-file', str(WORKER_ROOT / 'main.py')],
-            cwd=CORE_ROOT,
-            env=_runtime_env(
-                data_dir=data_dir,
-                database_url=container.url,
-                port=api_one_port,
-                grpc_port=api_one_grpc_port,
-                rustfs=rustfs_container,
-                grpc_target_port=api_one_grpc_port,
-                data_plane_port=data_plane_port,
-            ),
+            command=['uv', 'run', '--no-env-file', 'main.py'],
+            cwd=WORKER_ROOT,
+            env={
+                **_runtime_env(
+                    data_dir=data_dir,
+                    database_url=container.url,
+                    port=api_one_port,
+                    grpc_port=api_one_grpc_port,
+                    rustfs=rustfs_container,
+                    grpc_target_port=api_one_grpc_port,
+                    data_plane_port=data_plane_port,
+                ),
+                **engine_runtime_env,
+            },
         )
         try:
             api_one.start()

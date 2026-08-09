@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import contextlib
-import io
 import json
 import logging
-import tarfile
+import os
 import threading
 import time
 import uuid
@@ -46,16 +45,16 @@ def _container_name(*, identity: compute_pb2.EngineIdentity, namespace: str) -> 
 
 
 def _effective_resources(resource_config: dict[str, object]) -> dict[str, int]:
-    max_threads = resource_config.get("max_threads", settings.polars_cores_available)
+    available_threads = settings.polars_cores_available or os.cpu_count() or 1
+    max_threads = resource_config.get("max_threads", available_threads)
     max_memory_mb = resource_config.get("max_memory_mb", settings.polars_max_memory_mb)
     streaming_chunk_size = resource_config.get("streaming_chunk_size", settings.polars_streaming_chunk_size)
     values = {
-        "max_threads": max_threads if isinstance(max_threads, int) and max_threads >= 0 else 0,
+        "max_threads": max_threads if isinstance(max_threads, int) and max_threads > 0 else available_threads,
         "max_memory_mb": max_memory_mb if isinstance(max_memory_mb, int) and max_memory_mb >= 0 else 0,
         "streaming_chunk_size": streaming_chunk_size if isinstance(streaming_chunk_size, int) and streaming_chunk_size >= 0 else 0,
     }
-    if settings.polars_cores_available > 0:
-        values["max_threads"] = min(values["max_threads"] or settings.polars_cores_available, settings.polars_cores_available)
+    values["max_threads"] = min(values["max_threads"], available_threads)
     return values
 
 
@@ -68,25 +67,30 @@ def _engine_object_store_endpoint() -> str:
     return endpoint
 
 
-def _credential_archive(*, identity: compute_pb2.EngineIdentity, token: str, resources: dict[str, int]) -> bytes:
-    payload = {
+def _credential_payload(*, identity: compute_pb2.EngineIdentity, token: str, resources: dict[str, int]) -> str:
+    payload: dict[str, str] = {
         "ENGINE_IDENTITY": identity.resource_id,
         "ENGINE_RPC_TOKEN": token,
         "OBJECT_STORE_ENDPOINT": _engine_object_store_endpoint(),
         "OBJECT_STORE_REGION": settings.object_store_region,
         "OBJECT_STORE_ACCESS_KEY": settings.object_store_access_key,
         "OBJECT_STORE_SECRET_KEY": settings.object_store_secret_key,
-        "POLARS_MAX_THREADS": str(resources["max_threads"]),
-        "POLARS_STREAMING_CHUNK_SIZE": str(resources["streaming_chunk_size"]),
     }
-    raw = json.dumps(payload, separators=(",", ":")).encode()
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w") as archive:
-        info = tarfile.TarInfo("engine.json")
-        info.size = len(raw)
-        info.mode = 0o400
-        archive.addfile(info, io.BytesIO(raw))
-    return buffer.getvalue()
+    if resources["max_threads"]:
+        payload["POLARS_MAX_THREADS"] = str(resources["max_threads"])
+    if resources["streaming_chunk_size"]:
+        payload["POLARS_STREAMING_CHUNK_SIZE"] = str(resources["streaming_chunk_size"])
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def _write_bootstrap(container: Any, *, identity: compute_pb2.EngineIdentity, token: str, resources: dict[str, int]) -> None:
+    """Stage the launch payload in the engine's tmpfs, not its long-lived environment."""
+    result = container.exec_run(
+        ["/bin/sh", "-c", "umask 077 && printf '%s' \"$ENGINE_BOOTSTRAP_JSON\" > /run/dataforge-secrets/engine.json"],
+        environment={"ENGINE_BOOTSTRAP_JSON": _credential_payload(identity=identity, token=token, resources=resources)},
+    )
+    if result.exit_code != 0:
+        raise RuntimeError(f"Engine credential bootstrap failed: {result.output!r}")
 
 
 class DockerComputeEngine(ComputeEngine):
@@ -167,8 +171,7 @@ class DockerComputeEngine(ComputeEngine):
             container = client.containers.create(**create_kwargs)
             try:
                 container.start()
-                if not container.put_archive("/run/dataforge-secrets", _credential_archive(identity=self.identity, token=self._token, resources=resources)):
-                    raise RuntimeError("Docker rejected engine credential bootstrap")
+                _write_bootstrap(container, identity=self.identity, token=self._token, resources=resources)
                 self._client = client
                 self._container = container
                 target = f"{container.name}:{settings.engine_rpc_port}"
