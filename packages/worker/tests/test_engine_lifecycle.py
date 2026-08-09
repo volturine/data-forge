@@ -4,6 +4,7 @@ import time
 from typing import Any, cast
 
 from dataforge_protocol import compute_pb2, enums_pb2
+from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_manager import ProcessManager
 
 
@@ -75,5 +76,25 @@ def test_process_manager_reaps_idle_shared_engines(monkeypatch) -> None:
             time.sleep(0.05)
 
         assert manager.get_engine(identity) is None
+    finally:
+        manager.shutdown_all()
+
+
+def test_process_manager_shutdown_stops_real_engine_subprocess() -> None:
+    identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id="analysis-shutdown",
+        resource_id="analysis-shutdown",
+    )
+    manager = ProcessManager(engine_factory=PolarsComputeEngine)
+    engine = manager.spawn_engine(identity).engine
+    try:
+        assert engine.is_process_alive()
+
+        manager.shutdown_engine(identity)
+
+        assert manager.get_engine(identity) is None
+        assert not engine.is_process_alive()
     finally:
         manager.shutdown_all()

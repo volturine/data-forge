@@ -55,7 +55,7 @@ def _ensure_runtime_available(runtime_probe: RuntimeAvailabilityProbe) -> None:
     raise HTTPException(status_code=503, detail='Compute runtime unavailable')
 
 
-async def _submit_and_wait(
+def _submit(
     session: Session,
     *,
     kind: enums_pb2.ComputeRequestKind,
@@ -76,8 +76,19 @@ async def _submit_and_wait(
     except Exception:
         session.rollback()
         raise
-    wait_task = asyncio.create_task(response_hub.wait(request.id))
     runtime_outbox_service.dispatch_pending_events(session)
+    return request
+
+
+async def _submit_and_wait(
+    session: Session,
+    *,
+    kind: enums_pb2.ComputeRequestKind,
+    command: compute_pb2.ComputeCommand,
+    runtime_probe: RuntimeAvailabilityProbe,
+):
+    request = _submit(session, kind=kind, command=command, runtime_probe=runtime_probe)
+    wait_task = asyncio.create_task(response_hub.wait(request.id))
     while True:
         session.expire_all()
         completed = compute_requests_service.get_request(session, request.id)
@@ -445,6 +456,21 @@ async def shutdown_engine(
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
     await _submit_and_wait(
+        session,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+        command=_lifecycle_command('shutdown_engine', identity),
+        runtime_probe=runtime_probe,
+    )
+
+
+def request_engine_shutdown(
+    session: Session,
+    *,
+    identity: EngineIdentity,
+    runtime_probe: RuntimeAvailabilityProbe,
+) -> None:
+    """Durably queue engine shutdown without coupling an API response to its completion."""
+    _submit(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
         command=_lifecycle_command('shutdown_engine', identity),

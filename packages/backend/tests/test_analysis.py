@@ -10,10 +10,12 @@ from backend_core.persistence.analysis.models import Analysis, AnalysisDataSourc
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.locks.models import ResourceLock
 from backend_core.sqlmodel_typing import sa
+from dataforge_protocol import compute_pb2
 from main import app
 from modules.analysis import service as analysis_service
 from modules.analysis.schemas import AnalysisResponseSchema
 from modules.auth.dependencies import get_optional_user
+from modules.compute import executor_client
 from tests.http_client import TestClient
 
 
@@ -1193,6 +1195,20 @@ class TestAnalysisUpdate:
 
 
 class TestAnalysisDelete:
+    def test_delete_analysis_queues_engine_shutdown_without_waiting(self, client, sample_analysis: Analysis, monkeypatch):
+        shutdown_calls: list[compute_pb2.EngineIdentity] = []
+
+        def request_shutdown(session, *, identity, runtime_probe) -> None:
+            shutdown_calls.append(identity)
+
+        monkeypatch.setattr(executor_client, 'request_engine_shutdown', request_shutdown)
+
+        response = client.delete(f'/api/v1/analysis/{sample_analysis.id}')
+
+        assert response.status_code == 204
+        assert len(shutdown_calls) == 1
+        assert shutdown_calls[0].analysis_id == sample_analysis.id
+
     def test_delete_analysis_success(self, client, sample_analysis: Analysis, test_db_session):
         analysis_id = sample_analysis.id
 

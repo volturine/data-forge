@@ -20,6 +20,7 @@ from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, worker_runtime_client
 from runtime.compute_engine import PolarsComputeEngine
+from runtime.compute_manager import ProcessManager
 from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
@@ -406,20 +407,36 @@ async def test_compute_request_renewal_reports_lost_claim(monkeypatch) -> None:
         await compute_request_runtime._renew_compute_lease(claimed, stop_event=asyncio.Event())
 
 
-def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) -> None:
+def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot(monkeypatch) -> None:
     completed: list[compute_pb2.ComputeResponse] = []
     dispatched: list[bool] = []
-
-    engine = SimpleNamespace(current_job_id="job-1", is_process_alive=lambda: True)
     identity = _analysis_identity("analysis-1")
-    shutdown_calls: list[object] = []
 
-    def fake_sleep(_seconds: float) -> None:
-        engine.current_job_id = None
+    class _Engine:
+        current_job_id = "job-1"
+        process_id = 1234
+        resource_config: dict[str, object] = {}
+        effective_resources: dict[str, object] = {}
 
-    monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
-    monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
-    monkeypatch.setattr(compute_request_runtime.time, "sleep", fake_sleep)
+        def __init__(self) -> None:
+            self.alive = False
+            self.shutdown_calls = 0
+
+        def start(self) -> None:
+            self.alive = True
+
+        def is_process_alive(self) -> bool:
+            return self.alive
+
+        def check_health(self) -> bool:
+            return self.alive
+
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+            self.alive = False
+
+    engine = _Engine()
+    snapshots: list[list[object]] = []
 
     class _Client:
         def complete_compute_request(self, **kwargs):
@@ -434,10 +451,9 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
 
     monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
 
-    manager = SimpleNamespace(
-        get_engine=lambda engine_identity: engine,
-        shutdown_engine=lambda engine_identity: shutdown_calls.append(engine_identity),
-    )
+    manager = ProcessManager(engine_factory=lambda _resource_id, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
+    manager.spawn_engine(identity)
+    assert manager.get_engine(identity) is engine
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-1",
         namespace="default",
@@ -454,13 +470,18 @@ def test_shutdown_compute_request_waits_for_active_job_to_finish(monkeypatch) ->
         ),
     )
 
-    compute_request_runtime._execute_request_sync(claimed, cast(Any, manager))
+    try:
+        compute_request_runtime._execute_request_sync(claimed, manager)
 
-    assert shutdown_calls == [identity]
-    assert len(completed) == 1
-    assert completed[0].WhichOneof("response") == "ack"
-    assert completed[0].ack.success is True
-    assert dispatched == [True]
+        assert manager.get_engine(identity) is None
+        assert engine.shutdown_calls == 1
+        assert snapshots[-1] == []
+        assert len(completed) == 1
+        assert completed[0].WhichOneof("response") == "ack"
+        assert completed[0].ack.success is True
+        assert dispatched == [True]
+    finally:
+        manager.shutdown_all()
 
 
 def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) -> None:
