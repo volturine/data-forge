@@ -160,6 +160,8 @@
 	let descriptionExpanded = $state<Record<string, boolean>>({});
 	let currentDatasourceId = $state<string | null>(null);
 	let freshnessThreshold = $state<number | null>(null);
+	let customFreshnessThreshold = $state('');
+	let isCustomFreshnessThreshold = $state(false);
 
 	const descriptionMutation = createMutation(() => ({
 		mutationFn: async (payload: { columnName: string; description: string | null }) => {
@@ -207,6 +209,14 @@
 		descriptionError = null;
 		descriptionExpanded = {};
 		freshnessThreshold = ds.freshness_threshold_minutes ?? null;
+		isCustomFreshnessThreshold =
+			ds.freshness_threshold_minutes != null &&
+			!FRESHNESS_THRESHOLD_OPTIONS.some(
+				(option) => option.minutes === ds.freshness_threshold_minutes
+			);
+		customFreshnessThreshold = isCustomFreshnessThreshold
+			? String(ds.freshness_threshold_minutes)
+			: '';
 
 		// Initialize type-specific config
 		const fileSource = getFileSource(ds);
@@ -400,9 +410,29 @@
 	];
 
 	function handleThresholdChange(value: string) {
-		const option = FRESHNESS_THRESHOLD_OPTIONS.find((opt) => opt.minutes === parseInt(value, 10));
+		if (value === 'custom') {
+			isCustomFreshnessThreshold = true;
+			customFreshnessThreshold = freshnessThreshold == null ? '' : String(freshnessThreshold);
+			return;
+		}
+		if (value === '') {
+			freshnessThreshold = null;
+			isCustomFreshnessThreshold = false;
+			hasChanges = true;
+			return;
+		}
+		const option = FRESHNESS_THRESHOLD_OPTIONS.find((opt) => opt.minutes === Number(value));
 		if (!option) return;
 		freshnessThreshold = option.minutes;
+		isCustomFreshnessThreshold = false;
+		hasChanges = true;
+	}
+
+	function handleCustomThresholdChange(value: string) {
+		customFreshnessThreshold = value;
+		const minutes = Number(value);
+		if (!Number.isInteger(minutes) || minutes <= 0) return;
+		freshnessThreshold = minutes;
 		hasChanges = true;
 	}
 
@@ -1116,11 +1146,11 @@
 										color: 'fg.muted'
 									})}>Last updated</span
 								>
+								<FreshnessBadge
+									lastDataUpdate={ds.last_data_update}
+									thresholdMinutes={ds.freshness_threshold_minutes ?? null}
+								/>
 								{#if ds.last_data_update}
-									<FreshnessBadge
-										lastDataUpdate={ds.last_data_update}
-										thresholdMinutes={ds.freshness_threshold_minutes ?? null}
-									/>
 									<span class={css({ fontWeight: 'medium' })}>
 										<RelativeTime timestamp={ds.last_data_update} />
 									</span>
@@ -1142,7 +1172,7 @@
 							>
 							<select
 								id="freshness-threshold-{datasource.id}"
-								value={freshnessThreshold ?? ''}
+								value={isCustomFreshnessThreshold ? 'custom' : (freshnessThreshold ?? '')}
 								onchange={(e) => handleThresholdChange(e.currentTarget.value)}
 								class={input()}
 								disabled={updateMutation.isPending}
@@ -1150,7 +1180,20 @@
 								{#each FRESHNESS_THRESHOLD_OPTIONS as option (option.minutes)}
 									<option value={option.minutes ?? ''}>{option.label}</option>
 								{/each}
+								<option value="custom">Custom</option>
 							</select>
+							{#if isCustomFreshnessThreshold}
+								<input
+									type="number"
+									min="1"
+									step="1"
+									aria-label="Custom freshness threshold in minutes"
+									value={customFreshnessThreshold}
+									oninput={(e) => handleCustomThresholdChange(e.currentTarget.value)}
+									class={input()}
+									disabled={updateMutation.isPending}
+								/>
+							{/if}
 						</div>
 					</div>
 				</div>

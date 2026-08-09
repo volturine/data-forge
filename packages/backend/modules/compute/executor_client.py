@@ -62,6 +62,7 @@ def _submit(
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
     runtime_probe: RuntimeAvailabilityProbe,
+    dispatch: bool = True,
 ):
     _ensure_runtime_available(runtime_probe)
     try:
@@ -77,7 +78,8 @@ def _submit(
     except Exception:
         session.rollback()
         raise
-    runtime_outbox_service.dispatch_pending_events(session)
+    if dispatch:
+        runtime_outbox_service.dispatch_pending_events(session)
     return request
 
 
@@ -476,4 +478,5 @@ def request_engine_shutdown(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
         command=_lifecycle_command('shutdown_engine', identity),
         runtime_probe=runtime_probe,
+        dispatch=False,
     )

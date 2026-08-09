@@ -451,12 +451,10 @@
 												Import
 											</span>
 										{/if}
-										{#if datasource.last_data_update}
-											<FreshnessBadge
-												lastDataUpdate={datasource.last_data_update}
-												thresholdMinutes={datasource.freshness_threshold_minutes ?? null}
-											/>
-										{/if}
+										<FreshnessBadge
+											lastDataUpdate={datasource.last_data_update}
+											thresholdMinutes={datasource.freshness_threshold_minutes ?? null}
+										/>
 									</div>
 									{#if datasource.description}
 										<p

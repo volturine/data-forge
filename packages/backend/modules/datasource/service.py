@@ -786,7 +786,13 @@ def cached_schema(session: Session, datasource_id: str) -> datasource_pb2.Schema
     datasource = session.get(DataSource, datasource_id)
     if datasource is None or not isinstance(datasource.schema_cache, dict):
         return None
-    if not isinstance(datasource.schema_cache.get('columns'), list):
+    columns = datasource.schema_cache.get('columns')
+    if not isinstance(columns, list) or not columns:
+        return None
+    if not all(
+        isinstance(column, dict) and isinstance(column.get('name'), str) and isinstance(column.get('dtype'), str) and isinstance(column.get('nullable'), bool)
+        for column in columns
+    ):
         return None
     return schema_info_proto(datasource.schema_cache)
 

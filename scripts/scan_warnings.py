@@ -53,6 +53,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a command and fail on unclassified warnings/errors in output.")
     parser.add_argument("--cwd")
     parser.add_argument("--report-only", action="store_true")
+    parser.add_argument("--ignore-pattern", action="append", default=[])
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser.parse_args()
 
@@ -100,7 +101,11 @@ def main() -> None:
     stderr_thread.join()
 
     combined = "".join(stdout_chunks + stderr_chunks)
-    matches = [*_scan(combined), *_scan_returncode(returncode)]
+    matches = [
+        match
+        for match in [*_scan(combined), *_scan_returncode(returncode)]
+        if not any(pattern in match.line for pattern in args.ignore_pattern)
+    ]
     if not matches:
         raise SystemExit(returncode)
 
