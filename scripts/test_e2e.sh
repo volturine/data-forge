@@ -228,12 +228,12 @@ echo "Starting e2e worker, scheduler, and frontend"
 if [ -n "$LOG_DIR" ]; then
     (cd packages/worker && exec uv run --no-env-file main.py) >"$LOG_DIR/worker.log" 2>&1 & WORKER_PID=$!
     (cd packages/scheduler && exec uv run --no-env-file main.py) >"$LOG_DIR/scheduler.log" 2>&1 & SCHEDULER_PID=$!
-    (cd packages/frontend && bun run panda:codegen && bun run build && exec env NODE_NO_WARNINGS=1 node ./node_modules/vite/bin/vite.js preview) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
+    (cd packages/frontend && bun run panda:codegen && bun run build && exec node ./node_modules/vite/bin/vite.js preview) >"$LOG_DIR/frontend.log" 2>&1 & FRONTEND_PID=$!
 fi
 if [ -z "$LOG_DIR" ]; then
     (cd packages/worker && exec uv run --no-env-file main.py) & WORKER_PID=$!
     (cd packages/scheduler && exec uv run --no-env-file main.py) & SCHEDULER_PID=$!
-    (cd packages/frontend && bun run panda:codegen && bun run build && exec env NODE_NO_WARNINGS=1 node ./node_modules/vite/bin/vite.js preview) & FRONTEND_PID=$!
+    (cd packages/frontend && bun run panda:codegen && bun run build && exec node ./node_modules/vite/bin/vite.js preview) & FRONTEND_PID=$!
 fi
 echo "Waiting for runtime worker registrations"
 wait_for_runtime_worker "build_manager" 1 "worker build manager"
@@ -265,10 +265,6 @@ run_playwright() {
         read -r -a test_files <<<"${PLAYWRIGHT_TEST_FILES}"
         echo "Running Playwright subset: ${test_files[*]}"
     fi
-    # Suppress Node.js runtime deprecation warnings (e.g. DEP0205 module.register)
-    # that come from Playwright/Vite internals on Node v26+; these are third-party
-    # warnings we cannot fix without upgrading those dependencies.
-    NODE_NO_WARNINGS=1 \
     PLAYWRIGHT_DISABLE_WEB_SERVER=true \
     PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir" \
     PLAYWRIGHT_OUTPUT_DIR="$output_dir" \

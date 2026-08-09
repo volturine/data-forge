@@ -85,7 +85,7 @@ test.describe('Analyses – list & gallery', () => {
 			const link = favorites.getByRole('link', { name: analysisName });
 			await expect(link).toBeVisible({ timeout: 5_000 });
 
-			await page.reload({ waitUntil: 'networkidle' });
+			await page.reload();
 			await gotoAnalysesGallery(page);
 			await expandSidebar(page);
 			const persistedLink = page

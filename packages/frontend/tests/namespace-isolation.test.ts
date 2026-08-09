@@ -57,7 +57,7 @@ test.describe('Namespace – data isolation', () => {
 		await switchNamespace(page, ns);
 		await expectNamespace(page, ns);
 
-		await page.reload({ waitUntil: 'networkidle' });
+		await page.reload();
 		await waitForAppShell(page);
 
 		await expectNamespace(page, ns);
