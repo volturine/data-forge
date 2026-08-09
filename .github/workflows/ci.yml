@@ -62,7 +62,11 @@ jobs:
         run: just verify
 
       - name: Canonical tests
-        run: just test
+        run: |
+          docker builder prune --all --force --filter until=24h
+          docker image prune --force
+          docker system df
+          just test
 
   frontend:
     name: frontend
