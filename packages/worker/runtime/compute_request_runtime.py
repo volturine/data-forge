@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, cast
@@ -20,16 +19,13 @@ from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
 from runtime.domain.domain_enums import domain_token
-from runtime.exceptions import AppError, EngineBusyError, engine_not_found, status_for_app_error
+from runtime.exceptions import AppError, engine_not_found, status_for_app_error
 from runtime.worker_runtime_client import BackendWorkerRpcError, WorkerRuntimeClient, client_from_env
 from runtime.json_values import dict_to_struct
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
 
 logger = logging.getLogger(__name__)
-
-_ENGINE_SHUTDOWN_WAIT_SECONDS = 15.0
-_ENGINE_SHUTDOWN_POLL_SECONDS = 0.1
 
 _COMPUTE_REQUEST_MAX_WORKERS = max(
     1,
@@ -524,11 +520,9 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             engine = manager.get_engine(identity)
             if engine is None:
                 raise engine_not_found(identity.resource_id)
-            deadline = time.monotonic() + _ENGINE_SHUTDOWN_WAIT_SECONDS
-            while engine.current_job_id and engine.is_process_alive() and time.monotonic() < deadline:
-                time.sleep(_ENGINE_SHUTDOWN_POLL_SECONDS)
-            if engine.current_job_id and engine.is_process_alive():
-                raise EngineBusyError(identity.resource_id)
+            # Deleting an analysis must retire its engine even when a preview is in
+            # flight. ProcessManager first requests a cooperative subprocess stop,
+            # then escalates only when it does not stop.
             manager.shutdown_engine(identity)
             _complete_request(client, claimed, response=compute_pb2.ComputeResponse(ack=compute_pb2.ComputeAckResult(success=True)))
         else:

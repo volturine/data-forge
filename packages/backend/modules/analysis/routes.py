@@ -9,7 +9,6 @@ from backend_core.dependencies import RuntimeAvailabilityProbe, get_runtime_avai
 from backend_core.domain.analysis.step_types import is_step_type
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.error_handlers import handle_errors
-from backend_core.exceptions import PipelineExecutionError
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.validation import AnalysisId, parse_analysis_id
 from dataforge_protocol import compute_pb2, enums_pb2
@@ -226,8 +225,9 @@ async def delete_analysis(
         service.delete_analysis(session, analysis_id_value)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    try:
-        await executor_client.shutdown_engine(
+    # The deletion is committed above; runtime teardown must not delay its response.
+    with contextlib.suppress(HTTPException):
+        executor_client.request_engine_shutdown(
             session,
             identity=compute_pb2.EngineIdentity(
                 scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
@@ -237,12 +237,6 @@ async def delete_analysis(
             ),
             runtime_probe=runtime_probe,
         )
-    except HTTPException:
-        # Engine teardown is best-effort after the analysis row has been deleted.
-        pass
-    except PipelineExecutionError as exc:
-        if 'not found' not in str(exc).lower():
-            raise
 
 
 @router.post('/{analysis_id}/preview', mcp=True)
