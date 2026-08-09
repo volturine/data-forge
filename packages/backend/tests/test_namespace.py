@@ -119,6 +119,20 @@ def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.Monke
     assert provisioned == ['test']
 
 
+def test_provision_namespace_bucket_uses_explicit_data_plane_operation(monkeypatch: pytest.MonkeyPatch) -> None:
+    ensured: list[str] = []
+
+    class FakeDataPlane:
+        def ensure_object_store_bucket(self, name: str) -> None:
+            ensured.append(name)
+
+    monkeypatch.setattr(namespace_routes, 'client_from_settings', FakeDataPlane)
+
+    namespace_routes._provision_namespace_bucket('analytics')
+
+    assert ensured == ['analytics']
+
+
 def test_namespace_storage_plan_endpoint_previews_exact_roots() -> None:
     from main import app
 

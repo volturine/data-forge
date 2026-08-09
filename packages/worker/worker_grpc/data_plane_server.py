@@ -140,6 +140,11 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
             storage_options=_object_store_storage_options_proto(object_store.object_store_storage_options())
         )
 
+    async def EnsureBucket(self, request: object_store_pb2.ObjectStoreBucket, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
+        await _require_internal_token(context)
+        await asyncio.to_thread(object_store.ensure_bucket_exists, request.name)
+        return common_pb2.EmptyRequest()
+
     async def UploadBytes(self, request: object_store_pb2.ObjectStoreBytes, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreUrl:
         await _require_internal_token(context)
         content_type = request.content_type if request.HasField("content_type") else None

@@ -14,7 +14,7 @@ services:
       retries: 20
 
   rustfs:
-    image: rustfs/rustfs:latest
+    image: rustfs/rustfs:1.0.0-rc.1
     environment:
       RUSTFS_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
       RUSTFS_SECRET_KEY: ${DF_OBJECT_STORE_SECRET_KEY}

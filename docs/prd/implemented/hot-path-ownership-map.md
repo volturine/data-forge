@@ -7,8 +7,8 @@ _Last audited: 2026-08-02_
 
 This record maps the user-facing flows that can dominate E2E runtime to their
 current frontend, backend, and runtime owners. It is an ownership contract, not
-a timing attribution. Direct profiling remains in the active
-[Hot-Path Profiling Plan](../active/hot-path-request-map.md).
+a timing attribution. Direct profiling is published in the implemented
+[Hot-Path Profiling Record](hot-path-request-map.md).
 
 ## Tier 1 product paths
 
@@ -45,5 +45,5 @@ a timing attribution. Direct profiling remains in the active
 
 Ownership and required behavior are documented and therefore implemented. No
 per-file timing, worker-utilization trace, or per-flow request count was captured
-by this map. The active profiling PRD must produce those measurements before it
-attributes the regression to any owner.
+by this map. Those measurements are now complete in the implemented profiling
+record.

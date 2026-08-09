@@ -166,7 +166,7 @@ docker run -d --rm \
     -e RUSTFS_ACCESS_KEY="${OBJECT_STORE_ACCESS_KEY}" \
     -e RUSTFS_SECRET_KEY="${OBJECT_STORE_SECRET_KEY}" \
     -p "127.0.0.1:${RUSTFS_PORT}:9000" \
-    rustfs/rustfs:latest /data >/dev/null
+    rustfs/rustfs:1.0.0-rc.1 /data >/dev/null
 if [ -z "$RUSTFS_PORT" ]; then
     echo "Failed to resolve e2e RustFS host port" >&2
     exit 1

@@ -5,10 +5,10 @@
 
 _Last audited: 2026-08-02_
 
-This completion record captures the performance safeguards and repeatability
-gate that are already delivered. It does not claim that the current runtime is
-fast enough; the measured regression remains in the active
-[Performance Regression Investigation](../active/performance-violation-checklist.md).
+This completion record captures the original performance safeguards and
+repeatability gate. The later optimization and accepted replacement baseline
+are published in the implemented
+[Performance Regression Investigation](performance-regression-investigation.md).
 
 ## Verified gate
 
@@ -59,4 +59,4 @@ implemented and verified. The following are deliberately not claimed here:
 - request-count measurements; or
 - an optimized replacement baseline.
 
-Those deliverables remain active and must be closed with direct evidence.
+Those deliverables are complete in the implemented investigation record.

@@ -54,6 +54,10 @@ message ObjectStoreBytes {
   optional string content_type = 3;
 }
 
+message ObjectStoreBucket {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+}
+
 message ObjectStoreExistsResponse {
   bool exists = 1;
 }
@@ -71,6 +75,7 @@ service ObjectStoreService {
   rpc BuildUrl(ObjectStorePathParts) returns (ObjectStoreUrl);
   rpc JoinUrl(ObjectStoreJoinRequest) returns (ObjectStoreUrl);
   rpc StorageOptions(EmptyRequest) returns (ObjectStoreStorageOptionsResponse);
+  rpc EnsureBucket(ObjectStoreBucket) returns (EmptyRequest);
   rpc UploadBytes(ObjectStoreBytes) returns (ObjectStoreUrl);
   rpc DownloadBytes(ObjectStoreUrl) returns (ObjectStoreBytes);
   rpc DeleteObject(ObjectStoreUrl) returns (EmptyRequest);
