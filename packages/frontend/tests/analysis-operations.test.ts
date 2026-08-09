@@ -11,7 +11,7 @@ import { createCleanupPage } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
 import type { Browser } from '@playwright/test';
-import { waitForInlinePreviewReady } from './utils/readiness.js';
+import { readyTimeoutMs, waitForInlinePreviewReady } from './utils/readiness.js';
 
 const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
@@ -732,8 +732,12 @@ test.describe('Analyses – select config editing', () => {
 			await expect(dropdown).toHaveCount(1);
 			await dropdown.click();
 
-			await page.locator('#msc-col-id').check({ timeout: 5_000 });
-			await page.locator('#msc-col-name').check({ timeout: 5_000 });
+			const idColumn = page.locator('#msc-col-id');
+			const nameColumn = page.locator('#msc-col-name');
+			await expect(idColumn).toBeVisible({ timeout: readyTimeoutMs() });
+			await expect(nameColumn).toBeVisible({ timeout: readyTimeoutMs() });
+			await idColumn.check();
+			await nameColumn.check();
 
 			await configPanel.click({ position: { x: 5, y: 5 } });
 
