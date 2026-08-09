@@ -56,7 +56,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Authentication and Identity](backlog/authentication-and-identity.md)
 - [Authorization, Ownership, and Collaboration](backlog/authorization-ownership-and-collaboration.md)
 - [Build Observability](backlog/build-observability.md)
-- [Containerized Polars Engines](backlog/containerized-polars-engines.md)
+- [Containerized Polars Engines](backlog/containerized-polars-engines.md) — approved Docker-native execution, scoped credential, and reconciliation plan
 - [Feature-overhaul Portfolio](backlog/data-forge-2.md)
 - [Horizontal Node Configuration](backlog/horizontal-node-config.md)
 - [Kaggle Connection](backlog/kaggle-connection.md)
