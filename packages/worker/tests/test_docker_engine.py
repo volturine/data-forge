@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from dataforge_protocol import compute_pb2, enums_pb2
-
 from runtime.config import settings
 from runtime.docker_engine import (
     DockerComputeEngine,

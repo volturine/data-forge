@@ -75,7 +75,6 @@ from runtime.healthchecks import (
 )
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
-from runtime.worker_runtime_client import ClaimedBuildJob, HealthCheckSpec, client_from_env
 from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import extract_staged_deliveries, render_template, strip_staged_preview
@@ -93,6 +92,7 @@ from runtime.resource_observation import (
     stream_resource_events as _stream_resource_events,
 )
 from runtime.time import utc_now as _utcnow
+from runtime.worker_runtime_client import ClaimedBuildJob, HealthCheckSpec, client_from_env
 
 logger = logging.getLogger(__name__)
 

@@ -20,10 +20,10 @@ from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
 from runtime.domain.domain_enums import domain_token
 from runtime.exceptions import AppError, status_for_app_error
-from runtime.worker_runtime_client import BackendWorkerRpcError, WorkerRuntimeClient, client_from_env
 from runtime.json_values import dict_to_struct
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
+from runtime.worker_runtime_client import BackendWorkerRpcError, WorkerRuntimeClient, client_from_env
 
 logger = logging.getLogger(__name__)
 

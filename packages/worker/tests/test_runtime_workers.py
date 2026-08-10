@@ -10,8 +10,8 @@ from typing import cast
 
 import pytest
 
-from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient
 from runtime.worker_runtime import build_worker_loop
+from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient
 
 
 class FakeWorkerRuntimeClient:

@@ -36,8 +36,6 @@ from runtime.domain.datasource.source_types import DataSourceFileType, DataSourc
 from runtime.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus, SchemaDiffStatus
 from runtime.exceptions import DataSourceConnectionError, DataSourceValidationError
 from runtime.iceberg_catalog import load_runtime_catalog
-from runtime.protocol_mapping import schema_info_proto
-from runtime.worker_runtime_client import BackendWorkerRpcError, DatasourceMetadata, WorkerRuntimeClient
 from runtime.namespace import get_namespace
 from runtime.object_store import (
     download_file,
@@ -45,6 +43,8 @@ from runtime.object_store import (
     object_store_storage_options,
     object_store_url,
 )
+from runtime.protocol_mapping import schema_info_proto
+from runtime.worker_runtime_client import BackendWorkerRpcError, DatasourceMetadata, WorkerRuntimeClient
 
 logger = logging.getLogger(__name__)
 

@@ -11,8 +11,8 @@ from runtime.compute_manager import ProcessManager
 from runtime.domain.compute import schemas
 from runtime.domain.datasource.models import DataSourceTargetKind
 from runtime.domain.engine_runs.schemas import EngineRunKind
-from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 from runtime.namespace import reset_namespace, set_namespace_context
+from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 
 logger = logging.getLogger(__name__)
 

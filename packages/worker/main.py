@@ -16,10 +16,9 @@ from runtime.compute_manager import ProcessManager
 from runtime.compute_request_runtime import compute_request_loop, compute_request_worker_count
 from runtime.config import settings
 from runtime.datasource_delete_runtime import datasource_delete_loop
-from runtime.domain.runtime_workers.models import RuntimeWorkerKind
 from runtime.docker_engine import reconcile_deployment_containers
+from runtime.domain.runtime_workers.models import RuntimeWorkerKind
 from runtime.engine_notifications import create_snapshot_notifier
-from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 from runtime.logging import configure_logging
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
 from runtime.worker_runtime import (
@@ -28,6 +27,7 @@ from runtime.worker_runtime import (
 from runtime.worker_runtime import (
     worker_id as build_worker_id,
 )
+from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 from worker_grpc.data_plane_server import start_data_plane_grpc_server_in_thread
 
 logger = logging.getLogger(__name__)

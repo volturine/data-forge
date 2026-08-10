@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from dataforge_protocol import compute_pb2, enums_pb2
-from runtime.docker_engine import DockerComputeEngine
 from runtime.config import settings
+from runtime.docker_engine import DockerComputeEngine
 from runtime.domain.compute.base import ComputeEngine, EngineStatusInfo
 from runtime.domain.compute.schemas import EngineStatus
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
