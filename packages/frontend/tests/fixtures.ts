@@ -1,5 +1,5 @@
 import type { Browser, BrowserContext, Page } from '@playwright/test';
-import { expect, test as base } from '@playwright/test';
+import { test as base } from '@playwright/test';
 import {
 	E2E_PASSWORD,
 	E2E_RUN_STAMP,
@@ -42,7 +42,7 @@ async function createSessionState(browser: Browser, workerIndex: number): Promis
 					password: E2E_PASSWORD,
 					display_name: `E2E UI Worker ${workerIndex}`
 				},
-				timeout: 30_000
+				timeout: 15_000
 			});
 			if (!register.ok()) {
 				const body = await register.text().catch(() => '');
