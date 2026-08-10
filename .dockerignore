@@ -20,6 +20,7 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 .venv/
+**/.venv/
 backend/.env
 backend/.env.*
 backend/.prod.env
@@ -28,6 +29,7 @@ backend/.mypy_cache/
 backend/.pytest_cache/
 backend/.ruff_cache/
 backend/.venv/
+packages/worker/.venv/
 packages/frontend/node_modules/
 packages/protocol/.venv/
 packages/protocol/node_modules/

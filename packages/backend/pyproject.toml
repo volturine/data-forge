@@ -28,6 +28,7 @@
         "grpcio>=1.81.0",
         "protobuf>=7.35.1",
         "protovalidate>=1.2.0",
+        "polars>=1.41.2",
 ]
 
 [build-system]
@@ -116,7 +117,7 @@
     dev = [
         "fastexcel>=0.19.0",
         "mypy>=2.1.0",
-        "polars[rtcompat]>=1.41.2",
+        "polars>=1.41.2",
         "pytest>=9.0.3",
         "pytest-asyncio>=1.4.0",
         "pytest-cov>=7.1.0",
