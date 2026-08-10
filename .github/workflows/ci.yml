@@ -63,9 +63,15 @@ jobs:
 
       - name: Canonical tests
         run: |
-          docker builder prune --all --force --filter until=24h
+          # Self-hosted runners retain resources from prior jobs. The engine
+          # integration tests build an image, so reclaim all unused Docker
+          # state instead of retaining a day's build cache.
+          docker container prune --force
+          docker volume prune --force
+          docker builder prune --all --force
           docker image prune --force
           docker system df
+          df -h
           just test
 
   frontend:
@@ -158,11 +164,17 @@ jobs:
         working-directory: packages/frontend
         run: bun x playwright install --with-deps chromium
 
-      - name: Reclaim stale Docker build cache
+      - name: Reclaim unused Docker state
         run: |
-          docker builder prune --all --force --filter until=24h
+          # E2E provisions the native engine image. This runner is shared
+          # across jobs, so stale stopped containers, unused volumes, and
+          # build cache must not consume the image build's disk budget.
+          docker container prune --force
+          docker volume prune --force
+          docker builder prune --all --force
           docker image prune --force
           docker system df
+          df -h
 
       - name: Run e2e tests
         run: |
