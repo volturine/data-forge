@@ -1,6 +1,12 @@
 import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
-import { findAnalysisIdByName, type E2EStorageState } from './api.js';
+import {
+	findAnalysisIdByName,
+	shutdownDatasourcePreviewEngine,
+	shutdownEngine,
+	unregisterAnalysis,
+	type E2EStorageState
+} from './api.js';
 import {
 	gotoAnalysesGallery,
 	gotoUdfLibrary,
@@ -155,6 +161,14 @@ async function deleteDatasourceViaUIOnPage(
 	}
 	if (!(await row.isVisible().catch(() => false))) return;
 	const datasourceId = options?.id ?? (await row.getAttribute('data-ds-id'));
+	if (datasourceId) {
+		await shutdownDatasourcePreviewEngine(page, datasourceId).catch((error) => {
+			console.warn(
+				`[e2e] shutdownDatasourcePreviewEngine before UI delete failed for ${datasourceId}:`,
+				error
+			);
+		});
+	}
 	const deleteResponse = datasourceId
 		? page
 				.waitForResponse(
@@ -197,6 +211,27 @@ export async function deleteDatasourceViaUI(
 	});
 }
 
+/** Resolve analysis id from registry or the gallery card DOM (href / select input). */
+async function resolveAnalysisIdFromCard(card: Locator, name: string): Promise<string | null> {
+	const registered = findAnalysisIdByName(name);
+	if (registered) return registered;
+	const href = await card.getAttribute('href').catch(() => null);
+	if (href) {
+		const match = href.match(/\/analysis\/([^/?#]+)/);
+		if (match?.[1]) return match[1];
+	}
+	const selectId = await card
+		.locator('input[type="checkbox"][id^="analysis-"]')
+		.first()
+		.getAttribute('id')
+		.catch(() => null);
+	if (selectId) {
+		const match = selectId.match(/^analysis-(.+)-select$/);
+		if (match?.[1]) return match[1];
+	}
+	return null;
+}
+
 async function deleteAnalysisViaUIOnPage(
 	page: Page,
 	name: string,
@@ -211,9 +246,22 @@ async function deleteAnalysisViaUIOnPage(
 	try {
 		await card.waitFor({ state: 'visible', timeout: 1_500 });
 	} catch {
+		const knownId = findAnalysisIdByName(name);
+		if (knownId) {
+			// Card gone but engine may still be warm — free it and drop the registry entry.
+			await shutdownEngine(page, knownId).catch(() => undefined);
+			unregisterAnalysis(knownId);
+		}
 		return;
 	}
-	const analysisId = findAnalysisIdByName(name);
+	const analysisId = await resolveAnalysisIdFromCard(card, name);
+	// Free Docker engine before UI delete so parallel e2e does not retain containers
+	// until idle TTL. DELETE analysis also queues durable shutdown as a backstop.
+	if (analysisId) {
+		await shutdownEngine(page, analysisId).catch((error) => {
+			console.warn(`[e2e] shutdownEngine before UI delete failed for ${analysisId}:`, error);
+		});
+	}
 	const deleteResponse = analysisId
 		? page
 				.waitForResponse(
@@ -245,6 +293,7 @@ async function deleteAnalysisViaUIOnPage(
 			await gotoAnalysesGallery(page, 5_000);
 			await expect(card).toBeHidden({ timeout: 5_000 });
 		});
+	if (analysisId) unregisterAnalysis(analysisId);
 }
 
 export async function deleteAnalysisViaUI(

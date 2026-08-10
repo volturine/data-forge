@@ -7,7 +7,7 @@ import {
 	type E2ERequest
 } from './utils/api.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor } from './utils/analysis.js';
-import { createCleanupPage } from './utils/ui-cleanup.js';
+import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
 import type { Browser } from '@playwright/test';
@@ -56,7 +56,18 @@ test.beforeAll(async ({ browser, workerAuth, helperContext }) => {
 });
 
 test.afterAll(async ({ browser, workerAuth }) => {
-	const { context } = await createCleanupPage(browser, workerAuth.sessionState);
+	const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
+	// Free any datasource-preview engines held by shared fixtures for the suite.
+	for (const name of [
+		sharedBaseDatasourceName,
+		sharedAuxDatasourceName,
+		sharedDateDatasourceName
+	]) {
+		if (name) {
+			await deleteDatasourceViaUI(page, name).catch(() => undefined);
+		}
+	}
+	await page.close();
 	await context.close();
 });
 

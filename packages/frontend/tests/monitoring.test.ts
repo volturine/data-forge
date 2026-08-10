@@ -4,7 +4,8 @@ import {
 	createSchedule,
 	createHealthCheck,
 	createLargeDatasource,
-	createMultiStepAnalysis
+	createMultiStepAnalysis,
+	shutdownBuildEngine
 } from './utils/api.js';
 import {
 	deleteDatasourceViaUI,
@@ -745,8 +746,9 @@ test.describe('Monitoring – Builds tab', () => {
 		const analysisName = `E2E Duration ${uid()}`;
 		const dsId = await createDatasource(request, ds);
 		const analysisId = await createMultiStepAnalysis(request, analysisName, dsId);
+		let buildId: string | undefined;
 		try {
-			const buildId = await startBuildFromAnalysisPage(page, analysisId);
+			buildId = await startBuildFromAnalysisPage(page, analysisId);
 			await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
 			const panel = page.locator('#panel-builds');
 			await expect(panel).toBeVisible({ timeout: 5_000 });
@@ -793,6 +795,9 @@ test.describe('Monitoring – Builds tab', () => {
 			expect(stats).toHaveProperty('trend');
 			expect(stats).toHaveProperty('runs');
 		} finally {
+			if (buildId) {
+				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -803,8 +808,9 @@ test.describe('Monitoring – Builds tab', () => {
 		const analysisName = `E2E Builds Payload ${uid()}`;
 		const dsId = await createDatasource(request, ds);
 		const analysisId = await createMultiStepAnalysis(request, analysisName, dsId);
+		let buildId: string | undefined;
 		try {
-			const buildId = await startBuildFromAnalysisPage(page, analysisId);
+			buildId = await startBuildFromAnalysisPage(page, analysisId);
 			await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
 			const panel = page.locator('#panel-builds');
 			const buildRow = await waitForBuildRowEventually(page, panel, buildId, [
@@ -830,6 +836,9 @@ test.describe('Monitoring – Builds tab', () => {
 				timeout: 5_000
 			});
 		} finally {
+			if (buildId) {
+				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -840,8 +849,9 @@ test.describe('Monitoring – Builds tab', () => {
 		const analysisName = `E2E Single Build Row ${uid()}`;
 		const dsId = await createDatasource(request, ds);
 		const analysisId = await createMultiStepAnalysis(request, analysisName, dsId);
+		let buildId: string | undefined;
 		try {
-			const buildId = await startBuildFromAnalysisPage(page, analysisId);
+			buildId = await startBuildFromAnalysisPage(page, analysisId);
 			await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
 			const panel = page.locator('#panel-builds');
 			const buildRow = await waitForBuildRowById(
@@ -856,6 +866,9 @@ test.describe('Monitoring – Builds tab', () => {
 				panel.locator(`[data-build-kind="build"][data-build-analysis-id="${analysisId}"]`)
 			).toHaveCount(1);
 		} finally {
+			if (buildId) {
+				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -869,6 +882,7 @@ test.describe('Monitoring – Builds tab', () => {
 		const analysisName = `E2E Build Determinism ${uid()}`;
 		const dsId = await createDatasource(request, ds);
 		const analysisId = await createMultiStepAnalysis(request, analysisName, dsId);
+		const startedBuildIds: string[] = [];
 		try {
 			const monitorPage = await page.context().newPage();
 			await monitorPage.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
@@ -880,11 +894,14 @@ test.describe('Monitoring – Builds tab', () => {
 			for (let i = 0; i < 2; i += 1) {
 				const buildId = await startBuildFromAnalysisPage(page, analysisId, previousBuildId);
 				previousBuildId = buildId;
+				startedBuildIds.push(buildId);
 				const row = await waitForBuildRowEventually(monitorPage, panel, buildId, ['completed']);
 				await expect(row).toHaveAttribute('data-build-kind', 'build');
 				await expect(row).toHaveAttribute('data-build-status', 'completed');
 				await expect(row).toContainText('Build');
 				await expect(row).not.toContainText('Preview');
+				// Free the exclusive build engine before starting the next one.
+				await shutdownBuildEngine(page, buildId).catch(() => undefined);
 			}
 
 			let previewRequests = 0;
@@ -903,9 +920,12 @@ test.describe('Monitoring – Builds tab', () => {
 			await expect(previewRow).toContainText('Preview');
 			await monitorPage.close();
 		} finally {
-			// This regression intentionally focuses on repeated build/preview behavior.
-			// Full UI cleanup here can dominate the 30s test budget and obscure the
-			// actual product assertion, while the e2e environment is ephemeral per run.
+			// Free engines even when assertions fail; keep cleanup cheap under budget.
+			for (const buildId of startedBuildIds) {
+				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+			}
+			await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
+			await deleteDatasourceViaUI(page, ds).catch(() => undefined);
 		}
 	});
 
@@ -1018,6 +1038,7 @@ test.describe('Monitoring – live build history', () => {
 		const aName = `E2E Active Build ${uid()}`;
 		const dsId = await createLargeDatasource(request, dsName, 2000);
 		const aId = await createMultiStepAnalysis(request, aName, dsId);
+		let buildId: string | undefined;
 		try {
 			const monitorPage = await page.context().newPage();
 
@@ -1030,7 +1051,7 @@ test.describe('Monitoring – live build history', () => {
 			const monitorPanel = monitorPage.locator('#panel-builds');
 			await expect(monitorPanel).toBeVisible({ timeout: 5_000 });
 
-			const buildId = await startBuildFromAnalysisPage(page, aId);
+			buildId = await startBuildFromAnalysisPage(page, aId);
 
 			const monitorBuildRow = await waitForBuildRowById(monitorPage, monitorPanel, buildId, [
 				'queued',
@@ -1054,6 +1075,9 @@ test.describe('Monitoring – live build history', () => {
 
 			await screenshot(page, 'monitoring', 'build-history-terminal');
 		} finally {
+			if (buildId) {
+				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+			}
 			await deleteAnalysisViaUI(page, aName);
 			await deleteDatasourceViaUI(page, dsName);
 		}

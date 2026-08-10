@@ -185,10 +185,19 @@ export async function deleteAnalysisByApi(
 	source: Page | E2ERequest,
 	analysisId: string
 ): Promise<number> {
+	// Free the Docker engine immediately; analysis DELETE also queues durable
+	// shutdown, but that path is async and leaves containers warm under load.
+	await shutdownEngine(source, analysisId).catch((error) => {
+		console.warn(`[e2e] shutdownEngine before delete failed for ${analysisId}:`, error);
+	});
+
 	const run = async (page: Page): Promise<number> => {
 		const endpoint = `/api/v1/analysis/${analysisId}`;
 		const current = await page.request.get(endpoint, { timeout: 5_000 });
-		if (current.status() === 404) return 404;
+		if (current.status() === 404) {
+			unregisterAnalysis(analysisId);
+			return 404;
+		}
 		if (!current.ok()) {
 			throw new Error(`Cleanup GET ${endpoint} returned HTTP ${current.status()}`);
 		}
@@ -198,6 +207,9 @@ export async function deleteAnalysisByApi(
 			timeout: 5_000,
 			headers: { 'If-Match': revision }
 		});
+		if (response.status() === 204 || response.status() === 404) {
+			unregisterAnalysis(analysisId);
+		}
 		return response.status();
 	};
 
@@ -246,9 +258,8 @@ export async function createImportedAnalysis(
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
 		await prepareHelperNamespace(page);
-		const id = await importAnalysisViaUi(page, { name, description, pipeline, datasourceRemap });
-		analysisRegistry.set(id, { name });
-		return id;
+		// importAnalysisViaUi registers the analysis for cleanup / engine shutdown.
+		return importAnalysisViaUi(page, { name, description, pipeline, datasourceRemap });
 	});
 }
 
@@ -406,8 +417,110 @@ export async function createHealthCheck(
 	});
 }
 
+/**
+ * Run an authenticated request helper against a live Page or the worker
+ * helper context (when the test page is already closed).
+ */
+async function withRequestPage(
+	source: Page | E2ERequest,
+	fn: (page: Page) => Promise<void>
+): Promise<void> {
+	if ('helperContext' in source) {
+		await withAuthedPage(source, fn);
+		return;
+	}
+	await fn(source);
+}
+
+async function deleteEngineEndpoint(
+	page: Page,
+	endpoint: string,
+	waitForIdleMs: number
+): Promise<void> {
+	const deadline = Date.now() + waitForIdleMs;
+	let lastStatus = 0;
+	let lastBody = '';
+	while (Date.now() < deadline) {
+		const response = await page.request.delete(endpoint, { timeout: 15_000 });
+		lastStatus = response.status();
+		if (lastStatus === 204 || lastStatus === 404) {
+			return;
+		}
+		lastBody = await response.text().catch(() => '');
+		// 409 = active job; wait for the job to finish then free the container.
+		if (lastStatus === 409) {
+			await page.waitForTimeout(250);
+			continue;
+		}
+		throw new Error(`Engine shutdown ${endpoint} failed: HTTP ${lastStatus} ${lastBody}`);
+	}
+	if (lastStatus === 409) {
+		// Last resort: do not fail test cleanup if a job is still draining.
+		// Idle reaper will still reclaim; surface for diagnostics.
+		console.warn(
+			`[e2e] engine still busy after ${waitForIdleMs}ms: ${endpoint} (HTTP 409 ${lastBody})`
+		);
+		return;
+	}
+	throw new Error(`Engine shutdown ${endpoint} failed: HTTP ${lastStatus} ${lastBody}`);
+}
+
+/**
+ * Tear down the interactive analysis engine container immediately.
+ * Prefer this in finally blocks so Docker RAM/CPU is not held until idle TTL.
+ */
+export async function shutdownEngine(
+	source: Page | E2ERequest,
+	analysisId: string,
+	options?: { waitForIdleMs?: number }
+): Promise<void> {
+	if (!analysisId) return;
+	const waitForIdleMs = options?.waitForIdleMs ?? 15_000;
+	await withRequestPage(source, async (page) => {
+		await deleteEngineEndpoint(
+			page,
+			`/api/v1/compute/engine/analysis/${analysisId}`,
+			waitForIdleMs
+		);
+	});
+}
+
+/**
+ * Tear down a datasource preview engine container.
+ */
+export async function shutdownDatasourcePreviewEngine(
+	source: Page | E2ERequest,
+	datasourceId: string,
+	options?: { waitForIdleMs?: number }
+): Promise<void> {
+	if (!datasourceId) return;
+	const waitForIdleMs = options?.waitForIdleMs ?? 15_000;
+	await withRequestPage(source, async (page) => {
+		await deleteEngineEndpoint(
+			page,
+			`/api/v1/compute/engine/datasource-preview/${datasourceId}`,
+			waitForIdleMs
+		);
+	});
+}
+
+/**
+ * Tear down a build-scoped exclusive engine (if still running after a build).
+ */
+export async function shutdownBuildEngine(
+	source: Page | E2ERequest,
+	buildId: string,
+	options?: { waitForIdleMs?: number }
+): Promise<void> {
+	if (!buildId) return;
+	const waitForIdleMs = options?.waitForIdleMs ?? 15_000;
+	await withRequestPage(source, async (page) => {
+		await deleteEngineEndpoint(page, `/api/v1/compute/engine/build/${buildId}`, waitForIdleMs);
+	});
+}
+
 export async function spawnEngine(_request: E2ERequest, _analysisId: string): Promise<void> {
-	// No-op in pure UI e2e: engines are started through visible user actions.
+	// Engines are started through visible user actions / analysis prewarm.
 }
 
 export async function waitForNoEngineJob(
@@ -415,7 +528,11 @@ export async function waitForNoEngineJob(
 	_analysisId: string,
 	_timeoutMs = 5_000
 ): Promise<void> {
-	// No-op in pure UI e2e: engine lifecycle is observed via visible build status.
+	// Active-job waits are handled inside shutdownEngine (409 retry).
+}
+
+export function registerAnalysis(id: string, name: string): void {
+	analysisRegistry.set(id, { name });
 }
 
 export function findAnalysisIdByName(name: string): string | null {
@@ -425,13 +542,8 @@ export function findAnalysisIdByName(name: string): string | null {
 	return null;
 }
 
-export async function shutdownEngine(
-	_request: E2ERequest,
-	_analysisId: string,
-	_options?: { waitForIdleMs?: number }
-): Promise<void> {
-	// Closing the test page cancels its queries. Engine capacity eviction and
-	// idle reaping own teardown; analysis deletion queues durable shutdown.
+export function unregisterAnalysis(analysisId: string): void {
+	analysisRegistry.delete(analysisId);
 }
 
 export function nameForDatasourceId(datasourceId: string): string | undefined {

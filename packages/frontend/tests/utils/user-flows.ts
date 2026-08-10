@@ -124,6 +124,7 @@ export async function createAnalysisViaUi(
 	analysisName: string,
 	datasourceName: string
 ): Promise<string> {
+	const { registerAnalysis } = await import('./api.js');
 	await gotoNewAnalysis(page);
 	await page.locator('#name').fill(analysisName);
 	await page.getByRole('button', { name: /Next/i }).click();
@@ -138,7 +139,9 @@ export async function createAnalysisViaUi(
 	await page.getByRole('button', { name: /Next/i }).click();
 	await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
 	await page.getByRole('button', { name: /Create Analysis/i }).click();
-	return waitForCurrentAnalysisEditor(page);
+	const analysisId = await waitForCurrentAnalysisEditor(page);
+	registerAnalysis(analysisId, analysisName);
+	return analysisId;
 }
 
 export async function importAnalysisViaUi(
@@ -150,6 +153,7 @@ export async function importAnalysisViaUi(
 		datasourceRemap?: Record<string, string>;
 	}
 ): Promise<string> {
+	const { registerAnalysis } = await import('./api.js');
 	await gotoNewAnalysis(page);
 	await page.getByRole('button', { name: 'Import JSON' }).click();
 	await page.locator('#name').fill(options.name);
@@ -189,7 +193,9 @@ export async function importAnalysisViaUi(
 			`Analysis import create failed: HTTP ${createResponse.status()} ${body.slice(0, 300)}`
 		);
 	}
-	return waitForCurrentAnalysisEditor(page);
+	const analysisId = await waitForCurrentAnalysisEditor(page);
+	registerAnalysis(analysisId, options.name);
+	return analysisId;
 }
 
 export async function createUdfViaUi(page: Page, name: string): Promise<string> {

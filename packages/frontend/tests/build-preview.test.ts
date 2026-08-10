@@ -2,7 +2,14 @@ import type { Locator, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
-import { createDatasource, createAnalysis, deleteAnalysisByApi } from './utils/api.js';
+import {
+	createDatasource,
+	createAnalysis,
+	deleteAnalysisByApi,
+	nameForDatasourceId,
+	shutdownBuildEngine
+} from './utils/api.js';
+import { deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { readyTimeoutMs } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
@@ -13,33 +20,47 @@ async function expectVisibleEventually(locator: Locator) {
 	await expect(locator).toBeVisible({ timeout: readyTimeoutMs() });
 }
 
-async function deleteBestEffort(
-	page: Page,
-	endpoint: string,
-	expectedStatuses: Set<number>
-): Promise<void> {
-	const response = await page.request.delete(endpoint, { timeout: 5_000 }).catch(() => null);
-	if (!response || expectedStatuses.has(response.status())) return;
-	throw new Error(`Cleanup DELETE ${endpoint} returned HTTP ${response.status()}`);
-}
-
 async function cleanupBuildPreviewResources(
 	page: Page,
 	analysisId: string,
-	datasourceId: string
+	datasourceId: string,
+	buildId?: string
 ): Promise<void> {
-	await deleteBestEffort(
-		page,
-		`/api/v1/compute/engine/analysis/${analysisId}`,
-		new Set([204, 404, 409])
-	);
+	// Free exclusive build engine first (if known), then analysis engine via delete.
+	if (buildId) {
+		await shutdownBuildEngine(page, buildId).catch((error) => {
+			console.warn(`[e2e] shutdownBuildEngine failed for ${buildId}:`, error);
+		});
+	}
 	const analysisDeleteStatus = await deleteAnalysisByApi(page, analysisId);
 	if (![204, 404].includes(analysisDeleteStatus)) {
 		throw new Error(
 			`Cleanup DELETE /api/v1/analysis/${analysisId} returned HTTP ${analysisDeleteStatus}`
 		);
 	}
-	await deleteBestEffort(page, `/api/v1/datasource/${datasourceId}`, new Set([202, 204, 404]));
+	const dsName = nameForDatasourceId(datasourceId);
+	if (dsName) {
+		await deleteDatasourceViaUI(page, dsName, { id: datasourceId });
+	}
+}
+
+async function startBuildAndCaptureId(page: Page): Promise<string | undefined> {
+	const buildBtn = page.locator('[data-testid="output-build-button"]');
+	await expectVisibleEventually(buildBtn);
+	const started = page.waitForResponse(
+		(response) => {
+			if (response.request().method() !== 'POST' || !response.ok()) return false;
+			const path = new URL(response.url()).pathname;
+			return path === '/api/v1/compute/builds' || path === '/api/v1/compute/builds/';
+		},
+		{ timeout: readyTimeoutMs() }
+	);
+	await buildBtn.click();
+	const payload = (await (await started).json().catch(() => null)) as {
+		build_id?: string;
+		id?: string;
+	} | null;
+	return payload?.build_id ?? payload?.id;
 }
 
 test.describe('Build Preview – real build lifecycle', () => {
@@ -51,12 +72,10 @@ test.describe('Build Preview – real build lifecycle', () => {
 		const aName = `E2E BPrev Real ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
+		let buildId: string | undefined;
 		try {
 			await gotoAnalysisEditor(page, aId);
-
-			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expectVisibleEventually(buildBtn);
-			await buildBtn.click();
+			buildId = await startBuildAndCaptureId(page);
 
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).not.toBeVisible();
@@ -75,7 +94,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-terminal');
 		} finally {
-			await cleanupBuildPreviewResources(page, aId, dsId);
+			await cleanupBuildPreviewResources(page, aId, dsId, buildId);
 		}
 	});
 
@@ -84,12 +103,10 @@ test.describe('Build Preview – real build lifecycle', () => {
 		const aName = `E2E BPrev Close ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
+		let buildId: string | undefined;
 		try {
 			await gotoAnalysisEditor(page, aId);
-
-			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expectVisibleEventually(buildBtn);
-			await buildBtn.click();
+			buildId = await startBuildAndCaptureId(page);
 
 			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
 			await expectVisibleEventually(openPreviewBtn);
@@ -106,7 +123,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-modal-closed');
 		} finally {
-			await cleanupBuildPreviewResources(page, aId, dsId);
+			await cleanupBuildPreviewResources(page, aId, dsId, buildId);
 		}
 	});
 });

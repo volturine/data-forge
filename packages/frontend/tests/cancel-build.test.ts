@@ -1,6 +1,10 @@
 import { test, expect } from './fixtures.js';
 import type { Page } from '@playwright/test';
-import { createLargeDatasource, createLongRunningAnalysis } from './utils/api.js';
+import {
+	createLargeDatasource,
+	createLongRunningAnalysis,
+	shutdownBuildEngine
+} from './utils/api.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
@@ -132,8 +136,9 @@ test.describe('Cancel Build – e2e', () => {
 		const analysisName = `E2E Cancel Preview ${uid()}`;
 		const dsId = await createLargeDatasource(request, dsName, 200);
 		const analysisId = await createLongRunningAnalysis(request, analysisName, dsId);
+		let buildId: string | undefined;
 		try {
-			await startBuildFromAnalysisPage(page, analysisId);
+			buildId = await startBuildFromAnalysisPage(page, analysisId);
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 5_000 });
 			await openCancelDialogFromPreview(page, preview);
@@ -157,6 +162,9 @@ test.describe('Cancel Build – e2e', () => {
 				timeout: 5_000
 			});
 		} finally {
+			if (buildId) {
+				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, dsName);
 		}
@@ -167,9 +175,10 @@ test.describe('Cancel Build – e2e', () => {
 		const analysisName = `E2E Cancel History ${uid()}`;
 		const dsId = await createLargeDatasource(request, dsName, 200);
 		const analysisId = await createLongRunningAnalysis(request, analysisName, dsId);
+		let buildId: string | undefined;
 		try {
 			// Skip preview so we reach Monitoring while the long-running build is still active.
-			const buildId = await startBuildFromAnalysisPage(page, analysisId, { openPreview: false });
+			buildId = await startBuildFromAnalysisPage(page, analysisId, { openPreview: false });
 
 			// Monitoring history is explicit-refresh only, so refresh until the build row
 			// appears as running before attempting the cancel action.
@@ -211,6 +220,9 @@ test.describe('Cancel Build – e2e', () => {
 			});
 			await expect(cancelledRow.getByText('Cancelled')).toBeVisible();
 		} finally {
+			if (buildId) {
+				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, dsName);
 		}
