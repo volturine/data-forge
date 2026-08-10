@@ -1,13 +1,14 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export function readyTimeoutMs(): number {
-	// Engine cold start + one preview. Keep this tight so stuck work fails fast.
-	return 30_000;
+	// Docker engine cold start + shell hydrate. Fail faster than 60s, but allow
+	// one full container health cycle under host load.
+	return 45_000;
 }
 
 /** Builds need a full exclusive engine start plus pipeline work. */
 export function buildTimeoutMs(): number {
-	return 60_000;
+	return 90_000;
 }
 
 function mainNavigation(page: Page): Locator {

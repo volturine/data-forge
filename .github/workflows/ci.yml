@@ -119,25 +119,24 @@ jobs:
     name: e2e
     runs-on: [self-hosted, linux, x64]
     if: github.event_name == 'pull_request' && github.base_ref == 'master'
-    timeout-minutes: 25
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
       PORT: "8001"
       FRONTEND_PORT: "3001"
-      # 6-core self-hosted runner: use the cores. Host-connected engines do not
-      # take Docker nano_cpu hard caps, so parallel browsers no longer starve
-      # the shell. Keep engine slots high enough to avoid create/destroy thrash.
-      PW_E2E_WORKERS: "4"
+      # 6-core runner, Docker engines still share the host with browsers/API.
+      # 4 Playwright workers regenerated blank-shell flakes (29 fails). Use 2
+      # workers: faster than serial (~12–15m target) without oversubscribing.
+      PW_E2E_WORKERS: "2"
       BUILD_WORKER_MIN_PROCESSES: "2"
       BUILD_WORKER_MAX_PROCESSES: "2"
-      COMPUTE_REQUEST_CONCURRENCY: "4"
-      MAX_CONCURRENT_ENGINES: "16"
+      COMPUTE_REQUEST_CONCURRENCY: "2"
+      MAX_CONCURRENT_ENGINES: "8"
       POLARS_MAX_MEMORY_MB: "256"
       E2E_ENGINE_IDLE_TTL_SECONDS: "120"
       E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "15"
-      # Fail the job if the suite regresses past ~15m of harness time.
-      E2E_TIMEOUT_SECONDS: "900"
+      E2E_TIMEOUT_SECONDS: "1200"
       LOG_LEVEL: "warning"
     steps:
       - uses: actions/checkout@v6
