@@ -119,7 +119,7 @@ jobs:
     name: e2e
     runs-on: [self-hosted, linux, x64]
     if: github.event_name == 'pull_request' && github.base_ref == 'master'
-    timeout-minutes: 40
+    timeout-minutes: 50
     permissions:
       contents: read
     env:
@@ -133,12 +133,12 @@ jobs:
       BUILD_WORKER_MIN_PROCESSES: "1"
       BUILD_WORKER_MAX_PROCESSES: "1"
       COMPUTE_REQUEST_CONCURRENCY: "2"
-      MAX_CONCURRENT_ENGINES: "8"
-      POLARS_MAX_MEMORY_MB: "512"
-      E2E_ENGINE_IDLE_TTL_SECONDS: "45"
-      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "10"
-      # One worker is slower; keep headroom under the 35m job budget.
-      E2E_TIMEOUT_SECONDS: "1800"
+      MAX_CONCURRENT_ENGINES: "6"
+      POLARS_MAX_MEMORY_MB: "384"
+      E2E_ENGINE_IDLE_TTL_SECONDS: "20"
+      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "5"
+      # Serial browser + up to two retries of slow tests needs a long harness.
+      E2E_TIMEOUT_SECONDS: "2400"
       # Keep service logs quiet enough that logging I/O does not contend with
       # page loads; capacity issues still surface via failed compute requests.
       LOG_LEVEL: "warning"

@@ -171,8 +171,8 @@ def test_container_nano_cpus_halves_quota_for_host_connected_engines(monkeypatch
     from runtime.docker_engine import _container_nano_cpus
 
     monkeypatch.setattr(settings, "engine_connect_host", "127.0.0.1")
-    assert _container_nano_cpus(1) == 500_000_000
-    assert _container_nano_cpus(2) == 1_000_000_000
+    assert _container_nano_cpus(1) == 250_000_000
+    assert _container_nano_cpus(2) == 500_000_000
 
     monkeypatch.setattr(settings, "engine_connect_host", "")
     assert _container_nano_cpus(1) == 1_000_000_000

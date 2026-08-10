@@ -104,7 +104,9 @@ def _container_nano_cpus(max_threads: int) -> int | None:
         return None
     per_thread = 1_000_000_000
     if settings.engine_connect_host:
-        per_thread = 500_000_000
+        # Host-connected e2e/dev: leave most cores for API, browser, and worker.
+        # Polars is still hard-capped via POLARS_MAX_THREADS inside the container.
+        per_thread = 250_000_000
     return max(100_000_000, max_threads * per_thread)
 
 
