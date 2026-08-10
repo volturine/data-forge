@@ -137,8 +137,8 @@ jobs:
       POLARS_MAX_MEMORY_MB: "384"
       E2E_ENGINE_IDLE_TTL_SECONDS: "20"
       E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "5"
-      # Serial browser + up to two retries of slow tests needs a long harness.
-      E2E_TIMEOUT_SECONDS: "2400"
+      # Serial browser + one retry of slow tests needs a long harness.
+      E2E_TIMEOUT_SECONDS: "2100"
       # Keep service logs quiet enough that logging I/O does not contend with
       # page loads; capacity issues still surface via failed compute requests.
       LOG_LEVEL: "warning"

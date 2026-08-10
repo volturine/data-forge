@@ -9,7 +9,7 @@ import {
 } from './utils/api.js';
 import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
-import { readyTimeoutMs } from './utils/readiness.js';
+import { readyTimeoutMs, waitForInlinePreviewReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -580,6 +580,9 @@ test.describe('Analyses – row count action', () => {
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
+			// Engines process jobs serially. Wait for the auto-preview to finish so
+			// the row-count request is not queued behind a still-running preview.
+			await waitForInlinePreviewReady(page);
 
 			const viewNode = page.locator('[data-step-type="view"]');
 			await expect(viewNode).toHaveCount(1, { timeout: 5_000 });

@@ -104,9 +104,10 @@ def _container_nano_cpus(max_threads: int) -> int | None:
         return None
     per_thread = 1_000_000_000
     if settings.engine_connect_host:
-        # Host-connected e2e/dev: leave most cores for API, browser, and worker.
+        # Host-connected e2e/dev: leave cores for API, browser, and worker.
         # Polars is still hard-capped via POLARS_MAX_THREADS inside the container.
-        per_thread = 250_000_000
+        # Skip a hard Docker quota entirely so concurrent engines cannot pin the host.
+        return None
     return max(100_000_000, max_threads * per_thread)
 
 
@@ -236,7 +237,6 @@ class DockerComputeEngine(ComputeEngine):
                 "labels": labels,
                 "network": settings.engine_docker_network,
                 "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
-                "nano_cpus": _container_nano_cpus(resources["max_threads"]),
                 "pids_limit": 256,
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
@@ -245,6 +245,9 @@ class DockerComputeEngine(ComputeEngine):
                 "restart_policy": {"Name": "no"},
                 "auto_remove": True,
             }
+            nano_cpus = _container_nano_cpus(resources["max_threads"])
+            if nano_cpus is not None:
+                create_kwargs["nano_cpus"] = nano_cpus
             if settings.engine_connect_host:
                 create_kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
                 create_kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}

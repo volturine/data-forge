@@ -12,7 +12,7 @@ import {
 	deleteHealthCheckViaUI,
 	deleteAnalysisViaUI
 } from './utils/ui-cleanup.js';
-import { gotoMonitoringTab, readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
+import { buildTimeoutMs, gotoMonitoringTab, readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
@@ -182,7 +182,7 @@ async function waitForBuildRowEventually(
 	buildId: string,
 	statuses: Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>
 ) {
-	return waitForBuildRowById(page, panel, buildId, statuses);
+	return waitForBuildRowById(page, panel, buildId, statuses, buildTimeoutMs());
 }
 
 /**
