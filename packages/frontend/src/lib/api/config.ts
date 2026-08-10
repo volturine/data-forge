@@ -1,4 +1,4 @@
-import { apiRequest } from './client';
+import { apiRequest, BOOTSTRAP_API_TIMEOUT_MS } from './client';
 import type { ApiError } from './client';
 import type { ResultAsync } from 'neverthrow';
 
@@ -19,5 +19,7 @@ export interface FrontendConfig {
 }
 
 export function getConfig(): ResultAsync<FrontendConfig, ApiError> {
-	return apiRequest<FrontendConfig>('/v1/config');
+	return apiRequest<FrontendConfig>('/v1/config', {
+		signal: AbortSignal.timeout(BOOTSTRAP_API_TIMEOUT_MS)
+	});
 }
