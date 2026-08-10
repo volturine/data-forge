@@ -33,11 +33,39 @@ logger = logging.getLogger(__name__)
 _ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
 _MIB = 1024 * 1024
 _IMAGE_DIGEST_RE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+_docker_runtime_lock = threading.Lock()
+_cached_daemon_cpu_count: int | None = None
+_validated_image_ref: str | None = None
+_validated_image_id: str | None = None
+_validated_network: str | None = None
 
 
 def _validate_engine_image_reference() -> None:
     if settings.prod_mode_enabled and _IMAGE_DIGEST_RE.fullmatch(settings.engine_image) is None:
         raise RuntimeError("Production ENGINE_IMAGE must use an immutable repository@sha256:digest reference")
+
+
+def _resolve_launch_context(client: Any) -> tuple[int | None, str]:
+    """Cache daemon/image/network lookups across engine starts on this worker.
+
+    Each Docker API round-trip is cheap alone but multiplies across hundreds of
+    e2e engine spawns. Image and network are immutable for a worker process.
+    """
+    global _cached_daemon_cpu_count, _validated_image_ref, _validated_image_id, _validated_network
+    with _docker_runtime_lock:
+        if _cached_daemon_cpu_count is None:
+            ncpu = client.info().get("NCPU")
+            _cached_daemon_cpu_count = ncpu if isinstance(ncpu, int) else 0
+        if _validated_image_ref != settings.engine_image or not _validated_image_id:
+            image = client.images.get(settings.engine_image)
+            _validated_image_ref = settings.engine_image
+            _validated_image_id = str(image.id)
+        if _validated_network != settings.engine_docker_network:
+            client.networks.get(settings.engine_docker_network)
+            _validated_network = settings.engine_docker_network
+        daemon_cpu = _cached_daemon_cpu_count if _cached_daemon_cpu_count and _cached_daemon_cpu_count > 0 else None
+        assert _validated_image_id is not None
+        return daemon_cpu, _validated_image_id
 
 
 def reconcile_deployment_containers() -> int:
@@ -193,13 +221,8 @@ class DockerComputeEngine(ComputeEngine):
             credentials = resolve_engine_credentials(self._namespace, self.identity)
             client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
             try:
-                daemon_cpu_count = client.info().get("NCPU")
-                resources = _effective_resources(
-                    self.resource_config,
-                    runtime_cpu_count=daemon_cpu_count if isinstance(daemon_cpu_count, int) else None,
-                )
-                image = client.images.get(settings.engine_image)
-                client.networks.get(settings.engine_docker_network)
+                daemon_cpu_count, image_id = _resolve_launch_context(client)
+                resources = _effective_resources(self.resource_config, runtime_cpu_count=daemon_cpu_count)
             except Exception:
                 client.close()
                 raise
@@ -213,7 +236,7 @@ class DockerComputeEngine(ComputeEngine):
                 "io.dataforge.scope": _identity_scope(self.identity),
                 "io.dataforge.resource-id": self.identity.resource_id,
                 "io.dataforge.protocol-version": str(ENGINE_PROTOCOL_VERSION),
-                "io.dataforge.image-id": str(image.id),
+                "io.dataforge.image-id": image_id,
                 "io.dataforge.created-at": datetime.now(UTC).isoformat(),
             }
             create_kwargs: dict[str, object] = {

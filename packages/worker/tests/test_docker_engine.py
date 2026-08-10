@@ -166,7 +166,7 @@ def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) ->
     assert result.error_kind == "engine_shutdown"
 
 
-def test_container_nano_cpus_halves_quota_for_host_connected_engines(monkeypatch) -> None:
+def test_container_nano_cpus_skips_hard_quota_for_host_connected_engines(monkeypatch) -> None:
     from runtime.docker_engine import _container_nano_cpus
 
     monkeypatch.setattr(settings, "engine_connect_host", "127.0.0.1")
@@ -176,3 +176,53 @@ def test_container_nano_cpus_halves_quota_for_host_connected_engines(monkeypatch
     monkeypatch.setattr(settings, "engine_connect_host", "")
     assert _container_nano_cpus(1) == 1_000_000_000
     assert _container_nano_cpus(0) is None
+
+
+def test_resolve_launch_context_caches_daemon_and_image_lookups(monkeypatch) -> None:
+    from runtime import docker_engine
+
+    class Image:
+        id = "sha256:abc"
+
+    class Images:
+        calls = 0
+
+        def get(self, name: str):
+            self.calls += 1
+            assert name == "engine:test"
+            return Image()
+
+    class Networks:
+        calls = 0
+
+        def get(self, name: str):
+            self.calls += 1
+            assert name == "net-test"
+            return object()
+
+    class Client:
+        def __init__(self) -> None:
+            self.images = Images()
+            self.networks = Networks()
+            self.info_calls = 0
+
+        def info(self):
+            self.info_calls += 1
+            return {"NCPU": 6}
+
+    monkeypatch.setattr(settings, "engine_image", "engine:test")
+    monkeypatch.setattr(settings, "engine_docker_network", "net-test")
+    docker_engine._cached_daemon_cpu_count = None
+    docker_engine._validated_image_ref = None
+    docker_engine._validated_image_id = None
+    docker_engine._validated_network = None
+
+    client = Client()
+    first = docker_engine._resolve_launch_context(client)
+    second = docker_engine._resolve_launch_context(client)
+
+    assert first == (6, "sha256:abc")
+    assert second == first
+    assert client.info_calls == 1
+    assert client.images.calls == 1
+    assert client.networks.calls == 1
