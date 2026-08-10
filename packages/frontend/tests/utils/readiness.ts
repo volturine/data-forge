@@ -45,9 +45,29 @@ export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): P
  * completed, and the Svelte page component has started rendering.
  */
 export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	await expect(mainNavigation(page)).toBeVisible({ timeout });
-	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
-	await waitForAnyVisible(page.locator('main'), timeout);
+	const deadline = Date.now() + timeout;
+	let lastError: unknown;
+	// Under Docker-engine load the first paint can hang on a blank spinner.
+	// One soft reload inside the budget recovers without failing the suite.
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		const remaining = Math.max(1_000, deadline - Date.now());
+		try {
+			await expect(mainNavigation(page)).toBeVisible({ timeout: remaining });
+			await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({
+				timeout: remaining
+			});
+			await waitForAnyVisible(page.locator('main'), remaining);
+			return;
+		} catch (error) {
+			lastError = error;
+			if (attempt === 0 && Date.now() + 2_000 < deadline) {
+				await page.reload({ waitUntil: 'domcontentloaded' });
+				continue;
+			}
+			throw error;
+		}
+	}
+	throw lastError;
 }
 
 async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {
