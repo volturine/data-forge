@@ -126,12 +126,14 @@ jobs:
       PORT: "8001"
       FRONTEND_PORT: "3001"
       # This self-hosted runner executes browsers, runtime roles, and Docker
-      # engines together. Keep enough CPU/memory headroom for the app shell.
+      # engines together. Engines each receive a full CPU, so serialize native
+      # compute while retaining two browser workers; otherwise engine work can
+      # starve the frontend/backend and turn unrelated navigations into 500s.
       PW_E2E_WORKERS: "2"
-      BUILD_WORKER_MIN_PROCESSES: "2"
-      BUILD_WORKER_MAX_PROCESSES: "2"
-      COMPUTE_REQUEST_CONCURRENCY: "2"
-      MAX_CONCURRENT_ENGINES: "4"
+      BUILD_WORKER_MIN_PROCESSES: "1"
+      BUILD_WORKER_MAX_PROCESSES: "1"
+      COMPUTE_REQUEST_CONCURRENCY: "1"
+      MAX_CONCURRENT_ENGINES: "2"
     steps:
       - uses: actions/checkout@v6
 
