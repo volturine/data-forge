@@ -9,7 +9,7 @@ import {
 } from './utils/api.js';
 import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
-import { readyTimeoutMs, waitForInlinePreviewReady } from './utils/readiness.js';
+import { buildTimeoutMs, readyTimeoutMs, waitForInlinePreviewReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -31,7 +31,8 @@ test.afterAll(async ({ browser, workerAuth }) => {
 // ── Output visibility toggle ────────────────────────────────────────────────
 
 async function expectCompletedEventually(locator: Locator) {
-	await expect(locator).toContainText(/Completed/i, { timeout: 15_000 });
+	// Builds under parallel Docker engines need the full cold-start budget.
+	await expect(locator).toContainText(/Completed/i, { timeout: buildTimeoutMs() });
 }
 
 /** Cleanup via worker helper context — safe after test-page timeout/teardown. */

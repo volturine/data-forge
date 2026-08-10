@@ -131,10 +131,11 @@ jobs:
       # Engine pool stays high enough for identity reuse under concurrent previews.
       # No Playwright retries.
       PW_E2E_WORKERS: "4"
-      BUILD_WORKER_MIN_PROCESSES: "2"
-      BUILD_WORKER_MAX_PROCESSES: "2"
-      COMPUTE_REQUEST_CONCURRENCY: "4"
-      MAX_CONCURRENT_ENGINES: "16"
+      # One build executor per browser worker so parallel builds do not queue.
+      BUILD_WORKER_MIN_PROCESSES: "4"
+      BUILD_WORKER_MAX_PROCESSES: "4"
+      COMPUTE_REQUEST_CONCURRENCY: "8"
+      MAX_CONCURRENT_ENGINES: "24"
       POLARS_MAX_MEMORY_MB: "256"
       E2E_ENGINE_IDLE_TTL_SECONDS: "120"
       E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "15"
