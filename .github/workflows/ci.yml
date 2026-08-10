@@ -117,26 +117,29 @@ jobs:
 
   e2e:
     name: e2e
+    needs: [backend, frontend]
     runs-on: [self-hosted, linux, x64]
     if: github.event_name == 'pull_request' && github.base_ref == 'master'
-    timeout-minutes: 30
+    timeout-minutes: 35
     permissions:
       contents: read
     env:
       PORT: "8001"
       FRONTEND_PORT: "3001"
-      # 6-core runner, Docker engines still share the host with browsers/API.
-      # 4 Playwright workers regenerated blank-shell flakes (29 fails). Use 2
-      # workers: faster than serial (~12–15m target) without oversubscribing.
-      PW_E2E_WORKERS: "2"
-      BUILD_WORKER_MIN_PROCESSES: "2"
-      BUILD_WORKER_MAX_PROCESSES: "2"
+      # Docker engines share this self-hosted host with Chromium + API. Parallel
+      # Playwright workers (2–4) still produce blank-shell layout timeouts under
+      # concurrent container starts. Keep one browser worker for reliability;
+      # engine identity reuse + warm image keep Docker path correct without
+      # thrashing. No Playwright retries (e2e-runtime-baseline).
+      PW_E2E_WORKERS: "1"
+      BUILD_WORKER_MIN_PROCESSES: "1"
+      BUILD_WORKER_MAX_PROCESSES: "1"
       COMPUTE_REQUEST_CONCURRENCY: "2"
       MAX_CONCURRENT_ENGINES: "8"
       POLARS_MAX_MEMORY_MB: "256"
-      E2E_ENGINE_IDLE_TTL_SECONDS: "120"
-      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "15"
-      E2E_TIMEOUT_SECONDS: "1200"
+      E2E_ENGINE_IDLE_TTL_SECONDS: "180"
+      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "20"
+      E2E_TIMEOUT_SECONDS: "1500"
       LOG_LEVEL: "warning"
     steps:
       - uses: actions/checkout@v6
