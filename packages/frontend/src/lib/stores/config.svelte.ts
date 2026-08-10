@@ -14,15 +14,24 @@ export class ConfigStore {
 		this.loading = true;
 		this.error = null;
 
-		const request = getConfig().match(
-			(config) => {
-				this.config = config;
-				this.fetched = true;
-			},
-			(err) => {
-				this.error = err.message;
+		const request = (async () => {
+			// One automatic retry covers transient API stalls (e.g. host load
+			// while Docker engines boot) that would otherwise leave the shell
+			// on a permanent bootstrap spinner.
+			for (let attempt = 0; attempt < 2; attempt += 1) {
+				const result = await getConfig();
+				if (result.isOk()) {
+					this.config = result.value;
+					this.fetched = true;
+					this.error = null;
+					return;
+				}
+				this.error = result.error.message;
+				if (attempt === 0) {
+					await new Promise((resolve) => setTimeout(resolve, 250));
+				}
 			}
-		);
+		})();
 
 		this.pending = request.finally(() => {
 			this.loading = false;

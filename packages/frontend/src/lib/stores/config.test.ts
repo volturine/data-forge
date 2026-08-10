@@ -28,22 +28,30 @@ function makeConfig(overrides: Partial<FrontendConfig> = {}): FrontendConfig {
 	};
 }
 
+function okResult(config: FrontendConfig) {
+	return {
+		isOk: () => true as const,
+		isErr: () => false as const,
+		value: config,
+		error: undefined as never
+	};
+}
+
+function errResult(message: string) {
+	return {
+		isOk: () => false as const,
+		isErr: () => true as const,
+		value: undefined as never,
+		error: { message }
+	};
+}
+
 function mockSuccess(config: FrontendConfig) {
-	mockGetConfig.mockReturnValue({
-		match: (onOk: (c: FrontendConfig) => void, _onErr: (e: { message: string }) => void) => {
-			onOk(config);
-			return Promise.resolve();
-		}
-	});
+	mockGetConfig.mockResolvedValue(okResult(config));
 }
 
 function mockError(message: string) {
-	mockGetConfig.mockReturnValue({
-		match: (_onOk: unknown, onErr: (e: { message: string }) => void) => {
-			onErr({ message });
-			return Promise.resolve();
-		}
-	});
+	mockGetConfig.mockResolvedValue(errResult(message));
 }
 
 describe('ConfigStore', () => {
@@ -150,7 +158,7 @@ describe('ConfigStore', () => {
 	});
 
 	describe('fetch error', () => {
-		test('sets error message and clears loading', async () => {
+		test('sets error message and clears loading after retries', async () => {
 			mockError('Network failure');
 
 			await store.fetch();
@@ -158,12 +166,27 @@ describe('ConfigStore', () => {
 			expect(store.error).toBe('Network failure');
 			expect(store.loading).toBe(false);
 			expect(store.config).toBeNull();
+			// One automatic retry on the same fetch call.
+			expect(mockGetConfig).toHaveBeenCalledTimes(2);
 		});
 
 		test('getters still return defaults after error', async () => {
 			mockError('boom');
 			await store.fetch();
 			expect(store.timezone).toBe('UTC');
+		});
+
+		test('retries once and succeeds on the second attempt', async () => {
+			const cfg = makeConfig();
+			mockGetConfig
+				.mockResolvedValueOnce(errResult('transient'))
+				.mockResolvedValueOnce(okResult(cfg));
+
+			await store.fetch();
+
+			expect(store.config).toEqual(cfg);
+			expect(store.error).toBeNull();
+			expect(mockGetConfig).toHaveBeenCalledTimes(2);
 		});
 	});
 
@@ -197,22 +220,17 @@ describe('ConfigStore', () => {
 		});
 
 		test('concurrent fetches share the same promise', async () => {
-			let resolve!: () => void;
-			const delayed = new Promise<void>((r) => {
+			let resolve!: (value: ReturnType<typeof okResult>) => void;
+			const delayed = new Promise<ReturnType<typeof okResult>>((r) => {
 				resolve = r;
 			});
 
-			mockGetConfig.mockReturnValue({
-				match: (onOk: (c: FrontendConfig) => void) => {
-					onOk(makeConfig());
-					return delayed;
-				}
-			});
+			mockGetConfig.mockReturnValue(delayed);
 
 			const p1 = store.fetch();
 			const p2 = store.fetch();
 
-			resolve();
+			resolve(okResult(makeConfig()));
 			await p1;
 			await p2;
 
@@ -225,12 +243,13 @@ describe('ConfigStore', () => {
 			mockError('first try');
 			await store.fetch();
 			expect(store.error).toBe('first try');
-			expect(mockGetConfig).toHaveBeenCalledTimes(1);
+			// Two getConfig attempts from the automatic retry inside fetch.
+			expect(mockGetConfig).toHaveBeenCalledTimes(2);
 
 			mockSuccess(makeConfig());
 			await store.fetch();
 			expect(store.config).not.toBeNull();
-			expect(mockGetConfig).toHaveBeenCalledTimes(2);
+			expect(mockGetConfig).toHaveBeenCalledTimes(3);
 		});
 	});
 });

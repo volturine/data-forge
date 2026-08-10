@@ -127,18 +127,19 @@ jobs:
       PORT: "8001"
       FRONTEND_PORT: "3001"
       # Docker engines share this self-hosted host with Chromium + API. Parallel
-      # Playwright workers (2–4) still produce blank-shell layout timeouts under
-      # concurrent container starts. Keep one browser worker for reliability;
-      # engine identity reuse + warm image keep Docker path correct without
-      # thrashing. No Playwright retries (e2e-runtime-baseline).
+      # Playwright workers still produce blank-shell layout timeouts under
+      # concurrent container starts. One browser worker + modest engine cap keeps
+      # identity reuse without starving the app shell. No Playwright retries.
       PW_E2E_WORKERS: "1"
       BUILD_WORKER_MIN_PROCESSES: "1"
       BUILD_WORKER_MAX_PROCESSES: "1"
       COMPUTE_REQUEST_CONCURRENCY: "2"
-      MAX_CONCURRENT_ENGINES: "8"
+      MAX_CONCURRENT_ENGINES: "4"
       POLARS_MAX_MEMORY_MB: "256"
-      E2E_ENGINE_IDLE_TTL_SECONDS: "180"
-      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "20"
+      # Reap idle engines quickly so leftover containers do not pin RAM/CPU
+      # across later pure-UI navigations that only need the app shell.
+      E2E_ENGINE_IDLE_TTL_SECONDS: "45"
+      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "10"
       E2E_TIMEOUT_SECONDS: "1500"
       LOG_LEVEL: "warning"
     steps:
