@@ -3,11 +3,14 @@ import {
 	createDatasource,
 	createDatasourceWithDates,
 	createAnalysis,
-	shutdownEngine,
 	type E2ERequest
 } from './utils/api.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor } from './utils/analysis.js';
-import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import {
+	createCleanupPage,
+	deleteDatasourceViaUI,
+	shutdownAnalysisEngineViaUI
+} from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
 import type { Browser } from '@playwright/test';
@@ -116,7 +119,7 @@ test.describe('Analyses – download config format switching', () => {
 
 			await screenshot(page, 'analysis/operations', 'download-config-format-switch');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -147,7 +150,7 @@ test.describe('Analyses – limit config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'limit-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -178,7 +181,7 @@ test.describe('Analyses – expression config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'expression-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -231,7 +234,7 @@ test.describe('Analyses – sort config editing', () => {
 			// Apply is now enabled again (change from applied state)
 			await expect(applyBtn).toBeEnabled();
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -293,7 +296,7 @@ test.describe('Analyses – rename config editing', () => {
 			// And both buttons disabled again
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -351,7 +354,7 @@ test.describe('Analyses – filter config editing', () => {
 			await expect(configPanel.getByText('Alice')).toBeVisible();
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -369,7 +372,7 @@ test.describe('Analyses – view node inline preview', () => {
 
 			await screenshot(page, 'analysis/operations', 'view-inline-preview');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -404,7 +407,7 @@ test.describe('Analyses – chart config and preview', () => {
 
 			await screenshot(page, 'analysis/operations', 'chart-preview-rendered');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -463,7 +466,7 @@ test.describe('Analyses – groupby config editing', () => {
 			await expect(configPanel.getByText('mean(age) as age_mean')).not.toBeVisible();
 			await expect(applyBtn).toBeEnabled();
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -491,7 +494,7 @@ test.describe('Analyses – sample config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'sample-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -526,7 +529,7 @@ test.describe('Analyses – topk config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'topk-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -561,7 +564,7 @@ test.describe('Analyses – unpivot config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'unpivot-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -600,7 +603,7 @@ test.describe('Analyses – fill null config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'fillnull-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -639,7 +642,7 @@ test.describe('Analyses – pivot config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'pivot-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -684,7 +687,7 @@ test.describe('Analyses – string transform config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'string-transform-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -726,7 +729,7 @@ test.describe('Analyses – drop config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'drop-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -761,7 +764,7 @@ test.describe('Analyses – select config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'select-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -797,7 +800,7 @@ test.describe('Analyses – with_columns config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'with-columns-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -828,7 +831,7 @@ test.describe('Analyses – download config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'download-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -862,7 +865,7 @@ test.describe('Analyses – notification config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'notification-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -903,7 +906,7 @@ test.describe('Analyses – AI config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'ai-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -959,7 +962,7 @@ test.describe('Analyses – join config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'join-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -976,7 +979,7 @@ test.describe('Analyses – timeseries config editing', () => {
 			});
 			await screenshot(page, 'analysis/operations', 'timeseries-no-date-warning');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 
@@ -1006,7 +1009,7 @@ test.describe('Analyses – timeseries config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'timeseries-extract-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -1051,7 +1054,7 @@ test.describe('Analyses – deduplicate config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'deduplicate-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -1084,7 +1087,7 @@ test.describe('Analyses – explode config warning', () => {
 
 			await screenshot(page, 'analysis/operations', 'explode-config-warning');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -1143,7 +1146,7 @@ test.describe('Analyses – union_by_name config editing', () => {
 
 			await screenshot(page, 'analysis/operations', 'union-config-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });
@@ -1197,7 +1200,7 @@ test.describe('Analyses – explode config positive path', () => {
 
 			await screenshot(page, 'analysis/operations', 'explode-positive-applied');
 		} finally {
-			await shutdownEngine(request, aId);
+			await shutdownAnalysisEngineViaUI(page, aId);
 		}
 	});
 });

@@ -2,14 +2,12 @@ import type { Locator, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
+import { createDatasource, createAnalysis } from './utils/api.js';
 import {
-	createDatasource,
-	createAnalysis,
-	deleteAnalysisByApi,
-	nameForDatasourceId,
-	shutdownBuildEngine
-} from './utils/api.js';
-import { deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+	deleteAnalysisViaUI,
+	deleteDatasourceViaUI,
+	shutdownBuildEngineViaUI
+} from './utils/ui-cleanup.js';
 import { readyTimeoutMs } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
@@ -22,26 +20,18 @@ async function expectVisibleEventually(locator: Locator) {
 
 async function cleanupBuildPreviewResources(
 	page: Page,
-	analysisId: string,
-	datasourceId: string,
+	analysisName: string,
+	datasourceName: string,
 	buildId?: string
 ): Promise<void> {
-	// Free exclusive build engine first (if known), then analysis engine via delete.
+	// Free engines through the Engines popup, then delete resources via gallery UI.
 	if (buildId) {
-		await shutdownBuildEngine(page, buildId).catch((error) => {
-			console.warn(`[e2e] shutdownBuildEngine failed for ${buildId}:`, error);
+		await shutdownBuildEngineViaUI(page, buildId).catch((error) => {
+			console.warn(`[e2e] shutdownBuildEngineViaUI failed for ${buildId}:`, error);
 		});
 	}
-	const analysisDeleteStatus = await deleteAnalysisByApi(page, analysisId);
-	if (![204, 404].includes(analysisDeleteStatus)) {
-		throw new Error(
-			`Cleanup DELETE /api/v1/analysis/${analysisId} returned HTTP ${analysisDeleteStatus}`
-		);
-	}
-	const dsName = nameForDatasourceId(datasourceId);
-	if (dsName) {
-		await deleteDatasourceViaUI(page, dsName, { id: datasourceId });
-	}
+	await deleteAnalysisViaUI(page, analysisName);
+	await deleteDatasourceViaUI(page, datasourceName);
 }
 
 async function startBuildAndCaptureId(page: Page): Promise<string | undefined> {
@@ -94,7 +84,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-terminal');
 		} finally {
-			await cleanupBuildPreviewResources(page, aId, dsId, buildId);
+			await cleanupBuildPreviewResources(page, aName, dsName, buildId);
 		}
 	});
 
@@ -123,7 +113,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-modal-closed');
 		} finally {
-			await cleanupBuildPreviewResources(page, aId, dsId, buildId);
+			await cleanupBuildPreviewResources(page, aName, dsName, buildId);
 		}
 	});
 });

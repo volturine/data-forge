@@ -4,14 +4,14 @@ import {
 	createSchedule,
 	createHealthCheck,
 	createLargeDatasource,
-	createMultiStepAnalysis,
-	shutdownBuildEngine
+	createMultiStepAnalysis
 } from './utils/api.js';
 import {
 	deleteDatasourceViaUI,
 	deleteScheduleViaUI,
 	deleteHealthCheckViaUI,
-	deleteAnalysisViaUI
+	deleteAnalysisViaUI,
+	shutdownBuildEngineViaUI
 } from './utils/ui-cleanup.js';
 import {
 	buildTimeoutMs,
@@ -796,7 +796,7 @@ test.describe('Monitoring – Builds tab', () => {
 			expect(stats).toHaveProperty('runs');
 		} finally {
 			if (buildId) {
-				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
 			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
@@ -837,7 +837,7 @@ test.describe('Monitoring – Builds tab', () => {
 			});
 		} finally {
 			if (buildId) {
-				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
 			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
@@ -867,7 +867,7 @@ test.describe('Monitoring – Builds tab', () => {
 			).toHaveCount(1);
 		} finally {
 			if (buildId) {
-				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
 			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
@@ -901,7 +901,7 @@ test.describe('Monitoring – Builds tab', () => {
 				await expect(row).toContainText('Build');
 				await expect(row).not.toContainText('Preview');
 				// Free the exclusive build engine before starting the next one.
-				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
 			}
 
 			let previewRequests = 0;
@@ -922,7 +922,7 @@ test.describe('Monitoring – Builds tab', () => {
 		} finally {
 			// Free engines even when assertions fail; keep cleanup cheap under budget.
 			for (const buildId of startedBuildIds) {
-				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
 			}
 			await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
 			await deleteDatasourceViaUI(page, ds).catch(() => undefined);
@@ -1076,7 +1076,7 @@ test.describe('Monitoring – live build history', () => {
 			await screenshot(page, 'monitoring', 'build-history-terminal');
 		} finally {
 			if (buildId) {
-				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
 			}
 			await deleteAnalysisViaUI(page, aName);
 			await deleteDatasourceViaUI(page, dsName);

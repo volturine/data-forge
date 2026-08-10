@@ -1,11 +1,11 @@
 import { test, expect } from './fixtures.js';
 import type { Page } from '@playwright/test';
+import { createLargeDatasource, createLongRunningAnalysis } from './utils/api.js';
 import {
-	createLargeDatasource,
-	createLongRunningAnalysis,
-	shutdownBuildEngine
-} from './utils/api.js';
-import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+	deleteAnalysisViaUI,
+	deleteDatasourceViaUI,
+	shutdownBuildEngineViaUI
+} from './utils/ui-cleanup.js';
 import { readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { waitForBuildPreviewId } from './utils/builds.js';
@@ -163,7 +163,7 @@ test.describe('Cancel Build – e2e', () => {
 			});
 		} finally {
 			if (buildId) {
-				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
 			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, dsName);
@@ -221,7 +221,7 @@ test.describe('Cancel Build – e2e', () => {
 			await expect(cancelledRow.getByText('Cancelled')).toBeVisible();
 		} finally {
 			if (buildId) {
-				await shutdownBuildEngine(page, buildId).catch(() => undefined);
+				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
 			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, dsName);

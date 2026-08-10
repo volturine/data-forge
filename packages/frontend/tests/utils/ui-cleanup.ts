@@ -1,18 +1,96 @@
 import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
-import {
-	findAnalysisIdByName,
-	shutdownDatasourcePreviewEngine,
-	shutdownEngine,
-	unregisterAnalysis,
-	type E2EStorageState
-} from './api.js';
+import { findAnalysisIdByName, unregisterAnalysis, type E2EStorageState } from './api.js';
 import {
 	gotoAnalysesGallery,
 	gotoUdfLibrary,
 	gotoMonitoringTab,
-	waitForDatasourceList
+	waitForDatasourceList,
+	waitForLayoutReady
 } from './readiness.js';
+
+/** Matches product `engineIdentityKey` (`scope:resource_id`). */
+export type EngineUiScope = 'analysis_interactive' | 'datasource_preview' | 'build';
+
+function engineIdentityKey(scope: EngineUiScope, resourceId: string): string {
+	return `${scope}:${resourceId}`;
+}
+
+/**
+ * Open the sidebar Engines popup (human path for engine lifecycle).
+ * Pure UI — no direct compute API calls from the test helper.
+ */
+export async function openEnginesPopup(page: Page): Promise<Locator> {
+	const popup = page.locator('[data-engines-popup="true"]');
+	if (await popup.isVisible().catch(() => false)) {
+		return popup;
+	}
+	// Sidebar is only reliable once the shell has finished bootstrap.
+	await waitForLayoutReady(page, 5_000).catch(() => undefined);
+	const trigger = page.getByRole('button', { name: 'Engine Monitor' });
+	await expect(trigger).toBeVisible({ timeout: 5_000 });
+	await trigger.click();
+	await expect(popup).toBeVisible({ timeout: 5_000 });
+	// Stream connect shows "Loading engines..." then rows or empty state.
+	await expect(popup.getByText('Loading engines...'))
+		.toBeHidden({ timeout: 10_000 })
+		.catch(() => undefined);
+	return popup;
+}
+
+export async function closeEnginesPopup(page: Page): Promise<void> {
+	const popup = page.locator('[data-engines-popup="true"]');
+	if (!(await popup.isVisible().catch(() => false))) return;
+	await popup
+		.getByLabel('Close engines')
+		.click({ timeout: 1_500 })
+		.catch(() => undefined);
+	await expect(popup)
+		.toBeHidden({ timeout: 3_000 })
+		.catch(() => undefined);
+}
+
+/**
+ * Shut down one engine via the visible Engines popup power button.
+ * Prefer this over any direct DELETE /compute/engine/* in e2e.
+ */
+export async function shutdownEngineViaUI(
+	page: Page,
+	resourceId: string,
+	scope: EngineUiScope = 'analysis_interactive'
+): Promise<void> {
+	if (!resourceId) return;
+	const key = engineIdentityKey(scope, resourceId);
+	const popup = await openEnginesPopup(page);
+	const row = popup.locator(`[data-engine-row="${key}"]`);
+	if (!(await row.isVisible().catch(() => false))) {
+		await closeEnginesPopup(page);
+		return;
+	}
+	const power = popup.locator(`[data-engine-shutdown="${key}"]`);
+	await expect(power).toBeEnabled({ timeout: 5_000 });
+	await power.click({ timeout: 3_000 });
+	// Product optimistically removes the row; wait for it to leave the list.
+	await expect(row)
+		.toBeHidden({ timeout: 15_000 })
+		.catch(() => undefined);
+	await closeEnginesPopup(page);
+}
+
+export async function shutdownAnalysisEngineViaUI(page: Page, analysisId: string): Promise<void> {
+	await shutdownEngineViaUI(page, analysisId, 'analysis_interactive');
+}
+
+export async function shutdownDatasourcePreviewEngineViaUI(
+	page: Page,
+	datasourceId: string
+): Promise<void> {
+	await shutdownEngineViaUI(page, datasourceId, 'datasource_preview');
+}
+
+export async function shutdownBuildEngineViaUI(page: Page, buildId: string): Promise<void> {
+	await shutdownEngineViaUI(page, buildId, 'build');
+}
 
 function confirmDialog(page: Page, heading: string | RegExp): Locator {
 	return page
@@ -162,9 +240,9 @@ async function deleteDatasourceViaUIOnPage(
 	if (!(await row.isVisible().catch(() => false))) return;
 	const datasourceId = options?.id ?? (await row.getAttribute('data-ds-id'));
 	if (datasourceId) {
-		await shutdownDatasourcePreviewEngine(page, datasourceId).catch((error) => {
+		await shutdownDatasourcePreviewEngineViaUI(page, datasourceId).catch((error) => {
 			console.warn(
-				`[e2e] shutdownDatasourcePreviewEngine before UI delete failed for ${datasourceId}:`,
+				`[e2e] shutdownDatasourcePreviewEngineViaUI before UI delete failed for ${datasourceId}:`,
 				error
 			);
 		});
@@ -248,18 +326,21 @@ async function deleteAnalysisViaUIOnPage(
 	} catch {
 		const knownId = findAnalysisIdByName(name);
 		if (knownId) {
-			// Card gone but engine may still be warm — free it and drop the registry entry.
-			await shutdownEngine(page, knownId).catch(() => undefined);
+			// Card gone but engine may still be warm — free via Engines popup.
+			await shutdownAnalysisEngineViaUI(page, knownId).catch(() => undefined);
 			unregisterAnalysis(knownId);
 		}
 		return;
 	}
 	const analysisId = await resolveAnalysisIdFromCard(card, name);
-	// Free Docker engine before UI delete so parallel e2e does not retain containers
-	// until idle TTL. DELETE analysis also queues durable shutdown as a backstop.
+	// Free Docker engine via visible Engines UI before deleting the analysis card.
+	// Analysis DELETE also queues durable shutdown as a backstop.
 	if (analysisId) {
-		await shutdownEngine(page, analysisId).catch((error) => {
-			console.warn(`[e2e] shutdownEngine before UI delete failed for ${analysisId}:`, error);
+		await shutdownAnalysisEngineViaUI(page, analysisId).catch((error) => {
+			console.warn(
+				`[e2e] shutdownAnalysisEngineViaUI before UI delete failed for ${analysisId}:`,
+				error
+			);
 		});
 	}
 	const deleteResponse = analysisId
