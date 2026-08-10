@@ -794,10 +794,12 @@ describe('AnalysisStore.normalizeSteps', () => {
 			thumbnail: null
 		};
 		store.current = analysis;
-		expect(() => store.applyAnalysis(analysis)).toThrow(/missing depends_on/);
+		store.applyAnalysis(analysis);
+		// Missing depends_on is coerced from pipeline order so load never throws.
+		expect(store.tabs[0]?.steps[1]?.depends_on).toEqual(['A']);
 	});
 
-	test('rejects steps that lack is_applied', () => {
+	test('coerces steps that lack is_applied to true', () => {
 		const step = makeStep({ id: 'A' });
 		delete step.is_applied;
 		const tab = makeTab({
@@ -816,7 +818,8 @@ describe('AnalysisStore.normalizeSteps', () => {
 			thumbnail: null
 		};
 		store.current = analysis;
-		expect(() => store.applyAnalysis(analysis)).toThrow(/missing is_applied/);
+		store.applyAnalysis(analysis);
+		expect(store.tabs[0]?.steps[0]?.is_applied).toBe(true);
 	});
 });
 
