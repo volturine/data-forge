@@ -130,14 +130,16 @@ jobs:
       # and fails visibly, so we no longer serialize browsers to hide shell hangs.
       # Engine pool stays high enough for identity reuse under concurrent previews.
       # No Playwright retries.
+      # Four browsers match pre-Docker e2e. Engine concurrency is capped so
+      # Chromium + API keep host headroom (24 engines + 4 Chromium OOMs the
+      # runner into "Failed to fetch" / ERR_NETWORK_CHANGED).
       PW_E2E_WORKERS: "4"
-      # One build executor per browser worker so parallel builds do not queue.
       BUILD_WORKER_MIN_PROCESSES: "4"
       BUILD_WORKER_MAX_PROCESSES: "4"
-      COMPUTE_REQUEST_CONCURRENCY: "8"
-      MAX_CONCURRENT_ENGINES: "24"
-      POLARS_MAX_MEMORY_MB: "256"
-      E2E_ENGINE_IDLE_TTL_SECONDS: "120"
+      COMPUTE_REQUEST_CONCURRENCY: "4"
+      MAX_CONCURRENT_ENGINES: "8"
+      POLARS_MAX_MEMORY_MB: "192"
+      E2E_ENGINE_IDLE_TTL_SECONDS: "90"
       E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "15"
       E2E_TIMEOUT_SECONDS: "1500"
       LOG_LEVEL: "warning"
