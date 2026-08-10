@@ -31,7 +31,8 @@ const {
 	switchNamespace,
 	useNamespace,
 	isNamespaceReady,
-	isNamespaceSwitching
+	isNamespaceSwitching,
+	getNamespaceInitError
 } = await import('./namespace.svelte');
 
 describe('namespace store', () => {
@@ -80,11 +81,12 @@ describe('namespace store', () => {
 			expect(isNamespaceReady()).toBe(true);
 		});
 
-		test('rejects init when config default namespace is missing', async () => {
+		test('records init error when config default namespace is missing', async () => {
 			mockIdbGet.mockResolvedValue(null);
 			mockConfigStore.config = null;
-			await expect(initNamespace()).rejects.toThrow('Default namespace missing from config');
+			await initNamespace();
 			expect(isNamespaceReady()).toBe(false);
+			expect(getNamespaceInitError()).toMatch(/Default namespace missing|Failed to load|config/i);
 		});
 
 		test('returns true when namespace already set before init', async () => {
@@ -110,10 +112,12 @@ describe('namespace store', () => {
 			expect(requireNamespace()).toBe('config-ns');
 		});
 
-		test('rejects when both IndexedDB and config are empty', async () => {
+		test('sets init error when both IndexedDB and config are empty', async () => {
 			mockIdbGet.mockResolvedValue(null);
 			mockConfigStore.config = null;
-			await expect(initNamespace()).rejects.toThrow('Default namespace missing from config');
+			await initNamespace();
+			expect(isNamespaceReady()).toBe(false);
+			expect(getNamespaceInitError()).toBeTruthy();
 		});
 
 		test('persists resolved namespace to IndexedDB', async () => {
@@ -174,8 +178,9 @@ describe('namespace store', () => {
 		test('deletes stale whitespace-only value from IDB during init', async () => {
 			mockIdbGet.mockResolvedValue('   ');
 			mockConfigStore.config = null;
-			await expect(initNamespace()).rejects.toThrow('Default namespace missing from config');
+			await initNamespace();
 			expect(mockIdbDelete).toHaveBeenCalledWith('namespace');
+			expect(isNamespaceReady()).toBe(false);
 		});
 	});
 

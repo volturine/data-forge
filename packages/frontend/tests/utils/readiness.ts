@@ -31,9 +31,8 @@ type MonitoringTabKey = 'builds' | 'schedules' | 'health';
  * nav links) that lives outside page-specific content.
  */
 export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	// Share layout recovery (one soft reload) so shell-only gates are as
-	// resilient as full layout readiness under Docker-engine host load.
-	await waitForLayoutReady(page, timeout);
+	await expect(mainNavigation(page)).toBeVisible({ timeout });
+	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
 }
 
 /**
@@ -44,34 +43,25 @@ export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): P
  * Use as the first await after `page.goto(...)` before any page-specific
  * assertions. This guarantees the layout `ready` flag resolved, auth
  * completed, and the Svelte page component has started rendering.
+ *
+ * Bootstrap failures surface as `[data-shell-bootstrap="error"]` — fail
+ * immediately with that message instead of waiting out the full timeout.
  */
 export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	const deadline = Date.now() + timeout;
-	let lastError: unknown;
-	// Under Docker-engine host load the first paint can hang on the bootstrap
-	// spinner (config/auth/namespace never resolve). Reserve half the budget for a
-	// soft reload so the first wait cannot consume the entire timeout.
-	const firstAttemptMs = Math.max(5_000, Math.floor(timeout / 2));
-	for (let attempt = 0; attempt < 2; attempt += 1) {
-		const remaining = Math.max(1_000, deadline - Date.now());
-		const attemptTimeout = attempt === 0 ? Math.min(firstAttemptMs, remaining) : remaining;
-		try {
-			await expect(mainNavigation(page)).toBeVisible({ timeout: attemptTimeout });
-			await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({
-				timeout: Math.max(1_000, deadline - Date.now())
-			});
-			await waitForAnyVisible(page.locator('main'), Math.max(1_000, deadline - Date.now()));
-			return;
-		} catch (error) {
-			lastError = error;
-			if (attempt === 0 && Date.now() + 2_000 < deadline && !page.isClosed()) {
-				await page.reload({ waitUntil: 'domcontentloaded' });
-				continue;
-			}
-			throw error;
+	const bootstrapError = page.locator('[data-shell-bootstrap="error"]');
+	const nav = mainNavigation(page);
+	await Promise.race([
+		nav.waitFor({ state: 'visible', timeout }).then(() => 'ready' as const),
+		bootstrapError.waitFor({ state: 'visible', timeout }).then(() => 'error' as const)
+	]).then(async (outcome) => {
+		if (outcome === 'error') {
+			const message =
+				(await bootstrapError.innerText().catch(() => null)) ?? 'App shell bootstrap failed';
+			throw new Error(`App shell failed to bootstrap:\n${message}`);
 		}
-	}
-	throw lastError;
+	});
+	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
+	await waitForAnyVisible(page.locator('main'), timeout);
 }
 
 async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {

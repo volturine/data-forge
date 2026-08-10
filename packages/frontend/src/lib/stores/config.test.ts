@@ -158,7 +158,7 @@ describe('ConfigStore', () => {
 	});
 
 	describe('fetch error', () => {
-		test('sets error message and clears loading after retries', async () => {
+		test('sets error message and clears loading without retry', async () => {
 			mockError('Network failure');
 
 			await store.fetch();
@@ -166,27 +166,14 @@ describe('ConfigStore', () => {
 			expect(store.error).toBe('Network failure');
 			expect(store.loading).toBe(false);
 			expect(store.config).toBeNull();
-			// One automatic retry on the same fetch call.
-			expect(mockGetConfig).toHaveBeenCalledTimes(2);
+			expect(store.settled).toBe(true);
+			expect(mockGetConfig).toHaveBeenCalledTimes(1);
 		});
 
 		test('getters still return defaults after error', async () => {
 			mockError('boom');
 			await store.fetch();
 			expect(store.timezone).toBe('UTC');
-		});
-
-		test('retries once and succeeds on the second attempt', async () => {
-			const cfg = makeConfig();
-			mockGetConfig
-				.mockResolvedValueOnce(errResult('transient'))
-				.mockResolvedValueOnce(okResult(cfg));
-
-			await store.fetch();
-
-			expect(store.config).toEqual(cfg);
-			expect(store.error).toBeNull();
-			expect(mockGetConfig).toHaveBeenCalledTimes(2);
 		});
 	});
 
@@ -239,17 +226,16 @@ describe('ConfigStore', () => {
 	});
 
 	describe('fetched guard', () => {
-		test('error path does not set fetched flag — allows retry', async () => {
+		test('error path does not set fetched flag — allows a later fetch after refresh', async () => {
 			mockError('first try');
 			await store.fetch();
 			expect(store.error).toBe('first try');
-			// Two getConfig attempts from the automatic retry inside fetch.
-			expect(mockGetConfig).toHaveBeenCalledTimes(2);
+			expect(mockGetConfig).toHaveBeenCalledTimes(1);
 
 			mockSuccess(makeConfig());
-			await store.fetch();
+			await store.refresh();
 			expect(store.config).not.toBeNull();
-			expect(mockGetConfig).toHaveBeenCalledTimes(3);
+			expect(mockGetConfig).toHaveBeenCalledTimes(2);
 		});
 	});
 });

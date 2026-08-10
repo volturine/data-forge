@@ -34,39 +34,22 @@ async function waitForAnalysisEditor(
 ): Promise<void> {
 	const remaining = () => Math.max(deadline - Date.now(), 1_000);
 	const editor = page.locator('[role="application"]');
-	// Client-side analysis loads occasionally land on SvelteKit's 500 page under
-	// Docker-engine host load. Soft-reload once with a reserved budget so the
-	// suite recovers without Playwright-level retries.
-	const firstAttemptMs = Math.max(5_000, Math.floor((deadline - Date.now()) / 2));
-	let lastError: unknown;
-	for (let attempt = 0; attempt < 2; attempt += 1) {
-		const attemptTimeout = attempt === 0 ? Math.min(firstAttemptMs, remaining()) : remaining();
-		try {
-			await expect(editor).toBeVisible({ timeout: attemptTimeout });
-			lastError = null;
-			break;
-		} catch (error) {
-			lastError = error;
-			const errorPage = page.getByText('Internal Error');
-			const onErrorPage = await errorPage
-				.first()
-				.isVisible()
-				.catch(() => false);
-			if (attempt === 0 && Date.now() + 2_000 < deadline && !page.isClosed()) {
-				await page.reload({ waitUntil: 'domcontentloaded' });
-				await waitForLayoutReady(page, remaining());
-				continue;
-			}
-			if (onErrorPage) {
-				throw new Error(
-					`Analysis editor failed with a client 500 (Internal Error) after ${attempt + 1} attempt(s)`,
-					{ cause: error }
-				);
-			}
-			throw error;
+	const loadError = page.locator('[data-testid="analysis-load-error"]');
+	const kitError = page.getByText('Internal Error');
+	// Fail fast on product/error UI — no soft-reload (app must work first try).
+	await Promise.race([
+		editor.waitFor({ state: 'visible', timeout: remaining() }).then(() => 'ready' as const),
+		loadError.waitFor({ state: 'visible', timeout: remaining() }).then(() => 'load' as const),
+		kitError.waitFor({ state: 'visible', timeout: remaining() }).then(() => 'kit' as const)
+	]).then(async (outcome) => {
+		if (outcome === 'load') {
+			const message = (await loadError.innerText().catch(() => null)) ?? 'Error loading analysis';
+			throw new Error(`Analysis editor load failed:\n${message}`);
 		}
-	}
-	if (lastError) throw lastError;
+		if (outcome === 'kit') {
+			throw new Error('Analysis page hit SvelteKit Internal Error (unhandled client exception)');
+		}
+	});
 
 	await expect(editor).toHaveAttribute('data-editor-access-state', accessState, {
 		timeout: remaining()

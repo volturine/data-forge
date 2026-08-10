@@ -15,22 +15,14 @@ export class ConfigStore {
 		this.error = null;
 
 		const request = (async () => {
-			// One automatic retry covers transient API stalls (e.g. host load
-			// while Docker engines boot) that would otherwise leave the shell
-			// on a permanent bootstrap spinner.
-			for (let attempt = 0; attempt < 2; attempt += 1) {
-				const result = await getConfig();
-				if (result.isOk()) {
-					this.config = result.value;
-					this.fetched = true;
-					this.error = null;
-					return;
-				}
-				this.error = result.error.message;
-				if (attempt === 0) {
-					await new Promise((resolve) => setTimeout(resolve, 250));
-				}
+			const result = await getConfig();
+			if (result.isOk()) {
+				this.config = result.value;
+				this.fetched = true;
+				this.error = null;
+				return;
 			}
+			this.error = result.error.message;
 		})();
 
 		this.pending = request.finally(() => {
@@ -39,6 +31,11 @@ export class ConfigStore {
 		});
 
 		return this.pending;
+	}
+
+	/** True once fetch settled (success or failure). Used to leave the bootstrap spinner. */
+	get settled(): boolean {
+		return this.fetched || this.error !== null;
 	}
 
 	/**

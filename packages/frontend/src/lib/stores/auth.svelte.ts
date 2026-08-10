@@ -1,6 +1,6 @@
 import { getMe, login, logout, register, updateProfile, type UserPublic } from '$lib/api/auth';
 
-type AuthStatus = 'unknown' | 'authenticated' | 'unauthenticated';
+type AuthStatus = 'unknown' | 'authenticated' | 'unauthenticated' | 'failed';
 
 export class AuthStore {
 	user = $state<UserPublic | null>(null);
@@ -12,8 +12,14 @@ export class AuthStore {
 		return this.status === 'authenticated' && this.user !== null;
 	}
 
+	/** Auth has a terminal answer for bootstrap (including hard failure). */
 	get resolved(): boolean {
 		return this.status !== 'unknown';
+	}
+
+	/** Bootstrap cannot proceed: session probe failed without a clear 401. */
+	get bootstrapFailed(): boolean {
+		return this.status === 'failed';
 	}
 
 	async resolve(): Promise<void> {
@@ -25,10 +31,20 @@ export class AuthStore {
 			(user) => {
 				this.user = user;
 				this.status = 'authenticated';
+				this.error = null;
 			},
-			() => {
+			(err) => {
 				this.user = null;
-				this.status = 'unauthenticated';
+				// Unauthenticated session is a normal terminal state. Network /
+				// timeout / 5xx leave bootstrap in a failed state so the shell
+				// can show an error instead of hanging or false-login-redirect.
+				if (err.status === 401 || err.status === 403) {
+					this.status = 'unauthenticated';
+					this.error = null;
+				} else {
+					this.status = 'failed';
+					this.error = err.message;
+				}
 			}
 		);
 		this.loading = false;

@@ -42,10 +42,13 @@ function mockMeSuccess(user: UserPublic) {
 	});
 }
 
-function mockMeError(message: string) {
+function mockMeError(message: string, status?: number) {
 	mockGetMe.mockReturnValue({
-		match: (_onOk: unknown, onErr: (e: { message: string }) => void) => {
-			onErr({ message });
+		match: (
+			_onOk: unknown,
+			onErr: (e: { message: string; status?: number }) => void
+		) => {
+			onErr({ message, status });
 			return Promise.resolve();
 		}
 	});
@@ -122,8 +125,8 @@ describe('AuthStore', () => {
 			expect(store.loading).toBe(false);
 		});
 
-		test('failure sets unauthenticated', async () => {
-			mockMeError('Unauthorized');
+		test('401 sets unauthenticated', async () => {
+			mockMeError('Unauthorized', 401);
 
 			await store.resolve();
 
@@ -131,6 +134,19 @@ describe('AuthStore', () => {
 			expect(store.user).toBeNull();
 			expect(store.authenticated).toBe(false);
 			expect(store.resolved).toBe(true);
+			expect(store.bootstrapFailed).toBe(false);
+		});
+
+		test('network failure sets failed bootstrap state', async () => {
+			mockMeError('Network error');
+
+			await store.resolve();
+
+			expect(store.status).toBe('failed');
+			expect(store.user).toBeNull();
+			expect(store.resolved).toBe(true);
+			expect(store.bootstrapFailed).toBe(true);
+			expect(store.error).toBe('Network error');
 		});
 
 		test('second resolve is a no-op', async () => {
@@ -140,18 +156,6 @@ describe('AuthStore', () => {
 
 			await store.resolve();
 			expect(mockGetMe).toHaveBeenCalledTimes(1);
-		});
-	});
-
-	describe('resolve always resolves on failure', () => {
-		test('failure sets unauthenticated', async () => {
-			mockMeError('Network error');
-
-			await store.resolve();
-
-			expect(store.status).toBe('unauthenticated');
-			expect(store.user).toBeNull();
-			expect(store.resolved).toBe(true);
 		});
 	});
 

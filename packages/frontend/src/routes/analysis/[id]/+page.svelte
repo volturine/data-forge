@@ -247,48 +247,65 @@
 		}
 
 		const token = draftLoadGate.issue();
-		void idbGet<string>(currentStorageKey).then((raw) => {
-			if (!draftLoadGate.isCurrent(token)) return;
-			if (storageKey !== currentStorageKey || analysisId !== currentAnalysisId) return;
-			if (!raw) {
+		void idbGet<string>(currentStorageKey)
+			.then((raw) => {
+				if (!draftLoadGate.isCurrent(token)) return;
+				if (storageKey !== currentStorageKey || analysisId !== currentAnalysisId) return;
+				if (!raw) {
+					draftLoaded = true;
+					return;
+				}
+				let parsed: {
+					analysisId: string;
+					version?: string | null;
+					tabs: AnalysisTab[];
+					activeTabId: string | null;
+					resourceConfig: EngineResourceConfig | null;
+					engineDefaults: EngineDefaults | null;
+					selectedStepId: string | null;
+					leftPaneCollapsed: boolean;
+					rightPaneCollapsed: boolean;
+					configPosition?: 'right' | 'bottom';
+					bottomPaneHeight?: number;
+				};
+				try {
+					parsed = JSON.parse(raw) as typeof parsed;
+				} catch {
+					void idbDelete(currentStorageKey);
+					draftLoaded = true;
+					return;
+				}
+				if (parsed.analysisId !== currentAnalysisId) {
+					draftLoaded = true;
+					return;
+				}
+				if ((parsed.version ?? null) !== serverVersion) {
+					void idbDelete(currentStorageKey);
+					draftLoaded = true;
+					return;
+				}
+				if (!Array.isArray(parsed.tabs)) {
+					void idbDelete(currentStorageKey);
+					draftLoaded = true;
+					return;
+				}
+				const sanitized = parsed.tabs.map((tab, index) => ensureTabDefaults(tab, index));
+				analysisStore.setTabs(sanitized);
+				analysisStore.activeTabId = parsed.activeTabId;
+				analysisStore.setResourceConfig(parsed.resourceConfig);
+				analysisStore.setEngineDefaults(parsed.engineDefaults);
+				selectedStepId = parsed.selectedStepId;
+				leftPaneCollapsed = parsed.leftPaneCollapsed;
+				rightPaneCollapsed = parsed.rightPaneCollapsed;
+				if (parsed.configPosition) configPosition = parsed.configPosition;
+				if (parsed.bottomPaneHeight) bottomPaneHeight = parsed.bottomPaneHeight;
+				isDirty = true;
 				draftLoaded = true;
-				return;
-			}
-			const parsed = JSON.parse(raw) as {
-				analysisId: string;
-				version?: string | null;
-				tabs: AnalysisTab[];
-				activeTabId: string | null;
-				resourceConfig: EngineResourceConfig | null;
-				engineDefaults: EngineDefaults | null;
-				selectedStepId: string | null;
-				leftPaneCollapsed: boolean;
-				rightPaneCollapsed: boolean;
-				configPosition?: 'right' | 'bottom';
-				bottomPaneHeight?: number;
-			};
-			if (parsed.analysisId !== currentAnalysisId) {
-				draftLoaded = true;
-				return;
-			}
-			if ((parsed.version ?? null) !== serverVersion) {
-				void idbDelete(currentStorageKey);
-				draftLoaded = true;
-				return;
-			}
-			const sanitized = parsed.tabs.map((tab, index) => ensureTabDefaults(tab, index));
-			analysisStore.setTabs(sanitized);
-			analysisStore.activeTabId = parsed.activeTabId;
-			analysisStore.setResourceConfig(parsed.resourceConfig);
-			analysisStore.setEngineDefaults(parsed.engineDefaults);
-			selectedStepId = parsed.selectedStepId;
-			leftPaneCollapsed = parsed.leftPaneCollapsed;
-			rightPaneCollapsed = parsed.rightPaneCollapsed;
-			if (parsed.configPosition) configPosition = parsed.configPosition;
-			if (parsed.bottomPaneHeight) bottomPaneHeight = parsed.bottomPaneHeight;
-			isDirty = true;
-			draftLoaded = true;
-		});
+			})
+			.catch(() => {
+				// Corrupt draft storage must not take down the analysis page.
+				if (draftLoadGate.isCurrent(token)) draftLoaded = true;
+			});
 
 		return () => {
 			draftLoadGate.invalidate();

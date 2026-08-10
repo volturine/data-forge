@@ -11,6 +11,7 @@ function isValid(value: unknown): value is string {
 let namespace = $state<string>('');
 let ready = $state(false);
 let switching = $state(false);
+let initError = $state<string | null>(null);
 let pending: Promise<void> | null = null;
 
 function invalidateNamespaceRequests(): void {
@@ -19,14 +20,20 @@ function invalidateNamespaceRequests(): void {
 	}
 }
 
+export function getNamespaceInitError(): string | null {
+	return initError;
+}
+
 export async function initNamespace(): Promise<void> {
 	if (isValid(namespace)) {
 		ready = true;
+		initError = null;
 		return;
 	}
 	if (pending) return pending;
 
 	pending = (async () => {
+		initError = null;
 		const stored = await idbGet<string>(NAMESPACE_KEY);
 		if (isValid(stored)) {
 			namespace = stored;
@@ -38,11 +45,19 @@ export async function initNamespace(): Promise<void> {
 		}
 		await configStore.fetch();
 		if (!isValid(configStore.config?.default_namespace)) {
-			throw new Error('Default namespace missing from config');
+			// Surface as state so layout can leave the spinner. Do not throw —
+			// callers use void initNamespace() and an unhandled rejection left
+			// the shell permanently blank.
+			ready = false;
+			initError =
+				configStore.error ??
+				'Default namespace missing from config. Check that the API is reachable.';
+			return;
 		}
 		namespace = configStore.config.default_namespace;
 		await idbSet(NAMESPACE_KEY, namespace);
 		ready = true;
+		initError = null;
 	})();
 
 	try {
@@ -72,6 +87,7 @@ export async function setNamespace(value: string): Promise<void> {
 		if (namespace) invalidateNamespaceRequests();
 		namespace = '';
 		ready = false;
+		initError = null;
 		await idbDelete(NAMESPACE_KEY);
 		return;
 	}
@@ -79,6 +95,7 @@ export async function setNamespace(value: string): Promise<void> {
 	invalidateNamespaceRequests();
 	namespace = value;
 	ready = true;
+	initError = null;
 	await idbSet(NAMESPACE_KEY, value);
 }
 

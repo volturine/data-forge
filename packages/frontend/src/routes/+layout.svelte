@@ -23,7 +23,8 @@
 		initNamespace,
 		switchNamespace,
 		useNamespace,
-		isNamespaceReady
+		isNamespaceReady,
+		getNamespaceInitError
 	} from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
@@ -62,8 +63,30 @@
 
 	const ready = $derived(
 		configStore.config !== null &&
-			(!configStore.authRequired || authStore.resolved) &&
-			isNamespaceReady()
+			isNamespaceReady() &&
+			(!configStore.authRequired ||
+				(authStore.resolved && !authStore.bootstrapFailed && authStore.status !== 'unknown'))
+	);
+
+	// Bootstrap finished without a usable shell: stop spinning and show why.
+	// No auto-retry and no soft-reload — surface the failure for a person to act.
+	const bootstrapError = $derived.by(() => {
+		if (ready) return null;
+		if (configStore.error) return configStore.error;
+		if (configStore.settled && configStore.config === null) {
+			return 'Failed to load application configuration';
+		}
+		// Auth pages only depend on config; ignore session/namespace failures there.
+		if (onAuthPage) return null;
+		if (authStore.bootstrapFailed) return authStore.error ?? 'Failed to verify session';
+		if (getNamespaceInitError()) return getNamespaceInitError();
+		return null;
+	});
+	// Auth routes only need config. App routes need full ready (config + auth + namespace).
+	const bootstrapping = $derived(
+		onAuthPage
+			? configStore.config === null && configStore.error === null
+			: !ready && bootstrapError === null
 	);
 
 	// Navigation: $derived can't redirect; side effect redirects unauthenticated users.
@@ -74,7 +97,10 @@
 			return;
 		}
 		if (authStore.authenticated) return;
+		if (authStore.bootstrapFailed) return;
 		if (onAuthPage) return;
+		// Only redirect when we know the user is unauthenticated — not on probe failure.
+		if (authStore.status !== 'unauthenticated') return;
 		void goto(resolve('/login'));
 	});
 
@@ -303,7 +329,7 @@
 </svelte:head>
 
 <QueryClientProvider client={queryClient}>
-	{#if !ready && !onAuthPage}
+	{#if bootstrapping}
 		<div
 			class={css({
 				display: 'flex',
@@ -312,8 +338,35 @@
 				height: '100vh',
 				backgroundColor: 'bg.secondary'
 			})}
+			data-shell-bootstrap="loading"
 		>
 			<div class={spinner()}></div>
+		</div>
+	{:else if bootstrapError}
+		<div
+			class={css({
+				display: 'flex',
+				flexDirection: 'column',
+				alignItems: 'center',
+				justifyContent: 'center',
+				height: '100vh',
+				backgroundColor: 'bg.secondary',
+				padding: '6',
+				gap: '3',
+				textAlign: 'center'
+			})}
+			data-shell-bootstrap="error"
+			role="alert"
+		>
+			<h1 class={css({ fontSize: 'lg', fontWeight: 'semibold', color: 'fg.primary', margin: '0' })}>
+				Unable to start the app
+			</h1>
+			<p class={css({ fontSize: 'sm', color: 'fg.muted', margin: '0', maxWidth: 'md' })}>
+				{bootstrapError}
+			</p>
+			<p class={css({ fontSize: 'xs', color: 'fg.muted', margin: '0' })}>
+				Reload the page once the API is reachable.
+			</p>
 		</div>
 	{:else if onAuthPage && configStore.authRequired}
 		{@render children()}

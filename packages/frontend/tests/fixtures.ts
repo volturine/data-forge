@@ -1,5 +1,5 @@
 import type { Browser, BrowserContext, Page } from '@playwright/test';
-import { test as base } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 import {
 	E2E_PASSWORD,
 	E2E_RUN_STAMP,
@@ -17,46 +17,43 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
 const authRequired = process.env.AUTH_REQUIRED !== 'false';
 
 async function expectSignedIn(page: Page): Promise<void> {
-	// Session bootstrap uses the same soft-reload shell gate as tests.
 	const timeout = process.env.CI ? 45_000 : 15_000;
 	await waitForLayoutReady(page, timeout);
 }
 
 /**
- * Register once per worker via the auth API and return Playwright storage state.
- *
- * UI registration races client hydration under Docker-engine host load and
- * fails when Playwright restarts a worker (same email → already registered).
- * API registration sets the session cookie directly; a unique stamp per call
- * keeps restarts safe. We still hard-navigate home so storage state captures a
- * settled authenticated document.
+ * Register once per worker through the real register UI (same path a person
+ * uses) and return Playwright storage state. Unique emails keep worker
+ * restarts from colliding with an already-registered account.
  */
 async function createSessionState(browser: Browser, workerIndex: number): Promise<E2EStorageState> {
 	const context = await browser.newContext({ baseURL });
+	const page = await context.newPage();
 	try {
 		if (authRequired) {
+			// Unique per session so a Playwright worker restart does not collide.
 			const email = `e2e-ui-${E2E_RUN_STAMP}-w${workerIndex}-${Date.now()}@example.com`;
-			const register = await context.request.post('/api/v1/auth/register', {
-				data: {
-					email,
-					password: E2E_PASSWORD,
-					display_name: `E2E UI Worker ${workerIndex}`
-				},
-				timeout: 15_000
-			});
-			if (!register.ok()) {
-				const body = await register.text().catch(() => '');
-				throw new Error(
-					`worker ${workerIndex}: register failed HTTP ${register.status()}: ${body}`
-				);
-			}
-			const page = await context.newPage();
-			try {
-				await page.goto('/', { waitUntil: 'domcontentloaded' });
-				await expectSignedIn(page);
-			} finally {
-				await page.close();
-			}
+			await page.goto('/register', { waitUntil: 'domcontentloaded' });
+			// Ready the way a person is: form fields are visible and interactive.
+			const nameInput = page.locator('#name');
+			await expect(nameInput).toBeVisible({ timeout: 15_000 });
+			const emailInput = page.locator('#email');
+			const passwordInput = page.locator('#password');
+			const confirmInput = page.locator('#confirm');
+			await nameInput.fill(`E2E UI Worker ${workerIndex}`);
+			await emailInput.fill(email);
+			await passwordInput.fill(E2E_PASSWORD);
+			await confirmInput.fill(E2E_PASSWORD);
+			await expect(nameInput).toHaveValue(`E2E UI Worker ${workerIndex}`);
+			await expect(emailInput).toHaveValue(email);
+			await expect(passwordInput).toHaveValue(E2E_PASSWORD);
+			await expect(confirmInput).toHaveValue(E2E_PASSWORD);
+			const createButton = page.getByRole('button', { name: 'Create account', exact: true });
+			await expect(createButton).toBeEnabled({ timeout: 5_000 });
+			await createButton.click();
+			await expect(page.getByText(/Account created\./i)).toBeVisible({ timeout: 15_000 });
+			await page.goto('/', { waitUntil: 'domcontentloaded' });
+			await expectSignedIn(page);
 		}
 		const sessionState = (await context.storageState()) as E2EStorageState;
 		if (authRequired && !sessionState.cookies.some((cookie) => cookie.name === 'session_token')) {
