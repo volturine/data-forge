@@ -44,10 +44,7 @@ function mockMeSuccess(user: UserPublic) {
 
 function mockMeError(message: string, status?: number) {
 	mockGetMe.mockReturnValue({
-		match: (
-			_onOk: unknown,
-			onErr: (e: { message: string; status?: number }) => void
-		) => {
+		match: (_onOk: unknown, onErr: (e: { message: string; status?: number }) => void) => {
 			onErr({ message, status });
 			return Promise.resolve();
 		}
