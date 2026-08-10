@@ -12,7 +12,12 @@ import {
 	deleteHealthCheckViaUI,
 	deleteAnalysisViaUI
 } from './utils/ui-cleanup.js';
-import { buildTimeoutMs, gotoMonitoringTab, readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
+import {
+	buildTimeoutMs,
+	gotoMonitoringTab,
+	readyTimeoutMs,
+	waitForLayoutReady
+} from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
