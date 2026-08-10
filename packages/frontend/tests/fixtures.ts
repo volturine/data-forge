@@ -107,14 +107,14 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 		{ scope: 'worker' }
 	],
 
-	page: async ({ browser, workerAuth }, use) => {
-		const context = await browser.newContext({
-			baseURL,
-			storageState: structuredClone(workerAuth.sessionState)
-		});
-		const page = await context.newPage();
+	page: async ({ helperContext }, use) => {
+		// Reuse the worker's authenticated context so IndexedDB namespace and
+		// session cookies stay warm across tests. Fresh contexts force a cold
+		// config/auth/namespace bootstrap on every test and starve under Docker
+		// engine load on the shared CI host.
+		const page = await helperContext.newPage();
 		await use(page);
-		await context.close();
+		await page.close();
 	},
 
 	request: async ({ browser, workerAuth, helperContext }, use) => {

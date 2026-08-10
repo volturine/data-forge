@@ -49,16 +49,18 @@ export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs())
 	const deadline = Date.now() + timeout;
 	let lastError: unknown;
 	// Under Docker-engine host load the first paint can hang on the bootstrap
-	// spinner (config/auth/namespace never resolve). One soft reload inside the
-	// shared budget recovers without Playwright-level retries.
+	// spinner (config/auth/namespace never resolve). Reserve half the budget for a
+	// soft reload so the first wait cannot consume the entire timeout.
+	const firstAttemptMs = Math.max(5_000, Math.floor(timeout / 2));
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		const remaining = Math.max(1_000, deadline - Date.now());
+		const attemptTimeout = attempt === 0 ? Math.min(firstAttemptMs, remaining) : remaining;
 		try {
-			await expect(mainNavigation(page)).toBeVisible({ timeout: remaining });
+			await expect(mainNavigation(page)).toBeVisible({ timeout: attemptTimeout });
 			await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({
-				timeout: remaining
+				timeout: Math.max(1_000, deadline - Date.now())
 			});
-			await waitForAnyVisible(page.locator('main'), remaining);
+			await waitForAnyVisible(page.locator('main'), Math.max(1_000, deadline - Date.now()));
 			return;
 		} catch (error) {
 			lastError = error;

@@ -33,9 +33,41 @@ async function waitForAnalysisEditor(
 	accessState: EditorAccessState
 ): Promise<void> {
 	const remaining = () => Math.max(deadline - Date.now(), 1_000);
-
 	const editor = page.locator('[role="application"]');
-	await expect(editor).toBeVisible({ timeout: remaining() });
+	// Client-side analysis loads occasionally land on SvelteKit's 500 page under
+	// Docker-engine host load. Soft-reload once with a reserved budget so the
+	// suite recovers without Playwright-level retries.
+	const firstAttemptMs = Math.max(5_000, Math.floor((deadline - Date.now()) / 2));
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		const attemptTimeout = attempt === 0 ? Math.min(firstAttemptMs, remaining()) : remaining();
+		try {
+			await expect(editor).toBeVisible({ timeout: attemptTimeout });
+			lastError = null;
+			break;
+		} catch (error) {
+			lastError = error;
+			const errorPage = page.getByText('Internal Error');
+			const onErrorPage = await errorPage
+				.first()
+				.isVisible()
+				.catch(() => false);
+			if (attempt === 0 && Date.now() + 2_000 < deadline && !page.isClosed()) {
+				await page.reload({ waitUntil: 'domcontentloaded' });
+				await waitForLayoutReady(page, remaining());
+				continue;
+			}
+			if (onErrorPage) {
+				throw new Error(
+					`Analysis editor failed with a client 500 (Internal Error) after ${attempt + 1} attempt(s)`,
+					{ cause: error }
+				);
+			}
+			throw error;
+		}
+	}
+	if (lastError) throw lastError;
+
 	await expect(editor).toHaveAttribute('data-editor-access-state', accessState, {
 		timeout: remaining()
 	});
