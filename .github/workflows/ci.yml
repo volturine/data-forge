@@ -119,25 +119,26 @@ jobs:
     name: e2e
     runs-on: [self-hosted, linux, x64]
     if: github.event_name == 'pull_request' && github.base_ref == 'master'
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: read
     env:
       PORT: "8001"
       FRONTEND_PORT: "3001"
-      # Self-hosted runner shares CPUs between browsers, API, worker, and Docker
-      # engines. Two browser workers need matching compute slots. Engine capacity
-      # must stay high enough that unique analysis identities are not constantly
-      # evicted (eviction thrash spent ~3–5s per spawn and starved the app shell).
-      PW_E2E_WORKERS: "2"
+      # Native Docker engines add multi-second cold starts. Parallel Playwright
+      # workers share one default namespace and race on create/delete, which
+      # shows up as empty galleries while waiting for the analysis editor.
+      # Serialize browsers on CI; keep enough engine slots for sequential work.
+      PW_E2E_WORKERS: "1"
       BUILD_WORKER_MIN_PROCESSES: "1"
       BUILD_WORKER_MAX_PROCESSES: "1"
       COMPUTE_REQUEST_CONCURRENCY: "2"
-      MAX_CONCURRENT_ENGINES: "16"
-      # Bound each engine so higher concurrency stays within runner RAM.
+      MAX_CONCURRENT_ENGINES: "8"
       POLARS_MAX_MEMORY_MB: "512"
       E2E_ENGINE_IDLE_TTL_SECONDS: "45"
       E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "10"
+      # One worker is slower; keep headroom under the 35m job budget.
+      E2E_TIMEOUT_SECONDS: "1800"
       # Surface engine spawn / capacity failures in the uploaded diagnostics.
       LOG_LEVEL: "info"
     steps:
@@ -200,7 +201,7 @@ jobs:
           just test-e2e 2>&1 | tee .artifacts/ci/e2e/e2e.log
           status=${PIPESTATUS[0]}
           if [ "$status" -eq 124 ]; then
-            echo "e2e step hit the shared 27 minute harness timeout before the 30 minute job timeout"
+            echo "e2e step hit the harness timeout (E2E_TIMEOUT_SECONDS) before the job timeout"
           fi
           exit "$status"
 
