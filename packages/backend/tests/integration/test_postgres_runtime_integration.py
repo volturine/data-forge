@@ -6,6 +6,7 @@ import json
 import threading
 import time
 import uuid
+from collections.abc import Generator
 from pathlib import Path
 
 import psycopg
@@ -117,7 +118,7 @@ def _runtime_env(
 
 
 @pytest.fixture(scope='module')
-def engine_runtime_env() -> dict[str, str]:
+def engine_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str, str]]:
     """Use the engine image built by the canonical test recipe before pytest starts."""
     require_docker()
     run_command(
@@ -132,13 +133,21 @@ def engine_runtime_env() -> dict[str, str]:
     ).stdout.strip()
     if not docker_host:
         raise RuntimeError('Docker context did not provide a daemon endpoint')
-    return {
-        'ENGINE_IMAGE': ENGINE_TEST_IMAGE,
-        'ENGINE_DOCKER_HOST': docker_host,
-        'ENGINE_DOCKER_NETWORK': 'bridge',
-        'ENGINE_CONNECT_HOST': '127.0.0.1',
-        'ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS': 'true',
-    }
+    network_name = f'dataforge-integration-engine-{uuid.uuid4().hex[:10]}'
+    run_command(['docker', 'network', 'create', network_name], env=docker_env(), timeout=120)
+    try:
+        run_command(['docker', 'network', 'connect', network_name, rustfs_container.name], env=docker_env(), timeout=120)
+        yield {
+            'ENGINE_IMAGE': ENGINE_TEST_IMAGE,
+            'ENGINE_DOCKER_HOST': docker_host,
+            'ENGINE_DOCKER_NETWORK': network_name,
+            'ENGINE_OBJECT_STORE_ENDPOINT': f'http://{rustfs_container.name}:9000',
+            'ENGINE_CONNECT_HOST': '127.0.0.1',
+            'ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS': 'true',
+        }
+    finally:
+        run_command(['docker', 'network', 'disconnect', '--force', network_name, rustfs_container.name], env=docker_env(), check=False, timeout=120)
+        run_command(['docker', 'network', 'rm', network_name], env=docker_env(), check=False, timeout=120)
 
 
 def _init_runtime_db(env: dict[str, str]) -> None:
