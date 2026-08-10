@@ -12,7 +12,7 @@ export DATA_DIR
 export ENGINE_IMAGE="data-forge-polars-engine:latest"
 ENGINE_DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
 export ENGINE_DOCKER_HOST
-export ENGINE_DOCKER_NETWORK="bridge"
+export ENGINE_DOCKER_NETWORK="dataforge-e2e-engine-$$"
 export ENGINE_CONNECT_HOST="127.0.0.1"
 export ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS="true"
 # Four Playwright workers can start engines concurrently. Give each engine one
@@ -29,6 +29,7 @@ PG_PORT=""
 RUSTFS_CONTAINER="dataforge-e2e-rustfs-$$"
 RUSTFS_LABEL="data-forge.test-rustfs=1"
 RUSTFS_PORT=""
+ENGINE_NETWORK_LABEL="data-forge.test-engine-network=1"
 pick_host_port() {
     python - "$@" <<'PY'
 import socket
@@ -121,6 +122,7 @@ cleanup() {
     terminate_processes "${FRONTEND_PID:-}" "${SCHEDULER_PID:-}" "${WORKER_PID:-}"
     terminate_processes "${BACKEND_PID:-}"
     docker rm -f "${RUSTFS_CONTAINER}" >/dev/null 2>&1 || true
+    docker network rm "${ENGINE_DOCKER_NETWORK}" >/dev/null 2>&1 || true
     docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
     docker volume rm -f "${PG_VOLUME}" >/dev/null 2>&1 || true
     lsof -ti "tcp:${PORT}" | xargs -r kill >/dev/null 2>&1 || true
@@ -170,10 +172,12 @@ done
 echo "Starting e2e RustFS"
 docker ps -aq --filter "label=${RUSTFS_LABEL}" | xargs -r docker rm -f >/dev/null 2>&1 || true
 docker rm -f "${RUSTFS_CONTAINER}" >/dev/null 2>&1 || true
+docker network create --label "${ENGINE_NETWORK_LABEL}" "${ENGINE_DOCKER_NETWORK}" >/dev/null
 RUSTFS_PORT="$(pick_host_port "${PORT}" "${FRONTEND_PORT}" "${INTERNAL_GRPC_PORT}" "${WORKER_DATA_PLANE_GRPC_PORT}" "${PG_PORT}")"
 docker run -d --rm \
     --label "${RUSTFS_LABEL}" \
     --name "${RUSTFS_CONTAINER}" \
+    --network "${ENGINE_DOCKER_NETWORK}" \
     -e RUSTFS_ACCESS_KEY="${OBJECT_STORE_ACCESS_KEY}" \
     -e RUSTFS_SECRET_KEY="${OBJECT_STORE_SECRET_KEY}" \
     -p "127.0.0.1:${RUSTFS_PORT}:9000" \
@@ -183,9 +187,8 @@ if [ -z "$RUSTFS_PORT" ]; then
     exit 1
 fi
 export OBJECT_STORE_ENDPOINT="http://127.0.0.1:${RUSTFS_PORT}"
-# Let ordinary asynchronous work finish, but do not let a request orphaned by
-# a destructive navigation test dominate the local suite runtime.
-deadline=$((SECONDS + 15))
+export ENGINE_OBJECT_STORE_ENDPOINT="http://${RUSTFS_CONTAINER}:9000"
+deadline=$((SECONDS + 60))
 until [ "$(curl -s -o /dev/null -w '%{http_code}' "${OBJECT_STORE_ENDPOINT}" || true)" != "000" ]; do
     if [ "$SECONDS" -ge "$deadline" ]; then
         echo "Timed out waiting for e2e RustFS" >&2
@@ -299,7 +302,9 @@ run_playwright() {
 run_playwright
 
 echo "Waiting for e2e runtime work to drain"
-deadline=$((SECONDS + 60))
+# Let ordinary asynchronous work finish, but do not let a request orphaned by
+# a destructive navigation test dominate the local suite runtime.
+deadline=$((SECONDS + 15))
 while true; do
     active_runtime_work="$(docker exec "${PG_CONTAINER}" psql -U dataforge -d dataforge -Atc \
         "SELECT

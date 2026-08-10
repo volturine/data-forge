@@ -198,6 +198,7 @@ rejected; nothing is rewritten.
 | `OBJECT_STORE_ACCESS_KEY` | `rustfsadmin` | Access key with read, write, list, delete, and bucket-creation permissions for namespace buckets. Replace the development default in production. |
 | `OBJECT_STORE_SECRET_KEY` | `rustfsadmin` | Secret key paired with `OBJECT_STORE_ACCESS_KEY`. Replace the development default in production. |
 | `ENGINE_OBJECT_STORE_CREDENTIALS_JSON` | empty | Namespace-to-role credential map consumed only by the worker. Each namespace must define `reader` and `builder` access/secret key pairs before production engines can start. |
+| `ENGINE_OBJECT_STORE_ENDPOINT` | empty | Optional engine-container endpoint for the same object store. Set this when the worker uses a host-published URL but engines should use private Docker DNS. |
 | `ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS` | `false` | Development/test-only escape hatch. Production rejects platform credentials even when this is enabled. |
 | `ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5` | Worker-to-engine heartbeat interval. Engines stop themselves after three missed intervals. |
 

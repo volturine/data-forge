@@ -11,6 +11,7 @@ from runtime.config import settings
 from runtime.docker_engine import (
     DockerComputeEngine,
     _effective_resources,
+    _engine_object_store_endpoint,
     _validate_engine_image_reference,
     reconcile_deployment_containers,
 )
@@ -86,6 +87,13 @@ def test_production_requires_immutable_engine_digest(monkeypatch) -> None:
 
     monkeypatch.setattr(settings, "engine_image", f"registry.example/dataforge-engine@sha256:{'a' * 64}")
     _validate_engine_image_reference()
+
+
+def test_engine_object_store_endpoint_prefers_private_network_override(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "object_store_endpoint", "http://127.0.0.1:9000")
+    monkeypatch.setattr(settings, "engine_object_store_endpoint", "http://rustfs:9000")
+
+    assert _engine_object_store_endpoint() == "http://rustfs:9000"
 
 
 def test_export_submits_object_store_artifact_instead_of_worker_path(monkeypatch, tmp_path: Path) -> None:

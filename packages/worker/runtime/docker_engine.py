@@ -93,6 +93,8 @@ def _effective_resources(resource_config: dict[str, object], *, runtime_cpu_coun
 
 
 def _engine_object_store_endpoint() -> str:
+    if settings.engine_object_store_endpoint:
+        return settings.engine_object_store_endpoint
     endpoint = settings.object_store_endpoint
     if settings.engine_connect_host and endpoint.startswith("http://127.0.0.1"):
         return endpoint.replace("http://127.0.0.1", "http://host.docker.internal", 1)
