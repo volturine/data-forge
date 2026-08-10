@@ -125,6 +125,13 @@ jobs:
     env:
       PORT: "8001"
       FRONTEND_PORT: "3001"
+      # This self-hosted runner executes browsers, runtime roles, and Docker
+      # engines together. Keep enough CPU/memory headroom for the app shell.
+      PW_E2E_WORKERS: "2"
+      BUILD_WORKER_MIN_PROCESSES: "2"
+      BUILD_WORKER_MAX_PROCESSES: "2"
+      COMPUTE_REQUEST_CONCURRENCY: "2"
+      MAX_CONCURRENT_ENGINES: "4"
     steps:
       - uses: actions/checkout@v6
 
@@ -195,6 +202,7 @@ jobs:
         with:
           name: e2e-diagnostics-${{ github.run_id }}
           if-no-files-found: warn
+          include-hidden-files: true
           path: |
             .artifacts/ci/e2e/
             packages/frontend/tests/.artifacts/playwright/
