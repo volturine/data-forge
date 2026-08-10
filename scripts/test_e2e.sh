@@ -15,12 +15,19 @@ export ENGINE_DOCKER_HOST
 export ENGINE_DOCKER_NETWORK="dataforge-e2e-engine-$$"
 export ENGINE_CONNECT_HOST="127.0.0.1"
 export ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS="true"
-# Four Playwright workers can start engines concurrently. Give each engine one
+# Playwright workers can start engines concurrently. Give each engine one
 # Polars thread so the Docker test deployment does not oversubscribe the runner.
 export POLARS_CORES_AVAILABLE="${E2E_POLARS_CORES_AVAILABLE:-1}"
-export ENGINE_IDLE_TTL_SECONDS="${E2E_ENGINE_IDLE_TTL_SECONDS:-120}"
-export ENGINE_IDLE_REAP_INTERVAL_SECONDS="${E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS:-10}"
+# Short idle TTL keeps capacity free across unique analysis identities that e2e
+# creates every few seconds. Production defaults remain longer.
+export ENGINE_IDLE_TTL_SECONDS="${E2E_ENGINE_IDLE_TTL_SECONDS:-30}"
+export ENGINE_IDLE_REAP_INTERVAL_SECONDS="${E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS:-5}"
 LOG_DIR="${E2E_LOG_DIR:-}"
+# When CI captures service logs and the caller left the quiet e2e default, raise
+# verbosity so Docker engine spawn/capacity failures appear in the artifact.
+if [ -n "$LOG_DIR" ] && [ "${LOG_LEVEL:-warning}" = "warning" ]; then
+    export LOG_LEVEL=info
+fi
 PLAYWRIGHT_ARTIFACTS_DIR="${ROOT_DIR}/packages/frontend/tests/.artifacts/playwright"
 PG_CONTAINER="dataforge-e2e-pg-$$"
 PG_LABEL="data-forge.test-postgres=1"
@@ -121,6 +128,17 @@ cleanup() {
     status=$?
     terminate_processes "${FRONTEND_PID:-}" "${SCHEDULER_PID:-}" "${WORKER_PID:-}"
     terminate_processes "${BACKEND_PID:-}"
+    # Worker death can leave labelled engines on the private network; remove them
+    # before network teardown so the next suite does not hit name/network conflicts.
+    if [ -n "${ENGINE_DOCKER_NETWORK:-}" ]; then
+        docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "${ENGINE_DOCKER_NETWORK}" 2>/dev/null \
+            | tr ' ' '\n' \
+            | while read -r container_name; do
+                [ -z "$container_name" ] && continue
+                [ "$container_name" = "${RUSTFS_CONTAINER}" ] && continue
+                docker rm -f "$container_name" >/dev/null 2>&1 || true
+            done
+    fi
     docker rm -f "${RUSTFS_CONTAINER}" >/dev/null 2>&1 || true
     docker network rm "${ENGINE_DOCKER_NETWORK}" >/dev/null 2>&1 || true
     docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true

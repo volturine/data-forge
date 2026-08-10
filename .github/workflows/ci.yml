@@ -125,15 +125,20 @@ jobs:
     env:
       PORT: "8001"
       FRONTEND_PORT: "3001"
-      # This self-hosted runner executes browsers, runtime roles, and Docker
-      # engines together. Engines each receive a full CPU, so serialize native
-      # compute while retaining two browser workers; otherwise engine work can
-      # starve the frontend/backend and turn unrelated navigations into 500s.
+      # Self-hosted runner shares CPUs between browsers, API, worker, and Docker
+      # engines. Keep two browser workers, but match compute throughput so previews
+      # do not sit queued for the full Playwright timeout (observed with
+      # concurrency=1: sticky Loading + cascading layout timeouts). Cap engines
+      # just above concurrent analyses so idle reuse works without thrashing.
       PW_E2E_WORKERS: "2"
       BUILD_WORKER_MIN_PROCESSES: "1"
       BUILD_WORKER_MAX_PROCESSES: "1"
-      COMPUTE_REQUEST_CONCURRENCY: "1"
-      MAX_CONCURRENT_ENGINES: "2"
+      COMPUTE_REQUEST_CONCURRENCY: "2"
+      MAX_CONCURRENT_ENGINES: "4"
+      E2E_ENGINE_IDLE_TTL_SECONDS: "30"
+      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "5"
+      # Surface engine spawn / capacity failures in the uploaded diagnostics.
+      LOG_LEVEL: "info"
     steps:
       - uses: actions/checkout@v6
 
