@@ -210,7 +210,9 @@ class DockerComputeEngine(ComputeEngine):
                     "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
                     "ENGINE_BOOTSTRAP_PATH": "/run/dataforge-secrets/engine.json",
                     "ENGINE_BOOTSTRAP_TIMEOUT_SECONDS": str(settings.engine_start_timeout_seconds),
-                    "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 3),
+                    # Worker may miss a couple of heartbeats under host load before
+                    # declaring the engine dead; keep the container watchdog looser.
+                    "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
                     "APP_VERSION": "engine",
                 },
                 "labels": labels,
@@ -286,15 +288,27 @@ class DockerComputeEngine(ComputeEngine):
         raise RuntimeError(f"Timed out waiting for engine container health: {last_error}")
 
     def _heartbeat_loop(self) -> None:
+        consecutive_failures = 0
         while not self._heartbeat_stop.wait(settings.engine_heartbeat_interval_seconds):
             try:
                 stub = self._stub
                 if stub is None:
                     return
                 stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=2, metadata=self._metadata())
+                consecutive_failures = 0
             except Exception as exc:
-                logger.warning("Engine heartbeat failed for %s: %s", self.identity.resource_id, exc)
-                return
+                consecutive_failures += 1
+                logger.warning(
+                    "Engine heartbeat failed for %s (%s consecutive): %s",
+                    self.identity.resource_id,
+                    consecutive_failures,
+                    exc,
+                )
+                # Transient gRPC blips under CI load must not stop heartbeats;
+                # the engine watchdog only tolerates a few missed intervals.
+                if consecutive_failures >= 3 or not self.is_process_alive():
+                    self._alive = False
+                    return
 
     def is_process_alive(self) -> bool:
         with self._lock:
