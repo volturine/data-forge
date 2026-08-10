@@ -1,4 +1,5 @@
 import uuid
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -168,6 +169,7 @@ class TestBuildModeWiring:
         engine = self._make_engine_mock()
         manager.get_engine.return_value = engine
         manager.get_or_create_engine.return_value = engine
+        manager.acquire_engine.return_value = nullcontext(engine)
         return manager
 
     def _make_internal_client_mock(self, output_ds_id: str) -> MagicMock:

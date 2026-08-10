@@ -253,6 +253,9 @@ test-backend-raw:
     fi
     cd packages/backend
     {{pytest}} tests --ignore=tests/integration
+    cd ../..
+    docker build -f docker/Dockerfile --target engine -t data-forge-polars-engine:integration .
+    cd packages/backend
     {{pytest}} tests/integration
     cd ../worker
     {{pytest}} tests --ignore=tests/integration

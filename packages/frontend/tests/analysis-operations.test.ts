@@ -388,8 +388,8 @@ test.describe('Analyses – chart config and preview', () => {
 
 			// Chart preview should render (contains an SVG)
 			const chartPreview = page.locator('[data-testid="chart-preview"]');
-			await expect(chartPreview).toBeVisible({ timeout: 5_000 });
-			await expect(chartPreview.locator('svg')).toBeVisible({ timeout: 5_000 });
+			await expect(chartPreview).toBeVisible({ timeout: readyTimeoutMs() });
+			await expect(chartPreview.locator('svg')).toBeVisible({ timeout: readyTimeoutMs() });
 
 			await screenshot(page, 'analysis/operations', 'chart-preview-rendered');
 		} finally {
@@ -934,7 +934,7 @@ test.describe('Analyses – join config editing', () => {
 			await rightDropdown.click();
 			const rightListbox = rightGroup.getByRole('listbox');
 			await expect(rightListbox.locator('[data-column-option="id"]')).toBeVisible({
-				timeout: 10_000
+				timeout: readyTimeoutMs()
 			});
 			await rightListbox.locator('[data-column-option="id"]').click({ timeout: 5_000 });
 

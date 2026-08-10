@@ -10,8 +10,16 @@ ROOT_DIR="$(pwd)"
 DATA_DIR="${DATA_DIR}-run-$$"
 export DATA_DIR
 export ENGINE_IMAGE="data-forge-polars-engine:latest"
+ENGINE_DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
+export ENGINE_DOCKER_HOST
 export ENGINE_DOCKER_NETWORK="bridge"
 export ENGINE_CONNECT_HOST="127.0.0.1"
+export ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS="true"
+# Four Playwright workers can start engines concurrently. Give each engine one
+# Polars thread so the Docker test deployment does not oversubscribe the runner.
+export POLARS_CORES_AVAILABLE="${E2E_POLARS_CORES_AVAILABLE:-1}"
+export ENGINE_IDLE_TTL_SECONDS="${E2E_ENGINE_IDLE_TTL_SECONDS:-120}"
+export ENGINE_IDLE_REAP_INTERVAL_SECONDS="${E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS:-10}"
 LOG_DIR="${E2E_LOG_DIR:-}"
 PLAYWRIGHT_ARTIFACTS_DIR="${ROOT_DIR}/packages/frontend/tests/.artifacts/playwright"
 PG_CONTAINER="dataforge-e2e-pg-$$"
@@ -175,7 +183,9 @@ if [ -z "$RUSTFS_PORT" ]; then
     exit 1
 fi
 export OBJECT_STORE_ENDPOINT="http://127.0.0.1:${RUSTFS_PORT}"
-deadline=$((SECONDS + 60))
+# Let ordinary asynchronous work finish, but do not let a request orphaned by
+# a destructive navigation test dominate the local suite runtime.
+deadline=$((SECONDS + 15))
 until [ "$(curl -s -o /dev/null -w '%{http_code}' "${OBJECT_STORE_ENDPOINT}" || true)" != "000" ]; do
     if [ "$SECONDS" -ge "$deadline" ]; then
         echo "Timed out waiting for e2e RustFS" >&2
@@ -263,6 +273,12 @@ run_playwright() {
     cd "${ROOT_DIR}/packages/frontend"
     local output_dir="$PWD/tests/.artifacts/playwright/test-results"
     local report_dir="$PWD/tests/.artifacts/playwright/playwright-report"
+    local timeout_seconds="${E2E_TIMEOUT_SECONDS:-0}"
+    # A local canonical run must never monopolize a developer machine for more
+    # than ten minutes. CI keeps its explicit, larger cold-run budget.
+    if [ -z "${CI:-}" ] && { [ "$timeout_seconds" -eq 0 ] || [ "$timeout_seconds" -gt 600 ]; }; then
+        timeout_seconds=600
+    fi
     mkdir -p "$output_dir" "$report_dir"
     # Optional profiling subset, e.g. PLAYWRIGHT_TEST_FILES="tests/profile.test.ts tests/monitoring.test.ts".
     local test_files=()
@@ -274,10 +290,32 @@ run_playwright() {
     PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir" \
     PLAYWRIGHT_OUTPUT_DIR="$output_dir" \
     python3 ../../scripts/run_with_timeout.py \
-        --timeout-seconds "${E2E_TIMEOUT_SECONDS:-0}" \
+        --timeout-seconds "$timeout_seconds" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
         -- ./node_modules/.bin/playwright test --config=playwright.config.ts \
         ${test_files[@]+"${test_files[@]}"}
 }
 
 run_playwright
+
+echo "Waiting for e2e runtime work to drain"
+deadline=$((SECONDS + 60))
+while true; do
+    active_runtime_work="$(docker exec "${PG_CONTAINER}" psql -U dataforge -d dataforge -Atc \
+        "SELECT
+            (SELECT count(*) FROM public.compute_requests WHERE status IN (1, 2)) +
+            (SELECT count(*) FROM public.build_jobs WHERE status IN ('queued', 'leased', 'running'));" \
+        2>/dev/null || echo 1)"
+    active_runtime_work="${active_runtime_work//$'\n'/}"
+    if [ "${active_runtime_work:-1}" -eq 0 ]; then
+        break
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+        echo "E2E runtime drain deadline reached (${active_runtime_work} active); proceeding with cooperative shutdown"
+        break
+    fi
+    sleep 1
+done
+# A cancelled build can be terminal in Postgres while its executor is still
+# unwinding the engine RPC. Let that cooperative path finish before signals.
+sleep 2

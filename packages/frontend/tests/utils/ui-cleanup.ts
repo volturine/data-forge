@@ -7,7 +7,6 @@ import {
 	gotoMonitoringTab,
 	waitForDatasourceList
 } from './readiness.js';
-import { shutdownEngineViaUi } from './user-flows.js';
 
 function confirmDialog(page: Page, heading: string | RegExp): Locator {
 	return page
@@ -23,18 +22,6 @@ async function closeFloatingPanels(page: Page): Promise<void> {
 			.getByLabel('Close engines')
 			.click({ timeout: 1_000 })
 			.catch(() => undefined);
-	}
-}
-
-async function bestEffortShutdownAnalysisEngine(page: Page, name: string): Promise<void> {
-	const analysisId = findAnalysisIdByName(name);
-	if (!analysisId) return;
-	try {
-		await shutdownEngineViaUi(page, analysisId, { timeoutMs: 1_500 });
-	} catch {
-		return;
-	} finally {
-		await page.keyboard.press('Escape').catch(() => undefined);
 	}
 }
 
@@ -213,15 +200,12 @@ export async function deleteDatasourceViaUI(
 async function deleteAnalysisViaUIOnPage(
 	page: Page,
 	name: string,
-	options?: { skipNavigation?: boolean; skipEngineShutdown?: boolean }
+	options?: { skipNavigation?: boolean }
 ): Promise<void> {
 	if (!options?.skipNavigation) {
 		await gotoAnalysesGallery(page, 1_500).catch(() => undefined);
 	}
 	await closeFloatingPanels(page);
-	if (!options?.skipEngineShutdown) {
-		await bestEffortShutdownAnalysisEngine(page, name);
-	}
 	await closeFloatingPanels(page);
 	const card = page.locator(`[data-analysis-card="${name}"]`);
 	try {
@@ -266,7 +250,7 @@ async function deleteAnalysisViaUIOnPage(
 export async function deleteAnalysisViaUI(
 	page: Page,
 	name: string,
-	options?: { skipNavigation?: boolean; skipEngineShutdown?: boolean }
+	options?: { skipNavigation?: boolean }
 ): Promise<void> {
 	await runCleanupWithFallback(page, 'deleteAnalysisViaUI', name, async (cleanupPage) => {
 		await deleteAnalysisViaUIOnPage(cleanupPage, name, options);

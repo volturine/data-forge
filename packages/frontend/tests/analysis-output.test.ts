@@ -9,6 +9,7 @@ import {
 } from './utils/api.js';
 import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
+import { readyTimeoutMs } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -583,12 +584,12 @@ test.describe('Analyses – row count action', () => {
 			const viewNode = page.locator('[data-step-type="view"]');
 			await expect(viewNode).toHaveCount(1, { timeout: 5_000 });
 			const countBtn = viewNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(countBtn).toBeEnabled({ timeout: readyTimeoutMs() });
 
 			await countBtn.click();
 
 			const badge = viewNode.locator('[data-testid="step-row-count"]');
-			await expect(badge).toContainText('rows', { timeout: 15_000 });
+			await expect(badge).toContainText('rows', { timeout: readyTimeoutMs() });
 
 			await screenshot(page, 'analysis/output', 'row-count-success');
 		} finally {
@@ -621,11 +622,11 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			// Click count-rows on the filter node
 			const countBtn = filterNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(countBtn).toBeEnabled({ timeout: readyTimeoutMs() });
 			await countBtn.click();
 
 			const badge = filterNode.locator('[data-testid="step-row-count"]');
-			await expect(badge).toContainText('rows', { timeout: 15_000 });
+			await expect(badge).toContainText('rows', { timeout: readyTimeoutMs() });
 
 			await screenshot(page, 'analysis/output', 'row-count-filter-step');
 		} finally {
@@ -652,11 +653,11 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			// Click count-rows on the limit node
 			const countBtn = limitNode.locator('[data-testid="step-row-count-button"]');
-			await expect(countBtn).toBeEnabled({ timeout: 15_000 });
+			await expect(countBtn).toBeEnabled({ timeout: readyTimeoutMs() });
 			await countBtn.click();
 
 			const badge = limitNode.locator('[data-testid="step-row-count"]');
-			await expect(badge).toContainText('rows', { timeout: 15_000 });
+			await expect(badge).toContainText('rows', { timeout: readyTimeoutMs() });
 
 			await screenshot(page, 'analysis/output', 'row-count-limit-step');
 		} finally {

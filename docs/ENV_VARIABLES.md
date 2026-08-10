@@ -160,6 +160,9 @@ just dev
 | `DF_ENGINE_IMAGE`           | `ghcr.io/volturine/data-forge-polars-engine:1.0.0`                                        | Polars engine image used for dynamically-created engine containers.                                                                                            |
 | `DF_ENGINE_DOCKER_HOST`     | `unix:///var/run/docker.sock`                                                              | Docker API endpoint available only to the worker service.                                                                                                       |
 | `DF_ENGINE_DOCKER_NETWORK`  | `dataforge-prod-engine-runtime`                                                            | Dedicated network joining the worker, RustFS, and dynamic engine containers.                                                                                    |
+| `DF_ENGINE_OBJECT_STORE_CREDENTIALS_JSON` | empty | Namespace-scoped reader/builder credentials passed to one engine at launch; required in production. |
+| `DF_ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS` | `false` | Development-only global credential opt-in; production always rejects it. |
+| `DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5` | Engine liveness lease heartbeat interval. |
 | `DF_DOCKER_SOCKET_PATH`     | `/var/run/docker.sock`                                                                     | Host Docker socket bind-mounted into the worker. Docker daemon access is administrative host access.                                                             |
 | `DF_DOCKER_GID`             | `0`                                                                                        | Group ID permitted to access the mounted Docker socket; set this to the socket's host group ID.                                                                  |
 | `DISTRIBUTED_RUNTIME_ENABLED`| `false`                                                                                   | Enables supported distributed runtime behavior when `DATABASE_URL` is Postgres.                                                                                |
@@ -179,6 +182,7 @@ Nothing is rewritten. Keys sit directly in the bucket:
 s3://{namespace}/uploads/...
 s3://{namespace}/clean/...
 s3://{namespace}/exports/...
+s3://{namespace}/runtime-staging/...
 ```
 
 Namespace names must be valid bucket names (3–63 chars; lowercase letters,
@@ -193,6 +197,9 @@ rejected; nothing is rewritten.
 | `OBJECT_STORE_REGION` | `us-east-1` | S3 signing region. Must match the provider configuration. |
 | `OBJECT_STORE_ACCESS_KEY` | `rustfsadmin` | Access key with read, write, list, delete, and bucket-creation permissions for namespace buckets. Replace the development default in production. |
 | `OBJECT_STORE_SECRET_KEY` | `rustfsadmin` | Secret key paired with `OBJECT_STORE_ACCESS_KEY`. Replace the development default in production. |
+| `ENGINE_OBJECT_STORE_CREDENTIALS_JSON` | empty | Namespace-to-role credential map consumed only by the worker. Each namespace must define `reader` and `builder` access/secret key pairs before production engines can start. |
+| `ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS` | `false` | Development/test-only escape hatch. Production rejects platform credentials even when this is enabled. |
+| `ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5` | Worker-to-engine heartbeat interval. Engines stop themselves after three missed intervals. |
 
 All object-store settings are process-start configuration. Change them for the
 API, scheduler, and worker together, then restart the complete runtime.

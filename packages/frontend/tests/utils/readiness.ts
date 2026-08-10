@@ -1,7 +1,9 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export function readyTimeoutMs(): number {
-	return 15_000;
+	// A cold native engine must start its container and import Polars before the
+	// first preview. Allow the runtime's 30-second startup budget plus CI load.
+	return 45_000;
 }
 
 function mainNavigation(page: Page): Locator {

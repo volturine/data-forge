@@ -17,6 +17,7 @@ from runtime.compute_request_runtime import compute_request_loop, compute_reques
 from runtime.config import settings
 from runtime.datasource_delete_runtime import datasource_delete_loop
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
+from runtime.docker_engine import reconcile_deployment_containers
 from runtime.engine_notifications import create_snapshot_notifier
 from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 from runtime.logging import configure_logging
@@ -300,6 +301,9 @@ def install_stop_handlers(stop_event: asyncio.Event) -> None:
 
 async def main() -> None:
     multiprocessing.freeze_support()
+    removed = await asyncio.to_thread(reconcile_deployment_containers)
+    if removed:
+        logger.warning("Removed %s orphaned engine container(s) during startup", removed)
     stop_event = asyncio.Event()
     install_stop_handlers(stop_event)
     await run_build_manager_process(stop_event=stop_event)

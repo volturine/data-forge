@@ -20,6 +20,36 @@ COPY packages/worker/ /app/packages/worker/
 RUN mkdir -p /app/packages/frontend/src/lib
 RUN just generate-protocol
 
+FROM python:3.14.3-slim AS engine
+ARG UV_VERSION=0.9.5
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+ARG APP_VERSION=unknown
+ENV DEBIAN_FRONTEND=noninteractive
+LABEL org.opencontainers.image.title="Data-Forge Polars Engine"
+LABEL org.opencontainers.image.description="Isolated Polars compute engine"
+LABEL org.opencontainers.image.version="${APP_VERSION}"
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+RUN pip install --no-cache-dir "uv==${UV_VERSION}" && \
+    addgroup --gid 1000 appgroup && \
+    adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
+COPY packages/worker/ /app/packages/worker/
+COPY --from=protocol-builder /app/packages/worker/buf /app/packages/worker/buf
+COPY --from=protocol-builder /app/packages/worker/dataforge_protocol /app/packages/worker/dataforge_protocol
+WORKDIR /app/packages/worker
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    uv sync --frozen --no-dev && \
+    apt-get purge -y --auto-remove build-essential && \
+    rm -rf /var/lib/apt/lists/* && \
+    chown -R appuser:appgroup /app
+USER appuser
+ENV PATH="/app/packages/worker/.venv/bin:${PATH}"
+ENV PYTHONPATH="/app/packages/worker"
+HEALTHCHECK NONE
+CMD ["python3", "engine_main.py"]
+
 FROM bun-runtime AS frontend-builder
 WORKDIR /app/packages/frontend
 COPY packages/frontend/package.json packages/frontend/bun.lock* ./
@@ -110,8 +140,3 @@ ENV PYTHONPATH="/app/packages/worker"
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD python3 -c "import main"
 CMD ["python3", "../worker/main.py"]
-
-FROM worker AS engine
-WORKDIR /app/packages/worker
-HEALTHCHECK NONE
-CMD ["python3", "engine_main.py"]

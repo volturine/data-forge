@@ -561,7 +561,7 @@ class PolarsComputeEngine:
                         step_timings: dict[str, float] = {}
                         query_plan = None
                         if isinstance(command, PreviewCommand):
-                            result_data = PolarsComputeEngine._execute_preview(
+                            result_data = PolarsComputeEngine.execute_preview(
                                 datasource_config,
                                 steps,
                                 command.row_limit,
@@ -571,7 +571,7 @@ class PolarsComputeEngine:
                                 progress_callback,
                             )
                         elif isinstance(command, ExportCommand):
-                            result_data = PolarsComputeEngine._execute_export(
+                            result_data = PolarsComputeEngine.execute_export(
                                 datasource_config,
                                 steps,
                                 command.output_path,
@@ -581,7 +581,7 @@ class PolarsComputeEngine:
                                 progress_callback,
                             )
                         elif isinstance(command, SchemaCommand):
-                            result_data = PolarsComputeEngine._execute_schema(
+                            result_data = PolarsComputeEngine.execute_schema(
                                 datasource_config,
                                 steps,
                                 job_id,
@@ -589,7 +589,7 @@ class PolarsComputeEngine:
                                 progress_callback,
                             )
                         elif isinstance(command, RowCountCommand):
-                            result_data = PolarsComputeEngine._execute_row_count(
+                            result_data = PolarsComputeEngine.execute_row_count(
                                 datasource_config,
                                 steps,
                                 job_id,
@@ -950,7 +950,7 @@ class PolarsComputeEngine:
         return preview_lf, metadata
 
     @staticmethod
-    def _execute_preview(
+    def execute_preview(
         datasource_config: dict,
         steps: list[dict],
         row_limit: int,
@@ -1006,7 +1006,7 @@ class PolarsComputeEngine:
         return result
 
     @staticmethod
-    def _execute_export(
+    def execute_export(
         datasource_config: dict,
         steps: list[dict],
         output_path: str,
@@ -1059,7 +1059,7 @@ class PolarsComputeEngine:
         }
 
     @staticmethod
-    def _execute_schema(
+    def execute_schema(
         datasource_config: dict,
         steps: list[dict],
         job_id: str,
@@ -1099,7 +1099,7 @@ class PolarsComputeEngine:
         }
 
     @staticmethod
-    def _execute_row_count(
+    def execute_row_count(
         datasource_config: dict,
         steps: list[dict],
         job_id: str,

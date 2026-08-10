@@ -1,6 +1,7 @@
 """Tests for bug fixes and new features."""
 
 import asyncio
+import logging
 import os
 import tempfile
 from datetime import UTC, datetime
@@ -544,6 +545,35 @@ def test_grpc_precondition_error_does_not_invent_domain_error_code() -> None:
 
     assert error.status_code == 412
     assert not error.HasField("error_code")
+
+
+def test_retired_compute_request_lease_drains_without_error_log(monkeypatch, caplog) -> None:
+    class _Client:
+        def fail_compute_request(self, **_kwargs):
+            raise BackendWorkerRpcError(
+                status_code=412,
+                error="Compute request lease is no longer active",
+                error_code="FAILED_PRECONDITION",
+            )
+
+        def dispatch_runtime_outbox(self):
+            return 0
+
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-retired",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_UNSPECIFIED,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=compute_pb2.ComputeCommandEnvelope(),
+    )
+
+    compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
+
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
 
 
 @pytest.mark.asyncio

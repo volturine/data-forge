@@ -51,7 +51,7 @@ def test_query_plan_merges_eager_segments(tmp_path):
         },
     ]
 
-    result = PolarsComputeEngine._execute_preview(
+    result = PolarsComputeEngine.execute_preview(
         datasource_config=datasource_config,
         steps=steps,
         row_limit=10,
@@ -99,7 +99,7 @@ def test_chart_preview_metadata_includes_overlays_and_reference_lines(tmp_path):
         },
     ]
 
-    result = PolarsComputeEngine._execute_preview(
+    result = PolarsComputeEngine.execute_preview(
         datasource_config=datasource_config,
         steps=steps,
         row_limit=10,

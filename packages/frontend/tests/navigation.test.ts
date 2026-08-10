@@ -8,6 +8,7 @@ import {
 	gotoNewAnalysis,
 	gotoNewUdfPage,
 	gotoUdfLibrary,
+	readyTimeoutMs,
 	waitForAppShell,
 	waitForLayoutReady
 } from './utils/readiness.js';
@@ -270,9 +271,13 @@ test.describe('Navigation – engines live monitor', () => {
 			await expect(enginePopup).toBeVisible({ timeout: 5_000 });
 			await expect(page.getByTestId('engine-monitor-count')).toBeVisible({ timeout: 5_000 });
 			await expect(
-				enginePopup.locator(`[data-engine-row="analysis_interactive:${analysisId}"]`)
+				enginePopup
+					.locator(
+						`[data-engine-row="analysis_interactive:${analysisId}"], [data-engine-row="build:${runId}"]`
+					)
+					.first()
 			).toBeVisible({
-				timeout: 5_000
+				timeout: readyTimeoutMs()
 			});
 
 			const panel = page.locator('#panel-builds');

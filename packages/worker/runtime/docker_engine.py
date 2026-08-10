@@ -4,12 +4,14 @@ import contextlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
 from collections import deque
 from datetime import UTC, datetime
 from hashlib import sha256
+from pathlib import Path
 from typing import Any, cast
 
 import docker
@@ -19,14 +21,46 @@ from google.protobuf import json_format
 from dataforge_protocol import compute_pb2, engine_runtime_pb2, engine_runtime_pb2_grpc, enums_pb2
 from runtime.config import settings
 from runtime.domain.compute.base import ComputeEngine, EngineProgressEvent, EngineResult
+from runtime.engine_credentials import ObjectStoreCredentials, resolve_engine_credentials
 from runtime.engine_server import ENGINE_PROTOCOL_VERSION
-from runtime.json_values import dict_to_struct
+from runtime.export_formats import get_export_format
+from runtime.json_values import encode_json_bytes
 from runtime.namespace import get_namespace
+from runtime.object_store import delete_object, download_file, object_store_url, presigned_put_url
 
 logger = logging.getLogger(__name__)
 
 _ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
 _MIB = 1024 * 1024
+_IMAGE_DIGEST_RE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+
+
+def _validate_engine_image_reference() -> None:
+    if settings.prod_mode_enabled and _IMAGE_DIGEST_RE.fullmatch(settings.engine_image) is None:
+        raise RuntimeError("Production ENGINE_IMAGE must use an immutable repository@sha256:digest reference")
+
+
+def reconcile_deployment_containers() -> int:
+    """Remove containers left by a previous supervisor for this deployment."""
+    client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
+    removed = 0
+    try:
+        containers = client.containers.list(
+            all=True,
+            filters={
+                "label": [
+                    "io.dataforge.managed=true",
+                    f"io.dataforge.deployment={settings.deployment_id}",
+                ]
+            },
+        )
+        for container in containers:
+            with contextlib.suppress(Exception):
+                container.remove(force=True)
+                removed += 1
+    finally:
+        client.close()
+    return removed
 
 
 def _identity_scope(identity: compute_pb2.EngineIdentity) -> str:
@@ -44,8 +78,8 @@ def _container_name(*, identity: compute_pb2.EngineIdentity, namespace: str) -> 
     return f"dataforge-engine-{_safe_name(namespace)}-{_safe_name(identity.resource_id)}-{suffix}"
 
 
-def _effective_resources(resource_config: dict[str, object]) -> dict[str, int]:
-    available_threads = settings.polars_cores_available or os.cpu_count() or 1
+def _effective_resources(resource_config: dict[str, object], *, runtime_cpu_count: int | None = None) -> dict[str, int]:
+    available_threads = settings.polars_cores_available or runtime_cpu_count or os.cpu_count() or 1
     max_threads = resource_config.get("max_threads", available_threads)
     max_memory_mb = resource_config.get("max_memory_mb", settings.polars_max_memory_mb)
     streaming_chunk_size = resource_config.get("streaming_chunk_size", settings.polars_streaming_chunk_size)
@@ -67,27 +101,36 @@ def _engine_object_store_endpoint() -> str:
     return endpoint
 
 
-def _credential_payload(*, identity: compute_pb2.EngineIdentity, token: str, resources: dict[str, int]) -> str:
+def _credential_payload(*, identity: compute_pb2.EngineIdentity, token: str, resources: dict[str, int], credentials: ObjectStoreCredentials) -> str:
     payload: dict[str, str] = {
         "ENGINE_IDENTITY": identity.resource_id,
         "ENGINE_RPC_TOKEN": token,
         "OBJECT_STORE_ENDPOINT": _engine_object_store_endpoint(),
         "OBJECT_STORE_REGION": settings.object_store_region,
-        "OBJECT_STORE_ACCESS_KEY": settings.object_store_access_key,
-        "OBJECT_STORE_SECRET_KEY": settings.object_store_secret_key,
+        "OBJECT_STORE_ACCESS_KEY": credentials.access_key,
+        "OBJECT_STORE_SECRET_KEY": credentials.secret_key,
     }
     if resources["max_threads"]:
         payload["POLARS_MAX_THREADS"] = str(resources["max_threads"])
     if resources["streaming_chunk_size"]:
         payload["POLARS_STREAMING_CHUNK_SIZE"] = str(resources["streaming_chunk_size"])
+    if credentials.session_token:
+        payload["OBJECT_STORE_SESSION_TOKEN"] = credentials.session_token
     return json.dumps(payload, separators=(",", ":"))
 
 
-def _write_bootstrap(container: Any, *, identity: compute_pb2.EngineIdentity, token: str, resources: dict[str, int]) -> None:
+def _write_bootstrap(
+    container: Any,
+    *,
+    identity: compute_pb2.EngineIdentity,
+    token: str,
+    resources: dict[str, int],
+    credentials: ObjectStoreCredentials,
+) -> None:
     """Stage the launch payload in the engine's tmpfs, not its long-lived environment."""
     result = container.exec_run(
         ["/bin/sh", "-c", "umask 077 && printf '%s' \"$ENGINE_BOOTSTRAP_JSON\" > /run/dataforge-secrets/engine.json"],
-        environment={"ENGINE_BOOTSTRAP_JSON": _credential_payload(identity=identity, token=token, resources=resources)},
+        environment={"ENGINE_BOOTSTRAP_JSON": _credential_payload(identity=identity, token=token, resources=resources, credentials=credentials)},
     )
     if result.exit_code != 0:
         raise RuntimeError(f"Engine credential bootstrap failed: {result.output!r}")
@@ -107,9 +150,14 @@ class DockerComputeEngine(ComputeEngine):
         self._stub: engine_runtime_pb2_grpc.PolarsEngineServiceStub | None = None
         self._token = ""
         self._alive = False
+        self._shutdown_requested = False
         self._lock = threading.RLock()
         self._pending_results: dict[str, EngineResult] = {}
         self._pending_progress: dict[str, deque[EngineProgressEvent]] = {}
+        self._active_job_ids: set[str] = set()
+        self._artifact_transfers: dict[str, tuple[Path, str]] = {}
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
 
     @property
     def process_id(self) -> int | None:
@@ -123,15 +171,22 @@ class DockerComputeEngine(ComputeEngine):
         with self._lock:
             if self._alive:
                 return
-            resources = _effective_resources(self.resource_config)
-            self.effective_resources = cast(dict[str, object], resources)
+            self._shutdown_requested = False
+            _validate_engine_image_reference()
+            credentials = resolve_engine_credentials(self._namespace, self.identity)
             client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
             try:
-                client.images.get(settings.engine_image)
+                daemon_cpu_count = client.info().get("NCPU")
+                resources = _effective_resources(
+                    self.resource_config,
+                    runtime_cpu_count=daemon_cpu_count if isinstance(daemon_cpu_count, int) else None,
+                )
+                image = client.images.get(settings.engine_image)
                 client.networks.get(settings.engine_docker_network)
             except Exception:
                 client.close()
                 raise
+            self.effective_resources = cast(dict[str, object], resources)
 
             self._token = uuid.uuid4().hex
             labels = {
@@ -141,6 +196,7 @@ class DockerComputeEngine(ComputeEngine):
                 "io.dataforge.scope": _identity_scope(self.identity),
                 "io.dataforge.resource-id": self.identity.resource_id,
                 "io.dataforge.protocol-version": str(ENGINE_PROTOCOL_VERSION),
+                "io.dataforge.image-id": str(image.id),
                 "io.dataforge.created-at": datetime.now(UTC).isoformat(),
             }
             create_kwargs: dict[str, object] = {
@@ -152,6 +208,7 @@ class DockerComputeEngine(ComputeEngine):
                     "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
                     "ENGINE_BOOTSTRAP_PATH": "/run/dataforge-secrets/engine.json",
                     "ENGINE_BOOTSTRAP_TIMEOUT_SECONDS": str(settings.engine_start_timeout_seconds),
+                    "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 3),
                     "APP_VERSION": "engine",
                 },
                 "labels": labels,
@@ -164,6 +221,7 @@ class DockerComputeEngine(ComputeEngine):
                 "read_only": True,
                 "tmpfs": {"/run/dataforge-secrets": "rw,noexec,nosuid,size=64k", "/tmp": "rw,noexec,nosuid,size=256m"},
                 "restart_policy": {"Name": "no"},
+                "auto_remove": True,
             }
             if settings.engine_connect_host:
                 create_kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
@@ -171,7 +229,13 @@ class DockerComputeEngine(ComputeEngine):
             container = client.containers.create(**create_kwargs)
             try:
                 container.start()
-                _write_bootstrap(container, identity=self.identity, token=self._token, resources=resources)
+                _write_bootstrap(
+                    container,
+                    identity=self.identity,
+                    token=self._token,
+                    resources=resources,
+                    credentials=credentials,
+                )
                 self._client = client
                 self._container = container
                 target = f"{container.name}:{settings.engine_rpc_port}"
@@ -188,6 +252,13 @@ class DockerComputeEngine(ComputeEngine):
                 self._stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(self._channel)
                 self._await_health()
                 self._alive = True
+                self._heartbeat_stop.clear()
+                self._heartbeat_thread = threading.Thread(
+                    target=self._heartbeat_loop,
+                    name=f"engine-heartbeat-{self.identity.resource_id}",
+                    daemon=True,
+                )
+                self._heartbeat_thread.start()
             except Exception:
                 with contextlib.suppress(Exception):
                     container.remove(force=True)
@@ -212,6 +283,17 @@ class DockerComputeEngine(ComputeEngine):
             time.sleep(0.1)
         raise RuntimeError(f"Timed out waiting for engine container health: {last_error}")
 
+    def _heartbeat_loop(self) -> None:
+        while not self._heartbeat_stop.wait(settings.engine_heartbeat_interval_seconds):
+            try:
+                stub = self._stub
+                if stub is None:
+                    return
+                stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=2, metadata=self._metadata())
+            except Exception as exc:
+                logger.warning("Engine heartbeat failed for %s: %s", self.identity.resource_id, exc)
+                return
+
     def is_process_alive(self) -> bool:
         with self._lock:
             if not self._alive or self._container is None:
@@ -229,23 +311,29 @@ class DockerComputeEngine(ComputeEngine):
     def check_health(self) -> bool:
         return self.is_process_alive()
 
-    def _submit(self, kind: str, payload: dict[str, object]) -> str:
+    def _submit(self, kind: str, payload: dict[str, object], *, job_id: str | None = None) -> str:
         with self._lock:
             if not self.is_process_alive():
                 self.start()
             assert self._stub is not None
-            job_id = str(uuid.uuid4())
+            job_id = job_id or str(uuid.uuid4())
+            self._active_job_ids.add(job_id)
             self.current_job_id = job_id
-            self._stub.SubmitJob(
-                engine_runtime_pb2.EngineSubmitJobRequest(
-                    protocol_version=ENGINE_PROTOCOL_VERSION,
-                    job_id=job_id,
-                    kind=kind,
-                    payload=dict_to_struct(payload),
-                ),
-                timeout=settings.engine_start_timeout_seconds,
-                metadata=self._metadata(),
-            )
+            try:
+                self._stub.SubmitJob(
+                    engine_runtime_pb2.EngineSubmitJobRequest(
+                        protocol_version=ENGINE_PROTOCOL_VERSION,
+                        job_id=job_id,
+                        kind=kind,
+                        payload_json=encode_json_bytes(payload),
+                    ),
+                    timeout=settings.engine_start_timeout_seconds,
+                    metadata=self._metadata(),
+                )
+            except Exception:
+                self._active_job_ids.discard(job_id)
+                self.current_job_id = next(iter(self._active_job_ids), None)
+                raise
             threading.Thread(target=self._watch_job, args=(job_id,), name=f"engine-watch-{job_id}", daemon=True).start()
             return job_id
 
@@ -266,16 +354,42 @@ class DockerComputeEngine(ComputeEngine):
     def export(
         self, datasource_config: dict, steps: list[dict], output_path: str, export_format: str = "csv", additional_datasources: dict[str, dict] | None = None
     ) -> str:
-        return self._submit(
-            "export",
-            {
-                "datasource_config": datasource_config,
-                "steps": steps,
-                "output_path": output_path,
-                "export_format": export_format,
-                "additional_datasources": additional_datasources or {},
-            },
+        job_id = str(uuid.uuid4())
+        artifact_url = object_store_url(
+            "runtime-staging",
+            _safe_name(self.identity.resource_id),
+            job_id,
+            f"output.{_safe_name(export_format)}",
+            namespace=self._namespace,
         )
+        with self._lock:
+            self._artifact_transfers[job_id] = (Path(output_path), artifact_url)
+        try:
+            export = get_export_format(export_format)
+            upload_url = presigned_put_url(
+                artifact_url,
+                expires_seconds=max(settings.engine_start_timeout_seconds * 10, 3600),
+                endpoint_url=_engine_object_store_endpoint(),
+                content_type=export.content_type,
+            )
+            return self._submit(
+                "export",
+                {
+                    "datasource_config": datasource_config,
+                    "steps": steps,
+                    "artifact_url": artifact_url,
+                    "artifact_upload_url": upload_url,
+                    "export_format": export_format,
+                    "additional_datasources": additional_datasources or {},
+                },
+                job_id=job_id,
+            )
+        except Exception:
+            with self._lock:
+                self._artifact_transfers.pop(job_id, None)
+            with contextlib.suppress(Exception):
+                delete_object(artifact_url)
+            raise
 
     def get_schema(self, datasource_config: dict, steps: list[dict], additional_datasources: dict[str, dict] | None = None) -> str:
         return self._submit("schema", {"datasource_config": datasource_config, "steps": steps, "additional_datasources": additional_datasources or {}})
@@ -289,22 +403,69 @@ class DockerComputeEngine(ComputeEngine):
             stream = self._stub.WatchJob(engine_runtime_pb2.EngineWatchJobRequest(job_id=job_id), metadata=self._metadata())
             for event in stream:
                 which = event.WhichOneof("event")
-                if which == "progress":
-                    payload = json_format.MessageToDict(event.progress, preserving_proto_field_name=True)
+                if which == "progress_json":
+                    payload = json.loads(event.progress_json)
+                    if not isinstance(payload, dict):
+                        raise RuntimeError("Engine progress payload must be an object")
                     with self._lock:
-                        self._pending_progress.setdefault(job_id, deque()).append(EngineProgressEvent(job_id=job_id, event=payload))
+                        self._pending_progress.setdefault(job_id, deque(maxlen=1000)).append(EngineProgressEvent(job_id=job_id, event=payload))
+                        while len(self._pending_progress) > 100:
+                            self._pending_progress.pop(next(iter(self._pending_progress)))
                 elif which == "result":
+                    result = _result_from_message(event.result)
+                    with contextlib.suppress(Exception):
+                        self._stub.GetJobResult(
+                            engine_runtime_pb2.EngineGetJobResultRequest(job_id=job_id),
+                            timeout=2,
+                            metadata=self._metadata(),
+                        )
                     with self._lock:
-                        self._pending_results[job_id] = _result_from_message(event.result)
-                        if self.current_job_id == job_id:
-                            self.current_job_id = None
+                        transfer = self._artifact_transfers.pop(job_id, None)
+                    if transfer is not None:
+                        local_path, artifact_url = transfer
+                        try:
+                            if result.error is None:
+                                download_file(artifact_url, local_path)
+                                if result.data is not None:
+                                    result.data["output_path"] = str(local_path)
+                        except Exception as exc:
+                            result = EngineResult(
+                                job_id=job_id,
+                                data=None,
+                                error=f"Failed to retrieve staged engine artifact: {exc}",
+                                error_kind="engine_artifact_transfer_failed",
+                                error_details={},
+                            )
+                        finally:
+                            with contextlib.suppress(Exception):
+                                delete_object(artifact_url)
+                    with self._lock:
+                        self._pending_results[job_id] = result
+                        while len(self._pending_results) > 100:
+                            self._pending_results.pop(next(iter(self._pending_results)))
+                        self._active_job_ids.discard(job_id)
+                        self.current_job_id = next(iter(self._active_job_ids), None)
                     return
         except Exception as exc:
-            logger.warning("Engine job watcher failed for %s: %s", job_id, exc)
             with self._lock:
-                self._pending_results[job_id] = EngineResult(job_id=job_id, data=None, error=str(exc), error_kind="engine_rpc_lost", error_details={})
-                if self.current_job_id == job_id:
-                    self.current_job_id = None
+                intentional_shutdown = self._shutdown_requested
+                transfer = self._artifact_transfers.pop(job_id, None)
+                self._pending_results[job_id] = EngineResult(
+                    job_id=job_id,
+                    data=None,
+                    error="Engine shutdown requested" if intentional_shutdown else str(exc),
+                    error_kind="engine_shutdown" if intentional_shutdown else "engine_rpc_lost",
+                    error_details={},
+                )
+                self._active_job_ids.discard(job_id)
+                self.current_job_id = next(iter(self._active_job_ids), None)
+            if intentional_shutdown:
+                logger.info("Engine job %s stopped during engine shutdown", job_id)
+            else:
+                logger.warning("Engine job watcher failed for %s: %s", job_id, exc)
+            if transfer is not None:
+                with contextlib.suppress(Exception):
+                    delete_object(transfer[1])
 
     def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> EngineResult | None:
         expected = job_id or self.current_job_id
@@ -314,8 +475,13 @@ class DockerComputeEngine(ComputeEngine):
                 if expected and expected in self._pending_results:
                     return self._pending_results.pop(expected)
                 if expected and not self.is_process_alive():
+                    intentional_shutdown = self._shutdown_requested
                     return EngineResult(
-                        job_id=expected, data=None, error="Engine container died unexpectedly", error_kind="engine_container_died", error_details={}
+                        job_id=expected,
+                        data=None,
+                        error="Engine shutdown requested" if intentional_shutdown else "Engine container died unexpectedly",
+                        error_kind="engine_shutdown" if intentional_shutdown else "engine_container_died",
+                        error_details={},
                     )
             if time.monotonic() >= deadline:
                 return None
@@ -336,9 +502,19 @@ class DockerComputeEngine(ComputeEngine):
 
     def shutdown(self) -> None:
         with self._lock:
+            self._shutdown_requested = True
+            self._heartbeat_stop.set()
             container = self._container
             stub = self._stub
             if container is None:
+                transfers = list(self._artifact_transfers.values())
+                self._artifact_transfers.clear()
+            else:
+                transfers = []
+            if container is None:
+                for _local_path, artifact_url in transfers:
+                    with contextlib.suppress(Exception):
+                        delete_object(artifact_url)
                 return
             if stub is not None:
                 with contextlib.suppress(Exception):
@@ -365,12 +541,18 @@ class DockerComputeEngine(ComputeEngine):
             self._container = None
             self._stub = None
             self._alive = False
+            self._active_job_ids.clear()
             self.current_job_id = None
+            transfers = list(self._artifact_transfers.values())
+            self._artifact_transfers.clear()
+        for _local_path, artifact_url in transfers:
+            with contextlib.suppress(Exception):
+                delete_object(artifact_url)
 
 
 def _result_from_message(message: engine_runtime_pb2.EngineJobResult) -> EngineResult:
-    data = json_format.MessageToDict(message.data, preserving_proto_field_name=True) if message.HasField("data") else None
-    details = json_format.MessageToDict(message.error_details, preserving_proto_field_name=True) if message.HasField("error_details") else None
+    data = json.loads(message.data_json) if message.HasField("data_json") else None
+    details = json.loads(message.error_details_json) if message.HasField("error_details_json") else None
     timings = json_format.MessageToDict(message.step_timings, preserving_proto_field_name=True)
     return EngineResult(
         job_id=message.job_id,

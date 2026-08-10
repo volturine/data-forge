@@ -39,6 +39,8 @@ EXTRA_RUNTIME_KEYS = {
     'WORKER_DATA_PLANE_GRPC_PORT',
     'WORKER_DATA_PLANE_GRPC_TARGET',
     'GRPC_ENABLE_FORK_SUPPORT',
+    'ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS',
+    'ENGINE_OBJECT_STORE_CREDENTIALS_JSON',
 }
 
 ENV_KEY_RE = re.compile(r'^[A-Z][A-Z0-9_]*$')
@@ -144,7 +146,7 @@ def main() -> int:
     for env_path in RUNTIME_ENV_FILES:
         parsed, parse_errors = _parse_env_keys(env_path)
         errors.extend(parse_errors)
-        unknown = sorted(item for item in parsed if item.key not in runtime_allowed)
+        unknown = sorted((item for item in parsed if item.key not in runtime_allowed), key=lambda item: item.key)
         for item in unknown:
             errors.append(
                 f'{env_path.relative_to(ROOT)}:{item.line}: unknown runtime env key: {item.key} (not defined by Settings/AuthSettings or approved extras)'

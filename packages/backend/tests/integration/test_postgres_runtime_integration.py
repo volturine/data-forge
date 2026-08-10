@@ -118,13 +118,12 @@ def _runtime_env(
 
 @pytest.fixture(scope='module')
 def engine_runtime_env() -> dict[str, str]:
-    """Build the same engine image that the runtime worker will launch."""
+    """Use the engine image built by the canonical test recipe before pytest starts."""
     require_docker()
     run_command(
-        ['docker', 'build', '-f', 'docker/Dockerfile', '--target', 'engine', '-t', ENGINE_TEST_IMAGE, '.'],
-        cwd=CORE_ROOT.parent.parent,
+        ['docker', 'image', 'inspect', ENGINE_TEST_IMAGE],
+        cwd=CORE_ROOT,
         env=docker_env(),
-        timeout=900,
     )
     docker_host = run_command(
         ['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'],
@@ -138,6 +137,7 @@ def engine_runtime_env() -> dict[str, str]:
         'ENGINE_DOCKER_HOST': docker_host,
         'ENGINE_DOCKER_NETWORK': 'bridge',
         'ENGINE_CONNECT_HOST': '127.0.0.1',
+        'ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS': 'true',
     }
 
 

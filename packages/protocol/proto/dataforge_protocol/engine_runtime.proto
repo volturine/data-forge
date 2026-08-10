@@ -27,6 +27,9 @@ message EngineHealthResponse {
 }
 
 message EngineSubmitJobRequest {
+  reserved 4;
+  reserved "payload";
+
   int32 protocol_version = 1 [(buf.validate.field).int32.gte = 1];
   string job_id = 2 [(buf.validate.field).string.min_len = 1];
   string kind = 3 [(buf.validate.field).string = {
@@ -35,7 +38,7 @@ message EngineSubmitJobRequest {
     in: "schema"
     in: "row_count"
   }];
-  google.protobuf.Struct payload = 4 [(buf.validate.field).required = true];
+  bytes payload_json = 5 [(buf.validate.field).bytes.min_len = 2];
 }
 
 message EngineJobReference {
@@ -52,26 +55,32 @@ message EngineGetJobResultRequest {
 }
 
 message EngineJobEvent {
+  reserved 4;
+  reserved "progress";
+
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
   int32 sequence = 2 [(buf.validate.field).int32.gte = 1];
   google.protobuf.Timestamp emitted_at = 3 [(buf.validate.field).required = true];
   oneof event {
-    google.protobuf.Struct progress = 4;
     EngineJobResult result = 5;
+    bytes progress_json = 6;
   }
 }
 
 message EngineJobResult {
+  reserved 2, 5;
+  reserved "data", "error_details";
+
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
-  optional google.protobuf.Struct data = 2;
   optional string error = 3;
   optional string error_kind = 4;
-  optional google.protobuf.Struct error_details = 5;
   google.protobuf.Struct step_timings = 6 [(buf.validate.field).required = true];
   optional string query_plan = 7;
   optional double read_duration_ms = 8;
   optional double write_duration_ms = 9;
   optional double collect_duration_ms = 10;
+  optional bytes data_json = 12;
+  optional bytes error_details_json = 13;
 }
 
 message EngineShutdownRequest {}

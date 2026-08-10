@@ -1,7 +1,7 @@
 import contextlib
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -71,6 +71,7 @@ class EngineInfo:
         self.last_activity = datetime.now(UTC)
         self.current_build_id: str | None = None
         self.current_engine_run_id: str | None = None
+        self.active_reservations = 0
 
     def touch(self) -> None:
         self.last_activity = datetime.now(UTC)
@@ -86,6 +87,7 @@ class ProcessManager:
         self._engine_identities: dict[EngineIdentityKey, EngineIdentity] = {}
         self._engines_lock = threading.Lock()
         self._engine_events: dict[EngineIdentityKey, threading.Event] = {}
+        self._closed = False
         self._engine_factory = engine_factory
         self._on_snapshot = on_snapshot
         self._idle_ttl_seconds = settings.engine_idle_ttl_seconds
@@ -107,7 +109,13 @@ class ProcessManager:
             resource_id=resource_id,
         )
 
-    def spawn_engine(self, identity: EngineIdentity, resource_config: dict | None = None) -> EngineInfo:
+    def spawn_engine(
+        self,
+        identity: EngineIdentity,
+        resource_config: dict | None = None,
+        *,
+        _reserve: bool = False,
+    ) -> EngineInfo:
         """Spawn a new compute engine or reuse an existing one for the same identity."""
         normalized_config = self._normalize_config(resource_config)
         qualified_key = self._key(identity)
@@ -119,6 +127,8 @@ class ProcessManager:
 
         while True:
             with self._engines_lock:
+                if self._closed:
+                    raise RuntimeError("Process manager is shut down")
                 in_progress_event = self._engine_events.get(qualified_key)
                 if in_progress_event is not None:
                     wait_event = in_progress_event
@@ -129,6 +139,8 @@ class ProcessManager:
                         normalized_config,
                     ):
                         info.touch()
+                        if _reserve:
+                            info.active_reservations += 1
                         logger.debug("Reusing existing engine for %s", qualified_key)
                         reused_info = info
                         break
@@ -158,12 +170,17 @@ class ProcessManager:
 
             evict_target: tuple[EngineIdentityKey, EngineInfo] | None = None
             with self._engines_lock:
-                if len(self._engines) >= settings.max_concurrent_engines:
+                # _engine_events includes this spawn and every other unique
+                # engine currently being started. Count those reservations so
+                # Docker startup can happen concurrently without exceeding the
+                # configured container capacity.
+                reserved_capacity = len(self._engines) + len(self._engine_events)
+                if reserved_capacity > settings.max_concurrent_engines:
                     idle_key: EngineIdentityKey | None = None
                     idle_info: EngineInfo | None = None
                     for active_key, info in self._engines.items():
                         engine = info.engine
-                        if engine.current_job_id and engine.is_process_alive():
+                        if info.active_reservations or (engine.current_job_id and engine.is_process_alive()):
                             continue
                         if idle_info is not None and info.last_activity >= idle_info.last_activity:
                             continue
@@ -196,19 +213,16 @@ class ProcessManager:
                 _, evicted_info = evict_target
                 evicted_info.engine.shutdown()
 
+            logger.info("Spawning new engine for key %s", qualified_key)
+            engine = self._engine_factory(identity, normalized_config)
+            engine.start()
+            if not engine.is_process_alive():
+                engine.shutdown()
+                raise RuntimeError(f"Failed to start engine for {qualified_key}")
+            info = EngineInfo(engine)
+            if _reserve:
+                info.active_reservations = 1
             with self._engines_lock:
-                logger.info(
-                    "Spawning new engine for key %s (%s/%s)",
-                    qualified_key,
-                    len(self._engines) + 1,
-                    settings.max_concurrent_engines,
-                )
-                engine = self._engine_factory(identity, normalized_config)
-                engine.start()
-                if not engine.is_process_alive():
-                    engine.shutdown()
-                    raise RuntimeError(f"Failed to start engine for {qualified_key}")
-                info = EngineInfo(engine)
                 self._engines[qualified_key] = info
                 self._engine_identities[qualified_key] = identity
                 spawned_info = info
@@ -236,6 +250,19 @@ class ProcessManager:
     def get_or_create_engine(self, identity: EngineIdentity, resource_config: dict | None = None) -> ComputeEngine:
         info = self.spawn_engine(identity, resource_config=resource_config)
         return info.engine
+
+    @contextlib.contextmanager
+    def acquire_engine(self, identity: EngineIdentity, resource_config: dict | None = None) -> Iterator[ComputeEngine]:
+        """Reserve an engine until its caller has submitted work to it."""
+        qualified_key = self._key(identity)
+        info = self.spawn_engine(identity, resource_config=resource_config, _reserve=True)
+        try:
+            yield info.engine
+        finally:
+            with self._engines_lock:
+                current = self._engines.get(qualified_key)
+                if current is info:
+                    current.active_reservations = max(current.active_reservations - 1, 0)
 
     def restart_engine_with_config(self, identity: EngineIdentity, resource_config: dict) -> EngineInfo:
         identity_key = self._key(identity)
@@ -332,9 +359,14 @@ class ProcessManager:
         qualified_key = self._key(identity, namespace=namespace)
         resolved_namespace = qualified_key.namespace
         info: EngineInfo | None = None
-        with self._engines_lock:
-            info = self._engines.pop(qualified_key, None)
-            self._engine_identities.pop(qualified_key, None)
+        while True:
+            with self._engines_lock:
+                spawn_event = self._engine_events.get(qualified_key)
+                if spawn_event is None:
+                    info = self._engines.pop(qualified_key, None)
+                    self._engine_identities.pop(qualified_key, None)
+                    break
+            spawn_event.wait()
         if info is None:
             logger.debug("No engine found to shutdown for %s", qualified_key)
             return
@@ -348,6 +380,11 @@ class ProcessManager:
         self._reaper_stop.set()
         if self._reaper_thread is not None and self._reaper_thread.is_alive():
             self._reaper_thread.join(timeout=1.0)
+        with self._engines_lock:
+            self._closed = True
+            spawn_events = list(self._engine_events.values())
+        for spawn_event in spawn_events:
+            spawn_event.wait()
         with self._engines_lock:
             shutdown_targets = list(self._engines.items())
             self._engines.clear()
@@ -397,7 +434,7 @@ class ProcessManager:
                 is_alive = engine.is_process_alive()
                 is_busy = bool(engine.current_job_id and is_alive)
                 idle_seconds = (now - info.last_activity).total_seconds()
-                if is_alive and (is_busy or idle_seconds < self._idle_ttl_seconds):
+                if is_alive and (info.active_reservations or is_busy or idle_seconds < self._idle_ttl_seconds):
                     continue
                 stale.append((key, info))
                 del self._engines[key]

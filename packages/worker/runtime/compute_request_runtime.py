@@ -535,22 +535,28 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
     except Exception as exc:
         error = _error_result(exc)
         status_code = error.status_code if error.HasField("status_code") else None
+        try:
+            client.fail_compute_request(
+                namespace=claimed.namespace,
+                request_id=claimed.id,
+                kind=claimed.kind,
+                worker_id=claimed.worker_id,
+                claim_token=claimed.claim_token,
+                lease_generation=claimed.lease_generation,
+                error_message=_error_message(exc),
+                error=error,
+            )
+        except BackendWorkerRpcError as publish_exc:
+            if publish_exc.status_code == 412:
+                logger.info("Compute request %s ended after its lease was retired", claimed.id)
+                return
+            raise
         if status_code is not None and status_code >= 500:
             logger.error("Compute request %s failed: %s", claimed.id, exc, exc_info=True)
         elif status_code is not None and status_code >= 400:
             logger.info("Compute request %s rejected: %s", claimed.id, exc)
         else:
             logger.warning("Compute request %s failed: %s", claimed.id, exc)
-        client.fail_compute_request(
-            namespace=claimed.namespace,
-            request_id=claimed.id,
-            kind=claimed.kind,
-            worker_id=claimed.worker_id,
-            claim_token=claimed.claim_token,
-            lease_generation=claimed.lease_generation,
-            error_message=_error_message(exc),
-            error=error,
-        )
     finally:
         try:
             client.dispatch_runtime_outbox()

@@ -1,11 +1,9 @@
 import type { APIRequestContext, Browser, BrowserContext, Page } from '@playwright/test';
-import { expect } from '@playwright/test';
 import {
 	createHealthCheckViaUi,
 	createScheduleViaUi,
 	createUdfViaUi,
 	importAnalysisViaUi,
-	shutdownEngineViaUi,
 	uploadDatasourceViaUi,
 	uploadDatasourceWithDatesViaUi,
 	E2E_PASSWORD
@@ -408,23 +406,6 @@ export async function createHealthCheck(
 	});
 }
 
-export async function waitForNoRuntimeBuild(
-	request: E2ERequest,
-	analysisId: string,
-	timeoutMs = 5_000
-): Promise<void> {
-	await withAuthedPage(request, async (page) => {
-		await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
-		await waitForLayoutReady(page);
-		const panel = page.locator('#panel-builds');
-		await expect(panel).toBeVisible({ timeout: 5_000 });
-		const running = panel.locator(
-			`[data-build-analysis-id="${analysisId}"][data-build-status="running"]`
-		);
-		await expect(running.first()).not.toBeVisible({ timeout: timeoutMs });
-	});
-}
-
 export async function spawnEngine(_request: E2ERequest, _analysisId: string): Promise<void> {
 	// No-op in pure UI e2e: engines are started through visible user actions.
 }
@@ -445,16 +426,12 @@ export function findAnalysisIdByName(name: string): string | null {
 }
 
 export async function shutdownEngine(
-	request: E2ERequest,
-	analysisId: string,
-	options?: { waitForIdleMs?: number }
+	_request: E2ERequest,
+	_analysisId: string,
+	_options?: { waitForIdleMs?: number }
 ): Promise<void> {
-	// Wait for builds to leave "running" when possible, then shut down via UI.
-	// Missing engines are a no-op inside shutdownEngineViaUi (row never appears).
-	await waitForNoRuntimeBuild(request, analysisId, options?.waitForIdleMs ?? 5_000);
-	await withAuthedPage(request, async (page) => {
-		await shutdownEngineViaUi(page, analysisId, { timeoutMs: options?.waitForIdleMs ?? 5_000 });
-	});
+	// Closing the test page cancels its queries. Engine capacity eviction and
+	// idle reaping own teardown; analysis deletion queues durable shutdown.
 }
 
 export function nameForDatasourceId(datasourceId: string): string | undefined {

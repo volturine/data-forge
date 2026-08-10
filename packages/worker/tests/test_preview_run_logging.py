@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime import compute_service
+from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_manager import ProcessManager
 
 
@@ -57,7 +58,7 @@ def test_preview_step_persists_engine_run_by_default(sample_datasource, monkeypa
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", True)
     analysis_id = f"preview-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    manager = ProcessManager()
+    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeEngine(identity.resource_id, config))
     identity = _analysis_identity(analysis_id)
     internal_client = _internal_client_mock()
     try:
@@ -92,7 +93,7 @@ def test_preview_step_skips_engine_run_persistence_when_disabled(sample_datasour
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", False)
     analysis_id = f"preview-no-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    manager = ProcessManager()
+    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeEngine(identity.resource_id, config))
     identity = _analysis_identity(analysis_id)
     internal_client = _internal_client_mock()
     try:
