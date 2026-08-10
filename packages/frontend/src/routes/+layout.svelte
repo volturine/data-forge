@@ -19,16 +19,11 @@
 	import { favoriteStore } from '$lib/stores/favorites.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import {
-		initNamespace,
-		switchNamespace,
-		useNamespace,
-		isNamespaceReady,
-		getNamespaceError
-	} from '$lib/stores/namespace.svelte';
+	import { switchNamespace, useNamespace, isNamespaceReady } from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { AppLifecycle } from '$lib/services/app-lifecycle';
+	import { appBootstrap } from '$lib/services/app-bootstrap.svelte';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
 	import { untrack } from 'svelte';
 	import 'styled-system/styles.css';
@@ -55,38 +50,15 @@
 	];
 	const onAuthPage = $derived(authPaths.some((p) => currentPath.startsWith(p)));
 
-	// Network: resolve auth eagerly in parallel with config fetch.
+	// Single orchestrator: config ∥ auth, then namespace. Layout only renders phase.
 	$effect(() => {
 		if (typeof window === 'undefined') return;
-		untrack(() => void authStore.resolve());
+		untrack(() => void appBootstrap.start());
 	});
 
-	const ready = $derived(
-		configStore.config !== null &&
-			isNamespaceReady() &&
-			(!configStore.authRequired ||
-				(authStore.resolved && !authStore.bootstrapFailed && authStore.status !== 'unknown'))
-	);
-
-	// Bootstrap finished without a usable shell: stop spinning and show why.
-	// Prefer the most specific terminal failure (config → auth → namespace).
-	const bootstrapError = $derived.by(() => {
-		if (ready) return null;
-		if (configStore.error) return configStore.error;
-		if (configStore.settled && configStore.config === null) {
-			return 'Failed to load application configuration';
-		}
-		// Auth pages only need config; ignore session/namespace failures there.
-		if (onAuthPage) return null;
-		if (authStore.bootstrapFailed) return authStore.error ?? 'Failed to verify session';
-		return getNamespaceError();
-	});
-	// Auth routes only need config. App routes need full ready (config + auth + namespace).
-	const bootstrapping = $derived(
-		onAuthPage
-			? configStore.config === null && configStore.error === null
-			: !ready && bootstrapError === null
-	);
+	const shellPhase = $derived(appBootstrap.phase(onAuthPage));
+	const bootstrapError = $derived(appBootstrap.errorFor(onAuthPage));
+	const ready = $derived(appBootstrap.appReady);
 
 	// Navigation: $derived can't redirect; side effect redirects unauthenticated users.
 	$effect(() => {
@@ -121,18 +93,6 @@
 			sidebarCollapsed = value;
 		});
 	}
-
-	// Network: $derived can't fetch config on client.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		untrack(() => configStore.fetch());
-	});
-
-	// Storage: $derived can't load namespace from storage.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		void initNamespace();
-	});
 
 	// State: favorites are namespace-scoped and reset on namespace changes.
 	$effect(() => {
@@ -328,7 +288,7 @@
 </svelte:head>
 
 <QueryClientProvider client={queryClient}>
-	{#if bootstrapping}
+	{#if shellPhase === 'loading'}
 		<div
 			class={css({
 				display: 'flex',
@@ -341,7 +301,7 @@
 		>
 			<div class={spinner()}></div>
 		</div>
-	{:else if bootstrapError}
+	{:else if shellPhase === 'error'}
 		<div
 			class={css({
 				display: 'flex',
@@ -367,7 +327,7 @@
 				Reload the page once the API is reachable.
 			</p>
 		</div>
-	{:else if onAuthPage && configStore.authRequired}
+	{:else if shellPhase === 'auth'}
 		{@render children()}
 	{:else}
 		<div class={css({ display: 'flex', height: '100vh' })}>
