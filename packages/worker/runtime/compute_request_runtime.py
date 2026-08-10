@@ -19,7 +19,7 @@ from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
 from runtime.domain.domain_enums import domain_token
-from runtime.exceptions import AppError, engine_not_found, status_for_app_error
+from runtime.exceptions import AppError, status_for_app_error
 from runtime.worker_runtime_client import BackendWorkerRpcError, WorkerRuntimeClient, client_from_env
 from runtime.json_values import dict_to_struct
 from runtime.namespace import reset_namespace, set_namespace_context
@@ -519,12 +519,9 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "shutdown_engine")
             identity = command.engine_identity
-            engine = manager.get_engine(identity)
-            if engine is None:
-                raise engine_not_found(identity.resource_id)
-            # Deleting an analysis must retire its engine even when a preview is in
-            # flight. ProcessManager first requests a cooperative subprocess stop,
-            # then escalates only when it does not stop.
+            # Shutdown is idempotent: capacity eviction, idle reaping, or a prior
+            # crash may already have removed the container. Missing engines are a
+            # successful terminal state, matching reconciliation rules.
             manager.shutdown_engine(identity)
             _complete_request(client, claimed, response=compute_pb2.ComputeResponse(ack=compute_pb2.ComputeAckResult(success=True)))
         else:

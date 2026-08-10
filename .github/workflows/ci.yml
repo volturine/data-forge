@@ -126,17 +126,18 @@ jobs:
       PORT: "8001"
       FRONTEND_PORT: "3001"
       # Self-hosted runner shares CPUs between browsers, API, worker, and Docker
-      # engines. Keep two browser workers, but match compute throughput so previews
-      # do not sit queued for the full Playwright timeout (observed with
-      # concurrency=1: sticky Loading + cascading layout timeouts). Cap engines
-      # just above concurrent analyses so idle reuse works without thrashing.
+      # engines. Two browser workers need matching compute slots. Engine capacity
+      # must stay high enough that unique analysis identities are not constantly
+      # evicted (eviction thrash spent ~3–5s per spawn and starved the app shell).
       PW_E2E_WORKERS: "2"
       BUILD_WORKER_MIN_PROCESSES: "1"
       BUILD_WORKER_MAX_PROCESSES: "1"
       COMPUTE_REQUEST_CONCURRENCY: "2"
-      MAX_CONCURRENT_ENGINES: "4"
-      E2E_ENGINE_IDLE_TTL_SECONDS: "30"
-      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "5"
+      MAX_CONCURRENT_ENGINES: "16"
+      # Bound each engine so higher concurrency stays within runner RAM.
+      POLARS_MAX_MEMORY_MB: "512"
+      E2E_ENGINE_IDLE_TTL_SECONDS: "45"
+      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "10"
       # Surface engine spawn / capacity failures in the uploaded diagnostics.
       LOG_LEVEL: "info"
     steps:

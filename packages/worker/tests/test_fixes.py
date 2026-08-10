@@ -485,6 +485,47 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         manager.shutdown_all()
 
 
+def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monkeypatch) -> None:
+    completed: list[compute_pb2.ComputeResponse] = []
+    identity = _analysis_identity("analysis-already-gone")
+
+    class _Client:
+        def complete_compute_request(self, **kwargs):
+            completed.append(kwargs["response"])
+
+        def fail_compute_request(self, **_kwargs):
+            raise AssertionError("missing engines must complete shutdown successfully")
+
+        def dispatch_runtime_outbox(self):
+            return 0
+
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, object()))
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-missing-shutdown",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_command_envelope(
+            kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+            request_id="req-missing-shutdown",
+            payload={"engine_identity": _engine_identity_payload(identity)},
+            shutdown_identity=identity,
+        ),
+    )
+
+    try:
+        compute_request_runtime._execute_request_sync(claimed, manager)
+        assert len(completed) == 1
+        assert completed[0].WhichOneof("response") == "ack"
+        assert completed[0].ack.success is True
+    finally:
+        manager.shutdown_all()
+
+
 def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) -> None:
     completed: list[compute_pb2.ComputeResponse] = []
 
