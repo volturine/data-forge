@@ -95,20 +95,16 @@ def _effective_resources(resource_config: dict[str, object], *, runtime_cpu_coun
 def _container_nano_cpus(max_threads: int) -> int | None:
     """Translate thread budget into Docker CPU quota.
 
-    When the worker reaches engines through a published host port
-    (`ENGINE_CONNECT_HOST`), the API/worker/browser share that host with the
-    containers. A hard 1.0 CPU quota per engine then starves page loads. Keep
-    Polars thread caps via env, but grant half a core per thread in that topology.
+    Production compose workers run engines on a dedicated runtime network and
+    enforce hard CPU limits. Host-connected topologies (local/e2e harnesses)
+    share cores with the API, worker, and browser, so hard nano_cpu quotas are
+    omitted there; Polars still honors POLARS_MAX_THREADS inside the container.
     """
     if max_threads <= 0:
         return None
-    per_thread = 1_000_000_000
     if settings.engine_connect_host:
-        # Host-connected e2e/dev: leave cores for API, browser, and worker.
-        # Polars is still hard-capped via POLARS_MAX_THREADS inside the container.
-        # Skip a hard Docker quota entirely so concurrent engines cannot pin the host.
         return None
-    return max(100_000_000, max_threads * per_thread)
+    return max(100_000_000, max_threads * 1_000_000_000)
 
 
 def _engine_object_store_endpoint() -> str:

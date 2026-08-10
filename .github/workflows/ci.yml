@@ -119,28 +119,25 @@ jobs:
     name: e2e
     runs-on: [self-hosted, linux, x64]
     if: github.event_name == 'pull_request' && github.base_ref == 'master'
-    timeout-minutes: 50
+    timeout-minutes: 25
     permissions:
       contents: read
     env:
       PORT: "8001"
       FRONTEND_PORT: "3001"
-      # Native Docker engines add multi-second cold starts. Parallel Playwright
-      # workers share one default namespace and race on create/delete, which
-      # shows up as empty galleries while waiting for the analysis editor.
-      # Serialize browsers on CI; keep enough engine slots for sequential work.
-      PW_E2E_WORKERS: "1"
-      BUILD_WORKER_MIN_PROCESSES: "1"
-      BUILD_WORKER_MAX_PROCESSES: "1"
-      COMPUTE_REQUEST_CONCURRENCY: "2"
-      MAX_CONCURRENT_ENGINES: "6"
-      POLARS_MAX_MEMORY_MB: "384"
-      E2E_ENGINE_IDLE_TTL_SECONDS: "20"
-      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "5"
-      # Serial browser; Playwright retries stay at 0 (see e2e-runtime-baseline).
-      E2E_TIMEOUT_SECONDS: "2100"
-      # Keep service logs quiet enough that logging I/O does not contend with
-      # page loads; capacity issues still surface via failed compute requests.
+      # 6-core self-hosted runner: use the cores. Host-connected engines do not
+      # take Docker nano_cpu hard caps, so parallel browsers no longer starve
+      # the shell. Keep engine slots high enough to avoid create/destroy thrash.
+      PW_E2E_WORKERS: "4"
+      BUILD_WORKER_MIN_PROCESSES: "2"
+      BUILD_WORKER_MAX_PROCESSES: "2"
+      COMPUTE_REQUEST_CONCURRENCY: "4"
+      MAX_CONCURRENT_ENGINES: "16"
+      POLARS_MAX_MEMORY_MB: "256"
+      E2E_ENGINE_IDLE_TTL_SECONDS: "120"
+      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "15"
+      # Fail the job if the suite regresses past ~15m of harness time.
+      E2E_TIMEOUT_SECONDS: "900"
       LOG_LEVEL: "warning"
     steps:
       - uses: actions/checkout@v6
@@ -183,12 +180,10 @@ jobs:
 
       - name: Reclaim unused Docker state
         run: |
-          # E2E provisions the native engine image. This runner is shared
-          # across jobs, so stale stopped containers, unused volumes, and
-          # build cache must not consume the image build's disk budget.
+          # Free stopped containers/volumes without wiping the engine image
+          # build cache. A cold 2.5GB engine rebuild dominates e2e wall time.
           docker container prune --force
           docker volume prune --force
-          docker builder prune --all --force
           docker image prune --force
           docker system df
           df -h

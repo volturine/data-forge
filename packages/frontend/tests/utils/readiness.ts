@@ -1,14 +1,13 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export function readyTimeoutMs(): number {
-	// A cold native engine must start its container and import Polars before the
-	// first preview. CI shares the host with Docker engines, so budget extra time.
-	return process.env.CI ? 60_000 : 45_000;
+	// Engine cold start + one preview. Keep this tight so stuck work fails fast.
+	return 30_000;
 }
 
 /** Builds need a full exclusive engine start plus pipeline work. */
 export function buildTimeoutMs(): number {
-	return process.env.CI ? 120_000 : 60_000;
+	return 60_000;
 }
 
 function mainNavigation(page: Page): Locator {
@@ -45,29 +44,9 @@ export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): P
  * completed, and the Svelte page component has started rendering.
  */
 export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	const deadline = Date.now() + timeout;
-	let lastError: unknown;
-	// Under Docker-engine load the first paint can hang on a blank spinner.
-	// One soft reload inside the budget recovers without failing the suite.
-	for (let attempt = 0; attempt < 2; attempt += 1) {
-		const remaining = Math.max(1_000, deadline - Date.now());
-		try {
-			await expect(mainNavigation(page)).toBeVisible({ timeout: remaining });
-			await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({
-				timeout: remaining
-			});
-			await waitForAnyVisible(page.locator('main'), remaining);
-			return;
-		} catch (error) {
-			lastError = error;
-			if (attempt === 0 && Date.now() + 2_000 < deadline) {
-				await page.reload({ waitUntil: 'domcontentloaded' });
-				continue;
-			}
-			throw error;
-		}
-	}
-	throw lastError;
+	await expect(mainNavigation(page)).toBeVisible({ timeout });
+	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
+	await waitForAnyVisible(page.locator('main'), timeout);
 }
 
 async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {

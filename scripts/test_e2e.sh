@@ -15,19 +15,14 @@ export ENGINE_DOCKER_HOST
 export ENGINE_DOCKER_NETWORK="dataforge-e2e-engine-$$"
 export ENGINE_CONNECT_HOST="127.0.0.1"
 export ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS="true"
-# Playwright workers can start engines concurrently. Give each engine one
-# Polars thread so the Docker test deployment does not oversubscribe the runner.
+# Parallel Playwright workers start engines concurrently. Cap each engine to
+# one Polars thread so compute does not monopolize the host.
 export POLARS_CORES_AVAILABLE="${E2E_POLARS_CORES_AVAILABLE:-1}"
-# Short idle TTL keeps capacity free across unique analysis identities that e2e
-# creates every few seconds. Production defaults remain longer.
-export ENGINE_IDLE_TTL_SECONDS="${E2E_ENGINE_IDLE_TTL_SECONDS:-30}"
-export ENGINE_IDLE_REAP_INTERVAL_SECONDS="${E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS:-5}"
+# Keep engines warm across steps of the same identity; thrashing Docker create
+# is the main e2e wall-time cost after the Docker cutover.
+export ENGINE_IDLE_TTL_SECONDS="${E2E_ENGINE_IDLE_TTL_SECONDS:-120}"
+export ENGINE_IDLE_REAP_INTERVAL_SECONDS="${E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS:-15}"
 LOG_DIR="${E2E_LOG_DIR:-}"
-# When CI captures service logs and the caller left the quiet e2e default, raise
-# verbosity so Docker engine spawn/capacity failures appear in the artifact.
-if [ -n "$LOG_DIR" ] && [ "${LOG_LEVEL:-warning}" = "warning" ]; then
-    export LOG_LEVEL=info
-fi
 PLAYWRIGHT_ARTIFACTS_DIR="${ROOT_DIR}/packages/frontend/tests/.artifacts/playwright"
 PG_CONTAINER="dataforge-e2e-pg-$$"
 PG_LABEL="data-forge.test-postgres=1"
@@ -217,7 +212,8 @@ done
 
 echo "Starting e2e services"
 echo "Building e2e Polars engine image"
-docker build -q -f docker/Dockerfile --target engine -t "${ENGINE_IMAGE}" . >/dev/null
+# BuildKit layer cache keeps rebuilds cheap when the engine target is unchanged.
+DOCKER_BUILDKIT=1 docker build -q -f docker/Dockerfile --target engine -t "${ENGINE_IMAGE}" . >/dev/null
 if [ -n "$LOG_DIR" ]; then
     (cd packages/backend && exec uv run --no-env-file main.py) >"$LOG_DIR/backend.log" 2>&1 & BACKEND_PID=$!
 fi
