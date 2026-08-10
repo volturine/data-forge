@@ -32,7 +32,8 @@ const {
 	useNamespace,
 	isNamespaceReady,
 	isNamespaceSwitching,
-	getNamespaceInitError
+	getNamespaceError,
+	getNamespaceStatus
 } = await import('./namespace.svelte');
 
 describe('namespace store', () => {
@@ -81,12 +82,13 @@ describe('namespace store', () => {
 			expect(isNamespaceReady()).toBe(true);
 		});
 
-		test('records init error when config default namespace is missing', async () => {
+		test('enters failed status when config default namespace is missing', async () => {
 			mockIdbGet.mockResolvedValue(null);
 			mockConfigStore.config = null;
 			await initNamespace();
 			expect(isNamespaceReady()).toBe(false);
-			expect(getNamespaceInitError()).toMatch(/Default namespace missing|Failed to load|config/i);
+			expect(getNamespaceStatus()).toBe('failed');
+			expect(getNamespaceError()).toMatch(/unavailable|default_namespace/i);
 		});
 
 		test('returns true when namespace already set before init', async () => {
@@ -112,12 +114,13 @@ describe('namespace store', () => {
 			expect(requireNamespace()).toBe('config-ns');
 		});
 
-		test('sets init error when both IndexedDB and config are empty', async () => {
+		test('fails when both IndexedDB and config are empty', async () => {
 			mockIdbGet.mockResolvedValue(null);
 			mockConfigStore.config = null;
 			await initNamespace();
 			expect(isNamespaceReady()).toBe(false);
-			expect(getNamespaceInitError()).toBeTruthy();
+			expect(getNamespaceStatus()).toBe('failed');
+			expect(getNamespaceError()).toBeTruthy();
 		});
 
 		test('persists resolved namespace to IndexedDB', async () => {
@@ -181,6 +184,15 @@ describe('namespace store', () => {
 			await initNamespace();
 			expect(mockIdbDelete).toHaveBeenCalledWith('namespace');
 			expect(isNamespaceReady()).toBe(false);
+			expect(getNamespaceStatus()).toBe('failed');
+		});
+
+		test('fails with a contract error when config loads without default_namespace', async () => {
+			mockIdbGet.mockResolvedValue(null);
+			mockConfigStore.config = {};
+			await initNamespace();
+			expect(getNamespaceStatus()).toBe('failed');
+			expect(getNamespaceError()).toBe('Configuration is missing default_namespace');
 		});
 	});
 

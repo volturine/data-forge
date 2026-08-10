@@ -4,14 +4,17 @@ import { configStore } from '$lib/stores/config.svelte';
 
 const NAMESPACE_KEY = 'namespace';
 
+/** Lifecycle of the active namespace — same shape as auth: terminal success or failure. */
+export type NamespaceStatus = 'pending' | 'ready' | 'failed';
+
 function isValid(value: unknown): value is string {
 	return typeof value === 'string' && value.trim().length > 0;
 }
 
 let namespace = $state<string>('');
-let ready = $state(false);
+let status = $state<NamespaceStatus>('pending');
+let error = $state<string | null>(null);
 let switching = $state(false);
-let initError = $state<string | null>(null);
 let pending: Promise<void> | null = null;
 
 function invalidateNamespaceRequests(): void {
@@ -20,44 +23,79 @@ function invalidateNamespaceRequests(): void {
 	}
 }
 
-export function getNamespaceInitError(): string | null {
-	return initError;
+function markReady(value: string): void {
+	namespace = value;
+	status = 'ready';
+	error = null;
 }
 
+function markFailed(message: string): void {
+	namespace = '';
+	status = 'failed';
+	error = message;
+}
+
+function markPending(): void {
+	status = 'pending';
+	error = null;
+}
+
+export function isNamespaceReady(): boolean {
+	return status === 'ready' && isValid(namespace);
+}
+
+export function isNamespaceSwitching(): boolean {
+	return switching;
+}
+
+export function getNamespaceStatus(): NamespaceStatus {
+	return status;
+}
+
+export function getNamespaceError(): string | null {
+	return status === 'failed' ? error : null;
+}
+
+/**
+ * Resolve the active namespace once per app load.
+ *
+ * Success: stored value, or config.default_namespace.
+ * Failure: terminal `failed` status — never leave callers on `pending` forever,
+ * and never throw out of fire-and-forget layout effects.
+ */
 export async function initNamespace(): Promise<void> {
-	if (isValid(namespace)) {
-		ready = true;
-		initError = null;
-		return;
-	}
+	if (status === 'ready' && isValid(namespace)) return;
 	if (pending) return pending;
 
 	pending = (async () => {
-		initError = null;
+		markPending();
+
 		const stored = await idbGet<string>(NAMESPACE_KEY);
 		if (isValid(stored)) {
-			namespace = stored;
-			ready = true;
+			markReady(stored);
 			return;
 		}
 		if (stored !== null) {
 			await idbDelete(NAMESPACE_KEY);
 		}
+
 		await configStore.fetch();
-		if (!isValid(configStore.config?.default_namespace)) {
-			// Surface as state so layout can leave the spinner. Do not throw —
-			// callers use void initNamespace() and an unhandled rejection left
-			// the shell permanently blank.
-			ready = false;
-			initError =
-				configStore.error ??
-				'Default namespace missing from config. Check that the API is reachable.';
+		const defaultNamespace = configStore.config?.default_namespace;
+		if (!isValid(defaultNamespace)) {
+			// Config itself failed, or config loaded without a default — both are
+			// contract failures for namespace selection. Layout already prefers
+			// configStore.error when present; this status is for "config ok but
+			// unusable" and for callers that only observe namespace.
+			markFailed(
+				configStore.config
+					? 'Configuration is missing default_namespace'
+					: (configStore.error ?? 'Configuration is unavailable')
+			);
 			return;
 		}
-		namespace = configStore.config.default_namespace;
-		await idbSet(NAMESPACE_KEY, namespace);
-		ready = true;
-		initError = null;
+
+		await idbSet(NAMESPACE_KEY, defaultNamespace);
+		markReady(defaultNamespace);
 	})();
 
 	try {
@@ -68,35 +106,24 @@ export async function initNamespace(): Promise<void> {
 }
 
 export function requireNamespace(): string {
-	if (!ready || !isValid(namespace)) {
+	if (status !== 'ready' || !isValid(namespace)) {
 		throw new Error('Namespace not initialized — call initNamespace() first');
 	}
 	return namespace;
-}
-
-export function isNamespaceReady(): boolean {
-	return ready;
-}
-
-export function isNamespaceSwitching(): boolean {
-	return switching;
 }
 
 export async function setNamespace(value: string): Promise<void> {
 	if (!isValid(value)) {
 		if (namespace) invalidateNamespaceRequests();
 		namespace = '';
-		ready = false;
-		initError = null;
+		markPending();
 		await idbDelete(NAMESPACE_KEY);
 		return;
 	}
-	if (value === namespace && ready) return;
+	if (value === namespace && status === 'ready') return;
 	invalidateNamespaceRequests();
-	namespace = value;
-	ready = true;
-	initError = null;
 	await idbSet(NAMESPACE_KEY, value);
+	markReady(value);
 }
 
 export async function switchNamespace(
@@ -124,7 +151,13 @@ export const useNamespace = () => ({
 		return requireNamespace();
 	},
 	get ready() {
-		return ready;
+		return isNamespaceReady();
+	},
+	get status() {
+		return status;
+	},
+	get error() {
+		return getNamespaceError();
 	},
 	get switching() {
 		return switching;

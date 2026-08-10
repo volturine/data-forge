@@ -24,7 +24,7 @@
 		switchNamespace,
 		useNamespace,
 		isNamespaceReady,
-		getNamespaceInitError
+		getNamespaceError
 	} from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
@@ -69,18 +69,17 @@
 	);
 
 	// Bootstrap finished without a usable shell: stop spinning and show why.
-	// No auto-retry and no soft-reload — surface the failure for a person to act.
+	// Prefer the most specific terminal failure (config → auth → namespace).
 	const bootstrapError = $derived.by(() => {
 		if (ready) return null;
 		if (configStore.error) return configStore.error;
 		if (configStore.settled && configStore.config === null) {
 			return 'Failed to load application configuration';
 		}
-		// Auth pages only depend on config; ignore session/namespace failures there.
+		// Auth pages only need config; ignore session/namespace failures there.
 		if (onAuthPage) return null;
 		if (authStore.bootstrapFailed) return authStore.error ?? 'Failed to verify session';
-		if (getNamespaceInitError()) return getNamespaceInitError();
-		return null;
+		return getNamespaceError();
 	});
 	// Auth routes only need config. App routes need full ready (config + auth + namespace).
 	const bootstrapping = $derived(
