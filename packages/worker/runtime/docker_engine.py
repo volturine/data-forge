@@ -92,6 +92,22 @@ def _effective_resources(resource_config: dict[str, object], *, runtime_cpu_coun
     return values
 
 
+def _container_nano_cpus(max_threads: int) -> int | None:
+    """Translate thread budget into Docker CPU quota.
+
+    When the worker reaches engines through a published host port
+    (`ENGINE_CONNECT_HOST`), the API/worker/browser share that host with the
+    containers. A hard 1.0 CPU quota per engine then starves page loads. Keep
+    Polars thread caps via env, but grant half a core per thread in that topology.
+    """
+    if max_threads <= 0:
+        return None
+    per_thread = 1_000_000_000
+    if settings.engine_connect_host:
+        per_thread = 500_000_000
+    return max(100_000_000, max_threads * per_thread)
+
+
 def _engine_object_store_endpoint() -> str:
     if settings.engine_object_store_endpoint:
         return settings.engine_object_store_endpoint
@@ -218,7 +234,7 @@ class DockerComputeEngine(ComputeEngine):
                 "labels": labels,
                 "network": settings.engine_docker_network,
                 "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
-                "nano_cpus": resources["max_threads"] * 1_000_000_000 if resources["max_threads"] else None,
+                "nano_cpus": _container_nano_cpus(resources["max_threads"]),
                 "pids_limit": 256,
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],

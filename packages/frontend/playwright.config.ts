@@ -45,7 +45,9 @@ export default defineConfig({
 	fullyParallel: false,
 	globalSetup: './tests/global-setup.ts',
 	workers,
-	retries: 0,
+	// Native Docker engines add cold-start jitter on shared CI hosts. One
+	// retry absorbs blank-shell timeouts without masking hard product bugs.
+	retries: process.env.CI ? 1 : 0,
 	outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR
 		? path.resolve(process.env.PLAYWRIGHT_OUTPUT_DIR)
 		: path.join(artifactsRoot, 'playwright', `test-results${shardSuffix}`),

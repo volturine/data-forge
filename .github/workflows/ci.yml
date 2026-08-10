@@ -139,8 +139,9 @@ jobs:
       E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "10"
       # One worker is slower; keep headroom under the 35m job budget.
       E2E_TIMEOUT_SECONDS: "1800"
-      # Surface engine spawn / capacity failures in the uploaded diagnostics.
-      LOG_LEVEL: "info"
+      # Keep service logs quiet enough that logging I/O does not contend with
+      # page loads; capacity issues still surface via failed compute requests.
+      LOG_LEVEL: "warning"
     steps:
       - uses: actions/checkout@v6
 

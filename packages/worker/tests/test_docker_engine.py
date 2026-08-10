@@ -165,3 +165,15 @@ def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) ->
     assert result is not None
     assert result.error == "Engine shutdown requested"
     assert result.error_kind == "engine_shutdown"
+
+
+def test_container_nano_cpus_halves_quota_for_host_connected_engines(monkeypatch) -> None:
+    from runtime.docker_engine import _container_nano_cpus
+
+    monkeypatch.setattr(settings, "engine_connect_host", "127.0.0.1")
+    assert _container_nano_cpus(1) == 500_000_000
+    assert _container_nano_cpus(2) == 1_000_000_000
+
+    monkeypatch.setattr(settings, "engine_connect_host", "")
+    assert _container_nano_cpus(1) == 1_000_000_000
+    assert _container_nano_cpus(0) is None
