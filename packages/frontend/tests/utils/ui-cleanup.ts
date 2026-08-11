@@ -110,7 +110,22 @@ export async function shutdownEngineViaUI(
 		}
 
 		await power.click({ timeout: 3_000 }).catch(() => undefined);
-		// Optimistic remove; active-job (409) re-adds the row on the next snapshot.
+		// Product confirm: idle vs cancel-job-then-shutdown messaging.
+		const confirm = page
+			.getByRole('dialog')
+			.filter({
+				has: page.getByRole('heading', {
+					name: /Shut down idle engine|Cancel job and shut down engine/i
+				})
+			})
+			.first();
+		if (await confirm.isVisible().catch(() => false)) {
+			const confirmBtn = confirm.getByRole('button', {
+				name: /Shut down|Cancel job & shut down/i
+			});
+			await confirmBtn.click({ timeout: 3_000 }).catch(() => undefined);
+		}
+		// Optimistic remove; settle then re-check the engines list.
 		await row.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => undefined);
 		await page.waitForTimeout(400);
 

@@ -752,15 +752,30 @@ async def _shutdown_engine_identity(
     session: Session,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
+    """Shut down an engine after cancelling any active job.
+
+    Idle engines are stopped immediately. Busy engines cancel the in-flight job
+    first (clearing job state / killing the container), then shut down. Callers
+    must not leave warm containers behind because of an active job.
+    """
     manager = _override_manager(http_request)
     if manager is not None:
         engine = manager.get_engine(identity)
         if not engine:
             raise engine_not_found(identity.resource_id)
+        # Cancel the active job before tearing down so shutdown never blocks on
+        # "busy". Container/process shutdown is the hard cancel for jobs.
         if engine.current_job_id and engine.is_process_alive():
-            raise HTTPException(status_code=409, detail='Engine has an active job')
+            cancel = getattr(engine, 'cancel_current_job', None)
+            if callable(cancel):
+                cancel()
+            else:
+                # Stub / lightweight engines: clear the job marker so shutdown
+                # is allowed. Production Docker engines cancel via container stop.
+                engine.current_job_id = None
         manager.shutdown_engine(identity)
         return
+    # Worker path: engine.shutdown() stops the container and any running job.
     await executor_client.shutdown_engine(session, identity=identity, runtime_probe=runtime_probe)
 
 

@@ -104,4 +104,17 @@ describe('EnginesPopup', () => {
 		expect(enginesStore.status).toBe('disconnected');
 		expect(enginesStore.engines).toEqual([]);
 	});
+
+	test('shows Idle for warm engines and Job running when current_job_id is set', async () => {
+		const { getByText } = render(EnginesPopup, { props: { open: true } });
+		enginesStore.engines = [
+			makeEngine({ resource_id: 'idle-1', current_job_id: null }),
+			makeEngine({ resource_id: 'busy-1', current_job_id: 'job-9' })
+		];
+		enginesStore.status = 'connected';
+		await tick();
+		flushSync();
+		expect(getByText('Idle')).toBeTruthy();
+		expect(getByText('Job running')).toBeTruthy();
+	});
 });

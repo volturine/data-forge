@@ -370,6 +370,18 @@ class ProcessManager:
         if info is None:
             logger.debug("No engine found to shutdown for %s", qualified_key)
             return
+        # Active jobs cannot outlive the engine: cancel/clear then stop container.
+        active_job = getattr(info.engine, "current_job_id", None)
+        if active_job and info.engine.is_process_alive():
+            logger.info(
+                "Cancelling active job %s before shutting down engine %s",
+                active_job,
+                qualified_key,
+            )
+            cancel = getattr(info.engine, "cancel_current_job", None)
+            if callable(cancel):
+                with contextlib.suppress(Exception):
+                    cancel()
         logger.info("Shutting down engine for %s", qualified_key)
         info.engine.shutdown()
         logger.info("Engine shutdown complete for %s", qualified_key)

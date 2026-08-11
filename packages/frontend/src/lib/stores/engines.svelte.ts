@@ -53,6 +53,10 @@ export class EnginesStore {
 		this.status = 'disconnected';
 	}
 
+	/**
+	 * Shut down an engine via the API. Backend cancels any active job first,
+	 * then stops the container. 404 means already gone (race with reaper).
+	 */
 	async shutdownEngine(engine: EngineStatusResponse): Promise<void> {
 		const key = engineIdentityKey(engine);
 		this.shuttingDown.add(key);
@@ -61,10 +65,13 @@ export class EnginesStore {
 			engine.scope ?? 'analysis_interactive',
 			engine.resource_id
 		).match(
-			() => {},
+			() => {
+				this.error = null;
+			},
 			(err) => {
 				this.shuttingDown.delete(key);
-				if (err.status === 404 || err.status === 409) {
+				// Already reaped / never existed — treat as success for the UI.
+				if (err.status === 404) {
 					this.error = null;
 					return;
 				}
@@ -76,9 +83,11 @@ export class EnginesStore {
 
 	async shutdownAnalysisEngine(analysisId: string): Promise<void> {
 		await shutdownAnalysisEngineApi(analysisId).match(
-			() => {},
+			() => {
+				this.error = null;
+			},
 			(err) => {
-				if (err.status === 404 || err.status === 409) {
+				if (err.status === 404) {
 					this.error = null;
 					return;
 				}

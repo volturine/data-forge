@@ -106,6 +106,31 @@ def test_shutdown_engine_accepts_build_identity(client) -> None:
     assert manager.shutdown_calls == ['3:build-1']
 
 
+def test_shutdown_engine_cancels_active_job_then_shuts_down(client) -> None:
+    """Busy engines cancel the job first; shutdown must not return 409."""
+
+    class _BusyEngine:
+        current_job_id = 'job-active'
+
+        @staticmethod
+        def is_process_alive() -> bool:
+            return True
+
+    class _BusyManager(_StubManager):
+        def get_engine(self, identity):
+            return _BusyEngine() if self._identity_key(identity).endswith(':build-1') else None
+
+    manager = _BusyManager()
+    app.dependency_overrides[get_manager] = lambda: manager
+    try:
+        response = client.delete('/api/v1/compute/engine/build/build-1')
+    finally:
+        app.dependency_overrides.pop(get_manager, None)
+
+    assert response.status_code == 204
+    assert manager.shutdown_calls == ['3:build-1']
+
+
 def test_shutdown_engine_returns_not_found_for_unknown_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
