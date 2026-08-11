@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from builds.build_live import RuntimeBuild
-from dataforge_protocol import enums_pb2
+from dataforge_protocol import compute_pb2, enums_pb2
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
 from runtime.compute_manager import EngineCapacityFull, ProcessManager
