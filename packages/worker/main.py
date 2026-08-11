@@ -13,7 +13,13 @@ import uuid
 from multiprocessing.synchronize import Event as ProcessEvent
 
 from runtime.compute_manager import ProcessManager
-from runtime.compute_request_runtime import compute_request_loop, compute_request_worker_count
+from runtime.compute_request_runtime import (
+    ALL_REQUEST_KINDS,
+    ENGINE_REQUEST_KINDS,
+    NON_ENGINE_REQUEST_KINDS,
+    compute_request_loop,
+    compute_request_worker_count,
+)
 from runtime.config import settings
 from runtime.datasource_delete_runtime import datasource_delete_loop
 from runtime.docker_engine import reconcile_deployment_containers
@@ -234,7 +240,12 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
         daemon=True,
     )
     heartbeat_thread.start()
-    request_tasks = [asyncio.create_task(compute_request_loop(local_stop, worker_id=worker_id, manager=manager)) for _ in range(compute_request_worker_count())]
+    request_worker_count = compute_request_worker_count()
+    request_lanes = [ALL_REQUEST_KINDS] if request_worker_count == 1 else [NON_ENGINE_REQUEST_KINDS, *([ENGINE_REQUEST_KINDS] * (request_worker_count - 1))]
+    request_tasks = [
+        asyncio.create_task(compute_request_loop(local_stop, worker_id=worker_id, manager=manager, allowed_kinds=allowed_kinds))
+        for allowed_kinds in request_lanes
+    ]
     datasource_delete_task = asyncio.create_task(datasource_delete_loop(local_stop, manager=manager))
     data_plane_server = start_data_plane_grpc_server_in_thread()
     children: dict[int, ManagedWorkerProcess] = {}

@@ -37,6 +37,17 @@ def datetime_to_timestamp(value: datetime) -> timestamp_pb2.Timestamp:
     return timestamp
 
 
+def compute_claim_request(
+    worker_id: str,
+    *allowed_kinds: enums_pb2.ComputeRequestKind,
+) -> common_pb2.RuntimeWorkerRequest:
+    return common_pb2.RuntimeWorkerRequest(
+        worker_id=worker_id,
+        protocol_version=2,
+        allowed_compute_request_kinds=allowed_kinds,
+    )
+
+
 class FakeGrpcContext:
     def __init__(self, token: str) -> None:
         self._metadata = (('x-internal-token', token),)
@@ -388,7 +399,10 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     )
     servicer = WorkerRuntimeServicer()
 
-    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2), context)
+    response = await servicer.ClaimComputeRequest(
+        compute_claim_request(worker_id, enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE),
+        context,
+    )
 
     assert response.HasField('request')
     assert response.request.id == request.id
@@ -446,7 +460,10 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
         request_json=_schema_payload(),
     )
-    response = await servicer.ClaimComputeRequest(common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2), context)
+    response = await servicer.ClaimComputeRequest(
+        compute_claim_request(worker_id, enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA),
+        context,
+    )
     assert response.request.id == failed_request.id
 
     await servicer.FailComputeRequest(

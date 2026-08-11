@@ -222,8 +222,23 @@ class WorkerRuntimeClient:
             raise ValueError(f"Renewed build job {job_id} has no lease TTL")
         return int(response.lease_ttl_seconds)
 
-    def claim_compute_request(self, *, worker_id: str) -> ClaimedComputeRequest | None:
-        response = self._call(lambda: self._stub.ClaimComputeRequest(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
+    def claim_compute_request(
+        self,
+        *,
+        worker_id: str,
+        allowed_kinds: frozenset[enums_pb2.ComputeRequestKind],
+    ) -> ClaimedComputeRequest | None:
+        response = self._call(
+            lambda: self._stub.ClaimComputeRequest(
+                common_pb2.RuntimeWorkerRequest(
+                    worker_id=worker_id,
+                    protocol_version=2,
+                    allowed_compute_request_kinds=sorted(allowed_kinds),
+                ),
+                timeout=self._timeout_seconds,
+                metadata=self._metadata(),
+            )
+        )
         if not response.HasField("request"):
             return None
         command = response.request.command

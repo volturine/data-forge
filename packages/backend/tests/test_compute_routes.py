@@ -1,10 +1,11 @@
 from sqlalchemy import select
 
-from backend_core import engine_runs_service as engine_run_service
+from backend_core import dependencies, engine_runs_service as engine_run_service
 from backend_core.dependencies import get_manager, get_runtime_availability_probe
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
@@ -62,6 +63,32 @@ class _AvailableRuntimeProbe:
     def available(*, kind) -> bool:
         del kind
         return True
+
+
+def test_persisted_runtime_availability_probe_uses_an_isolated_session_per_check(monkeypatch) -> None:
+    calls: list[tuple[object, tuple[object, ...], dict[str, object]]] = []
+
+    def fake_run_settings_db(func, *args, **kwargs):
+        calls.append((func, args, kwargs))
+        return True
+
+    monkeypatch.setattr(dependencies, 'run_settings_db', fake_run_settings_db)
+    probe = dependencies.PersistedRuntimeAvailabilityProbe(heartbeat_seconds=7.0)
+
+    assert probe.available(kind=RuntimeWorkerKind.BUILD_WORKER) is True
+    assert probe.available(kind=RuntimeWorkerKind.SCHEDULER) is True
+    assert calls == [
+        (
+            dependencies.runtime_workers_service.worker_available,
+            (),
+            {'kind': RuntimeWorkerKind.BUILD_WORKER, 'heartbeat_seconds': 7.0},
+        ),
+        (
+            dependencies.runtime_workers_service.worker_available,
+            (),
+            {'kind': RuntimeWorkerKind.SCHEDULER, 'heartbeat_seconds': 7.0},
+        ),
+    ]
 
 
 def test_spawn_engine_accepts_datasource_preview_identity(client) -> None:

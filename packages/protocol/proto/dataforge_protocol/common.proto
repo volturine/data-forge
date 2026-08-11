@@ -3,12 +3,14 @@ syntax = "proto3";
 package dataforge.runtime;
 
 import "buf/validate/validate.proto";
+import "dataforge_protocol/enums.proto";
 
 message EmptyRequest {}
 
 message RuntimeWorkerRequest {
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
   int32 protocol_version = 2;
+  repeated ComputeRequestKind allowed_compute_request_kinds = 3;
 }
 
 message RuntimeWorkerResponse {

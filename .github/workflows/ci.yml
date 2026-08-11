@@ -68,9 +68,6 @@ jobs:
           # state instead of retaining a day's build cache.
           docker container prune --force
           docker volume prune --force
-          # Orphaned engine/e2e networks exhaust the default IPAM pool and
-          # make `docker network create` fail mid-suite.
-          docker network prune --force
           docker builder prune --all --force
           docker image prune --force
           docker system df
@@ -132,19 +129,14 @@ jobs:
       # Match the pre-Docker parallel e2e default (4). Bootstrap is now bounded
       # and fails visibly, so we no longer serialize browsers to hide shell hangs.
       # No Playwright retries.
-      # Four browsers match pre-Docker e2e. Cap engines so Chromium + API keep
-      # host headroom (24 engines + 4 Chromium OOMs the runner into
-      # "Failed to fetch" / ERR_NETWORK_CHANGED). 12 leaves room for
-      # analysis+datasource+build under 4-way parallel load; excess spawns
-      # FIFO-queue until a slot frees (never hard-fail on capacity).
+      # Four browsers match pre-Docker e2e. Engine admission queues above the
+      # real production-style capacity instead of increasing the limit for CI.
       PW_E2E_WORKERS: "4"
       BUILD_WORKER_MIN_PROCESSES: "4"
       BUILD_WORKER_MAX_PROCESSES: "4"
       COMPUTE_REQUEST_CONCURRENCY: "4"
-      MAX_CONCURRENT_ENGINES: "12"
-      POLARS_MAX_MEMORY_MB: "192"
-      E2E_ENGINE_IDLE_TTL_SECONDS: "90"
-      E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "15"
+      MAX_CONCURRENT_ENGINES: "8"
+      POLARS_MAX_MEMORY_MB: "256"
       E2E_TIMEOUT_SECONDS: "1500"
       LOG_LEVEL: "warning"
     steps:

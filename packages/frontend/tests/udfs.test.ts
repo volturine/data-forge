@@ -12,6 +12,7 @@ import { uid } from './utils/uid.js';
 import { deleteUdfViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { dialogByHeading } from './utils/locators.js';
+import { switchNamespace } from './utils/namespace.js';
 
 /**
  * E2E tests for UDFs – mirrors test_udf.py.
@@ -19,6 +20,11 @@ import { dialogByHeading } from './utils/locators.js';
 test.describe('UDFs – list & management', () => {
 	test('seeded default UDFs are visible on first load', async ({ page }) => {
 		await page.goto('/udfs');
+		await waitForLayoutReady(page);
+		const sidebar = page.locator('aside[aria-label="Main navigation"]');
+		if (!(await sidebar.getByText('default', { exact: true }).isVisible())) {
+			await switchNamespace(page, 'default');
+		}
 		await waitForUdfList(page);
 
 		await expect(page.locator('[data-udf-card="Ratio"]')).toBeVisible();

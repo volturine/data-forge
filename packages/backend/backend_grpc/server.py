@@ -621,6 +621,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     compute_requests_service.claim_next_request,
                     worker_id=request.worker_id,
                     reclaimable_owner_ids=reclaimable_owner_ids,
+                    allowed_kinds=request.allowed_compute_request_kinds,
                 )
                 if compute_request is None:
                     continue

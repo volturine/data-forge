@@ -44,6 +44,19 @@ _DATASOURCE_REQUEST_KINDS = {
     enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
     enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
 }
+NON_ENGINE_REQUEST_KINDS = frozenset({*_DATASOURCE_REQUEST_KINDS, enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE})
+ENGINE_REQUEST_KINDS = frozenset(
+    {
+        enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
+        enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
+        enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
+        enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
+        enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
+    }
+)
+ALL_REQUEST_KINDS = NON_ENGINE_REQUEST_KINDS | ENGINE_REQUEST_KINDS
 
 
 def worker_runtime_client() -> WorkerRuntimeClient:
@@ -75,8 +88,12 @@ class ComputeRequestLeaseLost(RuntimeError):
     pass
 
 
-def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:
-    claimed = worker_runtime_client().claim_compute_request(worker_id=worker_id)
+def next_compute_request(
+    worker_id: str,
+    *,
+    allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
+) -> ClaimedComputeRequest | None:
+    claimed = worker_runtime_client().claim_compute_request(worker_id=worker_id, allowed_kinds=allowed_kinds)
     if claimed is None:
         return None
     return ClaimedComputeRequest(
@@ -96,11 +113,12 @@ async def compute_request_loop(
     *,
     worker_id: str,
     manager: ProcessManager,
+    allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
 ) -> None:
     last_seen = request_hub.version()
     while not stop_event.is_set():
         try:
-            handled = await _run_once(worker_id=worker_id, manager=manager)
+            handled = await _run_once(worker_id=worker_id, manager=manager, allowed_kinds=allowed_kinds)
             if handled:
                 last_seen = request_hub.version()
                 continue
@@ -128,8 +146,13 @@ async def compute_request_loop(
                     last_seen = value
 
 
-async def _run_once(*, worker_id: str, manager: ProcessManager) -> bool:
-    claimed = next_compute_request(worker_id)
+async def _run_once(
+    *,
+    worker_id: str,
+    manager: ProcessManager,
+    allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
+) -> bool:
+    claimed = next_compute_request(worker_id, allowed_kinds=allowed_kinds)
     if claimed is None:
         return False
     try:

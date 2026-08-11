@@ -13,10 +13,6 @@ def register_namespace(session: Session, namespace: str | None) -> RuntimeNamesp
     existing = session.get(RuntimeNamespace, name)
     now = datetime.now(UTC).replace(tzinfo=None)
     if existing is not None:
-        existing.updated_at = now
-        session.add(existing)
-        session.commit()
-        session.refresh(existing)
         return existing
     record = RuntimeNamespace(name=name, created_at=now, updated_at=now)
     session.add(record)
@@ -27,10 +23,6 @@ def register_namespace(session: Session, namespace: str | None) -> RuntimeNamesp
         existing = session.get(RuntimeNamespace, name)
         if existing is None:
             raise
-        existing.updated_at = now
-        session.add(existing)
-        session.commit()
-        session.refresh(existing)
         return existing
     session.refresh(record)
     return record

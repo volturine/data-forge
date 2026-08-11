@@ -7,7 +7,7 @@ from sqlmodel import Session
 
 from backend_core import runtime_workers_service
 from backend_core.auth_config import settings as auth_settings
-from backend_core.database import get_settings_db
+from backend_core.database import get_settings_db, run_settings_db
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from modules.auth.dependencies import _resolve_session_token
 from modules.auth.service import ensure_default_user, validate_session
@@ -19,13 +19,12 @@ class RuntimeAvailabilityProbe(Protocol):
 
 
 class PersistedRuntimeAvailabilityProbe:
-    def __init__(self, session: Session, *, heartbeat_seconds: float = 15.0) -> None:
-        self._session = session
+    def __init__(self, *, heartbeat_seconds: float = 15.0) -> None:
         self._heartbeat_seconds = heartbeat_seconds
 
     def available(self, *, kind: RuntimeWorkerKind) -> bool:
-        return runtime_workers_service.worker_available(
-            self._session,
+        return run_settings_db(
+            runtime_workers_service.worker_available,
             kind=kind,
             heartbeat_seconds=self._heartbeat_seconds,
         )
@@ -55,12 +54,11 @@ def get_optional_lock_owner_id(
 
 def get_runtime_availability_probe(
     request: Request,
-    session: Session = Depends(get_settings_db),
 ) -> RuntimeAvailabilityProbe:
     probe = getattr(request.app.state, 'runtime_availability_probe', None)
     if probe is not None:
         return probe
-    return PersistedRuntimeAvailabilityProbe(session)
+    return PersistedRuntimeAvailabilityProbe()
 
 
 def get_lock_owner_id(
