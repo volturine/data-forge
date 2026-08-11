@@ -38,7 +38,7 @@ from runtime.build_events import (
 from runtime.build_events import (
     emit_progress as _emit_progress,
 )
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import EngineCapacityFull, ProcessManager
 from runtime.compute_utils import (
     apply_steps,
     await_engine_result,
@@ -2906,7 +2906,12 @@ async def _prewarm_build_engine(manager: ProcessManager, *, build_id: str) -> No
         resource_id=build_id,
     )
     try:
-        await asyncio.to_thread(manager.spawn_engine, identity)
+        while True:
+            try:
+                await asyncio.to_thread(manager.spawn_engine, identity)
+                break
+            except EngineCapacityFull:
+                await manager.wait_for_capacity()
         await asyncio.to_thread(manager.set_engine_runtime_context, identity, current_build_id=build_id, current_engine_run_id=None)
     except Exception:
         logger.debug("Build engine prewarm failed for %s", build_id, exc_info=True)

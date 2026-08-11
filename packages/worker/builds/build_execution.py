@@ -7,7 +7,7 @@ from builds.build_live import RuntimeBuild
 from dataforge_protocol import enums_pb2
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import EngineCapacityFull, ProcessManager
 from runtime.domain.compute import schemas
 from runtime.domain.datasource.models import DataSourceTargetKind
 from runtime.domain.engine_runs.schemas import EngineRunKind
@@ -228,14 +228,21 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
                 resource_config_json=build.resource_config_json,
             )
             return
-    await _run_build_task(
-        manager=manager,
-        claim=claim,
-        worker_id=worker_id,
-        build=build,
-        pipeline=pipeline,
-        triggered_by=starter.user_id or starter.email or starter.display_name or starter.triggered_by,
-    )
+    triggered_by = starter.user_id or starter.email or starter.display_name or starter.triggered_by
+    while True:
+        try:
+            await _run_build_task(
+                manager=manager,
+                claim=claim,
+                worker_id=worker_id,
+                build=build,
+                pipeline=pipeline,
+                triggered_by=triggered_by,
+            )
+            return
+        except EngineCapacityFull:
+            # Park this build worker until a slot frees — do not fail the job.
+            await manager.wait_for_capacity()
 
 
 __all__ = ["run_queued_build_job"]

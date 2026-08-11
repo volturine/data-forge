@@ -1,7 +1,9 @@
+from __future__ import annotations
+
+import asyncio
 import contextlib
 import logging
 import threading
-from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -20,6 +22,15 @@ _RESOURCE_KEYS = frozenset({"max_threads", "max_memory_mb", "streaming_chunk_siz
 EngineIdentity = compute_pb2.EngineIdentity
 EngineFactory = Callable[[EngineIdentity, dict | None], ComputeEngine]
 EngineSnapshotListener = Callable[[list[EngineStatusInfo]], None]
+
+
+class EngineCapacityFull(Exception):
+    """No free engine slot right now — caller must park outside the runner pool.
+
+    Raised only when a new engine is needed and every slot is busy (no idle to
+    evict). Waiters should release compute threads and await
+    :meth:`ProcessManager.wait_for_capacity` so the queue never holds runners.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,13 +98,12 @@ class ProcessManager:
         self._engines: dict[EngineIdentityKey, EngineInfo] = {}
         self._engine_identities: dict[EngineIdentityKey, EngineIdentity] = {}
         self._engines_lock = threading.Lock()
-        # Capacity is a FIFO queue: waiters block until a slot frees; they never hard-fail.
-        # Notified on shutdown, reap, spawn finish, reservation release, and idle→free.
+        # Capacity admission only. Running engines + in-flight starts count.
+        # Waiters park via wait_for_capacity() (async) and must not hold runners.
         self._capacity_changed = threading.Condition(self._engines_lock)
-        # Spawns that hold a capacity ticket while Docker start is in flight (not yet in _engines).
         self._capacity_starts = 0
-        # Fair order among threads waiting for a capacity ticket.
-        self._capacity_queue: deque[object] = deque()
+        # Async waiters parked outside the compute thread pool.
+        self._capacity_waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Future[None]]] = []
         self._engine_events: dict[EngineIdentityKey, threading.Event] = {}
         self._closed = False
         self._user_engine_factory = engine_factory
@@ -115,9 +125,36 @@ class ProcessManager:
         return engine
 
     def notify_capacity_changed(self) -> None:
-        """Wake capacity waiters (job finished, reservation released, or engine stopped)."""
+        """Wake parked capacity waiters when a slot may free."""
         with self._capacity_changed:
+            waiters = list(self._capacity_waiters)
+            self._capacity_waiters.clear()
             self._capacity_changed.notify_all()
+        for loop, future in waiters:
+            if future.done():
+                continue
+            try:
+                loop.call_soon_threadsafe(future.set_result, None)
+            except RuntimeError:
+                # Loop closed — waiter is gone.
+                pass
+
+    async def wait_for_capacity(self) -> None:
+        """Park until capacity may have freed. Does not hold a compute runner."""
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[None] = loop.create_future()
+        with self._capacity_changed:
+            if self._closed:
+                raise RuntimeError("Process manager is shut down")
+            # Fast path: a slot or idle eviction candidate is already available.
+            if self._capacity_used_locked() < settings.max_concurrent_engines or self._find_idle_engine_locked()[0] is not None:
+                return
+            self._capacity_waiters.append((loop, future))
+        try:
+            await future
+        finally:
+            with self._capacity_changed:
+                self._capacity_waiters[:] = [(lp, fut) for lp, fut in self._capacity_waiters if fut is not future]
 
     def _key(self, identity: EngineIdentity, namespace: str | None = None) -> EngineIdentityKey:
         resource_id = identity.resource_id.strip()
@@ -190,9 +227,16 @@ class ProcessManager:
             if shutdown_target is not None:
                 shutdown_target.shutdown()
 
-            # Capacity is queue-not-reject: wait until a free slot or an idle
-            # engine can be evicted. Waiters do not count toward the limit.
-            evict_info, capacity_held = self._acquire_capacity_slot(qualified_key)
+            # Non-blocking admission: running engines only count. If full, raise
+            # EngineCapacityFull so the caller parks outside the runner pool.
+            evict_info, capacity_held = self._try_claim_capacity_slot(qualified_key)
+            if not capacity_held:
+                logger.info(
+                    "Max concurrent engines (%s) in use; deferring spawn for %s (queue, not runner)",
+                    settings.max_concurrent_engines,
+                    qualified_key,
+                )
+                raise EngineCapacityFull(f"Maximum concurrent engines limit ({settings.max_concurrent_engines}) reached")
             if evict_info is not None:
                 _, idle_engine_info = evict_info
                 idle_engine_info.engine.shutdown()
@@ -215,8 +259,8 @@ class ProcessManager:
                     self._capacity_starts = max(self._capacity_starts - 1, 0)
                     capacity_held = False
                 spawned_info = info
-                self._capacity_changed.notify_all()
                 logger.info("Engine spawned successfully for %s", qualified_key)
+            self.notify_capacity_changed()
         finally:
             with self._capacity_changed:
                 if capacity_held:
@@ -225,7 +269,7 @@ class ProcessManager:
                 in_progress_event = self._engine_events.pop(qualified_key, None)
                 if in_progress_event is not None:
                     in_progress_event.set()
-                self._capacity_changed.notify_all()
+            self.notify_capacity_changed()
 
         if spawned_info is None:
             raise RuntimeError(f"Failed to start engine for {qualified_key}")
@@ -259,59 +303,36 @@ class ProcessManager:
         """Live engines plus in-flight starts that already hold a ticket."""
         return len(self._engines) + self._capacity_starts
 
-    def _acquire_capacity_slot(self, qualified_key: EngineIdentityKey) -> tuple[tuple[EngineIdentityKey, EngineInfo] | None, bool]:
-        """Queue until a capacity ticket is available (never reject for capacity).
+    def _try_claim_capacity_slot(self, qualified_key: EngineIdentityKey) -> tuple[tuple[EngineIdentityKey, EngineInfo] | None, bool]:
+        """Non-blocking capacity claim. Returns (evict_target, ticket_held).
 
-        Returns (optional idle engine to shut down outside the lock, ticket_held).
-        Only the head of the FIFO queue may claim a ticket.
+        Does not park the caller. On failure returns (None, False) so runners
+        can exit and the async queue can wait without holding a worker thread.
         """
-        ticket = object()
         with self._capacity_changed:
-            self._capacity_queue.append(ticket)
-            logged_queue = False
-            try:
-                while True:
-                    if self._closed:
-                        raise RuntimeError("Process manager is shut down")
-                    if self._capacity_queue and self._capacity_queue[0] is ticket:
-                        used = self._capacity_used_locked()
-                        max_engines = settings.max_concurrent_engines
-                        if used < max_engines:
-                            self._capacity_starts += 1
-                            self._capacity_queue.popleft()
-                            self._capacity_changed.notify_all()
-                            return None, True
-                        idle_key, idle_info = self._find_idle_engine_locked()
-                        if idle_key is not None and idle_info is not None:
-                            logger.info(
-                                "Max concurrent engines limit reached (%s), evicting idle engine %s in namespace %s to spawn %s",
-                                max_engines,
-                                idle_key.resource_id,
-                                idle_key.namespace,
-                                qualified_key,
-                            )
-                            del self._engines[idle_key]
-                            self._engine_identities.pop(idle_key, None)
-                            self._capacity_starts += 1
-                            self._capacity_queue.popleft()
-                            self._capacity_changed.notify_all()
-                            return (idle_key, idle_info), True
-                        if not logged_queue:
-                            logger.info(
-                                "Max concurrent engines (%s) in use; queueing spawn for %s (queue depth %s)",
-                                max_engines,
-                                qualified_key,
-                                len(self._capacity_queue),
-                            )
-                            logged_queue = True
-                    # Poll so jobs that finish without an explicit notify still
-                    # become visible as idle eviction candidates.
-                    self._capacity_changed.wait(timeout=0.25)
-            except BaseException:
-                with contextlib.suppress(ValueError):
-                    self._capacity_queue.remove(ticket)
+            if self._closed:
+                raise RuntimeError("Process manager is shut down")
+            used = self._capacity_used_locked()
+            max_engines = settings.max_concurrent_engines
+            if used < max_engines:
+                self._capacity_starts += 1
                 self._capacity_changed.notify_all()
-                raise
+                return None, True
+            idle_key, idle_info = self._find_idle_engine_locked()
+            if idle_key is not None and idle_info is not None:
+                logger.info(
+                    "Max concurrent engines limit reached (%s), evicting idle engine %s in namespace %s to spawn %s",
+                    max_engines,
+                    idle_key.resource_id,
+                    idle_key.namespace,
+                    qualified_key,
+                )
+                del self._engines[idle_key]
+                self._engine_identities.pop(idle_key, None)
+                self._capacity_starts += 1
+                self._capacity_changed.notify_all()
+                return (idle_key, idle_info), True
+            return None, False
 
     def get_or_create_engine(self, identity: EngineIdentity, resource_config: dict | None = None) -> ComputeEngine:
         info = self.spawn_engine(identity, resource_config=resource_config)
@@ -329,7 +350,7 @@ class ProcessManager:
                 current = self._engines.get(qualified_key)
                 if current is info:
                     current.active_reservations = max(current.active_reservations - 1, 0)
-                    self._capacity_changed.notify_all()
+            self.notify_capacity_changed()
 
     def restart_engine_with_config(self, identity: EngineIdentity, resource_config: dict) -> EngineInfo:
         identity_key = self._key(identity)

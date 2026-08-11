@@ -14,7 +14,7 @@ from datasources import execution as datasource_execution
 from datasources.schemas import CSVOptions
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import EngineCapacityFull, ProcessManager
 from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
@@ -140,20 +140,35 @@ async def _run_once(*, worker_id: str, manager: ProcessManager) -> bool:
 
 
 async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManager) -> None:
+    """Run the request on the compute pool; park off-pool when engine capacity is full.
+
+    EngineCapacityFull means every engine slot is busy. The executor thread is
+    released immediately so the capacity "queue" never holds runners. Lease
+    renewal continues while we wait for a free/idle slot.
+    """
     loop = asyncio.get_running_loop()
-    execution = loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
     renewal_stop = asyncio.Event()
     renewal = asyncio.create_task(_renew_compute_lease(claimed, stop_event=renewal_stop))
     try:
-        done, _pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
-        if renewal in done:
+        while True:
+            execution = loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
+            done, _pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
+            if renewal in done:
+                try:
+                    await renewal
+                except ComputeRequestLeaseLost:
+                    await asyncio.gather(execution, return_exceptions=True)
+                    raise
+                raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
             try:
-                await renewal
-            except ComputeRequestLeaseLost:
-                await asyncio.gather(execution, return_exceptions=True)
-                raise
-            raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
-        await execution
+                await execution
+                return
+            except EngineCapacityFull:
+                logger.info(
+                    "Compute request %s parked for engine capacity (not holding a runner)",
+                    claimed.id,
+                )
+                await manager.wait_for_capacity()
     finally:
         renewal_stop.set()
         await asyncio.gather(renewal, return_exceptions=True)
@@ -528,6 +543,9 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
             raise ValueError(f"Unsupported compute request kind: {_compute_request_kind_name(claimed.kind)}")
     except ComputeRequestLeaseLost:
         # Stale claim / replaced publication fence: drain without failing the request as an infrastructure error.
+        raise
+    except EngineCapacityFull:
+        # Propagate so the async runner can park without holding a pool thread.
         raise
     except Exception as exc:
         error = _error_result(exc)
