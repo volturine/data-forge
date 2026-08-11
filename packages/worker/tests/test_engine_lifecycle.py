@@ -5,8 +5,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast
 
-import pytest
-
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_manager import ProcessManager
@@ -132,9 +130,9 @@ def test_process_manager_starts_distinct_engines_concurrently() -> None:
         manager.shutdown_all()
 
 
-def test_process_manager_counts_in_progress_starts_against_capacity(monkeypatch) -> None:
+def test_process_manager_queues_while_start_holds_capacity(monkeypatch) -> None:
+    """In-flight starts hold a ticket; further spawns queue until a slot frees."""
     monkeypatch.setattr(settings, "max_concurrent_engines", 1)
-    monkeypatch.setattr(settings, "engine_capacity_wait_seconds", 0)
     start_entered = threading.Event()
     release_start = threading.Event()
 
@@ -150,57 +148,40 @@ def test_process_manager_counts_in_progress_starts_against_capacity(monkeypatch)
             first = executor.submit(manager.spawn_engine, _analysis_identity("analysis-capacity-1"))
             assert start_entered.wait(timeout=2)
             second = executor.submit(manager.spawn_engine, _analysis_identity("analysis-capacity-2"))
-            try:
-                with pytest.raises(RuntimeError, match="Maximum concurrent engines limit"):
-                    second.result(timeout=2)
-            finally:
-                release_start.set()
-            assert first.result(timeout=2).engine.is_process_alive()
+            time.sleep(0.15)
+            assert not second.done()
+            release_start.set()
+            first.result(timeout=2)
+            # First is idle after start → second evicts it and starts.
+            second_info = second.result(timeout=2)
+            assert second_info.engine.is_process_alive()
+            assert manager.get_engine(_analysis_identity("analysis-capacity-1")) is None
+            assert manager.get_engine(_analysis_identity("analysis-capacity-2")) is second_info.engine
     finally:
         release_start.set()
         manager.shutdown_all()
 
 
-def test_process_manager_does_not_evict_engine_while_work_is_being_submitted(monkeypatch) -> None:
+def test_process_manager_queues_while_engine_is_reserved(monkeypatch) -> None:
+    """Reservations block eviction; waiters queue until the reservation clears."""
     monkeypatch.setattr(settings, "max_concurrent_engines", 1)
-    monkeypatch.setattr(settings, "engine_capacity_wait_seconds", 0)
     manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
     first_identity = _analysis_identity("analysis-reserved-1")
     second_identity = _analysis_identity("analysis-reserved-2")
-    try:
-        with manager.acquire_engine(first_identity) as first_engine:
-            with pytest.raises(RuntimeError, match="Maximum concurrent engines limit"):
-                manager.spawn_engine(second_identity)
-            assert first_engine.is_process_alive()
-
-        second_engine = manager.spawn_engine(second_identity).engine
-        assert second_engine.is_process_alive()
-        assert not first_engine.is_process_alive()
-    finally:
-        manager.shutdown_all()
-
-
-def test_process_manager_waits_for_capacity_then_evicts_idle(monkeypatch) -> None:
-    """Under load, wait for a busy reservation to clear rather than hard-failing."""
-    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
-    monkeypatch.setattr(settings, "engine_capacity_wait_seconds", 2)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
-    first_identity = _analysis_identity("analysis-wait-1")
-    second_identity = _analysis_identity("analysis-wait-2")
     try:
         hold = threading.Event()
         released = threading.Event()
 
         def hold_first() -> None:
-            with manager.acquire_engine(first_identity):
+            with manager.acquire_engine(first_identity) as first_engine:
                 released.set()
+                assert first_engine.is_process_alive()
                 assert hold.wait(timeout=2)
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             first_future = executor.submit(hold_first)
             assert released.wait(timeout=2)
             second_future = executor.submit(manager.spawn_engine, second_identity)
-            # Still reserved — second must wait, not fail immediately.
             time.sleep(0.15)
             assert not second_future.done()
             hold.set()
@@ -208,6 +189,52 @@ def test_process_manager_waits_for_capacity_then_evicts_idle(monkeypatch) -> Non
             second_info = second_future.result(timeout=2)
             assert second_info.engine.is_process_alive()
             assert manager.get_engine(first_identity) is None
+    finally:
+        hold.set()
+        manager.shutdown_all()
+
+
+def test_process_manager_capacity_queue_is_fifo(monkeypatch) -> None:
+    """Queued spawns claim free slots in arrival order."""
+    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    first_identity = _analysis_identity("analysis-fifo-1")
+    second_identity = _analysis_identity("analysis-fifo-2")
+    third_identity = _analysis_identity("analysis-fifo-3")
+    try:
+        hold = threading.Event()
+        released = threading.Event()
+        order: list[str] = []
+        order_lock = threading.Lock()
+
+        def hold_first() -> None:
+            with manager.acquire_engine(first_identity):
+                released.set()
+                assert hold.wait(timeout=3)
+
+        def spawn_and_record(identity: compute_pb2.EngineIdentity) -> None:
+            info = manager.spawn_engine(identity)
+            with order_lock:
+                order.append(identity.resource_id)
+            # Hold the ticket briefly so the next waiter cannot overtake before we record.
+            time.sleep(0.05)
+            manager.shutdown_engine(identity)
+            assert info.engine.is_process_alive() is False
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            first_future = executor.submit(hold_first)
+            assert released.wait(timeout=2)
+            second_future = executor.submit(spawn_and_record, second_identity)
+            time.sleep(0.05)
+            third_future = executor.submit(spawn_and_record, third_identity)
+            time.sleep(0.1)
+            assert not second_future.done()
+            assert not third_future.done()
+            hold.set()
+            first_future.result(timeout=2)
+            second_future.result(timeout=2)
+            third_future.result(timeout=2)
+            assert order == ["analysis-fifo-2", "analysis-fifo-3"]
     finally:
         hold.set()
         manager.shutdown_all()

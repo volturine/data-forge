@@ -226,8 +226,7 @@ These variables configure the gRPC channel that the scheduler and worker use to 
 | `POLARS_CORES_AVAILABLE`          | `0`     | Total cores for analysis engines; `0` = all host logical CPUs. Not Polars' native `POLARS_MAX_THREADS`. |
 | `POLARS_MAX_MEMORY_MB`            | `0`     | `0` means unlimited.                                            |
 | `POLARS_STREAMING_CHUNK_SIZE`     | `0`     | `0` means automatic chunk sizing.                               |
-| `MAX_CONCURRENT_ENGINES`          | `10`    | Valid range: `1` to `100`.                                      |
-| `ENGINE_CAPACITY_WAIT_SECONDS`    | `60`    | Seconds to wait for an idle engine slot when at the limit (`0` = fail immediately). Worker-only. |
+| `MAX_CONCURRENT_ENGINES`          | `10`    | Caps live engines (`1`–`100`). Excess spawns FIFO-queue until a slot frees (idle eviction or shutdown); they do not hard-fail. |
 | `WORKERS`                         | `1`     | Valid range: `0` to `32`; `0` means auto in deployment scripts. The checked-in production env templates currently set this to `4`. |
 | `WORKER_CONNECTIONS`              | `1000`  | Maximum connections per worker.                                 |
 | `BUILD_WORKER_MIN_PROCESSES`      | `0`     | Minimum warm build-worker subprocesses to keep alive.           |
