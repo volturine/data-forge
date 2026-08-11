@@ -134,6 +134,7 @@ def test_process_manager_starts_distinct_engines_concurrently() -> None:
 
 def test_process_manager_counts_in_progress_starts_against_capacity(monkeypatch) -> None:
     monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    monkeypatch.setattr(settings, "engine_capacity_wait_seconds", 0)
     start_entered = threading.Event()
     release_start = threading.Event()
 
@@ -162,6 +163,7 @@ def test_process_manager_counts_in_progress_starts_against_capacity(monkeypatch)
 
 def test_process_manager_does_not_evict_engine_while_work_is_being_submitted(monkeypatch) -> None:
     monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    monkeypatch.setattr(settings, "engine_capacity_wait_seconds", 0)
     manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
     first_identity = _analysis_identity("analysis-reserved-1")
     second_identity = _analysis_identity("analysis-reserved-2")
@@ -175,4 +177,37 @@ def test_process_manager_does_not_evict_engine_while_work_is_being_submitted(mon
         assert second_engine.is_process_alive()
         assert not first_engine.is_process_alive()
     finally:
+        manager.shutdown_all()
+
+
+def test_process_manager_waits_for_capacity_then_evicts_idle(monkeypatch) -> None:
+    """Under load, wait for a busy reservation to clear rather than hard-failing."""
+    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    monkeypatch.setattr(settings, "engine_capacity_wait_seconds", 2)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    first_identity = _analysis_identity("analysis-wait-1")
+    second_identity = _analysis_identity("analysis-wait-2")
+    try:
+        hold = threading.Event()
+        released = threading.Event()
+
+        def hold_first() -> None:
+            with manager.acquire_engine(first_identity):
+                released.set()
+                assert hold.wait(timeout=2)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first_future = executor.submit(hold_first)
+            assert released.wait(timeout=2)
+            second_future = executor.submit(manager.spawn_engine, second_identity)
+            # Still reserved — second must wait, not fail immediately.
+            time.sleep(0.15)
+            assert not second_future.done()
+            hold.set()
+            first_future.result(timeout=2)
+            second_info = second_future.result(timeout=2)
+            assert second_info.engine.is_process_alive()
+            assert manager.get_engine(first_identity) is None
+    finally:
+        hold.set()
         manager.shutdown_all()

@@ -128,16 +128,17 @@ jobs:
       FRONTEND_PORT: "3001"
       # Match the pre-Docker parallel e2e default (4). Bootstrap is now bounded
       # and fails visibly, so we no longer serialize browsers to hide shell hangs.
-      # Engine pool stays high enough for identity reuse under concurrent previews.
       # No Playwright retries.
-      # Four browsers match pre-Docker e2e. Engine concurrency is capped so
-      # Chromium + API keep host headroom (24 engines + 4 Chromium OOMs the
-      # runner into "Failed to fetch" / ERR_NETWORK_CHANGED).
+      # Four browsers match pre-Docker e2e. Cap engines so Chromium + API keep
+      # host headroom (24 engines + 4 Chromium OOMs the runner into
+      # "Failed to fetch" / ERR_NETWORK_CHANGED). Capacity wait absorbs short
+      # pool saturation under 4-way parallel freeWarm/spawn instead of 500s.
       PW_E2E_WORKERS: "4"
       BUILD_WORKER_MIN_PROCESSES: "4"
       BUILD_WORKER_MAX_PROCESSES: "4"
       COMPUTE_REQUEST_CONCURRENCY: "4"
       MAX_CONCURRENT_ENGINES: "8"
+      ENGINE_CAPACITY_WAIT_SECONDS: "90"
       POLARS_MAX_MEMORY_MB: "192"
       E2E_ENGINE_IDLE_TTL_SECONDS: "90"
       E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS: "15"

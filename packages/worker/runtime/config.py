@@ -18,6 +18,7 @@ class WorkerSettings:
     engine_idle_ttl_seconds: int
     engine_idle_reap_interval_seconds: int
     max_concurrent_engines: int
+    engine_capacity_wait_seconds: int
     polars_cores_available: int
     polars_max_memory_mb: int
     polars_streaming_chunk_size: int
@@ -81,6 +82,8 @@ settings = WorkerSettings(
     engine_idle_ttl_seconds=_read_int("ENGINE_IDLE_TTL_SECONDS", 300, min_value=1),
     engine_idle_reap_interval_seconds=_read_int("ENGINE_IDLE_REAP_INTERVAL_SECONDS", 30, min_value=1),
     max_concurrent_engines=_read_int("MAX_CONCURRENT_ENGINES", 10, min_value=1, max_value=100),
+    # Seconds to wait for an idle slot when at MAX_CONCURRENT_ENGINES (0 = fail immediately).
+    engine_capacity_wait_seconds=_read_int("ENGINE_CAPACITY_WAIT_SECONDS", 60, min_value=0, max_value=600),
     # Total cores available for engines (0 = all logical CPUs). Not Polars' native env.
     polars_cores_available=_read_int("POLARS_CORES_AVAILABLE", 0, min_value=0),
     polars_max_memory_mb=_read_int("POLARS_MAX_MEMORY_MB", 0, min_value=0),
