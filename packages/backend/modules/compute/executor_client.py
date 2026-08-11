@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session
 
-from backend_core import compute_requests_service, runtime_outbox_service
+from backend_core import compute_requests_service, datasource_delete_service, runtime_outbox_service
 from backend_core.data_plane_client import client_from_settings
 from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.domain.compute import schemas as compute_schemas
@@ -24,6 +24,30 @@ from modules.datasource import schemas as datasource_schemas
 from modules.datasource.schema_protocol import schema_info_proto
 
 EngineIdentity = compute_pb2.EngineIdentity
+
+
+def _require_active_pipeline_datasources(session: Session, pipeline: compute_schemas.AnalysisPipelinePayload) -> None:
+    """Reject stale pipeline snapshots before they enter the durable queue."""
+    tab_ids = {tab.id for tab in pipeline.tabs}
+    output_ids = {result_id for tab in pipeline.tabs if isinstance((result_id := tab.output.get('result_id')), str)}
+    local_ids = tab_ids | output_ids
+    external_ids: set[str] = set()
+    for tab in pipeline.tabs:
+        datasource = tab.datasource
+        if datasource.analysis_tab_id is None and datasource.id not in local_ids:
+            external_ids.add(datasource.id)
+        for step in tab.steps:
+            config = step.get('config')
+            if not isinstance(config, dict):
+                continue
+            right_source = config.get('right_source')
+            if isinstance(right_source, str) and right_source not in local_ids:
+                external_ids.add(right_source)
+            sources = config.get('sources')
+            if isinstance(sources, list):
+                external_ids.update(source for source in sources if isinstance(source, str) and source not in local_ids)
+    for datasource_id in sorted(external_ids):
+        datasource_delete_service.get_active_datasource(session, datasource_id)
 
 
 def _protocol_request_payload(request: BaseModel) -> dict[str, object]:
@@ -140,6 +164,7 @@ async def preview_step(
     *,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> compute_schemas.StepPreviewResponse:
+    _require_active_pipeline_datasources(session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
@@ -155,6 +180,7 @@ async def get_step_schema(
     *,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> compute_schemas.StepSchemaResponse:
+    _require_active_pipeline_datasources(session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
@@ -170,6 +196,7 @@ async def get_step_row_count(
     *,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> compute_schemas.StepRowCountResponse:
+    _require_active_pipeline_datasources(session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
@@ -185,6 +212,7 @@ async def download_step(
     *,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> tuple[bytes, str, str]:
+    _require_active_pipeline_datasources(session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
@@ -210,6 +238,7 @@ async def export_data(
     *,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> compute_schemas.ExportResponse:
+    _require_active_pipeline_datasources(session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,

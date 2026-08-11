@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from dataforge_protocol import compute_pb2, enums_pb2
+from dataforge_protocol import compute_pb2, engine_runtime_pb2, enums_pb2
 from runtime.config import settings
 from runtime.docker_engine import (
     DockerComputeEngine,
@@ -164,6 +164,41 @@ def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) ->
     assert result is not None
     assert result.error == "Engine shutdown requested"
     assert result.error_kind == "engine_shutdown"
+
+
+def test_job_watch_resumes_clean_stream_close_without_leaking_active_job(monkeypatch) -> None:
+    engine = DockerComputeEngine(_identity())
+    job_id = "job-resume"
+    result = engine_runtime_pb2.EngineJobResult(job_id=job_id, data_json=b'{"rows":[1]}')
+    progress = engine_runtime_pb2.EngineJobEvent(job_id=job_id, sequence=1, progress_json=b'{"type":"compute_start"}')
+    terminal = engine_runtime_pb2.EngineJobEvent(job_id=job_id, sequence=2, result=result)
+
+    class Stub:
+        requests: list[int] = []
+
+        def WatchJob(self, request, metadata):
+            del metadata
+            self.requests.append(request.after_sequence)
+            return iter((progress,)) if len(self.requests) == 1 else iter((terminal,))
+
+        def GetJobResult(self, request, *, timeout, metadata):
+            del request, timeout, metadata
+            return result
+
+    stub = Stub()
+    engine._stub = stub  # type: ignore[assignment]
+    engine._active_job_ids.add(job_id)
+    engine.current_job_id = job_id
+    monkeypatch.setattr(engine._heartbeat_stop, "wait", lambda _timeout: False)
+
+    engine._watch_job(job_id)
+
+    published = engine.get_result(timeout=0, job_id=job_id)
+    assert published is not None
+    assert published.data == {"rows": [1]}
+    assert stub.requests == [0, 1]
+    assert engine.current_job_id is None
+    assert job_id not in engine._active_job_ids
 
 
 def test_container_nano_cpus_skips_hard_quota_for_host_connected_engines(monkeypatch) -> None:

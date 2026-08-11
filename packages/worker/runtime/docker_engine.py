@@ -9,9 +9,9 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from datetime import UTC, datetime
 from hashlib import sha256
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -469,56 +469,74 @@ class DockerComputeEngine(ComputeEngine):
     def get_row_count(self, datasource_config: dict, steps: list[dict], additional_datasources: dict[str, dict] | None = None) -> str:
         return self._submit("row_count", {"datasource_config": datasource_config, "steps": steps, "additional_datasources": additional_datasources or {}})
 
+    def _publish_job_result(self, job_id: str, result: EngineResult) -> None:
+        with self._lock:
+            transfer = self._artifact_transfers.pop(job_id, None)
+        if transfer is not None:
+            local_path, artifact_url = transfer
+            try:
+                if result.error is None:
+                    download_file(artifact_url, local_path)
+                    if result.data is not None:
+                        result.data["output_path"] = str(local_path)
+            except Exception as exc:
+                result = EngineResult(
+                    job_id=job_id,
+                    data=None,
+                    error=f"Failed to retrieve staged engine artifact: {exc}",
+                    error_kind="engine_artifact_transfer_failed",
+                    error_details={},
+                )
+            finally:
+                with contextlib.suppress(Exception):
+                    delete_object(artifact_url)
+        with self._lock:
+            self._pending_results[job_id] = result
+            while len(self._pending_results) > 100:
+                self._pending_results.pop(next(iter(self._pending_results)))
+            self._active_job_ids.discard(job_id)
+            next_job = next(iter(self._active_job_ids), None)
+        self._publish_current_job_id(next_job)
+
     def _watch_job(self, job_id: str) -> None:
         try:
             assert self._stub is not None
-            stream = self._stub.WatchJob(engine_runtime_pb2.EngineWatchJobRequest(job_id=job_id), metadata=self._metadata())
-            for event in stream:
-                which = event.WhichOneof("event")
-                if which == "progress_json":
-                    payload = json.loads(event.progress_json)
-                    if not isinstance(payload, dict):
-                        raise RuntimeError("Engine progress payload must be an object")
-                    with self._lock:
-                        self._pending_progress.setdefault(job_id, deque(maxlen=1000)).append(EngineProgressEvent(job_id=job_id, event=payload))
-                        while len(self._pending_progress) > 100:
-                            self._pending_progress.pop(next(iter(self._pending_progress)))
-                elif which == "result":
-                    result = _result_from_message(event.result)
-                    with contextlib.suppress(Exception):
-                        self._stub.GetJobResult(
-                            engine_runtime_pb2.EngineGetJobResultRequest(job_id=job_id),
-                            timeout=2,
-                            metadata=self._metadata(),
-                        )
-                    with self._lock:
-                        transfer = self._artifact_transfers.pop(job_id, None)
-                    if transfer is not None:
-                        local_path, artifact_url = transfer
-                        try:
-                            if result.error is None:
-                                download_file(artifact_url, local_path)
-                                if result.data is not None:
-                                    result.data["output_path"] = str(local_path)
-                        except Exception as exc:
-                            result = EngineResult(
-                                job_id=job_id,
-                                data=None,
-                                error=f"Failed to retrieve staged engine artifact: {exc}",
-                                error_kind="engine_artifact_transfer_failed",
-                                error_details={},
+            sequence = 0
+            while True:
+                stream = self._stub.WatchJob(
+                    engine_runtime_pb2.EngineWatchJobRequest(job_id=job_id, after_sequence=sequence),
+                    metadata=self._metadata(),
+                )
+                for event in stream:
+                    sequence = max(sequence, event.sequence)
+                    which = event.WhichOneof("event")
+                    if which == "progress_json":
+                        payload = json.loads(event.progress_json)
+                        if not isinstance(payload, dict):
+                            raise RuntimeError("Engine progress payload must be an object")
+                        with self._lock:
+                            self._pending_progress.setdefault(job_id, deque(maxlen=1000)).append(EngineProgressEvent(job_id=job_id, event=payload))
+                            while len(self._pending_progress) > 100:
+                                self._pending_progress.pop(next(iter(self._pending_progress)))
+                    elif which == "result":
+                        result = _result_from_message(event.result)
+                        with contextlib.suppress(Exception):
+                            self._stub.GetJobResult(
+                                engine_runtime_pb2.EngineGetJobResultRequest(job_id=job_id),
+                                timeout=2,
+                                metadata=self._metadata(),
                             )
-                        finally:
-                            with contextlib.suppress(Exception):
-                                delete_object(artifact_url)
-                    with self._lock:
-                        self._pending_results[job_id] = result
-                        while len(self._pending_results) > 100:
-                            self._pending_results.pop(next(iter(self._pending_results)))
-                        self._active_job_ids.discard(job_id)
-                        next_job = next(iter(self._active_job_ids), None)
-                    self._publish_current_job_id(next_job)
-                    return
+                        self._publish_job_result(job_id, result)
+                        return
+
+                # A healthy watch is open until a terminal result. If the
+                # transport closes cleanly first, resume from the last durable
+                # sequence instead of abandoning the active job forever.
+                if self._shutdown_requested:
+                    raise RuntimeError("Engine shutdown requested")
+                logger.info("Engine job watch ended before result for %s; resuming after sequence %s", job_id, sequence)
+                if self._heartbeat_stop.wait(0.05):
+                    raise RuntimeError("Engine shutdown requested")
         except Exception as exc:
             with self._lock:
                 intentional_shutdown = self._shutdown_requested

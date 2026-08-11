@@ -1,11 +1,14 @@
+import pytest
 from sqlalchemy import select
 
-from backend_core import dependencies, engine_runs_service as engine_run_service
+from backend_core import datasource_delete_service, dependencies, engine_runs_service as engine_run_service
 from backend_core.dependencies import get_manager, get_runtime_availability_probe
+from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
+from backend_core.exceptions import AppError
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
@@ -13,7 +16,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
 from backend_core.sqlmodel_typing import sa
 from main import app
-from modules.compute import routes as compute_routes
+from modules.compute import executor_client, routes as compute_routes
 
 
 class _StubEngine:
@@ -63,6 +66,34 @@ class _AvailableRuntimeProbe:
     def available(*, kind) -> bool:
         del kind
         return True
+
+
+def test_compute_queue_rejects_pipeline_after_source_delete_requested(test_db_session, sample_datasource) -> None:
+    datasource_delete_service.request_delete(test_db_session, sample_datasource.id)
+    request = compute_schemas.StepPreviewRequest.model_validate(
+        {
+            'analysis_id': 'analysis-1',
+            'target_step_id': 'source',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-1',
+                'tabs': [
+                    {
+                        'id': 'tab-1',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {'result_id': 'output-1', 'format': 'parquet', 'filename': 'output'},
+                        'steps': [],
+                    }
+                ],
+            },
+        }
+    )
+
+    with pytest.raises(AppError, match='not found'):
+        executor_client._require_active_pipeline_datasources(test_db_session, request.analysis_pipeline)
 
 
 def test_persisted_runtime_availability_probe_uses_an_isolated_session_per_check(monkeypatch) -> None:
