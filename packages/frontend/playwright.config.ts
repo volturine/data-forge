@@ -52,6 +52,10 @@ export default defineConfig({
 	reporter,
 	use: {
 		baseURL,
+		// Fail stuck clicks/gotos in seconds instead of sitting until the 120s
+		// test wall (default 0 = unlimited until test timeout).
+		actionTimeout: 15_000,
+		navigationTimeout: 30_000,
 		trace: 'on-first-retry',
 		screenshot: 'only-on-failure'
 	},

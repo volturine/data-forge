@@ -50,16 +50,31 @@ export class DatasourceStore {
 		);
 	}
 
-	async getSchema(id: string, sheetName?: string): Promise<SchemaInfo> {
-		const cached = this.schemas.get(id);
-		if (cached && !sheetName) return cached;
+	/**
+	 * Fetch column schema for a datasource.
+	 *
+	 * Default is cache-first (`refresh: false`): memory cache, then the API
+	 * which serves the DB `schema_cache` without re-ingest. Pass
+	 * `refresh: true` only for explicit user-driven re-extract / re-ingest.
+	 */
+	async getSchema(
+		id: string,
+		options: { sheetName?: string; refresh?: boolean } = {}
+	): Promise<SchemaInfo> {
+		const sheetName = options.sheetName;
+		const refresh = options.refresh === true;
+
+		if (!refresh && !sheetName) {
+			const cached = this.schemas.get(id);
+			if (cached) return cached;
+		}
 
 		const datasource = this.getDatasource(id);
 		if (datasource?.source_type === 'analysis') {
 			throw new Error('Schema must be fetched via analysis output');
 		}
 
-		const result = await getDatasourceSchema(id, { sheetName, refresh: true });
+		const result = await getDatasourceSchema(id, { sheetName, refresh });
 		return result.match(
 			(schema) => {
 				if (!sheetName) {
@@ -67,8 +82,8 @@ export class DatasourceStore {
 				}
 				return schema;
 			},
-			(_err) => {
-				throw new Error('Failed to get schema');
+			(err) => {
+				throw new Error(err.message || 'Failed to get schema');
 			}
 		);
 	}

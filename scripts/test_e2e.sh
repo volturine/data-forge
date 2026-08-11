@@ -303,6 +303,11 @@ run_playwright() {
         read -r -a test_files <<<"${PLAYWRIGHT_TEST_FILES}"
         echo "Running Playwright subset: ${test_files[*]}"
     fi
+    local grep_args=()
+    if [ -n "${PLAYWRIGHT_GREP:-}" ]; then
+        grep_args=(--grep "${PLAYWRIGHT_GREP}")
+        echo "Playwright grep: ${PLAYWRIGHT_GREP}"
+    fi
     PLAYWRIGHT_DISABLE_WEB_SERVER=true \
     PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir" \
     PLAYWRIGHT_OUTPUT_DIR="$output_dir" \
@@ -310,7 +315,8 @@ run_playwright() {
         --timeout-seconds "$timeout_seconds" \
         --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
         -- ./node_modules/.bin/playwright test --config=playwright.config.ts \
-        ${test_files[@]+"${test_files[@]}"}
+        ${test_files[@]+"${test_files[@]}"} \
+        ${grep_args[@]+"${grep_args[@]}"}
 }
 
 run_playwright

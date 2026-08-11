@@ -65,7 +65,9 @@ export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs())
 }
 
 async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {
-	await page.goto(path, { waitUntil: 'domcontentloaded' });
+	// Cap navigation so a stuck beforeunload/network cannot sit until the test wall.
+	const navigationTimeout = Math.min(timeout, 30_000);
+	await page.goto(path, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
 	await waitForLayoutReady(page, timeout);
 }
 
