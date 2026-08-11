@@ -174,9 +174,10 @@ jobs:
         working-directory: packages/frontend
         run: bun install --frozen-lockfile
 
-      - name: Install Playwright browsers
-        working-directory: packages/frontend
-        run: bun x playwright install --with-deps chromium
+      - name: Pull isolated Playwright runtime
+        run: |
+          PLAYWRIGHT_VERSION="$(node -p "require('./packages/frontend/node_modules/playwright/package.json').version")"
+          docker pull "mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
 
       - name: Reclaim unused Docker state
         run: |

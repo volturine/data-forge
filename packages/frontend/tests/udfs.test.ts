@@ -1,4 +1,3 @@
-import { readFileSync } from 'fs';
 import { test, expect } from './fixtures.js';
 import { createUdf } from './utils/api.js';
 import {
@@ -237,10 +236,12 @@ test.describe('UDFs – export & import', () => {
 				page.waitForEvent('download'),
 				page.getByRole('button', { name: /Export/i }).click()
 			]);
-			const exportedJson = await download.path().then((p) => {
-				if (!p) throw new Error('No download path');
-				return readFileSync(p, 'utf8');
-			});
+			const downloadStream = await download.createReadStream();
+			const chunks: Buffer[] = [];
+			for await (const chunk of downloadStream) {
+				chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+			}
+			const exportedJson = Buffer.concat(chunks).toString('utf8');
 
 			// Delete the UDF via UI first
 			await deleteUdfViaUI(page, udf, { strict: true });

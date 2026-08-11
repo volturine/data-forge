@@ -24,6 +24,9 @@ export ENGINE_IDLE_TTL_SECONDS="${E2E_ENGINE_IDLE_TTL_SECONDS:-120}"
 export ENGINE_IDLE_REAP_INTERVAL_SECONDS="${E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS:-15}"
 LOG_DIR="${E2E_LOG_DIR:-}"
 PLAYWRIGHT_ARTIFACTS_DIR="${ROOT_DIR}/packages/frontend/tests/.artifacts/playwright"
+PLAYWRIGHT_CONTAINER="dataforge-e2e-playwright-$$"
+PLAYWRIGHT_LABEL="data-forge.test-playwright=1"
+PLAYWRIGHT_PORT=""
 PG_CONTAINER="dataforge-e2e-pg-$$"
 PG_LABEL="data-forge.test-postgres=1"
 PG_VOLUME="${PG_CONTAINER}-data"
@@ -121,6 +124,7 @@ dump_service_logs() {
 }
 cleanup() {
     status=$?
+    docker rm -f "${PLAYWRIGHT_CONTAINER}" >/dev/null 2>&1 || true
     terminate_processes "${FRONTEND_PID:-}" "${SCHEDULER_PID:-}" "${WORKER_PID:-}"
     terminate_processes "${BACKEND_PID:-}"
     # Worker death can leave labelled engines on the private network; remove them
@@ -278,6 +282,36 @@ PLAYWRIGHT_WORKERS="${PW_E2E_WORKERS:-}"
 if [ -z "${PLAYWRIGHT_WORKERS}" ]; then
     echo "PW_E2E_WORKERS must be set before running e2e tests" >&2
     exit 1
+fi
+if [ -n "${CI:-}" ]; then
+    # Engine containers attach and detach throughout the suite. Chromium treats
+    # those host veth changes as network changes, which can abort unrelated page
+    # requests. Keep the browser in its own stable network namespace and use
+    # Playwright's native loopback exposure to reach the host-run test services.
+    PLAYWRIGHT_VERSION="$(node -p "require('./packages/frontend/node_modules/playwright/package.json').version")"
+    PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
+    PLAYWRIGHT_PORT="$(pick_host_port "${PORT}" "${FRONTEND_PORT}" "${INTERNAL_GRPC_PORT}" "${WORKER_DATA_PLANE_GRPC_PORT}" "${PG_PORT}" "${RUSTFS_PORT}")"
+    docker ps -aq --filter "label=${PLAYWRIGHT_LABEL}" | xargs -r docker rm -f >/dev/null 2>&1 || true
+    docker run -d --rm --init \
+        --label "${PLAYWRIGHT_LABEL}" \
+        --name "${PLAYWRIGHT_CONTAINER}" \
+        -v "${ROOT_DIR}:/work:ro" \
+        -w /work/packages/frontend \
+        -p "127.0.0.1:${PLAYWRIGHT_PORT}:3000" \
+        "${PLAYWRIGHT_IMAGE}" \
+        node node_modules/playwright/cli.js run-server --host 0.0.0.0 --port 3000 >/dev/null
+    deadline=$((SECONDS + 30))
+    until docker logs "${PLAYWRIGHT_CONTAINER}" 2>&1 | grep -q "Listening on ws://"; do
+        if [ "$SECONDS" -ge "$deadline" ] || [ "$(docker inspect -f '{{.State.Running}}' "${PLAYWRIGHT_CONTAINER}" 2>/dev/null || true)" != "true" ]; then
+            echo "Failed to start isolated Playwright browser server" >&2
+            docker logs "${PLAYWRIGHT_CONTAINER}" >&2 || true
+            exit 1
+        fi
+        sleep 0.25
+    done
+    export PW_TEST_CONNECT_WS_ENDPOINT="ws://127.0.0.1:${PLAYWRIGHT_PORT}/"
+    export PW_TEST_CONNECT_EXPOSE_NETWORK="<loopback>"
+    echo "Playwright browser is isolated from Docker engine network churn"
 fi
 echo "Starting Playwright e2e tests"
 echo "Using ${PLAYWRIGHT_WORKERS} worker(s)"

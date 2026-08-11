@@ -128,14 +128,25 @@
 	const inferredSchemaGate = createAsyncGate();
 	let pendingSourceSchemaKeys = new SvelteSet<string>();
 	let warmedEngineIdentityCache = $state<string | null>(null);
+	let remoteLockSyncPending = $state(false);
+	let remoteLockSyncFailed = $state(false);
 
 	let lockMode = $state<EditorLockMode>('pending');
 	let lockIntent = $state<'editing' | 'released'>('editing');
 	const editorAccessState = $derived(
-		lockIntent === 'released' ? getEditorAccessState('released') : getEditorAccessState(lockMode)
+		lockIntent === 'released'
+			? getEditorAccessState('released')
+			: remoteLockSyncFailed
+				? getEditorAccessState('error')
+				: lockMode === 'owned' && (!draftLoaded || remoteLockSyncPending)
+					? getEditorAccessState('pending')
+					: getEditorAccessState(lockMode)
 	);
 	const lockedByOther = $derived(lockMode === 'other');
-	const editorReadOnly = $derived(lockIntent === 'released' || isEditorReadOnly(lockMode));
+	const lockReadOnly = $derived(lockIntent === 'released' || isEditorReadOnly(lockMode));
+	const editorReadOnly = $derived(
+		lockReadOnly || !draftLoaded || remoteLockSyncPending || remoteLockSyncFailed
+	);
 	const saveButtonState = $derived.by(() => {
 		if (editorAccessState === 'pending') return 'pending';
 		if (editorAccessState === 'locked') return 'locked';
@@ -230,7 +241,8 @@
 
 	// Storage: $derived can't hydrate from IndexedDB.
 	$effect(() => {
-		if (!storageKey || draftLoaded || editorReadOnly) return;
+		if (!storageKey || draftLoaded || lockReadOnly || remoteLockSyncPending || remoteLockSyncFailed)
+			return;
 		if (!analysisStore.tabs.length) return;
 		const currentStorageKey = storageKey;
 		const currentAnalysisId = analysisId;
@@ -426,6 +438,8 @@
 		}
 		if (resetForRemoteLock) return;
 		resetForRemoteLock = true;
+		remoteLockSyncPending = true;
+		remoteLockSyncFailed = false;
 
 		showDatasourceModal = false;
 		showVersionModal = false;
@@ -440,8 +454,19 @@
 			void idbDelete(storageKey);
 		}
 		if (analysisQuery.data) {
-			void analysisQuery.refetch();
+			const syncAnalysisId = analysisId;
+			void analysisQuery
+				.refetch()
+				.then((result) => {
+					if (analysisId !== syncAnalysisId) return;
+					remoteLockSyncFailed = result.isError;
+				})
+				.finally(() => {
+					if (analysisId === syncAnalysisId) remoteLockSyncPending = false;
+				});
+			return;
 		}
+		remoteLockSyncPending = false;
 	});
 
 	const versionsQuery = createQuery(() => ({
