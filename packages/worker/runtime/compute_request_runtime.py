@@ -605,31 +605,31 @@ def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.
         field = "spawn_engine" if kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE else "configure_engine"
         return _lifecycle_command_from_claimed(claimed, field).engine_identity
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
-        cmd = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
-        if cmd.HasField("engine_identity"):
-            return cmd.engine_identity
-        if cmd.HasField("analysis_id") and cmd.analysis_id:
-            return _analysis_interactive_identity(cmd.analysis_id)
+        preview = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
+        if preview.HasField("engine_identity"):
+            return preview.engine_identity
+        if preview.HasField("analysis_id") and preview.analysis_id:
+            return _analysis_interactive_identity(preview.analysis_id)
         return None
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
-        cmd = cast(compute_pb2.StepSchemaCommand, _compute_command_from_claimed(claimed, "schema"))
-        if cmd.HasField("analysis_id") and cmd.analysis_id:
-            return _analysis_interactive_identity(cmd.analysis_id)
+        schema = cast(compute_pb2.StepSchemaCommand, _compute_command_from_claimed(claimed, "schema"))
+        if schema.HasField("analysis_id") and schema.analysis_id:
+            return _analysis_interactive_identity(schema.analysis_id)
         return None
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
-        cmd = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
-        if cmd.HasField("analysis_id") and cmd.analysis_id:
-            return _analysis_interactive_identity(cmd.analysis_id)
+        row_count = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
+        if row_count.HasField("analysis_id") and row_count.analysis_id:
+            return _analysis_interactive_identity(row_count.analysis_id)
         return None
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
-        cmd = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
-        if cmd.HasField("analysis_id") and cmd.analysis_id:
-            return _analysis_interactive_identity(cmd.analysis_id)
+        download = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
+        if download.HasField("analysis_id") and download.analysis_id:
+            return _analysis_interactive_identity(download.analysis_id)
         return None
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
-        cmd = cast(compute_pb2.ExportCommand, _compute_command_from_claimed(claimed, "export"))
-        if cmd.HasField("analysis_id") and cmd.analysis_id:
-            return _analysis_interactive_identity(cmd.analysis_id)
+        export = cast(compute_pb2.ExportCommand, _compute_command_from_claimed(claimed, "export"))
+        if export.HasField("analysis_id") and export.analysis_id:
+            return _analysis_interactive_identity(export.analysis_id)
         return None
     return None
 
