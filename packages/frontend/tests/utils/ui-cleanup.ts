@@ -1,6 +1,12 @@
 import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
-import { findAnalysisIdByName, unregisterAnalysis, type E2EStorageState } from './api.js';
+import {
+	findAnalysisIdByName,
+	registeredAnalysisIds,
+	registeredDatasourceIds,
+	unregisterAnalysis,
+	type E2EStorageState
+} from './api.js';
 import {
 	gotoAnalysesGallery,
 	gotoUdfLibrary,
@@ -18,7 +24,7 @@ function engineIdentityKey(scope: EngineUiScope, resourceId: string): string {
 
 /**
  * Open the sidebar Engines popup (human path for engine lifecycle).
- * Pure UI — no direct compute API calls from the test helper.
+ * Pure UI — no direct DELETE /compute/engine/* from the test helper.
  */
 export async function openEnginesPopup(page: Page): Promise<Locator> {
 	const popup = page.locator('[data-engines-popup="true"]');
@@ -54,52 +60,156 @@ export async function closeEnginesPopup(page: Page): Promise<void> {
 }
 
 /**
- * Shut down one engine via the visible Engines popup power button.
- * Prefer this over any direct DELETE /compute/engine/* in e2e.
+ * Shut down one engine via the Engines popup power button.
+ *
+ * Warm/idle engines free immediately. If a job is still active (backend 409),
+ * the product re-surfaces the row after the optimistic remove — we wait and
+ * retry until the job finishes and the container is actually gone.
  */
 export async function shutdownEngineViaUI(
 	page: Page,
 	resourceId: string,
-	scope: EngineUiScope = 'analysis_interactive'
+	scope: EngineUiScope = 'analysis_interactive',
+	options?: { waitForIdleMs?: number }
 ): Promise<void> {
-	if (!resourceId) return;
-	// Cleanup must not blow remaining test budget when the page is already gone.
-	if (page.isClosed()) return;
+	if (!resourceId || page.isClosed()) return;
+	const waitForIdleMs = options?.waitForIdleMs ?? 20_000;
 	const key = engineIdentityKey(scope, resourceId);
-	const popup = await openEnginesPopup(page);
-	const row = popup.locator(`[data-engine-row="${key}"]`);
-	// Stream can lag a beat after open; poll briefly for the target row.
-	const appeared = await row
-		.waitFor({ state: 'visible', timeout: 3_000 })
-		.then(() => true)
-		.catch(() => false);
-	if (!appeared) {
-		await closeEnginesPopup(page);
-		return;
+	const deadline = Date.now() + waitForIdleMs;
+
+	while (Date.now() < deadline) {
+		if (page.isClosed()) return;
+
+		let popup: Locator;
+		try {
+			popup = await openEnginesPopup(page);
+		} catch {
+			return;
+		}
+
+		const row = popup.locator(`[data-engine-row="${key}"]`);
+		const visible = await row
+			.waitFor({ state: 'visible', timeout: 1_500 })
+			.then(() => true)
+			.catch(() => false);
+
+		if (!visible) {
+			// Stream lag: re-check once before treating as already free.
+			await page.waitForTimeout(300);
+			const stillMissing = !(await row.isVisible().catch(() => false));
+			await closeEnginesPopup(page);
+			if (stillMissing) return;
+			continue;
+		}
+
+		const power = popup.locator(`[data-engine-shutdown="${key}"]`);
+		if (!(await power.isEnabled().catch(() => false))) {
+			await closeEnginesPopup(page);
+			await page.waitForTimeout(250);
+			continue;
+		}
+
+		await power.click({ timeout: 3_000 }).catch(() => undefined);
+		// Optimistic remove; active-job (409) re-adds the row on the next snapshot.
+		await row.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => undefined);
+		await page.waitForTimeout(400);
+
+		const reappeared = await row.isVisible().catch(() => false);
+		if (!reappeared) {
+			await closeEnginesPopup(page);
+			// Confirm with a fresh open so we don't leave a warm container.
+			try {
+				const confirm = await openEnginesPopup(page);
+				const stillThere = await confirm
+					.locator(`[data-engine-row="${key}"]`)
+					.isVisible()
+					.catch(() => false);
+				await closeEnginesPopup(page);
+				if (!stillThere) return;
+			} catch {
+				return;
+			}
+		} else {
+			await closeEnginesPopup(page);
+		}
+
+		// Job still draining — only then is the engine "busy"; wait and retry.
+		await page.waitForTimeout(500);
 	}
-	const power = popup.locator(`[data-engine-shutdown="${key}"]`);
-	await expect(power).toBeEnabled({ timeout: 3_000 });
-	await power.click({ timeout: 3_000 });
-	// Product optimistically removes the row; wait briefly then close.
-	await expect(row)
-		.toBeHidden({ timeout: 8_000 })
-		.catch(() => undefined);
-	await closeEnginesPopup(page);
+
+	console.warn(`[e2e] engine still present after ${waitForIdleMs}ms (likely stuck job): ${key}`);
 }
 
-export async function shutdownAnalysisEngineViaUI(page: Page, analysisId: string): Promise<void> {
-	await shutdownEngineViaUI(page, analysisId, 'analysis_interactive');
+export async function shutdownAnalysisEngineViaUI(
+	page: Page,
+	analysisId: string,
+	options?: { waitForIdleMs?: number }
+): Promise<void> {
+	await shutdownEngineViaUI(page, analysisId, 'analysis_interactive', options);
 }
 
 export async function shutdownDatasourcePreviewEngineViaUI(
 	page: Page,
-	datasourceId: string
+	datasourceId: string,
+	options?: { waitForIdleMs?: number }
 ): Promise<void> {
-	await shutdownEngineViaUI(page, datasourceId, 'datasource_preview');
+	await shutdownEngineViaUI(page, datasourceId, 'datasource_preview', options);
 }
 
-export async function shutdownBuildEngineViaUI(page: Page, buildId: string): Promise<void> {
-	await shutdownEngineViaUI(page, buildId, 'build');
+export async function shutdownBuildEngineViaUI(
+	page: Page,
+	buildId: string,
+	options?: { waitForIdleMs?: number }
+): Promise<void> {
+	await shutdownEngineViaUI(page, buildId, 'build', options);
+}
+
+/**
+ * Free warm Docker engines for the identities this test (or registry) owns.
+ * Call after work reaches a terminal UI state so engines are idle, not busy.
+ */
+export async function freeWarmEnginesViaUI(
+	page: Page,
+	targets: {
+		analysisIds?: Iterable<string>;
+		datasourceIds?: Iterable<string>;
+		buildIds?: Iterable<string>;
+		waitForIdleMs?: number;
+	} = {}
+): Promise<void> {
+	if (page.isClosed()) return;
+	const waitForIdleMs = targets.waitForIdleMs ?? 20_000;
+	const opts = { waitForIdleMs };
+
+	for (const buildId of targets.buildIds ?? []) {
+		if (!buildId) continue;
+		await shutdownBuildEngineViaUI(page, buildId, opts).catch((error) => {
+			console.warn(`[e2e] freeWarmEngines build ${buildId}:`, error);
+		});
+	}
+	for (const analysisId of targets.analysisIds ?? []) {
+		if (!analysisId) continue;
+		await shutdownAnalysisEngineViaUI(page, analysisId, opts).catch((error) => {
+			console.warn(`[e2e] freeWarmEngines analysis ${analysisId}:`, error);
+		});
+	}
+	for (const datasourceId of targets.datasourceIds ?? []) {
+		if (!datasourceId) continue;
+		await shutdownDatasourcePreviewEngineViaUI(page, datasourceId, opts).catch((error) => {
+			console.warn(`[e2e] freeWarmEngines datasource ${datasourceId}:`, error);
+		});
+	}
+}
+
+/**
+ * Free warm engines for every analysis/datasource registered by this worker.
+ * Prefer explicit ids when known; use this for suite-level teardown.
+ */
+export async function freeRegisteredWarmEnginesViaUI(page: Page): Promise<void> {
+	await freeWarmEnginesViaUI(page, {
+		analysisIds: registeredAnalysisIds(),
+		datasourceIds: registeredDatasourceIds()
+	});
 }
 
 function confirmDialog(page: Page, heading: string | RegExp): Locator {

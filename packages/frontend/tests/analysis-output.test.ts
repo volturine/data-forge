@@ -1,11 +1,12 @@
 import type { Locator } from '@playwright/test';
 
 import { test, expect } from './fixtures.js';
-import { createDatasource, createAnalysis } from './utils/api.js';
+import { createDatasource, createAnalysis, findAnalysisIdByName } from './utils/api.js';
 import {
 	createCleanupPage,
 	deleteAnalysisViaUI,
-	deleteDatasourceViaUI
+	deleteDatasourceViaUI,
+	freeWarmEnginesViaUI
 } from './utils/ui-cleanup.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
 import {
@@ -38,7 +39,10 @@ test.beforeAll(async ({ request }) => {
 
 test.afterAll(async ({ browser, workerAuth }) => {
 	const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-	await deleteDatasourceViaUI(page, sharedDatasourceName);
+	await freeWarmEnginesViaUI(page, {
+		datasourceIds: sharedDatasourceId ? [sharedDatasourceId] : []
+	}).catch(() => undefined);
+	await deleteDatasourceViaUI(page, sharedDatasourceName).catch(() => undefined);
 	await page.close();
 	await context.close();
 });
@@ -50,11 +54,15 @@ async function expectCompletedEventually(locator: Locator) {
 	await expect(locator).toContainText(/Completed/i, { timeout: buildTimeoutMs() });
 }
 
-/** Cleanup through visible gallery delete (shuts engines via Engines popup first). */
+/** Free warm analysis engines, then delete through the gallery UI. */
 async function cleanupAnalysis(
 	page: import('@playwright/test').Page,
 	analysisName: string
 ): Promise<void> {
+	const analysisId = findAnalysisIdByName(analysisName);
+	await freeWarmEnginesViaUI(page, {
+		analysisIds: analysisId ? [analysisId] : []
+	}).catch(() => undefined);
 	await deleteAnalysisViaUI(page, analysisName);
 }
 

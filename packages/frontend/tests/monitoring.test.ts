@@ -11,7 +11,7 @@ import {
 	deleteScheduleViaUI,
 	deleteHealthCheckViaUI,
 	deleteAnalysisViaUI,
-	shutdownBuildEngineViaUI
+	freeWarmEnginesViaUI
 } from './utils/ui-cleanup.js';
 import {
 	buildTimeoutMs,
@@ -789,9 +789,10 @@ test.describe('Monitoring – Builds tab', () => {
 				timeout: 10_000
 			});
 		} finally {
-			if (buildId) {
-				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
-			}
+			await freeWarmEnginesViaUI(page, {
+				buildIds: buildId ? [buildId] : [],
+				analysisIds: [analysisId]
+			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -830,9 +831,10 @@ test.describe('Monitoring – Builds tab', () => {
 				timeout: 5_000
 			});
 		} finally {
-			if (buildId) {
-				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
-			}
+			await freeWarmEnginesViaUI(page, {
+				buildIds: buildId ? [buildId] : [],
+				analysisIds: [analysisId]
+			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -860,9 +862,10 @@ test.describe('Monitoring – Builds tab', () => {
 				panel.locator(`[data-build-kind="build"][data-build-analysis-id="${analysisId}"]`)
 			).toHaveCount(1);
 		} finally {
-			if (buildId) {
-				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
-			}
+			await freeWarmEnginesViaUI(page, {
+				buildIds: buildId ? [buildId] : [],
+				analysisIds: [analysisId]
+			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -894,12 +897,14 @@ test.describe('Monitoring – Builds tab', () => {
 				await expect(row).toHaveAttribute('data-build-status', 'completed');
 				await expect(row).toContainText('Build');
 				await expect(row).not.toContainText('Preview');
-				// Free the exclusive build engine before starting the next one.
-				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
+				// Free the exclusive build engine once the run is terminal.
+				await freeWarmEnginesViaUI(page, { buildIds: [buildId] });
 			}
 
 			await page.goto(`/datasources?id=${dsId}`);
 			await waitForDatasourcePreviewReady(page);
+			// Preview finished — free the warm datasource-preview container.
+			await freeWarmEnginesViaUI(page, { datasourceIds: [dsId] });
 
 			await gotoMonitoringTab(monitorPage, 'builds');
 			await monitorPage.getByLabel(/Search builds/i).fill(ds);
@@ -907,10 +912,11 @@ test.describe('Monitoring – Builds tab', () => {
 			await expect(previewRow).toContainText('Preview');
 			await monitorPage.close();
 		} finally {
-			// Free engines even when assertions fail; keep cleanup cheap under budget.
-			for (const buildId of startedBuildIds) {
-				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
-			}
+			await freeWarmEnginesViaUI(page, {
+				buildIds: startedBuildIds,
+				analysisIds: [analysisId],
+				datasourceIds: [dsId]
+			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
 			await deleteDatasourceViaUI(page, ds).catch(() => undefined);
 		}
@@ -1062,11 +1068,12 @@ test.describe('Monitoring – live build history', () => {
 
 			await screenshot(page, 'monitoring', 'build-history-terminal');
 		} finally {
-			if (buildId) {
-				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
-			}
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await freeWarmEnginesViaUI(page, {
+				buildIds: buildId ? [buildId] : [],
+				analysisIds: [aId]
+			}).catch(() => undefined);
+			await deleteAnalysisViaUI(page, aName).catch(() => undefined);
+			await deleteDatasourceViaUI(page, dsName).catch(() => undefined);
 		}
 	});
 });

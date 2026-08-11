@@ -410,6 +410,14 @@ export function unregisterAnalysis(analysisId: string): void {
 	analysisRegistry.delete(analysisId);
 }
 
+export function registeredAnalysisIds(): string[] {
+	return [...analysisRegistry.keys()];
+}
+
+export function registeredDatasourceIds(): string[] {
+	return [...datasourceRegistry.keys()];
+}
+
 export function nameForDatasourceId(datasourceId: string): string | undefined {
 	return datasourceRegistry.get(datasourceId)?.name;
 }

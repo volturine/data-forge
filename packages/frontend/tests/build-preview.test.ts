@@ -2,11 +2,11 @@ import type { Locator, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
-import { createDatasource, createAnalysis } from './utils/api.js';
+import { createDatasource, createAnalysis, findAnalysisIdByName } from './utils/api.js';
 import {
 	deleteAnalysisViaUI,
 	deleteDatasourceViaUI,
-	shutdownBuildEngineViaUI
+	freeWarmEnginesViaUI
 } from './utils/ui-cleanup.js';
 import { readyTimeoutMs } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
@@ -22,16 +22,17 @@ async function cleanupBuildPreviewResources(
 	page: Page,
 	analysisName: string,
 	datasourceName: string,
-	buildId?: string
+	buildId?: string,
+	analysisId?: string
 ): Promise<void> {
-	// Free engines through the Engines popup, then delete resources via gallery UI.
-	if (buildId) {
-		await shutdownBuildEngineViaUI(page, buildId).catch((error) => {
-			console.warn(`[e2e] shutdownBuildEngineViaUI failed for ${buildId}:`, error);
-		});
-	}
-	await deleteAnalysisViaUI(page, analysisName);
-	await deleteDatasourceViaUI(page, datasourceName);
+	// After terminal build status, free warm containers then delete via UI.
+	const aId = analysisId ?? findAnalysisIdByName(analysisName) ?? undefined;
+	await freeWarmEnginesViaUI(page, {
+		buildIds: buildId ? [buildId] : [],
+		analysisIds: aId ? [aId] : []
+	}).catch(() => undefined);
+	await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
+	await deleteDatasourceViaUI(page, datasourceName).catch(() => undefined);
 }
 
 async function startBuildAndCaptureId(page: Page): Promise<string | undefined> {
@@ -88,7 +89,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-terminal');
 		} finally {
-			await cleanupBuildPreviewResources(page, aName, dsName, buildId);
+			await cleanupBuildPreviewResources(page, aName, dsName, buildId, aId);
 		}
 	});
 
@@ -117,7 +118,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-modal-closed');
 		} finally {
-			await cleanupBuildPreviewResources(page, aName, dsName, buildId);
+			await cleanupBuildPreviewResources(page, aName, dsName, buildId, aId);
 		}
 	});
 });
