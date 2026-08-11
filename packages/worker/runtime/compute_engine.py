@@ -91,6 +91,17 @@ class PolarsComputeEngine:
         self._lifecycle_lock = threading.RLock()
         self._pending_results: dict[str, EngineResult] = {}
         self._pending_progress: dict[str, deque[EngineProgressEvent]] = {}
+        self._capacity_notifier: Callable[[], None] | None = None
+
+    def bind_capacity_notifier(self, notifier: Callable[[], None]) -> None:
+        self._capacity_notifier = notifier
+
+    def _clear_current_job_if_match(self, job_id: str | None) -> None:
+        if job_id is not None and self.current_job_id == job_id:
+            self.current_job_id = None
+            if self._capacity_notifier is not None:
+                with contextlib.suppress(Exception):
+                    self._capacity_notifier()
 
     @property
     def process_id(self) -> int | None:
@@ -146,11 +157,15 @@ class PolarsComputeEngine:
     def _reset_state(self) -> None:
         """Reset engine state after process death."""
         with self._lifecycle_lock:
+            was_busy = bool(self.current_job_id)
             self.is_running = False
             self.current_job_id = None
             self._pending_results = {}
             self._pending_progress = {}
             process = self.process
+            if was_busy and self._capacity_notifier is not None:
+                with contextlib.suppress(Exception):
+                    self._capacity_notifier()
             if process:
                 # Clean up the dead process
                 with contextlib.suppress(Exception):
@@ -342,7 +357,7 @@ class PolarsComputeEngine:
         if expected and expected in self._pending_results:
             result = self._pending_results.pop(expected)
             if expected == self.current_job_id and (result.data is not None or result.error):
-                self.current_job_id = None
+                self._clear_current_job_if_match(expected)
             return result
 
         deadline = time.monotonic() + timeout
@@ -373,7 +388,7 @@ class PolarsComputeEngine:
                 self._store_pending_result(result)
                 continue
             if expected == self.current_job_id and (result.data is not None or result.error):
-                self.current_job_id = None
+                self._clear_current_job_if_match(expected)
             return result
 
     def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> EngineProgressEvent | None:
@@ -466,9 +481,13 @@ class PolarsComputeEngine:
                     process.close()
 
             self._close_queues()
+            was_busy = bool(self.current_job_id)
             self.is_running = False
             self.current_job_id = None
             self.process = None
+            if was_busy and self._capacity_notifier is not None:
+                with contextlib.suppress(Exception):
+                    self._capacity_notifier()
 
     def _close_queues(self) -> None:
         """Close queues to properly unregister semaphores from resource tracker."""

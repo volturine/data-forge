@@ -96,7 +96,7 @@ class ProcessManager:
         self._capacity_queue: deque[object] = deque()
         self._engine_events: dict[EngineIdentityKey, threading.Event] = {}
         self._closed = False
-        self._engine_factory = engine_factory
+        self._user_engine_factory = engine_factory
         self._on_snapshot = on_snapshot
         self._idle_ttl_seconds = settings.engine_idle_ttl_seconds
         self._idle_reap_interval_seconds = settings.engine_idle_reap_interval_seconds
@@ -105,6 +105,19 @@ class ProcessManager:
         if self._idle_ttl_seconds > 0:
             self._reaper_thread = threading.Thread(target=self._reap_idle_engines_loop, name="engine-idle-reaper", daemon=True)
             self._reaper_thread.start()
+
+    def _engine_factory(self, identity: EngineIdentity, resource_config: dict | None = None) -> ComputeEngine:
+        """Create an engine and wire capacity wakeups when its job slot frees."""
+        engine = self._user_engine_factory(identity, resource_config)
+        bind = getattr(engine, "bind_capacity_notifier", None)
+        if callable(bind):
+            bind(self.notify_capacity_changed)
+        return engine
+
+    def notify_capacity_changed(self) -> None:
+        """Wake capacity waiters (job finished, reservation released, or engine stopped)."""
+        with self._capacity_changed:
+            self._capacity_changed.notify_all()
 
     def _key(self, identity: EngineIdentity, namespace: str | None = None) -> EngineIdentityKey:
         resource_id = identity.resource_id.strip()

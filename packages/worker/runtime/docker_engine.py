@@ -11,6 +11,7 @@ import uuid
 from collections import deque
 from datetime import UTC, datetime
 from hashlib import sha256
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -203,6 +204,21 @@ class DockerComputeEngine(ComputeEngine):
         self._artifact_transfers: dict[str, tuple[Path, str]] = {}
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
+        self._capacity_notifier: Callable[[], None] | None = None
+
+    def bind_capacity_notifier(self, notifier: Callable[[], None]) -> None:
+        """ProcessManager wakes capacity waiters when this engine becomes idle."""
+        self._capacity_notifier = notifier
+
+    def _publish_current_job_id(self, job_id: str | None) -> None:
+        """Update current_job_id and notify capacity waiters when work drains."""
+        with self._lock:
+            was_busy = bool(self.current_job_id)
+            self.current_job_id = job_id
+            now_busy = bool(self.current_job_id)
+        if was_busy and not now_busy and self._capacity_notifier is not None:
+            with contextlib.suppress(Exception):
+                self._capacity_notifier()
 
     @property
     def process_id(self) -> int | None:
@@ -374,7 +390,7 @@ class DockerComputeEngine(ComputeEngine):
             assert self._stub is not None
             job_id = job_id or str(uuid.uuid4())
             self._active_job_ids.add(job_id)
-            self.current_job_id = job_id
+            self._publish_current_job_id(job_id)
             try:
                 self._stub.SubmitJob(
                     engine_runtime_pb2.EngineSubmitJobRequest(
@@ -388,7 +404,7 @@ class DockerComputeEngine(ComputeEngine):
                 )
             except Exception:
                 self._active_job_ids.discard(job_id)
-                self.current_job_id = next(iter(self._active_job_ids), None)
+                self._publish_current_job_id(next(iter(self._active_job_ids), None))
                 raise
             threading.Thread(target=self._watch_job, args=(job_id,), name=f"engine-watch-{job_id}", daemon=True).start()
             return job_id
@@ -500,7 +516,8 @@ class DockerComputeEngine(ComputeEngine):
                         while len(self._pending_results) > 100:
                             self._pending_results.pop(next(iter(self._pending_results)))
                         self._active_job_ids.discard(job_id)
-                        self.current_job_id = next(iter(self._active_job_ids), None)
+                        next_job = next(iter(self._active_job_ids), None)
+                    self._publish_current_job_id(next_job)
                     return
         except Exception as exc:
             with self._lock:
@@ -514,7 +531,8 @@ class DockerComputeEngine(ComputeEngine):
                     error_details={},
                 )
                 self._active_job_ids.discard(job_id)
-                self.current_job_id = next(iter(self._active_job_ids), None)
+                next_job = next(iter(self._active_job_ids), None)
+            self._publish_current_job_id(next_job)
             if intentional_shutdown:
                 logger.info("Engine job %s stopped during engine shutdown", job_id)
             else:
@@ -565,6 +583,8 @@ class DockerComputeEngine(ComputeEngine):
             if container is None:
                 transfers = list(self._artifact_transfers.values())
                 self._artifact_transfers.clear()
+                self._active_job_ids.clear()
+                self._publish_current_job_id(None)
             else:
                 transfers = []
             if container is None:
@@ -598,9 +618,10 @@ class DockerComputeEngine(ComputeEngine):
             self._stub = None
             self._alive = False
             self._active_job_ids.clear()
-            self.current_job_id = None
             transfers = list(self._artifact_transfers.values())
             self._artifact_transfers.clear()
+            # Drop job pointer after clearing active set so waiters can reclaim capacity.
+            self._publish_current_job_id(None)
         for _local_path, artifact_url in transfers:
             with contextlib.suppress(Exception):
                 delete_object(artifact_url)
