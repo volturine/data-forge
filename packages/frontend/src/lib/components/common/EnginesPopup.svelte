@@ -260,7 +260,7 @@
 	show={confirmOpen}
 	heading={confirmHeading}
 	message={confirmMessage}
-	confirmText={confirmText}
+	{confirmText}
 	cancelText="Keep running"
 	onConfirm={confirmShutdown}
 	onCancel={cancelConfirm}

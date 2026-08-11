@@ -60,128 +60,75 @@ export async function closeEnginesPopup(page: Page): Promise<void> {
 }
 
 /**
- * Shut down one engine via the Engines popup power button.
- *
- * Warm/idle engines free immediately. If a job is still active (backend 409),
- * the product re-surfaces the row after the optimistic remove — we wait and
- * retry until the job finishes and the container is actually gone.
+ * Drive product engine shutdown from the Engines sidebar popup:
+ * power → confirm (idle vs cancel-job-then-shutdown) → wait until the row is gone.
+ * All cancel/kill semantics live in the product (UI + API + worker), not here.
  */
 export async function shutdownEngineViaUI(
 	page: Page,
 	resourceId: string,
-	scope: EngineUiScope = 'analysis_interactive',
-	options?: { waitForIdleMs?: number }
+	scope: EngineUiScope = 'analysis_interactive'
 ): Promise<void> {
 	if (!resourceId || page.isClosed()) return;
-	const waitForIdleMs = options?.waitForIdleMs ?? 20_000;
 	const key = engineIdentityKey(scope, resourceId);
-	const deadline = Date.now() + waitForIdleMs;
 
-	while (Date.now() < deadline) {
-		if (page.isClosed()) return;
-
-		let popup: Locator;
-		try {
-			popup = await openEnginesPopup(page);
-		} catch {
-			return;
-		}
-
-		const row = popup.locator(`[data-engine-row="${key}"]`);
-		const visible = await row
-			.waitFor({ state: 'visible', timeout: 1_500 })
-			.then(() => true)
-			.catch(() => false);
-
-		if (!visible) {
-			// Stream lag: re-check once before treating as already free.
-			await page.waitForTimeout(300);
-			const stillMissing = !(await row.isVisible().catch(() => false));
-			await closeEnginesPopup(page);
-			if (stillMissing) return;
-			continue;
-		}
-
-		const power = popup.locator(`[data-engine-shutdown="${key}"]`);
-		if (!(await power.isEnabled().catch(() => false))) {
-			await closeEnginesPopup(page);
-			await page.waitForTimeout(250);
-			continue;
-		}
-
-		await power.click({ timeout: 3_000 }).catch(() => undefined);
-		// Product confirm: idle vs cancel-job-then-shutdown messaging.
-		const confirm = page
-			.getByRole('dialog')
-			.filter({
-				has: page.getByRole('heading', {
-					name: /Shut down idle engine|Cancel job and shut down engine/i
-				})
-			})
-			.first();
-		if (await confirm.isVisible().catch(() => false)) {
-			const confirmBtn = confirm.getByRole('button', {
-				name: /Shut down|Cancel job & shut down/i
-			});
-			await confirmBtn.click({ timeout: 3_000 }).catch(() => undefined);
-		}
-		// Optimistic remove; settle then re-check the engines list.
-		await row.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => undefined);
-		await page.waitForTimeout(400);
-
-		const reappeared = await row.isVisible().catch(() => false);
-		if (!reappeared) {
-			await closeEnginesPopup(page);
-			// Confirm with a fresh open so we don't leave a warm container.
-			try {
-				const confirm = await openEnginesPopup(page);
-				const stillThere = await confirm
-					.locator(`[data-engine-row="${key}"]`)
-					.isVisible()
-					.catch(() => false);
-				await closeEnginesPopup(page);
-				if (!stillThere) return;
-			} catch {
-				return;
-			}
-		} else {
-			await closeEnginesPopup(page);
-		}
-
-		// Job still draining — only then is the engine "busy"; wait and retry.
-		await page.waitForTimeout(500);
+	let popup: Locator;
+	try {
+		popup = await openEnginesPopup(page);
+	} catch {
+		return;
 	}
 
-	console.warn(`[e2e] engine still present after ${waitForIdleMs}ms (likely stuck job): ${key}`);
+	const row = popup.locator(`[data-engine-row="${key}"]`);
+	const visible = await row
+		.waitFor({ state: 'visible', timeout: 2_000 })
+		.then(() => true)
+		.catch(() => false);
+	if (!visible) {
+		await closeEnginesPopup(page);
+		return;
+	}
+
+	const power = popup.locator(`[data-engine-shutdown="${key}"]`);
+	await expect(power).toBeEnabled({ timeout: 5_000 });
+	await power.click({ timeout: 3_000 });
+
+	// Product ConfirmDialog — wording depends on idle vs active job.
+	const confirm = page
+		.getByRole('dialog')
+		.filter({
+			has: page.getByRole('heading', {
+				name: /Shut down idle engine|Cancel job and shut down engine/i
+			})
+		})
+		.first();
+	await expect(confirm).toBeVisible({ timeout: 5_000 });
+	await confirm
+		.getByRole('button', { name: /^(Shut down|Cancel job & shut down)$/ })
+		.click({ timeout: 5_000 });
+
+	// Product removes the engine from the list when shutdown succeeds.
+	await expect(row).toBeHidden({ timeout: 20_000 });
+	await closeEnginesPopup(page);
 }
 
-export async function shutdownAnalysisEngineViaUI(
-	page: Page,
-	analysisId: string,
-	options?: { waitForIdleMs?: number }
-): Promise<void> {
-	await shutdownEngineViaUI(page, analysisId, 'analysis_interactive', options);
+export async function shutdownAnalysisEngineViaUI(page: Page, analysisId: string): Promise<void> {
+	await shutdownEngineViaUI(page, analysisId, 'analysis_interactive');
 }
 
 export async function shutdownDatasourcePreviewEngineViaUI(
 	page: Page,
-	datasourceId: string,
-	options?: { waitForIdleMs?: number }
+	datasourceId: string
 ): Promise<void> {
-	await shutdownEngineViaUI(page, datasourceId, 'datasource_preview', options);
+	await shutdownEngineViaUI(page, datasourceId, 'datasource_preview');
 }
 
-export async function shutdownBuildEngineViaUI(
-	page: Page,
-	buildId: string,
-	options?: { waitForIdleMs?: number }
-): Promise<void> {
-	await shutdownEngineViaUI(page, buildId, 'build', options);
+export async function shutdownBuildEngineViaUI(page: Page, buildId: string): Promise<void> {
+	await shutdownEngineViaUI(page, buildId, 'build');
 }
 
 /**
- * Free warm Docker engines for the identities this test (or registry) owns.
- * Call after work reaches a terminal UI state so engines are idle, not busy.
+ * Shut down engines for owned identities through the product Engines UI.
  */
 export async function freeWarmEnginesViaUI(
 	page: Page,
@@ -189,28 +136,25 @@ export async function freeWarmEnginesViaUI(
 		analysisIds?: Iterable<string>;
 		datasourceIds?: Iterable<string>;
 		buildIds?: Iterable<string>;
-		waitForIdleMs?: number;
 	} = {}
 ): Promise<void> {
 	if (page.isClosed()) return;
-	const waitForIdleMs = targets.waitForIdleMs ?? 20_000;
-	const opts = { waitForIdleMs };
 
 	for (const buildId of targets.buildIds ?? []) {
 		if (!buildId) continue;
-		await shutdownBuildEngineViaUI(page, buildId, opts).catch((error) => {
+		await shutdownBuildEngineViaUI(page, buildId).catch((error) => {
 			console.warn(`[e2e] freeWarmEngines build ${buildId}:`, error);
 		});
 	}
 	for (const analysisId of targets.analysisIds ?? []) {
 		if (!analysisId) continue;
-		await shutdownAnalysisEngineViaUI(page, analysisId, opts).catch((error) => {
+		await shutdownAnalysisEngineViaUI(page, analysisId).catch((error) => {
 			console.warn(`[e2e] freeWarmEngines analysis ${analysisId}:`, error);
 		});
 	}
 	for (const datasourceId of targets.datasourceIds ?? []) {
 		if (!datasourceId) continue;
-		await shutdownDatasourcePreviewEngineViaUI(page, datasourceId, opts).catch((error) => {
+		await shutdownDatasourcePreviewEngineViaUI(page, datasourceId).catch((error) => {
 			console.warn(`[e2e] freeWarmEngines datasource ${datasourceId}:`, error);
 		});
 	}
