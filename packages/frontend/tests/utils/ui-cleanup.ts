@@ -13,9 +13,6 @@ import {
 /** Matches product `engineIdentityKey` (`scope:resource_id`). */
 export type EngineUiScope = 'analysis_interactive' | 'datasource_preview' | 'build';
 
-const NAV_TIMEOUT_MS = 15_000;
-const CLICK_TIMEOUT_MS = 5_000;
-
 function engineIdentityKey(scope: EngineUiScope, resourceId: string): string {
 	return `${scope}:${resourceId}`;
 }
@@ -31,7 +28,7 @@ export async function closeBuildPreviewIfOpen(page: Page): Promise<void> {
 
 	const closeBtn = page.getByRole('button', { name: 'Close build preview' });
 	if (await closeBtn.isVisible().catch(() => false)) {
-		await closeBtn.click({ timeout: CLICK_TIMEOUT_MS }).catch(() => undefined);
+		await closeBtn.click({ timeout: 5_000 }).catch(() => undefined);
 	} else {
 		await page.keyboard.press('Escape').catch(() => undefined);
 	}
@@ -54,7 +51,7 @@ export async function openEnginesPopup(page: Page): Promise<Locator> {
 		await waitForLayoutReady(page, 5_000).catch(() => undefined);
 	}
 	await expect(trigger).toBeVisible({ timeout: 5_000 });
-	await trigger.click({ timeout: CLICK_TIMEOUT_MS });
+	await trigger.click({ timeout: 5_000 });
 	await expect(popup).toBeVisible({ timeout: 5_000 });
 	// Settle stream: loading ends, empty state, or at least one row.
 	await Promise.race([
@@ -326,7 +323,7 @@ async function deleteDatasourceViaUIOnPage(
 	name: string,
 	options?: { id?: string }
 ): Promise<void> {
-	await page.goto('/datasources', { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+	await page.goto('/datasources', { waitUntil: 'domcontentloaded', timeout: 15_000 });
 	await waitForDatasourceList(page, 1_500).catch(() => undefined);
 	const row = options?.id
 		? page.locator(`[data-ds-id="${options.id}"]`).first()
@@ -334,7 +331,7 @@ async function deleteDatasourceViaUIOnPage(
 	if (!(await row.isVisible().catch(() => false))) {
 		const toggle = page.locator('button[title="Show auto-generated datasources"]');
 		if (await toggle.isVisible().catch(() => false)) {
-			await toggle.click({ timeout: CLICK_TIMEOUT_MS });
+			await toggle.click({ timeout: 5_000 });
 			await waitForDatasourceList(page, 1_500).catch(() => undefined);
 		}
 	}
@@ -360,11 +357,11 @@ async function deleteDatasourceViaUIOnPage(
 		: Promise.resolve(null);
 	const deleteButton = row.locator('button[title="Delete"]');
 	await expect(deleteButton).toBeEnabled({ timeout: 1_500 });
-	await deleteButton.click({ timeout: CLICK_TIMEOUT_MS });
+	await deleteButton.click({ timeout: 5_000 });
 	const dialog = confirmDialog(page, 'Delete Datasource');
 	await Promise.all([
 		deleteResponse,
-		dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: CLICK_TIMEOUT_MS })
+		dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 })
 	]).then(([response]) => {
 		if (response && !response.ok()) {
 			throw new Error(`Failed to delete datasource ${name}: HTTP ${response.status()}`);
@@ -376,7 +373,7 @@ async function deleteDatasourceViaUIOnPage(
 		.catch(async () => {
 			await page.goto('/datasources', {
 				waitUntil: 'domcontentloaded',
-				timeout: NAV_TIMEOUT_MS
+				timeout: 15_000
 			});
 			await waitForDatasourceList(page, 5_000);
 			await expect(row).toBeHidden({ timeout: 5_000 });
@@ -457,11 +454,11 @@ async function deleteAnalysisViaUIOnPage(
 				)
 				.catch(() => null)
 		: Promise.resolve(null);
-	await card.getByRole('button', { name: /Delete analysis/ }).click({ timeout: CLICK_TIMEOUT_MS });
+	await card.getByRole('button', { name: /Delete analysis/ }).click({ timeout: 5_000 });
 	const dialog = confirmDialog(page, 'Delete Analysis');
 	await Promise.all([
 		deleteResponse,
-		dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: CLICK_TIMEOUT_MS })
+		dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 })
 	]).then(([response]) => {
 		if (response && !response.ok()) {
 			throw new Error(`Failed to delete analysis ${name}: HTTP ${response.status()}`);
@@ -502,10 +499,10 @@ async function deleteUdfViaUIOnPage(page: Page, name: string): Promise<void> {
 			{ timeout: 5_000 }
 		)
 		.catch(() => null);
-	await card.getByRole('button', { name: /^Delete$/i }).click({ timeout: CLICK_TIMEOUT_MS });
+	await card.getByRole('button', { name: /^Delete$/i }).click({ timeout: 5_000 });
 	await Promise.all([
 		deleteResponse,
-		card.getByRole('button', { name: /Confirm/i }).click({ timeout: CLICK_TIMEOUT_MS })
+		card.getByRole('button', { name: /Confirm/i }).click({ timeout: 5_000 })
 	]).then(([response]) => {
 		if (response && !response.ok()) {
 			throw new Error(`Failed to delete UDF ${name}: HTTP ${response.status()}`);
@@ -539,9 +536,9 @@ async function deleteScheduleViaUIOnPage(page: Page, cronOrName: string): Promis
 		.filter({ hasText: cronOrName })
 		.first();
 	await row.waitFor({ state: 'visible', timeout: 1_500 });
-	await row.getByLabel('Delete schedule').click({ timeout: CLICK_TIMEOUT_MS });
+	await row.getByLabel('Delete schedule').click({ timeout: 5_000 });
 	const dialog = confirmDialog(page, 'Delete Schedule');
-	await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: CLICK_TIMEOUT_MS });
+	await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 	await expect(row)
 		.toBeHidden({ timeout: 1_500 })
 		.catch(() => undefined);
@@ -558,9 +555,9 @@ async function deleteHealthCheckViaUIOnPage(page: Page, name: string): Promise<v
 	await waitForHealthChecksList(page, 1_500).catch(() => undefined);
 	const row = page.locator(`[data-healthcheck-name="${name}"]`);
 	await row.waitFor({ state: 'visible', timeout: 1_500 });
-	await row.getByLabel('Delete check').click({ timeout: CLICK_TIMEOUT_MS });
+	await row.getByLabel('Delete check').click({ timeout: 5_000 });
 	const dialog = confirmDialog(page, 'Delete Health Check');
-	await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: CLICK_TIMEOUT_MS });
+	await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 	await expect(row)
 		.toBeHidden({ timeout: 1_500 })
 		.catch(() => undefined);

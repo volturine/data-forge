@@ -73,7 +73,7 @@ let helperDefaultNamespace: string | undefined;
 
 async function resolveHelperDefaultNamespace(page: Page): Promise<string> {
 	if (!helperDefaultNamespace) {
-		await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+		await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
 		await waitForLayoutReady(page);
 		const label = page.getByRole('button', { name: 'Select namespace' });
 		await expect(label).toBeVisible({ timeout: 5_000 });
@@ -107,7 +107,7 @@ async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promis
  */
 async function prepareHelperNamespace(page: Page, namespace?: string): Promise<void> {
 	const target = namespace ?? (await resolveHelperDefaultNamespace(page));
-	await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+	await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
 	await waitForLayoutReady(page);
 	const sidebar = page.locator('aside[aria-label="Main navigation"]');
 	const active = sidebar.getByText(target, { exact: true });

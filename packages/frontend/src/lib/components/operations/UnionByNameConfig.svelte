@@ -37,10 +37,7 @@
 		Object.entries(schemaErrors).map(([id, message]) => ({ id, message }))
 	);
 
-	async function loadSourceSchema(
-		datasourceId: string,
-		options: { forceRefresh?: boolean } = {}
-	) {
+	async function loadSourceSchema(datasourceId: string, options: { forceRefresh?: boolean } = {}) {
 		loaded.add(datasourceId);
 		pending += 1;
 		if (options.forceRefresh) {

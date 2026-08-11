@@ -132,9 +132,8 @@ test.describe('Cancel Build – e2e', () => {
 		const analysisName = `E2E Cancel Preview ${uid()}`;
 		const dsId = await createLargeDatasource(request, dsName, 200);
 		const analysisId = await createLongRunningAnalysis(request, analysisName, dsId);
-		let buildId: string | undefined;
 		try {
-			buildId = await startBuildFromAnalysisPage(page, analysisId);
+			await startBuildFromAnalysisPage(page, analysisId);
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 5_000 });
 			await openCancelDialogFromPreview(page, preview);

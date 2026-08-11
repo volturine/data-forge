@@ -35,7 +35,7 @@ async function createSessionState(browser: Browser, workerIndex: number): Promis
 		if (authRequired) {
 			// Unique per session so a Playwright worker restart does not collide.
 			const email = `e2e-ui-${E2E_RUN_STAMP}-w${workerIndex}-${Date.now()}@example.com`;
-			await page.goto('/register', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+			await page.goto('/register', { waitUntil: 'domcontentloaded', timeout: 15_000 });
 			// Ready the way a person is: form fields are visible and interactive.
 			const nameInput = page.locator('#name');
 			await expect(nameInput).toBeVisible({ timeout: 15_000 });
@@ -54,7 +54,7 @@ async function createSessionState(browser: Browser, workerIndex: number): Promis
 			await expect(createButton).toBeEnabled({ timeout: 5_000 });
 			await createButton.click({ timeout: 15_000 });
 			await expect(page.getByText(/Account created\./i)).toBeVisible({ timeout: 15_000 });
-			await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+			await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
 			await expectSignedIn(page);
 		}
 		const sessionState = (await context.storageState()) as E2EStorageState;
