@@ -14,7 +14,6 @@ from multiprocessing.synchronize import Event as ProcessEvent
 
 from runtime.compute_manager import ProcessManager
 from runtime.compute_request_runtime import (
-    ALL_REQUEST_KINDS,
     ENGINE_REQUEST_KINDS,
     NON_ENGINE_REQUEST_KINDS,
     compute_request_loop,
@@ -241,7 +240,11 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
     )
     heartbeat_thread.start()
     request_worker_count = compute_request_worker_count()
-    request_lanes = [ALL_REQUEST_KINDS] if request_worker_count == 1 else [NON_ENGINE_REQUEST_KINDS, *([ENGINE_REQUEST_KINDS] * (request_worker_count - 1))]
+    # Claim each work class independently at the configured concurrency. Both
+    # classes share the bounded compute executor, so execution stays capped,
+    # while parked engine admissions cannot prevent datasource work from being
+    # claimed and datasource bursts cannot serialize engine requests.
+    request_lanes = [*([NON_ENGINE_REQUEST_KINDS] * request_worker_count), *([ENGINE_REQUEST_KINDS] * request_worker_count)]
     request_tasks = [
         asyncio.create_task(compute_request_loop(local_stop, worker_id=worker_id, manager=manager, allowed_kinds=allowed_kinds))
         for allowed_kinds in request_lanes

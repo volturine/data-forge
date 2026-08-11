@@ -527,6 +527,10 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
     request_lanes = [payload for name, payload in calls if name == "compute_request_loop"]
     assert request_lanes == [
         runtime_process.NON_ENGINE_REQUEST_KINDS,
+        runtime_process.NON_ENGINE_REQUEST_KINDS,
+        runtime_process.NON_ENGINE_REQUEST_KINDS,
+        runtime_process.NON_ENGINE_REQUEST_KINDS,
+        runtime_process.ENGINE_REQUEST_KINDS,
         runtime_process.ENGINE_REQUEST_KINDS,
         runtime_process.ENGINE_REQUEST_KINDS,
         runtime_process.ENGINE_REQUEST_KINDS,
