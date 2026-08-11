@@ -25,11 +25,11 @@ EngineSnapshotListener = Callable[[list[EngineStatusInfo]], None]
 
 
 class EngineCapacityFull(Exception):
-    """No free engine slot right now — caller must park outside the runner pool.
+    """No free engine slot at the moment of claim (lost race after admission).
 
-    Raised only when a new engine is needed and every slot is busy (no idle to
-    evict). Waiters should release compute threads and await
-    :meth:`ProcessManager.wait_for_capacity` so the queue never holds runners.
+    Callers must not hold a compute runner while waiting. Prefer
+    :meth:`ProcessManager.await_spawn_admission` *before* taking a runner so
+    capacity wait happens with zero runner threads.
     """
 
 
@@ -139,14 +139,20 @@ class ProcessManager:
                 # Loop closed — waiter is gone.
                 pass
 
+    def can_admit_spawn(self) -> bool:
+        """True if a new engine can start now (free slot or idle eviction)."""
+        with self._capacity_changed:
+            if self._closed:
+                return False
+            return self._capacity_used_locked() < settings.max_concurrent_engines or self._find_idle_engine_locked()[0] is not None
+
     async def wait_for_capacity(self) -> None:
-        """Park until capacity may have freed. Does not hold a compute runner."""
+        """Park until capacity may have freed. No compute runner involved."""
         loop = asyncio.get_running_loop()
         future: asyncio.Future[None] = loop.create_future()
         with self._capacity_changed:
             if self._closed:
                 raise RuntimeError("Process manager is shut down")
-            # Fast path: a slot or idle eviction candidate is already available.
             if self._capacity_used_locked() < settings.max_concurrent_engines or self._find_idle_engine_locked()[0] is not None:
                 return
             self._capacity_waiters.append((loop, future))
@@ -155,6 +161,29 @@ class ProcessManager:
         finally:
             with self._capacity_changed:
                 self._capacity_waiters[:] = [(lp, fut) for lp, fut in self._capacity_waiters if fut is not future]
+
+    async def await_spawn_admission(self, identity: EngineIdentity | None) -> None:
+        """Wait until this identity can run — without creating a compute runner.
+
+        - ``None`` identity: no engine gate (request does not need a Polars engine).
+        - Existing engine for identity: return immediately (reuse, no new slot).
+        - Otherwise park until a free slot exists or an idle engine can be evicted.
+
+        Only after this returns should the caller take a compute-pool thread.
+        """
+        if identity is None:
+            return
+        while True:
+            if self.get_engine(identity) is not None:
+                return
+            if self.can_admit_spawn():
+                return
+            logger.info(
+                "Engine capacity full (%s); request queued for %s (no runner yet)",
+                settings.max_concurrent_engines,
+                identity.resource_id,
+            )
+            await self.wait_for_capacity()
 
     def _key(self, identity: EngineIdentity, namespace: str | None = None) -> EngineIdentityKey:
         resource_id = identity.resource_id.strip()

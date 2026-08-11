@@ -229,7 +229,15 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
             )
             return
     triggered_by = starter.user_id or starter.email or starter.display_name or starter.triggered_by
+    build_identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_BUILD,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        build_id=build.build_id,
+        resource_id=build.build_id,
+    )
     while True:
+        # Admit capacity before any build runner work that needs an engine.
+        await manager.await_spawn_admission(build_identity)
         try:
             await _run_build_task(
                 manager=manager,
@@ -241,7 +249,6 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
             )
             return
         except EngineCapacityFull:
-            # Park this build worker until a slot frees — do not fail the job.
             await manager.wait_for_capacity()
 
 

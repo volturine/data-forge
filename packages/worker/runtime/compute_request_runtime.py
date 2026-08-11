@@ -140,17 +140,20 @@ async def _run_once(*, worker_id: str, manager: ProcessManager) -> bool:
 
 
 async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManager) -> None:
-    """Run the request on the compute pool; park off-pool when engine capacity is full.
+    """Admit engine capacity first, then run on the compute pool.
 
-    EngineCapacityFull means every engine slot is busy. The executor thread is
-    released immediately so the capacity "queue" never holds runners. Lease
-    renewal continues while we wait for a free/idle slot.
+    Capacity wait is a real queue: the request sits with **no compute-pool
+    thread** until a slot is free or the engine already exists for reuse.
+    Only then is a runner created. Lease renewal continues while queued.
     """
     loop = asyncio.get_running_loop()
+    identity = _engine_identity_for_claimed(claimed)
     renewal_stop = asyncio.Event()
     renewal = asyncio.create_task(_renew_compute_lease(claimed, stop_event=renewal_stop))
     try:
         while True:
+            # Gate: do not take a compute runner until admission allows spawn/reuse.
+            await manager.await_spawn_admission(identity)
             execution = loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
             done, _pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
             if renewal in done:
@@ -164,10 +167,8 @@ async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManag
                 await execution
                 return
             except EngineCapacityFull:
-                logger.info(
-                    "Compute request %s parked for engine capacity (not holding a runner)",
-                    claimed.id,
-                )
+                # Lost race after admission — wait for a capacity change, then
+                # re-admit before creating another runner.
                 await manager.wait_for_capacity()
     finally:
         renewal_stop.set()
@@ -578,6 +579,59 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
         except Exception as exc:
             logger.warning("Compute response outbox fast-path dispatch failed for request %s: %s", claimed.id, exc)
         reset_namespace(token)
+
+
+def _analysis_interactive_identity(analysis_id: str) -> compute_pb2.EngineIdentity:
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id=analysis_id,
+        resource_id=analysis_id,
+    )
+
+
+def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.EngineIdentity | None:
+    """Identity that will need a capacity slot, or None if no Polars engine is required."""
+    kind = claimed.kind
+    if kind in _DATASOURCE_REQUEST_KINDS:
+        return None
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
+        # Shutdown frees capacity; never waits for a slot.
+        return None
+    if kind in {
+        enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
+    }:
+        field = "spawn_engine" if kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE else "configure_engine"
+        return _lifecycle_command_from_claimed(claimed, field).engine_identity
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
+        cmd = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
+        if cmd.HasField("engine_identity"):
+            return cmd.engine_identity
+        if cmd.HasField("analysis_id") and cmd.analysis_id:
+            return _analysis_interactive_identity(cmd.analysis_id)
+        return None
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
+        cmd = cast(compute_pb2.StepSchemaCommand, _compute_command_from_claimed(claimed, "schema"))
+        if cmd.HasField("analysis_id") and cmd.analysis_id:
+            return _analysis_interactive_identity(cmd.analysis_id)
+        return None
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
+        cmd = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
+        if cmd.HasField("analysis_id") and cmd.analysis_id:
+            return _analysis_interactive_identity(cmd.analysis_id)
+        return None
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
+        cmd = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
+        if cmd.HasField("analysis_id") and cmd.analysis_id:
+            return _analysis_interactive_identity(cmd.analysis_id)
+        return None
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
+        cmd = cast(compute_pb2.ExportCommand, _compute_command_from_claimed(claimed, "export"))
+        if cmd.HasField("analysis_id") and cmd.analysis_id:
+            return _analysis_interactive_identity(cmd.analysis_id)
+        return None
+    return None
 
 
 def _lifecycle_command_from_claimed(claimed: ClaimedComputeRequest, field_name: str) -> compute_pb2.EngineLifecycleCommand:
