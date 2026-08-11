@@ -24,6 +24,7 @@ from tests.harness.postgres_harness import (
     ManagedProcess,
     PostgresContainer,
     RustfsContainer,
+    cleanup_stale_test_engine_networks,
     docker_env,
     free_port,
     require_docker,
@@ -133,8 +134,15 @@ def engine_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str,
     ).stdout.strip()
     if not docker_host:
         raise RuntimeError('Docker context did not provide a daemon endpoint')
+    network_label = 'data-forge.test-engine-network=1'
+    # Prior failed runs leave labeled networks that exhaust Docker's default IP pool.
+    cleanup_stale_test_engine_networks(label=network_label)
     network_name = f'dataforge-integration-engine-{uuid.uuid4().hex[:10]}'
-    run_command(['docker', 'network', 'create', network_name], env=docker_env(), timeout=120)
+    run_command(
+        ['docker', 'network', 'create', '--label', network_label, network_name],
+        env=docker_env(),
+        timeout=120,
+    )
     try:
         run_command(['docker', 'network', 'connect', network_name, rustfs_container.name], env=docker_env(), timeout=120)
         yield {

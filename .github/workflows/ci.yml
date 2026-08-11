@@ -68,6 +68,9 @@ jobs:
           # state instead of retaining a day's build cache.
           docker container prune --force
           docker volume prune --force
+          # Orphaned engine/e2e networks exhaust the default IPAM pool and
+          # make `docker network create` fail mid-suite.
+          docker network prune --force
           docker builder prune --all --force
           docker image prune --force
           docker system df
