@@ -789,10 +789,6 @@ test.describe('Monitoring – Builds tab', () => {
 				timeout: 10_000
 			});
 		} finally {
-			await freeWarmEnginesViaUI(page, {
-				buildIds: buildId ? [buildId] : [],
-				analysisIds: [analysisId]
-			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -831,10 +827,6 @@ test.describe('Monitoring – Builds tab', () => {
 				timeout: 5_000
 			});
 		} finally {
-			await freeWarmEnginesViaUI(page, {
-				buildIds: buildId ? [buildId] : [],
-				analysisIds: [analysisId]
-			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -862,10 +854,6 @@ test.describe('Monitoring – Builds tab', () => {
 				panel.locator(`[data-build-kind="build"][data-build-analysis-id="${analysisId}"]`)
 			).toHaveCount(1);
 		} finally {
-			await freeWarmEnginesViaUI(page, {
-				buildIds: buildId ? [buildId] : [],
-				analysisIds: [analysisId]
-			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -912,11 +900,6 @@ test.describe('Monitoring – Builds tab', () => {
 			await expect(previewRow).toContainText('Preview');
 			await monitorPage.close();
 		} finally {
-			await freeWarmEnginesViaUI(page, {
-				buildIds: startedBuildIds,
-				analysisIds: [analysisId],
-				datasourceIds: [dsId]
-			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
 			await deleteDatasourceViaUI(page, ds).catch(() => undefined);
 		}
@@ -1068,10 +1051,6 @@ test.describe('Monitoring – live build history', () => {
 
 			await screenshot(page, 'monitoring', 'build-history-terminal');
 		} finally {
-			await freeWarmEnginesViaUI(page, {
-				buildIds: buildId ? [buildId] : [],
-				analysisIds: [aId]
-			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, aName).catch(() => undefined);
 			await deleteDatasourceViaUI(page, dsName).catch(() => undefined);
 		}

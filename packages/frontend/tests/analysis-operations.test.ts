@@ -9,7 +9,6 @@ import { addStepAndOpenConfig, gotoAnalysisEditor } from './utils/analysis.js';
 import {
 	createCleanupPage,
 	deleteDatasourceViaUI,
-	freeRegisteredWarmEnginesViaUI,
 	freeWarmEnginesViaUI
 } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
@@ -61,12 +60,7 @@ test.beforeAll(async ({ browser, workerAuth, helperContext }) => {
 
 test.afterAll(async ({ browser, workerAuth }) => {
 	const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-	// Drop any leftover warm analysis/preview engines from this worker, then
-	// remove shared datasource fixtures through the gallery UI.
-	await freeRegisteredWarmEnginesViaUI(page).catch(() => undefined);
-	await freeWarmEnginesViaUI(page, {
-		datasourceIds: [sharedBaseDatasourceId, sharedDateDatasourceId].filter(Boolean)
-	}).catch(() => undefined);
+	// Per-test freeWarm already shut engines. Suite teardown only removes shared DS.
 	for (const name of [
 		sharedBaseDatasourceName,
 		sharedAuxDatasourceName,

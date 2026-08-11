@@ -1,11 +1,7 @@
 import { test, expect } from './fixtures.js';
 import type { Page } from '@playwright/test';
 import { createLargeDatasource, createLongRunningAnalysis } from './utils/api.js';
-import {
-	deleteAnalysisViaUI,
-	deleteDatasourceViaUI,
-	freeWarmEnginesViaUI
-} from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { waitForBuildPreviewId } from './utils/builds.js';
@@ -160,16 +156,7 @@ test.describe('Cancel Build – e2e', () => {
 			await expect(preview.locator('[data-testid="build-cancel-button"]')).toBeHidden({
 				timeout: 10_000
 			});
-			// Terminal cancel — free warm build/analysis engines before gallery deletes.
-			await freeWarmEnginesViaUI(page, {
-				buildIds: buildId ? [buildId] : [],
-				analysisIds: [analysisId]
-			});
 		} finally {
-			await freeWarmEnginesViaUI(page, {
-				buildIds: buildId ? [buildId] : [],
-				analysisIds: [analysisId]
-			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
 			await deleteDatasourceViaUI(page, dsName).catch(() => undefined);
 		}
@@ -224,15 +211,7 @@ test.describe('Cancel Build – e2e', () => {
 				timeout: 5_000
 			});
 			await expect(cancelledRow.getByText('Cancelled')).toBeVisible();
-			await freeWarmEnginesViaUI(page, {
-				buildIds: buildId ? [buildId] : [],
-				analysisIds: [analysisId]
-			});
 		} finally {
-			await freeWarmEnginesViaUI(page, {
-				buildIds: buildId ? [buildId] : [],
-				analysisIds: [analysisId]
-			}).catch(() => undefined);
 			await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
 			await deleteDatasourceViaUI(page, dsName).catch(() => undefined);
 		}

@@ -2,7 +2,7 @@ import type { Locator, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
-import { createDatasource, createAnalysis, findAnalysisIdByName } from './utils/api.js';
+import { createDatasource, createAnalysis } from './utils/api.js';
 import {
 	deleteAnalysisViaUI,
 	deleteDatasourceViaUI,
@@ -22,15 +22,13 @@ async function cleanupBuildPreviewResources(
 	page: Page,
 	analysisName: string,
 	datasourceName: string,
-	buildId?: string,
-	analysisId?: string
+	buildId?: string
 ): Promise<void> {
-	// After terminal build status, free warm containers then delete via UI.
-	const aId = analysisId ?? findAnalysisIdByName(analysisName) ?? undefined;
-	await freeWarmEnginesViaUI(page, {
-		buildIds: buildId ? [buildId] : [],
-		analysisIds: aId ? [aId] : []
-	}).catch(() => undefined);
+	// Free exclusive build engine once if still warm, then gallery deletes
+	// (analysis/datasource delete each shut their engines once — no freeWarm stack).
+	if (buildId) {
+		await freeWarmEnginesViaUI(page, { buildIds: [buildId] }).catch(() => undefined);
+	}
 	await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
 	await deleteDatasourceViaUI(page, datasourceName).catch(() => undefined);
 }
@@ -89,7 +87,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-terminal');
 		} finally {
-			await cleanupBuildPreviewResources(page, aName, dsName, buildId, aId);
+			await cleanupBuildPreviewResources(page, aName, dsName, buildId);
 		}
 	});
 
@@ -118,7 +116,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-modal-closed');
 		} finally {
-			await cleanupBuildPreviewResources(page, aName, dsName, buildId, aId);
+			await cleanupBuildPreviewResources(page, aName, dsName, buildId);
 		}
 	});
 });
