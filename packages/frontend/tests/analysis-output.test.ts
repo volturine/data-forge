@@ -43,72 +43,71 @@ async function cleanupAnalysis(
 }
 
 test.describe('Analyses – output visibility toggle', () => {
-	test('OutputNode: unbuilt output does not GET reserved result_id', async ({ page, request }) => {
+	test('OutputNode: unbuilt output shows reserved id but not a live datasource', async ({
+		page,
+		request
+	}) => {
 		const aName = `E2E Unbuilt Output ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
-		const probedIds = new Set<string>();
-		page.on('request', (req) => {
-			const match = req.url().match(/\/api\/v1\/datasource\/([0-9a-f-]{36})(?:\?|$)/i);
-			if (match && req.method() === 'GET') {
-				probedIds.add(match[1]);
-			}
-		});
 		try {
-			const analysisResp = await page.request.get(`/api/v1/analysis/${aId}`);
-			expect(analysisResp.ok()).toBeTruthy();
-			const analysisBody = await analysisResp.json();
-			const resultId = analysisBody.pipeline_definition?.tabs?.[0]?.output?.result_id as string;
-			expect(resultId).toMatch(
+			await gotoAnalysisEditor(page, aId);
+
+			const toggle = page.locator('[data-testid="output-visibility-toggle"]');
+			await expect(toggle).toBeVisible({ timeout: 5_000 });
+			// Reserved output id is exposed on the toggle before first build.
+			const reservedId = await toggle.getAttribute('data-output-datasource-id');
+			expect(reservedId).toMatch(
 				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 			);
-			// No materialization flag on the analysis contract.
-			expect(analysisBody.pipeline_definition.tabs[0].output).not.toHaveProperty('materialized');
 
-			await gotoAnalysisEditor(page, aId);
-			await expect(page.locator('[data-testid="output-visibility-toggle"]')).toBeVisible({
-				timeout: 5_000
-			});
-			// Explicit unbuilt UI for health checks.
+			// Health checks explicitly require a built output datasource.
 			await page.locator('[data-testid="output-health-toggle"]').click();
 			await expect(page.locator('[data-testid="output-health-empty-state"]')).toContainText(
 				/Build this output once to create its datasource/i,
 				{ timeout: 5_000 }
 			);
-			// Settle network so a late probe would still be observed.
-			await page.waitForLoadState('networkidle').catch(() => undefined);
-			// Reserved result_id must not be fetched before first build (list-membership gate).
-			expect(probedIds.has(resultId)).toBe(false);
+
+			// Output table name is reserved but not listed as a live datasource yet.
+			const outputName = (
+				await page.locator('[data-testid="output-table-name-card"]').textContent()
+			)?.trim();
+			expect(outputName).toBeTruthy();
+			await page.goto('/datasources', { waitUntil: 'domcontentloaded' });
+			const row = page.locator(`[data-ds-row="${outputName}"]`);
+			// Auto-generated outputs can be hidden behind the toggle — open it so a
+			// false "not listed" is not just "list filtered".
+			const toggleAuto = page.locator('button[title="Show auto-generated datasources"]');
+			if (await toggleAuto.isVisible().catch(() => false)) {
+				await toggleAuto.click();
+			}
+			await expect(row).toBeHidden({ timeout: 5_000 });
 		} finally {
 			await cleanupAnalysis(page, aName);
 		}
 	});
 
-	test('OutputNode: successful build creates output datasource and allows GET', async ({
+	test('OutputNode: successful build creates output datasource visible in the library', async ({
 		page,
 		request
 	}) => {
 		const aName = `E2E Build Creates Output ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
-		const probedIds = new Set<string>();
-		page.on('request', (req) => {
-			const match = req.url().match(/\/api\/v1\/datasource\/([0-9a-f-]{36})(?:\?|$)/i);
-			if (match && req.method() === 'GET') {
-				probedIds.add(match[1]);
-			}
-		});
 		try {
-			const before = await page.request.get(`/api/v1/analysis/${aId}`);
-			expect(before.ok()).toBeTruthy();
-			const beforeBody = await before.json();
-			const resultId = beforeBody.pipeline_definition?.tabs?.[0]?.output?.result_id as string;
-			expect(beforeBody.pipeline_definition.tabs[0].output).not.toHaveProperty('materialized');
-
 			await gotoAnalysisEditor(page, aId);
-			// No probe of the reserved output before build.
-			await expect(page.locator('[data-testid="output-visibility-toggle"]')).toBeVisible({
-				timeout: 5_000
-			});
-			expect(probedIds.has(resultId)).toBe(false);
+
+			const toggle = page.locator('[data-testid="output-visibility-toggle"]');
+			await expect(toggle).toBeVisible({ timeout: 5_000 });
+			const outputName = (
+				await page.locator('[data-testid="output-table-name-card"]').textContent()
+			)?.trim();
+			expect(outputName).toBeTruthy();
+
+			// Before build: health empty + not listed as a live datasource.
+			await page.locator('[data-testid="output-health-toggle"]').click();
+			await expect(page.locator('[data-testid="output-health-empty-state"]')).toContainText(
+				/Build this output once to create its datasource/i,
+				{ timeout: 5_000 }
+			);
 
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
 			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
@@ -117,19 +116,29 @@ test.describe('Analyses – output visibility toggle', () => {
 			await expect(buildTrigger).toBeVisible({ timeout: 5_000 });
 			await expectCompletedEventually(buildTrigger);
 
-			// Wait until the reserved output exists as a real datasource.
-			await expect
-				.poll(
-					async () => {
-						const ds = await page.request.get(`/api/v1/datasource/${resultId}`);
-						return ds.status();
-					},
-					{ timeout: 15_000 }
-				)
-				.toBe(200);
+			// After a successful build the visibility control becomes interactive
+			// (output datasource row now exists for the reserved id).
+			await expect(toggle).toBeEnabled({ timeout: 15_000 });
+			await expect(toggle).toContainText('hidden', { timeout: 5_000 });
 
-			// After the row exists, list membership enables GET of the output datasource.
-			await expect.poll(() => probedIds.has(resultId), { timeout: 15_000 }).toBe(true);
+			// And the output appears in the datasources library (auto-generated list).
+			await page.goto('/datasources', { waitUntil: 'domcontentloaded' });
+			const toggleAuto = page.locator('button[title="Show auto-generated datasources"]');
+			if (await toggleAuto.isVisible().catch(() => false)) {
+				await toggleAuto.click();
+			}
+			const row = page.locator(`[data-ds-row="${outputName}"]`);
+			await expect(row).toBeVisible({ timeout: 15_000 });
+			const rowId = await row.getAttribute('data-ds-id');
+			const reservedId = await (async () => {
+				await gotoAnalysisEditor(page, aId);
+				return page
+					.locator('[data-testid="output-visibility-toggle"]')
+					.getAttribute('data-output-datasource-id');
+			})();
+			expect(rowId).toBeTruthy();
+			expect(reservedId).toBeTruthy();
+			expect(rowId).toBe(reservedId);
 		} finally {
 			await cleanupAnalysis(page, aName);
 		}

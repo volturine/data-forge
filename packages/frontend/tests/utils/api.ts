@@ -1,4 +1,10 @@
-import type { APIRequestContext, Browser, BrowserContext, Page } from '@playwright/test';
+import {
+	expect,
+	type APIRequestContext,
+	type Browser,
+	type BrowserContext,
+	type Page
+} from '@playwright/test';
 import {
 	createHealthCheckViaUi,
 	createScheduleViaUi,
@@ -60,16 +66,19 @@ const udfRegistry = new Map<string, { name: string }>();
 
 /**
  * Default app namespace used by helpers unless a test passes another.
- * Resolved from the backend config (DEFAULT_NAMESPACE) so it stays correct
- * if the app default changes. Memoized per worker.
+ * Read from the visible sidebar namespace control (not /api/v1/config).
+ * Memoized per worker after first shell load.
  */
 let helperDefaultNamespace: string | undefined;
 
 async function resolveHelperDefaultNamespace(page: Page): Promise<string> {
 	if (!helperDefaultNamespace) {
-		const response = await page.request.get('/api/v1/config');
-		const config = (await response.json()) as { default_namespace?: string };
-		helperDefaultNamespace = config.default_namespace || 'default';
+		await page.goto('/');
+		await waitForLayoutReady(page);
+		const label = page.getByRole('button', { name: 'Select namespace' });
+		await expect(label).toBeVisible({ timeout: 5_000 });
+		const text = (await label.innerText()).trim();
+		helperDefaultNamespace = text || 'default';
 	}
 	return helperDefaultNamespace;
 }
