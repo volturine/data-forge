@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import grpc
 import pytest
 
 from dataforge_protocol import compute_pb2, engine_runtime_pb2, enums_pb2
@@ -13,8 +14,9 @@ from runtime.docker_engine import (
     _engine_object_store_endpoint,
     _validate_engine_image_reference,
     reconcile_deployment_containers,
+    validate_engine_runtime_readiness,
 )
-from runtime.engine_credentials import resolve_engine_credentials
+from runtime.engine_credentials import resolve_engine_credentials, validate_configured_engine_credentials
 
 
 def test_effective_resources_resolves_zero_threads_to_logical_cpu_count(monkeypatch) -> None:
@@ -77,6 +79,20 @@ def test_production_engine_rejects_platform_credentials(monkeypatch) -> None:
         resolve_engine_credentials("tenant-a", _identity())
 
 
+def test_production_readiness_requires_complete_static_credential_map(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "prod_mode_enabled", True)
+    monkeypatch.setattr(settings, "object_store_access_key", "platform-key")
+    monkeypatch.setattr(settings, "object_store_secret_key", "platform-secret")
+    monkeypatch.setattr(
+        settings,
+        "engine_object_store_credentials_json",
+        '{"tenant-a":{"reader":{"access_key":"reader","secret_key":"reader-secret"}}}',
+    )
+
+    with pytest.raises(RuntimeError, match="builder"):
+        validate_configured_engine_credentials()
+
+
 def test_production_requires_immutable_engine_digest(monkeypatch) -> None:
     monkeypatch.setattr(settings, "prod_mode_enabled", True)
     monkeypatch.setattr(settings, "engine_image", "registry.example/dataforge-engine:latest")
@@ -126,23 +142,20 @@ def test_export_submits_object_store_artifact_instead_of_worker_path(monkeypatch
 
 
 def test_startup_reconciliation_removes_only_current_deployment_engines(monkeypatch) -> None:
-    class Container:
-        removed = False
+    removed: list[str] = []
 
-        def remove(self, *, force: bool) -> None:
-            assert force
-            self.removed = True
-
-    container = Container()
-
-    class Containers:
-        def list(self, *, all: bool, filters: dict[str, object]):
+    class Api:
+        def containers(self, *, all: bool, filters: dict[str, object]):
             assert all
             assert filters == {"label": ["io.dataforge.managed=true", "io.dataforge.deployment=test-deployment"]}
-            return [container]
+            return [{"Id": "container-1", "State": "running"}]
+
+        def remove_container(self, container_id: str, *, force: bool) -> None:
+            assert force
+            removed.append(container_id)
 
     class Client:
-        containers = Containers()
+        api = Api()
 
         def close(self) -> None:
             return None
@@ -151,7 +164,44 @@ def test_startup_reconciliation_removes_only_current_deployment_engines(monkeypa
     monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
 
     assert reconcile_deployment_containers() == 1
-    assert container.removed
+    assert removed == ["container-1"]
+
+
+def test_periodic_reconciliation_removes_only_stopped_owned_containers(monkeypatch) -> None:
+    removed: list[str] = []
+
+    class Api:
+        def containers(self, *, all: bool, filters: dict[str, object]):
+            assert all
+            assert filters == {
+                "label": [
+                    "io.dataforge.managed=true",
+                    "io.dataforge.deployment=test-deployment",
+                    "io.dataforge.supervisor=worker-1",
+                ]
+            }
+            return [
+                {"Id": "running", "State": "running"},
+                {"Id": "starting", "State": "created"},
+                {"Id": "stopped", "State": "exited"},
+                {"Id": "dead", "State": "dead"},
+            ]
+
+        def remove_container(self, container_id: str, *, force: bool) -> None:
+            assert force
+            removed.append(container_id)
+
+    class Client:
+        api = Api()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
+    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+
+    assert reconcile_deployment_containers(supervisor_id="worker-1", remove_running=False) == 2
+    assert removed == ["stopped", "dead"]
 
 
 def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) -> None:
@@ -164,6 +214,33 @@ def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) ->
     assert result is not None
     assert result.error == "Engine shutdown requested"
     assert result.error_kind == "engine_shutdown"
+
+
+def test_oom_exit_is_reported_with_container_details() -> None:
+    engine = DockerComputeEngine(_identity())
+
+    class Container:
+        id = "container-oom"
+        status = "exited"
+        attrs = {"State": {"ExitCode": 137, "OOMKilled": True}}
+
+        def reload(self) -> None:
+            return None
+
+    engine._container = Container()
+    engine._container_id = "container-oom"
+    engine._alive = True
+
+    result = engine.get_result(job_id="job-oom", timeout=0)
+
+    assert result is not None
+    assert result.error_kind == "engine_oom_killed"
+    assert result.error_details == {
+        "container_id": "container-oom",
+        "exit_code": 137,
+        "oom_killed": True,
+        "termination_reason": "oom_killed",
+    }
 
 
 def test_job_watch_resumes_clean_stream_close_without_leaking_active_job(monkeypatch) -> None:
@@ -199,6 +276,53 @@ def test_job_watch_resumes_clean_stream_close_without_leaking_active_job(monkeyp
     assert stub.requests == [0, 1]
     assert engine.current_job_id is None
     assert job_id not in engine._active_job_ids
+
+
+def test_job_watch_recovers_terminal_result_after_progress_cursor_eviction() -> None:
+    engine = DockerComputeEngine(_identity())
+    job_id = "job-evicted"
+    result = engine_runtime_pb2.EngineJobResult(job_id=job_id, data_json=b'{"rows":[1]}')
+
+    class CursorEvicted(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.OUT_OF_RANGE
+
+    class Stub:
+        def WatchJob(self, request, metadata):
+            del request, metadata
+            raise CursorEvicted()
+
+        def GetJobResult(self, request, *, timeout, metadata):
+            del request, timeout, metadata
+            return result
+
+    engine._stub = Stub()  # type: ignore[assignment]
+    engine._active_job_ids.add(job_id)
+    engine.current_job_id = job_id
+
+    engine._watch_job(job_id)
+
+    published = engine.get_result(timeout=0, job_id=job_id)
+    assert published is not None
+    assert published.data == {"rows": [1]}
+    assert published.error is None
+
+
+def test_runtime_readiness_checks_credentials_image_and_network(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class Client:
+        def close(self) -> None:
+            calls.append("close")
+
+    monkeypatch.setattr("runtime.docker_engine._validate_engine_image_reference", lambda: calls.append("image-reference"))
+    monkeypatch.setattr("runtime.docker_engine.validate_configured_engine_credentials", lambda: calls.append("credentials"))
+    monkeypatch.setattr("runtime.docker_engine._resolve_launch_context", lambda client: calls.append("docker") or (4, "sha256:abc"))
+    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+
+    validate_engine_runtime_readiness()
+
+    assert calls == ["image-reference", "credentials", "docker", "close"]
 
 
 def test_container_nano_cpus_skips_hard_quota_for_host_connected_engines(monkeypatch) -> None:

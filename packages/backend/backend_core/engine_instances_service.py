@@ -19,8 +19,18 @@ def _required_identity_value(value: str | None, field_name: str) -> str:
 
 
 def _apply_engine_status(row: EngineInstance, *, status: EngineStatusInfo, stamp: datetime) -> None:
-    row.process_id = status.process_id
-    row.status = EngineInstanceStatus.from_engine_status(status.status, status.current_job_id)
+    row.container_id = status.container_id
+    row.image_digest = status.image_digest
+    row.termination_reason = status.termination_reason
+    row.exit_code = status.exit_code
+    row.oom_killed = status.oom_killed
+    row.supervisor_id = status.supervisor_id
+    row.owner_id = status.owner_id
+    row.status = (
+        EngineInstanceStatus.require(status.lifecycle_status)
+        if status.lifecycle_status
+        else EngineInstanceStatus.from_engine_status(status.status, status.current_job_id)
+    )
     row.engine_scope = _required_identity_value(status.scope, 'scope')
     row.engine_reuse_policy = _required_identity_value(status.reuse_policy, 'reuse_policy')
     row.datasource_id = status.datasource_id
@@ -50,8 +60,16 @@ def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, st
             engine_reuse_policy=_required_identity_value(status.reuse_policy, 'reuse_policy'),
             datasource_id=status.datasource_id,
             build_id=status.build_id,
-            process_id=status.process_id,
-            status=EngineInstanceStatus.from_engine_status(status.status, status.current_job_id),
+            container_id=status.container_id,
+            image_digest=status.image_digest,
+            termination_reason=status.termination_reason,
+            exit_code=status.exit_code,
+            oom_killed=status.oom_killed,
+            supervisor_id=status.supervisor_id,
+            owner_id=status.owner_id,
+            status=EngineInstanceStatus.require(status.lifecycle_status)
+            if status.lifecycle_status
+            else EngineInstanceStatus.from_engine_status(status.status, status.current_job_id),
             current_job_id=status.current_job_id,
             current_build_id=status.current_build_id,
             current_engine_run_id=status.current_engine_run_id,
@@ -158,7 +176,14 @@ def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object
         'analysis_id': row.analysis_id,
         'resource_id': _row_resource_id(row),
         'status': row.status_kind().overview_status,
-        'process_id': row.process_id,
+        'container_id': row.container_id,
+        'image_digest': row.image_digest,
+        'lifecycle_status': row.status_kind().value,
+        'termination_reason': row.termination_reason,
+        'exit_code': row.exit_code,
+        'oom_killed': row.oom_killed,
+        'supervisor_id': row.supervisor_id,
+        'owner_id': row.owner_id,
         'last_activity': row.last_activity_at.isoformat() if row.last_activity_at is not None else None,
         'current_job_id': row.current_job_id,
         'resource_config': copy_json_object(row.resource_config_json),

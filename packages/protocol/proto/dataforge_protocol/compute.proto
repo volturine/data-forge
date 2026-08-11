@@ -184,7 +184,8 @@ message EngineStatusResult {
     defined_only: true
     not_in: 0
   }];
-  optional int32 process_id = 4 [(buf.validate.field).int32.gte = 0];
+  reserved 4;
+  reserved "process_id";
   optional string last_activity = 5;
   optional string current_job_id = 6;
   optional EngineResourceConfig resource_config = 7;
@@ -202,6 +203,17 @@ message EngineStatusResult {
   optional string build_id = 13 [(buf.validate.field).string.min_len = 1];
   optional string current_build_id = 14 [(buf.validate.field).string.min_len = 1];
   optional string current_engine_run_id = 15 [(buf.validate.field).string.min_len = 1];
+  optional string container_id = 16 [(buf.validate.field).string.min_len = 1];
+  optional string image_digest = 17 [(buf.validate.field).string.min_len = 1];
+  optional EngineInstanceStatus lifecycle_status = 18 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string termination_reason = 19 [(buf.validate.field).string.min_len = 1];
+  optional int32 exit_code = 20;
+  optional bool oom_killed = 21;
+  optional string supervisor_id = 22 [(buf.validate.field).string.min_len = 1];
+  optional string owner_id = 23 [(buf.validate.field).string.min_len = 1];
 }
 
 message ComputeAckResult {

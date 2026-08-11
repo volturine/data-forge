@@ -46,7 +46,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 
 ## Active
 
-- [Containerized Polars Engines](active/containerized-polars-engines.md) — Docker-native execution, scoped credential, and reconciliation implementation
+- [Containerized Polars Engines](active/containerized-polars-engines.md) — Docker-native execution, operator-provided scoped credentials, and reconciliation implementation
 - [Lineage Revamp](active/lineage-revamp.md)
 
 ## Backlog

@@ -38,7 +38,13 @@ class EngineInstanceSummary(BaseModel):
     namespace: str
     analysis_id: str
     resource_id: str
-    process_id: int | None
+    container_id: str | None
+    image_digest: str | None
+    termination_reason: str | None
+    exit_code: int | None
+    oom_killed: bool | None
+    supervisor_id: str | None
+    owner_id: str | None
     status: EngineInstanceStatus
     current_job_id: str | None
     current_build_id: str | None

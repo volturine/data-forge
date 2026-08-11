@@ -183,7 +183,14 @@ class EngineStatusSchema(BaseModel):
     analysis_id: str
     resource_id: str
     status: EngineStatus
-    process_id: int | None = None
+    container_id: str | None = None
+    image_digest: str | None = None
+    lifecycle_status: str | None = None
+    termination_reason: str | None = None
+    exit_code: int | None = None
+    oom_killed: bool | None = None
+    supervisor_id: str | None = None
+    owner_id: str | None = None
     last_activity: str | None = None
     current_job_id: str | None = None
     resource_config: EngineResourceConfig | None = None  # Overrides provided by user

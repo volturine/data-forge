@@ -176,23 +176,26 @@ async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManag
     try:
         while True:
             # Gate: do not take a compute runner until admission allows spawn/reuse.
-            await manager.await_spawn_admission(identity)
-            execution = loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
-            done, _pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
-            if renewal in done:
-                try:
-                    await renewal
-                except ComputeRequestLeaseLost:
-                    await asyncio.gather(execution, return_exceptions=True)
-                    raise
-                raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
+            owns_admission = await manager.await_spawn_admission(identity)
             try:
-                await execution
-                return
-            except EngineCapacityFull:
-                # Lost race after admission — wait for a capacity change, then
-                # re-admit before creating another runner.
-                await manager.wait_for_capacity()
+                execution = loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
+                done, _pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
+                if renewal in done:
+                    try:
+                        await renewal
+                    except ComputeRequestLeaseLost:
+                        await asyncio.gather(execution, return_exceptions=True)
+                        raise
+                    raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
+                try:
+                    await execution
+                    return
+                except EngineCapacityFull:
+                    # Direct lifecycle work may have claimed the slot between
+                    # reuse admission and execution. Rejoin the FIFO queue.
+                    continue
+            finally:
+                manager.release_spawn_admission(identity, owned=owns_admission)
     finally:
         renewal_stop.set()
         await asyncio.gather(renewal, return_exceptions=True)
@@ -775,13 +778,19 @@ def _engine_status_result(value: compute_schemas.EngineStatusSchema) -> compute_
         status=cast(enums_pb2.EngineStatus, value.status.number),
     )
     optional_scalars = {
-        "process_id": value.process_id,
         "last_activity": value.last_activity,
         "current_job_id": value.current_job_id,
         "datasource_id": value.datasource_id,
         "build_id": value.build_id,
         "current_build_id": value.current_build_id,
         "current_engine_run_id": value.current_engine_run_id,
+        "container_id": value.container_id,
+        "image_digest": value.image_digest,
+        "termination_reason": value.termination_reason,
+        "exit_code": value.exit_code,
+        "oom_killed": value.oom_killed,
+        "supervisor_id": value.supervisor_id,
+        "owner_id": value.owner_id,
     }
     for field_name, field_value in optional_scalars.items():
         if field_value is not None:
@@ -790,6 +799,8 @@ def _engine_status_result(value: compute_schemas.EngineStatusSchema) -> compute_
         result.scope = cast(enums_pb2.EngineScope, value.scope.number)
     if value.reuse_policy is not None:
         result.reuse_policy = cast(enums_pb2.EngineReusePolicy, value.reuse_policy.number)
+    if value.lifecycle_status is not None:
+        result.lifecycle_status = getattr(enums_pb2, f"ENGINE_INSTANCE_STATUS_{value.lifecycle_status.upper()}")
     for field_name, config in (("resource_config", value.resource_config), ("effective_resources", value.effective_resources)):
         proto_config = _resource_config_proto(config)
         if proto_config is not None:

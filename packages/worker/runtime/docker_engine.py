@@ -22,7 +22,7 @@ from google.protobuf import json_format
 from dataforge_protocol import compute_pb2, engine_runtime_pb2, engine_runtime_pb2_grpc, enums_pb2
 from runtime.config import settings
 from runtime.domain.compute.base import ComputeEngine, EngineProgressEvent, EngineResult
-from runtime.engine_credentials import ObjectStoreCredentials, resolve_engine_credentials
+from runtime.engine_credentials import ObjectStoreCredentials, resolve_engine_credentials, validate_configured_engine_credentials
 from runtime.engine_server import ENGINE_PROTOCOL_VERSION
 from runtime.export_formats import get_export_format
 from runtime.json_values import encode_json_bytes
@@ -32,6 +32,7 @@ from runtime.object_store import delete_object, download_file, object_store_url,
 logger = logging.getLogger(__name__)
 
 _ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
+_ENGINE_APPLICATION_VERSION = "engine"
 _MIB = 1024 * 1024
 _IMAGE_DIGEST_RE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 _docker_runtime_lock = threading.Lock()
@@ -59,6 +60,8 @@ def _resolve_launch_context(client: Any) -> tuple[int | None, str]:
             _cached_daemon_cpu_count = ncpu if isinstance(ncpu, int) else 0
         if _validated_image_ref != settings.engine_image or not _validated_image_id:
             image = client.images.get(settings.engine_image)
+            if settings.prod_mode_enabled and settings.engine_image not in image.attrs.get("RepoDigests", []):
+                raise RuntimeError(f"Docker image does not match configured immutable digest: {settings.engine_image}")
             _validated_image_ref = settings.engine_image
             _validated_image_id = str(image.id)
         if _validated_network != settings.engine_docker_network:
@@ -69,23 +72,34 @@ def _resolve_launch_context(client: Any) -> tuple[int | None, str]:
         return daemon_cpu, _validated_image_id
 
 
-def reconcile_deployment_containers() -> int:
-    """Remove containers left by a previous supervisor for this deployment."""
+def validate_engine_runtime_readiness() -> None:
+    """Fail before worker registration if Docker or launch inputs are unavailable."""
+    _validate_engine_image_reference()
+    validate_configured_engine_credentials()
+    client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
+    try:
+        _resolve_launch_context(client)
+    finally:
+        client.close()
+
+
+def reconcile_deployment_containers(*, supervisor_id: str | None = None, remove_running: bool = True) -> int:
+    """Remove owned orphan or stopped containers within this deployment."""
     client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
     removed = 0
     try:
-        containers = client.containers.list(
-            all=True,
-            filters={
-                "label": [
-                    "io.dataforge.managed=true",
-                    f"io.dataforge.deployment={settings.deployment_id}",
-                ]
-            },
-        )
+        labels = ["io.dataforge.managed=true", f"io.dataforge.deployment={settings.deployment_id}"]
+        if supervisor_id is not None:
+            labels.append(f"io.dataforge.supervisor={supervisor_id}")
+        containers = client.api.containers(all=True, filters={"label": labels})
         for container in containers:
+            # A launch is visible as ``created`` before ``container.start()``.
+            # Periodic cleanup must not race that transition; only startup and
+            # dead-supervisor cleanup may remove non-terminal containers.
+            if not remove_running and container.get("State") not in {"dead", "exited"}:
+                continue
             with contextlib.suppress(Exception):
-                container.remove(force=True)
+                client.api.remove_container(container["Id"], force=True)
                 removed += 1
     finally:
         client.close()
@@ -183,20 +197,33 @@ def _write_bootstrap(
 
 
 class DockerComputeEngine(ComputeEngine):
-    def __init__(self, identity: compute_pb2.EngineIdentity, resource_config: dict[str, object] | None = None, *, namespace: str | None = None) -> None:
+    def __init__(
+        self,
+        identity: compute_pb2.EngineIdentity,
+        resource_config: dict[str, object] | None = None,
+        *,
+        namespace: str | None = None,
+        supervisor_id: str = "worker",
+    ) -> None:
         self.identity = identity
         self.analysis_id = identity.resource_id
         self.resource_config = resource_config or {}
         self.effective_resources: dict[str, object] = {}
         self.current_job_id: str | None = None
         self._namespace = namespace or get_namespace()
+        self._supervisor_id = supervisor_id
         self._client: Any | None = None  # docker-py does not publish Python 3.14 type stubs.
         self._container: Any | None = None
+        self._container_id: str | None = None
         self._channel: grpc.Channel | None = None
         self._stub: engine_runtime_pb2_grpc.PolarsEngineServiceStub | None = None
         self._token = ""
         self._alive = False
         self._shutdown_requested = False
+        self.image_digest: str | None = None
+        self.exit_code: int | None = None
+        self.oom_killed: bool | None = None
+        self.termination_reason: str | None = None
         self._lock = threading.RLock()
         self._pending_results: dict[str, EngineResult] = {}
         self._pending_progress: dict[str, deque[EngineProgressEvent]] = {}
@@ -226,7 +253,30 @@ class DockerComputeEngine(ComputeEngine):
 
     @property
     def container_id(self) -> str | None:
-        return str(self._container.id) if self._container is not None else None
+        return self._container_id
+
+    @property
+    def lifecycle_status(self) -> str:
+        if self._shutdown_requested and self._alive:
+            return "stopping"
+        if not self._alive:
+            return "failed" if self.termination_reason and self.termination_reason != "shutdown" else "stopped"
+        return "running" if self.current_job_id else "idle"
+
+    def _capture_termination(self, container: Any) -> None:
+        state = container.attrs.get("State", {}) if isinstance(container.attrs, dict) else {}
+        raw_exit_code = state.get("ExitCode")
+        self.exit_code = raw_exit_code if isinstance(raw_exit_code, int) else None
+        raw_oom = state.get("OOMKilled")
+        self.oom_killed = raw_oom if isinstance(raw_oom, bool) else None
+        if self._shutdown_requested:
+            self.termination_reason = "shutdown"
+        elif self.oom_killed:
+            self.termination_reason = "oom_killed"
+        elif self.exit_code not in (None, 0):
+            self.termination_reason = "container_exit"
+        else:
+            self.termination_reason = "container_stopped"
 
     def start(self) -> None:
         with self._lock:
@@ -243,6 +293,7 @@ class DockerComputeEngine(ComputeEngine):
                 client.close()
                 raise
             self.effective_resources = cast(dict[str, object], resources)
+            self.image_digest = settings.engine_image.split("@", 1)[1] if "@" in settings.engine_image else image_id
 
             self._token = uuid.uuid4().hex
             labels = {
@@ -250,9 +301,12 @@ class DockerComputeEngine(ComputeEngine):
                 "io.dataforge.deployment": settings.deployment_id,
                 "io.dataforge.namespace": self._namespace,
                 "io.dataforge.scope": _identity_scope(self.identity),
+                "io.dataforge.reuse-policy": enums_pb2.EngineReusePolicy.Name(self.identity.reuse_policy).removeprefix("ENGINE_REUSE_POLICY_").lower(),
                 "io.dataforge.resource-id": self.identity.resource_id,
+                "io.dataforge.supervisor": self._supervisor_id,
+                "io.dataforge.owner": self.identity.build_id if self.identity.HasField("build_id") else self._supervisor_id,
                 "io.dataforge.protocol-version": str(ENGINE_PROTOCOL_VERSION),
-                "io.dataforge.image-id": image_id,
+                "io.dataforge.image-digest": self.image_digest,
                 "io.dataforge.created-at": datetime.now(UTC).isoformat(),
             }
             create_kwargs: dict[str, object] = {
@@ -267,7 +321,7 @@ class DockerComputeEngine(ComputeEngine):
                     # Worker may miss a couple of heartbeats under host load before
                     # declaring the engine dead; keep the container watchdog looser.
                     "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
-                    "APP_VERSION": "engine",
+                    "APP_VERSION": _ENGINE_APPLICATION_VERSION,
                 },
                 "labels": labels,
                 "network": settings.engine_docker_network,
@@ -278,7 +332,7 @@ class DockerComputeEngine(ComputeEngine):
                 "read_only": True,
                 "tmpfs": {"/run/dataforge-secrets": "rw,noexec,nosuid,size=64k", "/tmp": "rw,noexec,nosuid,size=256m"},
                 "restart_policy": {"Name": "no"},
-                "auto_remove": True,
+                "auto_remove": False,
             }
             nano_cpus = _container_nano_cpus(resources["max_threads"])
             if nano_cpus is not None:
@@ -287,6 +341,7 @@ class DockerComputeEngine(ComputeEngine):
                 create_kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
                 create_kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}
             container = client.containers.create(**create_kwargs)
+            self._container_id = str(container.id)
             try:
                 container.start()
                 _write_bootstrap(
@@ -335,7 +390,12 @@ class DockerComputeEngine(ComputeEngine):
         while time.monotonic() < deadline:
             try:
                 health = self._stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=1, metadata=self._metadata())
-                if health.ready and health.engine_identity == self.identity.resource_id and health.protocol_version == ENGINE_PROTOCOL_VERSION:
+                if (
+                    health.ready
+                    and health.engine_identity == self.identity.resource_id
+                    and health.protocol_version == ENGINE_PROTOCOL_VERSION
+                    and health.application_version == _ENGINE_APPLICATION_VERSION
+                ):
                     return
                 last_error = RuntimeError("Engine health identity or protocol did not match launch specification")
             except grpc.RpcError as exc:
@@ -364,6 +424,9 @@ class DockerComputeEngine(ComputeEngine):
                 # the engine watchdog only tolerates a few missed intervals.
                 if consecutive_failures >= 3 or not self.is_process_alive():
                     self._alive = False
+                    if self._capacity_notifier is not None:
+                        with contextlib.suppress(Exception):
+                            self._capacity_notifier()
                     return
 
     def is_process_alive(self) -> bool:
@@ -375,6 +438,7 @@ class DockerComputeEngine(ComputeEngine):
                 running = self._container.status == "running"
                 if not running:
                     self._alive = False
+                    self._capture_termination(self._container)
                 return running
             except Exception:
                 self._alive = False
@@ -503,30 +567,47 @@ class DockerComputeEngine(ComputeEngine):
             assert self._stub is not None
             sequence = 0
             while True:
-                stream = self._stub.WatchJob(
-                    engine_runtime_pb2.EngineWatchJobRequest(job_id=job_id, after_sequence=sequence),
-                    metadata=self._metadata(),
-                )
-                for event in stream:
-                    sequence = max(sequence, event.sequence)
-                    which = event.WhichOneof("event")
-                    if which == "progress_json":
-                        payload = json.loads(event.progress_json)
-                        if not isinstance(payload, dict):
-                            raise RuntimeError("Engine progress payload must be an object")
-                        with self._lock:
-                            self._pending_progress.setdefault(job_id, deque(maxlen=1000)).append(EngineProgressEvent(job_id=job_id, event=payload))
-                            while len(self._pending_progress) > 100:
-                                self._pending_progress.pop(next(iter(self._pending_progress)))
-                    elif which == "result":
-                        result = _result_from_message(event.result)
-                        with contextlib.suppress(Exception):
-                            self._stub.GetJobResult(
-                                engine_runtime_pb2.EngineGetJobResultRequest(job_id=job_id),
-                                timeout=2,
-                                metadata=self._metadata(),
-                            )
-                        self._publish_job_result(job_id, result)
+                try:
+                    stream = self._stub.WatchJob(
+                        engine_runtime_pb2.EngineWatchJobRequest(job_id=job_id, after_sequence=sequence),
+                        metadata=self._metadata(),
+                    )
+                    for event in stream:
+                        sequence = max(sequence, event.sequence)
+                        which = event.WhichOneof("event")
+                        if which == "progress_json":
+                            payload = json.loads(event.progress_json)
+                            if not isinstance(payload, dict):
+                                raise RuntimeError("Engine progress payload must be an object")
+                            with self._lock:
+                                self._pending_progress.setdefault(job_id, deque(maxlen=1000)).append(EngineProgressEvent(job_id=job_id, event=payload))
+                                while len(self._pending_progress) > 100:
+                                    self._pending_progress.pop(next(iter(self._pending_progress)))
+                        elif which == "result":
+                            result = _result_from_message(event.result)
+                            with contextlib.suppress(Exception):
+                                self._stub.GetJobResult(
+                                    engine_runtime_pb2.EngineGetJobResultRequest(job_id=job_id),
+                                    timeout=2,
+                                    metadata=self._metadata(),
+                                )
+                            self._publish_job_result(job_id, result)
+                            return
+                except grpc.RpcError:
+                    # The terminal result is retained independently from the
+                    # bounded progress stream. Recover it before treating a
+                    # cursor eviction or transport interruption as job loss.
+                    try:
+                        message = self._stub.GetJobResult(
+                            engine_runtime_pb2.EngineGetJobResultRequest(job_id=job_id),
+                            timeout=2,
+                            metadata=self._metadata(),
+                        )
+                    except grpc.RpcError as result_error:
+                        if result_error.code() not in {grpc.StatusCode.FAILED_PRECONDITION, grpc.StatusCode.UNAVAILABLE} or not self.is_process_alive():
+                            raise
+                    else:
+                        self._publish_job_result(job_id, _result_from_message(message))
                         return
 
                 # A healthy watch is open until a terminal result. If the
@@ -568,12 +649,18 @@ class DockerComputeEngine(ComputeEngine):
                     return self._pending_results.pop(expected)
                 if expected and not self.is_process_alive():
                     intentional_shutdown = self._shutdown_requested
+                    error_kind = "engine_shutdown" if intentional_shutdown else "engine_oom_killed" if self.oom_killed else "engine_container_exited"
                     return EngineResult(
                         job_id=expected,
                         data=None,
                         error="Engine shutdown requested" if intentional_shutdown else "Engine container died unexpectedly",
-                        error_kind="engine_shutdown" if intentional_shutdown else "engine_container_died",
-                        error_details={},
+                        error_kind=error_kind,
+                        error_details={
+                            "container_id": self.container_id,
+                            "exit_code": self.exit_code,
+                            "oom_killed": self.oom_killed,
+                            "termination_reason": self.termination_reason,
+                        },
                     )
             if time.monotonic() >= deadline:
                 return None
@@ -624,6 +711,8 @@ class DockerComputeEngine(ComputeEngine):
                 container.reload()
                 if container.status == "running":
                     container.stop(timeout=settings.engine_shutdown_grace_seconds)
+                    container.reload()
+                self._capture_termination(container)
             with contextlib.suppress(Exception):
                 container.remove(force=True)
             if self._channel is not None:

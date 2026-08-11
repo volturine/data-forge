@@ -114,7 +114,11 @@ def test_engine_status_result_proto_uses_typed_snapshot_fields() -> None:
             "analysis_id": "analysis-1",
             "resource_id": "datasource-1",
             "status": "healthy",
-            "process_id": 1234,
+            "container_id": "container-1234",
+            "image_digest": "sha256:abc",
+            "lifecycle_status": "running",
+            "supervisor_id": "worker-1",
+            "owner_id": "worker-1",
             "last_activity": datetime.now(UTC).isoformat(),
             "current_job_id": "job-1",
             "resource_config": {"max_threads": 2},
@@ -742,6 +746,8 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     manager = cast(
         Any,
         SimpleNamespace(
+            await_spawn_admission=lambda identity: asyncio.sleep(0),
+            release_spawn_admission=lambda identity, *, owned: None,
             spawn_engine=lambda identity: spawn_calls.append(identity.resource_id),
             shutdown_engine=lambda identity: shutdown_calls.append(identity.resource_id),
             set_engine_runtime_context=lambda identity, current_build_id, current_engine_run_id: None,

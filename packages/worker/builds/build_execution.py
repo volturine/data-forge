@@ -237,19 +237,22 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
     )
     while True:
         # Admit capacity before any build runner work that needs an engine.
-        await manager.await_spawn_admission(build_identity)
+        owns_admission = await manager.await_spawn_admission(build_identity)
         try:
-            await _run_build_task(
-                manager=manager,
-                claim=claim,
-                worker_id=worker_id,
-                build=build,
-                pipeline=pipeline,
-                triggered_by=triggered_by,
-            )
-            return
-        except EngineCapacityFull:
-            await manager.wait_for_capacity()
+            try:
+                await _run_build_task(
+                    manager=manager,
+                    claim=claim,
+                    worker_id=worker_id,
+                    build=build,
+                    pipeline=pipeline,
+                    triggered_by=triggered_by,
+                )
+                return
+            except EngineCapacityFull:
+                continue
+        finally:
+            manager.release_spawn_admission(build_identity, owned=owns_admission)
 
 
 __all__ = ["run_queued_build_job"]

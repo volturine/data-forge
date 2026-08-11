@@ -210,3 +210,69 @@ async def test_process_manager_wait_for_capacity_then_spawn(monkeypatch) -> None
         assert manager.get_engine(first_identity) is None
     finally:
         manager.shutdown_all()
+
+
+@pytest.mark.asyncio
+async def test_process_manager_capacity_admission_is_fifo(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    first = _analysis_identity("analysis-fifo-1")
+    second = _analysis_identity("analysis-fifo-2")
+    third = _analysis_identity("analysis-fifo-3")
+    order: list[str] = []
+
+    async def admit_spawn_stop(identity: compute_pb2.EngineIdentity) -> None:
+        owns_admission = await manager.await_spawn_admission(identity)
+        try:
+            await asyncio.to_thread(manager.spawn_engine, identity)
+            order.append(identity.resource_id)
+            await asyncio.sleep(0)
+            await asyncio.to_thread(manager.shutdown_engine, identity)
+        finally:
+            manager.release_spawn_admission(identity, owned=owns_admission)
+
+    try:
+        with manager.acquire_engine(first):
+            second_task = asyncio.create_task(admit_spawn_stop(second))
+            await asyncio.sleep(0.02)
+            third_task = asyncio.create_task(admit_spawn_stop(third))
+            await asyncio.sleep(0.05)
+            assert order == []
+        await asyncio.wait_for(asyncio.gather(second_task, third_task), timeout=2)
+        assert order == [second.resource_id, third.resource_id]
+    finally:
+        manager.shutdown_all()
+
+
+@pytest.mark.asyncio
+async def test_process_manager_shutdown_rejects_capacity_waiter(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    running = manager.spawn_engine(_analysis_identity("analysis-running"))
+    running.engine.current_job_id = "job-running"
+    waiter = asyncio.create_task(manager.await_spawn_admission(_analysis_identity("analysis-waiting")))
+    await asyncio.sleep(0.02)
+
+    await asyncio.to_thread(manager.shutdown_all)
+
+    with pytest.raises(RuntimeError, match="shut down"):
+        await asyncio.wait_for(waiter, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_same_identity_prewarm_shares_pending_admission(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    identity = _analysis_identity("analysis-shared-admission")
+    try:
+        outer_owns = await manager.await_spawn_admission(identity)
+        prewarm_owns = await asyncio.wait_for(manager.await_spawn_admission(identity), timeout=1)
+
+        assert outer_owns is True
+        assert prewarm_owns is False
+        await asyncio.to_thread(manager.spawn_engine, identity)
+        manager.release_spawn_admission(identity, owned=outer_owns)
+        manager.release_spawn_admission(identity, owned=prewarm_owns)
+        assert manager.get_engine(identity) is not None
+    finally:
+        manager.shutdown_all()

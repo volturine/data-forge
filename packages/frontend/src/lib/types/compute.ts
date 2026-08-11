@@ -4,7 +4,12 @@ import type {
 	EngineResourceConfigJson as ProtocolEngineResourceConfigJson,
 	EngineStatusResultJson as ProtocolEngineStatusResultJson
 } from '$lib/protocol/dataforge_protocol/compute_pb';
-import type { EngineReusePolicy, EngineScope, EngineStatus } from '$lib/types/protocol-enum-tokens';
+import type {
+	EngineInstanceStatus,
+	EngineReusePolicy,
+	EngineScope,
+	EngineStatus
+} from '$lib/types/protocol-enum-tokens';
 
 export type { EngineReusePolicy, EngineScope, EngineStatus };
 
@@ -34,7 +39,14 @@ export interface EngineStatusResponse {
 	analysis_id: StringField<ProtocolEngineStatusResultJson, 'analysisId'>;
 	resource_id: StringField<ProtocolEngineStatusResultJson, 'resourceId'>;
 	status: EngineStatus;
-	process_id: OptionalNumberField<ProtocolEngineStatusResultJson, 'processId'>;
+	container_id: OptionalStringField<ProtocolEngineStatusResultJson, 'containerId'>;
+	image_digest: OptionalStringField<ProtocolEngineStatusResultJson, 'imageDigest'>;
+	lifecycle_status: EngineInstanceStatus | null;
+	termination_reason: OptionalStringField<ProtocolEngineStatusResultJson, 'terminationReason'>;
+	exit_code: OptionalNumberField<ProtocolEngineStatusResultJson, 'exitCode'>;
+	oom_killed: boolean | null;
+	supervisor_id: OptionalStringField<ProtocolEngineStatusResultJson, 'supervisorId'>;
+	owner_id: OptionalStringField<ProtocolEngineStatusResultJson, 'ownerId'>;
 	last_activity: OptionalStringField<ProtocolEngineStatusResultJson, 'lastActivity'>;
 	current_job_id: OptionalStringField<ProtocolEngineStatusResultJson, 'currentJobId'>;
 	resource_config: OptionalObjectField<ProtocolEngineStatusResultJson, 'resourceConfig'>;

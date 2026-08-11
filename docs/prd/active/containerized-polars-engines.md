@@ -218,17 +218,17 @@ Provision two long-lived, namespace-scoped object-store identities per namespace
 | Namespace reader | Datasource preview, analysis interactive | List/read the namespace bucket paths required by uploads, clean data, Iceberg metadata, and exports. |
 | Namespace builder | Build | Reader permissions plus write/delete within approved build output and runtime-staging prefixes. |
 
-The backend owns provisioning, encrypted persistence, rotation, and revocation. Secrets are encrypted with the existing `SETTINGS_ENCRYPTION_KEY` mechanism and are never returned through public API representations or logs.
+For this release, operators provision these identities and provide the complete namespace-to-role map to the worker through the protected `ENGINE_OBJECT_STORE_CREDENTIALS_JSON` deployment secret. The worker validates the complete map before becoming ready and selects only the matching namespace and role for each engine. Engine containers never receive the platform object-store administrator credential.
 
-The worker requests the appropriate credential for the engine identity. Engine containers never receive the platform object-store administrator credential. Namespace deletion revokes both identities after engine teardown and storage cleanup. Rotation creates the replacement first, updates the encrypted record, restarts affected shared engines, and then revokes the old identity.
+Backend-owned provisioning, encrypted persistence, automatic rotation, and revocation are deferred. Adding or rotating a namespace credential currently requires updating the deployment secret and restarting the worker.
 
 Production readiness requires a RustFS compatibility test proving policy enforcement for list, get, ranged get, put, multipart upload, and delete across allowed and denied namespace paths. If the pinned RustFS release cannot reliably create and enforce namespace identities, implementation is blocked until RustFS is upgraded or the fallback below is selected.
 
 ### Secret delivery
 
-Do not place object-store credentials in the container environment, where they become part of inspectable container configuration.
+Do not place object-store credentials in the container's long-lived configured environment, where they become part of inspectable container configuration.
 
-Create a container-only `tmpfs` at `/run/dataforge-secrets`. After the container starts, the worker writes a mode-`0400` credential document into that mount through the Docker API. The engine entrypoint waits for and consumes that document before making its gRPC service ready. The file is removed after loading, credentials remain only in engine memory, and the `tmpfs` disappears with the container.
+Create a container-only `tmpfs` at `/run/dataforge-secrets`. After the container starts, the worker uses a short-lived Docker exec environment to write a mode-`0400` credential document into that mount; the secret is not part of the container configuration. The engine entrypoint waits for and consumes that document before making its gRPC service ready. The file is removed after loading, credentials remain only in engine memory, and the `tmpfs` disappears with the container.
 
 The credential document includes only:
 
@@ -336,12 +336,10 @@ The work should be implemented as reviewable vertical slices. The old subprocess
 ### Phase 0 — contract and compatibility proof
 
 - Update this PRD and freeze the supported single-supervisor topology.
-- Add RustFS namespace-policy conformance tests.
-- Prove namespace reader and builder provisioning against the pinned RustFS image.
+- Validate the operator-provided namespace reader/builder map at startup.
 - Prove Polars, PyArrow, and PyIceberg operations with those credentials.
-- Resolve any required RustFS upgrade before main implementation.
 
-Exit condition: credential provisioning and enforcement work end to end without global credentials.
+Exit condition: credential selection and enforcement work end to end without global credentials.
 
 ### Phase 1 — engine RPC and standalone server
 
@@ -355,8 +353,8 @@ Exit condition: the standalone engine server passes the existing preview, schema
 
 ### Phase 2 — credential and artifact boundaries
 
-- Add backend namespace object-store credential persistence and internal worker access.
-- Implement provisioning, encrypted storage, rotation, and revocation.
+- Load the operator-provided namespace credential map only in the worker.
+- Reject missing, incomplete, or platform-wide credentials in production.
 - Implement the container `tmpfs` secret bootstrap document.
 - Replace worker-local export paths with namespace staging objects.
 - Add staging cleanup and artifact parity tests.
@@ -483,4 +481,5 @@ The Docker integration and lifecycle E2E suite must also pass repeatedly without
 - Kubernetes pod executor and scheduling contract details.
 - Distributed capacity and ownership leases for multiple Docker supervisors.
 - Replacing namespace credentials with per-engine STS sessions after RustFS conformance is proven.
+- Backend-owned namespace credential provisioning, encrypted persistence, rotation, and revocation.
 - OIDC workload identity or a worker-owned object-store authorization gateway.

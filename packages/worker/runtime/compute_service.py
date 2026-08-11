@@ -2907,11 +2907,14 @@ async def _prewarm_build_engine(manager: ProcessManager, *, build_id: str) -> No
     )
     try:
         while True:
+            owns_admission = await manager.await_spawn_admission(identity)
             try:
                 await asyncio.to_thread(manager.spawn_engine, identity)
                 break
             except EngineCapacityFull:
-                await manager.wait_for_capacity()
+                continue
+            finally:
+                manager.release_spawn_admission(identity, owned=owns_admission)
         await asyncio.to_thread(manager.set_engine_runtime_context, identity, current_build_id=build_id, current_engine_run_id=None)
     except Exception:
         logger.debug("Build engine prewarm failed for %s", build_id, exc_info=True)

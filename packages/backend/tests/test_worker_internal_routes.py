@@ -16,6 +16,7 @@ from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_requests.models import command_from_payload, response_envelope
 from backend_core.domain.datasource.source_types import DataSourceType
+from backend_core.domain.engine_instances.models import EngineInstanceStatus
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
@@ -953,7 +954,11 @@ async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: 
                     analysis_id='analysis-1',
                     resource_id='datasource-1',
                     status=enums_pb2.ENGINE_STATUS_HEALTHY,
-                    process_id=1234,
+                    container_id='container-1234',
+                    image_digest='sha256:abc',
+                    lifecycle_status=enums_pb2.ENGINE_INSTANCE_STATUS_RUNNING,
+                    supervisor_id='worker-typed-snapshot',
+                    owner_id='worker-typed-snapshot',
                     last_activity=datetime.now(UTC).isoformat(),
                     current_job_id='job-1',
                     resource_config=compute_pb2.EngineResourceConfig(max_threads=2),
@@ -978,6 +983,9 @@ async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: 
     assert len(instances) == 1
     assert instances[0].resource_config_json == {'max_threads': 2}
     assert instances[0].effective_resources_json == {'max_threads': 2, 'max_memory_mb': 1024}
+    assert instances[0].container_id == 'container-1234'
+    assert instances[0].image_digest == 'sha256:abc'
+    assert instances[0].status == EngineInstanceStatus.RUNNING
 
 
 @pytest.mark.asyncio

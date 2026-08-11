@@ -308,6 +308,15 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
             with state.condition:
                 while state.next_sequence <= sequence + 1 and not state.done and context.is_active():
                     state.condition.wait(timeout=0.25)
+                if state.done and state.events and sequence < state.events[0][0] - 1:
+                    if state.result is not None:
+                        yield engine_runtime_pb2.EngineJobEvent(
+                            job_id=request.job_id,
+                            sequence=max(sequence + 1, state.next_sequence),
+                            emitted_at=_timestamp(datetime.now(UTC)),
+                            result=_result_message(state.result),
+                        )
+                    return
                 if state.events and sequence < state.events[0][0] - 1:
                     context.abort(grpc.StatusCode.OUT_OF_RANGE, "Requested progress events have been evicted")
                 for event_sequence, raw_event in tuple(state.events):

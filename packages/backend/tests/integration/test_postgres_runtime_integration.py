@@ -750,6 +750,7 @@ async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path
 def test_postgres_runtime_roles_restart_after_forced_process_exit(
     tmp_path: Path,
     rustfs_container: RustfsContainer,
+    engine_runtime_env: dict[str, str],
 ) -> None:
     require_docker()
 
@@ -767,6 +768,7 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
             rustfs=rustfs_container,
             data_plane_port=data_plane_port,
         )
+        base_env.update(engine_runtime_env)
         base_env['SCHEDULER_CHECK_INTERVAL'] = '1'
         _init_runtime_db(base_env)
 
@@ -929,17 +931,33 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
                 build_id = _start_build(client_one, analysis)
 
             with httpx.Client(base_url=f'http://127.0.0.1:{api_two_port}', timeout=30) as client_two:
-                detail = wait_for_condition(
-                    lambda: (
-                        response.json()
-                        if (response := client_two.get(f'/api/v1/compute/builds/{build_id}')).status_code == 200
-                        and response.json().get('status') in {'completed', 'failed', 'cancelled'}
-                        else None
-                    ),
-                    timeout=180,
-                    interval=1,
-                    description='build detail from second api worker',
-                )
+                try:
+                    detail = wait_for_condition(
+                        lambda: (
+                            response.json()
+                            if (response := client_two.get(f'/api/v1/compute/builds/{build_id}')).status_code == 200
+                            and response.json().get('status') in {'completed', 'failed', 'cancelled'}
+                            else None
+                        ),
+                        timeout=180,
+                        interval=1,
+                        description='build detail from second api worker',
+                    )
+                except AssertionError as exc:
+                    with container.connect() as connection:
+                        build_state = connection.execute(
+                            'SELECT id, status, current_step, error_message FROM "default".build_runs WHERE id = %s',
+                            (build_id,),
+                        ).fetchone()
+                        job_state = connection.execute(
+                            'SELECT status, lease_owner, last_error FROM "default".build_jobs WHERE build_id = %s',
+                            (build_id,),
+                        ).fetchone()
+                        workers = connection.execute('SELECT kind, id, stopped_at FROM public.runtime_workers ORDER BY started_at').fetchall()
+                    raise AssertionError(
+                        f'{exc}\nbuild state: {build_state!r}\njob state: {job_state!r}\nworkers: {workers!r}'
+                        f'\napi-one tail:\n{api_one.tail()}\napi-two tail:\n{api_two.tail()}\nworker tail:\n{worker.tail()}'
+                    ) from exc
 
                 assert detail['build_id'] == build_id
                 assert detail['status'] == 'completed', json.dumps(detail, indent=2, sort_keys=True)
