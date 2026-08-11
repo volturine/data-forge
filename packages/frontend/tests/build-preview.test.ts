@@ -79,8 +79,12 @@ test.describe('Build Preview – real build lifecycle', () => {
 			const closeBtn = page.locator('[aria-label="Close build preview"]');
 			await expect(closeBtn).toBeVisible();
 
+			// Progress bar is always present; status may already be terminal under load.
 			const progressBar = page.locator('[data-testid="build-progress-bar"]');
-			await expect(progressBar).toBeVisible();
+			await expect(progressBar).toBeVisible({ timeout: 5_000 });
+			await expect(
+				preview.getByText(/Complete|Running|Queued|Failed|Cancelled/i).first()
+			).toBeVisible({ timeout: readyTimeoutMs() });
 
 			await screenshot(page, 'build-preview', 'real-build-terminal');
 		} finally {

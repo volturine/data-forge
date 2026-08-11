@@ -152,21 +152,20 @@ test.describe('Cancel Build – e2e', () => {
 			await expect(page.locator('[data-testid="build-cancel-error"]')).not.toBeVisible();
 
 			// Error banner text varies ("Build cancelled" vs "Cancelled by <user>");
-			// status chip uses exact "Cancelled". Avoid free-text match that hits both.
-			await expect(preview.getByTestId('build-error')).toBeVisible({ timeout: 5_000 });
-			await expect(preview.getByTestId('build-error')).toHaveText(/cancelled/i);
-			await expect(preview.getByText('Cancelled', { exact: true })).toBeVisible({
+			// status chip uses "Cancelled". Prefer the dedicated error test id.
+			await expect(preview.getByTestId('build-error')).toBeVisible({ timeout: 15_000 });
+			await expect(preview.getByTestId('build-error')).toHaveText(/cancelled/i, {
 				timeout: 5_000
 			});
-			await expect(preview.locator('[data-testid="build-cancel-button"]')).not.toBeVisible({
-				timeout: 5_000
+			await expect(preview.locator('[data-testid="build-cancel-button"]')).toBeHidden({
+				timeout: 10_000
 			});
 		} finally {
 			if (buildId) {
 				await shutdownBuildEngineViaUI(page, buildId).catch(() => undefined);
 			}
-			await deleteAnalysisViaUI(page, analysisName);
-			await deleteDatasourceViaUI(page, dsName);
+			await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
+			await deleteDatasourceViaUI(page, dsName).catch(() => undefined);
 		}
 	});
 

@@ -25,9 +25,12 @@ export async function openEnginesPopup(page: Page): Promise<Locator> {
 	if (await popup.isVisible().catch(() => false)) {
 		return popup;
 	}
-	// Sidebar is only reliable once the shell has finished bootstrap.
-	await waitForLayoutReady(page, 5_000).catch(() => undefined);
 	const trigger = page.getByRole('button', { name: 'Engine Monitor' });
+	// Prefer the already-rendered shell; only re-wait for layout when the
+	// monitor control is missing (cleanup after navigation / timeout paths).
+	if (!(await trigger.isVisible().catch(() => false))) {
+		await waitForLayoutReady(page, 5_000).catch(() => undefined);
+	}
 	await expect(trigger).toBeVisible({ timeout: 5_000 });
 	await trigger.click();
 	await expect(popup).toBeVisible({ timeout: 5_000 });
@@ -60,19 +63,26 @@ export async function shutdownEngineViaUI(
 	scope: EngineUiScope = 'analysis_interactive'
 ): Promise<void> {
 	if (!resourceId) return;
+	// Cleanup must not blow remaining test budget when the page is already gone.
+	if (page.isClosed()) return;
 	const key = engineIdentityKey(scope, resourceId);
 	const popup = await openEnginesPopup(page);
 	const row = popup.locator(`[data-engine-row="${key}"]`);
-	if (!(await row.isVisible().catch(() => false))) {
+	// Stream can lag a beat after open; poll briefly for the target row.
+	const appeared = await row
+		.waitFor({ state: 'visible', timeout: 3_000 })
+		.then(() => true)
+		.catch(() => false);
+	if (!appeared) {
 		await closeEnginesPopup(page);
 		return;
 	}
 	const power = popup.locator(`[data-engine-shutdown="${key}"]`);
-	await expect(power).toBeEnabled({ timeout: 5_000 });
+	await expect(power).toBeEnabled({ timeout: 3_000 });
 	await power.click({ timeout: 3_000 });
-	// Product optimistically removes the row; wait for it to leave the list.
+	// Product optimistically removes the row; wait briefly then close.
 	await expect(row)
-		.toBeHidden({ timeout: 15_000 })
+		.toBeHidden({ timeout: 8_000 })
 		.catch(() => undefined);
 	await closeEnginesPopup(page);
 }
