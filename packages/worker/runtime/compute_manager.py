@@ -246,9 +246,7 @@ class ProcessManager:
         """Live engines plus in-flight starts that already hold a ticket."""
         return len(self._engines) + self._capacity_starts
 
-    def _acquire_capacity_slot(
-        self, qualified_key: EngineIdentityKey
-    ) -> tuple[tuple[EngineIdentityKey, EngineInfo] | None, bool]:
+    def _acquire_capacity_slot(self, qualified_key: EngineIdentityKey) -> tuple[tuple[EngineIdentityKey, EngineInfo] | None, bool]:
         """Queue until a capacity ticket is available (never reject for capacity).
 
         Returns (optional idle engine to shut down outside the lock, ticket_held).
