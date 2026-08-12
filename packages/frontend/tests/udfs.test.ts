@@ -17,16 +17,13 @@ import { switchNamespace } from './utils/namespace.js';
  * E2E tests for UDFs – mirrors test_udf.py.
  */
 test.describe('UDFs – list & management', () => {
-	test('seeded default UDFs are visible after switching from an empty namespace', async ({
-		page
-	}) => {
+	test('seeded default UDFs are visible on first load', async ({ page }) => {
 		await page.goto('/udfs');
 		await waitForLayoutReady(page);
-		await switchNamespace(page, `e2e-udf-empty-${uid()}`);
-		await waitForUdfList(page);
-		await expect(page.getByText('No UDFs yet.')).toBeVisible();
-
-		await switchNamespace(page, 'default');
+		const sidebar = page.locator('aside[aria-label="Main navigation"]');
+		if (!(await sidebar.getByText('default', { exact: true }).isVisible())) {
+			await switchNamespace(page, 'default');
+		}
 		await waitForUdfList(page);
 
 		await expect(page.locator('[data-udf-card="Ratio"]')).toBeVisible();

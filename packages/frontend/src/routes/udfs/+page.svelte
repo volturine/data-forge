@@ -11,10 +11,8 @@
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, spinner, button, chip, input, label } from '$lib/styles/panda';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
 
 	const queryClient = useQueryClient();
-	const namespace = useNamespace();
 
 	let search = $state('');
 	let importOpen = $state(false);
@@ -34,7 +32,7 @@
 	}
 
 	const query = createQuery(() => ({
-		queryKey: ['udfs', namespace.value, search],
+		queryKey: ['udfs', search],
 		queryFn: async () => {
 			const result = await listUdfs(search ? { q: search } : undefined);
 			if (result.isErr()) throw new Error(result.error.message);
