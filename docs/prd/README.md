@@ -16,6 +16,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Build Length Tracking](implemented/build-length-tracking.md)
 - [Build Preview Checklist](implemented/build-preview-checklist.md) — archived rollout checklist
 - [Build Preview](implemented/build-preview.md)
+- [Containerized Polars Engines](implemented/containerized-polars-engines.md) — Docker-native execution, lifecycle, capacity, recovery, and reconciliation
 - [Cancel Build](implemented/cancel-build.md)
 - [Docker Release](implemented/docker-release.md)
 - [Dataset Column Descriptions](implemented/dataset-column-descriptions.md)
@@ -46,7 +47,6 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 
 ## Active
 
-- [Containerized Polars Engines](active/containerized-polars-engines.md) — Docker-native execution, operator-provided scoped credentials, and reconciliation implementation
 - [Lineage Revamp](active/lineage-revamp.md)
 
 ## Backlog
@@ -62,6 +62,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Kaggle Connection](backlog/kaggle-connection.md)
 - [Local Subdomain Serving](backlog/local-subdomain-serving.md)
 - [Mobile-first UI](backlog/mobile-first-ui.md)
+- [Namespace Credential Management](backlog/namespace-credential-management.md) — backend-owned provisioning, rotation, revocation, and migration from operator configuration
 - [Snapshot Rollback](backlog/snapshot-rollback.md)
 - [Tauri Hybrid Desktop](backlog/tauri-hybrid-desktop.md)
 - [Time Since Last Updated](backlog/time-since-last-updated.md)

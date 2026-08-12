@@ -1,11 +1,11 @@
 # PRD: Containerized Polars Engines
 
-> **Status (started 2026-08-09): Active — Docker-native engine runtime implementation in progress.**
+> **Status (completed 2026-08-12): Implemented — Docker-native engine runtime and lifecycle architecture shipped.**
 > **Portfolio:** [PRD index](../README.md)
 
 ## Summary
 
-Run each Polars engine in its own short-lived container instead of as a Python subprocess inside the worker container. The worker remains the authoritative lifecycle supervisor and command dispatcher; each engine container owns exactly one engine identity and its Polars compute process.
+Run each Polars engine in its own short-lived container instead of as a Python subprocess inside the worker container. The worker remains the authoritative lifecycle supervisor and command dispatcher; each engine container owns exactly one engine identity and its Polars compute process. Operator-provided namespace credentials are the current deployment contract; credential provisioning and rotation are tracked separately in [Namespace Credential Management](../backlog/namespace-credential-management.md).
 
 The first implementation targets one local Docker daemon in production Docker Compose deployments. It preserves the existing engine identity and durable compute-request contracts while replacing only the engine execution boundary. The executor interface and network protocol must remain suitable for a later Kubernetes executor, but Kubernetes scheduling is not part of this release.
 
@@ -37,7 +37,7 @@ Moving execution into a container also removes the worker and engine shared file
 6. Lifecycle API calls remain durable and responsive. A queued shutdown completes only after Docker confirms that the container is absent.
 7. Engine containers receive no Docker socket, host bind mounts, platform database URL, internal API token, or cross-namespace object-store credentials.
 8. Worker restart, build-child failure, idle reaping, and ordinary shutdown leave no orphaned engine containers.
-9. Production fails fast when the Docker daemon, runtime network, pinned image digest, or required credential provisioning is unavailable.
+9. Production fails fast when the Docker daemon, runtime network, pinned image digest, or required configured credentials are unavailable.
 
 ## Non-goals
 
@@ -96,7 +96,7 @@ Polars engine container
 | Worker | Authoritative lifecycle supervisor, Docker API owner, command dispatcher, credential selector, and snapshot publisher. |
 | Docker executor | Converts a launch specification into a restricted container and reconciles labelled containers. |
 | Engine container | Executes one engine identity, exposes the engine gRPC service, and holds only its scoped runtime credentials. |
-| Backend | Persists requests, credentials, engine snapshots, and lifecycle state. It does not control Docker directly. |
+| Backend | Persists requests, engine snapshots, and lifecycle state. It does not control Docker directly. |
 | Object store | Stores namespace data and cross-container staging artifacts. |
 
 ### Supported topology
@@ -386,7 +386,7 @@ Exit condition: every lifecycle path removes its container and publishes the cor
 
 - Add the Docker runtime network and worker Docker socket configuration to Compose.
 - Add engine image build, multi-architecture publish, digest reporting, and release documentation.
-- Add production readiness checks for daemon, permission, network, image digest, and credential provisioning.
+- Add production readiness checks for daemon, permission, network, image digest, and configured credentials.
 - Switch the production engine factory to Docker.
 - Delete `PolarsComputeEngine` multiprocessing management and queue-only command/result code.
 - Remove obsolete subprocess tests and replace them with executor contract tests.
@@ -404,7 +404,7 @@ Expected primary areas:
 - `packages/worker/runtime/compute_service.py` — artifact staging boundary
 - `packages/worker/runtime/` — executor, container client, engine server, reconciliation, credential bootstrap
 - `packages/backend/backend_core/engine_instances_service.py` — container-native snapshots
-- `packages/backend/backend_core/persistence/` — engine status and encrypted namespace credential persistence
+- `packages/backend/backend_core/persistence/` — engine status and lifecycle persistence
 - `packages/frontend/src/lib/` — generated status types and engine monitoring
 - `docker/Dockerfile` — engine image target
 - `docker/docker-compose.yml` — Docker access and runtime network
@@ -473,7 +473,7 @@ The Docker integration and lifecycle E2E suite must also pass repeatedly without
 7. Datasource deletion, idle cleanup, build completion, dead-child cleanup, and worker restart reconciliation leave no orphaned containers or staging artifacts.
 8. Preview, schema, row count, download, export, and build results remain behaviorally compatible with the current engine implementation.
 9. E2E tests cover creation, reuse, resource limits, credential isolation, deletion teardown, crash/OOM handling, and orphan reconciliation against Docker.
-10. Production fails fast when the Docker daemon, permission, runtime network, exact engine digest, or scoped credential provisioning is unavailable.
+10. Production fails fast when the Docker daemon, permission, runtime network, exact engine digest, or configured scoped credentials are unavailable.
 11. The production worker contains no subprocess engine fallback after cutover.
 
 ## Deferred Decisions
@@ -481,5 +481,4 @@ The Docker integration and lifecycle E2E suite must also pass repeatedly without
 - Kubernetes pod executor and scheduling contract details.
 - Distributed capacity and ownership leases for multiple Docker supervisors.
 - Replacing namespace credentials with per-engine STS sessions after RustFS conformance is proven.
-- Backend-owned namespace credential provisioning, encrypted persistence, rotation, and revocation.
 - OIDC workload identity or a worker-owned object-store authorization gateway.
