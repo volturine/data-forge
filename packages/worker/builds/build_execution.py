@@ -4,15 +4,15 @@ import asyncio
 import logging
 
 from builds.build_live import RuntimeBuild
-from dataforge_protocol import enums_pb2
+from dataforge_protocol import compute_pb2, enums_pb2
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import EngineCapacityFull, ProcessManager
 from runtime.domain.compute import schemas
 from runtime.domain.datasource.models import DataSourceTargetKind
 from runtime.domain.engine_runs.schemas import EngineRunKind
-from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 from runtime.namespace import reset_namespace, set_namespace_context
+from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -228,14 +228,31 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
                 resource_config_json=build.resource_config_json,
             )
             return
-    await _run_build_task(
-        manager=manager,
-        claim=claim,
-        worker_id=worker_id,
-        build=build,
-        pipeline=pipeline,
-        triggered_by=starter.user_id or starter.email or starter.display_name or starter.triggered_by,
+    triggered_by = starter.user_id or starter.email or starter.display_name or starter.triggered_by
+    build_identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_BUILD,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        build_id=build.build_id,
+        resource_id=build.build_id,
     )
+    while True:
+        # Admit capacity before any build runner work that needs an engine.
+        owns_admission = await manager.await_spawn_admission(build_identity)
+        try:
+            try:
+                await _run_build_task(
+                    manager=manager,
+                    claim=claim,
+                    worker_id=worker_id,
+                    build=build,
+                    pipeline=pipeline,
+                    triggered_by=triggered_by,
+                )
+                return
+            except EngineCapacityFull:
+                continue
+        finally:
+            manager.release_spawn_admission(build_identity, owned=owns_admission)
 
 
 __all__ = ["run_queued_build_job"]

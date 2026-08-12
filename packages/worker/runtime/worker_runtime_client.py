@@ -222,8 +222,23 @@ class WorkerRuntimeClient:
             raise ValueError(f"Renewed build job {job_id} has no lease TTL")
         return int(response.lease_ttl_seconds)
 
-    def claim_compute_request(self, *, worker_id: str) -> ClaimedComputeRequest | None:
-        response = self._call(lambda: self._stub.ClaimComputeRequest(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
+    def claim_compute_request(
+        self,
+        *,
+        worker_id: str,
+        allowed_kinds: frozenset[enums_pb2.ComputeRequestKind],
+    ) -> ClaimedComputeRequest | None:
+        response = self._call(
+            lambda: self._stub.ClaimComputeRequest(
+                common_pb2.RuntimeWorkerRequest(
+                    worker_id=worker_id,
+                    protocol_version=2,
+                    allowed_compute_request_kinds=sorted(allowed_kinds),
+                ),
+                timeout=self._timeout_seconds,
+                metadata=self._metadata(),
+            )
+        )
         if not response.HasField("request"):
             return None
         command = response.request.command
@@ -1165,17 +1180,34 @@ def _engine_status_result_proto(payload: Mapping[str, object]) -> compute_pb2.En
         resource_id=_required_mapping_str(payload, "resource_id"),
         status=enum_to_proto_value("ENGINE_STATUS", _required_mapping_str(payload, "status")),
     )
-    process_id = payload.get("process_id")
-    if process_id is not None:
-        if not isinstance(process_id, int) or isinstance(process_id, bool):
-            raise RuntimeError(f"Engine status process_id must be an integer: {payload!r}")
-        status.process_id = process_id
-    for field in ("last_activity", "current_job_id", "datasource_id", "build_id", "current_build_id", "current_engine_run_id"):
+    for field in (
+        "last_activity",
+        "current_job_id",
+        "datasource_id",
+        "build_id",
+        "current_build_id",
+        "current_engine_run_id",
+        "container_id",
+        "image_digest",
+        "termination_reason",
+        "supervisor_id",
+        "owner_id",
+    ):
         value = payload.get(field)
         if value is not None:
             if not isinstance(value, str):
                 raise RuntimeError(f"Engine status field {field} must be a string: {payload!r}")
             setattr(status, field, value)
+    exit_code = payload.get("exit_code")
+    if exit_code is not None:
+        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+            raise RuntimeError(f"Engine status exit_code must be an integer: {payload!r}")
+        status.exit_code = exit_code
+    oom_killed = payload.get("oom_killed")
+    if oom_killed is not None:
+        if not isinstance(oom_killed, bool):
+            raise RuntimeError(f"Engine status oom_killed must be a boolean: {payload!r}")
+        status.oom_killed = oom_killed
     resource_config = payload.get("resource_config")
     if isinstance(resource_config, Mapping):
         status.resource_config.CopyFrom(_engine_resource_config_proto(resource_config))
@@ -1195,6 +1227,11 @@ def _engine_status_result_proto(payload: Mapping[str, object]) -> compute_pb2.En
         if not isinstance(reuse_policy, str):
             raise RuntimeError(f"Engine status reuse_policy must be a string: {payload!r}")
         status.reuse_policy = enum_to_proto_value("ENGINE_REUSE_POLICY", reuse_policy)
+    lifecycle_status = payload.get("lifecycle_status")
+    if lifecycle_status is not None:
+        if not isinstance(lifecycle_status, str):
+            raise RuntimeError(f"Engine lifecycle status must be a string: {payload!r}")
+        status.lifecycle_status = enum_to_proto_value("ENGINE_INSTANCE_STATUS", lifecycle_status)
     return status
 
 

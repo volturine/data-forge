@@ -24,14 +24,28 @@ class WorkerSettings:
     normalize_tz: bool
     timezone: str
     persist_preview_runs: bool
+    prod_mode_enabled: bool
     database_url: str
     object_store_endpoint: str
     object_store_region: str
     object_store_access_key: str
     object_store_secret_key: str
+    object_store_session_token: str
     internal_api_token: str
     data_plane_grpc_host: str
     data_plane_grpc_port: int
+    engine_docker_host: str
+    engine_docker_network: str
+    engine_object_store_endpoint: str
+    engine_image: str
+    engine_connect_host: str
+    engine_rpc_port: int
+    engine_start_timeout_seconds: int
+    engine_shutdown_grace_seconds: int
+    engine_heartbeat_interval_seconds: int
+    engine_object_store_credentials_json: str
+    engine_allow_global_object_store_credentials: bool
+    deployment_id: str
 
 
 def _read_int(name: str, default: int, *, min_value: int | None = None, max_value: int | None = None) -> int:
@@ -74,12 +88,28 @@ settings = WorkerSettings(
     normalize_tz=_read_bool("NORMALIZE_TZ", False),
     timezone=os.environ.get("TIMEZONE", "UTC").strip() or "UTC",
     persist_preview_runs=_read_bool("PERSIST_PREVIEW_RUNS", True),
+    prod_mode_enabled=_read_bool("PROD_MODE_ENABLED", False),
     database_url=os.environ.get("DATABASE_URL", ""),
     object_store_endpoint=os.environ.get("OBJECT_STORE_ENDPOINT", "http://127.0.0.1:9000"),
     object_store_region=os.environ.get("OBJECT_STORE_REGION", "us-east-1"),
     object_store_access_key=os.environ.get("OBJECT_STORE_ACCESS_KEY", "rustfsadmin"),
     object_store_secret_key=os.environ.get("OBJECT_STORE_SECRET_KEY", "rustfsadmin"),
+    object_store_session_token=os.environ.get("OBJECT_STORE_SESSION_TOKEN", ""),
     internal_api_token=os.environ.get("INTERNAL_API_TOKEN", ""),
     data_plane_grpc_host=os.environ.get("WORKER_DATA_PLANE_GRPC_HOST", "127.0.0.1").strip() or "127.0.0.1",
     data_plane_grpc_port=_read_int("WORKER_DATA_PLANE_GRPC_PORT", 50052, min_value=1, max_value=65535),
+    engine_docker_host=os.environ.get("ENGINE_DOCKER_HOST", "unix:///var/run/docker.sock").strip() or "unix:///var/run/docker.sock",
+    engine_docker_network=os.environ.get("ENGINE_DOCKER_NETWORK", "dataforge-engine-runtime").strip() or "dataforge-engine-runtime",
+    engine_object_store_endpoint=os.environ.get("ENGINE_OBJECT_STORE_ENDPOINT", "").strip(),
+    engine_image=os.environ.get("ENGINE_IMAGE", "data-forge-polars-engine:latest").strip() or "data-forge-polars-engine:latest",
+    # Empty keeps engine RPC private on the Docker network. Test harnesses that
+    # run the worker on the host can opt in to an ephemeral host port.
+    engine_connect_host=os.environ.get("ENGINE_CONNECT_HOST", "").strip(),
+    engine_rpc_port=_read_int("ENGINE_RPC_PORT", 50053, min_value=1, max_value=65535),
+    engine_start_timeout_seconds=_read_int("ENGINE_START_TIMEOUT_SECONDS", 30, min_value=1),
+    engine_shutdown_grace_seconds=_read_int("ENGINE_SHUTDOWN_GRACE_SECONDS", 10, min_value=1),
+    engine_heartbeat_interval_seconds=_read_int("ENGINE_HEARTBEAT_INTERVAL_SECONDS", 5, min_value=1),
+    engine_object_store_credentials_json=os.environ.get("ENGINE_OBJECT_STORE_CREDENTIALS_JSON", ""),
+    engine_allow_global_object_store_credentials=_read_bool("ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS", False),
+    deployment_id=os.environ.get("DATAFORGE_DEPLOYMENT_ID", "dataforge").strip() or "dataforge",
 )

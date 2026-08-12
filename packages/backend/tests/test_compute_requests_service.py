@@ -153,6 +153,32 @@ def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_
     assert remaining.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
 
 
+def test_claim_next_request_filters_engine_work_for_non_engine_lane(test_db_session) -> None:
+    preview = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+    create_request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+        request_json={'name': 'upload', 'file_path': 's3://data/upload.csv', 'file_type': 'csv', 'options': {}},
+    )
+
+    claimed = compute_requests_service.claim_next_request(
+        test_db_session,
+        worker_id='non-engine-worker',
+        allowed_kinds={enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE},
+    )
+
+    assert claimed is not None
+    assert claimed.id == create_request.id
+    test_db_session.refresh(preview)
+    assert preview.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
+
+
 def test_claim_next_request_prioritizes_user_create_requests_over_background_ingest(test_db_session) -> None:
     background = _create_request(
         test_db_session,

@@ -1,11 +1,15 @@
-import type { APIRequestContext, Browser, BrowserContext, Page } from '@playwright/test';
-import { expect } from '@playwright/test';
+import {
+	expect,
+	type APIRequestContext,
+	type Browser,
+	type BrowserContext,
+	type Page
+} from '@playwright/test';
 import {
 	createHealthCheckViaUi,
 	createScheduleViaUi,
 	createUdfViaUi,
 	importAnalysisViaUi,
-	shutdownEngineViaUi,
 	uploadDatasourceViaUi,
 	uploadDatasourceWithDatesViaUi,
 	E2E_PASSWORD
@@ -62,16 +66,19 @@ const udfRegistry = new Map<string, { name: string }>();
 
 /**
  * Default app namespace used by helpers unless a test passes another.
- * Resolved from the backend config (DEFAULT_NAMESPACE) so it stays correct
- * if the app default changes. Memoized per worker.
+ * Read from the visible sidebar namespace control (not /api/v1/config).
+ * Memoized per worker after first shell load.
  */
 let helperDefaultNamespace: string | undefined;
 
 async function resolveHelperDefaultNamespace(page: Page): Promise<string> {
 	if (!helperDefaultNamespace) {
-		const response = await page.request.get('/api/v1/config');
-		const config = (await response.json()) as { default_namespace?: string };
-		helperDefaultNamespace = config.default_namespace || 'default';
+		await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+		await waitForLayoutReady(page);
+		const label = page.getByRole('button', { name: 'Select namespace' });
+		await expect(label).toBeVisible({ timeout: 5_000 });
+		const text = (await label.innerText()).trim();
+		helperDefaultNamespace = text || 'default';
 	}
 	return helperDefaultNamespace;
 }
@@ -100,7 +107,7 @@ async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promis
  */
 async function prepareHelperNamespace(page: Page, namespace?: string): Promise<void> {
 	const target = namespace ?? (await resolveHelperDefaultNamespace(page));
-	await page.goto('/');
+	await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
 	await waitForLayoutReady(page);
 	const sidebar = page.locator('aside[aria-label="Main navigation"]');
 	const active = sidebar.getByText(target, { exact: true });
@@ -178,37 +185,6 @@ export async function deleteDatasource(
 	});
 }
 
-/**
- * Delete an analysis via the authenticated API.
- * Prefer a live Page (same session cookies). When the test page is already
- * closed (timeout teardown), pass the worker E2ERequest helper context.
- */
-export async function deleteAnalysisByApi(
-	source: Page | E2ERequest,
-	analysisId: string
-): Promise<number> {
-	const run = async (page: Page): Promise<number> => {
-		const endpoint = `/api/v1/analysis/${analysisId}`;
-		const current = await page.request.get(endpoint, { timeout: 5_000 });
-		if (current.status() === 404) return 404;
-		if (!current.ok()) {
-			throw new Error(`Cleanup GET ${endpoint} returned HTTP ${current.status()}`);
-		}
-		const revision = current.headers()['x-analysis-version'];
-		if (!revision) throw new Error(`Cleanup GET ${endpoint} did not return X-Analysis-Version`);
-		const response = await page.request.delete(endpoint, {
-			timeout: 5_000,
-			headers: { 'If-Match': revision }
-		});
-		return response.status();
-	};
-
-	if ('helperContext' in source) {
-		return withAuthedPage(source, run);
-	}
-	return run(source);
-}
-
 export async function createAnalysis(
 	request: E2ERequest,
 	name: string,
@@ -248,9 +224,8 @@ export async function createImportedAnalysis(
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
 		await prepareHelperNamespace(page);
-		const id = await importAnalysisViaUi(page, { name, description, pipeline, datasourceRemap });
-		analysisRegistry.set(id, { name });
-		return id;
+		// importAnalysisViaUi registers the analysis for cleanup / engine shutdown.
+		return importAnalysisViaUi(page, { name, description, pipeline, datasourceRemap });
 	});
 }
 
@@ -408,25 +383,8 @@ export async function createHealthCheck(
 	});
 }
 
-export async function waitForNoRuntimeBuild(
-	request: E2ERequest,
-	analysisId: string,
-	timeoutMs = 5_000
-): Promise<void> {
-	await withAuthedPage(request, async (page) => {
-		await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
-		await waitForLayoutReady(page);
-		const panel = page.locator('#panel-builds');
-		await expect(panel).toBeVisible({ timeout: 5_000 });
-		const running = panel.locator(
-			`[data-build-analysis-id="${analysisId}"][data-build-status="running"]`
-		);
-		await expect(running.first()).not.toBeVisible({ timeout: timeoutMs });
-	});
-}
-
 export async function spawnEngine(_request: E2ERequest, _analysisId: string): Promise<void> {
-	// No-op in pure UI e2e: engines are started through visible user actions.
+	// Engines are started through visible user actions / analysis prewarm.
 }
 
 export async function waitForNoEngineJob(
@@ -434,7 +392,11 @@ export async function waitForNoEngineJob(
 	_analysisId: string,
 	_timeoutMs = 5_000
 ): Promise<void> {
-	// No-op in pure UI e2e: engine lifecycle is observed via visible build status.
+	// Observe engine lifecycle via the Engines popup / visible build status.
+}
+
+export function registerAnalysis(id: string, name: string): void {
+	analysisRegistry.set(id, { name });
 }
 
 export function findAnalysisIdByName(name: string): string | null {
@@ -444,17 +406,16 @@ export function findAnalysisIdByName(name: string): string | null {
 	return null;
 }
 
-export async function shutdownEngine(
-	request: E2ERequest,
-	analysisId: string,
-	options?: { waitForIdleMs?: number }
-): Promise<void> {
-	// Wait for builds to leave "running" when possible, then shut down via UI.
-	// Missing engines are a no-op inside shutdownEngineViaUi (row never appears).
-	await waitForNoRuntimeBuild(request, analysisId, options?.waitForIdleMs ?? 5_000);
-	await withAuthedPage(request, async (page) => {
-		await shutdownEngineViaUi(page, analysisId, { timeoutMs: options?.waitForIdleMs ?? 5_000 });
-	});
+export function unregisterAnalysis(analysisId: string): void {
+	analysisRegistry.delete(analysisId);
+}
+
+export function registeredAnalysisIds(): string[] {
+	return [...analysisRegistry.keys()];
+}
+
+export function registeredDatasourceIds(): string[] {
+	return [...datasourceRegistry.keys()];
 }
 
 export function nameForDatasourceId(datasourceId: string): string | undefined {

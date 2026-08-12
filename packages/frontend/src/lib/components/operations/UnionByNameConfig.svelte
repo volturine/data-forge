@@ -31,13 +31,23 @@
 
 	const loaded = new SvelteSet<string>();
 	let pending = $state(0);
+	let schemaErrors = $state.raw<Record<string, string>>({});
 	const loading = $derived(pending > 0);
+	const schemaErrorList = $derived(
+		Object.entries(schemaErrors).map(([id, message]) => ({ id, message }))
+	);
 
-	async function loadSourceSchema(datasourceId: string) {
+	async function loadSourceSchema(datasourceId: string, options: { forceRefresh?: boolean } = {}) {
 		loaded.add(datasourceId);
 		pending += 1;
+		if (options.forceRefresh) {
+			datasourceStore.clearSchemaCache(datasourceId);
+		}
 		try {
-			const schemaInfo = await datasourceStore.getSchema(datasourceId);
+			// Cache-first: join/union config only needs column metadata, not re-ingest.
+			const schemaInfo = await datasourceStore.getSchema(datasourceId, {
+				refresh: options.forceRefresh === true
+			});
 			const unionSchema: Schema = {
 				columns: schemaInfo.columns.map((c) => ({
 					name: c.name,
@@ -47,8 +57,14 @@
 				row_count: schemaInfo.row_count
 			};
 			schemaStore.setJoinDatasource(datasourceId, unionSchema);
-		} catch {
+			const { [datasourceId]: _removed, ...rest } = schemaErrors;
+			schemaErrors = rest;
+		} catch (err) {
 			loaded.delete(datasourceId);
+			schemaErrors = {
+				...schemaErrors,
+				[datasourceId]: err instanceof Error ? err.message : 'Failed to load schema'
+			};
 		} finally {
 			pending -= 1;
 		}
@@ -57,6 +73,8 @@
 	function removeSourceSchema(datasourceId: string) {
 		loaded.delete(datasourceId);
 		schemaStore.removeJoinDatasource(datasourceId);
+		const { [datasourceId]: _removed, ...rest } = schemaErrors;
+		schemaErrors = rest;
 	}
 
 	// Network: $derived can't trigger async schema loads for pre-populated or externally-changed sources.
@@ -149,6 +167,31 @@
 		{#if config.sources.length === 0}
 			<Callout tone="warn">Select at least one datasource to union.</Callout>
 		{/if}
+
+		{#each schemaErrorList as entry (entry.id)}
+			<div class={css({ marginTop: '2', display: 'flex', flexDirection: 'column', gap: '2' })}>
+				<Callout tone="error">
+					Failed to load schema for source {entry.id}: {entry.message}
+				</Callout>
+				<button
+					type="button"
+					class={css({
+						alignSelf: 'flex-start',
+						paddingY: '1',
+						paddingX: '3',
+						borderWidth: '1',
+						cursor: 'pointer',
+						fontSize: 'sm',
+						backgroundColor: 'bg.secondary',
+						_hover: { backgroundColor: 'bg.hover' }
+					})}
+					data-testid={`union-schema-retry-${entry.id}`}
+					onclick={() => void loadSourceSchema(entry.id, { forceRefresh: true })}
+				>
+					Retry
+				</button>
+			</div>
+		{/each}
 	</div>
 
 	<div

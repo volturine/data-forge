@@ -33,9 +33,24 @@ async function waitForAnalysisEditor(
 	accessState: EditorAccessState
 ): Promise<void> {
 	const remaining = () => Math.max(deadline - Date.now(), 1_000);
-
 	const editor = page.locator('[role="application"]');
-	await expect(editor).toBeVisible({ timeout: remaining() });
+	const loadError = page.locator('[data-testid="analysis-load-error"]');
+	const kitError = page.getByText('Internal Error');
+	// Fail fast on product/error UI — no soft-reload (app must work first try).
+	await Promise.race([
+		editor.waitFor({ state: 'visible', timeout: remaining() }).then(() => 'ready' as const),
+		loadError.waitFor({ state: 'visible', timeout: remaining() }).then(() => 'load' as const),
+		kitError.waitFor({ state: 'visible', timeout: remaining() }).then(() => 'kit' as const)
+	]).then(async (outcome) => {
+		if (outcome === 'load') {
+			const message = (await loadError.innerText().catch(() => null)) ?? 'Error loading analysis';
+			throw new Error(`Analysis editor load failed:\n${message}`);
+		}
+		if (outcome === 'kit') {
+			throw new Error('Analysis page hit SvelteKit Internal Error (unhandled client exception)');
+		}
+	});
+
 	await expect(editor).toHaveAttribute('data-editor-access-state', accessState, {
 		timeout: remaining()
 	});

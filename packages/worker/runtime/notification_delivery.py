@@ -6,8 +6,8 @@ from typing import Any, Mapping
 
 import pyarrow as pa  # type: ignore[import-untyped]
 
-from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
 from runtime.namespace import get_namespace
+from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
 
 STAGED_NOTIFICATION_PREFIX = "__dataforge_notification_"
 

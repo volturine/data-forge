@@ -273,7 +273,7 @@ class _TestWorkerDataPlaneClient:
         except ValueError:
             return ObjectStoreUrlClassification(is_object_store=False, is_managed=False, object_url=None)
         root = key.split('/', 1)[0]
-        managed_roots = {'uploads', 'clean', 'exports', 'runtime-artifacts', 'health', 'tests'}
+        managed_roots = {'uploads', 'clean', 'exports', 'runtime-artifacts', 'runtime-staging', 'health', 'tests'}
         is_managed = self._is_managed_bucket(bucket) and root in managed_roots
         return ObjectStoreUrlClassification(is_object_store=True, is_managed=is_managed, object_url=value)
 

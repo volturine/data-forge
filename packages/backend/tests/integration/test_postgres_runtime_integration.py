@@ -6,6 +6,7 @@ import json
 import threading
 import time
 import uuid
+from collections.abc import Generator
 from pathlib import Path
 
 import psycopg
@@ -23,6 +24,7 @@ from tests.harness.postgres_harness import (
     ManagedProcess,
     PostgresContainer,
     RustfsContainer,
+    cleanup_stale_test_engine_networks,
     docker_env,
     free_port,
     require_docker,
@@ -61,6 +63,7 @@ def _query_value(connection: psycopg.Connection, sql: str, params: tuple[object,
 
 SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n'
 INTERNAL_API_TOKEN = 'dataforge-runtime-test-internal-token'
+ENGINE_TEST_IMAGE = 'data-forge-polars-engine:integration'
 
 
 def _make_csv(rows: int) -> str:
@@ -113,6 +116,46 @@ def _runtime_env(
             'WORKER_DATA_PLANE_GRPC_TARGET': f'127.0.0.1:{worker_data_plane_port}',
         }
     )
+
+
+@pytest.fixture(scope='module')
+def engine_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str, str]]:
+    """Use the engine image built by the canonical test recipe before pytest starts."""
+    require_docker()
+    run_command(
+        ['docker', 'image', 'inspect', ENGINE_TEST_IMAGE],
+        cwd=CORE_ROOT,
+        env=docker_env(),
+    )
+    docker_host = run_command(
+        ['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'],
+        cwd=CORE_ROOT.parent.parent,
+        env=docker_env(),
+    ).stdout.strip()
+    if not docker_host:
+        raise RuntimeError('Docker context did not provide a daemon endpoint')
+    network_label = 'data-forge.test-engine-network=1'
+    # Prior failed runs leave labeled networks that exhaust Docker's default IP pool.
+    cleanup_stale_test_engine_networks(label=network_label)
+    network_name = f'dataforge-integration-engine-{uuid.uuid4().hex[:10]}'
+    run_command(
+        ['docker', 'network', 'create', '--label', network_label, network_name],
+        env=docker_env(),
+        timeout=120,
+    )
+    try:
+        run_command(['docker', 'network', 'connect', network_name, rustfs_container.name], env=docker_env(), timeout=120)
+        yield {
+            'ENGINE_IMAGE': ENGINE_TEST_IMAGE,
+            'ENGINE_DOCKER_HOST': docker_host,
+            'ENGINE_DOCKER_NETWORK': network_name,
+            'ENGINE_OBJECT_STORE_ENDPOINT': f'http://{rustfs_container.name}:9000',
+            'ENGINE_CONNECT_HOST': '127.0.0.1',
+            'ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS': 'true',
+        }
+    finally:
+        run_command(['docker', 'network', 'disconnect', '--force', network_name, rustfs_container.name], env=docker_env(), check=False, timeout=120)
+        run_command(['docker', 'network', 'rm', network_name], env=docker_env(), check=False, timeout=120)
 
 
 def _init_runtime_db(env: dict[str, str]) -> None:
@@ -707,6 +750,7 @@ async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path
 def test_postgres_runtime_roles_restart_after_forced_process_exit(
     tmp_path: Path,
     rustfs_container: RustfsContainer,
+    engine_runtime_env: dict[str, str],
 ) -> None:
     require_docker()
 
@@ -724,6 +768,7 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
             rustfs=rustfs_container,
             data_plane_port=data_plane_port,
         )
+        base_env.update(engine_runtime_env)
         base_env['SCHEDULER_CHECK_INTERVAL'] = '1'
         _init_runtime_db(base_env)
 
@@ -735,8 +780,8 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
         )
         worker = ManagedProcess(
             name='restart-worker',
-            command=['uv', 'run', '--no-env-file', str(WORKER_ROOT / 'main.py')],
-            cwd=CORE_ROOT,
+            command=['uv', 'run', '--no-env-file', 'main.py'],
+            cwd=WORKER_ROOT,
             env=base_env,
         )
         scheduler = ManagedProcess(
@@ -790,6 +835,7 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
 async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
     tmp_path: Path,
     rustfs_container: RustfsContainer,
+    engine_runtime_env: dict[str, str],
 ) -> None:
     require_docker()
 
@@ -840,17 +886,20 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
         )
         worker = ManagedProcess(
             name='worker',
-            command=['uv', 'run', '--no-env-file', str(WORKER_ROOT / 'main.py')],
-            cwd=CORE_ROOT,
-            env=_runtime_env(
-                data_dir=data_dir,
-                database_url=container.url,
-                port=api_one_port,
-                grpc_port=api_one_grpc_port,
-                rustfs=rustfs_container,
-                grpc_target_port=api_one_grpc_port,
-                data_plane_port=data_plane_port,
-            ),
+            command=['uv', 'run', '--no-env-file', 'main.py'],
+            cwd=WORKER_ROOT,
+            env={
+                **_runtime_env(
+                    data_dir=data_dir,
+                    database_url=container.url,
+                    port=api_one_port,
+                    grpc_port=api_one_grpc_port,
+                    rustfs=rustfs_container,
+                    grpc_target_port=api_one_grpc_port,
+                    data_plane_port=data_plane_port,
+                ),
+                **engine_runtime_env,
+            },
         )
         try:
             api_one.start()
@@ -882,17 +931,33 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
                 build_id = _start_build(client_one, analysis)
 
             with httpx.Client(base_url=f'http://127.0.0.1:{api_two_port}', timeout=30) as client_two:
-                detail = wait_for_condition(
-                    lambda: (
-                        response.json()
-                        if (response := client_two.get(f'/api/v1/compute/builds/{build_id}')).status_code == 200
-                        and response.json().get('status') in {'completed', 'failed', 'cancelled'}
-                        else None
-                    ),
-                    timeout=180,
-                    interval=1,
-                    description='build detail from second api worker',
-                )
+                try:
+                    detail = wait_for_condition(
+                        lambda: (
+                            response.json()
+                            if (response := client_two.get(f'/api/v1/compute/builds/{build_id}')).status_code == 200
+                            and response.json().get('status') in {'completed', 'failed', 'cancelled'}
+                            else None
+                        ),
+                        timeout=180,
+                        interval=1,
+                        description='build detail from second api worker',
+                    )
+                except AssertionError as exc:
+                    with container.connect() as connection:
+                        build_state = connection.execute(
+                            'SELECT id, status, current_step, error_message FROM "default".build_runs WHERE id = %s',
+                            (build_id,),
+                        ).fetchone()
+                        job_state = connection.execute(
+                            'SELECT status, lease_owner, last_error FROM "default".build_jobs WHERE build_id = %s',
+                            (build_id,),
+                        ).fetchone()
+                        workers = connection.execute('SELECT kind, id, stopped_at FROM public.runtime_workers ORDER BY started_at').fetchall()
+                    raise AssertionError(
+                        f'{exc}\nbuild state: {build_state!r}\njob state: {job_state!r}\nworkers: {workers!r}'
+                        f'\napi-one tail:\n{api_one.tail()}\napi-two tail:\n{api_two.tail()}\nworker tail:\n{worker.tail()}'
+                    ) from exc
 
                 assert detail['build_id'] == build_id
                 assert detail['status'] == 'completed', json.dumps(detail, indent=2, sort_keys=True)
@@ -921,7 +986,11 @@ async def test_postgres_runtime_supports_cross_api_build_detail_and_replay(
 
 
 @pytest.mark.timeout(300)
-def test_postgres_runtime_supports_cross_api_cancellation(tmp_path: Path, rustfs_container: RustfsContainer) -> None:
+def test_postgres_runtime_supports_cross_api_cancellation(
+    tmp_path: Path,
+    rustfs_container: RustfsContainer,
+    engine_runtime_env: dict[str, str],
+) -> None:
     require_docker()
 
     with PostgresContainer() as container:
@@ -971,17 +1040,20 @@ def test_postgres_runtime_supports_cross_api_cancellation(tmp_path: Path, rustfs
         )
         worker = ManagedProcess(
             name='worker',
-            command=['uv', 'run', '--no-env-file', str(WORKER_ROOT / 'main.py')],
-            cwd=CORE_ROOT,
-            env=_runtime_env(
-                data_dir=data_dir,
-                database_url=container.url,
-                port=api_one_port,
-                grpc_port=api_one_grpc_port,
-                rustfs=rustfs_container,
-                grpc_target_port=api_one_grpc_port,
-                data_plane_port=data_plane_port,
-            ),
+            command=['uv', 'run', '--no-env-file', 'main.py'],
+            cwd=WORKER_ROOT,
+            env={
+                **_runtime_env(
+                    data_dir=data_dir,
+                    database_url=container.url,
+                    port=api_one_port,
+                    grpc_port=api_one_grpc_port,
+                    rustfs=rustfs_container,
+                    grpc_target_port=api_one_grpc_port,
+                    data_plane_port=data_plane_port,
+                ),
+                **engine_runtime_env,
+            },
         )
         try:
             api_one.start()

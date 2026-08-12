@@ -43,6 +43,42 @@ class _RacingNamespaceSession:
         self.refreshed.append(record)
 
 
+class _ExistingNamespaceSession:
+    def __init__(self, record: RuntimeNamespace) -> None:
+        self.record = record
+        self.added: list[RuntimeNamespace] = []
+        self.commit_count = 0
+        self.refreshed: list[RuntimeNamespace] = []
+
+    def get(self, model: type[RuntimeNamespace], name: str) -> RuntimeNamespace | None:
+        assert model is RuntimeNamespace
+        assert name == self.record.name
+        return self.record
+
+    def add(self, record: RuntimeNamespace) -> None:
+        self.added.append(record)
+
+    def commit(self) -> None:
+        self.commit_count += 1
+
+    def refresh(self, record: RuntimeNamespace) -> None:
+        self.refreshed.append(record)
+
+
+def test_register_existing_namespace_does_not_write_hot_request_path() -> None:
+    timestamp = datetime(2026, 1, 1)
+    existing = RuntimeNamespace(name='alpha', created_at=timestamp, updated_at=timestamp)
+    session = _ExistingNamespaceSession(existing)
+
+    record = namespaces_service.register_namespace(cast(Session, session), 'alpha')
+
+    assert record is existing
+    assert record.updated_at == timestamp
+    assert session.added == []
+    assert session.commit_count == 0
+    assert session.refreshed == []
+
+
 def test_register_namespace_recovers_from_concurrent_insert() -> None:
     session = _RacingNamespaceSession()
 
@@ -50,4 +86,4 @@ def test_register_namespace_recovers_from_concurrent_insert() -> None:
 
     assert session.rolled_back is True
     assert record.name == 'alpha'
-    assert session.refreshed[-1] is record
+    assert session.refreshed == []

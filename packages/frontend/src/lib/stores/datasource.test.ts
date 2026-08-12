@@ -214,7 +214,7 @@ describe('DatasourceStore', () => {
 	});
 
 	describe('getSchema', () => {
-		test('fetches and caches schema', async () => {
+		test('fetches and caches schema with refresh false by default', async () => {
 			const s = makeSchema();
 			mockSchemaSuccess(s);
 			store.datasources = [makeDatasource({ id: 'ds-1' })];
@@ -224,6 +224,10 @@ describe('DatasourceStore', () => {
 			expect(result).toEqual(s);
 			expect(store.schemas.get('ds-1')).toEqual(s);
 			expect(mockGetDatasourceSchema).toHaveBeenCalledTimes(1);
+			expect(mockGetDatasourceSchema).toHaveBeenCalledWith('ds-1', {
+				sheetName: undefined,
+				refresh: false
+			});
 		});
 
 		test('returns cached schema without API call', async () => {
@@ -237,6 +241,23 @@ describe('DatasourceStore', () => {
 			expect(mockGetDatasourceSchema).not.toHaveBeenCalled();
 		});
 
+		test('bypasses memory cache when refresh is true', async () => {
+			const cached = makeSchema({ row_count: 5 });
+			const fresh = makeSchema({ row_count: 100 });
+			store.schemas.set('ds-1', cached);
+			store.datasources = [makeDatasource({ id: 'ds-1' })];
+			mockSchemaSuccess(fresh);
+
+			const result = await store.getSchema('ds-1', { refresh: true });
+
+			expect(result).toEqual(fresh);
+			expect(store.schemas.get('ds-1')).toEqual(fresh);
+			expect(mockGetDatasourceSchema).toHaveBeenCalledWith('ds-1', {
+				sheetName: undefined,
+				refresh: true
+			});
+		});
+
 		test('bypasses cache when sheetName is provided', async () => {
 			const cached = makeSchema({ row_count: 5 });
 			const fresh = makeSchema({ row_count: 100 });
@@ -244,10 +265,14 @@ describe('DatasourceStore', () => {
 			store.datasources = [makeDatasource({ id: 'ds-1' })];
 			mockSchemaSuccess(fresh);
 
-			const result = await store.getSchema('ds-1', 'Sheet2');
+			const result = await store.getSchema('ds-1', { sheetName: 'Sheet2' });
 
 			expect(result).toEqual(fresh);
 			expect(mockGetDatasourceSchema).toHaveBeenCalledTimes(1);
+			expect(mockGetDatasourceSchema).toHaveBeenCalledWith('ds-1', {
+				sheetName: 'Sheet2',
+				refresh: false
+			});
 		});
 
 		test('does not cache when sheetName is provided', async () => {
@@ -255,7 +280,7 @@ describe('DatasourceStore', () => {
 			store.datasources = [makeDatasource({ id: 'ds-1' })];
 			mockSchemaSuccess(s);
 
-			await store.getSchema('ds-1', 'Sheet2');
+			await store.getSchema('ds-1', { sheetName: 'Sheet2' });
 
 			expect(store.schemas.has('ds-1')).toBe(false);
 		});
@@ -269,11 +294,11 @@ describe('DatasourceStore', () => {
 			expect(mockGetDatasourceSchema).not.toHaveBeenCalled();
 		});
 
-		test('throws on API error', async () => {
+		test('throws on API error with server message', async () => {
 			store.datasources = [makeDatasource({ id: 'ds-1' })];
 			mockSchemaError('Not found');
 
-			await expect(store.getSchema('ds-1')).rejects.toThrow('Failed to get schema');
+			await expect(store.getSchema('ds-1')).rejects.toThrow('Not found');
 		});
 	});
 

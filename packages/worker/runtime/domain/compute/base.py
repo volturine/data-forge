@@ -117,7 +117,14 @@ class EngineStatusInfo:
     analysis_id: str
     resource_id: str
     status: str
-    process_id: int | None
+    container_id: str | None
+    image_digest: str | None
+    lifecycle_status: str | None
+    termination_reason: str | None
+    exit_code: int | None
+    oom_killed: bool | None
+    supervisor_id: str | None
+    owner_id: str | None
     last_activity: str | None
     current_job_id: str | None
     resource_config: dict[str, Any] | None

@@ -27,6 +27,7 @@ _MANAGED_KEY_ROOTS = frozenset(
         "clean",
         "exports",
         "runtime-artifacts",
+        "runtime-staging",
         "health",
         "tests",
     }
@@ -116,7 +117,7 @@ def is_managed_object_store_url(url: str) -> bool:
 
 
 def object_store_storage_options() -> dict[str, object]:
-    return {
+    options: dict[str, object] = {
         "s3.endpoint": settings.object_store_endpoint,
         "s3.access-key-id": settings.object_store_access_key,
         "s3.secret-access-key": settings.object_store_secret_key,
@@ -124,6 +125,9 @@ def object_store_storage_options() -> dict[str, object]:
         "s3.force-virtual-addressing": False,
         "py-io-impl": "pyiceberg.io.pyarrow.PyArrowFileIO",
     }
+    if settings.object_store_session_token:
+        options["s3.session-token"] = settings.object_store_session_token
+    return options
 
 
 def _client():
@@ -138,6 +142,7 @@ def _client():
                 region_name=settings.object_store_region,
                 aws_access_key_id=settings.object_store_access_key,
                 aws_secret_access_key=settings.object_store_secret_key,
+                aws_session_token=settings.object_store_session_token or None,
                 config=BotoConfig(s3={"addressing_style": "path"}),
             )
         return _S3_CLIENT
@@ -185,6 +190,38 @@ def upload_bytes(data: bytes, target_url: str, *, content_type: str | None = Non
         kwargs["ContentType"] = content_type
     _client().put_object(**kwargs)
     return target_url
+
+
+def presigned_put_url(
+    target_url: str,
+    *,
+    expires_seconds: int,
+    endpoint_url: str | None = None,
+    content_type: str | None = None,
+) -> str:
+    bucket, key = parse_object_store_url(target_url)
+    ensure_bucket_exists(bucket)
+    client = _client()
+    if endpoint_url is not None and endpoint_url.rstrip("/") != settings.object_store_endpoint.rstrip("/"):
+        client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            region_name=settings.object_store_region,
+            aws_access_key_id=settings.object_store_access_key,
+            aws_secret_access_key=settings.object_store_secret_key,
+            aws_session_token=settings.object_store_session_token or None,
+            config=BotoConfig(s3={"addressing_style": "path"}),
+        )
+    params = {"Bucket": bucket, "Key": key}
+    if content_type is not None:
+        params["ContentType"] = content_type
+    return str(
+        client.generate_presigned_url(
+            "put_object",
+            Params=params,
+            ExpiresIn=expires_seconds,
+        )
+    )
 
 
 def download_bytes(source_url: str) -> bytes:

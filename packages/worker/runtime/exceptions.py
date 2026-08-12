@@ -104,6 +104,11 @@ class EngineBusyError(ComputeError):
         super().__init__(message="Engine has an active job", error_code="ENGINE_BUSY", details=details)
 
 
+class EngineShutdownError(ComputeError):
+    def __init__(self, details: dict | None = None):
+        super().__init__(message="Engine shutdown requested", error_code="JOB_CANCELLED", details=details)
+
+
 class IcebergMetadataPathNotFoundError(ValueError):
     def __init__(self, metadata_path: str):
         self.metadata_path = metadata_path
@@ -119,6 +124,7 @@ ERROR_CODE_STATUS_MAP: dict[int, int] = {
     errors_pb2.ERROR_CODE_DATASOURCE_CONNECTION_ERROR: 502,
     errors_pb2.ERROR_CODE_DATASOURCE_SNAPSHOT_ERROR: 409,
     errors_pb2.ERROR_CODE_ENGINE_BUSY: 409,
+    errors_pb2.ERROR_CODE_JOB_CANCELLED: 409,
     errors_pb2.ERROR_CODE_PIPELINE_EXECUTION_ERROR: 500,
 }
 

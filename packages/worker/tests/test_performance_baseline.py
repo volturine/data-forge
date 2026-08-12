@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime import compute_service
+from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_manager import ProcessManager
 
 
@@ -38,7 +39,7 @@ def test_performance_baseline(sample_datasource):
         ],
     }
 
-    manager = ProcessManager()
+    manager = ProcessManager(engine_factory=lambda engine_identity, config: PolarsComputeEngine(engine_identity.resource_id, config))
     identity = compute_pb2.EngineIdentity(
         scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
         reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,

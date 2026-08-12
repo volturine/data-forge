@@ -83,11 +83,31 @@ def cleanup_stale_test_rustfs(*, label: str = 'data-forge.test-rustfs=1') -> Non
         run_command(['docker', 'rm', '-f', *container_ids], env=docker_env(), check=False, timeout=300)
 
 
+def cleanup_stale_test_engine_networks(*, label: str = 'data-forge.test-engine-network=1') -> None:
+    """Remove orphaned integration/e2e engine networks that exhaust Docker's IP pool."""
+    listed = run_command(
+        ['docker', 'network', 'ls', '-q', '--filter', f'label={label}'],
+        env=docker_env(),
+        check=False,
+        timeout=120,
+    )
+    network_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+    for network_id in network_ids:
+        run_command(['docker', 'network', 'rm', network_id], env=docker_env(), check=False, timeout=120)
+
+
 def run_command(
     command: list[str], *, cwd: Path = REPO_ROOT, env: dict[str, str] | None = None, timeout: float = 120, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
     merged_env = env if env is not None else os.environ.copy()
-    return subprocess.run(command, cwd=cwd, env=merged_env, text=True, capture_output=True, timeout=timeout, check=check)
+    result = subprocess.run(command, cwd=cwd, env=merged_env, text=True, capture_output=True, timeout=timeout, check=False)
+    if check and result.returncode != 0:
+        detail = (result.stderr or result.stdout or '').strip()
+        message = f'Command failed ({result.returncode}): {command!r}'
+        if detail:
+            message = f'{message}\n{detail}'
+        raise RuntimeError(message)
+    return result
 
 
 def free_port() -> int:

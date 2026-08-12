@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -27,3 +28,8 @@ def dict_to_struct(payload: Mapping[str, object]) -> struct_pb2.Struct:
     if not isinstance(value, dict):
         raise TypeError("protobuf Struct payload must be an object")
     return json_format.ParseDict(value, struct_pb2.Struct())
+
+
+def encode_json_bytes(payload: object) -> bytes:
+    """Encode transport JSON without coercing integers into floats."""
+    return json.dumps(_json_value(payload), separators=(",", ":")).encode()

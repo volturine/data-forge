@@ -62,7 +62,17 @@ jobs:
         run: just verify
 
       - name: Canonical tests
-        run: just test
+        run: |
+          # Self-hosted runners retain resources from prior jobs. The engine
+          # integration tests build an image, so reclaim all unused Docker
+          # state instead of retaining a day's build cache.
+          docker container prune --force
+          docker volume prune --force
+          docker builder prune --all --force
+          docker image prune --force
+          docker system df
+          df -h
+          just test
 
   frontend:
     name: frontend
@@ -107,14 +117,28 @@ jobs:
 
   e2e:
     name: e2e
+    needs: [backend, frontend]
     runs-on: [self-hosted, linux, x64]
     if: github.event_name == 'pull_request' && github.base_ref == 'master'
-    timeout-minutes: 30
+    timeout-minutes: 35
     permissions:
       contents: read
     env:
       PORT: "8001"
       FRONTEND_PORT: "3001"
+      # Match the pre-Docker parallel e2e default (4). Bootstrap is now bounded
+      # and fails visibly, so we no longer serialize browsers to hide shell hangs.
+      # No Playwright retries.
+      # Four browsers match pre-Docker e2e. Engine admission queues above the
+      # real production-style capacity instead of increasing the limit for CI.
+      PW_E2E_WORKERS: "4"
+      BUILD_WORKER_MIN_PROCESSES: "4"
+      BUILD_WORKER_MAX_PROCESSES: "4"
+      COMPUTE_REQUEST_CONCURRENCY: "4"
+      MAX_CONCURRENT_ENGINES: "8"
+      POLARS_MAX_MEMORY_MB: "256"
+      E2E_TIMEOUT_SECONDS: "1500"
+      LOG_LEVEL: "warning"
     steps:
       - uses: actions/checkout@v6
 
@@ -150,9 +174,20 @@ jobs:
         working-directory: packages/frontend
         run: bun install --frozen-lockfile
 
-      - name: Install Playwright browsers
-        working-directory: packages/frontend
-        run: bun x playwright install --with-deps chromium
+      - name: Pull isolated Playwright runtime
+        run: |
+          PLAYWRIGHT_VERSION="$(node -p "require('./packages/frontend/node_modules/playwright/package.json').version")"
+          docker pull "mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
+
+      - name: Reclaim unused Docker state
+        run: |
+          # Free stopped containers/volumes without wiping the engine image
+          # build cache. A cold 2.5GB engine rebuild dominates e2e wall time.
+          docker container prune --force
+          docker volume prune --force
+          docker image prune --force
+          docker system df
+          df -h
 
       - name: Run e2e tests
         run: |
@@ -163,9 +198,20 @@ jobs:
           just test-e2e 2>&1 | tee .artifacts/ci/e2e/e2e.log
           status=${PIPESTATUS[0]}
           if [ "$status" -eq 124 ]; then
-            echo "e2e step hit the shared 27 minute harness timeout before the 30 minute job timeout"
+            echo "e2e step hit the harness timeout (E2E_TIMEOUT_SECONDS) before the job timeout"
           fi
           exit "$status"
+
+      - name: Upload e2e diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics-${{ github.run_id }}
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            .artifacts/ci/e2e/
+            packages/frontend/tests/.artifacts/playwright/
 
   publish-images:
     if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'master')
@@ -183,6 +229,8 @@ jobs:
             target: scheduler
           - image_name: data-forge-worker
             target: worker
+          - image_name: data-forge-polars-engine
+            target: engine
     steps:
       - uses: actions/checkout@v6
 

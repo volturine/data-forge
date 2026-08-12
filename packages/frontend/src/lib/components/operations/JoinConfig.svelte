@@ -11,7 +11,7 @@
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { X } from '@lucide/svelte';
-	import { css, stepConfig, label, input } from '$lib/styles/panda';
+	import { css, stepConfig, label, input, button } from '$lib/styles/panda';
 
 	const _uid = $props.id();
 
@@ -30,51 +30,97 @@
 
 	let { schema, config = $bindable(defaultConfig) }: Props = $props();
 
-	// Use config.right_source directly as single source of truth
+	// Use config.right_source as single source of truth for selection.
 	let loadedRightSource = $state('');
 	let rightSchema = $state<Schema | null>(null);
-	const rightColumns = $derived(rightSchema?.columns ?? []);
+	let rightSchemaLoading = $state(false);
+	let rightSchemaError = $state<string | null>(null);
+	let loadGeneration = 0;
 
+	const hasRightSource = $derived(Boolean(config.right_source));
+	const rightColumns = $derived(rightSchema?.columns ?? []);
 	const isCrossJoin = $derived(config.how === 'cross');
 
-	// Load right schema when config.right_source changes
+	// Load right schema when config.right_source changes.
 	// Network: $derived can't fetch schema for selected datasource.
 	$effect(() => {
-		const source = config.right_source;
-		if (source && source !== loadedRightSource) {
-			loadedRightSource = source;
-			loadRightSchema(source);
-		}
-	});
-
-	async function loadRightSchema(datasourceId: string) {
-		const target = datasourceStore.getDatasource(datasourceId);
-		if (target?.source_type === 'analysis') {
+		const source = config.right_source ?? '';
+		if (!source) {
+			loadGeneration += 1;
+			loadedRightSource = '';
 			rightSchema = null;
+			rightSchemaError = null;
+			rightSchemaLoading = false;
 			return;
 		}
-		let schemaInfo: Awaited<ReturnType<typeof datasourceStore.getSchema>> | null;
-		try {
-			schemaInfo = await datasourceStore.getSchema(datasourceId);
-		} catch (err) {
-			void err;
-			schemaInfo = null;
-		}
-		if (!schemaInfo) {
+		if (source === loadedRightSource) return;
+		loadedRightSource = source;
+		void loadRightSchema(source);
+	});
+
+	async function loadRightSchema(
+		datasourceId: string,
+		options: { forceRefresh?: boolean } = {}
+	): Promise<void> {
+		const generation = ++loadGeneration;
+		const target = datasourceStore.getDatasource(datasourceId);
+		if (target?.source_type === 'analysis') {
+			if (generation !== loadGeneration) return;
 			rightSchema = null;
+			rightSchemaError = 'Analysis outputs cannot be used as a join right source';
+			rightSchemaLoading = false;
 			schemaStore.removeJoinDatasource(datasourceId);
 			return;
 		}
-		const joinSchema: Schema = {
-			columns: schemaInfo.columns.map((c) => ({
-				name: c.name,
-				dtype: c.dtype,
-				nullable: c.nullable
-			})),
-			row_count: schemaInfo.row_count
-		};
-		rightSchema = joinSchema;
-		schemaStore.setJoinDatasource(datasourceId, joinSchema);
+
+		rightSchemaLoading = true;
+		rightSchemaError = null;
+		if (options.forceRefresh) {
+			datasourceStore.clearSchemaCache(datasourceId);
+		}
+
+		try {
+			const schemaInfo = await datasourceStore.getSchema(datasourceId, {
+				refresh: options.forceRefresh === true
+			});
+			if (generation !== loadGeneration) return;
+			const joinSchema: Schema = {
+				columns: schemaInfo.columns.map((c) => ({
+					name: c.name,
+					dtype: c.dtype,
+					nullable: c.nullable
+				})),
+				row_count: schemaInfo.row_count
+			};
+			rightSchema = joinSchema;
+			rightSchemaError = null;
+			schemaStore.setJoinDatasource(datasourceId, joinSchema);
+		} catch (err) {
+			if (generation !== loadGeneration) return;
+			rightSchema = null;
+			rightSchemaError = err instanceof Error ? err.message : 'Failed to load schema';
+			schemaStore.removeJoinDatasource(datasourceId);
+		} finally {
+			if (generation === loadGeneration) {
+				rightSchemaLoading = false;
+			}
+		}
+	}
+
+	function retryRightSchema(): void {
+		const source = config.right_source;
+		if (!source) return;
+		// Allow the effect / explicit load to run again for the same id.
+		loadedRightSource = source;
+		void loadRightSchema(source, { forceRefresh: true });
+	}
+
+	function selectRightSource(id: string): void {
+		config.right_source = id;
+		// Effect loads when the id changes; re-selecting the same id still reloads.
+		if (id === loadedRightSource) {
+			void loadRightSchema(id);
+		}
 	}
 
 	function addJoinColumn() {
@@ -120,16 +166,35 @@
 			selected={config.right_source ?? ''}
 			mode="single"
 			highlightId={currentTabDatasource ?? undefined}
-			onSelect={(id) => {
-				config.right_source = id;
-				loadRightSchema(id);
-			}}
+			onSelect={selectRightSource}
 		/>
-		{#if rightSchema}
+		{#if rightSchemaLoading}
 			<div
 				id="join-schema-preview"
 				class={css({ marginTop: '2', fontSize: 'xs', color: 'fg.muted' })}
 				aria-live="polite"
+				data-testid="join-schema-loading"
+			>
+				Loading schema…
+			</div>
+		{:else if rightSchemaError}
+			<div class={css({ marginTop: '2', display: 'flex', flexDirection: 'column', gap: '2' })}>
+				<Callout tone="error">{rightSchemaError}</Callout>
+				<button
+					type="button"
+					class={button({ variant: 'secondary', size: 'sm' })}
+					data-testid="join-schema-retry"
+					onclick={retryRightSchema}
+				>
+					Retry schema load
+				</button>
+			</div>
+		{:else if rightSchema}
+			<div
+				id="join-schema-preview"
+				class={css({ marginTop: '2', fontSize: 'xs', color: 'fg.muted' })}
+				aria-live="polite"
+				data-testid="join-schema-ready"
 			>
 				{rightSchema.columns.length} columns available
 			</div>
@@ -215,9 +280,11 @@
 						fontSize: 'sm',
 						backgroundColor: 'bg.accent',
 						color: 'fg.inverse',
-						_hover: { backgroundColor: 'accent.primary' }
+						_hover: { backgroundColor: 'accent.primary' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed' }
 					})}
 					onclick={addJoinColumn}
+					disabled={!hasRightSource || rightSchemaLoading || !!rightSchemaError}
 					aria-label="Add join column pair"
 				>
 					+ Add Join Column
@@ -336,7 +403,45 @@
 		<span id="right-columns-heading"><SectionHeader>Columns from Right Dataset</SectionHeader></span
 		>
 
-		{#if rightColumns.length === 0}
+		{#if !hasRightSource}
+			<p
+				class={css({
+					color: 'fg.muted',
+					fontStyle: 'italic',
+					textAlign: 'center',
+					padding: '4',
+					margin: '0'
+				})}
+				data-testid="join-right-columns-empty"
+			>
+				Select a right datasource first
+			</p>
+		{:else if rightSchemaLoading}
+			<p
+				class={css({
+					color: 'fg.muted',
+					fontStyle: 'italic',
+					textAlign: 'center',
+					padding: '4',
+					margin: '0'
+				})}
+				data-testid="join-right-columns-loading"
+			>
+				Loading right datasource schema…
+			</p>
+		{:else if rightSchemaError}
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+				<Callout tone="error">Could not load right datasource schema: {rightSchemaError}</Callout>
+				<button
+					type="button"
+					class={button({ variant: 'secondary', size: 'sm' })}
+					data-testid="join-right-columns-retry"
+					onclick={retryRightSchema}
+				>
+					Retry
+				</button>
+			</div>
+		{:else if rightColumns.length === 0}
 			<p
 				class={css({
 					color: 'fg.muted',
@@ -346,7 +451,7 @@
 					margin: '0'
 				})}
 			>
-				Select a right datasource first
+				Right datasource has no columns
 			</p>
 		{:else}
 			<MultiSelectColumnDropdown

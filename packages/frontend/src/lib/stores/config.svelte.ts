@@ -14,15 +14,16 @@ export class ConfigStore {
 		this.loading = true;
 		this.error = null;
 
-		const request = getConfig().match(
-			(config) => {
-				this.config = config;
+		const request = (async () => {
+			const result = await getConfig();
+			if (result.isOk()) {
+				this.config = result.value;
 				this.fetched = true;
-			},
-			(err) => {
-				this.error = err.message;
+				this.error = null;
+				return;
 			}
-		);
+			this.error = result.error.message;
+		})();
 
 		this.pending = request.finally(() => {
 			this.loading = false;
@@ -30,6 +31,11 @@ export class ConfigStore {
 		});
 
 		return this.pending;
+	}
+
+	/** True once fetch settled (success or failure). Used to leave the bootstrap spinner. */
+	get settled(): boolean {
+		return this.fetched || this.error !== null;
 	}
 
 	/**

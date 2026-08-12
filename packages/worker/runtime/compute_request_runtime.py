@@ -14,16 +14,16 @@ from datasources import execution as datasource_execution
 from datasources.schemas import CSVOptions
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import EngineCapacityFull, ProcessManager
 from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
 from runtime.domain.domain_enums import domain_token
-from runtime.exceptions import AppError, engine_not_found, status_for_app_error
-from runtime.worker_runtime_client import BackendWorkerRpcError, WorkerRuntimeClient, client_from_env
+from runtime.exceptions import AppError, status_for_app_error
 from runtime.json_values import dict_to_struct
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
+from runtime.worker_runtime_client import BackendWorkerRpcError, WorkerRuntimeClient, client_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,19 @@ _DATASOURCE_REQUEST_KINDS = {
     enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
     enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
 }
+NON_ENGINE_REQUEST_KINDS = frozenset({*_DATASOURCE_REQUEST_KINDS, enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE})
+ENGINE_REQUEST_KINDS = frozenset(
+    {
+        enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
+        enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
+        enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
+        enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
+        enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
+    }
+)
+ALL_REQUEST_KINDS = NON_ENGINE_REQUEST_KINDS | ENGINE_REQUEST_KINDS
 
 
 def worker_runtime_client() -> WorkerRuntimeClient:
@@ -75,8 +88,12 @@ class ComputeRequestLeaseLost(RuntimeError):
     pass
 
 
-def next_compute_request(worker_id: str) -> ClaimedComputeRequest | None:
-    claimed = worker_runtime_client().claim_compute_request(worker_id=worker_id)
+def next_compute_request(
+    worker_id: str,
+    *,
+    allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
+) -> ClaimedComputeRequest | None:
+    claimed = worker_runtime_client().claim_compute_request(worker_id=worker_id, allowed_kinds=allowed_kinds)
     if claimed is None:
         return None
     return ClaimedComputeRequest(
@@ -96,11 +113,12 @@ async def compute_request_loop(
     *,
     worker_id: str,
     manager: ProcessManager,
+    allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
 ) -> None:
     last_seen = request_hub.version()
     while not stop_event.is_set():
         try:
-            handled = await _run_once(worker_id=worker_id, manager=manager)
+            handled = await _run_once(worker_id=worker_id, manager=manager, allowed_kinds=allowed_kinds)
             if handled:
                 last_seen = request_hub.version()
                 continue
@@ -128,8 +146,13 @@ async def compute_request_loop(
                     last_seen = value
 
 
-async def _run_once(*, worker_id: str, manager: ProcessManager) -> bool:
-    claimed = next_compute_request(worker_id)
+async def _run_once(
+    *,
+    worker_id: str,
+    manager: ProcessManager,
+    allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
+) -> bool:
+    claimed = next_compute_request(worker_id, allowed_kinds=allowed_kinds)
     if claimed is None:
         return False
     try:
@@ -140,20 +163,39 @@ async def _run_once(*, worker_id: str, manager: ProcessManager) -> bool:
 
 
 async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManager) -> None:
+    """Admit engine capacity first, then run on the compute pool.
+
+    Capacity wait is a real queue: the request sits with **no compute-pool
+    thread** until a slot is free or the engine already exists for reuse.
+    Only then is a runner created. Lease renewal continues while queued.
+    """
     loop = asyncio.get_running_loop()
-    execution = loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
+    identity = _engine_identity_for_claimed(claimed)
     renewal_stop = asyncio.Event()
     renewal = asyncio.create_task(_renew_compute_lease(claimed, stop_event=renewal_stop))
     try:
-        done, _pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
-        if renewal in done:
+        while True:
+            # Gate: do not take a compute runner until admission allows spawn/reuse.
+            owns_admission = await manager.await_spawn_admission(identity)
             try:
-                await renewal
-            except ComputeRequestLeaseLost:
-                await asyncio.gather(execution, return_exceptions=True)
-                raise
-            raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
-        await execution
+                execution = loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
+                done, _pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
+                if renewal in done:
+                    try:
+                        await renewal
+                    except ComputeRequestLeaseLost:
+                        await asyncio.gather(execution, return_exceptions=True)
+                        raise
+                    raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
+                try:
+                    await execution
+                    return
+                except EngineCapacityFull:
+                    # Direct lifecycle work may have claimed the slot between
+                    # reuse admission and execution. Rejoin the FIFO queue.
+                    continue
+            finally:
+                manager.release_spawn_admission(identity, owned=owns_admission)
     finally:
         renewal_stop.set()
         await asyncio.gather(renewal, return_exceptions=True)
@@ -519,12 +561,9 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "shutdown_engine")
             identity = command.engine_identity
-            engine = manager.get_engine(identity)
-            if engine is None:
-                raise engine_not_found(identity.resource_id)
-            # Deleting an analysis must retire its engine even when a preview is in
-            # flight. ProcessManager first requests a cooperative subprocess stop,
-            # then escalates only when it does not stop.
+            # Shutdown is idempotent: capacity eviction, idle reaping, or a prior
+            # crash may already have removed the container. Missing engines are a
+            # successful terminal state, matching reconciliation rules.
             manager.shutdown_engine(identity)
             _complete_request(client, claimed, response=compute_pb2.ComputeResponse(ack=compute_pb2.ComputeAckResult(success=True)))
         else:
@@ -532,31 +571,93 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
     except ComputeRequestLeaseLost:
         # Stale claim / replaced publication fence: drain without failing the request as an infrastructure error.
         raise
+    except EngineCapacityFull:
+        # Propagate so the async runner can park without holding a pool thread.
+        raise
     except Exception as exc:
         error = _error_result(exc)
         status_code = error.status_code if error.HasField("status_code") else None
+        try:
+            client.fail_compute_request(
+                namespace=claimed.namespace,
+                request_id=claimed.id,
+                kind=claimed.kind,
+                worker_id=claimed.worker_id,
+                claim_token=claimed.claim_token,
+                lease_generation=claimed.lease_generation,
+                error_message=_error_message(exc),
+                error=error,
+            )
+        except BackendWorkerRpcError as publish_exc:
+            if publish_exc.status_code == 412:
+                logger.info("Compute request %s ended after its lease was retired", claimed.id)
+                return
+            raise
         if status_code is not None and status_code >= 500:
             logger.error("Compute request %s failed: %s", claimed.id, exc, exc_info=True)
         elif status_code is not None and status_code >= 400:
             logger.info("Compute request %s rejected: %s", claimed.id, exc)
         else:
             logger.warning("Compute request %s failed: %s", claimed.id, exc)
-        client.fail_compute_request(
-            namespace=claimed.namespace,
-            request_id=claimed.id,
-            kind=claimed.kind,
-            worker_id=claimed.worker_id,
-            claim_token=claimed.claim_token,
-            lease_generation=claimed.lease_generation,
-            error_message=_error_message(exc),
-            error=error,
-        )
     finally:
         try:
             client.dispatch_runtime_outbox()
         except Exception as exc:
             logger.warning("Compute response outbox fast-path dispatch failed for request %s: %s", claimed.id, exc)
         reset_namespace(token)
+
+
+def _analysis_interactive_identity(analysis_id: str) -> compute_pb2.EngineIdentity:
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id=analysis_id,
+        resource_id=analysis_id,
+    )
+
+
+def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.EngineIdentity | None:
+    """Identity that will need a capacity slot, or None if no Polars engine is required."""
+    kind = claimed.kind
+    if kind in _DATASOURCE_REQUEST_KINDS:
+        return None
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
+        # Shutdown frees capacity; never waits for a slot.
+        return None
+    if kind in {
+        enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
+    }:
+        field = "spawn_engine" if kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE else "configure_engine"
+        return _lifecycle_command_from_claimed(claimed, field).engine_identity
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
+        preview = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
+        if preview.HasField("engine_identity"):
+            return preview.engine_identity
+        if preview.HasField("analysis_id") and preview.analysis_id:
+            return _analysis_interactive_identity(preview.analysis_id)
+        return None
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
+        schema = cast(compute_pb2.StepSchemaCommand, _compute_command_from_claimed(claimed, "schema"))
+        if schema.HasField("analysis_id") and schema.analysis_id:
+            return _analysis_interactive_identity(schema.analysis_id)
+        return None
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
+        row_count = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
+        if row_count.HasField("analysis_id") and row_count.analysis_id:
+            return _analysis_interactive_identity(row_count.analysis_id)
+        return None
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
+        download = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
+        if download.HasField("analysis_id") and download.analysis_id:
+            return _analysis_interactive_identity(download.analysis_id)
+        return None
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
+        export = cast(compute_pb2.ExportCommand, _compute_command_from_claimed(claimed, "export"))
+        if export.HasField("analysis_id") and export.analysis_id:
+            return _analysis_interactive_identity(export.analysis_id)
+        return None
+    return None
 
 
 def _lifecycle_command_from_claimed(claimed: ClaimedComputeRequest, field_name: str) -> compute_pb2.EngineLifecycleCommand:
@@ -677,13 +778,19 @@ def _engine_status_result(value: compute_schemas.EngineStatusSchema) -> compute_
         status=cast(enums_pb2.EngineStatus, value.status.number),
     )
     optional_scalars = {
-        "process_id": value.process_id,
         "last_activity": value.last_activity,
         "current_job_id": value.current_job_id,
         "datasource_id": value.datasource_id,
         "build_id": value.build_id,
         "current_build_id": value.current_build_id,
         "current_engine_run_id": value.current_engine_run_id,
+        "container_id": value.container_id,
+        "image_digest": value.image_digest,
+        "termination_reason": value.termination_reason,
+        "exit_code": value.exit_code,
+        "oom_killed": value.oom_killed,
+        "supervisor_id": value.supervisor_id,
+        "owner_id": value.owner_id,
     }
     for field_name, field_value in optional_scalars.items():
         if field_value is not None:
@@ -692,6 +799,8 @@ def _engine_status_result(value: compute_schemas.EngineStatusSchema) -> compute_
         result.scope = cast(enums_pb2.EngineScope, value.scope.number)
     if value.reuse_policy is not None:
         result.reuse_policy = cast(enums_pb2.EngineReusePolicy, value.reuse_policy.number)
+    if value.lifecycle_status is not None:
+        result.lifecycle_status = getattr(enums_pb2, f"ENGINE_INSTANCE_STATUS_{value.lifecycle_status.upper()}")
     for field_name, config in (("resource_config", value.resource_config), ("effective_resources", value.effective_resources)):
         proto_config = _resource_config_proto(config)
         if proto_config is not None:

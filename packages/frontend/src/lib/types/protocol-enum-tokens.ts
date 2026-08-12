@@ -18,6 +18,7 @@ import {
 	DisplayUnits as ProtocolDisplayUnits,
 	DurationUnit as ProtocolDurationUnit,
 	EngineReusePolicy as ProtocolEngineReusePolicy,
+	EngineInstanceStatus as ProtocolEngineInstanceStatus,
 	EngineRunExecutionCategory as ProtocolEngineRunExecutionCategory,
 	EngineRunExecutionCategorySchema as ProtocolEngineRunExecutionCategorySchema,
 	EngineRunKind as ProtocolEngineRunKind,
@@ -412,6 +413,15 @@ export const ENGINE_STATUS_TOKENS = {
 	[ProtocolEngineStatus.TERMINATED]: 'terminated'
 } as const satisfies Partial<Record<ProtocolEngineStatus, string>>;
 
+export const ENGINE_INSTANCE_STATUS_TOKENS = {
+	[ProtocolEngineInstanceStatus.STARTING]: 'starting',
+	[ProtocolEngineInstanceStatus.IDLE]: 'idle',
+	[ProtocolEngineInstanceStatus.RUNNING]: 'running',
+	[ProtocolEngineInstanceStatus.STOPPING]: 'stopping',
+	[ProtocolEngineInstanceStatus.STOPPED]: 'stopped',
+	[ProtocolEngineInstanceStatus.FAILED]: 'failed'
+} as const satisfies Partial<Record<ProtocolEngineInstanceStatus, string>>;
+
 export const ENGINE_SCOPE_TOKENS = {
 	[ProtocolEngineScope.DATASOURCE_PREVIEW]: 'datasource_preview',
 	[ProtocolEngineScope.ANALYSIS_INTERACTIVE]: 'analysis_interactive',
@@ -531,6 +541,7 @@ export type TimeDirection = EnumToken<typeof TIME_DIRECTION_TOKENS>;
 export type StringTransformMethod = EnumToken<typeof STRING_TRANSFORM_METHOD_TOKENS>;
 export type EngineRunKind = EnumToken<typeof ENGINE_RUN_KIND_TOKENS>;
 export type EngineStatus = EnumToken<typeof ENGINE_STATUS_TOKENS>;
+export type EngineInstanceStatus = EnumToken<typeof ENGINE_INSTANCE_STATUS_TOKENS>;
 export type EngineScope = EnumToken<typeof ENGINE_SCOPE_TOKENS>;
 export type EngineReusePolicy = EnumToken<typeof ENGINE_REUSE_POLICY_TOKENS>;
 export type BuildStepState = EnumToken<typeof BUILD_STEP_STATE_TOKENS>;

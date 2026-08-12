@@ -40,10 +40,11 @@ worker reach its internal gRPC endpoint only through the Compose network.
 ### Configure and start
 
 1. Review `docker/env/prod.env` and replace every `replace-with-...` value.
-2. Set the three image variables to tags published from the same release.
+2. Set the four image variables to tags published from the same release. `DF_ENGINE_IMAGE` must be available to the local Docker daemon before the worker starts.
 3. Set `DF_AUTH_FRONTEND_URL`, OAuth callback URLs, and `DF_CORS_ORIGINS` to the
    public HTTPS origin.
-4. Start the stack:
+4. Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the deployment host. The worker is the only service with Docker access; this permission is equivalent to administrative host access.
+5. Start the stack:
 
 ```bash
 docker compose --env-file docker/env/prod.env \
@@ -109,6 +110,9 @@ Edit `config/env/prod.env`:
 - set `DATABASE_URL` to PostgreSQL;
 - set the four `OBJECT_STORE_*` values (endpoint, region, access key, secret).
   Each product namespace is an S3 bucket (name == bucket);
+- provision separate namespace reader and builder object-store identities and
+  set `ENGINE_OBJECT_STORE_CREDENTIALS_JSON`; production rejects the platform
+  object-store credentials for engine containers;
 - replace `INTERNAL_API_TOKEN` and `SETTINGS_ENCRYPTION_KEY`;
 - set `DATA_DIR` to a writable, durable local directory for process scratch;
 - set the public auth and OAuth URLs;

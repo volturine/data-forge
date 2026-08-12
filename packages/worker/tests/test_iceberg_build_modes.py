@@ -1,4 +1,5 @@
 import uuid
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -9,8 +10,8 @@ from pyiceberg.types import NestedField, StringType
 
 from runtime.compute_service import _schema_cache_payload_from_arrow, _sync_iceberg_schema, export_data
 from runtime.domain.compute.base import EngineResult
-from runtime.worker_runtime_client import ClaimedBuildJob
 from runtime.namespace import namespace_paths
+from runtime.worker_runtime_client import ClaimedBuildJob
 
 
 class TestSyncIcebergSchema:
@@ -168,6 +169,7 @@ class TestBuildModeWiring:
         engine = self._make_engine_mock()
         manager.get_engine.return_value = engine
         manager.get_or_create_engine.return_value = engine
+        manager.acquire_engine.return_value = nullcontext(engine)
         return manager
 
     def _make_internal_client_mock(self, output_ds_id: str) -> MagicMock:

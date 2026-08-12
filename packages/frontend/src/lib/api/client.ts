@@ -116,9 +116,25 @@ function handleErrorResponse(
 	});
 }
 
+/** Bound for app-shell bootstrap probes (config + session). Compute stays unbounded. */
+export const BOOTSTRAP_API_TIMEOUT_MS = 15_000;
+
 function requestCacheMode(options: RequestInit | undefined): RequestCache | undefined {
 	if (options?.cache !== undefined) return options.cache;
 	return 'no-store';
+}
+
+function combineSignals(signals: AbortSignal[]): AbortSignal | undefined {
+	if (signals.length === 0) return undefined;
+	if (signals.length === 1) return signals[0];
+	return AbortSignal.any(signals);
+}
+
+function isAbortError(error: unknown): boolean {
+	return (
+		(error instanceof DOMException && error.name === 'AbortError') ||
+		(error instanceof Error && error.name === 'AbortError')
+	);
 }
 
 function apiFetch<T>(
@@ -131,11 +147,14 @@ function apiFetch<T>(
 	const requestNamespace = headers.get('X-Namespace');
 	const namespaceController = new AbortController();
 	if (requestNamespace) namespaceRequests.add(namespaceController);
-	const signals = [
-		options?.signal,
-		requestNamespace ? namespaceController.signal : undefined
-	].filter((signal): signal is AbortSignal => signal !== undefined);
-	const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+	// Optional timeout only when the caller passes options.signal (bootstrap).
+	// Compute/preview must not share a short global timeout — Docker engine cold
+	// starts legitimately exceed 15s.
+	const callerSignal = options?.signal;
+	const signals = [callerSignal, requestNamespace ? namespaceController.signal : undefined].filter(
+		(signal): signal is AbortSignal => signal !== undefined
+	);
+	const signal = combineSignals(signals);
 	const request = {
 		...options,
 		headers,
@@ -144,15 +163,22 @@ function apiFetch<T>(
 	} satisfies RequestInit;
 	const result = ResultAsync.fromPromise(
 		fetch(buildApiUrl(endpoint), request),
-		(error): ApiError =>
-			createApiError(
-				'network',
-				namespaceController.signal.aborted
-					? 'Request cancelled because the namespace changed'
-					: error instanceof Error
-						? error.message
-						: 'Network error'
-			)
+		(error): ApiError => {
+			if (namespaceController.signal.aborted) {
+				return createApiError('network', 'Request cancelled because the namespace changed');
+			}
+			if (callerSignal?.aborted || isAbortError(error)) {
+				return createApiError(
+					'network',
+					callerSignal
+						? `Request timed out or was aborted (bootstrap budget ${BOOTSTRAP_API_TIMEOUT_MS}ms)`
+						: error instanceof Error
+							? error.message
+							: 'Network error'
+				);
+			}
+			return createApiError('network', error instanceof Error ? error.message : 'Network error');
+		}
 	).andThen((response) => {
 		if (!response.ok) return handleErrorResponse(response, endpoint, options);
 		return parse(response).andThen((value) => {

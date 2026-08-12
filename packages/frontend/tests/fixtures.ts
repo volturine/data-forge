@@ -7,7 +7,9 @@ import {
 	type E2EStorageState,
 	type WorkerAuth
 } from './utils/api.js';
+import { installE2eContextGuards } from './utils/page-guards.js';
 import { createRequestTrace } from './utils/request-trace.js';
+import { waitForLayoutReady } from './utils/readiness.js';
 
 export { expect } from '@playwright/test';
 
@@ -16,25 +18,27 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
 const authRequired = process.env.AUTH_REQUIRED !== 'false';
 
 async function expectSignedIn(page: Page): Promise<void> {
-	const timeout = process.env.CI ? 15_000 : 5_000;
-	await page.getByLabel('Main navigation').waitFor({ state: 'visible', timeout });
+	const timeout = process.env.CI ? 45_000 : 15_000;
+	await waitForLayoutReady(page, timeout);
 }
 
 /**
- * Register once per worker and return Playwright storage state.
- * Session cookies are set by the register API; we hard-navigate home so the
- * captured state is a settled authenticated document.
+ * Register once per worker through the real register UI (same path a person
+ * uses) and return Playwright storage state. Unique emails keep worker
+ * restarts from colliding with an already-registered account.
  */
 async function createSessionState(browser: Browser, workerIndex: number): Promise<E2EStorageState> {
 	const context = await browser.newContext({ baseURL });
+	installE2eContextGuards(context);
 	const page = await context.newPage();
 	try {
 		if (authRequired) {
-			const email = `e2e-ui-${E2E_RUN_STAMP}-w${workerIndex}@example.com`;
-			await page.goto('/register', { waitUntil: 'domcontentloaded' });
-			await page.waitForLoadState('networkidle');
-			await page.locator('[data-auth-form-ready="true"]').waitFor({ timeout: 10_000 });
+			// Unique per session so a Playwright worker restart does not collide.
+			const email = `e2e-ui-${E2E_RUN_STAMP}-w${workerIndex}-${Date.now()}@example.com`;
+			await page.goto('/register', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+			// Ready the way a person is: form fields are visible and interactive.
 			const nameInput = page.locator('#name');
+			await expect(nameInput).toBeVisible({ timeout: 15_000 });
 			const emailInput = page.locator('#email');
 			const passwordInput = page.locator('#password');
 			const confirmInput = page.locator('#confirm');
@@ -48,9 +52,9 @@ async function createSessionState(browser: Browser, workerIndex: number): Promis
 			await expect(confirmInput).toHaveValue(E2E_PASSWORD);
 			const createButton = page.getByRole('button', { name: 'Create account', exact: true });
 			await expect(createButton).toBeEnabled({ timeout: 5_000 });
-			await createButton.click();
+			await createButton.click({ timeout: 15_000 });
 			await expect(page.getByText(/Account created\./i)).toBeVisible({ timeout: 15_000 });
-			await page.goto('/', { waitUntil: 'networkidle' });
+			await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
 			await expectSignedIn(page);
 		}
 		const sessionState = (await context.storageState()) as E2EStorageState;
@@ -96,20 +100,21 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 				baseURL,
 				storageState: structuredClone(workerAuth.sessionState)
 			});
+			installE2eContextGuards(context);
 			await use(context);
 			await context.close();
 		},
 		{ scope: 'worker' }
 	],
 
-	page: async ({ browser, workerAuth }, use) => {
-		const context = await browser.newContext({
-			baseURL,
-			storageState: structuredClone(workerAuth.sessionState)
-		});
-		const page = await context.newPage();
+	page: async ({ helperContext }, use) => {
+		// Reuse the worker's authenticated context so IndexedDB namespace and
+		// session cookies stay warm across tests. Fresh contexts force a cold
+		// config/auth/namespace bootstrap on every test and starve under Docker
+		// engine load on the shared CI host.
+		const page = await helperContext.newPage();
 		await use(page);
-		await context.close();
+		await page.close();
 	},
 
 	request: async ({ browser, workerAuth, helperContext }, use) => {

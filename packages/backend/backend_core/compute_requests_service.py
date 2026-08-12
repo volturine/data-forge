@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -138,7 +139,13 @@ def get_request(session: Session, request_id: str) -> ComputeRequest | None:
     return session.get(ComputeRequest, request_id)
 
 
-def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_ids: set[str] | None = None) -> ComputeRequest | None:
+def claim_next_request(
+    session: Session,
+    *,
+    worker_id: str,
+    reclaimable_owner_ids: set[str] | None = None,
+    allowed_kinds: Collection[enums_pb2.ComputeRequestKind] | None = None,
+) -> ComputeRequest | None:
     now = _database_now(session)
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
@@ -192,9 +199,10 @@ def claim_next_request(session: Session, *, worker_id: str, reclaimable_owner_id
         table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
         or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable), table.c.lease_expires_at <= now),
     )
-    base = (
-        select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).order_by(_request_priority_clause(table), table.c.created_at, table.c.id).limit(1)
-    )
+    base = select(ComputeRequest).where(or_(queued_clause, reclaimable_clause))
+    if allowed_kinds is not None:
+        base = base.where(table.c.kind.in_(allowed_kinds))
+    base = base.order_by(_request_priority_clause(table), table.c.created_at, table.c.id).limit(1)
     stmt = with_for_update_skip_locked(session, base)
     row = session.execute(stmt).scalars().first()
     if row is None:

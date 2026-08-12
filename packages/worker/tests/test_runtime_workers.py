@@ -10,8 +10,8 @@ from typing import cast
 
 import pytest
 
-from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient
 from runtime.worker_runtime import build_worker_loop
+from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient
 
 
 class FakeWorkerRuntimeClient:
@@ -497,10 +497,10 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
     )
 
     async def fake_compute_request_loop(*args, **kwargs) -> None:
-        calls.append(("compute_request_loop", None))
+        calls.append(("compute_request_loop", kwargs["allowed_kinds"]))
 
     monkeypatch.setattr(runtime_process, "compute_request_loop", fake_compute_request_loop)
-    monkeypatch.setattr(runtime_process, "compute_request_worker_count", lambda: 1)
+    monkeypatch.setattr(runtime_process, "compute_request_worker_count", lambda: 4)
     monkeypatch.setattr(runtime_process, "datasource_delete_loop", lambda *args, **kwargs: asyncio.sleep(0))
     monkeypatch.setattr(
         runtime_process,
@@ -524,5 +524,15 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
     assert register_payload["worker_id"] == "manager-1"
     assert register_payload["kind"] == "build_manager"
     assert register_payload["capacity"] == 2
-    assert names.count("compute_request_loop") == 1
+    request_lanes = [payload for name, payload in calls if name == "compute_request_loop"]
+    assert request_lanes == [
+        runtime_process.NON_ENGINE_REQUEST_KINDS,
+        runtime_process.NON_ENGINE_REQUEST_KINDS,
+        runtime_process.NON_ENGINE_REQUEST_KINDS,
+        runtime_process.NON_ENGINE_REQUEST_KINDS,
+        runtime_process.ENGINE_REQUEST_KINDS,
+        runtime_process.ENGINE_REQUEST_KINDS,
+        runtime_process.ENGINE_REQUEST_KINDS,
+        runtime_process.ENGINE_REQUEST_KINDS,
+    ]
     assert ("stop_worker", {"worker_id": "manager-1"}) in client.calls

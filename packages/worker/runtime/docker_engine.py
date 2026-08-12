@@ -1,0 +1,752 @@
+from __future__ import annotations
+
+import contextlib
+import json
+import logging
+import os
+import re
+import threading
+import time
+import uuid
+from collections import deque
+from collections.abc import Callable
+from datetime import UTC, datetime
+from hashlib import sha256
+from pathlib import Path
+from typing import Any, cast
+
+import docker
+import grpc
+from google.protobuf import json_format
+
+from dataforge_protocol import compute_pb2, engine_runtime_pb2, engine_runtime_pb2_grpc, enums_pb2
+from runtime.config import settings
+from runtime.domain.compute.base import ComputeEngine, EngineProgressEvent, EngineResult
+from runtime.engine_credentials import ObjectStoreCredentials, resolve_engine_credentials, validate_configured_engine_credentials
+from runtime.engine_server import ENGINE_PROTOCOL_VERSION
+from runtime.export_formats import get_export_format
+from runtime.json_values import encode_json_bytes
+from runtime.namespace import get_namespace
+from runtime.object_store import delete_object, download_file, object_store_url, presigned_put_url
+
+logger = logging.getLogger(__name__)
+
+_ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
+_ENGINE_APPLICATION_VERSION = "engine"
+_MIB = 1024 * 1024
+_IMAGE_DIGEST_RE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+_docker_runtime_lock = threading.Lock()
+_cached_daemon_cpu_count: int | None = None
+_validated_image_ref: str | None = None
+_validated_image_id: str | None = None
+_validated_network: str | None = None
+
+
+def _validate_engine_image_reference() -> None:
+    if settings.prod_mode_enabled and _IMAGE_DIGEST_RE.fullmatch(settings.engine_image) is None:
+        raise RuntimeError("Production ENGINE_IMAGE must use an immutable repository@sha256:digest reference")
+
+
+def _resolve_launch_context(client: Any) -> tuple[int | None, str]:
+    """Cache daemon/image/network lookups across engine starts on this worker.
+
+    Each Docker API round-trip is cheap alone but multiplies across hundreds of
+    e2e engine spawns. Image and network are immutable for a worker process.
+    """
+    global _cached_daemon_cpu_count, _validated_image_ref, _validated_image_id, _validated_network
+    with _docker_runtime_lock:
+        if _cached_daemon_cpu_count is None:
+            ncpu = client.info().get("NCPU")
+            _cached_daemon_cpu_count = ncpu if isinstance(ncpu, int) else 0
+        if _validated_image_ref != settings.engine_image or not _validated_image_id:
+            image = client.images.get(settings.engine_image)
+            if settings.prod_mode_enabled and settings.engine_image not in image.attrs.get("RepoDigests", []):
+                raise RuntimeError(f"Docker image does not match configured immutable digest: {settings.engine_image}")
+            _validated_image_ref = settings.engine_image
+            _validated_image_id = str(image.id)
+        if _validated_network != settings.engine_docker_network:
+            client.networks.get(settings.engine_docker_network)
+            _validated_network = settings.engine_docker_network
+        daemon_cpu = _cached_daemon_cpu_count if _cached_daemon_cpu_count and _cached_daemon_cpu_count > 0 else None
+        assert _validated_image_id is not None
+        return daemon_cpu, _validated_image_id
+
+
+def validate_engine_runtime_readiness() -> None:
+    """Fail before worker registration if Docker or launch inputs are unavailable."""
+    _validate_engine_image_reference()
+    validate_configured_engine_credentials()
+    client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
+    try:
+        _resolve_launch_context(client)
+    finally:
+        client.close()
+
+
+def reconcile_deployment_containers(*, supervisor_id: str | None = None, remove_running: bool = True) -> int:
+    """Remove owned orphan or stopped containers within this deployment."""
+    client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
+    removed = 0
+    try:
+        labels = ["io.dataforge.managed=true", f"io.dataforge.deployment={settings.deployment_id}"]
+        if supervisor_id is not None:
+            labels.append(f"io.dataforge.supervisor={supervisor_id}")
+        containers = client.api.containers(all=True, filters={"label": labels})
+        for container in containers:
+            # A launch is visible as ``created`` before ``container.start()``.
+            # Periodic cleanup must not race that transition; only startup and
+            # dead-supervisor cleanup may remove non-terminal containers.
+            if not remove_running and container.get("State") not in {"dead", "exited"}:
+                continue
+            with contextlib.suppress(Exception):
+                client.api.remove_container(container["Id"], force=True)
+                removed += 1
+    finally:
+        client.close()
+    return removed
+
+
+def _identity_scope(identity: compute_pb2.EngineIdentity) -> str:
+    return enums_pb2.EngineScope.Name(identity.scope).removeprefix("ENGINE_SCOPE_").lower()
+
+
+def _safe_name(value: str) -> str:
+    normalized = "".join(char.lower() if char.isalnum() else "-" for char in value).strip("-")
+    return normalized[:40] or "engine"
+
+
+def _container_name(*, identity: compute_pb2.EngineIdentity, namespace: str) -> str:
+    payload = f"{namespace}:{identity.scope}:{identity.resource_id}:{uuid.uuid4()}".encode()
+    suffix = sha256(payload).hexdigest()[:12]
+    return f"dataforge-engine-{_safe_name(namespace)}-{_safe_name(identity.resource_id)}-{suffix}"
+
+
+def _effective_resources(resource_config: dict[str, object], *, runtime_cpu_count: int | None = None) -> dict[str, int]:
+    available_threads = settings.polars_cores_available or runtime_cpu_count or os.cpu_count() or 1
+    max_threads = resource_config.get("max_threads", available_threads)
+    max_memory_mb = resource_config.get("max_memory_mb", settings.polars_max_memory_mb)
+    streaming_chunk_size = resource_config.get("streaming_chunk_size", settings.polars_streaming_chunk_size)
+    values = {
+        "max_threads": max_threads if isinstance(max_threads, int) and max_threads > 0 else available_threads,
+        "max_memory_mb": max_memory_mb if isinstance(max_memory_mb, int) and max_memory_mb >= 0 else 0,
+        "streaming_chunk_size": streaming_chunk_size if isinstance(streaming_chunk_size, int) and streaming_chunk_size >= 0 else 0,
+    }
+    values["max_threads"] = min(values["max_threads"], available_threads)
+    return values
+
+
+def _container_nano_cpus(max_threads: int) -> int | None:
+    """Translate thread budget into Docker CPU quota.
+
+    Production compose workers run engines on a dedicated runtime network and
+    enforce hard CPU limits. Host-connected topologies (local/e2e harnesses)
+    share cores with the API, worker, and browser, so hard nano_cpu quotas are
+    omitted there; Polars still honors POLARS_MAX_THREADS inside the container.
+    """
+    if max_threads <= 0:
+        return None
+    if settings.engine_connect_host:
+        return None
+    return max(100_000_000, max_threads * 1_000_000_000)
+
+
+def _engine_object_store_endpoint() -> str:
+    if settings.engine_object_store_endpoint:
+        return settings.engine_object_store_endpoint
+    endpoint = settings.object_store_endpoint
+    if settings.engine_connect_host and endpoint.startswith("http://127.0.0.1"):
+        return endpoint.replace("http://127.0.0.1", "http://host.docker.internal", 1)
+    if settings.engine_connect_host and endpoint.startswith("http://localhost"):
+        return endpoint.replace("http://localhost", "http://host.docker.internal", 1)
+    return endpoint
+
+
+def _credential_payload(*, identity: compute_pb2.EngineIdentity, token: str, resources: dict[str, int], credentials: ObjectStoreCredentials) -> str:
+    payload: dict[str, str] = {
+        "ENGINE_IDENTITY": identity.resource_id,
+        "ENGINE_RPC_TOKEN": token,
+        "OBJECT_STORE_ENDPOINT": _engine_object_store_endpoint(),
+        "OBJECT_STORE_REGION": settings.object_store_region,
+        "OBJECT_STORE_ACCESS_KEY": credentials.access_key,
+        "OBJECT_STORE_SECRET_KEY": credentials.secret_key,
+    }
+    if resources["max_threads"]:
+        payload["POLARS_MAX_THREADS"] = str(resources["max_threads"])
+    if resources["streaming_chunk_size"]:
+        payload["POLARS_STREAMING_CHUNK_SIZE"] = str(resources["streaming_chunk_size"])
+    if credentials.session_token:
+        payload["OBJECT_STORE_SESSION_TOKEN"] = credentials.session_token
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def _write_bootstrap(
+    container: Any,
+    *,
+    identity: compute_pb2.EngineIdentity,
+    token: str,
+    resources: dict[str, int],
+    credentials: ObjectStoreCredentials,
+) -> None:
+    """Stage the launch payload in the engine's tmpfs, not its long-lived environment."""
+    result = container.exec_run(
+        ["/bin/sh", "-c", "umask 077 && printf '%s' \"$ENGINE_BOOTSTRAP_JSON\" > /run/dataforge-secrets/engine.json"],
+        environment={"ENGINE_BOOTSTRAP_JSON": _credential_payload(identity=identity, token=token, resources=resources, credentials=credentials)},
+    )
+    if result.exit_code != 0:
+        raise RuntimeError(f"Engine credential bootstrap failed: {result.output!r}")
+
+
+class DockerComputeEngine(ComputeEngine):
+    def __init__(
+        self,
+        identity: compute_pb2.EngineIdentity,
+        resource_config: dict[str, object] | None = None,
+        *,
+        namespace: str | None = None,
+        supervisor_id: str = "worker",
+    ) -> None:
+        self.identity = identity
+        self.analysis_id = identity.resource_id
+        self.resource_config = resource_config or {}
+        self.effective_resources: dict[str, object] = {}
+        self.current_job_id: str | None = None
+        self._namespace = namespace or get_namespace()
+        self._supervisor_id = supervisor_id
+        self._client: Any | None = None  # docker-py does not publish Python 3.14 type stubs.
+        self._container: Any | None = None
+        self._container_id: str | None = None
+        self._channel: grpc.Channel | None = None
+        self._stub: engine_runtime_pb2_grpc.PolarsEngineServiceStub | None = None
+        self._token = ""
+        self._alive = False
+        self._shutdown_requested = False
+        self.image_digest: str | None = None
+        self.exit_code: int | None = None
+        self.oom_killed: bool | None = None
+        self.termination_reason: str | None = None
+        self._lock = threading.RLock()
+        self._pending_results: dict[str, EngineResult] = {}
+        self._pending_progress: dict[str, deque[EngineProgressEvent]] = {}
+        self._active_job_ids: set[str] = set()
+        self._artifact_transfers: dict[str, tuple[Path, str]] = {}
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
+        self._capacity_notifier: Callable[[], None] | None = None
+
+    def bind_capacity_notifier(self, notifier: Callable[[], None]) -> None:
+        """ProcessManager wakes capacity waiters when this engine becomes idle."""
+        self._capacity_notifier = notifier
+
+    def _publish_current_job_id(self, job_id: str | None) -> None:
+        """Update current_job_id and notify capacity waiters when work drains."""
+        with self._lock:
+            was_busy = bool(self.current_job_id)
+            self.current_job_id = job_id
+            now_busy = bool(self.current_job_id)
+        if was_busy and not now_busy and self._capacity_notifier is not None:
+            with contextlib.suppress(Exception):
+                self._capacity_notifier()
+
+    @property
+    def process_id(self) -> int | None:
+        return None
+
+    @property
+    def container_id(self) -> str | None:
+        return self._container_id
+
+    @property
+    def lifecycle_status(self) -> str:
+        if self._shutdown_requested and self._alive:
+            return "stopping"
+        if not self._alive:
+            return "failed" if self.termination_reason and self.termination_reason != "shutdown" else "stopped"
+        return "running" if self.current_job_id else "idle"
+
+    def _capture_termination(self, container: Any) -> None:
+        state = container.attrs.get("State", {}) if isinstance(container.attrs, dict) else {}
+        raw_exit_code = state.get("ExitCode")
+        self.exit_code = raw_exit_code if isinstance(raw_exit_code, int) else None
+        raw_oom = state.get("OOMKilled")
+        self.oom_killed = raw_oom if isinstance(raw_oom, bool) else None
+        if self._shutdown_requested:
+            self.termination_reason = "shutdown"
+        elif self.oom_killed:
+            self.termination_reason = "oom_killed"
+        elif self.exit_code not in (None, 0):
+            self.termination_reason = "container_exit"
+        else:
+            self.termination_reason = "container_stopped"
+
+    def start(self) -> None:
+        with self._lock:
+            if self._alive:
+                return
+            self._shutdown_requested = False
+            _validate_engine_image_reference()
+            credentials = resolve_engine_credentials(self._namespace, self.identity)
+            client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
+            try:
+                daemon_cpu_count, image_id = _resolve_launch_context(client)
+                resources = _effective_resources(self.resource_config, runtime_cpu_count=daemon_cpu_count)
+            except Exception:
+                client.close()
+                raise
+            self.effective_resources = cast(dict[str, object], resources)
+            self.image_digest = settings.engine_image.split("@", 1)[1] if "@" in settings.engine_image else image_id
+
+            self._token = uuid.uuid4().hex
+            labels = {
+                "io.dataforge.managed": "true",
+                "io.dataforge.deployment": settings.deployment_id,
+                "io.dataforge.namespace": self._namespace,
+                "io.dataforge.scope": _identity_scope(self.identity),
+                "io.dataforge.reuse-policy": enums_pb2.EngineReusePolicy.Name(self.identity.reuse_policy).removeprefix("ENGINE_REUSE_POLICY_").lower(),
+                "io.dataforge.resource-id": self.identity.resource_id,
+                "io.dataforge.supervisor": self._supervisor_id,
+                "io.dataforge.owner": self.identity.build_id if self.identity.HasField("build_id") else self._supervisor_id,
+                "io.dataforge.protocol-version": str(ENGINE_PROTOCOL_VERSION),
+                "io.dataforge.image-digest": self.image_digest,
+                "io.dataforge.created-at": datetime.now(UTC).isoformat(),
+            }
+            create_kwargs: dict[str, object] = {
+                "image": settings.engine_image,
+                "name": _container_name(identity=self.identity, namespace=self._namespace),
+                "command": ["python3", "engine_main.py"],
+                "environment": {
+                    "ENGINE_RPC_HOST": "0.0.0.0",
+                    "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
+                    "ENGINE_BOOTSTRAP_PATH": "/run/dataforge-secrets/engine.json",
+                    "ENGINE_BOOTSTRAP_TIMEOUT_SECONDS": str(settings.engine_start_timeout_seconds),
+                    # Worker may miss a couple of heartbeats under host load before
+                    # declaring the engine dead; keep the container watchdog looser.
+                    "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
+                    "APP_VERSION": _ENGINE_APPLICATION_VERSION,
+                },
+                "labels": labels,
+                "network": settings.engine_docker_network,
+                "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
+                "pids_limit": 256,
+                "cap_drop": ["ALL"],
+                "security_opt": ["no-new-privileges:true"],
+                "read_only": True,
+                "tmpfs": {"/run/dataforge-secrets": "rw,noexec,nosuid,size=64k", "/tmp": "rw,noexec,nosuid,size=256m"},
+                "restart_policy": {"Name": "no"},
+                "auto_remove": False,
+            }
+            nano_cpus = _container_nano_cpus(resources["max_threads"])
+            if nano_cpus is not None:
+                create_kwargs["nano_cpus"] = nano_cpus
+            if settings.engine_connect_host:
+                create_kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
+                create_kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}
+            container = client.containers.create(**create_kwargs)
+            self._container_id = str(container.id)
+            try:
+                container.start()
+                _write_bootstrap(
+                    container,
+                    identity=self.identity,
+                    token=self._token,
+                    resources=resources,
+                    credentials=credentials,
+                )
+                self._client = client
+                self._container = container
+                target = f"{container.name}:{settings.engine_rpc_port}"
+                if settings.engine_connect_host:
+                    container.reload()
+                    bindings = container.attrs["NetworkSettings"]["Ports"].get(f"{settings.engine_rpc_port}/tcp") or []
+                    if not bindings:
+                        raise RuntimeError("Docker did not publish an engine RPC port")
+                    target = f"{settings.engine_connect_host}:{bindings[0]['HostPort']}"
+                self._channel = grpc.insecure_channel(
+                    target,
+                    options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024)),
+                )
+                self._stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(self._channel)
+                self._await_health()
+                self._alive = True
+                self._heartbeat_stop.clear()
+                self._heartbeat_thread = threading.Thread(
+                    target=self._heartbeat_loop,
+                    name=f"engine-heartbeat-{self.identity.resource_id}",
+                    daemon=True,
+                )
+                self._heartbeat_thread.start()
+            except Exception:
+                with contextlib.suppress(Exception):
+                    container.remove(force=True)
+                client.close()
+                raise
+
+    def _metadata(self) -> tuple[tuple[str, str], ...]:
+        return ((_ENGINE_TOKEN_METADATA_KEY, self._token),)
+
+    def _await_health(self) -> None:
+        assert self._stub is not None
+        deadline = time.monotonic() + settings.engine_start_timeout_seconds
+        last_error: Exception | None = None
+        while time.monotonic() < deadline:
+            try:
+                health = self._stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=1, metadata=self._metadata())
+                if (
+                    health.ready
+                    and health.engine_identity == self.identity.resource_id
+                    and health.protocol_version == ENGINE_PROTOCOL_VERSION
+                    and health.application_version == _ENGINE_APPLICATION_VERSION
+                ):
+                    return
+                last_error = RuntimeError("Engine health identity or protocol did not match launch specification")
+            except grpc.RpcError as exc:
+                last_error = exc
+            time.sleep(0.1)
+        raise RuntimeError(f"Timed out waiting for engine container health: {last_error}")
+
+    def _heartbeat_loop(self) -> None:
+        consecutive_failures = 0
+        while not self._heartbeat_stop.wait(settings.engine_heartbeat_interval_seconds):
+            try:
+                stub = self._stub
+                if stub is None:
+                    return
+                stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=2, metadata=self._metadata())
+                consecutive_failures = 0
+            except Exception as exc:
+                consecutive_failures += 1
+                logger.warning(
+                    "Engine heartbeat failed for %s (%s consecutive): %s",
+                    self.identity.resource_id,
+                    consecutive_failures,
+                    exc,
+                )
+                # Transient gRPC blips under CI load must not stop heartbeats;
+                # the engine watchdog only tolerates a few missed intervals.
+                if consecutive_failures >= 3 or not self.is_process_alive():
+                    self._alive = False
+                    if self._capacity_notifier is not None:
+                        with contextlib.suppress(Exception):
+                            self._capacity_notifier()
+                    return
+
+    def is_process_alive(self) -> bool:
+        with self._lock:
+            if not self._alive or self._container is None:
+                return False
+            try:
+                self._container.reload()
+                running = self._container.status == "running"
+                if not running:
+                    self._alive = False
+                    self._capture_termination(self._container)
+                return running
+            except Exception:
+                self._alive = False
+                return False
+
+    def check_health(self) -> bool:
+        return self.is_process_alive()
+
+    def _submit(self, kind: str, payload: dict[str, object], *, job_id: str | None = None) -> str:
+        with self._lock:
+            if not self.is_process_alive():
+                self.start()
+            assert self._stub is not None
+            job_id = job_id or str(uuid.uuid4())
+            self._active_job_ids.add(job_id)
+            self._publish_current_job_id(job_id)
+            try:
+                self._stub.SubmitJob(
+                    engine_runtime_pb2.EngineSubmitJobRequest(
+                        protocol_version=ENGINE_PROTOCOL_VERSION,
+                        job_id=job_id,
+                        kind=kind,
+                        payload_json=encode_json_bytes(payload),
+                    ),
+                    timeout=settings.engine_start_timeout_seconds,
+                    metadata=self._metadata(),
+                )
+            except Exception:
+                self._active_job_ids.discard(job_id)
+                self._publish_current_job_id(next(iter(self._active_job_ids), None))
+                raise
+            threading.Thread(target=self._watch_job, args=(job_id,), name=f"engine-watch-{job_id}", daemon=True).start()
+            return job_id
+
+    def preview(
+        self, datasource_config: dict, steps: list[dict], row_limit: int = 1000, offset: int = 0, additional_datasources: dict[str, dict] | None = None
+    ) -> str:
+        return self._submit(
+            "preview",
+            {
+                "datasource_config": datasource_config,
+                "steps": steps,
+                "row_limit": row_limit,
+                "offset": offset,
+                "additional_datasources": additional_datasources or {},
+            },
+        )
+
+    def export(
+        self, datasource_config: dict, steps: list[dict], output_path: str, export_format: str = "csv", additional_datasources: dict[str, dict] | None = None
+    ) -> str:
+        job_id = str(uuid.uuid4())
+        artifact_url = object_store_url(
+            "runtime-staging",
+            _safe_name(self.identity.resource_id),
+            job_id,
+            f"output.{_safe_name(export_format)}",
+            namespace=self._namespace,
+        )
+        with self._lock:
+            self._artifact_transfers[job_id] = (Path(output_path), artifact_url)
+        try:
+            export = get_export_format(export_format)
+            upload_url = presigned_put_url(
+                artifact_url,
+                expires_seconds=max(settings.engine_start_timeout_seconds * 10, 3600),
+                endpoint_url=_engine_object_store_endpoint(),
+                content_type=export.content_type,
+            )
+            return self._submit(
+                "export",
+                {
+                    "datasource_config": datasource_config,
+                    "steps": steps,
+                    "artifact_url": artifact_url,
+                    "artifact_upload_url": upload_url,
+                    "export_format": export_format,
+                    "additional_datasources": additional_datasources or {},
+                },
+                job_id=job_id,
+            )
+        except Exception:
+            with self._lock:
+                self._artifact_transfers.pop(job_id, None)
+            with contextlib.suppress(Exception):
+                delete_object(artifact_url)
+            raise
+
+    def get_schema(self, datasource_config: dict, steps: list[dict], additional_datasources: dict[str, dict] | None = None) -> str:
+        return self._submit("schema", {"datasource_config": datasource_config, "steps": steps, "additional_datasources": additional_datasources or {}})
+
+    def get_row_count(self, datasource_config: dict, steps: list[dict], additional_datasources: dict[str, dict] | None = None) -> str:
+        return self._submit("row_count", {"datasource_config": datasource_config, "steps": steps, "additional_datasources": additional_datasources or {}})
+
+    def _publish_job_result(self, job_id: str, result: EngineResult) -> None:
+        with self._lock:
+            transfer = self._artifact_transfers.pop(job_id, None)
+        if transfer is not None:
+            local_path, artifact_url = transfer
+            try:
+                if result.error is None:
+                    download_file(artifact_url, local_path)
+                    if result.data is not None:
+                        result.data["output_path"] = str(local_path)
+            except Exception as exc:
+                result = EngineResult(
+                    job_id=job_id,
+                    data=None,
+                    error=f"Failed to retrieve staged engine artifact: {exc}",
+                    error_kind="engine_artifact_transfer_failed",
+                    error_details={},
+                )
+            finally:
+                with contextlib.suppress(Exception):
+                    delete_object(artifact_url)
+        with self._lock:
+            self._pending_results[job_id] = result
+            while len(self._pending_results) > 100:
+                self._pending_results.pop(next(iter(self._pending_results)))
+            self._active_job_ids.discard(job_id)
+            next_job = next(iter(self._active_job_ids), None)
+        self._publish_current_job_id(next_job)
+
+    def _watch_job(self, job_id: str) -> None:
+        try:
+            assert self._stub is not None
+            sequence = 0
+            while True:
+                try:
+                    stream = self._stub.WatchJob(
+                        engine_runtime_pb2.EngineWatchJobRequest(job_id=job_id, after_sequence=sequence),
+                        metadata=self._metadata(),
+                    )
+                    for event in stream:
+                        sequence = max(sequence, event.sequence)
+                        which = event.WhichOneof("event")
+                        if which == "progress_json":
+                            payload = json.loads(event.progress_json)
+                            if not isinstance(payload, dict):
+                                raise RuntimeError("Engine progress payload must be an object")
+                            with self._lock:
+                                self._pending_progress.setdefault(job_id, deque(maxlen=1000)).append(EngineProgressEvent(job_id=job_id, event=payload))
+                                while len(self._pending_progress) > 100:
+                                    self._pending_progress.pop(next(iter(self._pending_progress)))
+                        elif which == "result":
+                            result = _result_from_message(event.result)
+                            with contextlib.suppress(Exception):
+                                self._stub.GetJobResult(
+                                    engine_runtime_pb2.EngineGetJobResultRequest(job_id=job_id),
+                                    timeout=2,
+                                    metadata=self._metadata(),
+                                )
+                            self._publish_job_result(job_id, result)
+                            return
+                except grpc.RpcError:
+                    # The terminal result is retained independently from the
+                    # bounded progress stream. Recover it before treating a
+                    # cursor eviction or transport interruption as job loss.
+                    try:
+                        message = self._stub.GetJobResult(
+                            engine_runtime_pb2.EngineGetJobResultRequest(job_id=job_id),
+                            timeout=2,
+                            metadata=self._metadata(),
+                        )
+                    except grpc.RpcError as result_error:
+                        if result_error.code() not in {grpc.StatusCode.FAILED_PRECONDITION, grpc.StatusCode.UNAVAILABLE} or not self.is_process_alive():
+                            raise
+                    else:
+                        self._publish_job_result(job_id, _result_from_message(message))
+                        return
+
+                # A healthy watch is open until a terminal result. If the
+                # transport closes cleanly first, resume from the last durable
+                # sequence instead of abandoning the active job forever.
+                if self._shutdown_requested:
+                    raise RuntimeError("Engine shutdown requested")
+                logger.info("Engine job watch ended before result for %s; resuming after sequence %s", job_id, sequence)
+                if self._heartbeat_stop.wait(0.05):
+                    raise RuntimeError("Engine shutdown requested")
+        except Exception as exc:
+            with self._lock:
+                intentional_shutdown = self._shutdown_requested
+                transfer = self._artifact_transfers.pop(job_id, None)
+                self._pending_results[job_id] = EngineResult(
+                    job_id=job_id,
+                    data=None,
+                    error="Engine shutdown requested" if intentional_shutdown else str(exc),
+                    error_kind="engine_shutdown" if intentional_shutdown else "engine_rpc_lost",
+                    error_details={},
+                )
+                self._active_job_ids.discard(job_id)
+                next_job = next(iter(self._active_job_ids), None)
+            self._publish_current_job_id(next_job)
+            if intentional_shutdown:
+                logger.info("Engine job %s stopped during engine shutdown", job_id)
+            else:
+                logger.warning("Engine job watcher failed for %s: %s", job_id, exc)
+            if transfer is not None:
+                with contextlib.suppress(Exception):
+                    delete_object(transfer[1])
+
+    def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> EngineResult | None:
+        expected = job_id or self.current_job_id
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                if expected and expected in self._pending_results:
+                    return self._pending_results.pop(expected)
+                if expected and not self.is_process_alive():
+                    intentional_shutdown = self._shutdown_requested
+                    error_kind = "engine_shutdown" if intentional_shutdown else "engine_oom_killed" if self.oom_killed else "engine_container_exited"
+                    return EngineResult(
+                        job_id=expected,
+                        data=None,
+                        error="Engine shutdown requested" if intentional_shutdown else "Engine container died unexpectedly",
+                        error_kind=error_kind,
+                        error_details={
+                            "container_id": self.container_id,
+                            "exit_code": self.exit_code,
+                            "oom_killed": self.oom_killed,
+                            "termination_reason": self.termination_reason,
+                        },
+                    )
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
+    def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> EngineProgressEvent | None:
+        expected = job_id or self.current_job_id
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                if expected:
+                    events = self._pending_progress.get(expected)
+                    if events:
+                        return events.popleft()
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
+    def shutdown(self) -> None:
+        with self._lock:
+            self._shutdown_requested = True
+            self._heartbeat_stop.set()
+            container = self._container
+            stub = self._stub
+            if container is None:
+                transfers = list(self._artifact_transfers.values())
+                self._artifact_transfers.clear()
+                self._active_job_ids.clear()
+                self._publish_current_job_id(None)
+            else:
+                transfers = []
+            if container is None:
+                for _local_path, artifact_url in transfers:
+                    with contextlib.suppress(Exception):
+                        delete_object(artifact_url)
+                return
+            if stub is not None:
+                with contextlib.suppress(Exception):
+                    stub.Shutdown(engine_runtime_pb2.EngineShutdownRequest(), timeout=settings.engine_shutdown_grace_seconds, metadata=self._metadata())
+            deadline = time.monotonic() + settings.engine_shutdown_grace_seconds
+            while time.monotonic() < deadline:
+                with contextlib.suppress(Exception):
+                    container.reload()
+                    if container.status != "running":
+                        break
+                time.sleep(0.1)
+            with contextlib.suppress(Exception):
+                container.reload()
+                if container.status == "running":
+                    container.stop(timeout=settings.engine_shutdown_grace_seconds)
+                    container.reload()
+                self._capture_termination(container)
+            with contextlib.suppress(Exception):
+                container.remove(force=True)
+            if self._channel is not None:
+                self._channel.close()
+            if self._client is not None:
+                self._client.close()
+            self._channel = None
+            self._client = None
+            self._container = None
+            self._stub = None
+            self._alive = False
+            self._active_job_ids.clear()
+            transfers = list(self._artifact_transfers.values())
+            self._artifact_transfers.clear()
+            # Drop job pointer after clearing active set so waiters can reclaim capacity.
+            self._publish_current_job_id(None)
+        for _local_path, artifact_url in transfers:
+            with contextlib.suppress(Exception):
+                delete_object(artifact_url)
+
+
+def _result_from_message(message: engine_runtime_pb2.EngineJobResult) -> EngineResult:
+    data = json.loads(message.data_json) if message.HasField("data_json") else None
+    details = json.loads(message.error_details_json) if message.HasField("error_details_json") else None
+    timings = json_format.MessageToDict(message.step_timings, preserving_proto_field_name=True)
+    return EngineResult(
+        job_id=message.job_id,
+        data=data,
+        error=message.error if message.HasField("error") else None,
+        error_kind=message.error_kind if message.HasField("error_kind") else None,
+        error_details=details,
+        step_timings={str(key): float(value) for key, value in timings.items() if isinstance(value, int | float)},
+        query_plan=message.query_plan if message.HasField("query_plan") else None,
+        read_duration_ms=message.read_duration_ms if message.HasField("read_duration_ms") else None,
+        write_duration_ms=message.write_duration_ms if message.HasField("write_duration_ms") else None,
+        collect_duration_ms=message.collect_duration_ms if message.HasField("collect_duration_ms") else None,
+    )

@@ -1,10 +1,14 @@
+import pytest
 from sqlalchemy import select
 
-from backend_core import engine_runs_service as engine_run_service
+from backend_core import datasource_delete_service, dependencies, engine_runs_service as engine_run_service
 from backend_core.dependencies import get_manager, get_runtime_availability_probe
+from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
+from backend_core.exceptions import AppError
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
@@ -12,7 +16,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
 from backend_core.sqlmodel_typing import sa
 from main import app
-from modules.compute import routes as compute_routes
+from modules.compute import executor_client, routes as compute_routes
 
 
 class _StubEngine:
@@ -64,6 +68,60 @@ class _AvailableRuntimeProbe:
         return True
 
 
+def test_compute_queue_rejects_pipeline_after_source_delete_requested(test_db_session, sample_datasource) -> None:
+    datasource_delete_service.request_delete(test_db_session, sample_datasource.id)
+    request = compute_schemas.StepPreviewRequest.model_validate(
+        {
+            'analysis_id': 'analysis-1',
+            'target_step_id': 'source',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-1',
+                'tabs': [
+                    {
+                        'id': 'tab-1',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {'result_id': 'output-1', 'format': 'parquet', 'filename': 'output'},
+                        'steps': [],
+                    }
+                ],
+            },
+        }
+    )
+
+    with pytest.raises(AppError, match='not found'):
+        executor_client._require_active_pipeline_datasources(test_db_session, request.analysis_pipeline)
+
+
+def test_persisted_runtime_availability_probe_uses_an_isolated_session_per_check(monkeypatch) -> None:
+    calls: list[tuple[object, tuple[object, ...], dict[str, object]]] = []
+
+    def fake_run_settings_db(func, *args, **kwargs):
+        calls.append((func, args, kwargs))
+        return True
+
+    monkeypatch.setattr(dependencies, 'run_settings_db', fake_run_settings_db)
+    probe = dependencies.PersistedRuntimeAvailabilityProbe(heartbeat_seconds=7.0)
+
+    assert probe.available(kind=RuntimeWorkerKind.BUILD_WORKER) is True
+    assert probe.available(kind=RuntimeWorkerKind.SCHEDULER) is True
+    assert calls == [
+        (
+            dependencies.runtime_workers_service.worker_available,
+            (),
+            {'kind': RuntimeWorkerKind.BUILD_WORKER, 'heartbeat_seconds': 7.0},
+        ),
+        (
+            dependencies.runtime_workers_service.worker_available,
+            (),
+            {'kind': RuntimeWorkerKind.SCHEDULER, 'heartbeat_seconds': 7.0},
+        ),
+    ]
+
+
 def test_spawn_engine_accepts_datasource_preview_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
@@ -96,6 +154,31 @@ def test_configure_engine_accepts_datasource_preview_identity(client) -> None:
 
 def test_shutdown_engine_accepts_build_identity(client) -> None:
     manager = _StubManager()
+    app.dependency_overrides[get_manager] = lambda: manager
+    try:
+        response = client.delete('/api/v1/compute/engine/build/build-1')
+    finally:
+        app.dependency_overrides.pop(get_manager, None)
+
+    assert response.status_code == 204
+    assert manager.shutdown_calls == ['3:build-1']
+
+
+def test_shutdown_engine_cancels_active_job_then_shuts_down(client) -> None:
+    """Busy engines cancel the job first; shutdown must not return 409."""
+
+    class _BusyEngine:
+        current_job_id = 'job-active'
+
+        @staticmethod
+        def is_process_alive() -> bool:
+            return True
+
+    class _BusyManager(_StubManager):
+        def get_engine(self, identity):
+            return _BusyEngine() if self._identity_key(identity).endswith(':build-1') else None
+
+    manager = _BusyManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
         response = client.delete('/api/v1/compute/engine/build/build-1')

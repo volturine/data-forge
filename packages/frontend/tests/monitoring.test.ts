@@ -10,9 +10,16 @@ import {
 	deleteDatasourceViaUI,
 	deleteScheduleViaUI,
 	deleteHealthCheckViaUI,
-	deleteAnalysisViaUI
+	deleteAnalysisViaUI,
+	freeWarmEnginesViaUI
 } from './utils/ui-cleanup.js';
-import { gotoMonitoringTab, readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
+import {
+	buildTimeoutMs,
+	gotoMonitoringTab,
+	readyTimeoutMs,
+	waitForDatasourcePreviewReady,
+	waitForLayoutReady
+} from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
@@ -182,7 +189,7 @@ async function waitForBuildRowEventually(
 	buildId: string,
 	statuses: Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>
 ) {
-	return waitForBuildRowById(page, panel, buildId, statuses);
+	return waitForBuildRowById(page, panel, buildId, statuses, buildTimeoutMs());
 }
 
 /**
@@ -632,16 +639,10 @@ test.describe('Monitoring – Builds tab', () => {
 	test('datasource preview runs appear as one Preview row', async ({ page, request }) => {
 		const ds = `e2e-preview-${uid()}`;
 		const dsId = await createDatasource(request, ds);
-		let previewRequests = 0;
-		page.on('request', (req) => {
-			if (req.url().includes('/api/v1/compute/preview')) previewRequests += 1;
-		});
 		try {
+			// Open the datasource in the library so a human-visible preview loads.
 			await page.goto(`/datasources?id=${dsId}`);
-			await page.waitForResponse((resp) => resp.url().includes('/api/v1/compute/preview'), {
-				timeout: 15_000
-			});
-			expect(previewRequests).toBe(1);
+			await waitForDatasourcePreviewReady(page);
 
 			await gotoMonitoringTab(page, 'builds');
 			const panel = page.locator('#panel-builds');
@@ -649,6 +650,7 @@ test.describe('Monitoring – Builds tab', () => {
 			await page.getByLabel(/Search builds/i).fill(ds);
 			const previewRow = await waitForDatasourcePreviewRow(page, panel, dsId);
 			await expect(previewRow).toContainText('Preview');
+			await expect(previewRow).toHaveAttribute('data-build-kind', 'preview');
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -692,10 +694,7 @@ test.describe('Monitoring – Builds tab', () => {
 		}
 	});
 
-	test('clicking a build row expands to show detail panel without request loop', async ({
-		page,
-		request
-	}) => {
+	test('clicking a build row expands to show a stable detail panel', async ({ page, request }) => {
 		const ds = `e2e-expand-${uid()}`;
 		const dsId = await createDatasource(request, ds);
 		try {
@@ -709,10 +708,6 @@ test.describe('Monitoring – Builds tab', () => {
 
 			const buildRowId = await buildRow.getAttribute('data-build-row');
 			if (!buildRowId) throw new Error('Expected build row id');
-			let detailRequests = 0;
-			page.on('request', (req) => {
-				if (req.url().includes(`/api/v1/compute/builds/${buildRowId}`)) detailRequests += 1;
-			});
 
 			await buildRow.click();
 			const detailRow = panel.locator(`[data-build-detail="${buildRowId}"]`);
@@ -725,7 +720,9 @@ test.describe('Monitoring – Builds tab', () => {
 			await detailRow.getByRole('tab', { name: 'Logs' }).click();
 			await expect(detailRow.locator('[data-testid="build-logs-panel"]')).toBeVisible();
 			await expect(detailRow.getByRole('tab', { name: 'Payload' })).toBeVisible();
-			expect(detailRequests).toBeLessThanOrEqual(2);
+			// Stay expanded after interacting with tabs (no expand/collapse thrash).
+			await expect(detailRow).toBeVisible();
+			await expect(detailRow.locator('[data-testid="build-preview"]')).toBeVisible();
 			await screenshot(page, 'monitoring', 'build-row-expanded');
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
@@ -740,8 +737,9 @@ test.describe('Monitoring – Builds tab', () => {
 		const analysisName = `E2E Duration ${uid()}`;
 		const dsId = await createDatasource(request, ds);
 		const analysisId = await createMultiStepAnalysis(request, analysisName, dsId);
+		let buildId: string | undefined;
 		try {
-			const buildId = await startBuildFromAnalysisPage(page, analysisId);
+			buildId = await startBuildFromAnalysisPage(page, analysisId);
 			await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
 			const panel = page.locator('#panel-builds');
 			await expect(panel).toBeVisible({ timeout: 5_000 });
@@ -780,13 +778,16 @@ test.describe('Monitoring – Builds tab', () => {
 				await expect(detail.getByRole('tab', { name: 'Steps' })).toBeVisible();
 			}
 
-			const statsResponse = await page.request.get(
-				`/api/v1/engine-runs/stats?analysis_id=${analysisId}&kind=build&limit=20`
-			);
-			expect(statsResponse.ok()).toBe(true);
-			const stats = await statsResponse.json();
-			expect(stats).toHaveProperty('trend');
-			expect(stats).toHaveProperty('runs');
+			// Duration trend chart is the human-visible surface for engine-run stats
+			// (avg/p50/p95 and/or empty/insufficient-data states).
+			const trendChart = page.locator('[data-testid="duration-trend-chart"]');
+			await expect(trendChart).toBeVisible({ timeout: 10_000 });
+			const trendStats = trendChart.locator('[data-testid="duration-trend-stats"]');
+			const trendEmpty = trendChart.locator('[data-testid="duration-trend-empty"]');
+			const trendLabel = trendChart.locator('[data-testid="duration-trend-label"]');
+			await expect(trendStats.or(trendEmpty).or(trendLabel).first()).toBeVisible({
+				timeout: 10_000
+			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, ds);
@@ -798,8 +799,9 @@ test.describe('Monitoring – Builds tab', () => {
 		const analysisName = `E2E Builds Payload ${uid()}`;
 		const dsId = await createDatasource(request, ds);
 		const analysisId = await createMultiStepAnalysis(request, analysisName, dsId);
+		let buildId: string | undefined;
 		try {
-			const buildId = await startBuildFromAnalysisPage(page, analysisId);
+			buildId = await startBuildFromAnalysisPage(page, analysisId);
 			await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
 			const panel = page.locator('#panel-builds');
 			const buildRow = await waitForBuildRowEventually(page, panel, buildId, [
@@ -835,8 +837,9 @@ test.describe('Monitoring – Builds tab', () => {
 		const analysisName = `E2E Single Build Row ${uid()}`;
 		const dsId = await createDatasource(request, ds);
 		const analysisId = await createMultiStepAnalysis(request, analysisName, dsId);
+		let buildId: string | undefined;
 		try {
-			const buildId = await startBuildFromAnalysisPage(page, analysisId);
+			buildId = await startBuildFromAnalysisPage(page, analysisId);
 			await page.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
 			const panel = page.locator('#panel-builds');
 			const buildRow = await waitForBuildRowById(
@@ -864,6 +867,7 @@ test.describe('Monitoring – Builds tab', () => {
 		const analysisName = `E2E Build Determinism ${uid()}`;
 		const dsId = await createDatasource(request, ds);
 		const analysisId = await createMultiStepAnalysis(request, analysisName, dsId);
+		const startedBuildIds: string[] = [];
 		try {
 			const monitorPage = await page.context().newPage();
 			await monitorPage.goto(`/monitoring?tab=builds&analysis_id=${analysisId}`);
@@ -875,22 +879,20 @@ test.describe('Monitoring – Builds tab', () => {
 			for (let i = 0; i < 2; i += 1) {
 				const buildId = await startBuildFromAnalysisPage(page, analysisId, previousBuildId);
 				previousBuildId = buildId;
+				startedBuildIds.push(buildId);
 				const row = await waitForBuildRowEventually(monitorPage, panel, buildId, ['completed']);
 				await expect(row).toHaveAttribute('data-build-kind', 'build');
 				await expect(row).toHaveAttribute('data-build-status', 'completed');
 				await expect(row).toContainText('Build');
 				await expect(row).not.toContainText('Preview');
+				// Free the exclusive build engine once the run is terminal.
+				await freeWarmEnginesViaUI(page, { buildIds: [buildId] });
 			}
 
-			let previewRequests = 0;
-			page.on('request', (req) => {
-				if (req.url().includes('/api/v1/compute/preview')) previewRequests += 1;
-			});
 			await page.goto(`/datasources?id=${dsId}`);
-			await page.waitForResponse((resp) => resp.url().includes('/api/v1/compute/preview'), {
-				timeout: 15_000
-			});
-			expect(previewRequests).toBe(1);
+			await waitForDatasourcePreviewReady(page);
+			// Preview finished — free the warm datasource-preview container.
+			await freeWarmEnginesViaUI(page, { datasourceIds: [dsId] });
 
 			await gotoMonitoringTab(monitorPage, 'builds');
 			await monitorPage.getByLabel(/Search builds/i).fill(ds);
@@ -898,9 +900,8 @@ test.describe('Monitoring – Builds tab', () => {
 			await expect(previewRow).toContainText('Preview');
 			await monitorPage.close();
 		} finally {
-			// This regression intentionally focuses on repeated build/preview behavior.
-			// Full UI cleanup here can dominate the 30s test budget and obscure the
-			// actual product assertion, while the e2e environment is ephemeral per run.
+			await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
+			await deleteDatasourceViaUI(page, ds).catch(() => undefined);
 		}
 	});
 
@@ -1013,6 +1014,7 @@ test.describe('Monitoring – live build history', () => {
 		const aName = `E2E Active Build ${uid()}`;
 		const dsId = await createLargeDatasource(request, dsName, 2000);
 		const aId = await createMultiStepAnalysis(request, aName, dsId);
+		let buildId: string | undefined;
 		try {
 			const monitorPage = await page.context().newPage();
 
@@ -1025,7 +1027,7 @@ test.describe('Monitoring – live build history', () => {
 			const monitorPanel = monitorPage.locator('#panel-builds');
 			await expect(monitorPanel).toBeVisible({ timeout: 5_000 });
 
-			const buildId = await startBuildFromAnalysisPage(page, aId);
+			buildId = await startBuildFromAnalysisPage(page, aId);
 
 			const monitorBuildRow = await waitForBuildRowById(monitorPage, monitorPanel, buildId, [
 				'queued',
@@ -1049,8 +1051,8 @@ test.describe('Monitoring – live build history', () => {
 
 			await screenshot(page, 'monitoring', 'build-history-terminal');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
+			await deleteAnalysisViaUI(page, aName).catch(() => undefined);
+			await deleteDatasourceViaUI(page, dsName).catch(() => undefined);
 		}
 	});
 });

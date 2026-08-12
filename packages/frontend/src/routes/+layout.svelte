@@ -19,15 +19,11 @@
 	import { favoriteStore } from '$lib/stores/favorites.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import {
-		initNamespace,
-		switchNamespace,
-		useNamespace,
-		isNamespaceReady
-	} from '$lib/stores/namespace.svelte';
+	import { switchNamespace, useNamespace, isNamespaceReady } from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { AppLifecycle } from '$lib/services/app-lifecycle';
+	import { appBootstrap } from '$lib/services/app-bootstrap.svelte';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
 	import { untrack } from 'svelte';
 	import 'styled-system/styles.css';
@@ -54,17 +50,15 @@
 	];
 	const onAuthPage = $derived(authPaths.some((p) => currentPath.startsWith(p)));
 
-	// Network: resolve auth eagerly in parallel with config fetch.
+	// Single orchestrator: config ∥ auth, then namespace. Layout only renders phase.
 	$effect(() => {
 		if (typeof window === 'undefined') return;
-		untrack(() => void authStore.resolve());
+		untrack(() => void appBootstrap.start());
 	});
 
-	const ready = $derived(
-		configStore.config !== null &&
-			(!configStore.authRequired || authStore.resolved) &&
-			isNamespaceReady()
-	);
+	const shellPhase = $derived(appBootstrap.phase(onAuthPage));
+	const bootstrapError = $derived(appBootstrap.errorFor(onAuthPage));
+	const ready = $derived(appBootstrap.appReady);
 
 	// Navigation: $derived can't redirect; side effect redirects unauthenticated users.
 	$effect(() => {
@@ -74,7 +68,10 @@
 			return;
 		}
 		if (authStore.authenticated) return;
+		if (authStore.bootstrapFailed) return;
 		if (onAuthPage) return;
+		// Only redirect when we know the user is unauthenticated — not on probe failure.
+		if (authStore.status !== 'unauthenticated') return;
 		void goto(resolve('/login'));
 	});
 
@@ -96,18 +93,6 @@
 			sidebarCollapsed = value;
 		});
 	}
-
-	// Network: $derived can't fetch config on client.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		untrack(() => configStore.fetch());
-	});
-
-	// Storage: $derived can't load namespace from storage.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		void initNamespace();
-	});
 
 	// State: favorites are namespace-scoped and reset on namespace changes.
 	$effect(() => {
@@ -303,7 +288,7 @@
 </svelte:head>
 
 <QueryClientProvider client={queryClient}>
-	{#if !ready && !onAuthPage}
+	{#if shellPhase === 'loading'}
 		<div
 			class={css({
 				display: 'flex',
@@ -312,10 +297,37 @@
 				height: '100vh',
 				backgroundColor: 'bg.secondary'
 			})}
+			data-shell-bootstrap="loading"
 		>
 			<div class={spinner()}></div>
 		</div>
-	{:else if onAuthPage && configStore.authRequired}
+	{:else if shellPhase === 'error'}
+		<div
+			class={css({
+				display: 'flex',
+				flexDirection: 'column',
+				alignItems: 'center',
+				justifyContent: 'center',
+				height: '100vh',
+				backgroundColor: 'bg.secondary',
+				padding: '6',
+				gap: '3',
+				textAlign: 'center'
+			})}
+			data-shell-bootstrap="error"
+			role="alert"
+		>
+			<h1 class={css({ fontSize: 'lg', fontWeight: 'semibold', color: 'fg.primary', margin: '0' })}>
+				Unable to start the app
+			</h1>
+			<p class={css({ fontSize: 'sm', color: 'fg.muted', margin: '0', maxWidth: 'md' })}>
+				{bootstrapError}
+			</p>
+			<p class={css({ fontSize: 'xs', color: 'fg.muted', margin: '0' })}>
+				Reload the page once the API is reachable.
+			</p>
+		</div>
+	{:else if shellPhase === 'auth'}
 		{@render children()}
 	{:else}
 		<div class={css({ display: 'flex', height: '100vh' })}>

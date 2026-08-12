@@ -9,7 +9,8 @@ import {
 	openSchemaTabAndWait,
 	waitForDatasourceList,
 	waitForLayoutReady,
-	waitForDatasourcePreviewReady
+	waitForDatasourcePreviewReady,
+	readyTimeoutMs
 } from './utils/readiness.js';
 import { dialogByHeading } from './utils/locators.js';
 
@@ -640,7 +641,7 @@ test.describe('Datasources – schema refresh', () => {
 			});
 
 			// Button returns to idle after API completes
-			await expect(refreshBtn).toBeVisible({ timeout: 15_000 });
+			await expect(refreshBtn).toBeVisible({ timeout: readyTimeoutMs() });
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
 		}

@@ -185,13 +185,15 @@ export class AnalysisStore {
 	}
 
 	private normalizeSteps(steps: PipelineStep[]): PipelineStep[] {
-		return steps.map((step) => {
-			if (!Array.isArray(step.depends_on)) {
-				throw new Error(`Step ${step.id} missing depends_on`);
-			}
-			if (typeof step.is_applied !== 'boolean') {
-				throw new Error(`Step ${step.id} missing is_applied`);
-			}
+		// Coerce missing fields instead of throwing — a hard throw during load or
+		// draft restore surfaces as SvelteKit's generic 500 page and blanks the editor.
+		return steps.map((step, index) => {
+			const depends_on = Array.isArray(step.depends_on)
+				? step.depends_on
+				: index > 0
+					? [steps[index - 1]!.id]
+					: [];
+			const is_applied = typeof step.is_applied === 'boolean' ? step.is_applied : true;
 			return {
 				...step,
 				type: normalizeStepType(step.type),
@@ -199,8 +201,8 @@ export class AnalysisStore {
 					string,
 					unknown
 				>,
-				depends_on: step.depends_on,
-				is_applied: step.is_applied
+				depends_on,
+				is_applied
 			};
 		});
 	}

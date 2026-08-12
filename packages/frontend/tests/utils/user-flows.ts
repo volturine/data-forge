@@ -5,7 +5,6 @@ import {
 	gotoMonitoringTab,
 	gotoNewAnalysis,
 	waitForDatasourceList,
-	waitForLayoutReady,
 	waitForUdfList
 } from './readiness.js';
 
@@ -125,6 +124,7 @@ export async function createAnalysisViaUi(
 	analysisName: string,
 	datasourceName: string
 ): Promise<string> {
+	const { registerAnalysis } = await import('./api.js');
 	await gotoNewAnalysis(page);
 	await page.locator('#name').fill(analysisName);
 	await page.getByRole('button', { name: /Next/i }).click();
@@ -139,7 +139,9 @@ export async function createAnalysisViaUi(
 	await page.getByRole('button', { name: /Next/i }).click();
 	await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
 	await page.getByRole('button', { name: /Create Analysis/i }).click();
-	return waitForCurrentAnalysisEditor(page);
+	const analysisId = await waitForCurrentAnalysisEditor(page);
+	registerAnalysis(analysisId, analysisName);
+	return analysisId;
 }
 
 export async function importAnalysisViaUi(
@@ -151,6 +153,7 @@ export async function importAnalysisViaUi(
 		datasourceRemap?: Record<string, string>;
 	}
 ): Promise<string> {
+	const { registerAnalysis } = await import('./api.js');
 	await gotoNewAnalysis(page);
 	await page.getByRole('button', { name: 'Import JSON' }).click();
 	await page.locator('#name').fill(options.name);
@@ -190,7 +193,9 @@ export async function importAnalysisViaUi(
 			`Analysis import create failed: HTTP ${createResponse.status()} ${body.slice(0, 300)}`
 		);
 	}
-	return waitForCurrentAnalysisEditor(page);
+	const analysisId = await waitForCurrentAnalysisEditor(page);
+	registerAnalysis(analysisId, options.name);
+	return analysisId;
 }
 
 export async function createUdfViaUi(page: Page, name: string): Promise<string> {
@@ -279,30 +284,4 @@ export async function waitForUdfVisible(page: Page, name: string): Promise<void>
 	await page.goto('/udfs');
 	await waitForUdfList(page);
 	await expect(page.locator(`[data-udf-card="${name}"]`)).toBeVisible({ timeout: 5_000 });
-}
-
-export async function shutdownEngineViaUi(
-	page: Page,
-	analysisId: string,
-	options?: { timeoutMs?: number }
-): Promise<void> {
-	const timeoutMs = options?.timeoutMs ?? 5_000;
-	await page.goto('/', { waitUntil: 'domcontentloaded' });
-	await waitForLayoutReady(page, timeoutMs);
-
-	const engineButton = page.getByRole('button', { name: 'Engine Monitor' });
-	await expect(engineButton).toBeVisible({ timeout: timeoutMs });
-	await engineButton.click();
-
-	const popup = page.locator('[data-engines-popup="true"]');
-	await expect(popup).toBeVisible({ timeout: timeoutMs });
-
-	const identityKey = `analysis_interactive:${analysisId}`;
-	const row = popup.locator(`[data-engine-row="${identityKey}"]`);
-	const shutdownButton = popup.locator(`[data-engine-shutdown="${identityKey}"]`);
-	await expect(row).toBeVisible({ timeout: timeoutMs });
-	await expect(shutdownButton).toBeEnabled({ timeout: 1_000 });
-	await shutdownButton.click();
-	await expect(row).toBeHidden({ timeout: timeoutMs });
-	await page.keyboard.press('Escape').catch(() => undefined);
 }

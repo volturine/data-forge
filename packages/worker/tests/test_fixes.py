@@ -1,6 +1,7 @@
 """Tests for bug fixes and new features."""
 
 import asyncio
+import logging
 import os
 import tempfile
 from datetime import UTC, datetime
@@ -113,7 +114,11 @@ def test_engine_status_result_proto_uses_typed_snapshot_fields() -> None:
             "analysis_id": "analysis-1",
             "resource_id": "datasource-1",
             "status": "healthy",
-            "process_id": 1234,
+            "container_id": "container-1234",
+            "image_digest": "sha256:abc",
+            "lifecycle_status": "running",
+            "supervisor_id": "worker-1",
+            "owner_id": "worker-1",
             "last_activity": datetime.now(UTC).isoformat(),
             "current_job_id": "job-1",
             "resource_config": {"max_threads": 2},
@@ -451,7 +456,7 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
 
     monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
 
-    manager = ProcessManager(engine_factory=lambda _resource_id, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
+    manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
     manager.spawn_engine(identity)
     assert manager.get_engine(identity) is engine
     claimed = compute_request_runtime.ClaimedComputeRequest(
@@ -480,6 +485,47 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         assert completed[0].WhichOneof("response") == "ack"
         assert completed[0].ack.success is True
         assert dispatched == [True]
+    finally:
+        manager.shutdown_all()
+
+
+def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monkeypatch) -> None:
+    completed: list[compute_pb2.ComputeResponse] = []
+    identity = _analysis_identity("analysis-already-gone")
+
+    class _Client:
+        def complete_compute_request(self, **kwargs):
+            completed.append(kwargs["response"])
+
+        def fail_compute_request(self, **_kwargs):
+            raise AssertionError("missing engines must complete shutdown successfully")
+
+        def dispatch_runtime_outbox(self):
+            return 0
+
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, object()))
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-missing-shutdown",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_command_envelope(
+            kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+            request_id="req-missing-shutdown",
+            payload={"engine_identity": _engine_identity_payload(identity)},
+            shutdown_identity=identity,
+        ),
+    )
+
+    try:
+        compute_request_runtime._execute_request_sync(claimed, manager)
+        assert len(completed) == 1
+        assert completed[0].WhichOneof("response") == "ack"
+        assert completed[0].ack.success is True
     finally:
         manager.shutdown_all()
 
@@ -544,6 +590,35 @@ def test_grpc_precondition_error_does_not_invent_domain_error_code() -> None:
 
     assert error.status_code == 412
     assert not error.HasField("error_code")
+
+
+def test_retired_compute_request_lease_drains_without_error_log(monkeypatch, caplog) -> None:
+    class _Client:
+        def fail_compute_request(self, **_kwargs):
+            raise BackendWorkerRpcError(
+                status_code=412,
+                error="Compute request lease is no longer active",
+                error_code="FAILED_PRECONDITION",
+            )
+
+        def dispatch_runtime_outbox(self):
+            return 0
+
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-retired",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_UNSPECIFIED,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=compute_pb2.ComputeCommandEnvelope(),
+    )
+
+    compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
+
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
 
 
 @pytest.mark.asyncio
@@ -671,6 +746,8 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     manager = cast(
         Any,
         SimpleNamespace(
+            await_spawn_admission=lambda identity: asyncio.sleep(0),
+            release_spawn_admission=lambda identity, *, owned: None,
             spawn_engine=lambda identity: spawn_calls.append(identity.resource_id),
             shutdown_engine=lambda identity: shutdown_calls.append(identity.resource_id),
             set_engine_runtime_context=lambda identity, current_build_id, current_engine_run_id: None,

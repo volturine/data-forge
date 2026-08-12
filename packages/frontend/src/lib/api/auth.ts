@@ -1,5 +1,5 @@
 import type { ResultAsync } from 'neverthrow';
-import { apiRequest } from './client';
+import { apiRequest, BOOTSTRAP_API_TIMEOUT_MS } from './client';
 import type { ApiError } from './client';
 
 export interface UserPublic {
@@ -58,7 +58,9 @@ export function logout(): ResultAsync<{ success: boolean }, ApiError> {
 }
 
 export function getMe(): ResultAsync<UserPublic, ApiError> {
-	return apiRequest<UserPublic>('/v1/auth/me');
+	return apiRequest<UserPublic>('/v1/auth/me', {
+		signal: AbortSignal.timeout(BOOTSTRAP_API_TIMEOUT_MS)
+	});
 }
 
 export function updateProfile(payload: UpdateProfilePayload): ResultAsync<UserPublic, ApiError> {

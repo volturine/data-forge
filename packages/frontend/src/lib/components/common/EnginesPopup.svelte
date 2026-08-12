@@ -4,11 +4,16 @@
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import type { EngineStatusResponse } from '$lib/types/compute';
 	import {
+		engineActivityLabel,
+		engineHasActiveJob,
 		engineIdentityKey,
-		engineStatusColor as statusColor,
-		engineStatusLabel as statusLabel
-	} from '$lib/representations/engine';
+		engineShutdownConfirmText,
+		engineShutdownHeading,
+		engineShutdownMessage,
+		engineStatusColor as statusColor
+	} from '$lib/nxt/engine';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { css, iconButton } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
@@ -24,7 +29,25 @@
 	let popupRef = $state<HTMLElement | null>(null);
 	const activeAnchor = $derived(open ? anchor : null);
 
-	async function handleShutdown(engine: EngineStatusResponse) {
+	let confirmOpen = $state(false);
+	let pendingEngine = $state<EngineStatusResponse | null>(null);
+
+	function requestShutdown(engine: EngineStatusResponse) {
+		pendingEngine = engine;
+		confirmOpen = true;
+	}
+
+	function cancelConfirm() {
+		confirmOpen = false;
+		pendingEngine = null;
+	}
+
+	async function confirmShutdown() {
+		const engine = pendingEngine;
+		confirmOpen = false;
+		pendingEngine = null;
+		if (!engine) return;
+
 		const key = engineIdentityKey(engine);
 		shuttingDown.add(key);
 		try {
@@ -41,11 +64,25 @@
 	const overlayConfig = $derived<OverlayConfig>({
 		onEscape: handleClose,
 		onOutsideClick: (target: Node) => {
+			// Keep engines popup open while the confirm dialog is up.
+			if (confirmOpen) return;
 			if (popupRef?.contains(target)) return;
 			if (activeAnchor?.contains(target)) return;
 			handleClose();
 		}
 	});
+
+	const confirmHeading = $derived(
+		pendingEngine ? engineShutdownHeading(pendingEngine) : 'Shut down engine?'
+	);
+	const confirmMessage = $derived(
+		pendingEngine
+			? engineShutdownMessage(pendingEngine)
+			: 'This will stop and remove the engine container.'
+	);
+	const confirmText = $derived(
+		pendingEngine ? engineShutdownConfirmText(pendingEngine) : 'Shut down'
+	);
 </script>
 
 {#if open}
@@ -123,8 +160,10 @@
 		{:else}
 			<div class={css({ display: 'flex', flexDirection: 'column' })}>
 				{#each enginesStore.engines as engine (engineIdentityKey(engine))}
+					{@const busy = engineHasActiveJob(engine)}
 					<div
 						data-engine-row={engineIdentityKey(engine)}
+						data-engine-busy={busy ? 'true' : 'false'}
 						class={css({
 							display: 'flex',
 							alignItems: 'center',
@@ -144,7 +183,7 @@
 									flexShrink: '0',
 									backgroundColor: statusColor(engine.status)
 								})}
-								title={statusLabel(engine.status)}
+								title={engineActivityLabel(engine)}
 							></span>
 							<span
 								class={css({
@@ -157,8 +196,14 @@
 							>
 								{engine.resource_id}
 							</span>
-							<span class={css({ color: 'fg.tertiary', flexShrink: '0' })}>
-								{statusLabel(engine.status)}
+							<span
+								class={css({
+									color: busy ? 'fg.warning' : 'fg.tertiary',
+									flexShrink: '0'
+								})}
+								data-engine-activity={busy ? 'busy' : 'idle'}
+							>
+								{engineActivityLabel(engine)}
 							</span>
 						</div>
 						<button
@@ -176,10 +221,10 @@
 								_hover: { color: 'error' },
 								_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 							})}
-							onclick={() => handleShutdown(engine)}
+							onclick={() => requestShutdown(engine)}
 							disabled={shuttingDown.has(engineIdentityKey(engine))}
 							type="button"
-							title="Shutdown engine"
+							title={busy ? 'Cancel job and shut down engine' : 'Shut down idle engine'}
 						>
 							{#if shuttingDown.has(engineIdentityKey(engine))}
 								<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
@@ -210,3 +255,13 @@
 		{/if}
 	</div>
 {/if}
+
+<ConfirmDialog
+	show={confirmOpen}
+	heading={confirmHeading}
+	message={confirmMessage}
+	{confirmText}
+	cancelText="Keep running"
+	onConfirm={confirmShutdown}
+	onCancel={cancelConfirm}
+/>

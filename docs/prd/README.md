@@ -16,6 +16,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Build Length Tracking](implemented/build-length-tracking.md)
 - [Build Preview Checklist](implemented/build-preview-checklist.md) — archived rollout checklist
 - [Build Preview](implemented/build-preview.md)
+- [Containerized Polars Engines](implemented/containerized-polars-engines.md) — Docker-native execution, lifecycle, capacity, recovery, and reconciliation
 - [Cancel Build](implemented/cancel-build.md)
 - [Docker Release](implemented/docker-release.md)
 - [Dataset Column Descriptions](implemented/dataset-column-descriptions.md)
@@ -56,12 +57,12 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Authentication and Identity](backlog/authentication-and-identity.md)
 - [Authorization, Ownership, and Collaboration](backlog/authorization-ownership-and-collaboration.md)
 - [Build Observability](backlog/build-observability.md)
-- [Containerized Polars Engines](backlog/containerized-polars-engines.md)
 - [Feature-overhaul Portfolio](backlog/data-forge-2.md)
 - [Horizontal Node Configuration](backlog/horizontal-node-config.md)
 - [Kaggle Connection](backlog/kaggle-connection.md)
 - [Local Subdomain Serving](backlog/local-subdomain-serving.md)
 - [Mobile-first UI](backlog/mobile-first-ui.md)
+- [Namespace Credential Management](backlog/namespace-credential-management.md) — backend-owned provisioning, rotation, revocation, and migration from operator configuration
 - [Snapshot Rollback](backlog/snapshot-rollback.md)
 - [Tauri Hybrid Desktop](backlog/tauri-hybrid-desktop.md)
 - [Time Since Last Updated](backlog/time-since-last-updated.md)

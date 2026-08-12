@@ -28,6 +28,7 @@
         "grpcio>=1.81.0",
         "protobuf>=7.35.1",
         "protovalidate>=1.2.0",
+        "polars[rtcompat]>=1.41.2",
 ]
 
 [build-system]

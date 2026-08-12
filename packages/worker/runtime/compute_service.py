@@ -38,7 +38,7 @@ from runtime.build_events import (
 from runtime.build_events import (
     emit_progress as _emit_progress,
 )
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import EngineCapacityFull, ProcessManager
 from runtime.compute_utils import (
     apply_steps,
     await_engine_result,
@@ -53,6 +53,7 @@ from runtime.domain.datasource.source_types import DataSourceType
 from runtime.domain.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
 from runtime.exceptions import (
     DataSourceSnapshotError,
+    EngineShutdownError,
     PipelineExecutionError,
     PipelineValidationError,
     datasource_not_found,
@@ -74,7 +75,6 @@ from runtime.healthchecks import (
 )
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
-from runtime.worker_runtime_client import ClaimedBuildJob, HealthCheckSpec, client_from_env
 from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import extract_staged_deliveries, render_template, strip_staged_preview
@@ -92,6 +92,7 @@ from runtime.resource_observation import (
     stream_resource_events as _stream_resource_events,
 )
 from runtime.time import utc_now as _utcnow
+from runtime.worker_runtime_client import ClaimedBuildJob, HealthCheckSpec, client_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,14 @@ def _raise_engine_failure(
         raise DataSourceSnapshotError(
             "Datasource output is not available for this branch yet. Build the producing analysis first.",
             details=snapshot_details,
+        )
+
+    if error_kind == "engine_shutdown":
+        raise EngineShutdownError(
+            details={
+                "operation": operation,
+                "datasource_id": datasource_id,
+            }
         )
 
     raise PipelineExecutionError(
@@ -1372,7 +1381,7 @@ def _resolve_pipeline_request(
 
 
 def _acquire_engine(manager: ProcessManager, identity: compute_pb2.EngineIdentity, resource_config: dict | None = None):
-    return manager.get_or_create_engine(identity, resource_config=resource_config)
+    return manager.acquire_engine(identity, resource_config=resource_config)
 
 
 def _resolve_export_engine_identity(
@@ -1459,7 +1468,6 @@ def preview_step(
         analysis_id=analysis_id_value,
         resource_id=analysis_id_value,
     )
-    engine = _acquire_engine(manager, resolved_engine_identity, resource_config=resource_config)
     persist_preview_runs = settings.persist_preview_runs
     run_response = None
     if persist_preview_runs:
@@ -1482,19 +1490,20 @@ def preview_step(
             triggered_by=triggered_by,
         )
 
-    additional_datasources = _get_additional_datasources(session, preview_steps, analysis_pipeline)
+    with _acquire_engine(manager, resolved_engine_identity, resource_config=resource_config) as engine:
+        additional_datasources = _get_additional_datasources(session, preview_steps, analysis_pipeline)
 
-    # Calculate offset for pagination
-    offset = (page - 1) * row_limit
+        # Calculate offset for pagination
+        offset = (page - 1) * row_limit
 
-    # Use the new preview method that efficiently fetches only needed rows
-    job_id = engine.preview(
-        datasource_config=config,
-        steps=preview_steps,
-        row_limit=row_limit,
-        offset=offset,
-        additional_datasources=additional_datasources,
-    )
+        # Use the new preview method that efficiently fetches only needed rows
+        job_id = engine.preview(
+            datasource_config=config,
+            steps=preview_steps,
+            row_limit=row_limit,
+            offset=offset,
+            additional_datasources=additional_datasources,
+        )
 
     step_timings: dict = {}
     current_step_id: str | None = None
@@ -1639,7 +1648,7 @@ def get_step_schema(
         schema_steps = steps[: step_index + 1]
         schema_steps = _hydrate_udfs(session, schema_steps)
 
-    engine = _acquire_engine(
+    with _acquire_engine(
         manager,
         compute_pb2.EngineIdentity(
             scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
@@ -1647,16 +1656,15 @@ def get_step_schema(
             analysis_id=analysis_id_value,
             resource_id=analysis_id_value,
         ),
-    )
+    ) as engine:
+        additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
 
-    additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
-
-    # Use the new schema command that doesn't collect full data
-    job_id = engine.get_schema(
-        datasource_config=config,
-        steps=schema_steps,
-        additional_datasources=additional_datasources,
-    )
+        # Use the new schema command that doesn't collect full data
+        job_id = engine.get_schema(
+            datasource_config=config,
+            steps=schema_steps,
+            additional_datasources=additional_datasources,
+        )
 
     result_data = await_engine_result(engine, job_id=job_id)
     _raise_engine_failure(
@@ -1725,7 +1733,7 @@ def get_step_row_count(
         count_steps = steps[: step_index + 1]
         count_steps = _hydrate_udfs(session, count_steps)
 
-    engine = _acquire_engine(
+    with _acquire_engine(
         manager,
         compute_pb2.EngineIdentity(
             scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
@@ -1733,15 +1741,14 @@ def get_step_row_count(
             analysis_id=analysis_id_value,
             resource_id=analysis_id_value,
         ),
-    )
+    ) as engine:
+        additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
 
-    additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
-
-    job_id = engine.get_row_count(
-        datasource_config=config,
-        steps=count_steps,
-        additional_datasources=additional_datasources,
-    )
+        job_id = engine.get_row_count(
+            datasource_config=config,
+            steps=count_steps,
+            additional_datasources=additional_datasources,
+        )
     run_response = _create_engine_run(
         session,
         analysis_id=analysis_id_value,
@@ -1918,7 +1925,6 @@ def export_data(
     export_steps = _hydrate_udfs(session, export_steps)
 
     resolved_engine_identity = _resolve_export_engine_identity(engine_identity=engine_identity, analysis_id=analysis_id_value, build_id=build_id)
-    engine = _acquire_engine(manager, resolved_engine_identity)
 
     additional_datasources = _get_additional_datasources(session, export_steps, analysis_pipeline)
     source_datasource_name = _datasource_name(session, datasource_id)
@@ -1932,13 +1938,14 @@ def export_data(
     run_response = None
 
     try:
-        job_id = engine.export(
-            datasource_config=datasource_config,
-            steps=export_steps,
-            output_path=tmp_output,
-            export_format="parquet",
-            additional_datasources=additional_datasources,
-        )
+        with _acquire_engine(manager, resolved_engine_identity) as engine:
+            job_id = engine.export(
+                datasource_config=datasource_config,
+                steps=export_steps,
+                output_path=tmp_output,
+                export_format="parquet",
+                additional_datasources=additional_datasources,
+            )
         if job_started is not None:
             job_payload: dict[str, object] = {
                 "job_id": job_id,
@@ -2349,14 +2356,11 @@ def download_step(
         download_steps = steps[: step_index + 1]
         download_steps = _hydrate_udfs(session, download_steps)
 
-    engine = _acquire_engine(
-        manager,
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-            analysis_id=analysis_id_value,
-            resource_id=analysis_id_value,
-        ),
+    resolved_engine_identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id=analysis_id_value,
+        resource_id=analysis_id_value,
     )
     branch = _resolve_branch_value(datasource_config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
@@ -2381,35 +2385,36 @@ def download_step(
     content_type = export_fmt.content_type
 
     tmp_output = _secure_temp_path(suffix=ext)
-    run_response = _create_engine_run(
-        session,
-        analysis_id=analysis_id_value,
-        datasource_id=datasource_id,
-        kind="download",
-        status="running",
-        request_json=request_payload,
-        result_json=_initial_live_run_result(
-            current_tab_id=tab_id,
-            current_tab_name=tab_name,
-            total_steps=len(download_steps),
-            total_tabs=1,
-            resource_config=_resource_summary(engine),
-        ),
-        created_at=started_at,
-        progress=0.0,
-    )
-
+    run_response = None
     step_timings: dict = {}
     query_plan: str | None = None
     result_data: dict | None = None
     try:
-        job_id = engine.preview(
-            datasource_config=datasource_config,
-            steps=download_steps,
-            row_limit=10_000_000,  # Large limit to get all data for download
-            offset=0,
-            additional_datasources=additional_datasources,
-        )
+        with _acquire_engine(manager, resolved_engine_identity) as engine:
+            run_response = _create_engine_run(
+                session,
+                analysis_id=analysis_id_value,
+                datasource_id=datasource_id,
+                kind="download",
+                status="running",
+                request_json=request_payload,
+                result_json=_initial_live_run_result(
+                    current_tab_id=tab_id,
+                    current_tab_name=tab_name,
+                    total_steps=len(download_steps),
+                    total_tabs=1,
+                    resource_config=_resource_summary(engine),
+                ),
+                created_at=started_at,
+                progress=0.0,
+            )
+            job_id = engine.preview(
+                datasource_config=datasource_config,
+                steps=download_steps,
+                row_limit=10_000_000,  # Large limit to get all data for download
+                offset=0,
+                additional_datasources=additional_datasources,
+            )
 
         result_data = await_engine_result(engine, job_id=job_id)
         step_timings = result_data.get("step_timings", {}) if isinstance(result_data, dict) else {}
@@ -2487,6 +2492,8 @@ def download_step(
 
         return file_bytes, f"{filename}{ext}", content_type
     except Exception as exc:
+        if run_response is None:
+            raise
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
@@ -2899,7 +2906,15 @@ async def _prewarm_build_engine(manager: ProcessManager, *, build_id: str) -> No
         resource_id=build_id,
     )
     try:
-        await asyncio.to_thread(manager.spawn_engine, identity)
+        while True:
+            owns_admission = await manager.await_spawn_admission(identity)
+            try:
+                await asyncio.to_thread(manager.spawn_engine, identity)
+                break
+            except EngineCapacityFull:
+                continue
+            finally:
+                manager.release_spawn_admission(identity, owned=owns_admission)
         await asyncio.to_thread(manager.set_engine_runtime_context, identity, current_build_id=build_id, current_engine_run_id=None)
     except Exception:
         logger.debug("Build engine prewarm failed for %s", build_id, exc_info=True)

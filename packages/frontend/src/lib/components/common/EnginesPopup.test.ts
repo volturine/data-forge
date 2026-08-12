@@ -20,7 +20,14 @@ function makeEngine(overrides: Partial<EngineStatusResponse> = {}): EngineStatus
 		analysis_id: 'analysis-1',
 		resource_id: 'analysis-1',
 		status: 'healthy',
-		process_id: 1234,
+		container_id: 'container-1234',
+		image_digest: 'sha256:abc',
+		lifecycle_status: 'idle',
+		termination_reason: null,
+		exit_code: null,
+		oom_killed: null,
+		supervisor_id: 'worker-1',
+		owner_id: 'worker-1',
 		last_activity: Temporal.Now.instant().toString(),
 		current_job_id: null,
 		resource_config: null,
@@ -103,5 +110,18 @@ describe('EnginesPopup', () => {
 		stream.emitClose();
 		expect(enginesStore.status).toBe('disconnected');
 		expect(enginesStore.engines).toEqual([]);
+	});
+
+	test('shows Idle for warm engines and Job running when current_job_id is set', async () => {
+		const { getByText } = render(EnginesPopup, { props: { open: true } });
+		enginesStore.engines = [
+			makeEngine({ resource_id: 'idle-1', current_job_id: null }),
+			makeEngine({ resource_id: 'busy-1', current_job_id: 'job-9' })
+		];
+		enginesStore.status = 'connected';
+		await tick();
+		flushSync();
+		expect(getByText('Idle')).toBeTruthy();
+		expect(getByText('Job running')).toBeTruthy();
 	});
 });

@@ -128,14 +128,25 @@
 	const inferredSchemaGate = createAsyncGate();
 	let pendingSourceSchemaKeys = new SvelteSet<string>();
 	let warmedEngineIdentityCache = $state<string | null>(null);
+	let remoteLockSyncPending = $state(false);
+	let remoteLockSyncFailed = $state(false);
 
 	let lockMode = $state<EditorLockMode>('pending');
 	let lockIntent = $state<'editing' | 'released'>('editing');
 	const editorAccessState = $derived(
-		lockIntent === 'released' ? getEditorAccessState('released') : getEditorAccessState(lockMode)
+		lockIntent === 'released'
+			? getEditorAccessState('released')
+			: remoteLockSyncFailed
+				? getEditorAccessState('error')
+				: lockMode === 'owned' && (!draftLoaded || remoteLockSyncPending)
+					? getEditorAccessState('pending')
+					: getEditorAccessState(lockMode)
 	);
 	const lockedByOther = $derived(lockMode === 'other');
-	const editorReadOnly = $derived(lockIntent === 'released' || isEditorReadOnly(lockMode));
+	const lockReadOnly = $derived(lockIntent === 'released' || isEditorReadOnly(lockMode));
+	const editorReadOnly = $derived(
+		lockReadOnly || !draftLoaded || remoteLockSyncPending || remoteLockSyncFailed
+	);
 	const saveButtonState = $derived.by(() => {
 		if (editorAccessState === 'pending') return 'pending';
 		if (editorAccessState === 'locked') return 'locked';
@@ -230,7 +241,8 @@
 
 	// Storage: $derived can't hydrate from IndexedDB.
 	$effect(() => {
-		if (!storageKey || draftLoaded || editorReadOnly) return;
+		if (!storageKey || draftLoaded || lockReadOnly || remoteLockSyncPending || remoteLockSyncFailed)
+			return;
 		if (!analysisStore.tabs.length) return;
 		const currentStorageKey = storageKey;
 		const currentAnalysisId = analysisId;
@@ -247,48 +259,65 @@
 		}
 
 		const token = draftLoadGate.issue();
-		void idbGet<string>(currentStorageKey).then((raw) => {
-			if (!draftLoadGate.isCurrent(token)) return;
-			if (storageKey !== currentStorageKey || analysisId !== currentAnalysisId) return;
-			if (!raw) {
+		void idbGet<string>(currentStorageKey)
+			.then((raw) => {
+				if (!draftLoadGate.isCurrent(token)) return;
+				if (storageKey !== currentStorageKey || analysisId !== currentAnalysisId) return;
+				if (!raw) {
+					draftLoaded = true;
+					return;
+				}
+				let parsed: {
+					analysisId: string;
+					version?: string | null;
+					tabs: AnalysisTab[];
+					activeTabId: string | null;
+					resourceConfig: EngineResourceConfig | null;
+					engineDefaults: EngineDefaults | null;
+					selectedStepId: string | null;
+					leftPaneCollapsed: boolean;
+					rightPaneCollapsed: boolean;
+					configPosition?: 'right' | 'bottom';
+					bottomPaneHeight?: number;
+				};
+				try {
+					parsed = JSON.parse(raw) as typeof parsed;
+				} catch {
+					void idbDelete(currentStorageKey);
+					draftLoaded = true;
+					return;
+				}
+				if (parsed.analysisId !== currentAnalysisId) {
+					draftLoaded = true;
+					return;
+				}
+				if ((parsed.version ?? null) !== serverVersion) {
+					void idbDelete(currentStorageKey);
+					draftLoaded = true;
+					return;
+				}
+				if (!Array.isArray(parsed.tabs)) {
+					void idbDelete(currentStorageKey);
+					draftLoaded = true;
+					return;
+				}
+				const sanitized = parsed.tabs.map((tab, index) => ensureTabDefaults(tab, index));
+				analysisStore.setTabs(sanitized);
+				analysisStore.activeTabId = parsed.activeTabId;
+				analysisStore.setResourceConfig(parsed.resourceConfig);
+				analysisStore.setEngineDefaults(parsed.engineDefaults);
+				selectedStepId = parsed.selectedStepId;
+				leftPaneCollapsed = parsed.leftPaneCollapsed;
+				rightPaneCollapsed = parsed.rightPaneCollapsed;
+				if (parsed.configPosition) configPosition = parsed.configPosition;
+				if (parsed.bottomPaneHeight) bottomPaneHeight = parsed.bottomPaneHeight;
+				isDirty = true;
 				draftLoaded = true;
-				return;
-			}
-			const parsed = JSON.parse(raw) as {
-				analysisId: string;
-				version?: string | null;
-				tabs: AnalysisTab[];
-				activeTabId: string | null;
-				resourceConfig: EngineResourceConfig | null;
-				engineDefaults: EngineDefaults | null;
-				selectedStepId: string | null;
-				leftPaneCollapsed: boolean;
-				rightPaneCollapsed: boolean;
-				configPosition?: 'right' | 'bottom';
-				bottomPaneHeight?: number;
-			};
-			if (parsed.analysisId !== currentAnalysisId) {
-				draftLoaded = true;
-				return;
-			}
-			if ((parsed.version ?? null) !== serverVersion) {
-				void idbDelete(currentStorageKey);
-				draftLoaded = true;
-				return;
-			}
-			const sanitized = parsed.tabs.map((tab, index) => ensureTabDefaults(tab, index));
-			analysisStore.setTabs(sanitized);
-			analysisStore.activeTabId = parsed.activeTabId;
-			analysisStore.setResourceConfig(parsed.resourceConfig);
-			analysisStore.setEngineDefaults(parsed.engineDefaults);
-			selectedStepId = parsed.selectedStepId;
-			leftPaneCollapsed = parsed.leftPaneCollapsed;
-			rightPaneCollapsed = parsed.rightPaneCollapsed;
-			if (parsed.configPosition) configPosition = parsed.configPosition;
-			if (parsed.bottomPaneHeight) bottomPaneHeight = parsed.bottomPaneHeight;
-			isDirty = true;
-			draftLoaded = true;
-		});
+			})
+			.catch(() => {
+				// Corrupt draft storage must not take down the analysis page.
+				if (draftLoadGate.isCurrent(token)) draftLoaded = true;
+			});
 
 		return () => {
 			draftLoadGate.invalidate();
@@ -409,6 +438,8 @@
 		}
 		if (resetForRemoteLock) return;
 		resetForRemoteLock = true;
+		remoteLockSyncPending = true;
+		remoteLockSyncFailed = false;
 
 		showDatasourceModal = false;
 		showVersionModal = false;
@@ -423,8 +454,19 @@
 			void idbDelete(storageKey);
 		}
 		if (analysisQuery.data) {
-			void analysisQuery.refetch();
+			const syncAnalysisId = analysisId;
+			void analysisQuery
+				.refetch()
+				.then((result) => {
+					if (analysisId !== syncAnalysisId) return;
+					remoteLockSyncFailed = result.isError;
+				})
+				.finally(() => {
+					if (analysisId === syncAnalysisId) remoteLockSyncPending = false;
+				});
+			return;
 		}
+		remoteLockSyncPending = false;
 	});
 
 	const versionsQuery = createQuery(() => ({

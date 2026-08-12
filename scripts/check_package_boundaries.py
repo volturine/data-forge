@@ -256,6 +256,7 @@ PROTO_STRUCT_ALLOWLIST = {
     'proto/dataforge_protocol/datasource.proto:SnapshotPreview.rows': 'snapshot previews contain arbitrary row objects',
     'proto/dataforge_protocol/datasource.proto:ColumnStatsResult.top_values': 'top-value stats contain arbitrary value/count records by column type',
     'proto/dataforge_protocol/errors.proto:ErrorInfo.details': 'error details are intentionally extensible diagnostics',
+    'proto/dataforge_protocol/engine_runtime.proto:EngineJobResult.step_timings': 'engine timing keys are derived from user-defined pipeline step types',
     'proto/dataforge_protocol/iceberg.proto:IcebergSnapshotScanResponse.rows': 'Iceberg snapshot scans return arbitrary row objects',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerDatasourceMetadataResponse.config': 'datasource metadata exposes provider/user-defined config JSON',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerUpdateBuildResultRequest.result': 'build result is persisted runtime JSON at the database boundary',

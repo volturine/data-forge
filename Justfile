@@ -253,6 +253,9 @@ test-backend-raw:
     fi
     cd packages/backend
     {{pytest}} tests --ignore=tests/integration
+    cd ../..
+    docker build -f docker/Dockerfile --target engine -t data-forge-polars-engine:integration .
+    cd packages/backend
     {{pytest}} tests/integration
     cd ../worker
     {{pytest}} tests --ignore=tests/integration
@@ -306,9 +309,11 @@ docker-prod:
     docker build -f docker/Dockerfile --target api -t "data-forge-api:${TAG}" .
     docker build -f docker/Dockerfile --target scheduler -t "data-forge-scheduler:${TAG}" .
     docker build -f docker/Dockerfile --target worker -t "data-forge-worker:${TAG}" .
+    docker build -f docker/Dockerfile --target engine -t "data-forge-polars-engine:${TAG}" .
     DF_API_IMAGE="data-forge-api:${TAG}" \
     DF_SCHEDULER_IMAGE="data-forge-scheduler:${TAG}" \
     DF_WORKER_IMAGE="data-forge-worker:${TAG}" \
+    DF_ENGINE_IMAGE="data-forge-polars-engine:${TAG}" \
       docker compose --env-file docker/env/prod.env \
         -p dataforge-prod \
         -f docker/docker-compose.yml \

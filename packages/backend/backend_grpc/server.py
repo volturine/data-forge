@@ -423,7 +423,16 @@ def _engine_status_info_payload(message: compute_pb2.EngineStatusResult) -> Engi
         analysis_id=message.analysis_id,
         resource_id=message.resource_id,
         status=proto_value_to_enum_name(enums_pb2.EngineStatus, 'ENGINE_STATUS', message.status),
-        process_id=message.process_id if message.HasField('process_id') else None,
+        container_id=message.container_id if message.HasField('container_id') else None,
+        image_digest=message.image_digest if message.HasField('image_digest') else None,
+        lifecycle_status=proto_value_to_enum_name(enums_pb2.EngineInstanceStatus, 'ENGINE_INSTANCE_STATUS', message.lifecycle_status)
+        if message.HasField('lifecycle_status')
+        else None,
+        termination_reason=message.termination_reason if message.HasField('termination_reason') else None,
+        exit_code=message.exit_code if message.HasField('exit_code') else None,
+        oom_killed=message.oom_killed if message.HasField('oom_killed') else None,
+        supervisor_id=message.supervisor_id if message.HasField('supervisor_id') else None,
+        owner_id=message.owner_id if message.HasField('owner_id') else None,
         last_activity=message.last_activity if message.HasField('last_activity') else None,
         current_job_id=message.current_job_id if message.HasField('current_job_id') else None,
         resource_config=_engine_resource_config_payload(message.resource_config) if message.HasField('resource_config') else None,
@@ -621,6 +630,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     compute_requests_service.claim_next_request,
                     worker_id=request.worker_id,
                     reclaimable_owner_ids=reclaimable_owner_ids,
+                    allowed_kinds=request.allowed_compute_request_kinds,
                 )
                 if compute_request is None:
                     continue

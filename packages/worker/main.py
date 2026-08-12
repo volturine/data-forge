@@ -13,12 +13,17 @@ import uuid
 from multiprocessing.synchronize import Event as ProcessEvent
 
 from runtime.compute_manager import ProcessManager
-from runtime.compute_request_runtime import compute_request_loop, compute_request_worker_count
+from runtime.compute_request_runtime import (
+    ENGINE_REQUEST_KINDS,
+    NON_ENGINE_REQUEST_KINDS,
+    compute_request_loop,
+    compute_request_worker_count,
+)
 from runtime.config import settings
 from runtime.datasource_delete_runtime import datasource_delete_loop
+from runtime.docker_engine import reconcile_deployment_containers, validate_engine_runtime_readiness
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
 from runtime.engine_notifications import create_snapshot_notifier
-from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 from runtime.logging import configure_logging
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
 from runtime.worker_runtime import (
@@ -27,6 +32,7 @@ from runtime.worker_runtime import (
 from runtime.worker_runtime import (
     worker_id as build_worker_id,
 )
+from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient, client_from_env
 from worker_grpc.data_plane_server import start_data_plane_grpc_server_in_thread
 
 logger = logging.getLogger(__name__)
@@ -46,10 +52,12 @@ class ManagedWorkerProcess:
         process: multiprocessing.process.BaseProcess,
         stop_signal: ProcessEvent,
         stopped_signal: ProcessEvent,
+        worker_id: str = "",
     ) -> None:
         self.process = process
         self.stop_signal = stop_signal
         self.stopped_signal = stopped_signal
+        self.worker_id = worker_id
 
 
 def manager_id() -> str:
@@ -72,13 +80,13 @@ async def _watch_process_stop_signal(stop_signal: ProcessEvent, stop_event: asyn
     stop_event.set()
 
 
-def _worker_main(stop_signal: ProcessEvent, stopped_signal: ProcessEvent) -> None:
+def _worker_main(stop_signal: ProcessEvent, stopped_signal: ProcessEvent, worker_id: str) -> None:
     async def _run() -> None:
         stop_event = asyncio.Event()
         install_stop_handlers(stop_event)
         stop_task = asyncio.create_task(_watch_process_stop_signal(stop_signal, stop_event))
         try:
-            await run_build_worker_process(stop_event=stop_event)
+            await run_build_worker_process(stop_event=stop_event, worker_id=worker_id)
         finally:
             stop_event.set()
             stop_task.cancel()
@@ -93,17 +101,19 @@ async def run_build_worker_process(
     stop_event: asyncio.Event | None = None,
     idle_exit_seconds: float | None = None,
     max_jobs: int | None = None,
+    worker_id: str | None = None,
 ) -> None:
     configure_logging()
     logger.info("Starting build worker process...")
     local_stop = stop_event or asyncio.Event()
-    worker_id = build_worker_id()
+    worker_id = worker_id or build_worker_id()
     manager = ProcessManager(
         on_snapshot=create_snapshot_notifier(
             asyncio.get_running_loop(),
             namespace_provider=get_namespace,
             worker_id=worker_id,
-        )
+        ),
+        supervisor_id=worker_id,
     )
 
     from builds.build_execution import run_queued_build_job
@@ -141,9 +151,10 @@ async def run_build_worker_process(
 def _spawn_worker_process() -> ManagedWorkerProcess:
     stop_signal = _SPAWN.Event()
     stopped_signal = _SPAWN.Event()
-    process = _SPAWN.Process(target=_worker_main, args=(stop_signal, stopped_signal))
+    worker_id = build_worker_id()
+    process = _SPAWN.Process(target=_worker_main, args=(stop_signal, stopped_signal, worker_id))
     process.start()
-    return ManagedWorkerProcess(process=process, stop_signal=stop_signal, stopped_signal=stopped_signal)
+    return ManagedWorkerProcess(process=process, stop_signal=stop_signal, stopped_signal=stopped_signal, worker_id=worker_id)
 
 
 def _wait_for_child_stop(child: ManagedWorkerProcess, *, timeout_seconds: float, require_ack: bool) -> bool:
@@ -169,6 +180,8 @@ def _wait_for_child_stop(child: ManagedWorkerProcess, *, timeout_seconds: float,
 def _stop_worker_process(child: ManagedWorkerProcess) -> None:
     child.stop_signal.set()
     if _wait_for_child_stop(child, timeout_seconds=_CHILD_COOPERATIVE_STOP_SECONDS, require_ack=True):
+        if child.worker_id:
+            reconcile_deployment_containers(supervisor_id=child.worker_id)
         return
     logger.error(
         "Build worker process %s did not stop cooperatively; escalating shutdown",
@@ -176,10 +189,14 @@ def _stop_worker_process(child: ManagedWorkerProcess) -> None:
     )
     child.process.terminate()
     if _wait_for_child_stop(child, timeout_seconds=_CHILD_TERMINATE_SECONDS, require_ack=False):
+        if child.worker_id:
+            reconcile_deployment_containers(supervisor_id=child.worker_id)
         return
     logger.error("Build worker process %s ignored terminate(); killing", child.process.pid)
     child.process.kill()
     if _wait_for_child_stop(child, timeout_seconds=_CHILD_KILL_SECONDS, require_ack=False):
+        if child.worker_id:
+            reconcile_deployment_containers(supervisor_id=child.worker_id)
         return
     raise RuntimeError(f"Build worker process {child.process.pid} could not be stopped")
 
@@ -189,6 +206,8 @@ def _reap_dead_children(children: dict[int, ManagedWorkerProcess]) -> None:
     for pid in stale:
         child = children.pop(pid)
         child.process.join()
+        if child.worker_id:
+            reconcile_deployment_containers(supervisor_id=child.worker_id)
 
 
 def _next_idle_child_pid(children: dict[int, ManagedWorkerProcess], *, client: WorkerRuntimeClient) -> int | None:
@@ -220,7 +239,8 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
             asyncio.get_running_loop(),
             namespace_provider=get_namespace,
             worker_id=worker_id,
-        )
+        ),
+        supervisor_id=worker_id,
     )
     heartbeat_stop = threading.Event()
     heartbeat_thread = threading.Thread(
@@ -233,7 +253,16 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
         daemon=True,
     )
     heartbeat_thread.start()
-    request_tasks = [asyncio.create_task(compute_request_loop(local_stop, worker_id=worker_id, manager=manager)) for _ in range(compute_request_worker_count())]
+    request_worker_count = compute_request_worker_count()
+    # Claim each work class independently at the configured concurrency. Both
+    # classes share the bounded compute executor, so execution stays capped,
+    # while parked engine admissions cannot prevent datasource work from being
+    # claimed and datasource bursts cannot serialize engine requests.
+    request_lanes = [*([NON_ENGINE_REQUEST_KINDS] * request_worker_count), *([ENGINE_REQUEST_KINDS] * request_worker_count)]
+    request_tasks = [
+        asyncio.create_task(compute_request_loop(local_stop, worker_id=worker_id, manager=manager, allowed_kinds=allowed_kinds))
+        for allowed_kinds in request_lanes
+    ]
     datasource_delete_task = asyncio.create_task(datasource_delete_loop(local_stop, manager=manager))
     data_plane_server = start_data_plane_grpc_server_in_thread()
     children: dict[int, ManagedWorkerProcess] = {}
@@ -280,9 +309,11 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
         heartbeat_thread.join()
         for child in children.values():
             _stop_worker_process(child)
+        # Closing the manager first rejects parked capacity admissions. Waiting
+        # for request tasks before this point can deadlock shutdown forever.
+        manager.shutdown_all()
         await asyncio.gather(*request_tasks, datasource_delete_task, return_exceptions=True)
         await data_plane_server.stop(grace=1.0)
-        manager.shutdown_all()
         client.stop_worker(worker_id=worker_id)
         logger.info("Build worker manager shutdown complete")
 
@@ -300,6 +331,10 @@ def install_stop_handlers(stop_event: asyncio.Event) -> None:
 
 async def main() -> None:
     multiprocessing.freeze_support()
+    await asyncio.to_thread(validate_engine_runtime_readiness)
+    removed = await asyncio.to_thread(reconcile_deployment_containers)
+    if removed:
+        logger.warning("Removed %s orphaned engine container(s) during startup", removed)
     stop_event = asyncio.Event()
     install_stop_handlers(stop_event)
     await run_build_manager_process(stop_event=stop_event)

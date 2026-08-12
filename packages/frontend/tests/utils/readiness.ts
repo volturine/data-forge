@@ -1,7 +1,14 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export function readyTimeoutMs(): number {
-	return 15_000;
+	// Docker engine cold start + shell hydrate. Fail faster than 60s, but allow
+	// one full container health cycle under host load.
+	return 45_000;
+}
+
+/** Builds need a full exclusive engine start plus pipeline work. */
+export function buildTimeoutMs(): number {
+	return 90_000;
 }
 
 function mainNavigation(page: Page): Locator {
@@ -36,15 +43,31 @@ export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): P
  * Use as the first await after `page.goto(...)` before any page-specific
  * assertions. This guarantees the layout `ready` flag resolved, auth
  * completed, and the Svelte page component has started rendering.
+ *
+ * Bootstrap failures surface as `[data-shell-bootstrap="error"]` — fail
+ * immediately with that message instead of waiting out the full timeout.
  */
 export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	await expect(mainNavigation(page)).toBeVisible({ timeout });
+	const bootstrapError = page.locator('[data-shell-bootstrap="error"]');
+	const nav = mainNavigation(page);
+	await Promise.race([
+		nav.waitFor({ state: 'visible', timeout }).then(() => 'ready' as const),
+		bootstrapError.waitFor({ state: 'visible', timeout }).then(() => 'error' as const)
+	]).then(async (outcome) => {
+		if (outcome === 'error') {
+			const message =
+				(await bootstrapError.innerText().catch(() => null)) ?? 'App shell bootstrap failed';
+			throw new Error(`App shell failed to bootstrap:\n${message}`);
+		}
+	});
 	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
 	await waitForAnyVisible(page.locator('main'), timeout);
 }
 
 async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {
-	await page.goto(path, { waitUntil: 'domcontentloaded' });
+	// Cap navigation so a stuck beforeunload/network cannot sit until the test wall.
+	const navigationTimeout = Math.min(timeout, 15_000);
+	await page.goto(path, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
 	await waitForLayoutReady(page, timeout);
 }
 

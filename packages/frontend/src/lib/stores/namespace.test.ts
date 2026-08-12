@@ -31,7 +31,9 @@ const {
 	switchNamespace,
 	useNamespace,
 	isNamespaceReady,
-	isNamespaceSwitching
+	isNamespaceSwitching,
+	getNamespaceError,
+	getNamespaceStatus
 } = await import('./namespace.svelte');
 
 describe('namespace store', () => {
@@ -80,11 +82,13 @@ describe('namespace store', () => {
 			expect(isNamespaceReady()).toBe(true);
 		});
 
-		test('rejects init when config default namespace is missing', async () => {
+		test('enters failed status when config default namespace is missing', async () => {
 			mockIdbGet.mockResolvedValue(null);
 			mockConfigStore.config = null;
-			await expect(initNamespace()).rejects.toThrow('Default namespace missing from config');
+			await initNamespace();
 			expect(isNamespaceReady()).toBe(false);
+			expect(getNamespaceStatus()).toBe('failed');
+			expect(getNamespaceError()).toMatch(/unavailable|default_namespace/i);
 		});
 
 		test('returns true when namespace already set before init', async () => {
@@ -110,10 +114,13 @@ describe('namespace store', () => {
 			expect(requireNamespace()).toBe('config-ns');
 		});
 
-		test('rejects when both IndexedDB and config are empty', async () => {
+		test('fails when both IndexedDB and config are empty', async () => {
 			mockIdbGet.mockResolvedValue(null);
 			mockConfigStore.config = null;
-			await expect(initNamespace()).rejects.toThrow('Default namespace missing from config');
+			await initNamespace();
+			expect(isNamespaceReady()).toBe(false);
+			expect(getNamespaceStatus()).toBe('failed');
+			expect(getNamespaceError()).toBeTruthy();
 		});
 
 		test('persists resolved namespace to IndexedDB', async () => {
@@ -174,8 +181,18 @@ describe('namespace store', () => {
 		test('deletes stale whitespace-only value from IDB during init', async () => {
 			mockIdbGet.mockResolvedValue('   ');
 			mockConfigStore.config = null;
-			await expect(initNamespace()).rejects.toThrow('Default namespace missing from config');
+			await initNamespace();
 			expect(mockIdbDelete).toHaveBeenCalledWith('namespace');
+			expect(isNamespaceReady()).toBe(false);
+			expect(getNamespaceStatus()).toBe('failed');
+		});
+
+		test('fails with a contract error when config loads without default_namespace', async () => {
+			mockIdbGet.mockResolvedValue(null);
+			mockConfigStore.config = {};
+			await initNamespace();
+			expect(getNamespaceStatus()).toBe('failed');
+			expect(getNamespaceError()).toBe('Configuration is missing default_namespace');
 		});
 	});
 
