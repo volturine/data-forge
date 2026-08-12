@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { switchNamespace } from './utils/namespace.js';
+import { restoreDefaultNamespace, switchNamespace } from './utils/namespace.js';
 import {
 	waitForAppShell,
 	waitForProfileTabs,
@@ -342,6 +342,9 @@ test.describe('Profile – AI Providers tab', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Profile – System tab', () => {
+	test.afterEach(async ({ page }) => {
+		await restoreDefaultNamespace(page);
+	});
 	test('system tab shows debug section with IndexedDB toggle', async ({ page }) => {
 		await gotoProfile(page, 'system');
 		await waitForProfileTab(page, 'System');

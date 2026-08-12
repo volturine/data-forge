@@ -3,7 +3,7 @@ import { createDatasource } from './utils/api.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import { gotoMonitoringTab, waitForAppShell, waitForDatasourceList } from './utils/readiness.js';
-import { switchNamespace, expectNamespace } from './utils/namespace.js';
+import { switchNamespace, expectNamespace, restoreDefaultNamespace } from './utils/namespace.js';
 
 /**
  * E2E tests for namespace data isolation.
@@ -11,6 +11,10 @@ import { switchNamespace, expectNamespace } from './utils/namespace.js';
  * and reappear when switching back.
  */
 test.describe('Namespace – data isolation', () => {
+	test.afterEach(async ({ page }) => {
+		await restoreDefaultNamespace(page);
+	});
+
 	test('datasource in namespace A is invisible from namespace B', async ({ page, request }) => {
 		const id = uid();
 		const nsA = `e2e-ns-a-${id}`;

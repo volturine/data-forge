@@ -41,6 +41,14 @@ export async function expectNamespace(page: Page, name: string): Promise<void> {
 	await expect(page.locator(SIDEBAR).getByText(name)).toBeVisible({ timeout: 5_000 });
 }
 
+/** Restore the shared worker context after a test that changes namespace. */
+export async function restoreDefaultNamespace(page: Page): Promise<void> {
+	await waitForAppShell(page);
+	const picker = page.getByRole('button', { name: 'Select namespace' });
+	if ((await picker.textContent())?.trim() === 'default') return;
+	await switchNamespace(page, 'default');
+}
+
 /**
  * Switch namespace while on the datasources page and wait for the list to refresh.
  */
