@@ -35,8 +35,9 @@ export class AppLifecycle {
 		this.services.schema.reset();
 	}
 
-	activateNamespace(): void {
-		this.queryClient.clear();
+	async activateNamespace(): Promise<void> {
+		this.queryClient.removeQueries({ type: 'inactive' });
+		await this.queryClient.resetQueries({ type: 'active' });
 	}
 
 	destroy(): void {

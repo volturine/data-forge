@@ -19,18 +19,20 @@ describe('AppLifecycle', () => {
 	it('releases every namespace-scoped service before activating another namespace', async () => {
 		const queryClient = new QueryClient();
 		const cancelQueries = vi.spyOn(queryClient, 'cancelQueries');
-		const clear = vi.spyOn(queryClient, 'clear');
+		const removeQueries = vi.spyOn(queryClient, 'removeQueries');
+		const resetQueries = vi.spyOn(queryClient, 'resetQueries');
 		const scoped = services();
 		const lifecycle = new AppLifecycle(queryClient, scoped);
 
 		await lifecycle.releaseNamespace();
-		lifecycle.activateNamespace();
+		await lifecycle.activateNamespace();
 
 		expect(cancelQueries).toHaveBeenCalledOnce();
 		for (const service of Object.values(scoped)) {
 			expect(service.reset).toHaveBeenCalledOnce();
 		}
-		expect(clear).toHaveBeenCalledOnce();
+		expect(removeQueries).toHaveBeenCalledWith({ type: 'inactive' });
+		expect(resetQueries).toHaveBeenCalledWith({ type: 'active' });
 	});
 
 	it('destroys process resources when the app scope ends', () => {

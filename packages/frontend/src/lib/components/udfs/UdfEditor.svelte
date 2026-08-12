@@ -10,6 +10,7 @@
 	import type { Udf, UdfInput, UdfSignature } from '$lib/types/udf';
 	import { ArrowLeft, Save } from '@lucide/svelte';
 	import { css, button, input, label } from '$lib/styles/panda';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
 
 	interface Props {
 		mode: 'create' | 'edit';
@@ -17,6 +18,7 @@
 
 	let { mode }: Props = $props();
 	const queryClient = useQueryClient();
+	const namespace = useNamespace();
 	const udfId = $derived(page.params.id ?? '');
 
 	let name = $state('');
@@ -33,7 +35,7 @@
 	let initialized = $state(false);
 
 	const query = createQuery(() => ({
-		queryKey: ['udf', udfId],
+		queryKey: ['udf', namespace.value, udfId],
 		enabled: mode === 'edit' && !!udfId,
 		queryFn: async () => {
 			if (!udfId) throw new Error('Missing UDF id');

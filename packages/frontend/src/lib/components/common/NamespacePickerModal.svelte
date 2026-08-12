@@ -10,7 +10,7 @@
 	interface Props {
 		open: boolean;
 		selected: string;
-		onSelect: (value: string) => void;
+		onSelect: (value: string) => void | Promise<void>;
 		onClose: () => void;
 		anchor?: HTMLElement | null;
 	}
@@ -18,6 +18,8 @@
 	let { open, selected, onSelect, onClose, anchor = null }: Props = $props();
 
 	let searchQuery = $state('');
+	let selecting = $state(false);
+	let selectError = $state('');
 	const debouncedSearch = new Debounced(() => searchQuery, 200);
 	let popoverRect = $state({ left: 0, top: 0, width: 360 });
 	let lastAnchor = $state<HTMLElement | null>(null);
@@ -66,14 +68,23 @@
 		searchQuery = '';
 	}
 
-	function handleSelect(value: string) {
-		handleClose();
-		void onSelect(value);
+	async function handleSelect(value: string) {
+		if (selecting) return;
+		selecting = true;
+		selectError = '';
+		try {
+			await onSelect(value);
+			handleClose();
+		} catch (error) {
+			selectError = error instanceof Error ? error.message : 'Failed to switch namespace';
+		} finally {
+			selecting = false;
+		}
 	}
 
 	function handleCreate() {
 		if (!normalizedCandidate) return;
-		handleSelect(normalizedCandidate);
+		void handleSelect(normalizedCandidate);
 	}
 
 	const overlayConfig = $derived<OverlayConfig>({
@@ -202,7 +213,14 @@
 				placeholder="Search or create (lowercase)..."
 				aria-label="Search namespaces"
 				autocomplete="off"
+				disabled={selecting}
 			/>
+
+			{#if selectError}
+				<div class={css({ paddingX: '1', fontSize: '2xs', color: 'error', lineHeight: 'snug' })}>
+					{selectError}
+				</div>
+			{/if}
 
 			{#if invalidCandidate}
 				<div class={css({ paddingX: '1', fontSize: '2xs', color: 'error', lineHeight: 'snug' })}>
@@ -247,6 +265,7 @@
 								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 							})}
 							onclick={() => void handleCreate()}
+							disabled={selecting}
 							type="button"
 						>
 							<div
@@ -322,6 +341,7 @@
 								_hover: { backgroundColor: 'bg.hover' }
 							})}
 							onclick={() => void handleSelect(name)}
+							disabled={selecting}
 							type="button"
 						>
 							<span

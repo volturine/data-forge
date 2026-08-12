@@ -212,7 +212,6 @@
 	const namespaceDraft = $derived(namespaceState.value);
 
 	async function handleNamespaceSelect(value: string) {
-		namespaceOpen = false;
 		await switchNamespace(value, {
 			async beforeCommit() {
 				if (currentPath === '/datasources' && page.url.searchParams.has('id')) {
@@ -226,6 +225,7 @@
 				await appLifecycle.releaseNamespace();
 			},
 			async afterCommit() {
+				await appLifecycle.activateNamespace();
 				const nextUrl = new URL(page.url);
 				if (nextUrl.pathname === '/datasources') {
 					nextUrl.searchParams.delete('id');
@@ -234,7 +234,6 @@
 					invalidateAll: true,
 					replaceState: true
 				});
-				appLifecycle.activateNamespace();
 			}
 		});
 	}
