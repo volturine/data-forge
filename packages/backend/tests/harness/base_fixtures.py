@@ -219,6 +219,12 @@ class _TestWorkerDataPlaneClient:
     def __init__(self) -> None:
         self._client = None
 
+    def __enter__(self) -> _TestWorkerDataPlaneClient:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
     def _settings(self):
         return _settings()
 

@@ -548,7 +548,6 @@ async def start_build(
             placeholder_source_type = datasource_service.DataSourceType.ICEBERG
             placeholder_config = {
                 'catalog_type': 'sql',
-                'catalog_uri': settings.database_url,
                 'warehouse': warehouse_path,
                 'namespace': namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else 'outputs',
                 'table': table_name,

@@ -192,7 +192,6 @@ def _build_iceberg_config(
     target_path: str,
     branch: str,
     *,
-    database_url: str,
     source_config: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     cleaned = target_path.rstrip("/")
@@ -201,7 +200,6 @@ def _build_iceberg_config(
         raise ValueError(f"Invalid Iceberg table location: {target_path}")
     return {
         "catalog_type": "sql",
-        "catalog_uri": database_url,
         "warehouse": object_store_url("clean", namespace=get_namespace()),
         "namespace": "clean",
         "table": parts[-2],
@@ -418,7 +416,7 @@ def create_file_datasource(
                 f"Failed to load file datasource for ingestion: {exc}",
                 details={"file_path": resolved_file_path, "file_type": resolved_file_type.value},
             ) from exc
-        config = _build_iceberg_config(target_path, "master", database_url=database_url, source_config=source_config)
+        config = _build_iceberg_config(target_path, "master", source_config=source_config)
         _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
         record = client.publish_datasource_create(
             namespace=namespace,
@@ -496,7 +494,7 @@ def create_database_datasource(
         lazy = _coerce_database_iceberg_compatible_lazyframe(lazy)
         target_path = _prepare_clean_target(datasource_id, branch)
         snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate", database_url=database_url)
-        config = _build_iceberg_config(target_path, branch, database_url=database_url, source_config=source_config)
+        config = _build_iceberg_config(target_path, branch, source_config=source_config)
         _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
         record = client.publish_datasource_create(
             namespace=namespace,
@@ -594,7 +592,7 @@ def create_iceberg_datasource(
         except Exception as exc:
             raise DataSourceConnectionError(source_type.ingestion_error_message, details={"source_type": source_type}) from exc
         persisted_source = _validated_file_source_config(source) if source_type == DataSourceType.FILE else source
-        config = _build_iceberg_config(target_path, branch_name, database_url=database_url, source_config=persisted_source)
+        config = _build_iceberg_config(target_path, branch_name, source_config=persisted_source)
         _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
         record = client.publish_datasource_create(
             namespace=namespace,

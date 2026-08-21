@@ -77,7 +77,12 @@ from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
 from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
-from runtime.notification_delivery import extract_staged_deliveries, render_template, strip_staged_preview
+from runtime.notification_delivery import (
+    STAGED_NOTIFICATION_PREFIX,
+    extract_staged_deliveries,
+    render_template,
+    strip_staged_preview,
+)
 from runtime.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
 from runtime.resource_observation import (
     observe_stream_task as _observe_stream_task,
@@ -120,6 +125,33 @@ def _ensure_download_size(path: str) -> int:
         actual_mb = size / (1024 * 1024)
         raise ValueError(f"Download is {actual_mb:.1f} MB; maximum supported download size is {limit_mb} MB")
     return size
+
+
+def _internal_catalog_uri(config_uri: object) -> str | None:
+    if settings.database_url:
+        return settings.database_url
+    if isinstance(config_uri, str) and config_uri:
+        return config_uri
+    return None
+
+
+def _strip_staged_notification_columns(path: str) -> list[dict[str, object]] | None:
+    parquet_file = pq.ParquetFile(path)
+    staged_columns = [name for name in parquet_file.schema_arrow.names if name.startswith(STAGED_NOTIFICATION_PREFIX)]
+    if not staged_columns:
+        return None
+    _, deliveries = extract_staged_deliveries(parquet_file.read(columns=staged_columns))
+    kept_schema = pa.schema([field for field in parquet_file.schema_arrow if field.name not in set(staged_columns)])
+    tmp_rewrite = _secure_temp_path(suffix=".parquet")
+    try:
+        with pq.ParquetWriter(tmp_rewrite, kept_schema) as writer:
+            for batch in parquet_file.iter_batches(batch_size=65_536, columns=[field.name for field in kept_schema]):
+                writer.write_batch(batch)
+        os.replace(tmp_rewrite, path)
+    finally:
+        if os.path.exists(tmp_rewrite):
+            os.unlink(tmp_rewrite)
+    return deliveries
 
 
 class _UnsetType:
@@ -1975,10 +2007,9 @@ def export_data(
         row_count = data.get("row_count", 0)
         logger.info(f"Export completed: {row_count} rows written to parquet")
 
-        staged_table = pq.read_table(tmp_output)
-        sanitized_table, staged_notification_deliveries = extract_staged_deliveries(staged_table)
-        if sanitized_table.column_names != staged_table.column_names:
-            pq.write_table(sanitized_table, tmp_output)
+        staged_result = _strip_staged_notification_columns(tmp_output)
+        staged_notification_deliveries = staged_result if staged_result is not None else []
+        if staged_result is not None:
             data = strip_staged_preview(data)
 
         completed_at = datetime.now(UTC)
@@ -2140,7 +2171,6 @@ def export_data(
         datasource_name = iceberg_options.get("table_name", "exported_data")
         iceberg_ds_config = {
             "catalog_type": "sql",
-            "catalog_uri": settings.database_url,
             "warehouse": warehouse_path,
             "namespace": namespace,
             "table": table_name,
@@ -3643,7 +3673,7 @@ def list_iceberg_snapshots(session: object, datasource_id: str, branch: str | No
     branch_name = raw_branch_name if isinstance(raw_branch_name, str) else None
 
     catalog_type = datasource.config.get("catalog_type")
-    catalog_uri = datasource.config.get("catalog_uri")
+    catalog_uri = _internal_catalog_uri(datasource.config.get("catalog_uri"))
     namespace = datasource.config.get("namespace")
     table_name = datasource.config.get("table")
     warehouse = datasource.config.get("warehouse")
@@ -3708,7 +3738,7 @@ def delete_iceberg_snapshot(session: object, datasource_id: str, snapshot_id: st
         raise DataSourceSnapshotError("Snapshot ID must be an integer", details={"snapshot_id": snapshot_id}) from exc
 
     catalog_type = datasource.config.get("catalog_type")
-    catalog_uri = datasource.config.get("catalog_uri")
+    catalog_uri = _internal_catalog_uri(datasource.config.get("catalog_uri"))
     namespace = datasource.config.get("namespace")
     table_name = datasource.config.get("table")
     warehouse = datasource.config.get("warehouse")

@@ -11,7 +11,8 @@ from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
 _PUBLIC_REVISION = '0001_runtime_public'
-_TENANT_REVISION = '0002_runtime_tenant'
+_TENANT_REVISION = '0003_encrypt_secrets_at_rest'
+_PREVIOUS_TENANT_REVISION = '0002_runtime_tenant'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 
@@ -117,9 +118,9 @@ def migrate_runtime(namespaces: list[str]) -> None:
     for namespace in namespaces:
         tenant_schema = namespace_database_schema(namespace)
         revision = _current_revision(tenant_schema)
-        if revision is None:
-            _upgrade_schema(scope='tenant', schema=tenant_schema, revision=_TENANT_REVISION)
-        elif revision != _TENANT_REVISION:
+        if revision not in (None, _PREVIOUS_TENANT_REVISION, _TENANT_REVISION):
             raise RuntimeError(
                 f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected {_TENANT_REVISION}. Recreate the database.'
             )
+        if revision != _TENANT_REVISION:
+            _upgrade_schema(scope='tenant', schema=tenant_schema, revision=_TENANT_REVISION)

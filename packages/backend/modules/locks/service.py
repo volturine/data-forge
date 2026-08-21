@@ -1,6 +1,9 @@
 import uuid
 from datetime import datetime, timedelta
+from typing import Any, cast
 
+from sqlalchemy import or_, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import Session
@@ -59,6 +62,10 @@ def get_lock_status(session: Session, resource_type: str, resource_id: str) -> L
     return status
 
 
+def _lock_table():
+    return ResourceLock.metadata.tables[ResourceLock.__tablename__]
+
+
 def acquire_lock(
     session: Session,
     resource_type: str,
@@ -66,6 +73,7 @@ def acquire_lock(
     owner_id: str,
     ttl_seconds: int | None = None,
 ) -> LockStatusResponse:
+    table = _lock_table()
     for _ in range(2):
         now = _utcnow()
         lock = get_lock(session, resource_type, resource_id)
@@ -87,21 +95,32 @@ def acquire_lock(
                 continue
             session.refresh(lock)
             return _status(lock, now)
-        if lock.owner_id == owner_id or lock.is_expired(now=now):
-            lock.owner_id = owner_id
-            lock.lock_token = uuid.uuid4().hex
-            lock.acquired_at = now
-            lock.last_heartbeat = now
-            lock.expires_at = _expires_at(now, ttl_seconds)
-            session.add(lock)
-            try:
-                session.commit()
-            except StaleDataError:
-                _reset_session_after_conflict(session)
-                continue
-            session.refresh(lock)
-            return _status(lock, now)
-        raise ValueError(f'{resource_type} {resource_id} is locked by another owner')
+        if lock.owner_id != owner_id and not lock.is_expired(now=now):
+            raise ValueError(f'{resource_type} {resource_id} is locked by another owner')
+        token = uuid.uuid4().hex
+        statement = (
+            update(ResourceLock)
+            .where(table.c.resource_type == resource_type)
+            .where(table.c.resource_id == resource_id)
+            .where(or_(table.c.owner_id == owner_id, table.c.expires_at <= ResourceLock.as_utc(now)))
+            .values(
+                owner_id=owner_id,
+                lock_token=token,
+                acquired_at=now,
+                expires_at=_expires_at(now, ttl_seconds),
+                last_heartbeat=now,
+            )
+        )
+        result = cast(CursorResult[Any], session.execute(statement))
+        if result.rowcount != 1:
+            _reset_session_after_conflict(session)
+            continue
+        session.commit()
+        session.expire_all()
+        current = get_lock(session, resource_type, resource_id)
+        if current is None:
+            continue
+        return _status(current, now)
 
     current = get_lock(session, resource_type, resource_id)
     if current is None:
@@ -121,20 +140,31 @@ def heartbeat_lock(
     ttl_seconds: int | None = None,
 ) -> LockStatusResponse:
     now = _utcnow()
-    lock = get_lock(session, resource_type, resource_id)
-    if lock is None or lock.is_expired(now=now):
-        raise ValueError(f'{resource_type} {resource_id} lock is not active')
-    if lock.owner_id != owner_id or lock.lock_token != lock_token:
+    table = _lock_table()
+    statement = (
+        update(ResourceLock)
+        .where(table.c.resource_type == resource_type)
+        .where(table.c.resource_id == resource_id)
+        .where(table.c.owner_id == owner_id)
+        .where(table.c.lock_token == lock_token)
+        .where(table.c.expires_at > ResourceLock.as_utc(now))
+        .values(
+            last_heartbeat=now,
+            expires_at=_expires_at(now, ttl_seconds),
+        )
+    )
+    result = cast(CursorResult[Any], session.execute(statement))
+    if result.rowcount != 1:
+        session.rollback()
+        lock = get_lock(session, resource_type, resource_id)
+        if lock is None or lock.is_expired(now=now):
+            raise ValueError(f'{resource_type} {resource_id} lock is not active')
         raise ValueError(f'{resource_type} {resource_id} lock is owned by another owner')
-    lock.last_heartbeat = now
-    lock.expires_at = _expires_at(now, ttl_seconds)
-    session.add(lock)
-    try:
-        session.commit()
-    except StaleDataError as exc:
-        _reset_session_after_conflict(session)
-        raise ValueError(f'{resource_type} {resource_id} lock is not active') from exc
-    session.refresh(lock)
+    session.commit()
+    session.expire_all()
+    lock = get_lock(session, resource_type, resource_id)
+    if lock is None:
+        raise ValueError(f'{resource_type} {resource_id} lock is not active')
     return _status(lock, now)
 
 

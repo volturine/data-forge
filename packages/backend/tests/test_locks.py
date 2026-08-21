@@ -1,5 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+from sqlmodel import Session
+
 from backend_core.database import run_settings_db
 from backend_core.persistence.locks.models import ResourceLock
 from modules.auth.service import ensure_default_user
@@ -142,7 +145,7 @@ class TestLockRoutes:
         lock = test_db_session.get(ResourceLock, ('analysis', 'analysis-5'))
         assert lock is not None
 
-    def test_acquire_lock_recovers_when_existing_row_disappears_during_commit(
+    def test_acquire_lock_recovers_from_conflicting_insert_during_commit(
         self,
         test_db_session,
         test_engine,
@@ -153,40 +156,154 @@ class TestLockRoutes:
         from modules.locks import service as locks_service
 
         now = datetime.now(UTC).replace(tzinfo=None)
-        existing = ResourceLock(
-            resource_type='analysis',
-            resource_id='analysis-race',
-            owner_id='owner-a',
-            lock_token='lock-a',
-            acquired_at=now - timedelta(minutes=2),
-            expires_at=now - timedelta(seconds=1),
-            last_heartbeat=now - timedelta(minutes=1),
-        )
-        test_db_session.add(existing)
-        test_db_session.commit()
-
-        original_commit = test_db_session.commit
         injected = False
 
-        def race_commit() -> None:
+        def racing_commit() -> None:
             nonlocal injected
             if not injected:
                 injected = True
+                # Another acquirer wins the insert race just before our commit.
                 with SQLModelSession(test_engine) as other:
-                    victim = other.get(ResourceLock, ('analysis', 'analysis-race'))
-                    if victim is not None:
-                        other.delete(victim)
-                        other.commit()
+                    other.add(
+                        ResourceLock(
+                            resource_type='analysis',
+                            resource_id='analysis-insert-race',
+                            owner_id='owner-b',
+                            lock_token='lock-b',
+                            acquired_at=now,
+                            expires_at=now + timedelta(seconds=30),
+                            last_heartbeat=now,
+                        )
+                    )
+                    other.commit()
             original_commit()
 
-        monkeypatch.setattr(test_db_session, 'commit', race_commit)
+        original_commit = test_db_session.commit
+        monkeypatch.setattr(test_db_session, 'commit', racing_commit)
 
-        lock = locks_service.acquire_lock(test_db_session, 'analysis', 'analysis-race', 'owner-b')
+        lock = locks_service.acquire_lock(test_db_session, 'analysis', 'analysis-insert-race', 'owner-b')
 
         assert lock.owner_id == 'owner-b'
-        stored = test_db_session.get(ResourceLock, ('analysis', 'analysis-race'))
+        assert lock.lock_token != 'lock-b'
+        stored = test_db_session.get(ResourceLock, ('analysis', 'analysis-insert-race'))
         assert stored is not None
         assert stored.owner_id == 'owner-b'
+        assert stored.lock_token == lock.lock_token
+
+    def _seed_lock(self, test_db_session, resource_id: str, *, owner: str, token: str, expires_at: datetime) -> ResourceLock:
+        now = datetime.now(UTC).replace(tzinfo=None)
+        lock = ResourceLock(
+            resource_type='analysis',
+            resource_id=resource_id,
+            owner_id=owner,
+            lock_token=token,
+            acquired_at=now,
+            expires_at=expires_at,
+            last_heartbeat=now,
+        )
+        test_db_session.add(lock)
+        test_db_session.commit()
+        return lock
+
+    def _patch_stale_read_with_takeover(self, monkeypatch, test_engine, resource_type: str, resource_id: str):
+        """First service-level read returns the stale row while a competing owner
+        concurrently takes over the committed row in between.
+        """
+        from modules.locks import service as locks_service
+
+        original_get_lock = locks_service.get_lock
+        raced = {'done': False}
+
+        def racing_get_lock(session, rt, rid):
+            lock = original_get_lock(session, rt, rid)
+            if not raced['done'] and lock is not None and rt == resource_type and rid == resource_id:
+                raced['done'] = True
+                fresh_expires = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=60)
+                with Session(test_engine) as other:
+                    victim = other.get(ResourceLock, (rt, rid))
+                    victim.owner_id = 'owner-thief'
+                    victim.lock_token = 'thief-token'
+                    victim.acquired_at = datetime.now(UTC).replace(tzinfo=None)
+                    victim.last_heartbeat = victim.acquired_at
+                    victim.expires_at = fresh_expires
+                    other.add(victim)
+                    other.commit()
+            return lock
+
+        monkeypatch.setattr(locks_service, 'get_lock', racing_get_lock)
+        return raced
+
+    def test_acquire_lock_cas_rejects_takeover_of_live_lock(self, test_db_session, test_engine, monkeypatch) -> None:
+        from modules.locks import service as locks_service
+
+        expired = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)
+        self._seed_lock(test_db_session, 'analysis-cas-acquire', owner='owner-a', token='token-a', expires_at=expired)
+        raced = self._patch_stale_read_with_takeover(monkeypatch, test_engine, 'analysis', 'analysis-cas-acquire')
+
+        # Caller saw the stale expired row (owner-a), but by the time the
+        # compare-and-set UPDATE runs, the committed row is live under another
+        # owner: neither the owner nor expiry predicate matches.
+        with pytest.raises(ValueError, match='locked by another owner'):
+            locks_service.acquire_lock(test_db_session, 'analysis', 'analysis-cas-acquire', 'owner-c')
+
+        assert raced['done'] is True
+        test_db_session.expire_all()
+        stored = test_db_session.get(ResourceLock, ('analysis', 'analysis-cas-acquire'))
+        assert stored is not None
+        assert stored.owner_id == 'owner-thief'
+        assert stored.lock_token == 'thief-token'
+
+    def test_heartbeat_lock_cas_rejects_superseded_token(self, test_db_session, test_engine) -> None:
+        from modules.locks import service as locks_service
+
+        active = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=60)
+        seeded = self._seed_lock(test_db_session, 'analysis-cas-heartbeat', owner='owner-a', token='token-a', expires_at=active)
+
+        # A competing acquirer rotates the committed token before we heartbeat.
+        with Session(test_engine) as other:
+            victim = other.get(ResourceLock, ('analysis', 'analysis-cas-heartbeat'))
+            assert victim is not None
+            victim.lock_token = 'rotated-token'
+            other.add(victim)
+            other.commit()
+        test_db_session.expire_all()
+
+        with pytest.raises(ValueError, match='owned by another owner'):
+            locks_service.heartbeat_lock(test_db_session, 'analysis', 'analysis-cas-heartbeat', 'owner-a', 'token-a')
+
+        stored = test_db_session.get(ResourceLock, ('analysis', 'analysis-cas-heartbeat'))
+        assert stored is not None
+        assert stored.lock_token == 'rotated-token'
+        # The superseded heartbeat must not extend the lock expiry.
+        assert ResourceLock.as_utc(stored.expires_at) == ResourceLock.as_utc(seeded.expires_at)
+
+    def test_acquire_lock_cas_takes_over_only_expired_row(self, test_db_session) -> None:
+        from modules.locks import service as locks_service
+
+        expired = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)
+        self._seed_lock(test_db_session, 'analysis-cas-expired', owner='owner-old', token='old-token', expires_at=expired)
+
+        acquired = locks_service.acquire_lock(test_db_session, 'analysis', 'analysis-cas-expired', 'owner-new')
+
+        assert acquired.owner_id == 'owner-new'
+        assert acquired.lock_token != 'old-token'
+        test_db_session.expire_all()
+        stored = test_db_session.get(ResourceLock, ('analysis', 'analysis-cas-expired'))
+        assert stored is not None
+        assert stored.owner_id == 'owner-new'
+        assert stored.is_expired() is False
+
+    def test_same_owner_reacquire_rotates_token_via_cas(self, test_db_session) -> None:
+        from modules.locks import service as locks_service
+
+        active = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=60)
+        self._seed_lock(test_db_session, 'analysis-cas-reacquire', owner='owner-same', token='first-token', expires_at=active)
+
+        reacquired = locks_service.acquire_lock(test_db_session, 'analysis', 'analysis-cas-reacquire', 'owner-same')
+
+        assert reacquired.owner_id == 'owner-same'
+        assert reacquired.lock_token != 'first-token'
+        assert reacquired.is_expired is False
 
 
 class TestLockWebsocket:

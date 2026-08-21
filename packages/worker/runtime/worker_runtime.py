@@ -231,4 +231,5 @@ def worker_id() -> str:
 
 
 def runtime_namespaces() -> list[str]:
-    return client_from_env().runtime_namespaces()
+    with client_from_env() as client:
+        return client.runtime_namespaces()

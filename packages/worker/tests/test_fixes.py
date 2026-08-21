@@ -360,6 +360,9 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         )
 
     class _Client:
+        def close(self):
+            pass
+
         def complete_compute_request(self, **kwargs):
             completed.append(kwargs["response"])
 
@@ -393,6 +396,9 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
 @pytest.mark.asyncio
 async def test_compute_request_renewal_reports_lost_claim(monkeypatch) -> None:
     class _Client:
+        def close(self):
+            pass
+
         def renew_compute_request_lease(self, **_kwargs):
             return None
 
@@ -444,6 +450,9 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
     snapshots: list[list[object]] = []
 
     class _Client:
+        def close(self):
+            pass
+
         def complete_compute_request(self, **kwargs):
             completed.append(kwargs["response"])
 
@@ -494,6 +503,9 @@ def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monke
     identity = _analysis_identity("analysis-already-gone")
 
     class _Client:
+        def close(self):
+            pass
+
         def complete_compute_request(self, **kwargs):
             completed.append(kwargs["response"])
 
@@ -537,6 +549,9 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
     monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
 
     class _Client:
+        def close(self):
+            pass
+
         def datasource_metadata(self, **_kwargs):
             from runtime.worker_runtime_client import DatasourceMetadata
 
@@ -594,6 +609,9 @@ def test_grpc_precondition_error_does_not_invent_domain_error_code() -> None:
 
 def test_retired_compute_request_lease_drains_without_error_log(monkeypatch, caplog) -> None:
     class _Client:
+        def close(self):
+            pass
+
         def fail_compute_request(self, **_kwargs):
             raise BackendWorkerRpcError(
                 status_code=412,
@@ -642,11 +660,12 @@ async def test_pending_datasource_delete_waits_for_busy_preview_engine(monkeypat
     client = SimpleNamespace(
         pending_datasource_deletes=lambda: [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)],
         finalize_datasource_delete=finalize_delete,
+        close=lambda: None,
     )
 
     monkeypatch.setattr(datasource_delete_runtime, "worker_runtime_client", lambda: client)
 
-    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager))
+    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client))
 
     assert handled is False
     assert cleanup_calls == []
@@ -675,11 +694,12 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(m
     client = SimpleNamespace(
         pending_datasource_deletes=lambda: [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)],
         finalize_datasource_delete=finalize_delete,
+        close=lambda: None,
     )
 
     monkeypatch.setattr(datasource_delete_runtime, "worker_runtime_client", lambda: client)
 
-    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager))
+    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client))
 
     assert handled is True
     assert cleanup_calls == []

@@ -93,7 +93,8 @@ def next_compute_request(
     *,
     allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
 ) -> ClaimedComputeRequest | None:
-    claimed = worker_runtime_client().claim_compute_request(worker_id=worker_id, allowed_kinds=allowed_kinds)
+    with worker_runtime_client() as client:
+        claimed = client.claim_compute_request(worker_id=worker_id, allowed_kinds=allowed_kinds)
     if claimed is None:
         return None
     return ClaimedComputeRequest(
@@ -206,37 +207,40 @@ async def _renew_compute_lease(claimed: ClaimedComputeRequest, *, stop_event: as
     deadline = clock() + claimed.lease_ttl_seconds
     delay = claimed.lease_ttl_seconds / 3
     client = worker_runtime_client()
-    while True:
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=delay)
-            return
-        except TimeoutError:
-            pass
-        remaining = deadline - clock()
-        if remaining <= 0:
-            raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease renewal was not confirmed before expiry")
-        renewal_started = clock()
-        try:
-            lease_ttl_seconds = await asyncio.to_thread(
-                client.renew_compute_request_lease,
-                request_id=claimed.id,
-                namespace=claimed.namespace,
-                worker_id=claimed.worker_id,
-                claim_token=claimed.claim_token,
-                lease_generation=claimed.lease_generation,
-                timeout_seconds=remaining,
-            )
-        except Exception as exc:
+    try:
+        while True:
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=delay)
+                return
+            except TimeoutError:
+                pass
             remaining = deadline - clock()
             if remaining <= 0:
-                raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease renewal was not confirmed before expiry") from exc
-            delay = min(1.0, max(remaining / 3, 0.05))
-            logger.warning("Compute request %s lease renewal failed; retrying before confirmed expiry: %s", claimed.id, exc)
-            continue
-        if lease_ttl_seconds is None:
-            raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease is no longer active")
-        deadline = renewal_started + lease_ttl_seconds
-        delay = lease_ttl_seconds / 3
+                raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease renewal was not confirmed before expiry")
+            renewal_started = clock()
+            try:
+                lease_ttl_seconds = await asyncio.to_thread(
+                    client.renew_compute_request_lease,
+                    request_id=claimed.id,
+                    namespace=claimed.namespace,
+                    worker_id=claimed.worker_id,
+                    claim_token=claimed.claim_token,
+                    lease_generation=claimed.lease_generation,
+                    timeout_seconds=remaining,
+                )
+            except Exception as exc:
+                remaining = deadline - clock()
+                if remaining <= 0:
+                    raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease renewal was not confirmed before expiry") from exc
+                delay = min(1.0, max(remaining / 3, 0.05))
+                logger.warning("Compute request %s lease renewal failed; retrying before confirmed expiry: %s", claimed.id, exc)
+                continue
+            if lease_ttl_seconds is None:
+                raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease is no longer active")
+            deadline = renewal_started + lease_ttl_seconds
+            delay = lease_ttl_seconds / 3
+    finally:
+        client.close()
 
 
 def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
@@ -605,6 +609,7 @@ def _execute_request_sync(claimed: ClaimedComputeRequest, manager: ProcessManage
         except Exception as exc:
             logger.warning("Compute response outbox fast-path dispatch failed for request %s: %s", claimed.id, exc)
         reset_namespace(token)
+        client.close()
 
 
 def _analysis_interactive_identity(analysis_id: str) -> compute_pb2.EngineIdentity:

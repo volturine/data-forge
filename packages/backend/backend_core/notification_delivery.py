@@ -8,6 +8,14 @@ from backend_core.smtp import send_smtp_message
 EMAIL_DELIVERY_KIND = 'email_delivery'
 TELEGRAM_DELIVERY_KIND = 'telegram_delivery'
 _TELEGRAM_BASE_URL = 'https://api.telegram.org'
+_REDACTED = '[REDACTED]'
+
+
+def redact_secrets_in_text(message: str, *secrets: str) -> str:
+    for secret in secrets:
+        if secret:
+            message = message.replace(secret, _REDACTED)
+    return message
 
 
 def deliver(payload: dict[str, object], *, event_id: str) -> None:
@@ -74,17 +82,25 @@ def _deliver_telegram(payload: dict[str, object]) -> None:
         raise ValueError('Telegram bot token is not configured')
     chat_id = _required_text(payload, 'chat_id')
     base = f'{_TELEGRAM_BASE_URL}/bot{token}'
-    response = http_client.post(
-        f'{base}/sendMessage',
-        json={'chat_id': chat_id, 'text': _required_text(payload, 'message'), 'parse_mode': 'HTML'},
-        timeout=20,
-    )
-    response.raise_for_status()
-    for attachment in _attachments(payload):
-        file_response = http_client.post(
-            f'{base}/sendDocument',
-            data={'chat_id': chat_id},
-            files={'document': (attachment['filename'], base64.b64decode(attachment['content_base64']), attachment['content_type'])},
-            timeout=30,
+    try:
+        _telegram_post(
+            f'{base}/sendMessage',
+            token,
+            json={'chat_id': chat_id, 'text': _required_text(payload, 'message'), 'parse_mode': 'HTML'},
+            timeout=20,
         )
-        file_response.raise_for_status()
+        for attachment in _attachments(payload):
+            _telegram_post(
+                f'{base}/sendDocument',
+                token,
+                data={'chat_id': chat_id},
+                files={'document': (attachment['filename'], base64.b64decode(attachment['content_base64']), attachment['content_type'])},
+                timeout=30,
+            )
+    except Exception as exc:
+        raise RuntimeError(f'Telegram delivery failed: {redact_secrets_in_text(str(exc), token)}') from exc
+
+
+def _telegram_post(url: str, token: str, **kwargs: object) -> None:
+    response = http_client.post(url, **kwargs)
+    response.raise_for_status()

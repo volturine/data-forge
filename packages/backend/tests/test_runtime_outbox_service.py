@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from backend_core import runtime_outbox_service
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
-from backend_core.notification_delivery import EMAIL_DELIVERY_KIND
+from backend_core.notification_delivery import EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND
 from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxStatus
 
 
@@ -58,6 +58,26 @@ def test_dispatch_pending_events_quarantines_poison_event(test_db_session, monke
     assert event.status == RuntimeOutboxStatus.POISONED
     assert event.attempts == 1
     assert runtime_outbox_service.pending_event_count(test_db_session) == 0
+
+
+def test_dispatch_pending_events_redacts_payload_secrets_in_last_error(test_db_session, monkeypatch) -> None:
+    event = runtime_outbox_service.enqueue_notification_delivery(
+        test_db_session,
+        {'kind': TELEGRAM_DELIVERY_KIND, 'chat_id': '123', 'message': 'Ready', 'bot_token': '12345:SECRET-TOKEN', 'attachments': []},
+    )
+
+    def fail(_payload: dict[str, object], *, event_id: str) -> None:
+        raise RuntimeError('request to https://api.telegram.org/bot12345:SECRET-TOKEN/sendMessage failed')
+
+    monkeypatch.setattr('backend_core.runtime_outbox_service.notification_delivery.deliver', fail)
+
+    dispatched = runtime_outbox_service.dispatch_pending_events(test_db_session)
+
+    test_db_session.refresh(event)
+    assert dispatched == 0
+    assert event.status == RuntimeOutboxStatus.FAILED
+    assert event.last_error == 'request to https://api.telegram.org/bot[REDACTED]/sendMessage failed'
+    assert '12345:SECRET-TOKEN' not in (event.last_error or '')
 
 
 def test_dispatch_notification_delivery_uses_stable_outbox_id(test_db_session, monkeypatch) -> None:

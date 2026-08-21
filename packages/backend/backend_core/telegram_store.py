@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlmodel import Session
 
+from backend_core.exceptions import SettingsConfigurationError
 from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
+from backend_core.secrets import decrypt_secret, encrypt_secret, is_encrypted_secret
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.telegram_schemas import (
     ListenerCreate,
@@ -15,22 +17,41 @@ from backend_core.telegram_schemas import (
 logger = logging.getLogger(__name__)
 
 
+def _store_token(token: str) -> str:
+    if not token:
+        return ''
+    try:
+        return encrypt_secret(token)
+    except SettingsConfigurationError:
+        return token
+
+
+def _reveal_token(token: str) -> str:
+    if not is_encrypted_secret(token):
+        return token
+    return decrypt_secret(token)
+
+
 def list_subscribers(session: Session, bot_token: str | None = None) -> list[SubscriberResponse]:
     query = select(TelegramSubscriber)
-    if bot_token:
-        query = query.where(sa(TelegramSubscriber.bot_token == bot_token))
     rows = session.execute(query).scalars().all()
+    if bot_token:
+        rows = [row for row in rows if _reveal_token(row.bot_token) == bot_token]
     return [SubscriberResponse.model_validate(s) for s in rows]
 
 
 def get_subscriber_by_chat(session: Session, chat_id: str, bot_token: str) -> TelegramSubscriber | None:
-    return (
+    rows = (
         session.execute(
-            select(TelegramSubscriber).where(sa(TelegramSubscriber.chat_id == chat_id)).where(sa(TelegramSubscriber.bot_token == bot_token)),
+            select(TelegramSubscriber).where(sa(TelegramSubscriber.chat_id == chat_id)),
         )
         .scalars()
-        .first()
+        .all()
     )
+    for row in rows:
+        if _reveal_token(row.bot_token) == bot_token:
+            return row
+    return None
 
 
 def add_subscriber(session: Session, chat_id: str, title: str, bot_token: str) -> SubscriberResponse:
@@ -45,7 +66,7 @@ def add_subscriber(session: Session, chat_id: str, title: str, bot_token: str) -
     sub = TelegramSubscriber(
         chat_id=chat_id,
         title=title,
-        bot_token=bot_token,
+        bot_token=_store_token(bot_token),
         is_active=True,
         subscribed_at=datetime.now(UTC).replace(tzinfo=None),
     )
@@ -162,4 +183,4 @@ def get_notification_chat_ids(session: Session, datasource_id: str) -> list[tupl
         .scalars()
         .all()
     )
-    return [(s.chat_id, s.bot_token) for s in subs]
+    return [(s.chat_id, _reveal_token(s.bot_token)) for s in subs]

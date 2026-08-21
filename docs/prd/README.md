@@ -58,6 +58,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Authorization, Ownership, and Collaboration](backlog/authorization-ownership-and-collaboration.md)
 - [Build Observability](backlog/build-observability.md)
 - [Feature-overhaul Portfolio](backlog/data-forge-2.md)
+- [Frontend Component Decomposition](backlog/frontend-component-decomposition.md) — split multi-thousand-line UI monoliths; folds in audit a11y/timer/enum-drift findings
 - [Horizontal Node Configuration](backlog/horizontal-node-config.md)
 - [Kaggle Connection](backlog/kaggle-connection.md)
 - [Local Subdomain Serving](backlog/local-subdomain-serving.md)
@@ -66,3 +67,4 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Snapshot Rollback](backlog/snapshot-rollback.md)
 - [Tauri Hybrid Desktop](backlog/tauri-hybrid-desktop.md)
 - [Time Since Last Updated](backlog/time-since-last-updated.md)
+- [UDF Execution Sandbox](backlog/udf-execution-sandbox.md) — replace the ineffective UDF `exec` blacklist with a real execution boundary

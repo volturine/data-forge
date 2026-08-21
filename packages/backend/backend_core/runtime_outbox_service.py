@@ -8,9 +8,30 @@ from backend_core import notification_delivery, runtime_ipc
 from backend_core.claiming import with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
+from backend_core.notification_delivery import redact_secrets_in_text
 from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxEvent, RuntimeOutboxStatus
 from backend_core.sqlmodel_typing import sa
 from backend_core.transactions import committed
+
+_SENSITIVE_ERROR_FIELDS = frozenset(
+    {
+        'password',
+        'smtp_password',
+        'telegram_bot_token',
+        'openrouter_api_key',
+        'openai_api_key',
+        'kaggle_api_key',
+        'api_key',
+        'authorization',
+        'bot_token',
+        'token',
+    }
+)
+
+
+def _redact_payload_secrets(message: str, payload: dict[str, object]) -> str:
+    secrets = [str(value) for key, value in payload.items() if key in _SENSITIVE_ERROR_FIELDS and isinstance(value, str) and value]
+    return redact_secrets_in_text(message, *secrets)
 
 
 def _database_now(session: Session) -> datetime:
@@ -111,7 +132,13 @@ def dispatch_pending_events(session: Session, *, limit: int = 100) -> int:
             else:
                 runtime_ipc.notify_runtime_payload(delivery_payload)
         except Exception as exc:  # noqa: BLE001 - outbox must preserve retry state for transport failures.
-            _finalize_claim(session, event_id, claim_token=claim_token, lease_generation=lease_generation, error=str(exc))
+            _finalize_claim(
+                session,
+                event_id,
+                claim_token=claim_token,
+                lease_generation=lease_generation,
+                error=_redact_payload_secrets(str(exc), payload),
+            )
             continue
         if _finalize_claim(session, event_id, claim_token=claim_token, lease_generation=lease_generation, error=None):
             dispatched += 1

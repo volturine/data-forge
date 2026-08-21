@@ -239,8 +239,10 @@ def run_healthchecks(checks: list[HealthCheckSpec], lazy_frame: pl.LazyFrame) ->
 
 
 def persist_results(results: list[HealthCheckResult]) -> None:
-    if results:
-        client_from_env().record_healthcheck_results(
+    if not results:
+        return
+    with client_from_env() as client:
+        client.record_healthcheck_results(
             namespace=get_namespace(),
             results=[
                 {

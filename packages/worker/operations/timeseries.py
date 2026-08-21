@@ -68,11 +68,27 @@ class TimeseriesHandler(OperationHandler):
 
         if validated.operation_type == TimeseriesOperationType.TIMESTAMP:
             unit = DurationUnit.MICROSECONDS if validated.unit is None else DurationUnit.require(validated.unit)
-            if unit == DurationUnit.NANOSECONDS:
-                return lf.with_columns(pl.col(validated.column).dt.timestamp("ns").alias(validated.new_column))
-            if unit == DurationUnit.MILLISECONDS:
-                return lf.with_columns(pl.col(validated.column).dt.timestamp("ms").alias(validated.new_column))
-            return lf.with_columns(pl.col(validated.column).dt.timestamp("us").alias(validated.new_column))
+            expr = pl.col(validated.column)
+            match unit:
+                case DurationUnit.NANOSECONDS:
+                    timestamp_expr = expr.dt.timestamp("ns")
+                case DurationUnit.MICROSECONDS:
+                    timestamp_expr = expr.dt.timestamp("us")
+                case DurationUnit.MILLISECONDS:
+                    timestamp_expr = expr.dt.timestamp("us") // 1_000
+                case DurationUnit.SECONDS:
+                    timestamp_expr = expr.dt.timestamp("us") // 1_000_000
+                case DurationUnit.MINUTES:
+                    timestamp_expr = expr.dt.timestamp("us") // 60_000_000
+                case DurationUnit.HOURS:
+                    timestamp_expr = expr.dt.timestamp("us") // 3_600_000_000
+                case DurationUnit.DAYS:
+                    timestamp_expr = expr.dt.timestamp("us") // 86_400_000_000
+                case DurationUnit.WEEKS:
+                    timestamp_expr = expr.dt.timestamp("us") // 604_800_000_000
+                case _:
+                    raise ValueError(f"Unsupported duration unit: {unit.value}")
+            return lf.with_columns(timestamp_expr.alias(validated.new_column))
 
         if validated.operation_type in {
             TimeseriesOperationType.ADD,

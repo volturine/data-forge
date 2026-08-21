@@ -19,6 +19,33 @@ Initial post-fix e2e runs failed with a 600s timeout. Root causes found and fixe
 
 Final result: `just test-e2e` → **353 passed (7.3m)**, exit 0.
 
+---
+
+## Remediation log — batch 2 (2026-08-21)
+
+Seven audit workstreams implemented. Verification: `just verify`, `just test` (backend 1062, scheduler 99, worker 4, frontend unit 1221), and `just test-e2e` (353 passed) all green.
+
+**#3 Credential leakage**
+- Datasource API responses now mask `connection_string`/`catalog_uri`/nested source credentials (`modules/datasource/service.py`).
+- Platform DB credentials are no longer persisted into analysis-output/clean Iceberg datasource configs: removed `catalog_uri` producers in `compute/routes.py`, `worker/runtime/compute_service.py`, `worker/datasources/execution.py`; the worker prefers its own `DATABASE_URL` for snapshot list/delete and backend cleanup falls back to `settings.database_url`.
+
+**#5 MCP** — pending tokens are bound to the creating user (completion rejects mismatched presenters); all MCP tool results redact `connection_string`/`api_key`/`bot_token`.
+
+**#6 SSRF** — AI provider endpoint URLs validated against the configured-provider allowlist (client-supplied arbitrary endpoints rejected).
+
+**#2 Secrets at rest** — Telegram bot tokens encrypted via the existing `secrets.py` mechanism (settings were already encrypted); Alembic `0003_encrypt_secrets_at_rest` backfills existing rows idempotently; keyless deployments keep prior behavior; responses stay token-free.
+
+**#7 Worker resource hygiene** — data-plane clients gained close/context-manager support; ~8 worker runtime modules now close or reuse channels instead of leaking per call; trivial gRPC calls use shorter timeouts; export staged-column stripping streams record batches instead of full-file reads (remaining full-materialization sites documented as pyiceberg API / download-protocol constraints).
+
+**#8 Concurrency** — notification hubs prune dead waiters and cap entries with oldest eviction; `release_worker_jobs` uses `FOR UPDATE SKIP LOCKED` in one transaction; settings cache is weakref-keyed (no more `id()` reuse hazards); resource locks use compare-and-set takeover/heartbeat keyed on owner+token.
+
+**#9 Robustness** — form-encoded login bodies are redacted in request logs; too-short XFF chains fall back to peer address (shared helper); Telegram delivery and outbox errors redact tokens before persisting; timeseries TIMESTAMP units produce correct magnitudes; build-stream parse failures route through WebSocket onError; locks WS reconnect uses exponential backoff with jitter (cap 30s).
+
+### Deferred to backlog PRDs
+- Authorization/ownership gaps → [Authorization, Ownership, and Collaboration](docs/prd/backlog/authorization-ownership-and-collaboration.md) (audit findings appended)
+- UDF execution boundary → [UDF Execution Sandbox](docs/prd/backlog/udf-execution-sandbox.md)
+- Component decomposition → [Frontend Component Decomposition](docs/prd/backlog/frontend-component-decomposition.md)
+
 | # | Fix | Severity | Where |
 |---|-----|----------|-------|
 | 1 | Path traversal guard on static catch-all (`resolve()` + `is_relative_to` containment) | high | `packages/backend/main.py` |

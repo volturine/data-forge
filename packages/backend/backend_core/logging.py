@@ -8,6 +8,7 @@ import logging.handlers
 import queue
 import threading
 import time
+import urllib.parse
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
@@ -20,6 +21,7 @@ from fastapi import Request
 
 from backend_core.config import settings
 from backend_core.domain.enums import DataForgeStrEnum
+from backend_core.proxy import client_ip
 
 _writer: DatabaseLogWriter | None = None
 _listener: logging.handlers.QueueListener | None = None
@@ -141,18 +143,6 @@ class DatabaseLogKind(DataForgeStrEnum):
                     )
                 case _:
                     return
-
-
-def _client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get('x-forwarded-for')
-    if forwarded and settings.trusted_proxy_hops > 0:
-        parts = [item.strip() for item in forwarded.split(',') if item.strip()]
-        if len(parts) > settings.trusted_proxy_hops:
-            return parts[-(settings.trusted_proxy_hops + 1)][:128]
-        return parts[0][:128]
-    if request.client:
-        return str(request.client.host)
-    return None
 
 
 def _adapt_datetime(value: datetime) -> str:
@@ -550,7 +540,7 @@ class RequestLoggingMiddleware:
         status = response_status or 500
         if not error and response_status is not None and status >= 400:
             error = f'HTTP {status}'
-        ip = _client_ip(request)
+        ip = client_ip(request)
         if isinstance(ip, str):
             parts = ip.split('.') if '.' in ip else []
             if len(parts) == 4:
@@ -607,8 +597,18 @@ def redact_logged_body(path: str, body: str | None) -> str | None:
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError:
-        return body
+        return _redact_form_body(body)
     return json.dumps(_redact_json_value(parsed), default=str)
+
+
+def _redact_form_body(body: str) -> str:
+    if '=' not in body:
+        return body
+    pairs = urllib.parse.parse_qsl(body, keep_blank_values=True)
+    if not pairs:
+        return body
+    redacted = [(key, _REDACTED if key in _SENSITIVE_FIELDS else value) for key, value in pairs]
+    return urllib.parse.urlencode(redacted)
 
 
 def configure_logging() -> DatabaseLogWriter:

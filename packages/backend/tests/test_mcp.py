@@ -4,6 +4,7 @@ import re
 
 import pytest
 
+from backend_core.secrets import MASKED_SECRET
 from modules.mcp.decorators import (
     MCP_TOOL_MARKER,
     deterministic_tool,
@@ -149,7 +150,7 @@ class TestMCPCallPreview:
 
 
 class TestMCPConfirm:
-    def test_confirm_executes_pending_action(self, client: TestClient) -> None:
+    def test_confirm_executes_pending_action(self, client: TestClient, test_user) -> None:
         from modules.mcp.pending import pending_store
 
         response = client.get('/api/v1/mcp/tools')
@@ -163,7 +164,7 @@ class TestMCPConfirm:
 
         call_resp = client.post('/api/v1/mcp/call', json={'tool_id': post_tool['id'], 'args': {}})
         token = call_resp.json()['token']
-        pending = pending_store.get(token)
+        pending = pending_store.get(token, owner_id=test_user.id)
         assert pending is not None
         assert pending.context['headers']['X-Namespace'] == 'default'
 
@@ -193,6 +194,69 @@ class TestMCPConfirm:
         client.post('/api/v1/mcp/confirm', json={'token': token})
         second = client.post('/api/v1/mcp/confirm', json={'token': token})
         assert second.status_code == 404
+
+    @staticmethod
+    def _post_tool_without_required_args(client: TestClient) -> dict | None:
+        tools = client.get('/api/v1/mcp/tools').json()
+        return next((t for t in tools if t['method'] == 'POST' and not t['input_schema'].get('required')), None)
+
+    def test_pending_token_is_bound_to_creating_user(self, client: TestClient, test_user) -> None:
+        import uuid
+
+        from modules.mcp.pending import pending_store
+
+        post_tool = self._post_tool_without_required_args(client)
+        if post_tool is None:
+            pytest.skip('No POST tool without required args available')
+
+        call_resp = client.post('/api/v1/mcp/call', json={'tool_id': post_tool['id'], 'args': {}})
+        token = call_resp.json()['token']
+
+        assert pending_store.get(token, owner_id=test_user.id) is not None
+        assert pending_store.get(token, owner_id=uuid.uuid4().hex) is None
+        assert pending_store.pop(token, owner_id='someone-else') is None
+        assert pending_store.pop(token, owner_id=test_user.id) is not None
+
+    def test_confirm_rejects_token_presented_by_other_user(self, client: TestClient, test_user) -> None:
+        import uuid
+        from datetime import UTC, datetime
+
+        from fastapi import FastAPI
+
+        from modules.auth.dependencies import get_current_user
+        from modules.auth.models import User, UserStatus
+
+        app = client.app
+        assert isinstance(app, FastAPI)
+
+        post_tool = self._post_tool_without_required_args(client)
+        if post_tool is None:
+            pytest.skip('No POST tool without required args available')
+
+        call_resp = client.post('/api/v1/mcp/call', json={'tool_id': post_tool['id'], 'args': {}})
+        token = call_resp.json()['token']
+
+        now = datetime.now(UTC)
+        other_user = User(
+            id=uuid.uuid4().hex,
+            email='other@example.com',
+            display_name='Other User',
+            status=UserStatus.ACTIVE,
+            email_verified=True,
+            has_password=True,
+            preferences={},
+            created_at=now,
+            updated_at=now,
+        )
+        previous_override = app.dependency_overrides[get_current_user]
+        app.dependency_overrides[get_current_user] = lambda: other_user
+        denied = client.post('/api/v1/mcp/confirm', json={'token': token})
+        assert denied.status_code == 404
+
+        app.dependency_overrides[get_current_user] = previous_override
+        allowed = client.post('/api/v1/mcp/confirm', json={'token': token})
+        assert allowed.status_code == 200
+        assert allowed.json()['status'] == 'executed'
 
 
 class TestMCPValidate:
@@ -1135,6 +1199,59 @@ class TestPathParameterReliability:
         result = await call_tool(app, 'GET', '/api/v1/test/context', {}, context)
         assert result['ok'] is True
         assert result['body'] == {'session_token': 'session-1', 'namespace': 'alpha'}
+
+
+class TestSecretRedaction:
+    def test_redact_secrets_masks_sensitive_fields(self) -> None:
+        from modules.mcp.tool_output import redact_secrets
+
+        result = redact_secrets(
+            {
+                'connection_string': 'postgres://user:pass@host/db',
+                'api_key': 'sk-secret',
+                'bot_token': '123:abc',
+                'name': 'keep-me',
+            }
+        )
+        assert result == {'connection_string': MASKED_SECRET, 'api_key': MASKED_SECRET, 'bot_token': MASKED_SECRET, 'name': 'keep-me'}
+
+    def test_redact_secrets_walks_nested_structures(self) -> None:
+        from modules.mcp.tool_output import redact_secrets
+
+        result = redact_secrets(
+            {
+                'items': [{'config': {'connection_string': 'postgres://h/db'}}, {'safe': 1}],
+                'empty_secret': '',
+            }
+        )
+        assert result['items'][0]['config']['connection_string'] == MASKED_SECRET
+        assert result['items'][1] == {'safe': 1}
+        assert result['empty_secret'] == ''
+
+    async def test_call_tool_redacts_secrets_in_response_body(self) -> None:
+        from fastapi import FastAPI
+
+        from modules.mcp.executor import call_tool
+
+        app = FastAPI()
+
+        @app.get('/api/v1/datasource/{item_id}')
+        async def get_item(item_id: str) -> dict[str, str]:
+            return {
+                'id': item_id,
+                'connection_string': 'postgres://user:pass@host/db',
+                'api_key': 'sk-secret',
+                'bot_token': '123:abc',
+            }
+
+        result = await call_tool(app, 'GET', '/api/v1/datasource/{item_id}', {'item_id': 'ds-1'})
+        assert result['ok'] is True
+        assert result['body'] == {
+            'id': 'ds-1',
+            'connection_string': MASKED_SECRET,
+            'api_key': MASKED_SECRET,
+            'bot_token': MASKED_SECRET,
+        }
 
 
 class TestCheckSchemaSupported:

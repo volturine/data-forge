@@ -25,6 +25,24 @@ class TestLoggingRedaction:
         body = '{"api_key":"sk-test","value":1}'
         assert redact_logged_body('/api/v1/config', body) == body
 
+    def test_redacts_form_encoded_bodies_on_sensitive_paths(self) -> None:
+        body = 'username=user@example.com&password=sup3rsecret&remember=true'
+        redacted = redact_logged_body('/api/v1/auth/login', body)
+        assert redacted == 'username=user%40example.com&password=%5BREDACTED%5D&remember=true'
+        assert 'sup3rsecret' not in redacted
+
+    def test_redacts_token_fields_in_form_encoded_bodies(self) -> None:
+        body = 'telegram_bot_token=12345:ABC-DEF&chat_id=42'
+        redacted = redact_logged_body('/api/v1/settings/notifications', body)
+        assert redacted is not None
+        assert '12345:ABC-DEF' not in redacted
+        assert 'telegram_bot_token=%5BREDACTED%5D' in redacted
+        assert 'chat_id=42' in redacted
+
+    def test_leaves_non_form_non_json_body_unchanged_on_sensitive_path(self) -> None:
+        body = 'plain text without pairs'
+        assert redact_logged_body('/api/v1/auth/login', body) == body
+
 
 def test_database_log_kind_marks_control_messages() -> None:
     assert DatabaseLogKind.FLUSH.is_control is True

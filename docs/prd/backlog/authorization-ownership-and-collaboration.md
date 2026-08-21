@@ -14,6 +14,14 @@ Define who can access, change, and administer resources once real identity exist
 - [ ] Decide the ownership/backfill treatment for existing records.
 - [ ] Define the initial role set and which actions require an administrator.
 
+## Audit findings folded into this scope (2026-08)
+
+The 2026-08 codebase audit confirmed concrete gaps this PRD must close:
+
+- Analysis CRUD, engine-run/Iceberg-delete endpoints, namespace/bucket creation, and healthcheck CRUD lack ownership checks.
+- `/ws/engines` accepts connections without authentication; chat sessions have no per-user access control.
+- Frontend route guarding is client-side only; SvelteKit server hooks should enforce session checks server-side.
+
 ## Scope
 
 ### Ownership and access control

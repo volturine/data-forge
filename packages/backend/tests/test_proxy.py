@@ -47,13 +47,18 @@ def test_client_ip_uses_forwarded_chain_with_trusted_proxy(monkeypatch) -> None:
     assert client_ip(request) == '198.51.100.1'
 
 
-def test_client_ip_falls_back_to_first_forwarded_value_when_chain_short(
-    monkeypatch,
-) -> None:
+def test_client_ip_ignores_short_forwarded_chain_and_uses_socket_client(monkeypatch) -> None:
     monkeypatch.setattr('backend_core.config.settings.trusted_proxy_hops', 2)
-    request = _request({'headers': [(b'x-forwarded-for', b'198.51.100.1')]})
+    request = _request({'headers': [(b'x-forwarded-for', b'198.51.100.1')], 'client': ('10.0.0.9', 1234)})
 
-    assert client_ip(request) == '198.51.100.1'
+    assert client_ip(request) == '10.0.0.9'
+
+
+def test_client_ip_falls_back_to_socket_client_without_header(monkeypatch) -> None:
+    monkeypatch.setattr('backend_core.config.settings.trusted_proxy_hops', 1)
+    request = _request({'client': ('10.0.0.4', 1234)})
+
+    assert client_ip(request) == '10.0.0.4'
 
 
 def test_request_scheme_uses_socket_scheme_without_trusted_proxy(monkeypatch) -> None:

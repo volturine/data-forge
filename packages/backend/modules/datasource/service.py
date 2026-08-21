@@ -1,6 +1,9 @@
+import contextlib
 import logging
 import re
+import tempfile
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +16,7 @@ from sqlalchemy.orm import defer
 from sqlmodel import Session
 
 from backend_core import datasource_delete_service
+from backend_core.data_plane_client import client_from_settings
 from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy
@@ -21,6 +25,7 @@ from backend_core.exceptions import DataSourceValidationError, datasource_not_fo
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
+from backend_core.secrets import MASKED_SECRET
 from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import datasource_pb2
 from modules.datasource.schema_protocol import schema_info_proto
@@ -170,6 +175,23 @@ def _apply_display_name[DatasourceResponseT: (DataSourceResponse, DataSourceList
     if canonical is not None:
         response.name = canonical
     return response
+
+
+_SECRET_CONFIG_KEYS = ('connection_string', 'catalog_uri')
+
+
+def _masked_config(config: dict) -> dict:
+    masked = {**config}
+    for key in _SECRET_CONFIG_KEYS:
+        value = masked.get(key)
+        if isinstance(value, str) and value:
+            masked[key] = MASKED_SECRET
+    source = masked.get('source')
+    if isinstance(source, dict):
+        source_value = source.get('connection_string')
+        if isinstance(source_value, str) and source_value:
+            masked['source'] = {**source, 'connection_string': MASKED_SECRET}
+    return masked
 
 
 _SNAPSHOT_TIMESTAMP_KEYS = ('current_snapshot_timestamp_ms', 'snapshot_timestamp_ms')
@@ -746,6 +768,18 @@ def resolve_excel_selection(
     )
 
 
+@contextlib.contextmanager
+def _excel_selection_source(file_path: str) -> Iterator[Path]:
+    data_plane = client_from_settings()
+    if not data_plane.classify_object_url(file_path).is_object_store:
+        yield Path(file_path)
+        return
+    with tempfile.TemporaryDirectory() as temp_dir:
+        local_path = Path(temp_dir) / 'workbook.xlsx'
+        local_path.write_bytes(data_plane.download_object_bytes(file_path))
+        yield local_path
+
+
 def format_excel_cell_range(
     sheet_name: str,
     start_row: int,
@@ -855,6 +889,7 @@ def update_column_descriptions(
 def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
     datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
     response = _apply_display_name(DataSourceResponse.model_validate(datasource), datasource)
+    response.config = _masked_config(response.config)
     response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
     analysis_id = datasource.created_by_analysis_id
     last_build_completed_at = _last_build_completed_at_map(session, {analysis_id}).get(analysis_id) if analysis_id else None
@@ -877,6 +912,7 @@ def list_datasources(session: Session, include_hidden: bool = False) -> list[Dat
     results: list[DataSourceListItem] = []
     for ds, list_row_count in rows:
         item = _apply_display_name(DataSourceListItem.model_validate(ds), ds)
+        item.config = _masked_config(item.config)
         item.row_count = _coerce_row_count(list_row_count)
         item.output_of_tab_id = ds.config.get('analysis_tab_id') if isinstance(ds.config, dict) else None
         analysis_id = ds.created_by_analysis_id
@@ -1000,23 +1036,24 @@ def update_datasource(
             if end_col is None:
                 end_col = 0
             try:
-                (
-                    resolved_sheet,
-                    resolved_start_row,
-                    resolved_start_col,
-                    resolved_end_col,
-                    resolved_end_row,
-                ) = resolve_excel_selection(
-                    Path(file_path),
-                    next_config.get('sheet_name'),
-                    int(start_row),
-                    int(start_col),
-                    int(end_col),
-                    next_config.get('end_row'),
-                    next_config.get('table_name'),
-                    next_config.get('named_range'),
-                    next_config.get('cell_range'),
-                )
+                with _excel_selection_source(str(file_path)) as local_path:
+                    (
+                        resolved_sheet,
+                        resolved_start_row,
+                        resolved_start_col,
+                        resolved_end_col,
+                        resolved_end_row,
+                    ) = resolve_excel_selection(
+                        local_path,
+                        next_config.get('sheet_name'),
+                        int(start_row),
+                        int(start_col),
+                        int(end_col),
+                        next_config.get('end_row'),
+                        next_config.get('table_name'),
+                        next_config.get('named_range'),
+                        next_config.get('cell_range'),
+                    )
             except Exception as exc:
                 raise DataSourceValidationError(
                     str(exc),

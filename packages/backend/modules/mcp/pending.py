@@ -18,6 +18,7 @@ class PendingEntry:
     args: dict[str, Any]
     context: dict[str, Any]
     created_at: float
+    owner_id: str
 
 
 class PendingStore:
@@ -35,6 +36,8 @@ class PendingStore:
         path: str,
         args: dict[str, Any],
         context: dict[str, Any] | None = None,
+        *,
+        owner_id: str,
     ) -> str:
         token = secrets.token_urlsafe(24)
         self._store[token] = PendingEntry(
@@ -44,23 +47,25 @@ class PendingStore:
             args=dict(args),
             context=dict(context or {}),
             created_at=time.time(),
+            owner_id=owner_id,
         )
         return token
 
-    def pop(self, token: str) -> PendingEntry | None:
-        entry = self._store.pop(token, None)
+    def pop(self, token: str, *, owner_id: str) -> PendingEntry | None:
+        entry = self.get(token, owner_id=owner_id)
         if entry is None:
             return None
-        if time.time() - entry.created_at > self.TTL:
-            return None
+        self._store.pop(token, None)
         return entry
 
-    def get(self, token: str) -> PendingEntry | None:
+    def get(self, token: str, *, owner_id: str) -> PendingEntry | None:
         entry = self._store.get(token)
         if entry is None:
             return None
         if time.time() - entry.created_at > self.TTL:
             self._store.pop(token, None)
+            return None
+        if entry.owner_id != owner_id:
             return None
         return entry
 

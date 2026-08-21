@@ -942,6 +942,12 @@ class WorkerRuntimeClient:
     def close(self) -> None:
         self._channel.close()
 
+    def __enter__(self) -> WorkerRuntimeClient:
+        return self
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
+        self.close()
+
     def _metadata(self) -> tuple[tuple[str, str], ...]:
         return ((_TOKEN_METADATA_KEY, self._token),)
 

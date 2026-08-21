@@ -194,6 +194,13 @@ class TestBuildModeWiring:
         mock_arrow = MagicMock(schema=pa.schema([pa.field("id", pa.int64())]))
         return mock_catalog, mock_table, mock_arrow
 
+    @staticmethod
+    def _mock_parquet_file() -> MagicMock:
+        mock_parquet_file = MagicMock()
+        mock_parquet_file.schema_arrow.names = ["id"]
+        mock_parquet_file.iter_batches.return_value = iter(())
+        return mock_parquet_file
+
     def test_full_mode_calls_overwrite(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="full")
@@ -202,6 +209,7 @@ class TestBuildModeWiring:
         with (
             patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
             patch("runtime.compute_service._sync_iceberg_schema", return_value=False) as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
             patch("runtime.compute_service.ensure_bucket_exists"),
@@ -249,6 +257,7 @@ class TestBuildModeWiring:
         with (
             patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
             patch("runtime.compute_service.os.path.getsize", return_value=100),
             patch("runtime.compute_service.ensure_bucket_exists"),
             patch("runtime.compute_service.client_from_env", return_value=internal_client),
@@ -288,6 +297,7 @@ class TestBuildModeWiring:
         with (
             patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
             patch("runtime.compute_service._sync_iceberg_schema") as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
             patch("runtime.compute_service.ensure_bucket_exists"),
@@ -324,6 +334,7 @@ class TestBuildModeWiring:
         with (
             patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
             patch("runtime.compute_service.os.path.getsize", return_value=100),
             patch("runtime.compute_service.ensure_bucket_exists"),
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
@@ -357,6 +368,7 @@ class TestBuildModeWiring:
         with (
             patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
             patch("runtime.compute_service.os.path.getsize", return_value=100),
             patch("runtime.compute_service.ensure_bucket_exists"),
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
@@ -393,6 +405,7 @@ class TestBuildModeWiring:
         with (
             patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
             patch("runtime.compute_service.os.path.getsize", return_value=100),
             patch("runtime.compute_service.ensure_bucket_exists"),
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
@@ -429,6 +442,7 @@ class TestBuildModeWiring:
         with (
             patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
+            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
             patch(
                 "runtime.compute_service.resolve_iceberg_metadata_path",
                 return_value="/tmp/iceberg/warehouse/ns/tbl/metadata/v1.metadata.json",

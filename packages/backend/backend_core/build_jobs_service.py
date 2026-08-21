@@ -360,14 +360,14 @@ def queued_job_count(session: Session) -> int:
 
 
 def release_worker_jobs(session: Session, *, worker_id: str) -> list[BuildJob]:
-    now = _utcnow()
+    now = _database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     stmt = (
         select(BuildJob)
         .where(sa(BuildJob.lease_owner == worker_id))
         .where(table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]))
     )
-    jobs = list(session.execute(stmt).scalars().all())
+    jobs = list(session.execute(with_for_update_skip_locked(session, stmt)).scalars().all())
     for job in jobs:
         job.status = BuildJobStatus.QUEUED
         job.clear_lease()

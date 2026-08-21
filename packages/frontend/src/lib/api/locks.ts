@@ -1,6 +1,7 @@
 import { closeOwnedWebSocket, createOwnedWebSocket, preferHttp } from './websocket';
 
-const RECONNECT_DELAY_MS = 1_000;
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
 
 export interface LockStatus {
 	resource_type: string;
@@ -78,6 +79,7 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 	let wantsAcquire = false;
 	let attemptedAcquireOnExistingLock = false;
 	let ownedToken: string | null = null;
+	let reconnectAttempt = 0;
 
 	function clearTimer(): void {
 		if (timer !== null) {
@@ -125,11 +127,17 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 
 	function scheduleReconnect(): void {
 		if (closed || reconnectTimer !== null) return;
+		const backoff = Math.min(
+			RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempt,
+			RECONNECT_MAX_DELAY_MS
+		);
+		const delay = backoff / 2 + Math.random() * (backoff / 2);
+		reconnectAttempt += 1;
 		reconnectTimer = window.setTimeout(() => {
 			reconnectTimer = null;
 			if (closed) return;
 			connect();
-		}, RECONNECT_DELAY_MS);
+		}, delay);
 	}
 
 	function startPing(): void {
@@ -182,6 +190,7 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 		socket.addEventListener('open', () => {
 			if (closed || !socket) return;
 			opened = true;
+			reconnectAttempt = 0;
 			send({
 				action: 'watch',
 				resource_type: options.resourceType,
