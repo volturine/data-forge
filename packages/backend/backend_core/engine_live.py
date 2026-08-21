@@ -12,12 +12,6 @@ class EngineRegistry:
         self._lock = asyncio.Lock()
         self._version: dict[str, int] = {}
 
-    async def add_watcher(self, namespace: str, websocket) -> None:
-        del namespace, websocket
-
-    async def remove_watcher(self, namespace: str, websocket) -> None:
-        del namespace, websocket
-
     async def clear(self) -> None:
         async with self._lock:
             waiters = self._waiters
@@ -30,14 +24,13 @@ class EngineRegistry:
                 future.cancel()
 
     async def wait_for_namespace(self, namespace: str, last_seen: str | None = None) -> str:
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[str] = loop.create_future()
         async with self._lock:
             current = self._version.get(namespace, 0)
             current_token = str(current)
             if last_seen is not None and current_token != last_seen:
                 return current_token
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[str] = loop.create_future()
-        async with self._lock:
             self._waiters.setdefault(namespace, []).append(future)
         try:
             return await future

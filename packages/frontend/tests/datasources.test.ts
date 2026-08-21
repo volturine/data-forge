@@ -387,7 +387,9 @@ test.describe('Datasources – column stats panel', () => {
 			await expect(panel).toBeVisible({ timeout: 5_000 });
 			await expect(panel.getByText('Column Stats')).toBeVisible();
 			await expect(panel.getByText('age')).toBeVisible();
-			await expect(panel.getByText('Overview')).toBeVisible({ timeout: 5_000 });
+			// Stats are computed by an on-demand engine; under parallel workers the
+			// first compute can take well over the default five seconds.
+			await expect(panel.getByText('Overview')).toBeVisible({ timeout: 20_000 });
 			await expect(panel.getByText('Rows')).toBeVisible();
 
 			await screenshot(page, 'datasources', 'column-stats-panel-open');

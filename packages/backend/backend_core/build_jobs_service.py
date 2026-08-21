@@ -342,17 +342,21 @@ mark_job_cancelled = committed(stage_job_cancelled, refresh=True)
 def queued_job_count(session: Session) -> int:
     now = _database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
-    stmt = select(BuildJob).where(
-        or_(
-            table.c.status == BuildJobStatus.QUEUED,
-            and_(
-                table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]),
-                table.c.lease_expires_at <= now,
-                table.c.attempts < table.c.max_attempts,
-            ),
+    stmt = (
+        select(func.count())
+        .select_from(table)
+        .where(
+            or_(
+                table.c.status == BuildJobStatus.QUEUED,
+                and_(
+                    table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]),
+                    table.c.lease_expires_at <= now,
+                    table.c.attempts < table.c.max_attempts,
+                ),
+            )
         )
     )
-    return len(session.execute(stmt).scalars().all())
+    return session.execute(stmt).scalar_one()
 
 
 def release_worker_jobs(session: Session, *, worker_id: str) -> list[BuildJob]:

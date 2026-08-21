@@ -442,7 +442,10 @@ class RequestLoggingMiddleware:
         request_id = request.headers.get('x-request-id') or uuid.uuid4().hex
         scope.setdefault('state', {})['request_id'] = request_id
 
-        content_length = int(request.headers.get('content-length', 0))
+        try:
+            content_length = int(request.headers.get('content-length', 0))
+        except ValueError:
+            content_length = 0
         should_log_body = self.max_body_size == 0 or content_length <= self.max_body_size
         body_for_log: bytes | None = None
         replay_body_sent = False

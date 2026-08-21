@@ -163,8 +163,12 @@ def _claim_next_event(session: Session) -> tuple[str, str, int, str, dict[str, o
 
 def pending_event_count(session: Session) -> int:
     table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
-    stmt = select(RuntimeOutboxEvent).where(table.c.status.in_([RuntimeOutboxStatus.PENDING, RuntimeOutboxStatus.FAILED, RuntimeOutboxStatus.DISPATCHING]))
-    return len(session.execute(stmt).scalars().all())
+    stmt = (
+        select(func.count())
+        .select_from(table)
+        .where(table.c.status.in_([RuntimeOutboxStatus.PENDING, RuntimeOutboxStatus.FAILED, RuntimeOutboxStatus.DISPATCHING]))
+    )
+    return session.execute(stmt).scalar_one()
 
 
 def _finalize_claim(

@@ -422,8 +422,8 @@ def _validate_response_envelope(
 
 
 def queued_request_count(session: Session) -> int:
-    stmt = select(ComputeRequest).where(sa(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED))
-    return len(session.execute(stmt).scalars().all())
+    stmt = select(func.count()).select_from(ComputeRequest).where(sa(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED))
+    return session.execute(stmt).scalar_one()
 
 
 def cleanup_completed_requests(session: Session, *, older_than_seconds: int) -> int:

@@ -46,6 +46,7 @@ _SHARED_TABLES = {'app_settings', 'engine_instances', 'runtime_namespaces', 'run
 _TENANT_TABLES = {
     'analyses',
     'analysis_datasources',
+    'analysis_favorites',
     'analysis_versions',
     'build_events',
     'build_jobs',
@@ -56,6 +57,7 @@ _TENANT_TABLES = {
     'engine_runs',
     'healthcheck_results',
     'healthchecks',
+    'notification_delivery_receipts',
     'resource_locks',
     'runtime_outbox_events',
     'schedules',
