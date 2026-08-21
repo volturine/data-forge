@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 import pyarrow as pa  # type: ignore[import-untyped]
 
@@ -71,13 +72,17 @@ class NotificationDelivery:
     def __init__(self, client: WorkerRuntimeClient | None = None) -> None:
         self._client = client
 
-    def _api_client(self) -> WorkerRuntimeClient:
+    @contextmanager
+    def _use_api_client(self) -> Iterator[WorkerRuntimeClient]:
         if self._client is not None:
-            return self._client
-        return client_from_env()
+            yield self._client
+            return
+        with client_from_env() as client:
+            yield client
 
     def telegram_enabled(self) -> bool:
-        return self._api_client().telegram_enabled()
+        with self._use_api_client() as api_client:
+            return api_client.telegram_enabled()
 
     def send_email(
         self,
@@ -87,13 +92,14 @@ class NotificationDelivery:
         body: str,
         attachments: list[NotificationAttachment] | None = None,
     ) -> None:
-        self._api_client().send_email(
-            namespace=get_namespace(),
-            to=to,
-            subject=subject,
-            body=body,
-            attachments=[attachment.__dict__ for attachment in attachments or []],
-        )
+        with self._use_api_client() as api_client:
+            api_client.send_email(
+                namespace=get_namespace(),
+                to=to,
+                subject=subject,
+                body=body,
+                attachments=[attachment.__dict__ for attachment in attachments or []],
+            )
 
     def send_telegram(
         self,
@@ -103,10 +109,11 @@ class NotificationDelivery:
         bot_token: str | None = None,
         attachments: list[NotificationAttachment] | None = None,
     ) -> None:
-        self._api_client().send_telegram(
-            namespace=get_namespace(),
-            chat_id=chat_id,
-            message=message,
-            bot_token=bot_token,
-            attachments=[attachment.__dict__ for attachment in attachments or []],
-        )
+        with self._use_api_client() as api_client:
+            api_client.send_telegram(
+                namespace=get_namespace(),
+                chat_id=chat_id,
+                message=message,
+                bot_token=bot_token,
+                attachments=[attachment.__dict__ for attachment in attachments or []],
+            )

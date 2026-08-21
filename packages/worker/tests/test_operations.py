@@ -349,6 +349,62 @@ def test_timeseries_timestamp():
     assert len(result) == 3
 
 
+@pytest.mark.parametrize(
+    ("unit", "expected"),
+    [
+        ("ns", 1704067200000000000),
+        ("us", 1704067200000000),
+        ("ms", 1704067200000),
+        ("seconds", 1704067200),
+        ("minutes", 28401120),
+        ("hours", 473352),
+        ("days", 19723),
+        ("weeks", 2817),
+    ],
+)
+def test_timeseries_timestamp_unit_magnitudes(unit: str, expected: int) -> None:
+    handler = TimeseriesHandler()
+    lf = handler(
+        _frame(),
+        {
+            "column": "date",
+            "operation_type": "timestamp",
+            "new_column": "ts",
+            "unit": unit,
+        },
+    )
+    result = lf.collect()["ts"].to_list()
+    assert result == [expected] * 3
+
+
+def test_timeseries_timestamp_defaults_to_microseconds() -> None:
+    handler = TimeseriesHandler()
+    lf = handler(
+        _frame(),
+        {
+            "column": "date",
+            "operation_type": "timestamp",
+            "new_column": "ts",
+        },
+    )
+    result = lf.collect()["ts"].to_list()
+    assert result == [1704067200000000] * 3
+
+
+def test_timeseries_timestamp_rejects_months() -> None:
+    handler = TimeseriesHandler()
+    with pytest.raises(ValueError, match="Unsupported duration unit"):
+        handler(
+            _frame(),
+            {
+                "column": "date",
+                "operation_type": "timestamp",
+                "new_column": "ts",
+                "unit": "months",
+            },
+        ).collect()
+
+
 def test_timeseries_subtract():
     handler = TimeseriesHandler()
     lf = handler(

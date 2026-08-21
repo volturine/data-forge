@@ -95,7 +95,6 @@ def validate(request: Request, body: ToolRequest, user: User = Depends(get_curre
 @handle_errors('call MCP tool')
 async def call(request: Request, body: ToolRequest, user: User = Depends(get_current_user)) -> dict:
     """Execute a tool call. Mutating methods return a pending token for preview-first flow."""
-    del user
     tool, valid, errors, normalized = _resolve_tool(request.app, body.tool_id, body.args)
     if not valid:
         return tool.validation_error_response(errors, body.args)
@@ -103,7 +102,7 @@ async def call(request: Request, body: ToolRequest, user: User = Depends(get_cur
     context = _request_tool_context(request)
 
     if tool.method.is_mutating:
-        token = pending_store.create(tool.id, tool.method, tool.path, normalized, context)
+        token = pending_store.create(tool.id, tool.method, tool.path, normalized, context, owner_id=user.id)
         return tool.pending_response(token, normalized)
 
     try:
@@ -117,8 +116,7 @@ async def call(request: Request, body: ToolRequest, user: User = Depends(get_cur
 @handle_errors('confirm MCP tool')
 async def confirm(request: Request, body: ConfirmRequest, user: User = Depends(get_current_user)) -> dict:
     """Execute a previously previewed mutating tool call by token."""
-    del user
-    entry = pending_store.pop(body.token)
+    entry = pending_store.pop(body.token, owner_id=user.id)
     if entry is None:
         raise HTTPException(status_code=404, detail='Token not found or expired')
 

@@ -11,6 +11,7 @@ import httpx
 from fastapi import FastAPI
 
 from modules.mcp.models import MCPHttpMethod
+from modules.mcp.tool_output import redact_secrets
 
 
 def build_tool_context(
@@ -88,4 +89,4 @@ async def call_tool(
     elif resp.content:
         body = resp.text
 
-    return {'status': status, 'body': body, 'ok': 200 <= status < 300}
+    return {'status': status, 'body': redact_secrets(body), 'ok': 200 <= status < 300}

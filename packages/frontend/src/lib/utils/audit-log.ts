@@ -120,13 +120,13 @@ function pushLog(item: AuditLogItem) {
 	};
 	const config = configStore.config;
 	if (!config) return;
-	buffer.push(payload);
 	const now = nowEpochMs();
 	const key = `${payload.event}:${payload.action ?? ''}:${payload.target ?? ''}`;
 	const last = dedupe.get(key);
 	const dedupeWindowMs = config.log_client_dedupe_window_ms;
 	if (last && now - last < dedupeWindowMs) return;
 	dedupe.set(key, now);
+	buffer.push(payload);
 	const maxBuffer = config.log_queue_max_size;
 	if (buffer.length > maxBuffer) {
 		buffer.splice(0, buffer.length - maxBuffer);
@@ -141,6 +141,7 @@ function pushLog(item: AuditLogItem) {
 }
 
 function recordFlushFailure(error: string, payload: AuditLogItem[]) {
+	buffer.unshift(...payload);
 	const config = configStore.config;
 	if (!config) return;
 	const last = flushFailures.get(error);
@@ -148,15 +149,12 @@ function recordFlushFailure(error: string, payload: AuditLogItem[]) {
 	const flushCooldownMs = config.log_client_flush_cooldown_ms;
 	if (last && now - last < flushCooldownMs) return;
 	flushFailures.set(error, now);
-	buffer.unshift(
-		{
-			event: 'audit_error',
-			action: 'flush',
-			target: 'client',
-			meta: { error, dropped: payload.length }
-		},
-		...payload
-	);
+	buffer.unshift({
+		event: 'audit_error',
+		action: 'flush',
+		target: 'client',
+		meta: { error, dropped: payload.length }
+	});
 	scheduleFlush(config.log_client_flush_interval_ms);
 }
 

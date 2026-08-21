@@ -86,6 +86,7 @@ describe('openLockSession', () => {
 		}
 		sockets.length = 0;
 		vi.clearAllMocks();
+		vi.useRealTimers();
 	});
 
 	test('reacquires when connect sees an existing lock before the first token is known', () => {
@@ -148,6 +149,53 @@ describe('openLockSession', () => {
 			expect.objectContaining({ lock_token: 'other-lock' }),
 			false
 		);
+		session.close();
+	});
+
+	test('reconnects with exponential backoff that resets after a successful connection', () => {
+		vi.useFakeTimers();
+		const session: LockSession = openLockSession({
+			resourceType: 'analysis',
+			resourceId: 'analysis-1',
+			onStatus: vi.fn(),
+			onError: vi.fn()
+		});
+		expect(sockets.length).toBe(1);
+
+		sockets[0].emit('close');
+		vi.advanceTimersByTime(1_000);
+		expect(sockets.length).toBe(2);
+
+		sockets[1].emit('close');
+		vi.advanceTimersByTime(999);
+		expect(sockets.length).toBe(2);
+		vi.advanceTimersByTime(1_001);
+		expect(sockets.length).toBe(3);
+
+		sockets[2].emit('open');
+		sockets[2].emit('close');
+		vi.advanceTimersByTime(1_000);
+		expect(sockets.length).toBe(4);
+
+		session.close();
+	});
+
+	test('caps reconnect backoff so a reconnect always happens within the max delay', () => {
+		vi.useFakeTimers();
+		const session: LockSession = openLockSession({
+			resourceType: 'analysis',
+			resourceId: 'analysis-1',
+			onStatus: vi.fn(),
+			onError: vi.fn()
+		});
+		let current = sockets[0];
+		for (let i = 0; i < 12; i++) {
+			current.emit('close');
+			const before = sockets.length;
+			vi.advanceTimersByTime(30_000);
+			expect(sockets.length).toBe(before + 1);
+			current = sockets[sockets.length - 1];
+		}
 		session.close();
 	});
 });

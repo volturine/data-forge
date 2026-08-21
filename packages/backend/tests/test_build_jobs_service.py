@@ -1,6 +1,8 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session
 
 from backend_core import build_jobs_service
@@ -221,3 +223,145 @@ def test_expired_default_claim_is_failed_when_attempts_are_exhausted(test_db_ses
     assert current.last_error == 'Build job lease expired after maximum attempts'
     assert current.lease_owner is None
     assert current.claim_token is None
+
+
+def _claim_and_expire(session: Session, *, worker_id: str) -> BuildJob:
+    build_jobs_service.create_job(
+        session,
+        build_id=str(uuid.uuid4()),
+        namespace='default',
+        max_attempts=3,
+    )
+    claimed = build_jobs_service.claim_next_job(session, worker_id=worker_id)
+    assert claimed is not None
+    claimed.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    session.add(claimed)
+    session.commit()
+    return claimed
+
+
+def test_release_worker_jobs_selects_rows_with_for_update_skip_locked(test_db_session: Session, monkeypatch) -> None:
+    claimed = _claim_and_expire(test_db_session, worker_id='worker:one')
+
+    captured = []
+    original_execute = test_db_session.execute
+
+    def spy_execute(statement, *args, **kwargs):
+        captured.append(statement)
+        return original_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(test_db_session, 'execute', spy_execute)
+
+    released = build_jobs_service.release_worker_jobs(test_db_session, worker_id='worker:one')
+
+    assert [job.id for job in released] == [claimed.id]
+    select_stmts = [stmt for stmt in captured if getattr(stmt, '_for_update_arg', None) is not None]
+    assert len(select_stmts) == 1
+    assert select_stmts[0]._for_update_arg.skip_locked
+
+
+def test_release_worker_jobs_blocks_concurrent_transition_until_committed(test_db_session, test_engine, monkeypatch) -> None:
+    claimed = _claim_and_expire(test_db_session, worker_id='worker:one')
+
+    competitor_outcome: dict[str, bool] = {}
+    original_commit = test_db_session.commit
+
+    def racing_commit() -> None:
+        if 'blocked' not in competitor_outcome:
+            try:
+                with test_engine.connect() as conn:
+                    conn.execute(text("SET LOCAL lock_timeout = '300ms'"))
+                    conn.execute(
+                        text("UPDATE build_jobs SET status = 'FAILED' WHERE id = :job_id"),
+                        {'job_id': claimed.id},
+                    )
+                competitor_outcome['blocked'] = False
+            except OperationalError:
+                competitor_outcome['blocked'] = True
+        original_commit()
+
+    monkeypatch.setattr(test_db_session, 'commit', racing_commit)
+
+    released = build_jobs_service.release_worker_jobs(test_db_session, worker_id='worker:one')
+
+    assert [job.id for job in released] == [claimed.id]
+    assert competitor_outcome['blocked'] is True
+
+    test_db_session.expire_all()
+    current = test_db_session.get(BuildJob, claimed.id)
+    assert current is not None
+    assert current.status == BuildJobStatus.QUEUED
+    assert current.lease_owner is None
+    assert current.claim_token is None
+
+
+def test_release_worker_jobs_does_not_requeue_after_concurrent_reclaim(test_db_session, test_engine, monkeypatch) -> None:
+    claimed = _claim_and_expire(test_db_session, worker_id='worker:one')
+    previous_generation = claimed.lease_generation
+    previous_attempts = claimed.attempts
+
+    def thief_is_blocked() -> bool:
+        with Session(test_engine) as other:
+            stolen = build_jobs_service.claim_next_job(other, worker_id='worker:thief')
+            other.rollback()
+        return stolen is None
+
+    original_commit = test_db_session.commit
+    state: dict[str, bool] = {}
+
+    def racing_commit() -> None:
+        if 'checked' not in state:
+            state['checked'] = True
+            # While the release transaction holds the row locks, a competing
+            # scheduler using SKIP LOCKED cannot see the rows to reclaim them.
+            state['thief_blocked'] = thief_is_blocked()
+        original_commit()
+
+    monkeypatch.setattr(test_db_session, 'commit', racing_commit)
+
+    released = build_jobs_service.release_worker_jobs(test_db_session, worker_id='worker:one')
+
+    assert [job.id for job in released] == [claimed.id]
+    assert state['thief_blocked'] is True
+
+    test_db_session.expire_all()
+    current = test_db_session.get(BuildJob, claimed.id)
+    assert current is not None
+    assert current.status == BuildJobStatus.QUEUED
+    assert current.lease_owner is None
+
+    thief = build_jobs_service.claim_next_job(test_db_session, worker_id='worker:thief')
+    assert thief is not None
+    assert thief.id == claimed.id
+    assert thief.lease_generation == previous_generation + 1
+    assert thief.attempts == previous_attempts + 1
+
+
+def _claim_active(session: Session, *, worker_id: str) -> BuildJob:
+    build_jobs_service.create_job(
+        session,
+        build_id=str(uuid.uuid4()),
+        namespace='default',
+        max_attempts=3,
+    )
+    claimed = build_jobs_service.claim_next_job(session, worker_id=worker_id)
+    assert claimed is not None
+    return claimed
+
+
+def test_release_worker_jobs_leaves_other_workers_untouched(test_db_session: Session) -> None:
+    mine = _claim_active(test_db_session, worker_id='worker:one')
+    theirs = _claim_active(test_db_session, worker_id='worker:two')
+
+    mine.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    test_db_session.add(mine)
+    test_db_session.commit()
+
+    released = build_jobs_service.release_worker_jobs(test_db_session, worker_id='worker:one')
+
+    assert [job.id for job in released] == [mine.id]
+    test_db_session.expire_all()
+    still_theirs = test_db_session.get(BuildJob, theirs.id)
+    assert still_theirs is not None
+    assert still_theirs.status == BuildJobStatus.RUNNING
+    assert still_theirs.lease_owner == 'worker:two'

@@ -194,7 +194,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         token = str(resolved.get('token', ''))
         return enabled, token
 
-    enabled, token = run_settings_db(_check_bot_enabled)
+    enabled, token = await asyncio.to_thread(run_settings_db, _check_bot_enabled)
     if enabled:
         telegram_bot.start(token)
 
@@ -312,7 +312,8 @@ async def readiness(session: Session = Depends(get_settings_db)) -> JSONResponse
         session.execute(text('SELECT 1'))
         checks['database'] = 'ok'
     except Exception as e:
-        checks['database'] = f'error: {e!s}'
+        logger.warning('Database readiness check failed: %s', e)
+        checks['database'] = 'error'
         is_ready = False
 
     # Local DATA_DIR remains for process-local scratch; product data lives in object storage.
@@ -322,7 +323,8 @@ async def readiness(session: Session = Depends(get_settings_db)) -> JSONResponse
         if not paths.base_dir.exists():
             is_ready = False
     except Exception as e:
-        checks['data_dir'] = f'error: {e!s}'
+        logger.warning('Data dir readiness check failed: %s', e)
+        checks['data_dir'] = 'error'
         is_ready = False
 
     # Fail fast when the S3-compatible object store is unreachable or misconfigured.
@@ -365,8 +367,8 @@ async def serve_static_or_index(full_path: str) -> FileResponse:
     if full_path.startswith('api/') or full_path == 'api':
         raise HTTPException(status_code=404, detail='Not Found')
 
-    path = frontend_build_dir / full_path
-    if path.is_file():
+    path = (frontend_build_dir / full_path).resolve()
+    if path.is_relative_to(frontend_build_dir.resolve()) and path.is_file():
         return FileResponse(str(path))
 
     fallback_path = frontend_build_dir / '200.html'

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import weakref
 from dataclasses import dataclass
 from threading import Lock
+from typing import Any
 
 from sqlmodel import Session
 
@@ -18,7 +20,7 @@ DEFAULT_OLLAMA_ENDPOINT_URL = 'http://localhost:11434'
 DEFAULT_OLLAMA_MODEL = 'llama3.2'
 
 _RESOLVED_LOCK = Lock()
-_RESOLVED_CACHE: dict[int, ResolvedSettingsSnapshot] = {}
+_RESOLVED_CACHE: weakref.WeakKeyDictionary[Any, ResolvedSettingsSnapshot] = weakref.WeakKeyDictionary()
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,12 +107,6 @@ def _read_secret(row: AppSettings, field: str) -> str:
     return decrypt_secret(stored)
 
 
-def _active_settings_engine_id() -> int:
-    from backend_core.database import get_settings_engine
-
-    return id(get_settings_engine())
-
-
 def _load_resolved_snapshot(session: Session) -> ResolvedSettingsSnapshot:
     row = session.get(AppSettings, 1)
     if not row:
@@ -119,17 +115,17 @@ def _load_resolved_snapshot(session: Session) -> ResolvedSettingsSnapshot:
 
 
 def _get_resolved_snapshot() -> ResolvedSettingsSnapshot:
-    from backend_core.database import run_settings_db
+    from backend_core.database import get_settings_engine, run_settings_db
 
-    key = _active_settings_engine_id()
+    engine = get_settings_engine()
     with _RESOLVED_LOCK:
-        cached = _RESOLVED_CACHE.get(key)
+        cached = _RESOLVED_CACHE.get(engine)
     if cached is not None:
         return cached
 
     snapshot = run_settings_db(_load_resolved_snapshot)
     with _RESOLVED_LOCK:
-        _RESOLVED_CACHE[key] = snapshot
+        _RESOLVED_CACHE[engine] = snapshot
     return snapshot
 
 

@@ -47,10 +47,18 @@ class ObjectStoreUrlClassification:
 
 
 class WorkerDataPlaneClient:
-    def __init__(self, *, target: str | None = None, token: str | None = None, timeout_seconds: float = 120.0) -> None:
+    def __init__(
+        self,
+        *,
+        target: str | None = None,
+        token: str | None = None,
+        timeout_seconds: float = 120.0,
+        trivial_timeout_seconds: float = 15.0,
+    ) -> None:
         self._target = target or settings.worker_data_plane_grpc_target
         self._token = token if token is not None else settings.internal_api_token
         self._timeout_seconds = timeout_seconds
+        self._trivial_timeout_seconds = trivial_timeout_seconds
         self._channel = grpc.insecure_channel(
             self._target,
             options=(
@@ -65,7 +73,7 @@ class WorkerDataPlaneClient:
         response = self._call(
             lambda: self._object_store.ClassifyUrl(
                 object_store_pb2.ObjectStoreUrlClassificationRequest(value=value),
-                timeout=self._timeout_seconds,
+                timeout=self._trivial_timeout_seconds,
                 metadata=self._metadata(),
             )
         )
@@ -125,7 +133,7 @@ class WorkerDataPlaneClient:
         response = self._call(
             lambda: self._object_store.Exists(
                 object_store_pb2.ObjectStoreUrl(url=source_url),
-                timeout=self._timeout_seconds,
+                timeout=self._trivial_timeout_seconds,
                 metadata=self._metadata(),
             )
         )
@@ -229,6 +237,15 @@ class WorkerDataPlaneClient:
 
     def _metadata(self) -> tuple[tuple[str, str], ...]:
         return ((_TOKEN_METADATA_KEY, self._token),)
+
+    def close(self) -> None:
+        self._channel.close()
+
+    def __enter__(self) -> WorkerDataPlaneClient:
+        return self
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
+        self.close()
 
     def _call(self, fn: Callable[[], _T]) -> _T:
         try:

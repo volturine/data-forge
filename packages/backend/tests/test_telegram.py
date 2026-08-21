@@ -35,7 +35,6 @@ class TestAddSubscriber:
         result = add_subscriber(test_db_session, '111', 'Alice', 'tok-A')
         assert result.chat_id == '111'
         assert result.title == 'Alice'
-        assert result.bot_token == 'tok-A'
         assert result.is_active is True
 
     def test_reactivates_existing(self, test_db_session: Session) -> None:
@@ -70,7 +69,7 @@ class TestListSubscribers:
         add_subscriber(test_db_session, '2', 'B', 'tok-2')
         subs = list_subscribers(test_db_session, bot_token='tok-1')
         assert len(subs) == 1
-        assert subs[0].bot_token == 'tok-1'
+        assert subs[0].chat_id == '1'
 
 
 class TestDeactivateSubscriber:

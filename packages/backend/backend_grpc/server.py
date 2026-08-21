@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -147,7 +148,7 @@ async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
     if not settings.internal_api_token:
         await context.abort(grpc.StatusCode.UNAVAILABLE, 'INTERNAL_API_TOKEN must be configured before internal runtime services can be used')
     metadata = dict(cast(Any, context.invocation_metadata() or ()))
-    if metadata.get(_TOKEN_METADATA_KEY) != settings.internal_api_token:
+    if not hmac.compare_digest(metadata.get(_TOKEN_METADATA_KEY) or '', settings.internal_api_token):
         await context.abort(grpc.StatusCode.UNAUTHENTICATED, 'Invalid internal runtime token')
 
 
@@ -1327,6 +1328,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             session_gen.close()
             reset_namespace(token)
 
+    @_run_async_handler_in_thread
     async def PersistEngineSnapshot(
         self, request: worker_runtime_pb2.WorkerPersistEngineSnapshotRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.CountResponse:

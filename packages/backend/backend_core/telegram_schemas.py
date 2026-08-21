@@ -11,7 +11,6 @@ class SubscriberResponse(BaseModel):
     id: int
     chat_id: str
     title: str
-    bot_token: str
     is_active: bool
     subscribed_at: dt.datetime
 

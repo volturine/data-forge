@@ -325,10 +325,11 @@ run_playwright() {
     local output_dir="$PWD/tests/.artifacts/playwright/test-results"
     local report_dir="$PWD/tests/.artifacts/playwright/playwright-report"
     local timeout_seconds="${E2E_TIMEOUT_SECONDS:-0}"
-    # A local canonical run must never monopolize a developer machine for more
-    # than ten minutes. CI keeps its explicit, larger cold-run budget.
-    if [ -z "${CI:-}" ] && { [ "$timeout_seconds" -eq 0 ] || [ "$timeout_seconds" -gt 600 ]; }; then
-        timeout_seconds=600
+    # A local canonical run must stay bounded. The Docker-engine cutover pushed
+    # the full suite past ten minutes on common hardware, so the ceiling is now
+    # fifteen minutes; CI keeps its explicit, larger cold-run budget.
+    if [ -z "${CI:-}" ] && { [ "$timeout_seconds" -eq 0 ] || [ "$timeout_seconds" -gt 900 ]; }; then
+        timeout_seconds=900
     fi
     mkdir -p "$output_dir" "$report_dir"
     # Optional profiling subset, e.g. PLAYWRIGHT_TEST_FILES="tests/profile.test.ts tests/monitoring.test.ts".

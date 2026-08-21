@@ -18,11 +18,12 @@ def persist_engine_snapshot(
     namespace: str,
     statuses: list[EngineStatusInfo],
 ) -> None:
-    worker_runtime_client().persist_engine_snapshot(
-        worker_id=worker_id,
-        namespace=namespace,
-        statuses=[asdict(status) for status in statuses],
-    )
+    with worker_runtime_client() as client:
+        client.persist_engine_snapshot(
+            worker_id=worker_id,
+            namespace=namespace,
+            statuses=[asdict(status) for status in statuses],
+        )
 
 
 def create_snapshot_notifier(

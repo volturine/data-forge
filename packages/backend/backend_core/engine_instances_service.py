@@ -149,7 +149,7 @@ def list_engine_projection(session: Session, *, namespace: str) -> list[EngineIn
         current_seen = current.last_seen_at or current.updated_at
         row_seen = row.last_seen_at or row.updated_at
         if row_seen > current_seen:
-            latest[row.analysis_id] = row
+            latest[key] = row
             continue
         if row_seen < current_seen:
             continue

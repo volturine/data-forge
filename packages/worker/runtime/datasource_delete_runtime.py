@@ -17,23 +17,26 @@ def worker_runtime_client() -> WorkerRuntimeClient:
 
 
 async def datasource_delete_loop(stop_event: asyncio.Event, *, manager: ProcessManager) -> None:
-    while not stop_event.is_set():
-        try:
-            handled = await _run_once(manager=manager)
-            if handled:
-                continue
-        except Exception as exc:
-            logger.warning("Datasource delete loop iteration failed; will retry: %s", exc)
-            await asyncio.sleep(1.0)
-            continue
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=_DATASOURCE_DELETE_POLL_SECONDS)
-        except asyncio.TimeoutError:
-            continue
-
-
-async def _run_once(*, manager: ProcessManager) -> bool:
     client = worker_runtime_client()
+    try:
+        while not stop_event.is_set():
+            try:
+                handled = await _run_once(manager=manager, client=client)
+                if handled:
+                    continue
+            except Exception as exc:
+                logger.warning("Datasource delete loop iteration failed; will retry: %s", exc)
+                await asyncio.sleep(1.0)
+                continue
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=_DATASOURCE_DELETE_POLL_SECONDS)
+            except asyncio.TimeoutError:
+                continue
+    finally:
+        client.close()
+
+
+async def _run_once(*, manager: ProcessManager, client: WorkerRuntimeClient) -> bool:
     for pending_delete in client.pending_datasource_deletes():
         if _process_pending_datasource_delete(
             pending_delete.datasource_id,

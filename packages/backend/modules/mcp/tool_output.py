@@ -4,6 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend_core.secrets import MASKED_SECRET
+
+SENSITIVE_OUTPUT_FIELDS = frozenset({'connection_string', 'api_key', 'bot_token'})
+
+
+def redact_secrets(value: Any) -> Any:
+    """Recursively mask secret-bearing fields in tool output returned to clients."""
+    if isinstance(value, dict):
+        return {key: MASKED_SECRET if isinstance(key, str) and key in SENSITIVE_OUTPUT_FIELDS and item else redact_secrets(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_secrets(item) for item in value]
+    return value
+
 
 def top_level_output_fields(schema: Any) -> list[str]:
     if not isinstance(schema, dict):

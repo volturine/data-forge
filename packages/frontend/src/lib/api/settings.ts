@@ -61,7 +61,6 @@ export interface Subscriber {
 	id: number;
 	chat_id: string;
 	title: string;
-	bot_token: string;
 	is_active: boolean;
 	subscribed_at: string;
 }

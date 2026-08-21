@@ -64,15 +64,11 @@ function isBuildDetailSnapshot(msg: BuildStreamMessage): msg is BuildDetailSnaps
 	return isObject(msg) && (msg as Record<string, unknown>).type === 'snapshot';
 }
 
-function toBuildDetailEvent(msg: BuildStreamMessage): BuildEvent {
+function toBuildDetailEvent(msg: BuildStreamMessage): BuildEvent | null {
 	if (isBuildDetailSnapshot(msg) || isErrorMessage(msg)) {
-		throw new Error('Expected build event');
+		return null;
 	}
-	const event = protocolBuildEventToBuildEvent(msg);
-	if (event === null) {
-		throw new Error('Invalid build stream event');
-	}
-	return event;
+	return protocolBuildEventToBuildEvent(msg);
 }
 
 export function connectBuildDetailStream(
@@ -84,17 +80,28 @@ export function connectBuildDetailStream(
 		lastSequence > 0
 			? `/v1/compute/ws/builds/${buildId}?last_sequence=${lastSequence}`
 			: `/v1/compute/ws/builds/${buildId}`;
-	return createStream<BuildDetailSnapshot, BuildEvent, BuildStreamMessage>(endpoint, {
+	return createStream<BuildDetailSnapshot | null, BuildEvent | null, BuildStreamMessage>(endpoint, {
 		parse: parseBuildMessage,
 		isSnapshot: isBuildDetailSnapshot,
-		extractSnapshot: (msg) => {
-			if (!isBuildDetailSnapshot(msg)) {
-				throw new Error('Expected build snapshot');
+		extractSnapshot: (msg) => (isBuildDetailSnapshot(msg) ? msg : null),
+		extractEvent: (msg) => {
+			const event = toBuildDetailEvent(msg);
+			if (event === null) {
+				callbacks.onError('Invalid build stream event');
+				return null;
 			}
-			return msg;
+			return event;
 		},
-		extractEvent: toBuildDetailEvent,
-		callbacks
+		callbacks: {
+			onSnapshot: (snapshot) => {
+				if (snapshot !== null) callbacks.onSnapshot(snapshot);
+			},
+			onEvent: (event) => {
+				if (event !== null) callbacks.onEvent(event);
+			},
+			onError: callbacks.onError,
+			onClose: callbacks.onClose
+		}
 	});
 }
 

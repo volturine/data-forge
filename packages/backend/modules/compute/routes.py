@@ -548,7 +548,6 @@ async def start_build(
             placeholder_source_type = datasource_service.DataSourceType.ICEBERG
             placeholder_config = {
                 'catalog_type': 'sql',
-                'catalog_uri': settings.database_url,
                 'warehouse': warehouse_path,
                 'namespace': namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else 'outputs',
                 'table': table_name,
@@ -943,7 +942,6 @@ async def engine_list_stream(websocket: WebSocket) -> None:
     namespace = get_namespace()
     await websocket.accept()
     try:
-        await engine_registry.add_watcher(namespace, websocket)
         last_seen = await engine_registry.current_version(namespace)
         await _send_engine_snapshot(websocket)
         while True:
@@ -976,7 +974,6 @@ async def engine_list_stream(websocket: WebSocket) -> None:
             schemas.EngineWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     finally:
-        await engine_registry.remove_watcher(namespace, websocket)
         reset_namespace(token)
         await safe_close_websocket(websocket)
 

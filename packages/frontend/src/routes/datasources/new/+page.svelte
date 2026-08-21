@@ -551,7 +551,7 @@
 								>
 									<option value=",">Comma (,)</option>
 									<option value=";">Semicolon (;)</option>
-									<option value="\t">Tab</option>
+									<option value="&#9;">Tab</option>
 									<option value="|">Pipe (|)</option>
 									<option value=" ">Space</option>
 								</select>
