@@ -83,7 +83,15 @@ from runtime.notification_delivery import (
     render_template,
     strip_staged_preview,
 )
-from runtime.object_store import ensure_bucket_exists, join_object_store_url, object_store_storage_options, object_store_url
+from runtime.object_store import (
+    delete_prefix,
+    ensure_bucket_exists,
+    join_object_store_url,
+    list_prefixes,
+    object_store_storage_options,
+    object_store_url,
+    prefix_last_modified,
+)
 from runtime.resource_observation import (
     observe_stream_task as _observe_stream_task,
 )
@@ -1125,16 +1133,65 @@ def _resolve_branch_value(config: dict) -> str:
     raise ValueError("branch is required")
 
 
-def _set_snapshot_metadata(config: dict, snapshot_id: str | None, snapshot_timestamp_ms: int | None) -> dict:
+_REVISION_DIR_PREFIX = "revision_"
+# Superseded revision directories are only reclaimed after this grace period:
+# a reader that resolved a revision moments before the swap must finish.
+_REVISION_GC_GRACE_SECONDS: Final[int] = 3600
+
+
+def prune_superseded_revisions(
+    branch_base_url: str,
+    *,
+    keep_urls: frozenset[str] = frozenset(),
+    now: datetime | None = None,
+) -> None:
+    """Delete superseded revision_* directories under a branch base, best-effort.
+
+    A revision dir is reclaimable when it is not in keep_urls and its newest
+    object is older than the grace period. Failures only cost storage, never
+    correctness, so individual errors are logged and skipped.
+    """
+    current_time = now or datetime.now(UTC)
+    try:
+        names = list_prefixes(branch_base_url)
+    except Exception as exc:
+        logger.warning("Revision GC could not list %s: %s", branch_base_url, exc)
+        return
+    for name in names:
+        if not name.startswith(_REVISION_DIR_PREFIX):
+            continue
+        revision_url = join_object_store_url(branch_base_url, name)
+        if revision_url in keep_urls:
+            continue
+        try:
+            newest = prefix_last_modified(revision_url)
+        except Exception as exc:
+            logger.warning("Revision GC could not inspect %s: %s", revision_url, exc)
+            continue
+        if newest is None or (current_time - newest).total_seconds() < _REVISION_GC_GRACE_SECONDS:
+            continue
+        try:
+            delete_prefix(revision_url)
+            logger.info("Revision GC removed superseded revision %s", revision_url)
+        except Exception as exc:
+            logger.warning("Revision GC failed to delete %s: %s", revision_url, exc)
+
+
+def _set_snapshot_metadata(config: dict, snapshot_id: str | None, snapshot_timestamp_ms: int | None, metadata_file: str | None = None) -> dict:
     if snapshot_id is None or snapshot_timestamp_ms is None:
         return config
-    return {
+    updated = {
         **config,
         "current_snapshot_id": snapshot_id,
         "current_snapshot_timestamp_ms": snapshot_timestamp_ms,
         "snapshot_id": snapshot_id,
         "snapshot_timestamp_ms": snapshot_timestamp_ms,
     }
+    # Readers resolve this exact file instead of listing the prefix: S3-style
+    # stores guarantee single-object read-after-write, prefix listings do not.
+    if metadata_file:
+        updated["metadata_file"] = metadata_file
+    return updated
 
 
 def _ensure_request_branch(request_payload: dict, branch: str) -> dict:
@@ -2101,6 +2158,8 @@ def export_data(
             export_base = join_object_store_url(published_export_base, "claims", publication_claim.claim_token)
         table_path = join_object_store_url(export_base, branch_name)
         warehouse_path = object_store_url("exports", namespace=get_namespace())
+        final_table_name: str = table_name
+        final_metadata_path: str = export_base
         ensure_bucket_exists()
 
         catalog_config = {
@@ -2127,14 +2186,11 @@ def export_data(
         write_started = time.perf_counter()
         arrow_table = pq.read_table(tmp_output)
         table_exists = catalog.table_exists(identifier)
-        if publication_claim is not None and table_exists:
-            catalog.drop_table(identifier)
-            table_exists = False
-        elif build_mode == "recreate" and table_exists:
-            catalog.drop_table(identifier)
-            table_exists = False
 
         if publication_claim is not None:
+            # Claim rebuilds never drop: a drop purges metadata files that
+            # concurrent readers may still be resolving. The claim table is
+            # seeded/overwritten in place, swapping snapshots atomically.
             previous_arrow: pa.Table | None = None
             previous_config = existing_output_metadata.config
             if build_mode == "incremental" and isinstance(previous_config, dict):
@@ -2144,22 +2200,67 @@ def export_data(
                     previous_identifier = f"{previous_namespace}.{previous_table_name}"
                     if catalog.table_exists(previous_identifier):
                         previous_arrow = catalog.load_table(previous_identifier).scan().to_arrow()
-            initial_schema = previous_arrow.schema if previous_arrow is not None else arrow_table.schema
-            iceberg_table = catalog.create_table(identifier, schema=initial_schema, location=table_path)
-            if previous_arrow is not None:
-                iceberg_table.append(previous_arrow)
-                _sync_iceberg_schema(iceberg_table, arrow_table.schema)
-            iceberg_table.append(arrow_table)
+            if table_exists:
+                # Overwrite replaces the staged content exactly, matching the
+                # previous drop+create semantics without purging metadata that
+                # concurrent readers may still be resolving.
+                iceberg_table = catalog.load_table(identifier)
+                final = pa.concat_tables([previous_arrow, arrow_table], promote_options="default") if previous_arrow is not None else arrow_table
+                _sync_iceberg_schema(iceberg_table, final.schema)
+                iceberg_table.overwrite(final)
+            else:
+                initial_schema = previous_arrow.schema if previous_arrow is not None else arrow_table.schema
+                iceberg_table = catalog.create_table(identifier, schema=initial_schema, location=table_path)
+                if previous_arrow is not None:
+                    iceberg_table.append(previous_arrow)
+                    _sync_iceberg_schema(iceberg_table, arrow_table.schema)
+                iceberg_table.append(arrow_table)
         elif table_exists:
             iceberg_table = catalog.load_table(identifier)
             if build_mode == "incremental":
                 iceberg_table.append(arrow_table)
             else:
-                _sync_iceberg_schema(iceberg_table, arrow_table.schema)
-                iceberg_table.overwrite(arrow_table)
+                try:
+                    _sync_iceberg_schema(iceberg_table, arrow_table.schema)
+                    iceberg_table.overwrite(arrow_table)
+                except Exception as exc:
+                    # Incompatible schema evolution (e.g. a conflicting column
+                    # type change) cannot be applied in place. Write a fresh
+                    # revision table and repoint the published config at it;
+                    # never drop the table readers may still be resolving.
+                    logger.warning(
+                        "In-place rebuild of %s failed (%s); writing revision table instead",
+                        identifier,
+                        exc,
+                    )
+                    revision_token = uuid.uuid4().hex[:8]
+                    revision_table_name = f"{table_name}_rev{revision_token}"
+                    revision_location = join_object_store_url(table_path, f"revision_{revision_token}")
+                    iceberg_table = catalog.create_table(
+                        f"{namespace}.{revision_table_name}",
+                        schema=arrow_table.schema,
+                        location=revision_location,
+                    )
+                    iceberg_table.append(arrow_table)
+                    final_table_name = revision_table_name
+                    final_metadata_path = revision_location
         else:
             iceberg_table = catalog.create_table(identifier, schema=arrow_table.schema, location=table_path)
             iceberg_table.append(arrow_table)
+
+        if publication_claim is None:
+            # Best-effort reclaim of superseded revision directories from
+            # earlier schema-incompatible rebuilds. Keep the revision this
+            # build published and the one the previous config pointed at.
+            keep = {final_metadata_path.rstrip("/")}
+            previous_config = existing_output_metadata.config if existing_output_metadata.found else None
+            previous_metadata_path = previous_config.get("metadata_path") if isinstance(previous_config, dict) else None
+            if isinstance(previous_metadata_path, str):
+                keep.add(previous_metadata_path.rstrip("/"))
+            try:
+                prune_superseded_revisions(table_path, keep_urls=frozenset(keep))
+            except Exception as exc:
+                logger.warning("Revision GC failed for %s: %s", table_path, exc)
 
         snapshot_id = None
         snapshot_timestamp_ms = None
@@ -2173,16 +2274,16 @@ def export_data(
             "catalog_type": "sql",
             "warehouse": warehouse_path,
             "namespace": namespace,
-            "table": table_name,
+            "table": final_table_name,
             "table_name": datasource_name,
-            "metadata_path": export_base,
+            "metadata_path": final_metadata_path,
             "branch": branch_name,
             "namespace_name": get_namespace(),
             "reader": "native",
         }
         if tab_id:
             iceberg_ds_config["analysis_tab_id"] = str(tab_id)
-        iceberg_ds_config = _set_snapshot_metadata(iceberg_ds_config, snapshot_id, snapshot_timestamp_ms)
+        iceberg_ds_config = _set_snapshot_metadata(iceberg_ds_config, snapshot_id, snapshot_timestamp_ms, metadata_file=iceberg_table.metadata_location)
         schema_cache = _schema_cache_payload_from_arrow(arrow_table.schema, data)
         write_duration_ms = (time.perf_counter() - write_started) * 1000
         if build_stage_event is not None:

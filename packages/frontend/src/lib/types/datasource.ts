@@ -135,13 +135,6 @@ export type DataSource =
 	| IcebergDataSource
 	| AnalysisDataSource;
 
-export interface DataSourceCreate {
-	name: string;
-	description?: string | null;
-	source_type: SourceType;
-	config: DataSourceConfig;
-}
-
 const SOURCE_TYPES = new Set<SourceType>(['file', 'database', 'iceberg', 'analysis']);
 const DATASOURCE_FILE_TYPES = new Set<DataSourceFileType>([
 	'csv',

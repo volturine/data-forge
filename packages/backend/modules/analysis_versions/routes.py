@@ -6,11 +6,13 @@ from backend_core.error_handlers import handle_errors
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.validation import AnalysisId, parse_analysis_id
 from modules.analysis import schemas as analysis_schemas, service as analysis_service
+from modules.analysis.ownership import ensure_analysis_mutation_allowed
 from modules.analysis.revisions import require as require_analysis_revision, set_response_headers as set_analysis_revision_headers
 from modules.analysis_versions import schemas, service
+from modules.auth.dependencies import get_current_user, get_current_user_id
 from modules.mcp.router import MCPRouter
 
-router = MCPRouter(prefix='/analysis', tags=['analysis-versions'])
+router = MCPRouter(prefix='/analysis', tags=['analysis-versions'], dependencies=[Depends(get_current_user)])
 
 
 @router.get(
@@ -55,9 +57,12 @@ def delete_version(
     analysis_id: AnalysisId,
     version: int,
     session: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Delete a specific version of an analysis by version number."""
-    service.delete_version(session, parse_analysis_id(analysis_id), version)
+    parsed_id = parse_analysis_id(analysis_id)
+    ensure_analysis_mutation_allowed(session, parsed_id, user_id)
+    service.delete_version(session, parsed_id, version)
 
 
 @router.patch(
@@ -71,9 +76,12 @@ def rename_version(
     version: int,
     body: schemas.AnalysisVersionUpdate,
     session: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Rename a version (set a descriptive label like 'before refactor'). Only the name field can be changed."""
-    return service.rename_version(session, parse_analysis_id(analysis_id), version, body.name)
+    parsed_id = parse_analysis_id(analysis_id)
+    ensure_analysis_mutation_allowed(session, parsed_id, user_id)
+    return service.rename_version(session, parsed_id, version, body.name)
 
 
 @router.post(

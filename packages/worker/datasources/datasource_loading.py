@@ -225,10 +225,12 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
             raise ValueError("Datasource Iceberg loading requires metadata_path")
         branch = config.get("branch") if isinstance(config.get("branch"), str) else None
         namespace_name = config.get("namespace_name") if isinstance(config.get("namespace_name"), str) else None
+        metadata_file = config.get("metadata_file")
         resolved_metadata_path = resolve_iceberg_branch_metadata_path(
             metadata_path,
             branch,
             namespace_name=namespace_name,
+            fallback_file=metadata_file if isinstance(metadata_file, str) else None,
         )
         snapshot_id = config.get("snapshot_id")
         snapshot_timestamp_ms = config.get("snapshot_timestamp_ms")

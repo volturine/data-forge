@@ -21,14 +21,6 @@ export interface DurationStatsRun {
 	status: string;
 }
 
-export interface DurationStats {
-	runs: DurationStatsRun[];
-	avg_duration_ms: number | null;
-	p50_duration_ms: number | null;
-	p95_duration_ms: number | null;
-	trend: DurationTrend;
-}
-
 export function isSuccessfulBuildStatus(status: string): boolean {
 	const normalized = status.toLowerCase();
 	return normalized === 'completed' || normalized === 'success';

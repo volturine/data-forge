@@ -77,16 +77,6 @@ export function formatDateInput(value: DateInput): string {
 	return formatDateForInput(value, timezone, normalize);
 }
 
-export function formatDateTimeInput(value: DateInput): string {
-	const { timezone, normalize } = getTimezoneSettings();
-	return formatDateTimeForInput(value, timezone, normalize);
-}
-
-export function parseDateTimeInputValue(value: string): string {
-	const { timezone, normalize } = getTimezoneSettings();
-	return parseDateTimeInputToIso(value, timezone, normalize);
-}
-
 export function getYearDisplay(value: DateInput): number | null {
 	const { timezone, normalize } = getTimezoneSettings();
 	return getYearInZone(value, timezone, normalize);

@@ -46,6 +46,45 @@ Seven audit workstreams implemented. Verification: `just verify`, `just test` (b
 - UDF execution boundary → [UDF Execution Sandbox](docs/prd/backlog/udf-execution-sandbox.md)
 - Component decomposition → [Frontend Component Decomposition](docs/prd/backlog/frontend-component-decomposition.md)
 
+---
+
+## Remediation log — batch 3 (2026-08-22)
+
+**#1 Authorization enforcement** (per product decision; ownership model kept minimal):
+- Router-level `get_current_user` guards on all previously unguarded routers: analysis, analysis_versions, scheduler, healthcheck, namespaces (create/provision-bucket), and compute preview/engine/export/delete routes.
+- `/ws/engines` now requires an authenticated session (mirrors `/ws/builds`).
+- `namespace_middleware`: when auth is required, unknown namespaces are no longer auto-registered by unauthenticated callers (403); known-namespace cache removes the per-request DB roundtrip.
+- Object-level ownership on analysis mutations via `modules/analysis/ownership.py`: owner mismatch rejected when auth is on; ownerless records remain accessible (legacy/local mode).
+- Chat sessions are now per-user: `user_id` column + migration `0004_chat_session_user_id` (backfilled to default user), owner-stamped creation, foreign-session access returns 404 across all handlers.
+- New tests: `tests/test_auth_enforcement.py` + extended chat/migration tests.
+
+**#10 Maintainability debt**:
+- Split all four audited monoliths, behavior-preserving: `ChatPanel.svelte` 2,640→606 (`chat-panel/` orchestrating 7 child components), analysis editor page 2,611→788 (`analysis-editor/` components + `.svelte.ts` modules), `ScheduleManager.svelte` 2,043→508 (`schedule-manager/` incl. CronField + utils with 24 new tests), `DatasourceConfigPanel.svelte` →698 (5 tab components).
+- Deleted verified-dead code: worker domain duplicates (`domain/enums.py`, `domain/analysis/{models,pipeline_types}.py`, unused `engine_instances/` package with its unreachable states) plus 23 dead frontend exports/helpers across 14 files.
+- Keyboard-accessible row activation added to schedule list rows.
+- Regression caught and fixed during verification: extracted export modal re-triggered its load effect (read/write of tracked state) — now runs imperatively via `untrack`.
+
+Verification: `just verify`, `just test` (backend 1082, scheduler 99, worker 367, frontend unit 1245), `just test-e2e` **353 passed (7.8m), exit 0**. One transient ingest-timing flake observed under parallel load in one run (metadata read racing table creation); did not reproduce on re-run and is pre-existing infrastructure timing, not caused by these changes.
+
+---
+
+## Design fix — Iceberg rebuilds are no longer destructive (2026-08-22)
+
+Root cause of the ingest flake: `build_mode="recreate"` **dropped** Iceberg tables in the request path. A drop purges all metadata files; any concurrent reader resolving that datasource during the drop→create window found nothing (`IcebergMetadataPathNotFoundError` → "Failed to load file datasource"). Deletion was a *precondition for availability*.
+
+New semantics (verified across two consecutive full e2e runs, 353 passed each, zero flake occurrences):
+
+| Mode | Semantics | Mechanism |
+|------|-----------|-----------|
+| `full` / `recreate` | Replace all data with this build's output | atomic `overwrite` (commits a fresh snapshot; history kept) |
+| `incremental` | Append | atomic `append` |
+| Schema-incompatible rebuild | Fresh revision table written under the same branch; published config CAS-repoints to it (`metadata_path`, `table`, plus recorded exact `metadata_file`) |
+| GC | Superseded `revision_*` directories pruned best-effort after a 1h grace period (`prune_superseded_revisions`) |
+
+Reader hardening: writers record the exact metadata file location in configs (`metadata_file`); when a prefix listing transiently returns empty, readers fall back to a single-object read of that file (strongly consistent), instead of failing.
+
+Invariant established: **deletion is never a precondition for correctness** — a failed or in-flight build can no longer make an existing dataset unreadable.
+
 | # | Fix | Severity | Where |
 |---|-----|----------|-------|
 | 1 | Path traversal guard on static catch-all (`resolve()` + `is_relative_to` containment) | high | `packages/backend/main.py` |

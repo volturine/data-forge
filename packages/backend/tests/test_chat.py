@@ -2062,3 +2062,120 @@ class TestInferPatch:
         assert patch is not None
         assert patch['resource'] == 'datasource'
         assert patch['action'] == 'deleted'
+
+
+class TestSessionOwnership:
+    """Per-user chat session isolation."""
+
+    def _create_session(self, client: TestClient) -> str:
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={
+                'provider': 'openrouter',
+                'model': 'gpt-4o-mini',
+                'api_key': 'test-key',
+            },
+        )
+        assert resp.status_code == 200
+        return resp.json()['session_id']
+
+    def _insert_session_row(self, session_id: str, user_id: str | None) -> None:
+        from modules.chat.sessions import session_store
+
+        with session_store._db() as db:
+            db.add(
+                ChatSession(
+                    id=session_id,
+                    user_id=user_id,
+                    provider='openrouter',
+                    model='gpt-4o-mini',
+                    api_key=encrypt_secret('key'),
+                ),
+            )
+            db.commit()
+
+    def test_create_stamps_current_user_id(self, client: TestClient, test_user) -> None:
+        sid = self._create_session(client)
+        from modules.chat.sessions import session_store
+
+        with session_store._db() as db:
+            row = db.get(ChatSession, sid)
+            assert row is not None
+            assert row.user_id == test_user.id
+
+    def test_owner_can_read_own_session(self, client: TestClient) -> None:
+        sid = self._create_session(client)
+        resp = client.get(f'/api/v1/ai/chat/history/{sid}')
+        assert resp.status_code == 200
+
+    def test_foreign_session_history_returns_404(self, client: TestClient) -> None:
+        self._insert_session_row('foreign-sid', 'another-user')
+        resp = client.get('/api/v1/ai/chat/history/foreign-sid')
+        assert resp.status_code == 404
+
+    def test_foreign_session_update_returns_404(self, client: TestClient) -> None:
+        self._insert_session_row('foreign-sid', 'another-user')
+        resp = client.patch('/api/v1/ai/chat/sessions/foreign-sid', json={'model': 'new-model'})
+        assert resp.status_code == 404
+
+    def test_foreign_session_delete_returns_404(self, client: TestClient) -> None:
+        self._insert_session_row('foreign-sid', 'another-user')
+        resp = client.delete('/api/v1/ai/chat/sessions/foreign-sid')
+        assert resp.status_code == 404
+        from modules.chat.sessions import session_store
+
+        with session_store._db() as db:
+            assert db.get(ChatSession, 'foreign-sid') is not None
+
+    def test_foreign_session_message_returns_404(self, client: TestClient) -> None:
+        self._insert_session_row('foreign-sid', 'another-user')
+        resp = client.post('/api/v1/ai/chat/message', json={'session_id': 'foreign-sid', 'content': 'hi'})
+        assert resp.status_code == 404
+
+    def test_foreign_session_stop_returns_404(self, client: TestClient) -> None:
+        self._insert_session_row('foreign-sid', 'another-user')
+        resp = client.post('/api/v1/ai/chat/sessions/foreign-sid/stop')
+        assert resp.status_code == 404
+
+    def test_list_sessions_scoped_to_owner(self, client: TestClient, test_user) -> None:
+        own_sid = self._create_session(client)
+        self._insert_session_row('foreign-sid', 'another-user')
+        resp = client.get('/api/v1/ai/chat/sessions')
+        assert resp.status_code == 200
+        ids = {item['id'] for item in resp.json()}
+        assert own_sid in ids
+        assert 'foreign-sid' not in ids
+
+    def test_legacy_null_owner_session_inaccessible(self, client: TestClient) -> None:
+        """Rows predating ownership (user_id NULL) are not exposed to any user."""
+        self._insert_session_row('legacy-sid', None)
+        resp = client.get('/api/v1/ai/chat/history/legacy-sid')
+        assert resp.status_code == 404
+        listing = client.get('/api/v1/ai/chat/sessions')
+        assert 'legacy-sid' not in {item['id'] for item in listing.json()}
+
+    def test_legacy_null_owner_backfills_to_default_user(self) -> None:
+        """Backfilled legacy rows resolve ownership to the default user."""
+        from sqlalchemy import text
+
+        from modules.auth.service import get_default_user_id
+        from modules.chat.sessions import SessionStore
+
+        store = SessionStore()
+        with store._db() as db:
+            db.add(
+                ChatSession(
+                    id='legacy-sid',
+                    user_id=None,
+                    provider='openrouter',
+                    model='gpt-4o-mini',
+                    api_key=encrypt_secret('key'),
+                ),
+            )
+            db.commit()
+            db.execute(text('UPDATE chat_sessions SET user_id = :uid WHERE user_id IS NULL'), {'uid': get_default_user_id()})
+            db.commit()
+
+        live = SessionStore().get('legacy-sid')
+        assert live is not None
+        assert live.user_id == get_default_user_id()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
 from urllib.parse import urlparse
@@ -289,6 +290,22 @@ def list_metadata_files(base_url: str) -> list[str]:
                 continue
             results.append(f"s3://{bucket}/{object_key}")
     return sorted(results)
+
+
+def prefix_last_modified(prefix_url: str) -> datetime | None:
+    """Newest LastModified among all objects under prefix, or None if empty/missing."""
+    bucket, key = parse_object_store_url(prefix_url)
+    prefix = key.rstrip("/")
+    if prefix:
+        prefix = prefix + "/"
+    paginator = _client().get_paginator("list_objects_v2")
+    newest: datetime | None = None
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Contents") or []:
+            modified = item.get("LastModified") if isinstance(item, dict) else None
+            if isinstance(modified, datetime) and (newest is None or modified > newest):
+                newest = modified
+    return newest
 
 
 def delete_prefix(prefix_url: str) -> None:

@@ -15,6 +15,7 @@ from sqlmodel import Session, text
 
 from api import router
 from backend_core import build_runs_service as build_run_service, runtime_ipc, runtime_workers_service as runtime_worker_service
+from backend_core.auth_config import settings as auth_settings
 from backend_core.config import settings
 from backend_core.database import (
     get_settings_db,
@@ -37,6 +38,7 @@ from backend_core.logging import RequestLoggingMiddleware, configure_logging
 from backend_core.namespace import (
     list_namespaces,
     namespace_paths,
+    normalize_namespace,
     reset_namespace,
     set_namespace_context,
 )
@@ -227,13 +229,49 @@ app.add_exception_handler(AppError, cast(Any, app_error_handler))
 app.add_exception_handler(RequestValidationError, cast(Any, validation_error_handler))
 app.add_exception_handler(Exception, generic_error_handler)
 
+# Namespaces already known to this process; avoids a DB roundtrip per request.
+_KNOWN_NAMESPACES: set[str] = set()
+
+
+def _namespace_registered(session: Session, name: str) -> bool:
+    if name == settings.default_namespace or name in _KNOWN_NAMESPACES:
+        return True
+    from backend_core.persistence.namespaces.models import RuntimeNamespace
+
+    if session.get(RuntimeNamespace, name) is not None:
+        _KNOWN_NAMESPACES.add(name)
+        return True
+    return False
+
+
+def _has_valid_session(request: Request) -> bool:
+    from modules.auth.service import validate_session
+
+    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    if not token:
+        return False
+
+    def _check(session: Session) -> bool:
+        return validate_session(session, token) is not None
+
+    return run_settings_db(_check)
+
 
 @app.middleware('http')
 async def namespace_middleware(request: Request, call_next) -> Response:
     raw = request.headers.get('X-Namespace')
     token = set_namespace_context(raw)
     try:
-        await asyncio.to_thread(run_settings_db, register_namespace, raw)
+        if not auth_settings.auth_required:
+            await asyncio.to_thread(run_settings_db, register_namespace, raw)
+            return await call_next(request)
+        normalized = normalize_namespace(raw)
+        known = await asyncio.to_thread(run_settings_db, _namespace_registered, normalized)
+        if not known and not await asyncio.to_thread(_has_valid_session, request):
+            return JSONResponse(status_code=403, content={'detail': f'Unknown namespace: {normalized}'})
+        if not known:
+            await asyncio.to_thread(run_settings_db, register_namespace, raw)
+            _KNOWN_NAMESPACES.add(normalized)
         return await call_next(request)
     finally:
         reset_namespace(token)

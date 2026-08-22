@@ -113,12 +113,6 @@ export interface ColumnTypeConfig {
 /**
  * Configuration for a type category
  */
-export interface CategoryConfig {
-	category: ColumnTypeCategory;
-	label: string;
-	icon: LucideIcon;
-}
-
 // Aliases for Python/Polars shorthand names not present in COLUMN_TYPE_REGISTRY
 const _ALIASES: Record<string, string> = {
 	str: 'String',
@@ -127,47 +121,6 @@ const _ALIASES: Record<string, string> = {
 	bool: 'Boolean',
 	Unknown: 'Any',
 	unknown: 'Any'
-};
-
-/**
- * Category configurations with default colors and icons
- */
-export const CATEGORY_REGISTRY: Record<ColumnTypeCategory, CategoryConfig> = {
-	string: {
-		category: 'string',
-		label: 'String',
-		icon: Type
-	},
-	integer: {
-		category: 'integer',
-		label: 'Integer',
-		icon: Hash
-	},
-	float: {
-		category: 'float',
-		label: 'Float',
-		icon: Binary
-	},
-	temporal: {
-		category: 'temporal',
-		label: 'Temporal',
-		icon: Calendar
-	},
-	boolean: {
-		category: 'boolean',
-		label: 'Boolean',
-		icon: ToggleLeft
-	},
-	complex: {
-		category: 'complex',
-		label: 'Complex',
-		icon: Layers
-	},
-	other: {
-		category: 'other',
-		label: 'Other',
-		icon: CircleQuestionMark
-	}
 };
 
 /**

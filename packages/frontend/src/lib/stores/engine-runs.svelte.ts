@@ -1,7 +1,5 @@
 import { listEngineRuns, type EngineRun, type ListEngineRunsParams } from '$lib/api/engine-runs';
-import { PaginatedStore, type PaginatedStatus } from './paginated-store.svelte';
-
-export type EngineRunsStatus = PaginatedStatus;
+import { PaginatedStore } from './paginated-store.svelte';
 
 export class EngineRunsStore extends PaginatedStore<ListEngineRunsParams, EngineRun[]> {
 	runs = $state.raw<EngineRun[]>([]);

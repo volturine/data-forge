@@ -60,10 +60,6 @@ export interface EngineStatusResponse {
 	current_engine_run_id: OptionalStringField<ProtocolEngineStatusResultJson, 'currentEngineRunId'>;
 }
 
-export interface SpawnEngineRequest {
-	resource_config?: EngineResourceConfig | null;
-}
-
 export interface EngineIdentityPayload {
 	scope: EngineScope;
 	reuse_policy: EngineReusePolicy;

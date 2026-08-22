@@ -278,10 +278,11 @@ class TestBuildModeWiring:
             )
 
         staged_identifier = f"ns.{output_ds_id}_master_claim_claim_token_1"
-        mock_catalog.drop_table.assert_called_once_with(staged_identifier)
-        mock_catalog.create_table.assert_called_once()
-        assert mock_catalog.create_table.call_args.args[0] == staged_identifier
-        mock_table.overwrite.assert_not_called()
+        mock_catalog.drop_table.assert_not_called()
+        mock_catalog.load_table.assert_called_once_with(staged_identifier)
+        mock_catalog.create_table.assert_not_called()
+        mock_table.overwrite.assert_called_once_with(mock_arrow)
+        mock_table.append.assert_not_called()
         publication = internal_client.upsert_output_datasource.call_args.kwargs
         assert publication["job_id"] == "job-1"
         assert publication["claim_token"] == "claim-token-1"
@@ -361,7 +362,7 @@ class TestBuildModeWiring:
         mock_catalog.create_table.assert_called_once()
         mock_table.append.assert_called_once_with(mock_arrow)
 
-    def test_recreate_mode_drops_and_creates(self, sample_datasource: SimpleNamespace):
+    def test_recreate_mode_overwrites_existing_table_without_drop(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="recreate")
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
@@ -392,10 +393,12 @@ class TestBuildModeWiring:
                 build_mode="recreate",
             )
 
-        mock_catalog.drop_table.assert_called_once_with(f"ns.{output_ds_id}_master")
-        mock_catalog.create_table.assert_called_once()
-        mock_table.append.assert_called_once_with(mock_arrow)
-        mock_table.overwrite.assert_not_called()
+        # A drop purges metadata files that concurrent readers may still be
+        # resolving; rebuilds must swap snapshots atomically instead.
+        mock_catalog.drop_table.assert_not_called()
+        mock_catalog.load_table.assert_called_once_with(f"ns.{output_ds_id}_master")
+        mock_catalog.create_table.assert_not_called()
+        mock_table.overwrite.assert_called_once_with(mock_arrow)
 
     def test_recreate_mode_no_table_skips_drop(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())

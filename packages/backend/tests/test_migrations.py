@@ -14,6 +14,7 @@ def test_runtime_schema_has_only_public_and_tenant_creation_revisions() -> None:
         '0001_runtime_public.py',
         '0002_runtime_tenant.py',
         '0003_encrypt_secrets_at_rest.py',
+        '0004_chat_session_user_id.py',
     ]
 
 

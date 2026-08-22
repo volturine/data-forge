@@ -44,6 +44,7 @@ class LiveSession:
 
     def __init__(self, row: ChatSession) -> None:
         self.id = row.id
+        self.user_id = row.user_id
         self.provider = row.provider
         self.model = row.model
         self.api_key = decrypt_secret(row.api_key)
@@ -166,7 +167,7 @@ class SessionStore:
 
         return DbSession(get_settings_engine())
 
-    def create(self, provider: str, model: str, api_key: str, system_prompt: str = '') -> LiveSession:
+    def create(self, provider: str, model: str, api_key: str, system_prompt: str = '', *, user_id: str | None = None) -> LiveSession:
         sid = secrets.token_urlsafe(16)
         now = time.time()
         initial_messages: list[dict[str, Any]] = []
@@ -174,6 +175,7 @@ class SessionStore:
             initial_messages.append({'role': 'system', 'content': system_prompt})
         row = ChatSession(
             id=sid,
+            user_id=user_id,
             provider=provider,
             model=model,
             api_key=encrypt_secret(api_key),
@@ -230,11 +232,11 @@ class SessionStore:
             db.commit()
         return True
 
-    def list_sessions(self) -> list[dict]:
-        """List all sessions with preview info."""
+    def list_sessions(self, user_id: str) -> list[dict]:
+        """List the user's sessions with preview info."""
         sessions = []
         with self._db() as db:
-            rows = db.exec(select(ChatSession)).all()
+            rows = db.exec(select(ChatSession).where(sa(ChatSession.user_id == user_id))).all()
             for row in rows:
                 messages: list[dict[str, Any]] = json.loads(row.messages_json)
                 preview = ''

@@ -345,32 +345,3 @@ export interface AIConfigData {
 	max_tokens?: OptionalField<ProtocolAIConfigJson, 'maxTokens'>;
 	request_options?: OptionalField<ProtocolAIConfigJson, 'requestOptions'>;
 }
-
-// Union type for all possible config types
-export type OperationConfig =
-	| FilterConfigData
-	| SelectConfigData
-	| GroupByConfigData
-	| SortConfigData
-	| RenameConfigData
-	| DropConfigData
-	| JoinConfigData
-	| ExpressionConfigData
-	| WithColumnsConfigData
-	| DeduplicateConfigData
-	| FillNullConfigData
-	| ExplodeConfigData
-	| PivotConfigData
-	| TimeSeriesConfigData
-	| StringMethodsConfigData
-	| ViewConfigData
-	| SampleConfigData
-	| LimitConfigData
-	| TopKConfigData
-	| UnpivotConfigData
-	| UnionByNameConfigData
-	| ExportConfigData
-	| DownloadConfigData
-	| PlotConfigData
-	| NotificationConfigData
-	| AIConfigData;

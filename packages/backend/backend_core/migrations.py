@@ -11,8 +11,8 @@ from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
 _PUBLIC_REVISION = '0001_runtime_public'
-_TENANT_REVISION = '0003_encrypt_secrets_at_rest'
-_PREVIOUS_TENANT_REVISION = '0002_runtime_tenant'
+_TENANT_REVISION = '0004_chat_session_user_id'
+_PREVIOUS_TENANT_REVISION = '0003_encrypt_secrets_at_rest'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 

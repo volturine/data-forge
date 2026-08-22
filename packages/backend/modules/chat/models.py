@@ -7,6 +7,7 @@ class ChatSession(SQLModel, table=True):
     __tablename__ = 'chat_sessions'  # type: ignore[assignment]
 
     id: str = Field(primary_key=True)
+    user_id: str | None = Field(default=None, index=True)
     provider: str = Field(default='openrouter')
     model: str = Field(default='')
     api_key: str = Field(default='')

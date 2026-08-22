@@ -7,7 +7,6 @@ import type {
 	BuildRunDetailJson as ProtocolBuildRunDetailJson,
 	BuildRunListResponseJson as ProtocolBuildRunListResponseJson,
 	BuildRunSummaryJson as ProtocolBuildRunSummaryJson,
-	BuildListSnapshotMessageJson as ProtocolBuildListSnapshotMessageJson,
 	BuildLogEntryJson as ProtocolBuildLogEntryJson,
 	BuildQueryPlanSnapshotJson as ProtocolBuildQueryPlanSnapshotJson,
 	BuildResourceConfigSummaryJson as ProtocolBuildResourceConfigSummaryJson,
@@ -382,13 +381,6 @@ export interface BuildDetailSnapshot {
 	last_sequence?: NumberField<ProtocolBuildSnapshotMessageJson, 'lastSequence'>;
 }
 
-export interface BuildsSnapshot {
-	type: 'snapshot';
-	builds: Field<ProtocolBuildListSnapshotMessageJson, 'builds'> extends unknown[]
-		? BuildRunSummary[]
-		: never;
-}
-
 export interface BuildWebsocketErrorMessage {
 	type: 'error';
 	error: StringField<ProtocolBuildWebsocketErrorMessageJson, 'error'>;
@@ -450,13 +442,6 @@ const BUILD_STEP_STATES = new Set<BuildStepState>([
 	'failed',
 	'skipped'
 ]);
-const BUILD_LIFECYCLE_STATUSES = new Set<BuildLifecycleStatus>([
-	'queued',
-	'running',
-	'completed',
-	'failed',
-	'cancelled'
-]);
 const BUILD_TAB_STATUSES = new Set<BuildTabResult['status']>(['success', 'failed']);
 const BUILD_STATUS_TONES: Record<BuildStatus, BuildStatusTone> = {
 	connecting: 'accent',
@@ -513,12 +498,6 @@ export function coerceBuildStepState(value: unknown): BuildStepState {
 	return readBuildStepState(value) ?? 'pending';
 }
 
-export function readBuildLifecycleStatus(value: unknown): BuildLifecycleStatus | null {
-	return typeof value === 'string' && BUILD_LIFECYCLE_STATUSES.has(value as BuildLifecycleStatus)
-		? (value as BuildLifecycleStatus)
-		: null;
-}
-
 export function isTerminalBuildStatus(status: BuildStatus): boolean {
 	return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
@@ -556,10 +535,6 @@ export function buildLifecycleStatusLabel(status: BuildLifecycleStatus): string 
 
 export function buildLifecycleStatusTone(status: BuildLifecycleStatus): BuildLifecycleStatusTone {
 	return BUILD_LIFECYCLE_STATUS_TONES[status];
-}
-
-export function isTerminalBuildLifecycleStatus(status: BuildLifecycleStatus): boolean {
-	return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
 export function canCancelBuildLifecycleStatus(status: BuildLifecycleStatus): boolean {

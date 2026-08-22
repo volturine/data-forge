@@ -116,11 +116,6 @@ export function engineRunDatasourceName(run: EngineRun): string | null {
 	return readString(result?.source_datasource_name);
 }
 
-export function engineRunCurrentTabName(run: EngineRun): string | null {
-	const result = readObject(run.result_json);
-	return readString(result?.current_tab_name);
-}
-
 export function engineRunEstimatedRemainingMs(run: EngineRun): number | null {
 	const result = readObject(run.result_json);
 	return readNumber(result?.estimated_remaining_ms);
