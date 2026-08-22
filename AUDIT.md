@@ -83,6 +83,11 @@ New semantics (verified across two consecutive full e2e runs, 353 passed each, z
 
 Reader hardening: writers record the exact metadata file location in configs (`metadata_file`); when a prefix listing transiently returns empty, readers fall back to a single-object read of that file (strongly consistent), instead of failing.
 
+Follow-up hardening in the same design change:
+
+- **Dataset-family cleanup**: datasource deletion previously removed only `config.metadata_path`, which after a revision swap left the original table dir and its catalog identifier orphaned. Cleanup now deletes the whole id-derived prefix family (`exports/{id}`, `clean/{id}`, nested revisions, claim paths) and sweeps all catalog identifiers starting with the dataset id. Family reclaim is opportunistic — it can never block dataset deletion (`tests/test_datasource_storage_cleanup.py`).
+- **E2E engine-start budget**: parallel workers start many engine containers at once; on loaded machines a cold container could miss the default 30s health deadline. E2E now sets `ENGINE_START_TIMEOUT_SECONDS=120` (overridable via `E2E_ENGINE_START_TIMEOUT_SECONDS`).
+
 Invariant established: **deletion is never a precondition for correctness** — a failed or in-flight build can no longer make an existing dataset unreadable.
 
 | # | Fix | Severity | Where |

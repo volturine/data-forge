@@ -22,6 +22,10 @@ export POLARS_CORES_AVAILABLE="${E2E_POLARS_CORES_AVAILABLE:-1}"
 # is the main e2e wall-time cost after the Docker cutover.
 export ENGINE_IDLE_TTL_SECONDS="${E2E_ENGINE_IDLE_TTL_SECONDS:-120}"
 export ENGINE_IDLE_REAP_INTERVAL_SECONDS="${E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS:-15}"
+# Parallel workers start many containers at once; on loaded machines a cold
+# container can miss the 30s default health deadline through no fault of the
+# code under test. Give container boot a generous ceiling.
+export ENGINE_START_TIMEOUT_SECONDS="${E2E_ENGINE_START_TIMEOUT_SECONDS:-120}"
 LOG_DIR="${E2E_LOG_DIR:-}"
 PLAYWRIGHT_ARTIFACTS_DIR="${ROOT_DIR}/packages/frontend/tests/.artifacts/playwright"
 PLAYWRIGHT_CONTAINER="dataforge-e2e-playwright-$$"
