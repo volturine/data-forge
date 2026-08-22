@@ -122,7 +122,7 @@ class AnalysisCreateSchema(_RejectPipelineStepsModel):
 class AnalysisUpdateSchema(_RejectPipelineStepsModel):
     name: str | None = None
     description: str | None = None
-    tabs: list[TabSchema]
+    tabs: list[TabSchema] | None = None
 
 
 class AnalysisResponseSchema(BaseModel):

@@ -2179,3 +2179,88 @@ class TestSessionOwnership:
         live = SessionStore().get('legacy-sid')
         assert live is not None
         assert live.user_id == get_default_user_id()
+
+
+class TestAgentLoopGuards:
+    """Agent loop: turn cap and orphaned tool_call stripping."""
+
+    async def test_strips_tool_calls_on_disallowed_finish(self, client: TestClient) -> None:
+        """finish_reason='length' with pending tool_calls must not store unanswered tool_calls."""
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
+        )
+        sid = resp.json()['session_id']
+
+        async def mock_chat(api_key, model, messages, tools):
+            return {
+                'choices': [
+                    {
+                        'message': {
+                            'content': 'partial',
+                            'tool_calls': [{'id': 'tc1', 'function': {'name': 'safe_tool', 'arguments': '{}'}}],
+                        },
+                        'finish_reason': 'length',
+                    }
+                ],
+                'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2},
+            }
+
+        with (
+            patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
+            patch('modules.mcp.routes.get_registry', return_value=VALIDATION_REGISTRY),
+        ):
+            client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        assistant_msgs = [m for m in live.get_history() if m.get('role') == 'assistant']
+        assert all('tool_calls' not in m for m in assistant_msgs)
+
+    async def test_agent_loop_stops_at_turn_cap(self, client: TestClient) -> None:
+        """The tool loop must terminate instead of running forever."""
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
+        )
+        sid = resp.json()['session_id']
+
+        call_count = 0
+
+        async def mock_chat(api_key, model, messages, tools):
+            nonlocal call_count
+            call_count += 1
+            return {
+                'choices': [
+                    {
+                        'message': {
+                            'content': None,
+                            'tool_calls': [{'id': f'tc{call_count}', 'function': {'name': 'safe_tool', 'arguments': '{}'}}],
+                        },
+                        'finish_reason': 'tool_calls',
+                    }
+                ],
+                'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2},
+            }
+
+        with (
+            patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
+            patch('modules.mcp.routes.get_registry', return_value=VALIDATION_REGISTRY),
+        ):
+            client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
+            await _wait_for_history_async(
+                sid,
+                lambda history: any('tool-turn limit' in str(e.get('content')) for e in history),
+                timeout=30,
+            )
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        assert call_count <= 20
+        history = live.get_history()
+        assert any('tool-turn limit' in str(e.get('content')) for e in history)

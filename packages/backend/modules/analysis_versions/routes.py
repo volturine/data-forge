@@ -56,6 +56,7 @@ def get_version(
 def delete_version(
     analysis_id: AnalysisId,
     version: int,
+    _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
@@ -75,6 +76,7 @@ def rename_version(
     analysis_id: AnalysisId,
     version: int,
     body: schemas.AnalysisVersionUpdate,
+    _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):

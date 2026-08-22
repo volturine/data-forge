@@ -2,11 +2,11 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
-from sqlalchemy.ext.mutable import MutableDict
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.analysis.pipeline_types import PipelineDefinition, parse_pipeline
+from backend_core.persistence.mutable_json import CopyOnAssignMutableDict
 
 
 class Analysis(SQLModel, table=True):  # type: ignore[call-arg]
@@ -15,7 +15,7 @@ class Analysis(SQLModel, table=True):  # type: ignore[call-arg]
     id: str = Field(sa_column=Column(String, primary_key=True))
     name: str = Field(sa_column=Column(String, nullable=False))
     description: str | None = Field(default=None, sa_column=Column(String, nullable=True))
-    pipeline_definition: dict[str, Any] = Field(sa_column=Column(MutableDict.as_mutable(JSON), nullable=False))
+    pipeline_definition: dict[str, Any] = Field(sa_column=Column(CopyOnAssignMutableDict.as_mutable(JSON), nullable=False))
 
     @property
     def pipeline(self) -> PipelineDefinition:

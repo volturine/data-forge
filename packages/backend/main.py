@@ -160,6 +160,15 @@ async def api_worker_heartbeat_loop(stop_event: asyncio.Event, worker_id: str, *
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Enforce the single-worker invariant here rather than only in the
+    # __main__ block: launching via `uvicorn main:app --workers N` bypasses
+    # __main__ entirely, and multiple in-process workers would each register
+    # runtime workers and split leases unsafely.
+    _guard_runtime_workers(_resolve_uvicorn_workers())
+    # Fail closed at boot if any /v1 route was added without authentication.
+    from api.v1.router import verify_v1_auth_coverage
+
+    verify_v1_auth_coverage()
     await init_db()
     configure_logging()
     logger.info('Starting application...')

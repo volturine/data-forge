@@ -346,6 +346,7 @@ async def _run_agent_turn(
 
     turn_start = time.monotonic()
     tool_count = 0
+    MAX_AGENT_TOOL_TURNS = 16
     turn_usage: dict[str, int] = {
         'prompt_tokens': 0,
         'completion_tokens': 0,
@@ -430,6 +431,23 @@ async def _run_agent_turn(
             msg: dict = {'role': 'assistant', 'content': assistant_content}
             if tool_calls:
                 msg['tool_calls'] = tool_calls
+
+            # A provider refusing mid-tool-call (length/content_filter/...) would
+            # leave unanswered tool_calls in the history, which providers reject
+            # on the next request — drop them and end the turn instead.
+            disallowed_finish = finish not in ('tool_calls', 'stop', None, '')
+            if tool_calls and disallowed_finish:
+                msg = {'role': 'assistant', 'content': assistant_content or f'Stopped after {turn} turns ({finish}).'}
+                session.append_message(msg)
+                session.push_event({'type': 'message', 'role': 'assistant', 'content': msg['content']})
+                break
+
+            if tool_calls and turn >= MAX_AGENT_TOOL_TURNS:
+                note = f'Stopped: reached the {MAX_AGENT_TOOL_TURNS} tool-turn limit.'
+                session.append_message({'role': 'assistant', 'content': assistant_content or note})
+                session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content or note})
+                break
+
             session.append_message(msg)
 
             if assistant_content:
@@ -441,7 +459,7 @@ async def _run_agent_turn(
                     }
                 )
 
-            if not tool_calls or finish not in ('tool_calls', 'stop', None, ''):
+            if not tool_calls:
                 break
 
             for tc in tool_calls:

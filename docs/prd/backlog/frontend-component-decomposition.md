@@ -30,6 +30,7 @@ Additional audit findings folded in here:
 - [ ] Replace clickable-row patterns with accessible buttons or row-level interactive semantics.
 - [ ] Centralize timer lifecycle (one utility, effect-scoped cleanup).
 - [ ] Generate enum token tables from the protocol toolchain instead of hand maintenance.
+  - Current gap is frozen by `protocol-enum-tokens.test.ts`: every generated enum must either have a table or appear on the explicit exemption list (21 enums consumed via hand-maintained literal unions as of 2026-08-22). New protos fail the suite until tabled or exempted.
 
 ## Non-goals
 

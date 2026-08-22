@@ -89,7 +89,12 @@
 			editingVersionId = null;
 			return;
 		}
-		const result = await renameAnalysisVersion(analysisId, version, trimmed);
+		if (!currentRevision) {
+			versionError = 'Analysis response is missing its revision';
+			editingVersionId = null;
+			return;
+		}
+		const result = await renameAnalysisVersion(analysisId, version, trimmed, currentRevision);
 		if (result.isErr()) {
 			versionError = result.error.message;
 			editingVersionId = null;
@@ -101,8 +106,12 @@
 
 	async function handleDeleteVersion(version: number) {
 		if (!analysisId || editorReadOnly) return;
+		if (!currentRevision) {
+			versionError = 'Analysis response is missing its revision';
+			return;
+		}
 		versionError = null;
-		const result = await deleteAnalysisVersion(analysisId, version);
+		const result = await deleteAnalysisVersion(analysisId, version, currentRevision);
 		if (result.isErr()) {
 			versionError = result.error.message;
 			return;

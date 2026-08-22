@@ -123,6 +123,20 @@ function buildAggName(col: string, func: string | Array<{ column: string; agg: s
 	return `${col}_${func.map((a) => a.agg).join('_')}`;
 }
 
+function aggregationResultDtype(
+	sourceColumns: Schema['columns'],
+	column: string,
+	func: string
+): string {
+	if (func === 'count') return 'Int64';
+	if (func === 'sum' || func === 'mean' || func === 'avg') return 'Float64';
+	const source = normalizeDtype(sourceColumns.find((c) => c.name === column)?.dtype);
+	if (source) return source;
+	return func === 'min' || func === 'max' || func === 'first' || func === 'last'
+		? 'Any'
+		: 'Float64';
+}
+
 export function groupbyTransform(input: Schema | null, config: StepConfig): Schema {
 	if (!input) return EMPTY;
 
@@ -144,13 +158,17 @@ export function groupbyTransform(input: Schema | null, config: StepConfig): Sche
 
 	if (Array.isArray(aggregations)) {
 		result.push(
-			...aggregations
-				.filter((agg) => agg.column && (agg.function ?? agg.agg))
-				.map((agg) => ({
-					name: agg.alias || `${agg.column}_${agg.function ?? agg.agg}`,
-					dtype: 'Float64' as const,
-					nullable: true
-				}))
+			...aggregations.flatMap((agg) => {
+				const func = agg.function ?? agg.agg;
+				if (!agg.column || !func) return [];
+				return [
+					{
+						name: agg.alias || `${agg.column}_${func}`,
+						dtype: aggregationResultDtype(input.columns, agg.column, func),
+						nullable: true
+					}
+				];
+			})
 		);
 		return { columns: result, row_count: null };
 	}
@@ -159,7 +177,7 @@ export function groupbyTransform(input: Schema | null, config: StepConfig): Sche
 		const aggName = buildAggName(aggColumn, aggFunc);
 		result.push({
 			name: aggName,
-			dtype: 'Float64',
+			dtype: aggregationResultDtype(input.columns, aggColumn, String(aggFunc)),
 			nullable: true
 		});
 	}

@@ -4,7 +4,7 @@ import datetime as dt
 import uuid
 from typing import Any, cast
 
-from sqlalchemy import JSON, Column, DateTime, String
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, String
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.healthcheck_models import HealthCheckType
@@ -153,7 +153,7 @@ class HealthCheckResult(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = 'healthcheck_results'
 
     id: str = Field(sa_column=Column(String, primary_key=True))
-    healthcheck_id: str = Field(sa_column=Column(String, nullable=False, index=True))
+    healthcheck_id: str = Field(sa_column=Column(String, ForeignKey('healthchecks.id', ondelete='CASCADE'), nullable=False, index=True))
     passed: bool = Field(default=False)
     message: str = Field(sa_column=Column(String, nullable=False))
     details: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))

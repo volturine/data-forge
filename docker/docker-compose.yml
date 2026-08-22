@@ -80,6 +80,8 @@ services:
       GITHUB_REDIRECT_URI: ${DF_GITHUB_REDIRECT_URI}
     ports:
       - "${DF_API_PORT}:8000"
+    mem_limit: ${DF_API_MEM_LIMIT:-4g}
+    cpus: ${DF_API_CPUS:-0}
     volumes:
       - data:/app/data
     healthcheck:
@@ -124,6 +126,8 @@ services:
       SETTINGS_ENCRYPTION_KEY: ${DF_SETTINGS_ENCRYPTION_KEY}
     volumes:
       - data:/app/data
+    mem_limit: ${DF_SCHEDULER_MEM_LIMIT:-1g}
+    cpus: ${DF_SCHEDULER_CPUS:-0}
     restart: unless-stopped
 
   worker:
@@ -179,6 +183,8 @@ services:
     networks:
       - default
       - engine-runtime
+    mem_limit: ${DF_WORKER_MEM_LIMIT:-8g}
+    cpus: ${DF_WORKER_CPUS:-0}
     restart: unless-stopped
 
 volumes:

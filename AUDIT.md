@@ -3235,3 +3235,34 @@ Overall: test quality is good — assertions target real behavior (values, call 
 - **XSS:** The only `{@html}` in the frontend is `ChatPanel.svelte:1583` rendering `{@html renderMarkdown(msg.content)}`; `renderMarkdown` (`lib/utils/markdown.ts:10–14`) pipes `marked` output through `DOMPurify.sanitize` and has tests covering `<script>`, `onerror`, and `javascript:` vectors. The `btn.innerHTML` assignments in `ChatPanel.svelte:213/218/221` inject static SVG strings only. No unsanitized HTML sinks found in any audited file.
 - **Lifecycle leaks:** Chart teardown (`render-lifecycle.ts`) and all rAF/listener effects in `+layout.svelte` and `analysis/[id]` return proper cleanups. Only gap found is the missing `pointercancel` handling in `panel-layout.svelte.ts`.
 
+
+---
+
+## Remediation log — bucket 2 cleared (2026-08-23)
+
+All remaining audit-tail findings implemented. Verification: `just verify`, `just test` (backend 1088, scheduler 99, worker 373, frontend unit 1246), `just test-e2e` **353 passed, exit 0**.
+
+**Backend**
+- Chat agent loop: hard turn cap; unanswered `tool_calls` stripped on disallowed finish reasons and at the cap (providers reject orphaned calls)
+- `AnalysisUpdateSchema.tabs` optional → name-only updates work
+- Version delete/rename now enforce analysis If-Match (428/412 semantics); frontend wired to send revision headers
+- `restore_version` validates a detached copy **before** any mutation and restores via private deep copy — no bogus safety snapshot, no aliasing
+- Datasource deletion: row removal commits first; storage reclaim runs out-of-band as pure reclamation (structural `CleanableDatasource` protocol)
+- gRPC server: per-thread reusable event loop; single `close_rpc_session()` teardown across all 13 handlers
+- Startup fail-closed check `verify_v1_auth_coverage()`: boot fails if any `/v1` route lacks an auth dependency (router-level deps and in-body WS enforcement both recognized)
+
+**Worker**
+- `WatchJob` snapshots events under the lock and yields outside it — no more condition lock held across yields
+- Histogram binning vectorized (single group_by instead of O(bins×n) filters)
+- Filter conditions: true placeholders stay no-op, malformed conditions now rejected instead of silently filtering nothing
+
+**Frontend**
+- Protocol enum drift guard: every generated enum must have a token table or explicit exemption (21 known hand-maintained unions frozen; tracked for migration in the decomposition PRD)
+- `pointercancel` ends panel resizing; iceberg detection no longer over-matches paths ending in "metadata"; groupby preview dtype reflects aggregation function + source dtype; audit-log IndexedDB calls can't produce unhandled rejections
+
+**Infra**
+- Compose: memory/CPU limits for api/scheduler/worker (`DF_*_MEM_LIMIT`/`DF_*_CPUS`)
+- Scheduler/worker healthchecks upgraded from `import main` to real DB registration probes
+- `DATA_DIR` temp-dir fallback rejected in production mode
+
+**Migration consolidation** (per no-legacy decision): stacked data-migrations `0003/0004/0005` removed; tenant head back at `0002_runtime_tenant`. Their intent lives in the base schema/models instead: chat-session `user_id`, FKs on `healthcheck_results`/`telegram_listeners`, write-time secret encryption in stores. Migration 0003's unqualified `app_settings` backfill hazard disappears with it.

@@ -151,7 +151,22 @@ class TestObjectOwnership:
         analysis = _make_analysis(test_db_session, owner_id=None)
         version = _make_version(test_db_session, analysis)
 
-        response = client.patch(f'/api/v1/analysis/{analysis.id}/versions/{version.version}', json={'name': 'renamed'})
+        # Version rename now enforces the analysis If-Match precondition like
+        # every other mutation; missing header → 428, stale value → 412.
+        no_precondition = client.patch(f'/api/v1/analysis/{analysis.id}/versions/{version.version}', json={'name': 'renamed'})
+        assert no_precondition.status_code == 428
 
+        stale = client.patch(
+            f'/api/v1/analysis/{analysis.id}/versions/{version.version}',
+            json={'name': 'renamed'},
+            headers={'If-Match': f'"analysis-{analysis.id}-{analysis.revision + 99}"'},
+        )
+        assert stale.status_code == 412
+
+        response = client.patch(
+            f'/api/v1/analysis/{analysis.id}/versions/{version.version}',
+            json={'name': 'renamed'},
+            headers={'If-Match': f'"analysis-{analysis.id}-{analysis.revision}"'},
+        )
         assert response.status_code == 200
         assert response.json()['name'] == 'renamed'

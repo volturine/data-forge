@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Protocol
 
 from backend_core.config import settings
 from backend_core.data_plane_client import WorkerDataPlaneClient, client_from_settings
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.exceptions import FileError
 from backend_core.iceberg_catalog import load_runtime_catalog
-from backend_core.persistence.datasource.models import DataSource
 
 logger = logging.getLogger(__name__)
 
 
 class DatasourceStorageCleanup:
-    def delete(self, datasource: DataSource) -> None:
+    def delete(self, datasource: CleanableDatasource) -> None:
         if datasource.source_type_kind() == DataSourceType.FILE and isinstance(datasource.config, dict):
             with client_from_settings() as data_plane:
                 self._delete_managed_object(datasource.config.get('file_path'), data_plane)
@@ -129,5 +128,20 @@ class DatasourceStorageCleanup:
 _STORAGE_CLEANUP = DatasourceStorageCleanup()
 
 
-def cleanup_datasource_storage(datasource: DataSource) -> None:
+class CleanableDatasource(Protocol):
+    """Structural view of a datasource row needed for storage reclamation."""
+
+    id: str
+    source_type: str
+
+    @property
+    def is_iceberg(self) -> bool: ...
+
+    @property
+    def config(self) -> dict[str, Any] | None: ...
+
+    def source_type_kind(self) -> DataSourceType: ...
+
+
+def cleanup_datasource_storage(datasource: CleanableDatasource) -> None:
     _STORAGE_CLEANUP.delete(datasource)

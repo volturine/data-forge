@@ -28,5 +28,10 @@ class RuntimeWorker(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     def is_reclaimable(self, *, now: dt.datetime, heartbeat_seconds: float) -> bool:
         if self.stopped_at is not None:
             return True
-        heartbeat = self.last_heartbeat_at.astimezone(dt.UTC) if self.last_heartbeat_at.tzinfo is not None else self.last_heartbeat_at.replace(tzinfo=dt.UTC)
-        return now - heartbeat > dt.timedelta(seconds=heartbeat_seconds)
+        heartbeat = (
+            self.last_heartbeat_at.replace(tzinfo=None)
+            if self.last_heartbeat_at.tzinfo is None
+            else self.last_heartbeat_at.astimezone(dt.UTC).replace(tzinfo=None)
+        )
+        current = now.replace(tzinfo=None) if now.tzinfo is None else now.astimezone(dt.UTC).replace(tzinfo=None)
+        return current - heartbeat > dt.timedelta(seconds=heartbeat_seconds)

@@ -2,7 +2,7 @@
 
 import datetime as dt
 
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 from sqlmodel import Field, SQLModel
 
 
@@ -25,5 +25,5 @@ class TelegramListener(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = 'telegram_listeners'  # type: ignore[assignment]
 
     id: int | None = Field(default=None, sa_column=Column(Integer, primary_key=True, autoincrement=True))
-    subscriber_id: int = Field(sa_column=Column(Integer, nullable=False))
+    subscriber_id: int = Field(sa_column=Column(Integer, ForeignKey('telegram_subscribers.id', ondelete='CASCADE'), nullable=False))
     datasource_id: str = Field(sa_column=Column(String, nullable=False))

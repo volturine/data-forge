@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hmac
 import logging
+import threading
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -152,17 +154,32 @@ async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
         await context.abort(grpc.StatusCode.UNAUTHENTICATED, 'Invalid internal runtime token')
 
 
+_THREAD_LOCAL = threading.local()
+
+
+def _thread_event_loop() -> asyncio.AbstractEventLoop:
+    """One reusable event loop per worker thread instead of a fresh loop per RPC."""
+    loop = getattr(_THREAD_LOCAL, 'loop', None)
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        _THREAD_LOCAL.loop = loop
+        asyncio.set_event_loop(loop)
+    return loop
+
+
+def close_rpc_session(session_gen) -> None:
+    """Exhaust and close a get_db() generator so post-yield cleanup runs."""
+    with contextlib.suppress(StopIteration):
+        next(session_gen, None)
+    session_gen.close()
+
+
 def _run_async_handler_in_thread(func):
     async def wrapper(self, request, context):
         await _require_internal_token(context)
 
         def _run():
-            loop = asyncio.new_event_loop()
-            try:
-                asyncio.set_event_loop(loop)
-                return loop.run_until_complete(func(self, request, context))
-            finally:
-                loop.close()
+            return _thread_event_loop().run_until_complete(func(self, request, context))
 
         try:
             return await asyncio.to_thread(_run)
@@ -750,8 +767,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 raise ValueError('create publication must return a datasource result')
             return worker_runtime_pb2.WorkerPublishDatasourceCreateResponse(datasource=record.datasource)
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -820,8 +836,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 raise ValueError('ingest publication must return a datasource result')
             return worker_runtime_pb2.WorkerPublishDatasourceIngestResponse(datasource=record.datasource)
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -843,8 +858,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 raise
             raise _ThreadedRpcAbort(grpc.StatusCode.NOT_FOUND, str(exc)) from exc
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -877,8 +891,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 response.column_descriptions.update(descriptions)
             return response
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -896,8 +909,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             codes = {udf.id: udf.code for udf in session.execute(stmt).scalars().all()}
             return worker_runtime_pb2.WorkerUdfCodesResponse(codes=codes)
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -913,8 +925,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 return worker_runtime_pb2.WorkerAnalysisMetadataResponse(found=False)
             return worker_runtime_pb2.WorkerAnalysisMetadataResponse(found=True, name=analysis.name)
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -955,8 +966,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             build_run_service.update_build_result_json(session, request.build_id, struct_to_dict(request.result))
             return _response(request.build_id)
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -1032,8 +1042,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 is_hidden=datasource.is_hidden,
             )
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -1059,8 +1068,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 ]
             )
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -1087,8 +1095,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             )
             return _count(count)
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -1271,8 +1278,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 resource_config_json=_build_resource_config_payload(request.build_resource_config) if request.HasField('build_resource_config') else None,
             )
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
         if result is None:
             return worker_runtime_pb2.WorkerPersistBuildEventResponse()
@@ -1324,8 +1330,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 payload.build_resource_config.CopyFrom(_build_resource_config_proto(dict(run.resource_config_json)))
             return worker_runtime_pb2.WorkerStartBuildRunResponse(run=payload)
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread
@@ -1373,8 +1378,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             deleted = datasource_delete_service.finalize_delete(session, request.datasource_id)
             return worker_runtime_pb2.WorkerFinalizeDatasourceDeleteResponse(deleted=deleted)
         finally:
-            session.close()
-            session_gen.close()
+            close_rpc_session(session_gen)
             reset_namespace(token)
 
     @_run_async_handler_in_thread

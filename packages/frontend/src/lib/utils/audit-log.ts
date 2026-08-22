@@ -36,18 +36,23 @@ const state = {
 };
 
 if (browser) {
-	void idbGet<string>('audit_session').then((stored) => {
-		if (!stored) return;
-		if (state.session) return;
-		state.session = stored;
-	});
+	// Fire-and-forget restore: swallow rejections so a blocked/unavailable
+	// IndexedDB never surfaces as an unhandled rejection (and keeps its
+	// connection from being GC'd mid-open).
+	idbGet<string>('audit_session')
+		.then((stored) => {
+			if (!stored) return;
+			if (state.session) return;
+			state.session = stored;
+		})
+		.catch(() => {});
 }
 
 function ensureSessionId(): string {
 	if (!browser) return '';
 	if (state.session) return state.session;
 	state.session = `s-${Math.random().toString(16).slice(2)}-${nowEpochMs().toString(16)}`;
-	void idbSet('audit_session', state.session);
+	idbSet('audit_session', state.session).catch(() => {});
 	return state.session;
 }
 

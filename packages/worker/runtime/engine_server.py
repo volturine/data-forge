@@ -305,41 +305,56 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
         sequence = request.after_sequence
         assert state is not None
         while context.is_active():
+            # Snapshot events under the lock, yield outside it: holding the
+            # condition across yields would stall producers for the whole
+            # downstream iteration.
+            batch: list[engine_runtime_pb2.EngineJobEvent] = []
+            finished = False
             with state.condition:
                 while state.next_sequence <= sequence + 1 and not state.done and context.is_active():
                     state.condition.wait(timeout=0.25)
                 if state.done and state.events and sequence < state.events[0][0] - 1:
                     if state.result is not None:
-                        yield engine_runtime_pb2.EngineJobEvent(
-                            job_id=request.job_id,
-                            sequence=max(sequence + 1, state.next_sequence),
-                            emitted_at=_timestamp(datetime.now(UTC)),
-                            result=_result_message(state.result),
+                        batch.append(
+                            engine_runtime_pb2.EngineJobEvent(
+                                job_id=request.job_id,
+                                sequence=max(sequence + 1, state.next_sequence),
+                                emitted_at=_timestamp(datetime.now(UTC)),
+                                result=_result_message(state.result),
+                            )
                         )
-                    return
-                if state.events and sequence < state.events[0][0] - 1:
+                    finished = True
+                elif state.events and sequence < state.events[0][0] - 1:
                     context.abort(grpc.StatusCode.OUT_OF_RANGE, "Requested progress events have been evicted")
-                for event_sequence, raw_event in tuple(state.events):
-                    if event_sequence <= sequence:
-                        continue
-                    event = dict(raw_event)
-                    sequence = event_sequence
-                    emitted_at = datetime.fromisoformat(str(event.pop("emitted_at")).replace("Z", "+00:00"))
-                    yield engine_runtime_pb2.EngineJobEvent(
-                        job_id=request.job_id,
-                        sequence=event_sequence,
-                        emitted_at=_timestamp(emitted_at),
-                        progress_json=encode_json_bytes(event),
-                    )
-                if state.done:
-                    if state.result is not None:
-                        yield engine_runtime_pb2.EngineJobEvent(
-                            job_id=request.job_id,
-                            sequence=sequence + 1,
-                            emitted_at=_timestamp(datetime.now(UTC)),
-                            result=_result_message(state.result),
+                else:
+                    for event_sequence, raw_event in tuple(state.events):
+                        if event_sequence <= sequence:
+                            continue
+                        event = dict(raw_event)
+                        sequence = event_sequence
+                        emitted_at = datetime.fromisoformat(str(event.pop("emitted_at")).replace("Z", "+00:00"))
+                        batch.append(
+                            engine_runtime_pb2.EngineJobEvent(
+                                job_id=request.job_id,
+                                sequence=event_sequence,
+                                emitted_at=_timestamp(emitted_at),
+                                progress_json=encode_json_bytes(event),
+                            )
                         )
-                    return
+                    if state.done:
+                        if state.result is not None:
+                            batch.append(
+                                engine_runtime_pb2.EngineJobEvent(
+                                    job_id=request.job_id,
+                                    sequence=sequence + 1,
+                                    emitted_at=_timestamp(datetime.now(UTC)),
+                                    result=_result_message(state.result),
+                                )
+                            )
+                        finished = True
+            yield from batch
+            if finished:
+                return
 
     def GetJobResult(self, request: engine_runtime_pb2.EngineGetJobResultRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineJobResult:
         self._require_token(context)

@@ -11,7 +11,7 @@ from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.analysis_versions.models import AnalysisVersion
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.locks.models import ResourceLock
-from modules.analysis_versions.service import create_version, get_version
+from modules.analysis_versions.service import create_version, get_version, restore_version
 from tests.http_client import TestClient
 
 
@@ -701,3 +701,67 @@ def test_restore_version_with_derived_tab_uses_internal_output_mapping(test_db_s
     assert response.status_code == 200
     output_ds = test_db_session.get(DataSource, output_id)
     assert output_ds is None
+
+
+def test_restore_does_not_alias_version_pipeline(test_db_session, sample_datasource: DataSource):
+    """Restoring a version must deep-copy: mutating the analysis afterwards
+    must never corrupt the restored version row's stored definition.
+    """
+    analysis_id = str(uuid.uuid4())
+
+    def _pipeline(name: str) -> dict[str, Any]:
+        return {
+            'steps': [],
+            'tabs': [
+                {
+                    'id': 'tab-1',
+                    'name': name,
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'version_output',
+                    },
+                    'steps': [],
+                },
+            ],
+        }
+
+    analysis = Analysis(
+        id=analysis_id,
+        name='Aliasing Analysis',
+        description=None,
+        pipeline_definition=_pipeline('Current'),
+        status=AnalysisStatus.DRAFT,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    test_db_session.add(analysis)
+    create_version(test_db_session, analysis)
+    analysis.pipeline_definition = _pipeline('Mutated')
+    analysis.revision += 1
+    test_db_session.add(analysis)
+    test_db_session.commit()
+
+    restore_version(test_db_session, analysis_id, 1)
+
+    reloaded_analysis = test_db_session.get(Analysis, analysis_id)
+    version_rows = sorted((v.version, v) for v in test_db_session.query(AnalysisVersion).filter(AnalysisVersion.analysis_id == analysis_id).all())
+    assert reloaded_analysis is not None
+    assert reloaded_analysis.pipeline_definition['tabs'][0]['name'] == 'Current'
+    assert version_rows[0][1].pipeline_definition['tabs'][0]['name'] == 'Current'
+
+    # In-place mutation of the live analysis must stay isolated from history.
+    reloaded_analysis.pipeline_definition['tabs'][0]['name'] = 'Mutated Again'
+    test_db_session.add(reloaded_analysis)
+    test_db_session.commit()
+    test_db_session.expire_all()
+    final_version = get_version(test_db_session, analysis_id, 2)
+    assert final_version is not None
+    assert final_version.pipeline_definition['tabs'][0]['name'] == 'Mutated'
