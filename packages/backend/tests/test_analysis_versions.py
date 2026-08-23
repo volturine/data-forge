@@ -755,8 +755,7 @@ def test_restore_does_not_alias_version_pipeline(test_db_session, sample_datasou
 
     reloaded_analysis = test_db_session.get(Analysis, analysis_id)
     version_rows = sorted(
-        (v.version, v)
-        for v in test_db_session.execute(select(AnalysisVersion).where(col(AnalysisVersion.analysis_id) == analysis_id)).scalars()
+        (v.version, v) for v in test_db_session.execute(select(AnalysisVersion).where(col(AnalysisVersion.analysis_id) == analysis_id)).scalars()
     )
     assert reloaded_analysis is not None
     assert reloaded_analysis.pipeline_definition['tabs'][0]['name'] == 'Current'
