@@ -3,7 +3,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
+
+from backend_core.sqlmodel_typing import col
 
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.datasource.source_types import DataSourceType
@@ -752,7 +754,10 @@ def test_restore_does_not_alias_version_pipeline(test_db_session, sample_datasou
     restore_version(test_db_session, analysis_id, 1)
 
     reloaded_analysis = test_db_session.get(Analysis, analysis_id)
-    version_rows = sorted((v.version, v) for v in test_db_session.query(AnalysisVersion).filter(AnalysisVersion.analysis_id == analysis_id).all())
+    version_rows = sorted(
+        (v.version, v)
+        for v in test_db_session.execute(select(AnalysisVersion).where(col(AnalysisVersion.analysis_id) == analysis_id)).scalars()
+    )
     assert reloaded_analysis is not None
     assert reloaded_analysis.pipeline_definition['tabs'][0]['name'] == 'Current'
     assert version_rows[0][1].pipeline_definition['tabs'][0]['name'] == 'Current'
