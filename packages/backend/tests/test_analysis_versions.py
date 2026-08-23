@@ -5,14 +5,13 @@ from typing import Any
 import pytest
 from sqlmodel import Session, select
 
-from backend_core.sqlmodel_typing import col
-
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.analysis_versions.models import AnalysisVersion
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.locks.models import ResourceLock
+from backend_core.sqlmodel_typing import col
 from modules.analysis_versions.service import create_version, get_version, restore_version
 from tests.http_client import TestClient
 
