@@ -644,18 +644,4 @@ export class AnalysisStore {
 	}
 }
 
-export type AnalysisStoreApi = {
-	resourceConfig: EngineResourceConfig | null;
-	engineDefaults: EngineDefaults | null;
-	setResourceConfig: (config: EngineResourceConfig | null) => void;
-	setEngineDefaults: (defaults: EngineDefaults | null) => void;
-	insertStep: (
-		step: PipelineStep,
-		index: number,
-		parentId: string | null,
-		nextId: string | null
-	) => boolean;
-	addBranchStep: (step: PipelineStep, parentId: string | null) => void;
-};
-
 export const analysisStore = new AnalysisStore();

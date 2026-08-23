@@ -335,6 +335,7 @@ async def preview_step(
     request: schemas.StepPreviewRequest,
     http_request: Request,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Preview the result of a pipeline step with pagination.
@@ -383,6 +384,7 @@ async def get_step_schema(
     request: schemas.StepSchemaRequest,
     http_request: Request,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get the output column schema of a pipeline step without fetching data.
@@ -415,6 +417,7 @@ async def get_step_row_count(
     request: schemas.StepRowCountRequest,
     http_request: Request,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get the row count of a pipeline step result without fetching data. Faster than a full preview."""
@@ -785,6 +788,7 @@ async def spawn_analysis_engine(
     http_request: Request,
     request: schemas.SpawnEngineRequest | None = None,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     return await _spawn_engine_identity(
@@ -808,6 +812,7 @@ async def spawn_datasource_preview_engine(
     http_request: Request,
     request: schemas.SpawnEngineRequest | None = None,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
@@ -832,6 +837,7 @@ async def configure_analysis_engine(
     request: schemas.EngineResourceConfig,
     http_request: Request,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     return await _configure_engine_identity(
@@ -855,6 +861,7 @@ async def configure_datasource_preview_engine(
     request: schemas.EngineResourceConfig,
     http_request: Request,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
@@ -878,6 +885,7 @@ async def shutdown_analysis_engine(
     analysis_id: AnalysisId,
     http_request: Request,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     await _shutdown_engine_identity(
@@ -899,6 +907,7 @@ async def shutdown_datasource_preview_engine(
     datasource_id: DataSourceId,
     http_request: Request,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
@@ -921,6 +930,7 @@ async def shutdown_build_engine(
     build_id: str,
     http_request: Request,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     await _shutdown_engine_identity(
@@ -942,6 +952,7 @@ async def engine_list_stream(websocket: WebSocket) -> None:
     namespace = get_namespace()
     await websocket.accept()
     try:
+        await _require_websocket_user(websocket)
         last_seen = await engine_registry.current_version(namespace)
         await _send_engine_snapshot(websocket)
         while True:
@@ -1114,6 +1125,7 @@ async def export_data(
     request: schemas.ExportRequest,
     http_request: Request,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Export pipeline results to a file download or output datasource.
@@ -1195,6 +1207,7 @@ async def download_step(
     request: schemas.DownloadRequest,
     http_request: Request,
     session: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Download pipeline step result as a file.

@@ -1,4 +1,5 @@
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import cast
 
@@ -84,16 +85,21 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
     if not target:
         raise analysis_version_not_found(analysis_id, version)
 
+    # Work on a detached copy end-to-end: validation runs BEFORE anything is
+    # mutated (a failed validation must not leave a bogus safety snapshot),
+    # and the assignment can never alias the version row's live JSON.
+    restored_definition = deepcopy(target.pipeline_definition)
+    analysis_service.validate_stored_pipeline_definition(session, restored_definition, analysis_id)
+
     create_version(session, analysis)
 
     analysis.name = target.name
     analysis.description = target.description
-    analysis.pipeline_definition = target.pipeline_definition
+    analysis.pipeline_definition = restored_definition
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
     analysis.revision += 1
 
     pipeline_definition = analysis.pipeline_definition
-    analysis_service.validate_stored_pipeline_definition(session, pipeline_definition, analysis_id)
     tabs = pipeline_definition.get('tabs', [])
 
     stmt = delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id)

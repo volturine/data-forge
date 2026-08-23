@@ -89,10 +89,14 @@ export class ChatPanelLayout {
 			this.isResizing = false;
 			window.removeEventListener('pointermove', move);
 			window.removeEventListener('pointerup', finish);
+			window.removeEventListener('pointercancel', finish);
 			done();
 		};
 		window.addEventListener('pointermove', move);
 		window.addEventListener('pointerup', finish);
+		// A cancelled pointer (e.g. touch gesture interrupted) must still end
+		// the resize, otherwise isResizing sticks and the panel keeps tracking.
+		window.addEventListener('pointercancel', finish);
 	}
 
 	private persist(): void {

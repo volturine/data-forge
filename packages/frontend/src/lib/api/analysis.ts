@@ -109,18 +109,24 @@ export const restoreAnalysisVersion = (
 export const renameAnalysisVersion = (
 	analysisId: string,
 	version: number,
-	name: string
+	name: string,
+	revision: string
 ): ResultAsync<AnalysisVersion, ApiError> =>
 	apiRequest<AnalysisVersion>(`/v1/analysis/${analysisId}/versions/${version}`, {
 		method: 'PATCH',
-		body: JSON.stringify({ name })
+		body: JSON.stringify({ name }),
+		headers: { 'If-Match': revision }
 	});
 
 export const deleteAnalysisVersion = (
 	analysisId: string,
-	version: number
+	version: number,
+	revision: string
 ): ResultAsync<void, ApiError> =>
-	apiRequest<void>(`/v1/analysis/${analysisId}/versions/${version}`, { method: 'DELETE' });
+	apiRequest<void>(`/v1/analysis/${analysisId}/versions/${version}`, {
+		method: 'DELETE',
+		headers: { 'If-Match': revision }
+	});
 
 export const deleteAnalysis = (id: string): ResultAsync<void, ApiError> =>
 	getAnalysisWithHeaders(id).andThen(({ version }) =>

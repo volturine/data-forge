@@ -9,10 +9,11 @@ from backend_core.validation import (
     ScheduleId,
     parse_schedule_id,
 )
+from modules.auth.dependencies import get_current_user
 from modules.mcp.router import MCPRouter
 from modules.scheduler import commands, service
 
-router = MCPRouter(prefix='/schedules', tags=['schedules'])
+router = MCPRouter(prefix='/schedules', tags=['schedules'], dependencies=[Depends(get_current_user)])
 
 
 @router.get('', response_model=list[schemas.ScheduleResponse], mcp=True)

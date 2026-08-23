@@ -439,20 +439,18 @@ def _build_histogram(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
         )
 
     bin_width = (fmax - fmin) / bins
-    bin_starts = [fmin + i * bin_width for i in range(bins)]
-    bin_ends = [fmin + (i + 1) * bin_width for i in range(bins)]
 
-    counts = [
-        df.filter((pl.col("value") >= bin_starts[i]) & (pl.col("value") < bin_ends[i])).height
-        if i < bins - 1
-        else df.filter((pl.col("value") >= bin_starts[i]) & (pl.col("value") <= bin_ends[i])).height
-        for i in range(bins)
-    ]
+    # Single vectorized pass: bucket every row via floor arithmetic instead of
+    # one O(n) filter per bin.
+    binned = df.select(((pl.col("value") - fmin) / bin_width).floor().cast(pl.Int64).clip(0, bins - 1).alias("bin_index")).group_by("bin_index").len()
+
+    index_to_count = dict(zip(binned["bin_index"].to_list(), binned["len"].to_list()))
+    counts = [int(index_to_count.get(i, 0)) for i in range(bins)]
 
     result = pl.LazyFrame(
         {
-            "bin_start": bin_starts,
-            "bin_end": bin_ends,
+            "bin_start": [fmin + i * bin_width for i in range(bins)],
+            "bin_end": [fmin + (i + 1) * bin_width for i in range(bins)],
             "count": counts,
         },
     )

@@ -27,7 +27,7 @@ just generate-protocol
 
 - Import boundaries: `scripts/check_package_boundaries.py` (e.g. worker ↛ `backend_core`/`modules`).
 - Protocol: edit protos → `just generate-protocol` → commit generated code. Never hand-edit `dataforge_protocol` or `frontend/src/lib/protocol`.
-- Env: `config/env/`, `docker/env/` — see `docs/ENV_VARIABLES.md`.
+- Env: `docker/env/` — see `docs/ENV_VARIABLES.md`.
 
 ## Definition of done
 

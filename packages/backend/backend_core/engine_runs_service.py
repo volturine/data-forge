@@ -172,7 +172,7 @@ def stage_cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str 
 
     now = datetime.now(UTC)
     reason = f'Cancelled by {cancelled_by}' if cancelled_by else 'Cancelled'
-    existing = copy_json_dict(run.result_json)
+    existing = copy_json_dict(run.result_json) if isinstance(run.result_json, dict) else {}
     existing.pop('data', None)
     existing.pop('schema', None)
     existing['results'] = []
@@ -303,9 +303,12 @@ def stage_update_engine_run(
     current_status = run.status_kind()
     if current_status.is_terminal:
         requested_status = EngineRunStatus.require(status) if isinstance(status, (EngineRunStatus, str)) else None
-        if requested_status is not None and requested_status != current_status:
+        rejected = requested_status is not None and requested_status != current_status
+        if rejected:
             logger.warning('Rejected terminal status transition from %s to %s for run %s', current_status, requested_status, run_id)
-        return _serialize_run(run)
+        serialized = _serialize_run(run)
+        serialized.applied = not rejected
+        return serialized
 
     if not isinstance(analysis_id, _UnsetType):
         run.analysis_id = analysis_id if analysis_id is None or isinstance(analysis_id, str) else run.analysis_id
@@ -323,7 +326,7 @@ def stage_update_engine_run(
         if result_json is None:
             run.result_json = None
         elif isinstance(result_json, dict):
-            base = copy_json_dict(run.result_json) if merge_result_json else {}
+            base = copy_json_dict(run.result_json) if merge_result_json and isinstance(run.result_json, dict) else {}
             base.update(result_json)
             run.result_json = base
     if not isinstance(error_message, _UnsetType):
@@ -343,7 +346,7 @@ def stage_update_engine_run(
     if not isinstance(triggered_by, _UnsetType):
         run.triggered_by = triggered_by if triggered_by is None or isinstance(triggered_by, str) else run.triggered_by
     if not isinstance(execution_entries, _UnsetType):
-        next_result_json = copy_json_dict(run.result_json)
+        next_result_json = copy_json_dict(run.result_json) if isinstance(run.result_json, dict) else {}
         if execution_entries is None:
             next_result_json.pop('execution_entries', None)
         elif isinstance(execution_entries, list):

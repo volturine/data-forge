@@ -300,6 +300,7 @@ def upgrade() -> None:
         sa.Column('details', sa.JSON(), nullable=False),
         sa.Column('checked_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('id'),
+        sa.ForeignKeyConstraint(['healthcheck_id'], ['healthchecks.id'], ondelete='CASCADE'),
     )
     op.create_index('ix_healthcheck_results_healthcheck_id', 'healthcheck_results', ['healthcheck_id'])
     op.create_table(
@@ -359,6 +360,7 @@ def upgrade() -> None:
         sa.Column('subscriber_id', sa.Integer(), nullable=False),
         sa.Column('datasource_id', sa.String(), nullable=False),
         sa.PrimaryKeyConstraint('id'),
+        sa.ForeignKeyConstraint(['subscriber_id'], ['telegram_subscribers.id'], ondelete='CASCADE'),
     )
     op.create_table(
         'udfs',

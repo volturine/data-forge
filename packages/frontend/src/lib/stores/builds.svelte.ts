@@ -1,8 +1,6 @@
 import { listBuilds, type ListBuildsParams } from '$lib/api/builds';
 import type { BuildRunSummary } from '$lib/types/build-stream';
-import { PaginatedStore, type PaginatedStatus } from './paginated-store.svelte';
-
-export type BuildsStatus = PaginatedStatus;
+import { PaginatedStore } from './paginated-store.svelte';
 
 interface BuildsPage {
 	builds: BuildRunSummary[];

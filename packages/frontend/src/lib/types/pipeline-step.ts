@@ -10,10 +10,6 @@ export type KnownPipelineStepType = CanonicalStepType | PlotAliasStepType;
 export type PipelineStepType = KnownPipelineStepType | (string & {});
 
 export const KNOWN_PIPELINE_STEP_TYPES = Object.values(STEP_TYPE_TOKENS) as KnownPipelineStepType[];
-export const CANONICAL_STEP_TYPES = KNOWN_PIPELINE_STEP_TYPES.filter(
-	(stepType): stepType is CanonicalStepType => !stepType.startsWith('plot_')
-);
-
 export const CHART_ALIAS_TO_TYPE = {
 	plot_bar: 'bar',
 	plot_horizontal_bar: 'horizontal_bar',

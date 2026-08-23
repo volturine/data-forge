@@ -42,7 +42,7 @@ cd data-forge
 just install
 
 # Review local environment settings
-# config/env/dev.env covers the shared local runtime configuration
+# docker/env/dev.env covers the shared local runtime configuration
 
 # Start development servers
 just dev

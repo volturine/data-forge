@@ -12,12 +12,14 @@ _SYNC_CLIENT_LOCK = Lock()
 _ASYNC_CLIENTS: dict[int, tuple[asyncio.AbstractEventLoop, httpx.AsyncClient]] = {}
 _ASYNC_CLIENTS_LOCK = Lock()
 
+DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+
 
 def get_client() -> httpx.Client:
     global _SYNC_CLIENT
     with _SYNC_CLIENT_LOCK:
         if _SYNC_CLIENT is None or _SYNC_CLIENT.is_closed:
-            _SYNC_CLIENT = httpx.Client()
+            _SYNC_CLIENT = httpx.Client(timeout=DEFAULT_TIMEOUT)
         return _SYNC_CLIENT
 
 
@@ -42,7 +44,7 @@ def get_async_client() -> httpx.AsyncClient:
             existing_loop, client = existing
             if existing_loop is loop and not client.is_closed:
                 return client
-        client = httpx.AsyncClient()
+        client = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
         _ASYNC_CLIENTS[loop_id] = (loop, client)
         return client
 

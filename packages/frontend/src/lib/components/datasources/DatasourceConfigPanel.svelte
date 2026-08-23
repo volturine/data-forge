@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { resolve } from '$app/paths';
 	import {
 		getDatasource,
 		getDatasourceSchema,
@@ -10,42 +9,12 @@
 		updateDatasourceColumnDescriptions
 	} from '$lib/api/datasource';
 	import { BuildsStore } from '$lib/stores/builds.svelte';
-	import type { BuildRunSummary } from '$lib/types/build-stream';
+	import { CircleAlert } from '@lucide/svelte';
+	import type { DataSource, SchemaInfo, ColumnSchema } from '$lib/types/datasource';
 	import {
-		buildLifecycleStatusLabel,
-		buildLifecycleStatusTone,
-		engineRunDisplayKind,
-		engineRunKindLabel
-	} from '$lib/types/build-stream';
-	import {
-		Save,
-		Loader,
-		CircleAlert,
-		RefreshCw,
-		Pencil,
-		Eye,
-		EyeOff,
-		Download,
-		CircleCheck,
-		CircleX,
-		Upload,
-		GitBranch
-	} from '@lucide/svelte';
-	import type {
-		DataSource,
-		DatabaseDataSource,
-		FileDataSource,
-		IcebergDataSource,
-		SchemaInfo,
-		ColumnSchema
-	} from '$lib/types/datasource';
-	import {
-		datasourceExternalSourceConfig,
-		datasourceExternalSourceType,
 		datasourceFileConfig,
 		datasourceIsAnalysisOutput,
 		datasourceIsCsv,
-		datasourceIsDatabase,
 		datasourceIsExcel,
 		datasourceIsFile,
 		datasourceIsIceberg,
@@ -53,18 +22,18 @@
 		datasourceNeedsExternalIngest,
 		datasourceSupportsSchemaRefresh
 	} from '$lib/types/datasource';
-	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import FreshnessBadge from '$lib/components/common/FreshnessBadge.svelte';
-	import RelativeTime from '$lib/components/common/RelativeTime.svelte';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import ExcelTableSelector from '$lib/components/common/ExcelTableSelector.svelte';
+	import type { FileDataSource, IcebergDataSource } from '$lib/types/datasource';
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { formatDateDisplay, toEpochDisplay } from '$lib/utils/datetime';
+	import DatasourceGeneralTab, { FRESHNESS_THRESHOLD_OPTIONS } from './DatasourceGeneralTab.svelte';
+	import DatasourceSchemaTab from './DatasourceSchemaTab.svelte';
+	import DatasourceCsvOptionsTab, { type CsvConfig } from './DatasourceCsvOptionsTab.svelte';
+	import DatasourceExcelOptionsTab, { type ExcelConfig } from './DatasourceExcelOptionsTab.svelte';
+	import DatasourceRunsTab from './DatasourceRunsTab.svelte';
 	import { resolveColumnType } from '$lib/utils/column-types';
-	import { css, input, tabButton, chip, emptyText } from '$lib/styles/panda';
+	import { css, tabButton } from '$lib/styles/panda';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 
 	interface Props {
@@ -255,13 +224,7 @@
 	});
 
 	// CSV-specific state
-	let csvConfig = $state<{
-		delimiter: string;
-		quote_char: string;
-		has_header: boolean;
-		skip_rows: number;
-		encoding: string;
-	}>({
+	let csvConfig = $state<CsvConfig>({
 		delimiter: ',',
 		quote_char: '"',
 		has_header: true,
@@ -270,17 +233,7 @@
 	});
 
 	// Excel-specific state
-	let excelConfig = $state<{
-		sheet_name: string;
-		table_name: string;
-		named_range: string;
-		cell_range: string;
-		start_row: number;
-		start_col: number;
-		end_col: number;
-		end_row: number | null;
-		has_header: boolean;
-	}>({
+	let excelConfig = $state<ExcelConfig>({
 		sheet_name: '',
 		table_name: '',
 		named_range: '',
@@ -319,16 +272,6 @@
 		return descriptionExpanded[name] ?? false;
 	}
 
-	function isDescriptionLong(value: string | null | undefined): boolean {
-		return (value?.length ?? 0) > 140;
-	}
-
-	function getDescriptionPreview(value: string | null | undefined, expanded: boolean): string {
-		if (!value) return 'No description';
-		if (expanded || !isDescriptionLong(value)) return value;
-		return `${value.slice(0, 140).trimEnd()}...`;
-	}
-
 	function toggleDescription(name: string) {
 		descriptionExpanded = { ...descriptionExpanded, [name]: !isDescriptionExpanded(name) };
 	}
@@ -361,14 +304,6 @@
 		return datasourceFileConfig(ds);
 	}
 
-	function getExternalSource(ds: DataSource) {
-		return datasourceExternalSourceConfig(ds);
-	}
-
-	function getExternalSourceType(ds: DataSource) {
-		return datasourceExternalSourceType(ds);
-	}
-
 	function isCsv(ds: DataSource): boolean {
 		return datasourceIsCsv(ds);
 	}
@@ -381,107 +316,13 @@
 		return datasourceIsFile(ds);
 	}
 
-	function isDatabase(ds: DataSource): ds is DatabaseDataSource {
-		return datasourceIsDatabase(ds);
-	}
-
 	function isIceberg(ds: DataSource): ds is IcebergDataSource {
 		return datasourceIsIceberg(ds);
 	}
 
-	function handleNameChange(newName: string) {
-		name = newName;
-		hasChanges = true;
-	}
-
-	function handleDescriptionChange(newDescription: string) {
-		description = newDescription;
-		hasChanges = true;
-	}
-
-	const FRESHNESS_THRESHOLD_OPTIONS: { label: string; minutes: number | null }[] = [
-		{ label: 'Default (24 hours)', minutes: null },
-		{ label: '1 hour', minutes: 60 },
-		{ label: '6 hours', minutes: 360 },
-		{ label: '12 hours', minutes: 720 },
-		{ label: '24 hours', minutes: 1440 },
-		{ label: '7 days', minutes: 10080 },
-		{ label: '30 days', minutes: 43200 }
-	];
-
-	function handleThresholdChange(value: string) {
-		if (value === 'custom') {
-			isCustomFreshnessThreshold = true;
-			customFreshnessThreshold = freshnessThreshold == null ? '' : String(freshnessThreshold);
-			return;
-		}
-		if (value === '') {
-			freshnessThreshold = null;
-			isCustomFreshnessThreshold = false;
-			hasChanges = true;
-			return;
-		}
-		const option = FRESHNESS_THRESHOLD_OPTIONS.find((opt) => opt.minutes === Number(value));
-		if (!option) return;
-		freshnessThreshold = option.minutes;
-		isCustomFreshnessThreshold = false;
-		hasChanges = true;
-	}
-
-	function handleCustomThresholdChange(value: string) {
-		customFreshnessThreshold = value;
-		const minutes = Number(value);
-		if (!Number.isInteger(minutes) || minutes <= 0) return;
-		freshnessThreshold = minutes;
-		hasChanges = true;
-	}
-
-	function handleCsvConfigChange<K extends keyof typeof csvConfig>(
-		key: K,
-		value: (typeof csvConfig)[K]
-	) {
-		csvConfig = { ...csvConfig, [key]: value };
+	function markDirty() {
 		hasChanges = true;
 		configDirty = true;
-	}
-
-	function isExcelConfigEqual(a: typeof excelConfig, b: typeof excelConfig): boolean {
-		return (
-			a.sheet_name === b.sheet_name &&
-			a.table_name === b.table_name &&
-			a.named_range === b.named_range &&
-			a.cell_range === b.cell_range &&
-			a.start_row === b.start_row &&
-			a.start_col === b.start_col &&
-			a.end_col === b.end_col &&
-			a.end_row === b.end_row &&
-			a.has_header === b.has_header
-		);
-	}
-
-	function handleExcelConfigUpdate(value: typeof excelConfig) {
-		if (isExcelConfigEqual(value, excelConfig)) return;
-		excelConfig = value;
-		hasChanges = true;
-		configDirty = true;
-	}
-
-	const PROTECTED_CONFIG_KEYS = [
-		'snapshot_id',
-		'snapshot_timestamp_ms',
-		'current_snapshot_id',
-		'current_snapshot_timestamp_ms',
-		'time_travel_snapshot_id',
-		'time_travel_snapshot_timestamp_ms',
-		'time_travel_ui'
-	];
-
-	function stripProtectedKeys(config: Record<string, unknown>): Record<string, unknown> {
-		const cleaned = { ...config };
-		for (const key of PROTECTED_CONFIG_KEYS) {
-			delete cleaned[key];
-		}
-		return cleaned;
 	}
 
 	async function handleSave() {
@@ -616,33 +457,14 @@
 		}
 	}
 
-	type DatasourceRunRow = {
-		id: string;
-		kind: string;
-		status: BuildRunSummary['status'];
-		durationMs: number | null;
-		createdAt: string;
-		builtTag: boolean;
-	};
+	function openColumnStats(columnName: string) {
+		statsColumn = columnName;
+		statsOpen = true;
+	}
 
 	const ds = $derived(datasourceQuery.data ?? datasource);
 	const csv = $derived(isCsv(ds));
 	const excel = $derived(isExcel(ds));
-	const filteredRuns = $derived.by((): DatasourceRunRow[] => {
-		const buildRows = buildRunsStore.builds.map((run: BuildRunSummary) => ({
-			id: run.build_id,
-			kind: run.current_kind ?? 'build',
-			status: run.status,
-			durationMs: run.elapsed_ms,
-			createdAt: run.started_at,
-			builtTag:
-				run.current_output_id === datasource.id || run.result_json?.datasource_id === datasource.id
-		}));
-		const rows = buildRows.filter((run) => showPreviews || run.kind !== 'preview');
-		return rows.sort(
-			(left, right) => toEpochDisplay(right.createdAt) - toEpochDisplay(left.createdAt)
-		);
-	});
 	const isOutputDatasource = $derived(datasourceIsAnalysisOutput(ds));
 	const scheduleAnalysisId = $derived(
 		isOutputDatasource
@@ -657,20 +479,22 @@
 		datasourceNeedsExternalIngest(ds) ? 'Re-ingesting...' : 'Refreshing schema...'
 	);
 
-	function formatDuration(ms: number | null): string {
-		if (ms === null) return '-';
-		if (ms < 1000) return `${ms}ms`;
-		return `${(ms / 1000).toFixed(2)}s`;
-	}
+	const PROTECTED_CONFIG_KEYS = [
+		'snapshot_id',
+		'snapshot_timestamp_ms',
+		'current_snapshot_id',
+		'current_snapshot_timestamp_ms',
+		'time_travel_snapshot_id',
+		'time_travel_snapshot_timestamp_ms',
+		'time_travel_ui'
+	];
 
-	function runStatusLabel(status: DatasourceRunRow['status']): string {
-		return buildLifecycleStatusLabel(status);
-	}
-
-	function runStatusTone(
-		status: DatasourceRunRow['status']
-	): 'success' | 'active' | 'warning' | 'error' {
-		return buildLifecycleStatusTone(status);
+	function stripProtectedKeys(config: Record<string, unknown>): Record<string, unknown> {
+		const cleaned = { ...config };
+		for (const key of PROTECTED_CONFIG_KEYS) {
+			delete cleaned[key];
+		}
+		return cleaned;
 	}
 </script>
 
@@ -790,1101 +614,69 @@
 
 	<div class={css({ padding: '4' })}>
 		{#if activeTab === 'general'}
-			<div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
-				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
-					<label
-						for="datasource-name-{datasource.id}"
-						class={css({
-							display: 'block',
-							fontSize: 'xs',
-							fontWeight: 'medium',
-							color: 'fg.secondary',
-							textTransform: 'none',
-							letterSpacing: 'normal',
-							marginBottom: '1.5'
-						})}>Name</label
-					>
-					<input
-						id="datasource-name-{datasource.id}"
-						type="text"
-						value={name}
-						oninput={(e) => handleNameChange(e.currentTarget.value)}
-						placeholder="Data source name"
-						class={input()}
-					/>
-				</div>
-
-				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
-					<label
-						for="datasource-description-{datasource.id}"
-						class={css({
-							display: 'block',
-							fontSize: 'xs',
-							fontWeight: 'medium',
-							color: 'fg.secondary',
-							textTransform: 'none',
-							letterSpacing: 'normal',
-							marginBottom: '1.5'
-						})}>Description</label
-					>
-					<textarea
-						id="datasource-description-{datasource.id}"
-						value={description}
-						oninput={(e) => handleDescriptionChange(e.currentTarget.value)}
-						placeholder="Add context about what this dataset represents, when to use it, and any caveats."
-						rows="5"
-						maxlength="4000"
-						class={input({ variant: 'textarea' })}
-					></textarea>
-					{#if description.trim().length === 0}
-						<p class={emptyText({ size: 'inline' })}>No description added yet.</p>
-					{/if}
-				</div>
-
-				<div class={css({ paddingTop: '4' })}>
-					<h3
-						class={css({
-							margin: '0',
-							marginBottom: '3',
-							fontSize: 'xs',
-							fontWeight: 'semibold',
-							color: 'fg.secondary'
-						})}
-					>
-						Source Information
-					</h3>
-					<div class={css({ display: 'flex', flexDirection: 'column', gap: '3', fontSize: 'xs' })}>
-						<div class={css({ display: 'flex', alignItems: 'center', gap: '4' })}>
-							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-								<span
-									class={css({
-										textTransform: 'uppercase',
-										letterSpacing: 'wide',
-										color: 'fg.muted'
-									})}>Type</span
-								>
-								{#if isFile(ds)}
-									{@const config = (ds as FileDataSource).config}
-									<FileTypeBadge path={config.file_path} size="sm" />
-								{:else}
-									<FileTypeBadge sourceType={ds.source_type} size="sm" />
-								{/if}
-							</div>
-							{#if ds.is_hidden}
-								<div class={css({ display: 'flex', alignItems: 'center', gap: '1.5' })}>
-									<span class={chip({ tone: 'warning' })}> Hidden </span>
-								</div>
-							{/if}
-						</div>
-
-						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-							<span
-								class={css({
-									textTransform: 'uppercase',
-									letterSpacing: 'wide',
-									color: 'fg.muted'
-								})}>Source</span
-							>
-							{#if isOutputDatasource}
-								<span
-									class={css({
-										display: 'inline-flex',
-										alignItems: 'center',
-										gap: '1',
-										color: 'accent.primary'
-									})}
-								>
-									<GitBranch size={12} />
-									<span class={css({ fontWeight: 'medium' })}>Analysis</span>
-								</span>
-								{#if ds.created_by_analysis_id}
-									<a
-										href={resolve(`/analysis/${ds.created_by_analysis_id}` as '/')}
-										class={css({
-											color: 'accent.primary',
-											_hover: { textDecoration: 'underline' },
-											fontFamily: 'mono',
-											fontSize: '2xs'
-										})}
-									>
-										Open Analysis
-									</a>
-								{/if}
-							{:else}
-								<span
-									class={css({
-										display: 'inline-flex',
-										alignItems: 'center',
-										gap: '1',
-										color: 'fg.secondary'
-									})}
-								>
-									<Upload size={12} />
-									<span class={css({ fontWeight: 'medium' })}>Imported</span>
-								</span>
-							{/if}
-						</div>
-
-						<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-							<span
-								class={css({
-									textTransform: 'uppercase',
-									letterSpacing: 'wide',
-									color: 'fg.muted'
-								})}>Datasource ID</span
-							>
-							<span
-								class={css({
-									wordBreak: 'break-all',
-									color: 'fg.secondary',
-									fontFamily: 'mono'
-								})}>{ds.id}</span
-							>
-						</div>
-
-						{#if isFile(ds)}
-							{@const config = (ds as FileDataSource).config}
-							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-								<span
-									class={css({
-										textTransform: 'uppercase',
-										letterSpacing: 'wide',
-										color: 'fg.muted'
-									})}>Location</span
-								>
-								<span
-									class={css({
-										wordBreak: 'break-all',
-										color: 'fg.secondary',
-										fontFamily: 'mono'
-									})}>{config.file_path}</span
-								>
-							</div>
-						{/if}
-
-						{#if isDatabase(ds)}
-							{@const config = ds.config}
-							{#if config.connection_string}
-								<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-									<span
-										class={css({
-											textTransform: 'uppercase',
-											letterSpacing: 'wide',
-											color: 'fg.muted'
-										})}>Location</span
-									>
-									<span
-										class={css({
-											wordBreak: 'break-all',
-											color: 'fg.secondary',
-											fontFamily: 'mono'
-										})}>{config.connection_string}</span
-									>
-								</div>
-							{/if}
-						{/if}
-
-						{#if isIceberg(ds)}
-							{@const config = (ds as IcebergDataSource).config}
-							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-								<span
-									class={css({
-										textTransform: 'uppercase',
-										letterSpacing: 'wide',
-										color: 'fg.muted'
-									})}>Location</span
-								>
-								<span
-									class={css({
-										wordBreak: 'break-all',
-										color: 'fg.secondary',
-										fontFamily: 'mono'
-									})}>{config.metadata_path}</span
-								>
-							</div>
-							{#if getExternalSource(ds)}
-								{@const externalSource = getExternalSource(ds)}
-								{@const externalSourceType = getExternalSourceType(ds)}
-								<div
-									class={css({
-										paddingTop: '2',
-										marginTop: '1',
-										display: 'flex',
-										flexDirection: 'column',
-										gap: '2'
-									})}
-								>
-									<span
-										class={css({
-											fontSize: '2xs',
-											textTransform: 'uppercase',
-											letterSpacing: 'wider',
-											color: 'fg.muted',
-											fontWeight: 'semibold'
-										})}>Original Source</span
-									>
-									<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-										<span
-											class={css({
-												textTransform: 'uppercase',
-												letterSpacing: 'wide',
-												color: 'fg.muted'
-											})}>Type</span
-										>
-										<FileTypeBadge
-											sourceType={externalSourceType ?? undefined}
-											path={typeof externalSource?.file_path === 'string'
-												? externalSource.file_path
-												: undefined}
-											size="sm"
-										/>
-									</div>
-									{#if typeof externalSource?.file_path === 'string'}
-										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-											<span
-												class={css({
-													textTransform: 'uppercase',
-													letterSpacing: 'wide',
-													color: 'fg.muted'
-												})}>File</span
-											>
-											<span
-												class={css({
-													wordBreak: 'break-all',
-													color: 'fg.secondary',
-													fontFamily: 'mono'
-												})}>{externalSource.file_path}</span
-											>
-										</div>
-									{/if}
-									{#if typeof externalSource?.connection_string === 'string'}
-										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-											<span
-												class={css({
-													textTransform: 'uppercase',
-													letterSpacing: 'wide',
-													color: 'fg.muted'
-												})}>Connection</span
-											>
-											<span
-												class={css({
-													wordBreak: 'break-all',
-													color: 'fg.secondary',
-													fontFamily: 'mono'
-												})}>{externalSource.connection_string}</span
-											>
-										</div>
-									{/if}
-									{#if typeof externalSource?.query === 'string'}
-										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-											<span
-												class={css({
-													textTransform: 'uppercase',
-													letterSpacing: 'wide',
-													color: 'fg.muted'
-												})}>Query</span
-											>
-											<span
-												class={css({
-													wordBreak: 'break-all',
-													color: 'fg.secondary',
-													fontFamily: 'mono'
-												})}>{externalSource.query}</span
-											>
-										</div>
-									{/if}
-								</div>
-							{/if}
-						{/if}
-
-						<div class={css({ display: 'flex', alignItems: 'center', gap: '4' })}>
-							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-								<span
-									class={css({
-										textTransform: 'uppercase',
-										letterSpacing: 'wide',
-										color: 'fg.muted'
-									})}>Created</span
-								>
-								<span class={css({ fontWeight: 'medium' })}>{formatDateDisplay(ds.created_at)}</span
-								>
-							</div>
-							{#if schemaQuery.data}
-								<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-									<span
-										class={css({
-											textTransform: 'uppercase',
-											letterSpacing: 'wide',
-											color: 'fg.muted'
-										})}>Rows</span
-									>
-									<span data-testid="datasource-row-count" class={css({ fontWeight: 'medium' })}
-										>{schemaQuery.data.row_count?.toLocaleString() ?? 'Unknown'}</span
-									>
-								</div>
-								<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-									<span
-										class={css({
-											textTransform: 'uppercase',
-											letterSpacing: 'wide',
-											color: 'fg.muted'
-										})}>Columns</span
-									>
-									<span class={css({ fontWeight: 'medium' })}
-										>{schemaQuery.data.columns.length}</span
-									>
-								</div>
-							{/if}
-						</div>
-
-						<div class={css({ display: 'flex', alignItems: 'center', gap: '4' })}>
-							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-								<span
-									class={css({
-										textTransform: 'uppercase',
-										letterSpacing: 'wide',
-										color: 'fg.muted'
-									})}>Last updated</span
-								>
-								<FreshnessBadge
-									lastDataUpdate={ds.last_data_update}
-									thresholdMinutes={ds.freshness_threshold_minutes ?? null}
-								/>
-								{#if ds.last_data_update}
-									<span class={css({ fontWeight: 'medium' })}>
-										<RelativeTime timestamp={ds.last_data_update} />
-									</span>
-								{:else}
-									<span class={css({ fontWeight: 'medium', color: 'fg.muted' })}>Never</span>
-								{/if}
-							</div>
-						</div>
-
-						<div class={css({ display: 'flex', alignItems: 'center', gap: '4' })}>
-							<label
-								for="freshness-threshold-{datasource.id}"
-								class={css({
-									textTransform: 'uppercase',
-									letterSpacing: 'wide',
-									color: 'fg.muted',
-									margin: '0'
-								})}>Freshness threshold</label
-							>
-							<select
-								id="freshness-threshold-{datasource.id}"
-								value={isCustomFreshnessThreshold ? 'custom' : (freshnessThreshold ?? '')}
-								onchange={(e) => handleThresholdChange(e.currentTarget.value)}
-								class={input()}
-								disabled={updateMutation.isPending}
-							>
-								{#each FRESHNESS_THRESHOLD_OPTIONS as option (option.minutes)}
-									<option value={option.minutes ?? ''}>{option.label}</option>
-								{/each}
-								<option value="custom">Custom</option>
-							</select>
-							{#if isCustomFreshnessThreshold}
-								<input
-									type="number"
-									min="1"
-									step="1"
-									aria-label="Custom freshness threshold in minutes"
-									value={customFreshnessThreshold}
-									oninput={(e) => handleCustomThresholdChange(e.currentTarget.value)}
-									class={input()}
-									disabled={updateMutation.isPending}
-								/>
-							{/if}
-						</div>
-					</div>
-				</div>
-
-				<div
-					class={css({
-						display: 'flex',
-						alignItems: 'center',
-						paddingTop: '4',
-						justifyContent: 'space-between',
-						gap: '3'
-					})}
-				>
-					<button
-						class={css({
-							borderWidth: '1',
-							backgroundColor: 'transparent',
-							color: 'fg.primary',
-							'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.secondary' },
-							display: 'flex',
-							alignItems: 'center',
-							gap: '2'
-						})}
-						onclick={handleIngest}
-						disabled={isRefreshing || updateMutation.isPending}
-					>
-						{#if isRefreshing}
-							<Loader size={16} class={css({ animation: 'spin 1s linear infinite' })} />
-							{refreshBusyLabel}
-						{:else}
-							<RefreshCw size={16} />
-							{refreshActionLabel}
-						{/if}
-					</button>
-					{#if hasChanges}
-						<button
-							class={css({
-								borderWidth: '1',
-								backgroundColor: 'accent.primary',
-								color: 'fg.inverse',
-								'&:hover:not(:disabled)': { opacity: '0.9' },
-								display: 'flex',
-								alignItems: 'center',
-								gap: '2'
-							})}
-							onclick={handleSave}
-							disabled={updateMutation.isPending}
-						>
-							{#if updateMutation.isPending}
-								<Loader size={16} class={css({ animation: 'spin 1s linear infinite' })} />
-								Saving...
-							{:else}
-								<Save size={16} />
-								Save Changes
-							{/if}
-						</button>
-					{/if}
-				</div>
-			</div>
+			<DatasourceGeneralTab
+				datasourceId={datasource.id}
+				{ds}
+				schema={schemaQuery.data}
+				bind:name
+				bind:description
+				bind:freshnessThreshold
+				bind:customFreshnessThreshold
+				bind:isCustomFreshnessThreshold
+				savePending={updateMutation.isPending}
+				{hasChanges}
+				{isRefreshing}
+				{refreshActionLabel}
+				{refreshBusyLabel}
+				onDirty={() => (hasChanges = true)}
+				onIngest={handleIngest}
+				onSave={handleSave}
+			/>
 		{:else if activeTab === 'schema'}
-			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
-				{#if refreshError}
-					<Callout tone="error">
-						<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
-							<CircleAlert size={20} />
-							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-								<p class={css({ margin: '0', fontWeight: 'semibold' })}>Ingest failed</p>
-								<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>{refreshError}</p>
-							</div>
-						</div>
-					</Callout>
-				{/if}
-				{#if schemaChanged && schemaDiff}
-					<Callout tone="warn">
-						<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
-							<CircleAlert size={20} />
-							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-								<p class={css({ margin: '0', fontWeight: 'semibold' })}>Schema changed in source</p>
-								{#if schemaDiff.added.length > 0}
-									<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>
-										Added: {schemaDiff.added.join(', ')}
-									</p>
-								{/if}
-								{#if schemaDiff.removed.length > 0}
-									<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>
-										Removed: {schemaDiff.removed.join(', ')}
-									</p>
-								{/if}
-								{#if schemaDiff.types.length > 0}
-									<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>
-										Type changes: {schemaDiff.types.join(', ')}
-									</p>
-								{/if}
-							</div>
-						</div>
-					</Callout>
-				{/if}
-				{#if schemaQuery.isLoading}
-					<div
-						class={css({
-							display: 'flex',
-							alignItems: 'center',
-							flexDirection: 'column',
-							justifyContent: 'center',
-							gap: '3',
-							paddingY: '8',
-							color: 'fg.muted'
-						})}
-					>
-						<Loader size={24} class={css({ animation: 'spin 1s linear infinite' })} />
-						<p class={css({ fontSize: 'sm' })}>Loading schema...</p>
-					</div>
-				{:else if columns.length > 0}
-					<div
-						class={css({
-							borderWidth: '1'
-						})}
-					>
-						<div
-							class={css({
-								display: 'grid',
-								gridTemplateColumns: '24px minmax(0, 1fr) 140px minmax(0, 1.6fr)',
-								alignItems: 'center',
-								columnGap: '2',
-								backgroundColor: 'bg.tertiary',
-								paddingX: '3',
-								paddingY: '2',
-								fontSize: 'xs',
-								fontWeight: 'semibold',
-								textTransform: 'uppercase',
-								letterSpacing: 'wide',
-								color: 'fg.muted',
-								borderBottomWidth: '1'
-							})}
-						>
-							<span>#</span>
-							<span>Column</span>
-							<span>Type</span>
-							<span>Description</span>
-						</div>
-						{#each columns as column, index (index)}
-							<div
-								class={css(
-									{
-										display: 'grid',
-										gridTemplateColumns: '24px minmax(0, 1fr) 140px minmax(0, 1.6fr)',
-										alignItems: 'center',
-										columnGap: '2',
-										paddingX: '3',
-										paddingY: '1.5',
-										backgroundColor: 'transparent'
-									},
-									index > 0 && { borderTopWidth: '1' }
-								)}
-							>
-								<span class={css({ fontSize: 'xs', color: 'fg.faint' })}>{index + 1}</span>
-								<button
-									type="button"
-									class={css({
-										fontSize: 'xs',
-										textAlign: 'left',
-										backgroundColor: 'transparent',
-										borderColor: 'transparent',
-										padding: '0',
-										minWidth: '0',
-										overflow: 'hidden',
-										textOverflow: 'ellipsis',
-										whiteSpace: 'nowrap',
-										_hover: { color: 'accent.primary' }
-									})}
-									data-schema-column={column.name}
-									onclick={() => {
-										statsColumn = column.name;
-										statsOpen = true;
-									}}
-								>
-									{column.name}
-								</button>
-								<div>
-									<ColumnTypeBadge columnType={column.dtype} size="sm" showIcon={true} />
-								</div>
-								<div class={css({ minWidth: '0' })}>
-									{#if editingColumn === column.name}
-										<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
-											<textarea
-												value={descriptionDraft}
-												oninput={(e) => (descriptionDraft = e.currentTarget.value)}
-												rows="4"
-												maxlength="2000"
-												class={css({
-													width: 'full',
-													fontSize: 'xs',
-													paddingX: '2',
-													paddingY: '1.5',
-													borderWidth: '1',
-													backgroundColor: 'bg.primary',
-													resize: 'vertical',
-													_focus: { outline: 'none' },
-													_focusVisible: { borderColor: 'border.accent' }
-												})}
-											></textarea>
-											<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-												<button
-													type="button"
-													class={css({
-														borderWidth: '1',
-														backgroundColor: 'accent.primary',
-														color: 'fg.inverse',
-														fontSize: 'xs',
-														paddingX: '2',
-														paddingY: '1'
-													})}
-													onclick={() => saveDescription(column.name)}
-													disabled={descriptionMutation.isPending}
-												>
-													{#if descriptionMutation.isPending}
-														Saving...
-													{:else}
-														Save
-													{/if}
-												</button>
-												<button
-													type="button"
-													class={css({
-														borderWidth: '1',
-														backgroundColor: 'transparent',
-														fontSize: 'xs',
-														paddingX: '2',
-														paddingY: '1'
-													})}
-													onclick={cancelEditingDescription}
-													disabled={descriptionMutation.isPending}
-												>
-													Cancel
-												</button>
-												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
-													{descriptionDraft.length}/2000
-												</span>
-											</div>
-											{#if descriptionError}
-												<p class={css({ margin: '0', fontSize: '2xs', color: 'fg.error' })}>
-													{descriptionError}
-												</p>
-											{/if}
-										</div>
-									{:else}
-										<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '2' })}>
-											<div
-												class={css({
-													flex: '1',
-													minWidth: '0',
-													fontSize: 'xs',
-													color: column.description ? 'fg.primary' : 'fg.muted',
-													whiteSpace: 'pre-wrap',
-													wordBreak: 'break-word'
-												})}
-												data-schema-description={column.name}
-											>
-												{getDescriptionPreview(
-													column.description ?? null,
-													isDescriptionExpanded(column.name)
-												)}
-												{#if column.description && isDescriptionLong(column.description)}
-													<button
-														type="button"
-														class={css({
-															marginLeft: '1',
-															padding: '0',
-															borderColor: 'transparent',
-															backgroundColor: 'transparent',
-															fontSize: '2xs',
-															color: 'accent.primary'
-														})}
-														onclick={() => toggleDescription(column.name)}
-													>
-														{#if isDescriptionExpanded(column.name)}
-															Show less
-														{:else}
-															Show more
-														{/if}
-													</button>
-												{/if}
-											</div>
-											<button
-												type="button"
-												class={css({
-													display: 'inline-flex',
-													alignItems: 'center',
-													justifyContent: 'center',
-													borderWidth: '1',
-													backgroundColor: 'transparent',
-													paddingX: '1.5',
-													paddingY: '1',
-													color: 'fg.secondary',
-													_hover: { backgroundColor: 'bg.hover' }
-												})}
-												aria-label={`Edit description for ${column.name}`}
-												onclick={() => startEditingDescription(column)}
-											>
-												<Pencil size={12} />
-											</button>
-										</div>
-									{/if}
-								</div>
-							</div>
-						{/each}
-					</div>
-				{:else}
-					<div class={emptyText({ size: 'panel' })}>
-						<p class={css({ margin: '0' })}>No schema information available.</p>
-					</div>
-				{/if}
-			</div>
+			<DatasourceSchemaTab
+				{columns}
+				loading={schemaQuery.isLoading}
+				{refreshError}
+				{schemaChanged}
+				{schemaDiff}
+				descriptionPending={descriptionMutation.isPending}
+				bind:descriptionDraft
+				{descriptionError}
+				{editingColumn}
+				{isDescriptionExpanded}
+				onSelectColumn={openColumnStats}
+				onToggleDescription={toggleDescription}
+				onStartEdit={startEditingDescription}
+				onCancelEdit={cancelEditingDescription}
+				onSaveDescription={saveDescription}
+			/>
 		{:else if activeTab === 'csv' && csv}
-			<div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
-				<h3 class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>CSV Options</h3>
-
-				<div
-					class={css({
-						display: 'grid',
-						gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-						gap: '3'
-					})}
-				>
-					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
-						<label
-							for="csv-delimiter-{datasource.id}"
-							class={css({
-								display: 'block',
-								fontSize: 'xs',
-								fontWeight: 'medium',
-								color: 'fg.secondary',
-								textTransform: 'none',
-								letterSpacing: 'normal',
-								marginBottom: '1.5'
-							})}>Delimiter</label
-						>
-						<select
-							id="csv-delimiter-{datasource.id}"
-							value={csvConfig.delimiter}
-							onchange={(e) => handleCsvConfigChange('delimiter', e.currentTarget.value)}
-							class={input()}
-						>
-							<option value=",">Comma (,)</option>
-							<option value=";">Semicolon (;)</option>
-							<option value="&#9;">Tab</option>
-							<option value="|">Pipe (|)</option>
-							<option value=" ">Space</option>
-						</select>
-					</div>
-
-					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
-						<label
-							for="csv-quote-{datasource.id}"
-							class={css({
-								display: 'block',
-								fontSize: 'xs',
-								fontWeight: 'medium',
-								color: 'fg.secondary',
-								textTransform: 'none',
-								letterSpacing: 'normal',
-								marginBottom: '1.5'
-							})}>Quote</label
-						>
-						<select
-							id="csv-quote-{datasource.id}"
-							value={csvConfig.quote_char}
-							onchange={(e) => handleCsvConfigChange('quote_char', e.currentTarget.value)}
-							class={input()}
-						>
-							<option value="&quot;">Double Quote (")</option>
-							<option value="'">Single Quote (')</option>
-							<option value="">None</option>
-						</select>
-					</div>
-
-					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
-						<label
-							for="csv-encoding-{datasource.id}"
-							class={css({
-								display: 'block',
-								fontSize: 'xs',
-								fontWeight: 'medium',
-								color: 'fg.secondary',
-								textTransform: 'none',
-								letterSpacing: 'normal',
-								marginBottom: '1.5'
-							})}>Encoding</label
-						>
-						<select
-							id="csv-encoding-{datasource.id}"
-							value={csvConfig.encoding}
-							onchange={(e) => handleCsvConfigChange('encoding', e.currentTarget.value)}
-							class={input()}
-						>
-							<option value="utf8">UTF-8</option>
-							<option value="utf8-lossy">UTF-8 (lossy)</option>
-							<option value="latin1">Latin-1</option>
-							<option value="ascii">ASCII</option>
-						</select>
-					</div>
-
-					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
-						<label
-							for="csv-skip-rows-{datasource.id}"
-							class={css({
-								display: 'block',
-								fontSize: 'xs',
-								fontWeight: 'medium',
-								color: 'fg.secondary',
-								textTransform: 'none',
-								letterSpacing: 'normal',
-								marginBottom: '1.5'
-							})}>Skip Rows</label
-						>
-						<input
-							id="csv-skip-rows-{datasource.id}"
-							type="number"
-							min="0"
-							value={csvConfig.skip_rows}
-							oninput={(e) =>
-								handleCsvConfigChange('skip_rows', parseInt(e.currentTarget.value) || 0)}
-							class={input()}
-						/>
-					</div>
-				</div>
-
-				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-					<input
-						id="csv-header-{datasource.id}"
-						type="checkbox"
-						checked={csvConfig.has_header}
-						onchange={(e) => handleCsvConfigChange('has_header', e.currentTarget.checked)}
-						class={css({ height: 'iconSm', width: 'iconSm', cursor: 'pointer' })}
-					/>
-					<label
-						for="csv-header-{datasource.id}"
-						class={css({
-							display: 'block',
-							fontSize: 'sm',
-							fontWeight: 'medium',
-							color: 'fg.secondary',
-							textTransform: 'none',
-							letterSpacing: 'normal',
-							margin: '0'
-						})}>First row is header</label
-					>
-				</div>
-
-				{#if hasChanges}
-					<button
-						class={css({
-							borderWidth: '1',
-							backgroundColor: 'accent.primary',
-							color: 'fg.inverse',
-							'&:hover:not(:disabled)': { opacity: '0.9' },
-							display: 'flex',
-							alignItems: 'center',
-							width: '100%',
-							justifyContent: 'center',
-							gap: '2'
-						})}
-						onclick={handleSave}
-						disabled={updateMutation.isPending}
-					>
-						{#if updateMutation.isPending}
-							<Loader size={16} class={css({ animation: 'spin 1s linear infinite' })} />
-							Saving...
-						{:else}
-							<Save size={16} />
-							Save Changes
-						{/if}
-					</button>
-				{/if}
-			</div>
+			<DatasourceCsvOptionsTab
+				datasourceId={datasource.id}
+				bind:config={csvConfig}
+				pending={updateMutation.isPending}
+				{hasChanges}
+				onDirty={markDirty}
+				onSave={handleSave}
+			/>
 		{:else if activeTab === 'excel' && excel}
-			{@const fileSource = getFileSource(ds)}
-			<div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
-				<ExcelTableSelector
-					mode="config"
-					filePath={fileSource?.file_path ?? null}
-					initialConfig={excelConfig}
-					disabled={updateMutation.isPending}
-					onConfigChange={handleExcelConfigUpdate}
-				/>
-				{#if hasChanges}
-					<button
-						class={css({
-							borderWidth: '1',
-							backgroundColor: 'accent.primary',
-							color: 'fg.inverse',
-							'&:hover:not(:disabled)': { opacity: '0.9' },
-							display: 'flex',
-							alignItems: 'center',
-							width: '100%',
-							justifyContent: 'center',
-							gap: '2'
-						})}
-						onclick={handleSave}
-						disabled={updateMutation.isPending}
-					>
-						{#if updateMutation.isPending}
-							<Loader size={16} class={css({ animation: 'spin 1s linear infinite' })} />
-							Saving...
-						{:else}
-							<Save size={16} />
-							Save Changes
-						{/if}
-					</button>
-				{/if}
-				{#if !fileSource?.file_path}
-					<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
-						No original file path available for Excel preview.
-					</p>
-				{/if}
-			</div>
+			<DatasourceExcelOptionsTab
+				filePath={getFileSource(ds)?.file_path ?? null}
+				bind:config={excelConfig}
+				pending={updateMutation.isPending}
+				{hasChanges}
+				onDirty={markDirty}
+				onSave={handleSave}
+			/>
 		{:else if activeTab === 'runs'}
-			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
-				<button
-					class={css({
-						borderWidth: '1',
-						backgroundColor: 'transparent',
-						color: 'fg.secondary',
-						borderColor: 'transparent',
-						fontSize: 'xs',
-						paddingX: '2',
-						paddingY: '1',
-						width: 'fit-content',
-						'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.primary' }
-					})}
-					onclick={() => (showPreviews = !showPreviews)}
-					aria-pressed={showPreviews}
-				>
-					{#if showPreviews}
-						<EyeOff size={12} />
-						Hide previews
-					{:else}
-						<Eye size={12} />
-						Show previews
-					{/if}
-				</button>
-				{#if buildRunsStore.status === 'connecting'}
-					<div
-						class={css({
-							display: 'flex',
-							alignItems: 'center',
-							flexDirection: 'column',
-							justifyContent: 'center',
-							gap: '3',
-							paddingY: '8',
-							color: 'fg.muted'
-						})}
-					>
-						<Loader size={24} class={css({ animation: 'spin 1s linear infinite' })} />
-						<p class={css({ fontSize: 'sm' })}>Loading runs...</p>
-					</div>
-				{:else if buildRunsStore.status === 'error'}
-					<Callout tone="error">
-						<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
-							<CircleAlert size={20} />
-							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-								<p class={css({ margin: '0', fontWeight: 'semibold' })}>Failed to load runs</p>
-								<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>
-									{buildRunsStore.error ?? 'Unknown error'}
-								</p>
-							</div>
-						</div>
-					</Callout>
-				{:else if filteredRuns.length === 0}
-					<div class={emptyText({ size: 'panel' })}>
-						<p class={css({ margin: '0' })}>No runs associated with this datasource.</p>
-						<p class={css({ margin: '0', marginTop: '1', color: 'fg.tertiary' })}>
-							Runs will appear here when this datasource is onboarded, rebuilt from source, or used
-							in analyses.
-						</p>
-					</div>
-				{:else}
-					<div
-						class={css({
-							borderWidth: '1'
-						})}
-					>
-						<div
-							class={css({
-								display: 'grid',
-								gridTemplateColumns: '1fr 80px 80px 100px',
-								alignItems: 'center',
-								columnGap: '2',
-								backgroundColor: 'bg.tertiary',
-								paddingX: '3',
-								paddingY: '2',
-								fontSize: 'xs',
-								fontWeight: 'semibold',
-								textTransform: 'uppercase',
-								letterSpacing: 'wide',
-								color: 'fg.muted',
-								borderBottomWidth: '1'
-							})}
-						>
-							<span>Type</span>
-							<span>Status</span>
-							<span>Duration</span>
-							<span>Created</span>
-						</div>
-						{#each filteredRuns as run, index (run.id)}
-							{@const displayKind = engineRunDisplayKind(run.kind)}
-							<div
-								class={css(
-									{
-										display: 'grid',
-										gridTemplateColumns: '1fr 80px 80px 100px',
-										alignItems: 'center',
-										columnGap: '2',
-										paddingX: '3',
-										paddingY: '2'
-									},
-									index > 0 && { borderTopWidth: '1' }
-								)}
-							>
-								<div
-									class={css({ display: 'flex', alignItems: 'center', gap: '2', fontSize: 'xs' })}
-								>
-									{#if displayKind === 'preview'}
-										<Eye size={14} class={css({ flexShrink: '0', color: 'accent.primary' })} />
-									{:else if displayKind === 'build'}
-										<Save size={14} class={css({ flexShrink: '0', color: 'accent.primary' })} />
-									{:else if displayKind === 'row_count'}
-										<RefreshCw size={14} class={css({ flexShrink: '0', color: 'fg.secondary' })} />
-									{:else}
-										<Download size={14} class={css({ flexShrink: '0', color: 'fg.success' })} />
-									{/if}
-									<span>{engineRunKindLabel(run.kind)}</span>
-									{#if run.builtTag}
-										<span
-											class={chip({ tone: 'accent' })}
-											title="This datasource was produced by this run"
-										>
-											BUILT
-										</span>
-									{/if}
-								</div>
-								<div
-									class={css({ display: 'flex', alignItems: 'center', gap: '1.5', fontSize: 'xs' })}
-								>
-									{#if runStatusTone(run.status) === 'success'}
-										<CircleCheck size={14} class={css({ color: 'fg.success' })} />
-										<span class={css({ color: 'fg.success' })}>{runStatusLabel(run.status)}</span>
-									{:else if runStatusTone(run.status) === 'active'}
-										<Loader
-											size={14}
-											class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
-										/>
-										<span class={css({ color: 'accent.primary' })}
-											>{runStatusLabel(run.status)}</span
-										>
-									{:else if runStatusTone(run.status) === 'warning'}
-										<CircleX size={14} class={css({ color: 'fg.warning' })} />
-										<span class={css({ color: 'fg.warning' })}>{runStatusLabel(run.status)}</span>
-									{:else}
-										<CircleX size={14} class={css({ color: 'fg.error' })} />
-										<span class={css({ color: 'fg.error' })}>{runStatusLabel(run.status)}</span>
-									{/if}
-								</div>
-								<span
-									class={css({
-										fontSize: 'xs',
-										fontFamily: 'mono',
-										color: 'fg.secondary'
-									})}
-								>
-									{formatDuration(run.durationMs)}
-								</span>
-								<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
-									{formatDateDisplay(run.createdAt)}
-								</span>
-							</div>
-						{/each}
-					</div>
-					{#if filteredRuns.length >= 50}
-						<p class={css({ fontSize: 'xs', color: 'fg.tertiary', textAlign: 'center' })}>
-							Showing last 50 runs.
-							<a
-								href="{resolve('/monitoring')}?datasource_id={datasource.id}"
-								class={css({ color: 'accent.primary', _hover: { textDecoration: 'underline' } })}
-							>
-								View all runs
-							</a>
-						</p>
-					{/if}
-				{/if}
-			</div>
+			<DatasourceRunsTab
+				datasourceId={datasource.id}
+				builds={buildRunsStore.builds}
+				status={buildRunsStore.status}
+				error={buildRunsStore.error}
+				{showPreviews}
+				onTogglePreviews={() => (showPreviews = !showPreviews)}
+			/>
 		{:else if activeTab === 'health'}
 			<HealthChecksManager datasourceId={datasource.id} compact />
 		{:else if activeTab === 'schedules'}

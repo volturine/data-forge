@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from backend_core import build_jobs_service, build_runs_service as build_run_service
@@ -11,7 +12,7 @@ from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
-from backend_core.persistence.build_runs.models import BuildEvent
+from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.sqlmodel_typing import sa
 
@@ -371,6 +372,16 @@ def test_list_build_events_after_and_latest_sequence(test_db_session) -> None:
     assert context['buildId'] == run.id
     assert log['level'] == 'BUILD_LOG_LEVEL_INFO'
     assert log['message'] == 'two'
+
+
+def test_get_latest_sequence_clamps_to_zero(test_db_session) -> None:
+    run = _create_run(test_db_session)
+    assert build_run_service.get_latest_sequence(test_db_session, run.id) == 0
+
+    test_db_session.execute(update(BuildRun).where(sa(BuildRun.id == run.id)).values(next_event_sequence=0))
+    test_db_session.commit()
+
+    assert build_run_service.get_latest_sequence(test_db_session, run.id) == 0
 
 
 def test_serialize_event_row_preserves_proto_default_scalars(test_db_session) -> None:
@@ -809,6 +820,24 @@ def test_mark_running_builds_orphaned_marks_only_running(test_db_session) -> Non
     assert running_stored.status == BuildRunStatus.ORPHANED
     assert running_stored.error_message == 'Build orphaned during startup recovery'
     assert done_stored.status == BuildRunStatus.COMPLETED
+
+
+def test_mark_running_builds_orphaned_handles_naive_started_at(test_db_session) -> None:
+    running = _create_run(test_db_session)
+    naive_started = datetime.now(UTC).replace(tzinfo=None)
+    test_db_session.execute(
+        update(BuildRun).where(sa(BuildRun.id == running.id)).values(started_at=naive_started),
+    )
+    test_db_session.commit()
+
+    changed = build_run_service.mark_running_builds_orphaned(test_db_session, now=datetime.now(UTC))
+
+    assert changed == 1
+    orphaned = build_run_service.get_build_run(test_db_session, running.id)
+    assert orphaned is not None
+    assert orphaned.status == BuildRunStatus.ORPHANED
+    assert orphaned.duration_ms is not None
+    assert orphaned.duration_ms >= 0
 
 
 def test_get_build_run_by_engine_run_returns_latest_match(test_db_session) -> None:

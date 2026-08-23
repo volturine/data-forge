@@ -3,10 +3,10 @@
 This project uses environment variables for two layers:
 
 1. **Backend runtime** — loaded by `packages/backend/backend_core/config.py` from process env and the env file selected by `ENV_FILE`
-2. **Frontend dev server (Vite)** — read from the process environment; `just dev` sources `config/env/dev.env` so local dev variables come from the same file
+2. **Frontend dev server (Vite)** — read from the process environment; `just dev` sources `docker/env/dev.env` so local dev variables come from the same file
 
 There is no separate `packages/frontend/.env` file. All local dev configuration — including Vite
-dev-server settings (`FRONTEND_PORT`, `BACKEND_HOST`) — lives in `config/env/dev.env`.
+dev-server settings (`FRONTEND_PORT`, `BACKEND_HOST`) — lives in `docker/env/dev.env`.
 
 ## Deployment topologies
 
@@ -38,7 +38,7 @@ Browser  ──►  FastAPI (PORT 8000)
 **Templates for this topology:**
 
 - Docker: use `docker/docker-compose.yml` with `docker/env/prod.env`.
-- Bare-metal (`just prod`): edit `config/env/prod.env`
+- Bare-metal (`just prod`): edit `docker/env/prod.env`
 
 ### Development — local runtime
 
@@ -68,7 +68,7 @@ Repo-level local runtime:
 
 **Templates for this topology:**
 
-- Edit `config/env/dev.env` (covers both backend and Vite dev-server settings)
+- Edit `docker/env/dev.env` (covers both backend and Vite dev-server settings)
 
 ---
 
@@ -96,7 +96,7 @@ If you only want the high-value knobs, start with these:
 
 ### Frontend dev server
 
-- `just dev` sources `config/env/dev.env` into the shell before starting Vite, so `FRONTEND_PORT` and `BACKEND_HOST` are inherited from the same file as the backend.
+- `just dev` sources `docker/env/dev.env` into the shell before starting Vite, so `FRONTEND_PORT` and `BACKEND_HOST` are inherited from the same file as the backend.
 - No `packages/frontend/.env` file is needed or used.
 - No variables are exposed to browser code — the `VITE_` prefix convention is not used.
 
@@ -125,18 +125,18 @@ The checked-in Docker production env defaults to `DF_WORKERS=4` for the API proc
 
 ```bash
 # Provision PostgreSQL and S3-compatible storage, then edit
-# config/env/prod.env with endpoints, secrets, and resource limits.
+# docker/env/prod.env with endpoints, secrets, and resource limits.
 just prod
 ```
 
 `just prod` generates protocol bindings, builds the frontend, and runs the API,
-scheduler, and worker together. The checked-in `config/env/prod.env` defaults to
+scheduler, and worker together. The checked-in `docker/env/prod.env` defaults to
 `WORKERS=4` and dynamic build-worker scaling with zero warm workers.
 
 ### Local development
 
 ```bash
-# Edit config/env/dev.env with your settings — covers both backend and Vite dev-server
+# Edit docker/env/dev.env with your settings — covers both backend and Vite dev-server
 just dev
 ```
 
@@ -306,7 +306,7 @@ These variables configure the gRPC channel that the scheduler and worker use to 
 ## Frontend dev-server variables
 
 > **Development only.** These configure the Vite dev server and its proxy.
-> They live in `config/env/dev.env` alongside the backend variables. `just dev`
+> They live in `docker/env/dev.env` alongside the backend variables. `just dev`
 > sources that file so both processes share the same configuration.
 > In production the Vite dev server is not running, so none of these have any
 > effect on the deployed application.

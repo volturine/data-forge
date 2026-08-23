@@ -9,6 +9,8 @@ from backend_core.dependencies import get_optional_lock_owner_id
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.sqlmodel_typing import sa
 from backend_core.validation import AnalysisId, parse_analysis_id
+from modules.analysis.ownership import ensure_mutation_allowed
+from modules.auth.dependencies import get_optional_user_id
 from modules.locks import service as lock_service
 
 
@@ -44,6 +46,7 @@ async def require(
     if_match: str | None = Header(default=None, alias='If-Match'),
     session: Session = Depends(get_db),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
+    user_id: str | None = Depends(get_optional_user_id),
 ) -> Analysis:
     parsed_id = parse_analysis_id(analysis_id)
     try:
@@ -53,5 +56,6 @@ async def require(
     analysis = session.execute(select(Analysis).where(sa(Analysis.id == parsed_id)).with_for_update()).scalar_one_or_none()
     if analysis is None:
         raise HTTPException(status_code=404, detail=f'Analysis {parsed_id} not found')
+    ensure_mutation_allowed(analysis.owner_id, user_id)
     validate(analysis.revision, analysis.id, if_match)
     return analysis

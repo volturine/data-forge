@@ -21,13 +21,13 @@ from modules.analysis.revisions import (
     version as analysis_version,
 )
 from modules.analysis.step_schemas import get_step_catalog
-from modules.auth.dependencies import get_current_user_id, get_optional_user
+from modules.auth.dependencies import get_current_user, get_current_user_id
 from modules.auth.models import User
 from modules.compute import executor_client
 from modules.export import service as export_service
 from modules.mcp.router import MCPRouter
 
-router = MCPRouter(prefix='/analysis', tags=['analysis'])
+router = MCPRouter(prefix='/analysis', tags=['analysis'], dependencies=[Depends(get_current_user)])
 
 
 @router.post('/validate', mcp=True)
@@ -45,7 +45,7 @@ async def validate_analysis(
 async def create_analysis(
     data: schemas.AnalysisCreateSchema,
     session: Session = Depends(get_db),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Create a new analysis pipeline.
 
@@ -60,7 +60,7 @@ async def create_analysis(
     (with result_id, format, filename), and optionally steps.
     Use GET /api/v1/analysis/step-types to discover valid step types and their config schemas.
     """
-    owner_id = user.id if user else None
+    owner_id = user.id
     return service.create_analysis(session, data, owner_id=owner_id)
 
 
@@ -97,10 +97,10 @@ async def generate_analysis_pipeline(
 async def import_analysis(
     data: schemas.ImportAnalysisSchema,
     session: Session = Depends(get_db),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Import an analysis pipeline definition and persist it as a new analysis."""
-    owner_id = user.id if user else None
+    owner_id = user.id
     return service.import_analysis(session, data, owner_id=owner_id)
 
 
@@ -115,10 +115,10 @@ async def list_analyses(session: Session = Depends(get_db)):
 @handle_errors(operation='list favorite analyses')
 async def list_favorite_analyses(
     session: Session = Depends(get_db),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """List only the current user's favorited analyses."""
-    return service.list_favorite_analyses(session, user.id if user else None)
+    return service.list_favorite_analyses(session, user.id)
 
 
 @router.get('/step-types', mcp=True)
@@ -152,10 +152,10 @@ async def duplicate_analysis(
     analysis_id: AnalysisId,
     data: schemas.DuplicateAnalysisSchema,
     session: Session = Depends(get_db),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Duplicate an analysis while regenerating output identities and derived references."""
-    owner_id = user.id if user else None
+    owner_id = user.id
     return service.duplicate_analysis(session, parse_analysis_id(analysis_id), data, owner_id=owner_id)
 
 

@@ -8,6 +8,7 @@ from backend_core.error_handlers import handle_errors
 from backend_core.namespace import list_namespaces, namespace_paths, normalize_namespace
 from backend_core.namespace_storage import NAMESPACE_NAME_RULES, namespace_storage_plan
 from backend_core.namespaces_service import list_runtime_namespaces, register_namespace
+from modules.auth.dependencies import get_current_user
 from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/namespaces', tags=['namespaces'])
@@ -73,7 +74,7 @@ def namespace_storage_plan_endpoint(
     return _storage_response(normalize_namespace(name))
 
 
-@router.post('', response_model=NamespaceResponse, mcp=True)
+@router.post('', response_model=NamespaceResponse, mcp=True, dependencies=[Depends(get_current_user)])
 @handle_errors(operation='create namespace', value_error_status=400)
 def create_namespace_endpoint(
     request: NamespaceCreateRequest,

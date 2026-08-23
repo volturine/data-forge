@@ -7,18 +7,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-RUNTIME_ENV_FILES = [
-    ROOT / 'config/env/dev.env',
-    ROOT / 'config/env/prod.env',
-    ROOT / 'config/env/e2e.env',
-]
-
-DOCKER_ENV_TO_COMPOSE: dict[Path, tuple[Path, ...]] = {
+# One env file per environment, consumed two ways:
+#   - `docker compose --env-file <file>` reads the DF_* variables
+#   - Justfile/scripts source the same file for runtime variables
+ENV_FILES: dict[Path, tuple[Path, ...]] = {
     ROOT / 'docker/env/dev.env': (
         ROOT / 'docker/docker-compose.yml',
         ROOT / 'docker/docker-compose.dev.yml',
     ),
     ROOT / 'docker/env/prod.env': (ROOT / 'docker/docker-compose.yml',),
+    ROOT / 'docker/env/e2e.env': (),
 }
 
 EXTRA_RUNTIME_KEYS = {
@@ -144,28 +142,26 @@ def main() -> int:
     runtime_allowed.update(_collect_class_env_keys(auth_config_path, 'AuthSettings'))
     runtime_allowed.update(EXTRA_RUNTIME_KEYS)
 
-    for env_path in RUNTIME_ENV_FILES:
+    for env_path, compose_paths in ENV_FILES.items():
         parsed, parse_errors = _parse_env_keys(env_path)
         errors.extend(parse_errors)
-        unknown = sorted((item for item in parsed if item.key not in runtime_allowed), key=lambda item: item.key)
+
+        unknown = sorted(
+            (item for item in parsed if not item.key.startswith('DF_') and item.key not in runtime_allowed),
+            key=lambda item: item.key,
+        )
         for item in unknown:
             errors.append(
                 f'{env_path.relative_to(ROOT)}:{item.line}: unknown runtime env key: {item.key} (not defined by Settings/AuthSettings or approved extras)'
             )
 
-    for env_path, compose_paths in DOCKER_ENV_TO_COMPOSE.items():
-        parsed, parse_errors = _parse_env_keys(env_path)
-        errors.extend(parse_errors)
         referenced, required = _compose_vars(compose_paths)
-        keys = {item.key for item in parsed}
-
-        for item in parsed:
-            if not item.key.startswith('DF_'):
-                errors.append(f'{env_path.relative_to(ROOT)}:{item.line}: docker env key must start with DF_: {item.key}')
+        df_keys = [item for item in parsed if item.key.startswith('DF_')]
+        for item in df_keys:
             if item.key not in referenced:
                 errors.append(f'{env_path.relative_to(ROOT)}:{item.line}: docker env key is not referenced by compose files: {item.key}')
 
-        missing = sorted(required - keys)
+        missing = sorted(required - {item.key for item in df_keys})
         for key in missing:
             errors.append(f'{env_path.relative_to(ROOT)}: missing required compose variable: {key}')
 

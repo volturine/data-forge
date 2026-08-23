@@ -11,10 +11,11 @@ from backend_core.validation import (
     parse_datasource_id,
     parse_healthcheck_id,
 )
+from modules.auth.dependencies import get_current_user
 from modules.healthcheck import schemas, service
 from modules.mcp.router import MCPRouter
 
-router = MCPRouter(prefix='/healthchecks', tags=['healthchecks'])
+router = MCPRouter(prefix='/healthchecks', tags=['healthchecks'], dependencies=[Depends(get_current_user)])
 
 
 @router.get('', response_model=list[schemas.HealthCheckResponse], mcp=True)

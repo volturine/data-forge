@@ -258,8 +258,73 @@ def test_update_engine_run_keeps_terminal_run_immutable(test_db_session):
     assert stored is not None
     assert stored.status == EngineRunStatus.SUCCESS
     assert stored.error_message is None
+
+
+def test_update_engine_run_reports_rejected_terminal_conflict(test_db_session):
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id='analysis-terminal-conflict',
+            datasource_id='ds-terminal',
+            kind=EngineRunKind.PREVIEW,
+            status=EngineRunStatus.SUCCESS,
+            request_json={'kind': 'preview'},
+            result_json={'row_count': 1},
+            created_at=datetime.now(UTC),
+        ),
+    )
+
+    rejected = engine_run_service.update_engine_run(
+        test_db_session,
+        created.id,
+        status=EngineRunStatus.FAILED,
+        error_message='should be ignored',
+    )
+
+    assert rejected.applied is False
+    assert rejected.status == EngineRunStatus.SUCCESS
+    stored = test_db_session.get(EngineRun, created.id)
+    assert stored is not None
     assert stored.result_json == {'row_count': 1}
     assert stored.progress == 0.0
+
+    idempotent = engine_run_service.update_engine_run(
+        test_db_session,
+        created.id,
+        status=EngineRunStatus.SUCCESS,
+        error_message='still ignored',
+    )
+    assert idempotent.applied is True
+    assert idempotent.status == EngineRunStatus.SUCCESS
+
+
+def test_update_engine_run_applies_changes_to_running_run(test_db_session):
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id='analysis-running-applied',
+            datasource_id='ds-1',
+            kind=EngineRunKind.PREVIEW,
+            status=EngineRunStatus.RUNNING,
+            request_json={'kind': 'preview'},
+            result_json=None,
+            created_at=datetime.now(UTC),
+        ),
+    )
+
+    updated = engine_run_service.update_engine_run(
+        test_db_session,
+        created.id,
+        status=EngineRunStatus.SUCCESS,
+        execution_entries=[],
+        result_json={'row_count': 5},
+    )
+
+    assert updated.applied is True
+    assert updated.status == EngineRunStatus.SUCCESS
+    stored = test_db_session.get(EngineRun, created.id)
+    assert stored is not None
+    assert stored.result_json == {'row_count': 5, 'execution_entries': []}
 
 
 def test_list_engine_runs_http_returns_filtered_runs(client, test_db_session) -> None:

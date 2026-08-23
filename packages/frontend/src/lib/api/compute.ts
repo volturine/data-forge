@@ -44,8 +44,6 @@ export interface StepPreviewRequest {
 	resource_config?: EngineResourceConfig | null;
 }
 
-export type StepPreviewResourceConfig = StepPreviewRequest['resource_config'];
-
 export interface StepPreviewResponse {
 	step_id: StringField<ProtocolStepPreviewResultJson, 'stepId'>;
 	columns: Field<ProtocolStepPreviewResultJson, 'columns'>;

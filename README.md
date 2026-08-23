@@ -116,7 +116,7 @@ are already managed for you:
 
 ```bash
 just install
-# Edit config/env/prod.env, including DATABASE_URL, OBJECT_STORE_*, and secrets.
+# Edit docker/env/prod.env, including DATABASE_URL, OBJECT_STORE_*, and secrets.
 just prod
 ```
 
@@ -132,7 +132,7 @@ runtime are not supported by the current architecture.
 # Install all dependencies
 just install
 
-# Review config/env/dev.env for local settings
+# Review docker/env/dev.env for local settings
 
 # Start the full local runtime with hot-reload
 just dev
@@ -242,7 +242,6 @@ data-forge/
 │   ├── worker/               # Build/compute workers + data plane
 │   ├── frontend/             # SvelteKit frontend + Playwright/Vitest tests
 │   └── protocol/             # Protobuf contracts (shared wire types)
-├── config/env/               # Local/runtime env files (dev, prod, e2e)
 ├── docs/                     # Product docs, PRDs, and references
 ├── docker/                   # Docker images, compose, and env files
 ├── scripts/                  # Repo maintenance and validation scripts

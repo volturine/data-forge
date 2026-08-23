@@ -491,7 +491,7 @@ def list_build_events_after(session: Session, build_id: str, sequence: int = 0) 
 def get_latest_sequence(session: Session, build_id: str) -> int:
     stmt = select(sa(BuildRun.next_event_sequence)).where(sa(BuildRun.id == build_id))
     next_sequence = session.execute(stmt).scalar_one_or_none()
-    return next_sequence - 1 if isinstance(next_sequence, int) else 0
+    return max(next_sequence - 1, 0) if isinstance(next_sequence, int) else 0
 
 
 def latest_namespace_update(session: Session, *, namespace: str) -> datetime | None:
@@ -673,13 +673,14 @@ def build_summary(build_run: BuildRun) -> compute_schemas.BuildRunSummary:
 
 
 def mark_running_builds_orphaned(session: Session, *, now: datetime | None = None) -> int:
-    marker = now or _utcnow()
-    stmt = select(BuildRun).where(sa(BuildRun.status == BuildRunStatus.RUNNING))
+    raw_marker = now or _utcnow()
+    marker = raw_marker if raw_marker.tzinfo is not None else raw_marker.replace(tzinfo=UTC)
+    stmt = select(BuildRun).where(sa(BuildRun.status == BuildRunStatus.RUNNING)).with_for_update()
     runs = list(session.execute(stmt).scalars().all())
     if not runs:
         return 0
     for run in runs:
-        started_at = run.started_at if run.started_at.tzinfo is not None else run.started_at.replace(tzinfo=UTC)
+        started_at = marker if run.started_at is None else (run.started_at if run.started_at.tzinfo is not None else run.started_at.replace(tzinfo=UTC))
         run.status = BuildRunStatus.ORPHANED
         run.completed_at = marker
         run.updated_at = marker

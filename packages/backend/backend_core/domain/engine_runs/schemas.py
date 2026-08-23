@@ -139,6 +139,7 @@ class EngineRunBaseSchema(BaseModel):
 
 class EngineRunResponseSchema(EngineRunBaseSchema):
     id: str
+    applied: bool = True
 
 
 class ColumnDiff(BaseModel):

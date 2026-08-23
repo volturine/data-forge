@@ -96,14 +96,19 @@ class FilterCondition(BaseModel):
             return []
 
         normalized: list[Any] = []
-        for condition in conditions:
+        for index, condition in enumerate(conditions):
             if not isinstance(condition, dict):
-                normalized.append(condition)
-                continue
+                raise ValueError(f"Filter condition {index} must be an object")
 
             column = cls.normalize_text(condition.get("column"))
             if not column:
-                continue
+                # The UI emits empty placeholder rows for unused filter inputs;
+                # a condition with no column AND no value is that placeholder.
+                # Anything else with a missing column is malformed → reject it
+                # instead of silently filtering nothing (wrong-data hazard).
+                if condition.get("value") in (None, ""):
+                    continue
+                raise ValueError(f"Filter condition {index} is missing 'column'")
 
             operator = FilterOperator.require_supported(condition.get("operator") or FilterOperator.EQUAL.value)
             value_type = FilterValueType.require(condition.get("value_type", FilterValueType.STRING.value))
@@ -120,7 +125,7 @@ class FilterCondition(BaseModel):
 
             compare_column = cls.normalize_text(condition.get("compare_column"))
             if value_type == FilterValueType.COLUMN and not compare_column:
-                continue
+                raise ValueError(f"Filter condition {index}: 'compare_column' is required when value_type is '{FilterValueType.COLUMN.value}'")
             if compare_column:
                 item["compare_column"] = compare_column
 

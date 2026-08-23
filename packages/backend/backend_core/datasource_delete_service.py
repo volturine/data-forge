@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
+from types import SimpleNamespace
+from typing import Any
 
 from sqlmodel import Session, select
 
 from backend_core.datasource_storage import cleanup_datasource_storage
+from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.exceptions import datasource_not_found
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
-from backend_core.transactions import committed
 
 
 def get_datasource(session: Session, datasource_id: str) -> DataSource | None:
@@ -48,11 +51,35 @@ def list_pending_deletes(session: Session) -> list[DataSource]:
     return list(session.execute(stmt).scalars().all())
 
 
-@committed
 def finalize_delete(session: Session, datasource_id: str) -> bool:
+    """Delete the datasource row, then reclaim its storage out-of-band.
+
+    Storage cleanup must never run inside the row-deletion transaction: if it
+    failed mid-way the row would survive pointing at half-deleted storage.
+    Deletion commits first (the dataset becomes unreachable atomically); any
+    storage failure afterwards only costs orphaned bytes, never correctness.
+    """
     datasource = get_datasource(session, datasource_id)
     if datasource is None:
         return False
-    cleanup_datasource_storage(datasource)
+    snapshot = {
+        'id': str(datasource.id),
+        'source_type': str(datasource.source_type),
+        'is_iceberg': bool(datasource.is_iceberg),
+        'config': deepcopy(datasource.config) if isinstance(datasource.config, dict) else None,
+    }
     session.delete(datasource)
+    session.commit()
+    reclaim_storage(snapshot)
     return True
+
+
+def reclaim_storage(snapshot: dict[str, Any]) -> None:
+    stub = SimpleNamespace(
+        id=snapshot['id'],
+        source_type=snapshot['source_type'],
+        is_iceberg=snapshot['is_iceberg'],
+        config=snapshot['config'],
+        source_type_kind=lambda: DataSourceType.require(snapshot['source_type']),
+    )
+    cleanup_datasource_storage(stub)

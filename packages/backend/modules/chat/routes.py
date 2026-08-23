@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 HEARTBEAT_INTERVAL = 15
 
 
+def _require_owned_session(session_id: str, user: User) -> LiveSession:
+    """Return the live session, or 404 when it does not exist or belongs to another user."""
+    session = session_store.get(session_id)
+    if session is None or session.user_id != user.id:
+        raise HTTPException(status_code=404, detail='Session not found')
+    return session
+
+
 @dataclass(frozen=True, slots=True)
 class ChatProviderDefinition:
     provider: enums_pb2.AIProvider
@@ -338,6 +346,7 @@ async def _run_agent_turn(
 
     turn_start = time.monotonic()
     tool_count = 0
+    MAX_AGENT_TOOL_TURNS = 16
     turn_usage: dict[str, int] = {
         'prompt_tokens': 0,
         'completion_tokens': 0,
@@ -422,6 +431,23 @@ async def _run_agent_turn(
             msg: dict = {'role': 'assistant', 'content': assistant_content}
             if tool_calls:
                 msg['tool_calls'] = tool_calls
+
+            # A provider refusing mid-tool-call (length/content_filter/...) would
+            # leave unanswered tool_calls in the history, which providers reject
+            # on the next request — drop them and end the turn instead.
+            disallowed_finish = finish not in ('tool_calls', 'stop', None, '')
+            if tool_calls and disallowed_finish:
+                msg = {'role': 'assistant', 'content': assistant_content or f'Stopped after {turn} turns ({finish}).'}
+                session.append_message(msg)
+                session.push_event({'type': 'message', 'role': 'assistant', 'content': msg['content']})
+                break
+
+            if tool_calls and turn >= MAX_AGENT_TOOL_TURNS:
+                note = f'Stopped: reached the {MAX_AGENT_TOOL_TURNS} tool-turn limit.'
+                session.append_message({'role': 'assistant', 'content': assistant_content or note})
+                session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content or note})
+                break
+
             session.append_message(msg)
 
             if assistant_content:
@@ -433,7 +459,7 @@ async def _run_agent_turn(
                     }
                 )
 
-            if not tool_calls or finish not in ('tool_calls', 'stop', None, ''):
+            if not tool_calls:
                 break
 
             for tc in tool_calls:
@@ -595,17 +621,15 @@ async def _run_agent_turn(
 @handle_errors('list chat sessions')
 def list_sessions(user: User = Depends(get_current_user)) -> list[dict]:
     """List all active chat sessions with preview info."""
-    del user
-    return session_store.list_sessions()
+    return session_store.list_sessions(user_id=user.id)
 
 
 @router.post('/sessions')
 @handle_errors('create chat session')
 def create_session(body: CreateSessionRequest, user: User = Depends(get_current_user)) -> dict:
     """Create a new chat session with the given provider/model/key."""
-    del user
     provider = ChatProviderDefinition.require(body.provider).provider
-    session = session_store.create(ai_provider_name(provider), body.model, body.api_key or '', body.system_prompt or '')
+    session = session_store.create(ai_provider_name(provider), body.model, body.api_key or '', body.system_prompt or '', user_id=user.id)
     return {
         'session_id': session.id,
         'model': session.model,
@@ -617,10 +641,7 @@ def create_session(body: CreateSessionRequest, user: User = Depends(get_current_
 @handle_errors('update chat session')
 def update_session(session_id: str, body: UpdateSessionRequest, user: User = Depends(get_current_user)) -> dict:
     """Update model, system prompt, or API key on a live session."""
-    del user
-    session = session_store.get(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail='Session not found')
+    session = _require_owned_session(session_id, user)
     if body.provider is not None:
         session.provider = ai_provider_name(ChatProviderDefinition.require(body.provider).provider)
     if body.model is not None:
@@ -646,10 +667,7 @@ def update_session(session_id: str, body: UpdateSessionRequest, user: User = Dep
 @handle_errors('send chat message')
 async def send_message(request: Request, body: MessageRequest, user: User = Depends(get_current_user)) -> dict:
     """Send a user message; agent processing is kicked off asynchronously."""
-    del user
-    session = session_store.get(body.session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail='Session not found')
+    session = _require_owned_session(body.session_id, user)
 
     acquired = await session.acquire_turn()
     if not acquired:
@@ -675,10 +693,7 @@ async def send_message(request: Request, body: MessageRequest, user: User = Depe
 @handle_errors('stop chat generation')
 async def stop_generation(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Cancel the running agent turn for a session."""
-    del user
-    session = session_store.get(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail='Session not found')
+    session = _require_owned_session(session_id, user)
     session.cancel_task()
     await session.set_busy(False)
     return {'status': 'stopped', 'session_id': session_id}
@@ -694,10 +709,7 @@ class ConfirmRequest(BaseModel):
 @handle_errors('confirm chat tool')
 def confirm_tool(session_id: str, body: ConfirmRequest, user: User = Depends(get_current_user)) -> dict:
     """Confirm or deny a pending tool execution."""
-    del user
-    session = session_store.get(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail='Session not found')
+    session = _require_owned_session(session_id, user)
     session.resolve_confirm(body.approved)
     return {'status': 'resolved', 'approved': body.approved}
 
@@ -706,10 +718,7 @@ def confirm_tool(session_id: str, body: ConfirmRequest, user: User = Depends(get
 @handle_errors('get chat history')
 def get_history(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Return the full event history for a session."""
-    del user
-    session = session_store.get(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail='Session not found')
+    session = _require_owned_session(session_id, user)
     return {'session_id': session_id, 'history': session.get_history()}
 
 
@@ -717,10 +726,7 @@ def get_history(session_id: str, user: User = Depends(get_current_user)) -> dict
 @handle_errors('stream chat events')
 async def stream(session_id: str, user: User = Depends(get_current_user)) -> StreamingResponse:
     """SSE stream of chat events for a session with heartbeat."""
-    del user
-    session = session_store.get(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail='Session not found')
+    session = _require_owned_session(session_id, user)
 
     session.reopen_stream()
 
@@ -761,10 +767,8 @@ async def stream(session_id: str, user: User = Depends(get_current_user)) -> Str
 @handle_errors('delete chat session')
 def delete_session(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Close and delete a chat session."""
-    del user
-    deleted = session_store.delete(session_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail='Session not found')
+    _require_owned_session(session_id, user)
+    session_store.delete(session_id)
     return {'status': 'closed', 'session_id': session_id}
 
 

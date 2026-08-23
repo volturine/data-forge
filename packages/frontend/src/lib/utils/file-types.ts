@@ -139,7 +139,7 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 	iceberg: {
 		type: 'iceberg',
 		label: 'Iceberg',
-		extensions: ['metadata'],
+		extensions: ['/metadata'],
 		icon: Snowflake,
 		description: 'Apache Iceberg table format'
 	},
@@ -240,7 +240,11 @@ export function detectFileType(path: string, isFolder: boolean = false): FileTyp
 	}
 
 	// Check for Iceberg (contains metadata folder or .metadata.json)
-	if (lowerPath.includes('/metadata/') || lowerPath.endsWith('.metadata.json')) {
+	if (
+		lowerPath.includes('/metadata/') ||
+		lowerPath.endsWith('/metadata') ||
+		lowerPath.endsWith('.metadata.json')
+	) {
 		return 'iceberg';
 	}
 

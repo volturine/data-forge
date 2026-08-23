@@ -156,7 +156,7 @@ def _validated_file_source_config(source: Mapping[str, object]) -> dict[str, obj
     }
 
 
-def _write_iceberg_table(lazy: pl.LazyFrame, table_path: str, build_mode: str, *, database_url: str) -> Table:
+def _write_iceberg_table(lazy: pl.LazyFrame, table_path: str, *, database_url: str) -> Table:
     table_location = table_path.rstrip("/")
     location_parts = table_location.split("/")
     if len(location_parts) < 2:
@@ -173,15 +173,13 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: str, build_mode: str, *
     _ensure_catalog_namespace(catalog, namespace)
     identifier = f"{namespace}.{table_name}"
     arrow_table = _coerce_iceberg_compatible_lazyframe(lazy).collect().to_arrow()
-    if build_mode == "recreate" and catalog.table_exists(identifier):
-        catalog.drop_table(identifier)
     if catalog.table_exists(identifier):
+        # Never drop in the request path: a drop purges metadata files that
+        # concurrent readers may still be resolving. Overwrite swaps snapshots
+        # atomically and keeps every published metadata file intact.
         table = catalog.load_table(identifier)
-        if build_mode == "incremental":
-            table.append(arrow_table)
-        else:
-            _sync_iceberg_schema(table, arrow_table.schema)
-            table.overwrite(arrow_table)
+        _sync_iceberg_schema(table, arrow_table.schema)
+        table.overwrite(arrow_table)
         return table
     table = catalog.create_table(identifier, schema=arrow_table.schema, location=table_location)
     table.append(arrow_table)
@@ -228,13 +226,20 @@ def _sync_iceberg_schema(table: Table, new_schema: Any) -> None:
     update.commit()
 
 
-def _set_snapshot_metadata(config: dict[str, object], snapshot: Any | None) -> None:
-    if snapshot is None:
+def _set_snapshot_metadata(config: dict[str, object], table: Any | None) -> None:
+    if table is None:
         return
-    config["current_snapshot_id"] = str(snapshot.snapshot_id)
-    config["current_snapshot_timestamp_ms"] = int(snapshot.timestamp_ms)
-    config["snapshot_id"] = str(snapshot.snapshot_id)
-    config["snapshot_timestamp_ms"] = int(snapshot.timestamp_ms)
+    snapshot = table.current_snapshot()
+    if snapshot is not None:
+        config["current_snapshot_id"] = str(snapshot.snapshot_id)
+        config["current_snapshot_timestamp_ms"] = int(snapshot.timestamp_ms)
+        config["snapshot_id"] = str(snapshot.snapshot_id)
+        config["snapshot_timestamp_ms"] = int(snapshot.timestamp_ms)
+    # Readers resolve this exact file instead of listing the prefix: S-style
+    # stores guarantee single-object read-after-write, prefix listings do not.
+    metadata_location = table.metadata_location
+    if metadata_location:
+        config["metadata_file"] = metadata_location
 
 
 def _get_first_non_null_samples(lazy: pl.LazyFrame, max_rows: int = 1000) -> dict[str, str | None]:
@@ -410,14 +415,14 @@ def create_file_datasource(
                     fields={"current_step": "Writing Iceberg", "progress": 0.6},
                 )
                 target_path = _prepare_clean_target(datasource_id, "master")
-                snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate", database_url=database_url)
+                snapshot = _write_iceberg_table(lazy, target_path, database_url=database_url)
         except Exception as exc:
             raise DataSourceValidationError(
                 f"Failed to load file datasource for ingestion: {exc}",
                 details={"file_path": resolved_file_path, "file_type": resolved_file_type.value},
             ) from exc
         config = _build_iceberg_config(target_path, "master", source_config=source_config)
-        _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
+        _set_snapshot_metadata(config, snapshot)
         record = client.publish_datasource_create(
             namespace=namespace,
             datasource_id=datasource_id,
@@ -493,9 +498,9 @@ def create_database_datasource(
         )
         lazy = _coerce_database_iceberg_compatible_lazyframe(lazy)
         target_path = _prepare_clean_target(datasource_id, branch)
-        snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate", database_url=database_url)
+        snapshot = _write_iceberg_table(lazy, target_path, database_url=database_url)
         config = _build_iceberg_config(target_path, branch, source_config=source_config)
-        _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
+        _set_snapshot_metadata(config, snapshot)
         record = client.publish_datasource_create(
             namespace=namespace,
             datasource_id=datasource_id,
@@ -576,7 +581,7 @@ def create_iceberg_datasource(
                     run_id=run_id,
                     fields={"current_step": "Writing Iceberg", "progress": 0.6},
                 )
-                snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate", database_url=database_url)
+                snapshot = _write_iceberg_table(lazy, target_path, database_url=database_url)
             else:
                 file_source = _validated_file_source_config(source)
                 with _materialized_file_source(dict(file_source)) as load_source:
@@ -586,14 +591,14 @@ def create_iceberg_datasource(
                         run_id=run_id,
                         fields={"current_step": "Writing Iceberg", "progress": 0.6},
                     )
-                    snapshot = _write_iceberg_table(lazy, target_path, build_mode="recreate", database_url=database_url)
+                    snapshot = _write_iceberg_table(lazy, target_path, database_url=database_url)
         except DataSourceValidationError:
             raise
         except Exception as exc:
             raise DataSourceConnectionError(source_type.ingestion_error_message, details={"source_type": source_type}) from exc
         persisted_source = _validated_file_source_config(source) if source_type == DataSourceType.FILE else source
         config = _build_iceberg_config(target_path, branch_name, source_config=persisted_source)
-        _set_snapshot_metadata(config, snapshot.current_snapshot() if snapshot else None)
+        _set_snapshot_metadata(config, snapshot)
         record = client.publish_datasource_create(
             namespace=namespace,
             datasource_id=datasource_id,
@@ -711,7 +716,7 @@ def ingest_external_datasource(
                     run_id=run_id,
                     fields={"current_step": "Writing Iceberg", "progress": 0.6},
                 )
-                snapshot = _write_iceberg_table(lazy, target_path, build_mode="full", database_url=database_url)
+                snapshot = _write_iceberg_table(lazy, target_path, database_url=database_url)
             else:
                 file_source = _validated_file_source_config(source)
                 with _materialized_file_source(dict(file_source)) as load_source:
@@ -721,13 +726,13 @@ def ingest_external_datasource(
                         run_id=run_id,
                         fields={"current_step": "Writing Iceberg", "progress": 0.6},
                     )
-                    snapshot = _write_iceberg_table(lazy, target_path, build_mode="full", database_url=database_url)
+                    snapshot = _write_iceberg_table(lazy, target_path, database_url=database_url)
         except DataSourceValidationError:
             raise
         except Exception as exc:
             raise DataSourceConnectionError(source_type.ingestion_error_message, details={"datasource_id": datasource_id}) from exc
         next_config = dict(config)
-        _set_snapshot_metadata(next_config, snapshot.current_snapshot() if snapshot else None)
+        _set_snapshot_metadata(next_config, snapshot)
         next_config["branch"] = branch
         next_config["metadata_path"] = target_path
         next_config["source"] = _validated_file_source_config(source) if source_type == DataSourceType.FILE else source

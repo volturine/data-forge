@@ -29,10 +29,12 @@ def sync_iceberg_schema(table: IcebergTable, new_schema: pa.Schema) -> bool:
     return True
 
 
-def resolve_iceberg_metadata_path(metadata_path: str, *, namespace_name: str | None = None, data_root: str | Path | None = None) -> str:
+def resolve_iceberg_metadata_path(
+    metadata_path: str, *, namespace_name: str | None = None, data_root: str | Path | None = None, fallback_file: str | None = None
+) -> str:
     normalized = _strip_file_scheme(metadata_path)
     if is_object_store_url(normalized):
-        return _resolve_object_store_metadata_path(normalized)
+        return _resolve_object_store_metadata_path(normalized, fallback_file=fallback_file)
     path = Path(normalized)
     resolved = path.resolve()
     root = _resolve_iceberg_data_root(namespace_name=namespace_name, data_root=data_root)
@@ -62,6 +64,7 @@ def resolve_iceberg_branch_metadata_path(
     *,
     namespace_name: str | None = None,
     data_root: str | Path | None = None,
+    fallback_file: str | None = None,
 ) -> str:
     normalized = _strip_file_scheme(metadata_path)
     if is_object_store_url(normalized):
@@ -72,7 +75,7 @@ def resolve_iceberg_branch_metadata_path(
             with_branch = list_metadata_files(branch_url)
             if with_branch:
                 return resolve_iceberg_metadata_path(branch_url, namespace_name=namespace_name, data_root=data_root)
-        return resolve_iceberg_metadata_path(normalized, namespace_name=namespace_name, data_root=data_root)
+        return resolve_iceberg_metadata_path(normalized, namespace_name=namespace_name, data_root=data_root, fallback_file=fallback_file)
     path = Path(normalized)
     if path.suffix == ".metadata.json" or path.name == "metadata" or path.is_file():
         return resolve_iceberg_metadata_path(metadata_path, namespace_name=namespace_name, data_root=data_root)
@@ -99,13 +102,19 @@ def _resolve_iceberg_data_root(*, namespace_name: str | None = None, data_root: 
     return Path(os.path.realpath(namespace_paths(namespace_name).base_dir.resolve()))
 
 
-def _resolve_object_store_metadata_path(metadata_path: str) -> str:
+def _resolve_object_store_metadata_path(metadata_path: str, fallback_file: str | None = None) -> str:
     if metadata_path.endswith(".metadata.json"):
         if not object_exists(metadata_path):
             raise IcebergMetadataPathNotFoundError(metadata_path)
         return metadata_path
     files = list_metadata_files(metadata_path)
     if not files:
+        # Prefix listings are the only non-single-object observation in this
+        # path and can transiently come back empty under load even though the
+        # written metadata exists. The writer records the exact file in the
+        # datasource config; a single-object read is strongly consistent.
+        if fallback_file and fallback_file.endswith(".metadata.json") and object_exists(fallback_file):
+            return fallback_file
         raise IcebergMetadataPathNotFoundError(metadata_path)
     return files[-1]
 
