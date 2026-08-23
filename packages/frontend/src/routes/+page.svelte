@@ -26,6 +26,7 @@
 	import { button, css, input, spinner } from '$lib/styles/panda';
 	import { favoriteStore } from '$lib/stores/favorites.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { analysisQueryKey } from '$lib/queries/analysis';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
@@ -150,7 +151,7 @@
 		favoriteStore.apply(id, result.value.is_favorite);
 		void queryClient.invalidateQueries({ queryKey: ['analyses', ns.value] });
 		void queryClient.invalidateQueries({ queryKey: ['favorite-analyses', ns.value] });
-		void queryClient.invalidateQueries({ queryKey: ['analysis', id] });
+		void queryClient.invalidateQueries({ queryKey: analysisQueryKey(id) });
 	}
 
 	function requestDuplicate(analysis: AnalysisGalleryItem) {

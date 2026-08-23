@@ -15,7 +15,7 @@ vi.mock('$lib/stores/namespace.svelte', () => ({
 	isNamespaceReady: () => true
 }));
 
-const { apiRequest } = await import('./client');
+const { apiRequest, apiConditionalRequestWithHeaders } = await import('./client');
 
 describe('api client cache policy', () => {
 	beforeEach(() => {
@@ -83,5 +83,64 @@ describe('api client cache policy', () => {
 		const result = await request;
 		expect(result.isErr()).toBe(true);
 		if (result.isErr()) expect(result.error.message).toContain('namespace changed');
+	});
+});
+
+describe('api conditional requests', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	test('returns notModified for a 304 response instead of an error', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(new Response(null, { status: 304, headers: { ETag: '"a-1"' } }))
+		);
+
+		const result = await apiConditionalRequestWithHeaders<{ ok: boolean }>('/v1/test', {
+			headers: { 'If-None-Match': '"a-1"' }
+		});
+
+		expect(result.isOk()).toBe(true);
+		if (result.isOk()) {
+			expect(result.value.notModified).toBe(true);
+			expect(result.value.headers.get('ETag')).toBe('"a-1"');
+		}
+	});
+
+	test('returns data on a normal 200 response', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ ok: true }), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				})
+			)
+		);
+
+		const result = await apiConditionalRequestWithHeaders<{ ok: boolean }>('/v1/test', {
+			headers: { 'If-None-Match': '"a-1"' }
+		});
+
+		expect(result.isOk()).toBe(true);
+		if (result.isOk()) {
+			expect(result.value.notModified).toBe(false);
+			if (!result.value.notModified) expect(result.value.data).toEqual({ ok: true });
+		}
+	});
+
+	test('still surfaces HTTP errors as ApiError', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(new Response('{"detail":"missing"}', { status: 404 }))
+		);
+
+		const result = await apiConditionalRequestWithHeaders<{ ok: boolean }>('/v1/test', {
+			headers: { 'If-None-Match': '"a-1"' }
+		});
+
+		expect(result.isErr()).toBe(true);
+		if (result.isErr()) expect(result.error.status).toBe(404);
 	});
 });

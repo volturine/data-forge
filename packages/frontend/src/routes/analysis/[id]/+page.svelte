@@ -7,7 +7,8 @@
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import { formatPipelineErrors, isUuid, validatePipelineTabs } from '$lib/utils/analysis-tab';
-	import { favoriteAnalysis, unfavoriteAnalysis, getAnalysisWithHeaders } from '$lib/api/analysis';
+	import { favoriteAnalysis, unfavoriteAnalysis, type AnalysisDetail } from '$lib/api/analysis';
+	import { analysisQueryKey, fetchAnalysis } from '$lib/queries/analysis';
 	import { listDatasources } from '$lib/api/datasource';
 	import type { Analysis } from '$lib/types/analysis';
 	import { idbDelete } from '$lib/utils/indexeddb';
@@ -186,21 +187,25 @@
 	});
 
 	const analysisQuery = createQuery(() => ({
-		queryKey: ['analysis', analysisId],
+		queryKey: analysisQueryKey(analysisId ?? ''),
 		enabled: !!analysisId,
-		queryFn: async () => {
+		staleTime: 0,
+		queryFn: async (): Promise<AnalysisDetail> => {
 			if (!analysisId) throw new Error('Analysis ID is required');
 			if (!validAnalysisId) throw new Error('Invalid analysis ID format');
-			const result = await getAnalysisWithHeaders(validAnalysisId);
-			if (result.isErr()) {
-				throw new Error(result.error.message);
+			const cached = queryClient.getQueryData<AnalysisDetail>(analysisQueryKey(validAnalysisId));
+			const detail = await fetchAnalysis(validAnalysisId, cached?.etag);
+			// 304: serve from TanStack Query's cache; the hydration effect below keeps
+			// the store in sync without clobbering local edits.
+			if ('notModified' in detail) {
+				if (!cached) throw new Error('Analysis cache is empty after 304');
+				return cached;
 			}
-			const { analysis, version } = result.value;
-			analysisStore.applyAnalysis(analysis);
-			analysisStore.currentRevision = version;
-			lastLoadedVersion = version;
+			analysisStore.applyAnalysis(detail.analysis);
+			analysisStore.currentRevision = detail.version;
+			lastLoadedVersion = detail.version;
 			isDirty = false;
-			return result.value;
+			return detail;
 		},
 		retry: false
 	}));
@@ -448,7 +453,7 @@
 		};
 		void queryClient.invalidateQueries({ queryKey: ['analyses'] });
 		void queryClient.invalidateQueries({ queryKey: ['favorite-analyses'] });
-		void queryClient.invalidateQueries({ queryKey: ['analysis', validAnalysisId] });
+		void queryClient.invalidateQueries({ queryKey: analysisQueryKey(validAnalysisId) });
 	}
 
 	function openDescriptionModal() {
@@ -509,7 +514,7 @@
 		<AnalysisEditorHeader
 			tabs={analysisStore.tabs}
 			activeTabId={analysisStore.activeTab?.id ?? null}
-			titleName={currentAnalysis?.name ?? analysisQuery.data.analysis.name}
+			titleName={currentAnalysis?.name ?? analysisQuery.data?.analysis.name}
 			description={currentAnalysis?.description ?? null}
 			favorite={analysisFavorite}
 			loading={analysisStore.loading}

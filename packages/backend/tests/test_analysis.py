@@ -579,6 +579,56 @@ class TestAnalysisGet:
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
 
+    def test_get_analysis_returns_304_when_etag_matches(self, client, sample_analysis: Analysis):
+        initial = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        assert initial.status_code == 200
+        etag = initial.headers['ETag']
+
+        cached = client.get(f'/api/v1/analysis/{sample_analysis.id}', headers={'If-None-Match': etag})
+
+        assert cached.status_code == 304
+        assert cached.content == b''
+        assert cached.headers['ETag'] == etag
+
+    def test_get_analysis_accepts_unquoted_and_weak_etags(self, client, sample_analysis: Analysis):
+        initial = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        etag = initial.headers['ETag']
+        unquoted = etag.strip('"')
+
+        weak = client.get(f'/api/v1/analysis/{sample_analysis.id}', headers={'If-None-Match': f'W/{etag}'})
+        bare = client.get(f'/api/v1/analysis/{sample_analysis.id}', headers={'If-None-Match': unquoted})
+
+        assert weak.status_code == 304
+        assert bare.status_code == 304
+
+    def test_get_analysis_returns_200_after_revision_change(self, client, sample_analysis: Analysis):
+        initial = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        stale_etag = initial.headers['ETag']
+
+        update = client.put(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json={'name': 'Renamed', 'tabs': sample_analysis.pipeline_definition['tabs']},
+            headers={'If-Match': stale_etag},
+        )
+        assert update.status_code == 200
+        fresh_etag = update.headers['ETag']
+        assert fresh_etag != stale_etag
+
+        conditional = client.get(f'/api/v1/analysis/{sample_analysis.id}', headers={'If-None-Match': stale_etag})
+
+        assert conditional.status_code == 200
+        assert conditional.headers['ETag'] == fresh_etag
+        assert conditional.json()['name'] == 'Renamed'
+
+    def test_get_analysis_ignores_mismatched_if_none_match(self, client, sample_analysis: Analysis):
+        response = client.get(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            headers={'If-None-Match': '"analysis-other-id-99"'},
+        )
+
+        assert response.status_code == 200
+        assert response.headers['ETag']
+
 
 class TestAnalysisCreationTemplates:
     def test_lists_complete_builtin_template_catalog(self, client):

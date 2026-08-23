@@ -94,12 +94,16 @@ export class AnalysisStore {
 		this.error = null;
 
 		return getAnalysisWithHeaders(id)
-			.andThen(({ analysis, version }) => {
+			.andThen((result) => {
+				if ('notModified' in result) return ok(undefined);
 				if (this.loadId !== token) return ok(undefined);
-				this.current = analysis;
-				this.currentRevision = version;
-				this.lastSaved = { name: analysis.name, description: analysis.description ?? null };
-				this.resolveTabs(analysis);
+				this.current = result.analysis;
+				this.currentRevision = result.version;
+				this.lastSaved = {
+					name: result.analysis.name,
+					description: result.analysis.description ?? null
+				};
+				this.resolveTabs(result.analysis);
 				return ok(undefined);
 			})
 			.mapErr((error) => {
