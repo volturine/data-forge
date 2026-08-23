@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { untrack } from 'svelte';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -194,15 +195,26 @@
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
+			const { analysis, version } = result.value;
+			analysisStore.applyAnalysis(analysis);
+			analysisStore.currentRevision = version;
+			lastLoadedVersion = version;
+			isDirty = false;
 			return result.value;
 		},
 		retry: false
 	}));
 
-	// Hydration: $derived can't sync external store.
+	// Hydration: sync query data into the analysis store for cached reads where queryFn
+	// doesn't run. Uses untrack() on analysisQuery.data to avoid an infinite loop —
+	// applyAnalysis() mutates $state which triggers re-renders that would recreate the
+	// query result object with a new data reference, re-triggering this effect.
 	$effect(() => {
-		const data = analysisQuery.data;
-		if (!data || data.analysis.id !== validAnalysisId) return;
+		const id = validAnalysisId;
+		if (!id) return;
+		const data = untrack(() => analysisQuery.data);
+		if (!data || data.analysis.id !== id) return;
+		if (analysisStore.current?.id === id) return;
 		analysisStore.applyAnalysis(data.analysis);
 		analysisStore.currentRevision = data.version;
 		lastLoadedVersion = data.version;
