@@ -30,12 +30,12 @@ dev:
     #!/usr/bin/env bash
     set -euo pipefail
     just generate-protocol
-    set -a; source config/env/dev.env; set +a
+    set -a; source docker/env/dev.env; set +a
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_postgres.py
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_rustfs.py
-    (cd packages/backend && env -u VIRTUAL_ENV uv run --env-file ../../config/env/dev.env main.py) & \
-    (cd packages/scheduler && env -u VIRTUAL_ENV uv run --env-file ../../config/env/dev.env main.py) & \
-    (cd packages/worker && env -u VIRTUAL_ENV uv run --env-file ../../config/env/dev.env main.py) & \
+    (cd packages/backend && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
+    (cd packages/scheduler && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
+    (cd packages/worker && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
     (cd packages/frontend && bun run dev) & wait
 
 # Build the frontend and run the three fixed production roles from source.
@@ -47,7 +47,7 @@ prod:
     bun run build
     cd ../..
     set -a
-    source config/env/prod.env
+    source docker/env/prod.env
     set +a
     pids=()
     shutdown() {
@@ -91,7 +91,7 @@ prod:
 dev-clean:
     #!/usr/bin/env bash
     set -euo pipefail
-    set -a; source config/env/dev.env; set +a
+    set -a; source docker/env/dev.env; set +a
     cd packages/backend
     env -u VIRTUAL_ENV uv run python - <<'PY'
     from sqlalchemy import create_engine, text

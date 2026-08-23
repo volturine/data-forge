@@ -105,7 +105,7 @@ cd data-forge
 just install
 ```
 
-Edit `config/env/prod.env`:
+Edit `docker/env/prod.env`:
 
 - set `DATABASE_URL` to PostgreSQL;
 - set the four `OBJECT_STORE_*` values (endpoint, region, access key, secret).
@@ -125,7 +125,7 @@ just prod
 ```
 
 The recipe generates protocol bindings, builds the static frontend, loads
-`config/env/prod.env`, and runs the API, scheduler, and worker in the foreground.
+`docker/env/prod.env`, and runs the API, scheduler, and worker in the foreground.
 If one role exits, the recipe stops the others and exits unsuccessfully. Run it
 under a process supervisor that restarts the whole group and forwards `SIGTERM`;
 do not start only the API.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-set -a; source config/env/e2e.env; set +a
+set -a; source docker/env/e2e.env; set +a
 # Playwright forces FORCE_COLOR=1 for worker processes, so drop NO_COLOR to
 # keep the warning scanner clean and avoid conflicting color policies.
 unset NO_COLOR
