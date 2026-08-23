@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import socket
+import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -169,6 +170,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from api.v1.router import verify_v1_auth_coverage
 
     verify_v1_auth_coverage()
+    # A production deployment silently writing uploads to /tmp is never correct.
+    if settings.prod_mode_enabled and str(settings.data_dir).startswith(tempfile.gettempdir()):
+        raise RuntimeError('DATA_DIR must be set to a persistent location in production')
     await init_db()
     configure_logging()
     logger.info('Starting application...')

@@ -330,8 +330,6 @@ class Settings(BaseSettings):
             raise ValueError('OBJECT_STORE_SECRET_KEY must not be empty')
         if self.prod_mode_enabled and 'rustfsadmin' in {self.object_store_access_key, self.object_store_secret_key}:
             raise ValueError('OBJECT_STORE credentials must be changed from the rustfsadmin default in production')
-        if self.prod_mode_enabled and str(self.data_dir).startswith(tempfile.gettempdir()):
-            raise ValueError('DATA_DIR must be set to a persistent location in production (got a temp-directory fallback)')
         # Default namespace is the default S3 bucket name.
         from backend_core.namespace_storage import is_valid_namespace_name
 
