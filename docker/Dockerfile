@@ -4,7 +4,7 @@
 ARG BUN_VERSION=1.3.11
 FROM oven/bun:${BUN_VERSION} AS bun-runtime
 
-FROM python:3.14.3-slim AS protocol-builder
+FROM python:3.14.6-slim AS protocol-builder
 WORKDIR /app
 COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv
@@ -20,7 +20,7 @@ COPY packages/worker/ /app/packages/worker/
 RUN mkdir -p /app/packages/frontend/src/lib
 RUN just generate-protocol
 
-FROM python:3.14.3-slim AS engine
+FROM python:3.14.6-slim AS engine
 ARG UV_VERSION=0.9.5
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
@@ -58,7 +58,7 @@ COPY packages/frontend/ ./
 COPY --from=protocol-builder /app/packages/frontend/src/lib/protocol /app/packages/frontend/src/lib/protocol
 RUN bun run panda:codegen && bun run build
 
-FROM python:3.14.3-slim AS backend-base
+FROM python:3.14.6-slim AS backend-base
 WORKDIR /app/packages/backend
 
 ARG UV_VERSION=0.9.5
