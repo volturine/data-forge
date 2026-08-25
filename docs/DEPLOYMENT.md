@@ -37,6 +37,38 @@ Browser ────┘
 The API serves the built frontend and HTTP API on port 8000. The scheduler and
 worker reach its internal gRPC endpoint only through the Compose network.
 
+### Image channels
+
+CI publishes every role image to GHCR on three channels:
+
+| Channel | Trigger | Tags | Platforms |
+| --- | --- | --- | --- |
+| Dev / PR preview | pull request, push to `master` | `dev-pr-<number>`, `dev-master` | `linux/amd64` |
+| Release | tag `v*` | `<version>`, semver aliases, `latest` | `linux/amd64`, `linux/arm64` |
+
+Dev-channel images feed PR-preview deployments; release images are pinned in
+production. Keep all four `DF_*_IMAGE` values on the same channel and commit.
+
+### Naming, ports, and collision rules
+
+All fixed Docker resources are unique per purpose so prod, dev, tests, e2e,
+and centrally managed deployment stacks can coexist on one host:
+
+- Compose projects: repo smoke uses `-p dataforge-prod`, containerized dev uses
+  `-p dataforge-dev`; centrally deployed stacks use their own names
+  (`dataforge-app`, `dataforge-app-dev`) with separate volumes.
+- Engine networks follow the compose project (`dataforge-prod-engine-runtime`,
+  `dataforge-dev-engine-runtime`) and never overlap test networks — tests and
+  e2e always create per-run networks with UUID/run-id suffixes on random free
+  ports.
+- Host ports: dev 8000/3000 (`just dev` and `docker-dev` are mutually
+  exclusive), production smoke 8300, central deployment prod 3300, dev 3400.
+
+The central deployments workspace (one directory per project with
+`compose.prod.yaml`, `compose.dev.yaml`, a Tailscale Serve overlay, and real
+`.env.*` files) is the standard way these images get run on servers; its
+compose files mirror this directory's topology and follow the same registry.
+
 ### Configure and start
 
 1. Review `docker/env/prod.env` and replace every `replace-with-...` value.
@@ -49,11 +81,11 @@ worker reach its internal gRPC endpoint only through the Compose network.
 ```bash
 docker compose --env-file docker/env/prod.env \
   -p dataforge-prod \
-  -f docker/docker-compose.yml \
+  -f docker/compose.yaml \
   pull
 docker compose --env-file docker/env/prod.env \
   -p dataforge-prod \
-  -f docker/docker-compose.yml \
+  -f docker/compose.yaml \
   up -d
 ```
 
@@ -61,16 +93,16 @@ Inspect status and logs:
 
 ```bash
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml ps
+  -p dataforge-prod -f docker/compose.yaml ps
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml logs -f
+  -p dataforge-prod -f docker/compose.yaml logs -f
 ```
 
 Stop containers without deleting durable volumes:
 
 ```bash
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml down
+  -p dataforge-prod -f docker/compose.yaml down
 ```
 
 Do not add `-v` to the production `down` command: it deletes the PostgreSQL,
@@ -83,9 +115,9 @@ Back up all three durable stores first. Then change all application image tags i
 
 ```bash
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml pull
+  -p dataforge-prod -f docker/compose.yaml pull
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml up -d
+  -p dataforge-prod -f docker/compose.yaml up -d
 ```
 
 Watch the logs and wait for `/health/ready` before returning traffic to the
@@ -215,7 +247,7 @@ available, and test restores regularly.
 
 ```bash
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml \
+  -p dataforge-prod -f docker/compose.yaml \
   exec -T postgres pg_dump -U dataforge -d dataforge -Fc > dataforge-postgres.dump
 ```
 
@@ -223,7 +255,7 @@ Restore into an empty or disposable database after stopping application roles:
 
 ```bash
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml \
+  -p dataforge-prod -f docker/compose.yaml \
   exec -T postgres pg_restore -U dataforge -d dataforge \
   --clean --if-exists --no-owner < dataforge-postgres.dump
 ```

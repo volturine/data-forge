@@ -97,9 +97,9 @@ The API container serves both the backend API and the built frontend on port 800
 # 1) Edit docker/env/prod.env and set image tags, passwords, and secrets.
 # 2) Pull and start the production stack.
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml pull
+  -p dataforge-prod -f docker/compose.yaml pull
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml up -d
+  -p dataforge-prod -f docker/compose.yaml up -d
 
 # Open the application.
 open http://localhost:8000
@@ -150,12 +150,12 @@ just dev
 
 ### Production (Docker)
 
-Production Docker deployments use `docker/docker-compose.yml` with `docker/env/prod.env`.
+Production Docker deployments use `docker/compose.yaml` with `docker/env/prod.env`.
 The API serves both the backend API and the pre-built frontend on port 8000.
 
 ```bash
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml up -d
+  -p dataforge-prod -f docker/compose.yaml up -d
 ```
 
 The repository defaults are tuned for concurrent clients:
