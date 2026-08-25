@@ -30,12 +30,15 @@ The checked-in stack runs five services:
 ```text
 PostgreSQL ─┐
 RustFS ─────┼── API (HTTP + internal gRPC) ◄── Scheduler
-            │                              ◄── Worker
+            │         │                    ◄── Worker
+            │         └── worker data-plane gRPC
 Browser ────┘
 ```
 
 The API serves the built frontend and HTTP API on port 8000. The scheduler and
-worker reach its internal gRPC endpoint only through the Compose network.
+worker reach the API gRPC endpoint only through the Compose network. The API
+reaches the worker data-plane gRPC the same way for object-store operations
+such as file upload.
 
 ### Image channels
 
