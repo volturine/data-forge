@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { untrack } from 'svelte';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -187,7 +188,6 @@
 	const analysisQuery = createQuery(() => ({
 		queryKey: ['analysis', analysisId],
 		enabled: !!analysisId,
-		staleTime: 0,
 		queryFn: async () => {
 			if (!analysisId) throw new Error('Analysis ID is required');
 			if (!validAnalysisId) throw new Error('Invalid analysis ID format');
@@ -195,16 +195,33 @@
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
-			analysisStore.applyAnalysis(result.value.analysis);
-			analysisStore.currentRevision = result.value.version;
-			lastLoadedVersion = result.value.version;
+			const { analysis, version } = result.value;
+			analysisStore.applyAnalysis(analysis);
+			analysisStore.currentRevision = version;
+			lastLoadedVersion = version;
 			isDirty = false;
-			return result.value.analysis;
+			return result.value;
 		},
 		retry: false
 	}));
 
-	const currentAnalysis = $derived(analysisStore.current ?? analysisQuery.data ?? null);
+	// Hydration: sync query data into the analysis store for cached reads where queryFn
+	// doesn't run. Uses untrack() on analysisQuery.data to avoid an infinite loop —
+	// applyAnalysis() mutates $state which triggers re-renders that would recreate the
+	// query result object with a new data reference, re-triggering this effect.
+	$effect(() => {
+		const id = validAnalysisId;
+		if (!id) return;
+		const data = untrack(() => analysisQuery.data);
+		if (!data || data.analysis.id !== id) return;
+		if (analysisStore.current?.id === id) return;
+		analysisStore.applyAnalysis(data.analysis);
+		analysisStore.currentRevision = data.version;
+		lastLoadedVersion = data.version;
+		isDirty = false;
+	});
+
+	const currentAnalysis = $derived(analysisStore.current ?? analysisQuery.data?.analysis ?? null);
 	const analysisFavorite = $derived(
 		validAnalysisId ? favoriteStore.isFavorite(validAnalysisId) : false
 	);
@@ -264,7 +281,7 @@
 	});
 
 	const analysisTabs = $derived.by(() => {
-		const title = analysisStore.current?.name ?? analysisQuery.data?.name ?? 'Analysis';
+		const title = analysisStore.current?.name ?? analysisQuery.data?.analysis.name ?? 'Analysis';
 		return analysisStore.tabs.map((tab) => ({
 			id: tab.id,
 			name: `${title} · ${tab.name}`
@@ -477,8 +494,8 @@
 	}
 </script>
 
-{#if analysisQuery.isLoading || analysisQuery.isError}
-	<AnalysisEditorLoadGate isLoading={analysisQuery.isLoading} error={analysisQuery.error} />
+{#if analysisQuery.isPending}
+	<AnalysisEditorLoadGate isLoading={true} error={null} />
 {:else if analysisQuery.data}
 	<div
 		class={css({
@@ -492,7 +509,7 @@
 		<AnalysisEditorHeader
 			tabs={analysisStore.tabs}
 			activeTabId={analysisStore.activeTab?.id ?? null}
-			titleName={currentAnalysis?.name ?? analysisQuery.data.name}
+			titleName={currentAnalysis?.name ?? analysisQuery.data.analysis.name}
 			description={currentAnalysis?.description ?? null}
 			favorite={analysisFavorite}
 			loading={analysisStore.loading}
@@ -683,6 +700,8 @@
 			{/if}
 		</div>
 	</div>
+{:else}
+	<AnalysisEditorLoadGate isLoading={false} error={analysisQuery.error} />
 {/if}
 
 <svelte:window
