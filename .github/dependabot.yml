@@ -14,6 +14,13 @@ updates:
     directory: /packages/frontend
     schedule:
       interval: weekly
+    ignore:
+      # svelte-check and typescript-eslint still require the TypeScript 6 JS API.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # v9 removes createTable and needs a DataTable.svelte rewrite.
+      - dependency-name: "@tanstack/table-core"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: uv
     directory: /packages/backend
