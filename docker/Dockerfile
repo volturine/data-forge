@@ -122,7 +122,7 @@ CMD ["python3", "../backend/main.py"]
 FROM runtime-base AS scheduler
 ENV PYTHONPATH="/app/packages/scheduler"
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
-    CMD python3 -c "import psycopg; c=psycopg.connect('$${DATABASE_URL}'); r=c.execute(\"select count(*) from public.runtime_workers where kind='scheduler' and stopped_at is null\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)"
+    CMD python3 -c "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\"select count(*) from public.runtime_workers where kind='scheduler' and stopped_at is null\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)"
 CMD ["python3", "../scheduler/main.py"]
 
 FROM runtime-base AS worker
@@ -138,5 +138,5 @@ USER appuser
 ENV PATH="/app/worker-venv/bin:${PATH}"
 ENV PYTHONPATH="/app/packages/worker"
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
-    CMD python3 -c "import psycopg; c=psycopg.connect('$${DATABASE_URL}'); r=c.execute(\"select count(*) from public.runtime_workers where kind='build_manager' and stopped_at is null\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)"
+    CMD python3 -c "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\"select count(*) from public.runtime_workers where kind='build_manager' and stopped_at is null\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)"
 CMD ["python3", "../worker/main.py"]
