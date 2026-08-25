@@ -17,7 +17,7 @@ jobs:
   backend:
     runs-on: [self-hosted, linux, x64]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v8.1.0
         with:
@@ -78,7 +78,7 @@ jobs:
     name: frontend
     runs-on: [self-hosted, linux, x64]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v8.1.0
         with:
@@ -140,7 +140,7 @@ jobs:
       E2E_TIMEOUT_SECONDS: "1500"
       LOG_LEVEL: "warning"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v8.1.0
         with:
@@ -232,7 +232,7 @@ jobs:
           - image_name: data-forge-polars-engine
             target: engine
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
 
