@@ -289,18 +289,23 @@ test-e2e:
     fi
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py --cwd . --ignore-pattern "InvalidCredentialsError: Invalid email or password" --ignore-pattern "TokenInvalidError: Token is invalid" -- scripts/test_e2e.sh
 
+# Containerized dev stack (source mounts + Vite). Uses the same host ports as
+# `just dev` (API 8000, frontend 3000), so run either one, not both.
 docker-dev:
     just generate-protocol
-    docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build
+    docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/compose.yaml -f docker/compose.dev.yaml up --build
 
 docker-dev-down:
-    docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/docker-compose.yml -f docker/docker-compose.dev.yml down -v --remove-orphans
+    docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/compose.yaml -f docker/compose.dev.yaml down -v --remove-orphans
 
 docker-dev-logs:
-    docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/docker-compose.yml -f docker/docker-compose.dev.yml logs -f
+    docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/compose.yaml -f docker/compose.dev.yaml logs -f
 
 # Build local fixed-role images and smoke-test the production compose topology.
-# Overrides only DF_*_IMAGE tags; still uses docker/docker-compose.yml + docker/env/prod.env.
+# Overrides only DF_*_IMAGE tags and the host port; still uses
+# docker/compose.yaml + docker/env/prod.env.
+# Host port defaults to 8300 so the smoke stack never collides with the dev
+# stacks (8000/3000) or the central deployment stacks (3300/3400).
 docker-prod:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -314,13 +319,14 @@ docker-prod:
     DF_SCHEDULER_IMAGE="data-forge-scheduler:${TAG}" \
     DF_WORKER_IMAGE="data-forge-worker:${TAG}" \
     DF_ENGINE_IMAGE="data-forge-polars-engine:${TAG}" \
+    DF_API_PORT="${DF_SMOKE_API_PORT:-8300}" \
       docker compose --env-file docker/env/prod.env \
         -p dataforge-prod \
-        -f docker/docker-compose.yml \
+        -f docker/compose.yaml \
         up -d "$@"
 
 docker-prod-down:
-    docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/docker-compose.yml down -v --remove-orphans
+    docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml down -v --remove-orphans
 
 docker-prod-logs:
-    docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/docker-compose.yml logs -f
+    docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml logs -f

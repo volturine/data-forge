@@ -2,8 +2,11 @@ name: Docker Publish
 
 on:
   push:
+    branches:
+      - master
     tags:
       - "v*"
+  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -22,7 +25,65 @@ env:
   UV_VERSION: 0.9.5
 
 jobs:
+  # Dev channel: every PR publishes dev-pr-<number> images and master publishes
+  # a rolling dev-master image (linux/amd64 only). These feed the dev /
+  # PR-preview deployment stacks in the central deployments workspace.
+  dev:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: api
+            image: data-forge-api
+          - target: scheduler
+            image: data-forge-scheduler
+          - target: worker
+            image: data-forge-worker
+          - target: engine
+            image: data-forge-polars-engine
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Compute image tag and lowercase owner
+        id: tag
+        run: |
+          echo "owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "value=dev-pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev-master" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Fork PRs cannot write to GHCR; publish only same-repo PR branches.
+      - uses: docker/login-action@v4
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: ${{ matrix.target }}
+          push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          platforms: linux/amd64
+          tags: '${{ env.REGISTRY }}/${{ steps.tag.outputs.owner }}/${{ matrix.image }}:${{ steps.tag.outputs.value }}'
+          build-args: |
+            APP_VERSION=${{ github.sha }}
+            BUN_VERSION=${{ env.BUN_VERSION }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ github.run_id }}
+            UV_VERSION=${{ env.UV_VERSION }}
+
+  # Release channel: v* tags publish pinned multi-arch images.
   publish:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -101,7 +162,7 @@ jobs:
           SCHEDULER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-scheduler"
           WORKER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-worker"
           ENGINE_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-polars-engine"
-          COMPOSE_URL="https://github.com/${REPO}/blob/${TAG}/docker/docker-compose.yml"
+          COMPOSE_URL="https://github.com/${REPO}/blob/${TAG}/docker/compose.yaml"
           PROD_ENV_URL="https://github.com/${REPO}/blob/${TAG}/docker/env/prod.env"
           DEPLOY_URL="https://github.com/${REPO}/blob/${TAG}/docs/DEPLOYMENT.md"
 
@@ -133,7 +194,7 @@ jobs:
             echo
             echo "Recommended production path uses the checked-in stack:"
             echo
-            echo "- Compose file: [\`docker/docker-compose.yml\`](${COMPOSE_URL})"
+            echo "- Compose file: [\`docker/compose.yaml\`](${COMPOSE_URL})"
             echo "- Env template: [\`docker/env/prod.env\`](${PROD_ENV_URL})"
             echo "- Full guide: [\`docs/DEPLOYMENT.md\`](${DEPLOY_URL})"
             echo
@@ -152,11 +213,11 @@ jobs:
             echo '```bash'
             echo "docker compose --env-file docker/env/prod.env \\"
             echo "  -p dataforge-prod \\"
-            echo "  -f docker/docker-compose.yml \\"
+            echo "  -f docker/compose.yaml \\"
             echo "  pull"
             echo "docker compose --env-file docker/env/prod.env \\"
             echo "  -p dataforge-prod \\"
-            echo "  -f docker/docker-compose.yml \\"
+            echo "  -f docker/compose.yaml \\"
             echo "  up -d"
             echo '```'
             echo

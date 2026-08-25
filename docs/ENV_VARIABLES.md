@@ -37,7 +37,7 @@ Browser  ──►  FastAPI (PORT 8000)
 
 **Templates for this topology:**
 
-- Docker: use `docker/docker-compose.yml` with `docker/env/prod.env`.
+- Docker: use `docker/compose.yaml` with `docker/env/prod.env`.
 - Bare-metal (`just prod`): edit `docker/env/prod.env`
 
 ### Development — local runtime
@@ -107,15 +107,15 @@ If you only want the high-value knobs, start with these:
 ```bash
 # From the repository root, after editing docker/env/prod.env
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml pull
+  -p dataforge-prod -f docker/compose.yaml pull
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/docker-compose.yml up -d
+  -p dataforge-prod -f docker/compose.yaml up -d
 ```
 
-`docker/docker-compose.yml` is the single production compose file and
+`docker/compose.yaml` is the single production compose file and
 `docker/env/prod.env` is its production env template. GHCR-published images are
 for production releases only.
-`docker/docker-compose.yml` uses published fixed-role images and does not build application images during `up`.
+`docker/compose.yaml` uses published fixed-role images and does not build application images during `up`.
 The compose topology uses separate `api`, `scheduler`, and `worker` containers from the same codebase release.
 The checked-in Docker topology still includes `postgres` because the supported Docker runtime path is Postgres-backed. `DF_DATABASE_URL` in the Docker env files points at that service.
 

@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 #   - Justfile/scripts source the same file for runtime variables
 ENV_FILES: dict[Path, tuple[Path, ...]] = {
     ROOT / 'docker/env/dev.env': (
-        ROOT / 'docker/docker-compose.yml',
-        ROOT / 'docker/docker-compose.dev.yml',
+        ROOT / 'docker/compose.yaml',
+        ROOT / 'docker/compose.dev.yaml',
     ),
-    ROOT / 'docker/env/prod.env': (ROOT / 'docker/docker-compose.yml',),
+    ROOT / 'docker/env/prod.env': (ROOT / 'docker/compose.yaml',),
     ROOT / 'docker/env/e2e.env': (),
 }
 
