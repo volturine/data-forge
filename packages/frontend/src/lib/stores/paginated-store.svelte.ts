@@ -1,3 +1,5 @@
+import { untrack } from 'svelte';
+
 export type PaginatedStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 interface PaginatedError {
@@ -20,10 +22,12 @@ export abstract class PaginatedStore<TParams, TResponse> {
 	private token = 0;
 
 	load(params?: TParams): void {
-		if (
-			this.sameParams(this.params, params) &&
-			(this.status === 'connecting' || this.status === 'connected')
-		) {
+		const alreadyActive = untrack(
+			() =>
+				this.sameParams(this.params, params) &&
+				(this.status === 'connecting' || this.status === 'connected')
+		);
+		if (alreadyActive) {
 			return;
 		}
 		this.params = params;
