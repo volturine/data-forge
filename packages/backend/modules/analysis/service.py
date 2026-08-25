@@ -37,6 +37,7 @@ from backend_core.settings_store import (
 )
 from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import enums_pb2
+from modules.analysis import revisions
 from modules.analysis.pipeline_compiler import compile_step
 from modules.analysis.schemas import (
     AnalysisCreateSchema,
@@ -651,6 +652,14 @@ def get_analysis(
         raise analysis_not_found(analysis_id)
 
     return _to_response(analysis)
+
+
+def get_analysis_etag(session: Session, analysis_id: str) -> str:
+    """Return the revision-based ETag without building the full response payload."""
+    analysis = session.get(Analysis, analysis_id)
+    if not analysis:
+        raise analysis_not_found(analysis_id)
+    return revisions.etag(analysis)
 
 
 def list_analyses(

@@ -2,9 +2,11 @@
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { useQueryClient } from '@tanstack/svelte-query';
 	import { ChartBar, Copy, Star, Trash2 } from '@lucide/svelte';
 	import { formatDateDisplay, getYearDisplay } from '$lib/utils/datetime';
 	import { nowEpochMs } from '$lib/utils/temporal';
+	import { analysisQueryKey, fetchAnalysis } from '$lib/queries/analysis';
 	import { css } from '$lib/styles/panda';
 
 	interface Props {
@@ -26,6 +28,15 @@
 		onToggleFavorite,
 		onToggleSelect
 	}: Props = $props();
+
+	const queryClient = useQueryClient();
+
+	function prefetchAnalysis() {
+		void queryClient.prefetchQuery({
+			queryKey: analysisQueryKey(analysis.id),
+			queryFn: () => fetchAnalysis(analysis.id)
+		});
+	}
 
 	function handleClick(e: MouseEvent) {
 		const target = e.target as HTMLElement;
@@ -73,6 +84,8 @@
 	})}
 	onclick={handleClick}
 	onkeypress={handleKeyPress}
+	onpointerenter={prefetchAnalysis}
+	onfocus={prefetchAnalysis}
 >
 	<div
 		class={css({

@@ -34,6 +34,11 @@ export interface ApiResponse<T> {
 	headers: Headers;
 }
 
+/** Conditional (If-None-Match) request result — `data` is absent on 304. */
+export type ApiConditionalResponse<T> =
+	| { notModified: true; headers: Headers }
+	| { notModified: false; headers: Headers; data: T };
+
 let namespaceEpoch = 0;
 const namespaceRequests = new Set<AbortController>();
 
@@ -143,6 +148,8 @@ function apiFetch<T>(
 	parse: (response: Response) => ResultAsync<T, ApiError>
 ): ResultAsync<T, ApiError> {
 	const headers = buildHeaders(options);
+	// A 304 is a success for conditional requests — let it reach the parse callback.
+	const allowsNotModified = headers.has('If-None-Match');
 	const requestEpoch = namespaceEpoch;
 	const requestNamespace = headers.get('X-Namespace');
 	const namespaceController = new AbortController();
@@ -180,7 +187,9 @@ function apiFetch<T>(
 			return createApiError('network', error instanceof Error ? error.message : 'Network error');
 		}
 	).andThen((response) => {
-		if (!response.ok) return handleErrorResponse(response, endpoint, options);
+		if (!response.ok && !(allowsNotModified && response.status === 304)) {
+			return handleErrorResponse(response, endpoint, options);
+		}
 		return parse(response).andThen((value) => {
 			const currentNamespace = isNamespaceReady() ? requireNamespace() : null;
 			if (
@@ -226,7 +235,24 @@ export function apiRequestWithHeaders<T>(
 		}).map((data) => ({ data, headers: response.headers }));
 	});
 }
-
+export function apiConditionalRequestWithHeaders<T>(
+	endpoint: string,
+	options?: RequestInit
+): ResultAsync<ApiConditionalResponse<T>, ApiError> {
+	return apiFetch(
+		endpoint,
+		options,
+		(response): ResultAsync<ApiConditionalResponse<T>, ApiError> => {
+			if (response.status === 304) return okAsync({ notModified: true, headers: response.headers });
+			if (response.status === 204)
+				return okAsync({ notModified: false, headers: response.headers, data: undefined as T });
+			return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
+				trackParseError(endpoint, options?.method);
+				return createApiError('parse', 'Failed to parse response JSON');
+			}).map((data) => ({ notModified: false, data, headers: response.headers }));
+		}
+	);
+}
 export function apiBlobRequest(
 	endpoint: string,
 	options?: RequestInit

@@ -1,6 +1,6 @@
 import contextlib
 
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session
 
@@ -16,6 +16,7 @@ from modules.analysis import schemas, service
 from modules.analysis.pipeline_compiler import compile_step
 from modules.analysis.revisions import (
     etag as analysis_etag,
+    matches_if_none_match,
     require as require_analysis_revision,
     set_response_headers as set_analysis_revision_headers,
     version as analysis_version,
@@ -137,11 +138,16 @@ async def list_step_types():
 async def get_analysis(
     analysis_id: AnalysisId,
     response: Response,
+    if_none_match: str | None = Header(default=None),
     session: Session = Depends(get_db),
 ):
     """Get a single analysis by ID with full pipeline definition including all tabs and steps."""
-    analysis = service.get_analysis(session, parse_analysis_id(analysis_id))
-    response.headers['ETag'] = analysis_etag(analysis)
+    parsed_id = parse_analysis_id(analysis_id)
+    current_etag = service.get_analysis_etag(session, parsed_id)
+    if matches_if_none_match(if_none_match, current_etag):
+        return Response(status_code=304, headers={'ETag': current_etag})
+    analysis = service.get_analysis(session, parsed_id)
+    response.headers['ETag'] = current_etag
     response.headers['X-Analysis-Version'] = analysis_version(analysis)
     return analysis
 

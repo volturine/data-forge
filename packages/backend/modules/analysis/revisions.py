@@ -27,6 +27,21 @@ def version(analysis: RevisionedAnalysis) -> str:
     return str(analysis.revision)
 
 
+def matches_if_none_match(header: str | None, current_etag: str) -> bool:
+    if header is None:
+        return False
+    expected = current_etag.strip('"')
+    for token in header.split(','):
+        candidate = token.strip()
+        if candidate == '*':
+            return True
+        if candidate.startswith('W/'):
+            candidate = candidate[2:].strip()
+        if candidate.strip('"') == expected:
+            return True
+    return False
+
+
 def set_response_headers(response: Response, analysis: RevisionedAnalysis) -> None:
     response.headers['ETag'] = etag(analysis)
     response.headers['X-Analysis-Version'] = version(analysis)
