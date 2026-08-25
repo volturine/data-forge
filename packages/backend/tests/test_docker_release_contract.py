@@ -24,6 +24,13 @@ def test_single_production_compose_has_no_build_directive() -> None:
     assert 'image: ${DF_WORKER_IMAGE}' in text
 
 
+def test_compose_wires_worker_data_plane_across_containers() -> None:
+    text = COMPOSE.read_text()
+    assert 'WORKER_DATA_PLANE_GRPC_TARGET: worker:50052' in text
+    assert 'WORKER_DATA_PLANE_GRPC_HOST: 0.0.0.0' in text
+    assert 'WORKER_DATA_PLANE_GRPC_PORT: "50052"' in text
+
+
 def test_prod_env_uses_published_images_and_placeholder_secrets() -> None:
     text = PROD_ENV.read_text()
     assert 'DF_API_IMAGE=ghcr.io/volturine/data-forge-api:' in text

@@ -207,7 +207,9 @@ API, scheduler, and worker together, then restart the complete runtime.
 
 ### Internal runtime (gRPC)
 
-These variables configure the gRPC channel that the scheduler and worker use to communicate with the backend API process. They configure the internal gRPC control plane between API, scheduler, and worker.
+These variables configure the internal gRPC control plane between API, scheduler, and worker. Scheduler and worker clients connect to the API. The API also connects to the worker data-plane for object-store operations such as file upload.
+
+Same-host processes can keep the loopback defaults. Split Docker roles must bind the servers on `0.0.0.0` and point clients at Compose DNS (`api:50051`, `worker:50052`).
 
 | Variable               | Default                   | Notes                                                                                                 |
 | ---------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -215,6 +217,9 @@ These variables configure the gRPC channel that the scheduler and worker use to 
 | `INTERNAL_GRPC_HOST`   | `127.0.0.1`               | Host the API gRPC server binds to.                                                                    |
 | `INTERNAL_GRPC_PORT`   | `50051`                   | Port the API gRPC server listens on.                                                                    |
 | `INTERNAL_GRPC_TARGET` | `127.0.0.1:50051`         | Full `host:port` target string that scheduler and worker clients connect to.                          |
+| `WORKER_DATA_PLANE_GRPC_HOST` | `127.0.0.1`          | Host the worker data-plane gRPC server binds to.                                                      |
+| `WORKER_DATA_PLANE_GRPC_PORT` | `50052`              | Port the worker data-plane gRPC server listens on.                                                    |
+| `WORKER_DATA_PLANE_GRPC_TARGET` | `127.0.0.1:50052`  | Full `host:port` target string that the API uses to reach the worker data-plane.                      |
 
 ### Engine, scheduling, and resource limits
 
