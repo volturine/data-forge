@@ -4,9 +4,9 @@
     description     = "Data-Forge scheduler runtime package"
     requires-python = ">=3.14"
     dependencies    = [
-    "grpcio>=1.81.0",
-    "protobuf>=7.35.0",
-    "protovalidate>=1.2.0",
+    "grpcio>=1.83.0",
+    "protobuf>=7.36.0",
+    "protovalidate>=2.0.0",
 ]
 
 [build-system]
@@ -31,14 +31,14 @@
 
 [dependency-groups]
     dev = [
-        "mypy>=2.1.0",
-        "pytest>=9.0.3",
+        "mypy>=2.3.1",
+        "pytest>=9.1.1",
         "pytest-asyncio>=1.4.0",
         "pytest-cov>=7.1.0",
         "pytest-timeout>=2.4.0",
         "pytest-xdist>=3.8.0",
         "ruff>=0.15.17",
-        "types-grpcio>=1.0.0.20260607",
+        "types-grpcio>=1.83.0.20260730",
 ]
 
 [tool.hatch.build.targets.wheel]
