@@ -216,12 +216,14 @@
 			if ('notModified' in detail) {
 				if (!cached) throw new Error('Analysis cache is empty after 304');
 				draft.hydrate();
+				sourceSchemaLoader.load();
 				return cached;
 			}
 			analysisStore.applyAnalysis(detail.analysis);
 			analysisStore.currentRevision = detail.version;
 			lastLoadedVersion = detail.version;
 			draft.hydrate();
+			sourceSchemaLoader.load();
 			return detail;
 		},
 		retry: false
@@ -290,6 +292,7 @@
 			}
 			datasourceStore.datasources = result.value;
 			datasourceStore.loaded = true;
+			sourceSchemaLoader.load();
 			return result.value;
 		}
 	}));
