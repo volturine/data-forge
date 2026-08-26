@@ -125,4 +125,25 @@ describe('analysis editor lock + draft', () => {
 		expect(draft.draftLoaded).toBe(true);
 		expect(lock.editorAccessState).toBe('editable');
 	});
+
+	test('takeover hydrates after remote snap-back finishes', async () => {
+		const { lock, draft } = createEditor(true);
+		lock.sync(ANALYSIS_ID);
+		onStatus?.(ownedLock(), false);
+		lock.setRemoteSyncPending(true);
+		draft.hydrate();
+		await settleHydrate();
+		expect(lock.editorAccessState).toBe('locked');
+
+		onStatus?.(ownedLock(), true);
+		await settleHydrate();
+		expect(draft.draftLoaded).toBe(false);
+		expect(lock.editorAccessState).toBe('pending');
+
+		lock.setRemoteSyncPending(false);
+		draft.hydrate();
+		await settleHydrate();
+		expect(draft.draftLoaded).toBe(true);
+		expect(lock.editorAccessState).toBe('editable');
+	});
 });

@@ -254,11 +254,14 @@
 					lock.setRemoteSyncFailed(result.isError);
 				})
 				.finally(() => {
-					if (analysisId === syncAnalysisId) lock.setRemoteSyncPending(false);
+					if (analysisId !== syncAnalysisId) return;
+					lock.setRemoteSyncPending(false);
+					draft.hydrate();
 				});
 			return;
 		}
 		lock.setRemoteSyncPending(false);
+		draft.hydrate();
 	}
 
 	function handleWindowPointerDown(event: PointerEvent) {
