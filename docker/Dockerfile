@@ -23,19 +23,6 @@ COPY packages/worker/ /app/packages/worker/
 RUN mkdir -p /app/packages/frontend/src/lib
 RUN just generate-protocol
 
-FROM python:${PYTHON_VERSION}-slim-trixie AS python-builder
-COPY --from=uv-runtime /uv /usr/local/bin/uv
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential && \
-    rm -rf /var/lib/apt/lists/*
-
-FROM python-builder AS engine-builder
-COPY packages/worker/ /app/packages/worker/
-COPY --from=protocol-builder /app/packages/worker/buf /app/packages/worker/buf
-COPY --from=protocol-builder /app/packages/worker/dataforge_protocol /app/packages/worker/dataforge_protocol
-WORKDIR /app/packages/worker
-RUN uv sync --frozen --no-dev
-
 FROM python:${PYTHON_VERSION}-slim-trixie AS engine
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
@@ -45,15 +32,31 @@ LABEL org.opencontainers.image.description="Isolated Polars compute engine"
 LABEL org.opencontainers.image.version="${APP_VERSION}"
 LABEL org.opencontainers.image.revision="${VCS_REF}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
+COPY --from=uv-runtime /uv /usr/local/bin/uv
 RUN addgroup --gid 1000 appgroup && \
     adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
-COPY --from=engine-builder --chown=appuser:appgroup /app/packages/worker /app/packages/worker
+COPY packages/worker/ /app/packages/worker/
+COPY --from=protocol-builder /app/packages/worker/buf /app/packages/worker/buf
+COPY --from=protocol-builder /app/packages/worker/dataforge_protocol /app/packages/worker/dataforge_protocol
 WORKDIR /app/packages/worker
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    uv sync --frozen --no-dev && \
+    apt-get purge -y --auto-remove build-essential && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm /usr/local/bin/uv && \
+    chown -R appuser:appgroup /app
 USER appuser
 ENV PATH="/app/packages/worker/.venv/bin:${PATH}"
 ENV PYTHONPATH="/app/packages/worker"
 HEALTHCHECK NONE
 CMD ["python3", "engine_main.py"]
+
+FROM python:${PYTHON_VERSION}-slim-trixie AS python-builder
+COPY --from=uv-runtime /uv /usr/local/bin/uv
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
 FROM oven/bun:${BUN_VERSION}-alpine AS frontend-builder
 WORKDIR /app/packages/frontend
@@ -116,8 +119,15 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
     CMD python3 -c "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\"select count(*) from public.runtime_workers where kind='scheduler' and stopped_at is null\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)"
 CMD ["python3", "main.py"]
 
+FROM python-builder AS worker-builder
+COPY packages/worker/ /app/packages/worker/
+COPY --from=protocol-builder /app/packages/worker/buf /app/packages/worker/buf
+COPY --from=protocol-builder /app/packages/worker/dataforge_protocol /app/packages/worker/dataforge_protocol
+WORKDIR /app/packages/worker
+RUN uv sync --frozen --no-dev
+
 FROM app-runtime AS worker
-COPY --from=engine-builder --chown=appuser:appgroup /app/packages/worker /app/packages/worker
+COPY --from=worker-builder --chown=appuser:appgroup /app/packages/worker /app/packages/worker
 USER appuser
 WORKDIR /app/packages/worker
 ENV PATH="/app/packages/worker/.venv/bin:${PATH}"

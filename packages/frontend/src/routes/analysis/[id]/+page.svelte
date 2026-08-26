@@ -318,7 +318,7 @@
 		analysisId: () => analysisId,
 		datasourceId: () => datasourceId,
 		schemaKey: () => schemaKey,
-		datasources: () => datasourcesQuery.data
+		datasources: () => (datasourceStore.loaded ? datasourceStore.datasources : undefined)
 	});
 	const isLoadingSchema = $derived(sourceSchemaLoader.isLoading());
 

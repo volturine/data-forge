@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 set -a; source docker/env/e2e.env; set +a
+PORT="${E2E_PORT:-${PORT}}"
+FRONTEND_PORT="${E2E_FRONTEND_PORT:-${FRONTEND_PORT}}"
 # Playwright forces FORCE_COLOR=1 for worker processes, so drop NO_COLOR to
 # keep the warning scanner clean and avoid conflicting color policies.
 unset NO_COLOR
@@ -54,6 +56,15 @@ for _ in range(100):
         raise SystemExit(0)
 raise SystemExit("failed to choose an unreserved free TCP port")
 PY
+}
+assert_host_port_available() {
+    local port="$1"
+    if ! lsof -ti "tcp:${port}" >/dev/null 2>&1; then
+        return
+    fi
+    echo "E2E host port ${port} is already in use; refusing to terminate an unrelated process:" >&2
+    lsof -nP -iTCP:"${port}" -sTCP:LISTEN >&2 || true
+    exit 1
 }
 INTERNAL_GRPC_PORT="$(pick_host_port "${PORT}" "${FRONTEND_PORT}")"
 WORKER_DATA_PLANE_GRPC_PORT="$(pick_host_port "${PORT}" "${FRONTEND_PORT}" "${INTERNAL_GRPC_PORT}")"
@@ -146,17 +157,11 @@ cleanup() {
     docker network rm "${ENGINE_DOCKER_NETWORK}" >/dev/null 2>&1 || true
     docker rm -f "${PG_CONTAINER}" >/dev/null 2>&1 || true
     docker volume rm -f "${PG_VOLUME}" >/dev/null 2>&1 || true
-    lsof -ti "tcp:${PORT}" | xargs -r kill >/dev/null 2>&1 || true
-    lsof -ti "tcp:${FRONTEND_PORT}" | xargs -r kill >/dev/null 2>&1 || true
-    lsof -ti "tcp:${INTERNAL_GRPC_PORT}" | xargs -r kill >/dev/null 2>&1 || true
-    lsof -ti "tcp:${WORKER_DATA_PLANE_GRPC_PORT}" | xargs -r kill >/dev/null 2>&1 || true
     exit "$status"
 }
 trap cleanup EXIT
-lsof -ti "tcp:${PORT}" | xargs -r kill >/dev/null 2>&1 || true
-lsof -ti "tcp:${FRONTEND_PORT}" | xargs -r kill >/dev/null 2>&1 || true
-lsof -ti "tcp:${INTERNAL_GRPC_PORT}" | xargs -r kill >/dev/null 2>&1 || true
-lsof -ti "tcp:${WORKER_DATA_PLANE_GRPC_PORT}" | xargs -r kill >/dev/null 2>&1 || true
+assert_host_port_available "${PORT}"
+assert_host_port_available "${FRONTEND_PORT}"
 if [ -n "$LOG_DIR" ]; then
     mkdir -p "$LOG_DIR"
 fi
