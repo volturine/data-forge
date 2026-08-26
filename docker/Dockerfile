@@ -7,7 +7,7 @@ ARG UV_VERSION=0.9.5
 FROM oven/bun:${BUN_VERSION} AS bun-runtime
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-runtime
 
-FROM python:${PYTHON_VERSION}-slim AS protocol-builder
+FROM python:${PYTHON_VERSION}-slim-trixie AS protocol-builder
 WORKDIR /app
 COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=uv-runtime /uv /usr/local/bin/uv
@@ -23,7 +23,7 @@ COPY packages/worker/ /app/packages/worker/
 RUN mkdir -p /app/packages/frontend/src/lib
 RUN just generate-protocol
 
-FROM python:${PYTHON_VERSION}-slim AS python-builder
+FROM python:${PYTHON_VERSION}-slim-trixie AS python-builder
 COPY --from=uv-runtime /uv /usr/local/bin/uv
 RUN apt-get update && \
     apt-get install -y --no-install-recommends build-essential && \
@@ -36,7 +36,7 @@ COPY --from=protocol-builder /app/packages/worker/dataforge_protocol /app/packag
 WORKDIR /app/packages/worker
 RUN uv sync --frozen --no-dev
 
-FROM python:${PYTHON_VERSION}-slim AS engine
+FROM python:${PYTHON_VERSION}-slim-trixie AS engine
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG APP_VERSION=unknown
@@ -63,7 +63,7 @@ COPY packages/frontend/ ./
 COPY --from=protocol-builder /app/packages/frontend/src/lib/protocol /app/packages/frontend/src/lib/protocol
 RUN bun run panda:codegen && bun run build
 
-FROM python:${PYTHON_VERSION}-slim AS app-runtime
+FROM python:${PYTHON_VERSION}-slim-trixie AS app-runtime
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG APP_VERSION=unknown
