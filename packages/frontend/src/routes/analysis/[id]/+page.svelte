@@ -58,6 +58,7 @@
 		getDraftLoaded: () => draft.draftLoaded,
 		getIsSaving: () => isSaving,
 		getIsDirty: () => isDirty,
+		onOwned: () => draft.hydrate(),
 		onLockedByOther: () => snapBackFromRemoteLock()
 	});
 	const editorAccessState = $derived(lock.editorAccessState);

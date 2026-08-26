@@ -10,6 +10,7 @@ export type EditorLockControllerDeps = {
 	getDraftLoaded: () => boolean;
 	getIsSaving: () => boolean;
 	getIsDirty: () => boolean;
+	onOwned?: () => void;
 	onLockedByOther?: () => void;
 };
 
@@ -83,8 +84,10 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 					return;
 				}
 				const next = ownsLock ? 'owned' : 'other';
+				const becameOwned = next === 'owned' && lockMode !== 'owned';
 				const becameOther = next === 'other' && lockMode !== 'other';
 				lockMode = next;
+				if (becameOwned) deps.onOwned?.();
 				if (becameOther) deps.onLockedByOther?.();
 			},
 			onError(error: LockSessionError) {
