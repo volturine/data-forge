@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { X } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { createQuery } from '@tanstack/svelte-query';
 	import type { DataSource } from '$lib/types/datasource';
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { listAnalyses } from '$lib/api/analysis';
@@ -57,7 +58,6 @@
 
 	let searchValue = $state('');
 	const ns = useNamespace();
-	let lastNs = $state('');
 
 	const excludedSet = $derived(new SvelteSet(excludeIds));
 
@@ -78,29 +78,18 @@
 		return visibleDatasources.filter((ds) => set.has(ds.id));
 	});
 
-	let analyses = $state.raw<AnalysisGalleryItem[]>([]);
-	let analysesLoaded = $state(false);
-
-	// Network: $derived can't fetch analyses.
-	$effect(() => {
-		if (modeSource !== 'analysis') return;
-		const currentNs = ns.value;
-		if (currentNs !== lastNs) {
-			lastNs = currentNs;
-			analyses = [];
-			analysesLoaded = false;
+	const analysesQuery = createQuery(() => ({
+		queryKey: ['picker-analyses', ns.value],
+		enabled: modeSource === 'analysis',
+		queryFn: async () => {
+			const result = await listAnalyses();
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
 		}
-		if (analysesLoaded) return;
-		listAnalyses()
-			.map((value) => {
-				analyses = value;
-				analysesLoaded = true;
-			})
-			.mapErr(() => {
-				analyses = [];
-				analysesLoaded = true;
-			});
-	});
+	}));
+
+	const analyses = $derived(analysesQuery.data ?? []);
+	const analysesLoaded = $derived(modeSource !== 'analysis' || analysesQuery.isFetched);
 
 	const options = $derived.by(() => {
 		if (modeSource === 'analysis') {

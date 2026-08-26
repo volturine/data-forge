@@ -92,6 +92,7 @@
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
+			schemaStore.syncPreviewSchema(stepId, result.value, pipelineKey);
 			return result.value;
 		},
 		staleTime: Infinity,
@@ -117,22 +118,6 @@
 	const pageSize = $derived(data?.data?.length ?? 0);
 	const canPrev = $derived(currentPage > 1);
 	const canNext = $derived(pageSize === rowLimit);
-
-	const resetKey = $derived(
-		`${analysisId}-${datasourceId}-${stepId}-${rowLimit}-${pipelineKey}-${datasourceKey}`
-	);
-	// Subscription: $derived can't reset pagination on pipeline change.
-	$effect(() => {
-		void resetKey;
-		currentPage = 1;
-	});
-
-	// Schema sync: $derived can't write to an external store reactively.
-	$effect(() => {
-		const response = query.data;
-		if (!response) return;
-		schemaStore.syncPreviewSchema(stepId, response, pipelineKey);
-	});
 
 	function runPreview() {
 		if (!isActiveStep || analysisStore.previews.paused) return;

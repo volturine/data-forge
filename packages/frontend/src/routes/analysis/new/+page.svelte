@@ -65,8 +65,8 @@
 	let designTabs = $state<AnalysisTab[]>([]);
 	let aiPrompt = $state('');
 	let aiExplanation = $state('');
-	let aiProvider = $state<string | null>(null);
-	let aiModel = $state<string | null>(null);
+	let aiProviderOverride = $state<string | null>(null);
+	let aiModelOverride = $state<string | null>(null);
 	let generating = $state(false);
 
 	let cloneSourceId = $state('');
@@ -126,6 +126,12 @@
 		})
 	);
 	const configuredProviders = $derived(aiProvidersQuery.data ?? []);
+	const aiProvider = $derived(aiProviderOverride ?? configuredProviders[0]?.provider ?? null);
+	const aiModel = $derived(
+		aiModelOverride ??
+			configuredProviders.find((provider) => provider.provider === aiProvider)?.default_model ??
+			null
+	);
 	const defaultOutputNamespace = $derived(configStore.config?.default_namespace ?? ns.value);
 	const steps = $derived.by(() => {
 		if (mode === 'clone') return ['Start', 'Clone', 'Review'];
@@ -369,6 +375,9 @@
 		mode = nextMode;
 		resetDesignState(nextMode);
 		step = 1;
+		if (nextMode === 'template') {
+			synchronizeTemplateTabs(templateDetailQuery.data ?? null);
+		}
 	}
 
 	function resetDesignState(nextMode: CreationMode): void {
@@ -376,8 +385,8 @@
 		if (nextMode !== 'ai') {
 			aiPrompt = '';
 			aiExplanation = '';
-			aiProvider = null;
-			aiModel = null;
+			aiProviderOverride = null;
+			aiModelOverride = null;
 		}
 		if (nextMode !== 'clone') {
 			cloneSourceId = '';
@@ -426,7 +435,15 @@
 
 	function nextStep(): void {
 		if (!canProceed()) return;
-		step = Math.min(step + 1, steps.length);
+		const next = Math.min(step + 1, steps.length);
+		const nextLabel = steps[next - 1];
+		if (mode === 'template' && nextLabel === 'Output' && designTabs.length === 0) {
+			synchronizeTemplateTabs(templateDetailQuery.data ?? null);
+		}
+		step = next;
+		if (nextLabel === 'Review' && (mode === 'template' || mode === 'ai')) {
+			void refreshValidation();
+		}
 	}
 
 	function prevStep(): void {
@@ -456,6 +473,43 @@
 		next.splice(from, 1);
 		next.splice(to, 0, draggedDatasourceId);
 		selectedDatasourceIds = next;
+		syncTemplateTabs();
+	}
+
+	function syncTemplateTabs(): void {
+		if (mode !== 'template') return;
+		synchronizeTemplateTabs(templateDetailQuery.data ?? null);
+	}
+
+	function invalidateAiDraftIfDatasourcesChanged(): void {
+		if (mode !== 'ai') return;
+		if (designTabs.length === 0) return;
+		const currentIds = new Set(selectedDatasourceIds);
+		const generatedIds = new Set(
+			designTabs
+				.map((tab) => (tab.datasource.analysis_tab_id ? null : tab.datasource.id))
+				.filter((id): id is string => typeof id === 'string')
+		);
+		if (
+			currentIds.size === generatedIds.size &&
+			Array.from(currentIds).every((id) => generatedIds.has(id))
+		) {
+			return;
+		}
+		designTabs = [];
+		aiExplanation = '';
+	}
+
+	function handleDatasourceSelect(id: string): void {
+		ensureDatasourceConfig(id);
+		syncTemplateTabs();
+		invalidateAiDraftIfDatasourcesChanged();
+	}
+
+	function handleDatasourceDeselect(id: string): void {
+		removeDatasourceConfig(id);
+		syncTemplateTabs();
+		invalidateAiDraftIfDatasourcesChanged();
 	}
 
 	async function handleGenerate(): Promise<void> {
@@ -480,8 +534,8 @@
 			(value) => {
 				designTabs = value.pipeline.tabs;
 				aiExplanation = value.explanation;
-				aiProvider = value.provider;
-				aiModel = value.model;
+				aiProviderOverride = value.provider;
+				aiModelOverride = value.model;
 			},
 			(err) => {
 				error = err.message;
@@ -613,52 +667,6 @@
 		}
 		tab.output.build_mode = value;
 	}
-
-	// Subscription: template-driven tabs must stay aligned with datasource selection and config edits.
-	$effect(() => {
-		if (mode !== 'template') return;
-		synchronizeTemplateTabs(templateDetailQuery.data ?? null);
-	});
-
-	// Subscription: changing datasource selection after AI generation invalidates the generated draft.
-	$effect(() => {
-		if (mode !== 'ai') return;
-		if (designTabs.length === 0) return;
-		const currentIds = new Set(selectedDatasourceIds);
-		const generatedIds = new Set(
-			designTabs
-				.map((tab) => (tab.datasource.analysis_tab_id ? null : tab.datasource.id))
-				.filter((id): id is string => typeof id === 'string')
-		);
-		if (
-			currentIds.size === generatedIds.size &&
-			Array.from(currentIds).every((id) => generatedIds.has(id))
-		)
-			return;
-		designTabs = [];
-		aiExplanation = '';
-	});
-
-	// Subscription: entering review for pipeline modes should trigger server validation.
-	$effect(() => {
-		if (currentStepLabel !== 'Review') return;
-		if (mode !== 'template' && mode !== 'ai') return;
-		void refreshValidation();
-	});
-
-	// Subscription: configured AI providers should seed the provider/model pickers once loaded.
-	$effect(() => {
-		if (mode !== 'ai') return;
-		if (!configuredProviders.length) return;
-		if (!aiProvider) {
-			aiProvider = configuredProviders[0]?.provider ?? null;
-		}
-		if (!aiModel) {
-			aiModel =
-				configuredProviders.find((provider) => provider.provider === aiProvider)?.default_model ??
-				null;
-		}
-	});
 </script>
 
 <div
@@ -807,8 +815,8 @@
 							mode="multi"
 							label="Available datasources"
 							alwaysOpen
-							onSelect={(id) => ensureDatasourceConfig(id)}
-							onDeselect={(id) => removeDatasourceConfig(id)}
+							onSelect={handleDatasourceSelect}
+							onDeselect={handleDatasourceDeselect}
 						/>
 						<div class={css({ marginTop: '4', display: 'grid', gap: '3' })}>
 							{#each selectedDatasources as datasource (datasource.id)}
@@ -855,6 +863,7 @@
 															...currentConfig,
 															branch: (event.currentTarget as HTMLSelectElement).value
 														};
+														syncTemplateTabs();
 													}}
 												>
 													{#each getBranchOptions(datasource) as branch (branch)}
@@ -889,6 +898,7 @@
 														...currentConfig,
 														...(config as AnalysisTabDatasourceConfig)
 													};
+													syncTemplateTabs();
 												}}
 											/>
 										</div>
@@ -951,7 +961,13 @@
 													selectedTemplateId === template.id ? 'border.accent' : 'border.primary'
 											})}
 											onclick={() => {
+												if (selectedTemplateId === template.id) return;
 												selectedTemplateId = template.id;
+												if (templateDetailQuery.data?.id === template.id) {
+													synchronizeTemplateTabs(templateDetailQuery.data);
+													return;
+												}
+												designTabs = [];
 											}}
 										>
 											<div class={css({ fontWeight: 'semibold', marginBottom: '1' })}>
@@ -1067,7 +1083,13 @@
 								>
 									<label class={css({ display: 'grid', gap: '1' })}>
 										<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Provider</span>
-										<select class={input({ variant: 'dense' })} bind:value={aiProvider}>
+										<select
+											class={input({ variant: 'dense' })}
+											value={aiProvider ?? ''}
+											onchange={(event) => {
+												aiProviderOverride = (event.currentTarget as HTMLSelectElement).value;
+											}}
+										>
 											{#each configuredProviders as provider (provider.provider)}
 												<option value={provider.provider}>{provider.provider}</option>
 											{/each}
@@ -1075,7 +1097,13 @@
 									</label>
 									<label class={css({ display: 'grid', gap: '1' })}>
 										<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Model</span>
-										<input class={input({ variant: 'dense' })} bind:value={aiModel} />
+										<input
+											class={input({ variant: 'dense' })}
+											value={aiModel ?? ''}
+											oninput={(event) => {
+												aiModelOverride = (event.currentTarget as HTMLInputElement).value;
+											}}
+										/>
 									</label>
 								</div>
 								<button

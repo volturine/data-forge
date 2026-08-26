@@ -67,41 +67,43 @@
 </script>
 
 <div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
-	<ExcelTableSelector
-		mode="config"
-		{filePath}
-		initialConfig={config}
-		disabled={pending}
-		onConfigChange={handleConfigUpdate}
-	/>
-	{#if hasChanges}
-		<button
-			class={css({
-				borderWidth: '1',
-				backgroundColor: 'accent.primary',
-				color: 'fg.inverse',
-				'&:hover:not(:disabled)': { opacity: '0.9' },
-				display: 'flex',
-				alignItems: 'center',
-				width: '100%',
-				justifyContent: 'center',
-				gap: '2'
-			})}
-			onclick={onSave}
+	{#key filePath}
+		<ExcelTableSelector
+			mode="config"
+			{filePath}
+			initialConfig={config}
 			disabled={pending}
-		>
-			{#if pending}
-				<Loader size={16} class={css({ animation: 'spin 1s linear infinite' })} />
-				Saving...
-			{:else}
-				<Save size={16} />
-				Save Changes
-			{/if}
-		</button>
-	{/if}
-	{#if !filePath}
-		<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
-			No original file path available for Excel preview.
-		</p>
-	{/if}
+			onConfigChange={handleConfigUpdate}
+		/>
+		{#if hasChanges}
+			<button
+				class={css({
+					borderWidth: '1',
+					backgroundColor: 'accent.primary',
+					color: 'fg.inverse',
+					'&:hover:not(:disabled)': { opacity: '0.9' },
+					display: 'flex',
+					alignItems: 'center',
+					width: '100%',
+					justifyContent: 'center',
+					gap: '2'
+				})}
+				onclick={onSave}
+				disabled={pending}
+			>
+				{#if pending}
+					<Loader size={16} class={css({ animation: 'spin 1s linear infinite' })} />
+					Saving...
+				{:else}
+					<Save size={16} />
+					Save Changes
+				{/if}
+			</button>
+		{/if}
+		{#if !filePath}
+			<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
+				No original file path available for Excel preview.
+			</p>
+		{/if}
+	{/key}
 </div>

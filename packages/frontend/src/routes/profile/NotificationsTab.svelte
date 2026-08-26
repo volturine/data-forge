@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import {
 		Mail,
@@ -48,14 +49,13 @@
 
 	const queryClient = useQueryClient();
 
-	// Network: load settings on mount.
-	$effect(() => {
+	onMount(() => {
 		loading = true;
 		feedback = null;
 		smtp_password_dirty = false;
 		telegram_bot_token_dirty = false;
 		let aborted = false;
-		getSettings().match(
+		void getSettings().match(
 			(s) => {
 				if (aborted) return;
 				smtp_host = s.smtp_host;

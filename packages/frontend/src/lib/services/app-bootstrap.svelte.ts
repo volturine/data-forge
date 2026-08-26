@@ -32,7 +32,7 @@ export class AppBootstrap {
 	private settled = $state(false);
 
 	/**
-	 * Kick bootstrap exactly once. Safe to call from a layout $effect.
+	 * Kick bootstrap exactly once. Safe to call from layout `onMount`.
 	 */
 	start(): Promise<void> {
 		if (this.run) return this.run;

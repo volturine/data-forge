@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy, onMount } from 'svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import type { DataSource } from '$lib/types/datasource';
 	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
@@ -35,6 +36,7 @@
 		onChangeDatasource?: () => void;
 		onRenameTab?: (name: string) => void;
 		onDuplicateTab?: () => void;
+		onResourceConfigChange?: () => void;
 		readOnly?: boolean;
 	}
 
@@ -56,12 +58,12 @@
 		onChangeDatasource: _onChangeDatasource,
 		onRenameTab: _onRenameTab,
 		onDuplicateTab: _onDuplicateTab,
+		onResourceConfigChange: _onResourceConfigChange,
 		readOnly = false
 	}: Props = $props();
 
 	const canDrop = $derived(!readOnly && drag.active);
 	const hoverIndex = $derived(drag.target?.index ?? null);
-	const activeTabId = $derived(activeTab?.id ?? null);
 	const insertButton = css({
 		display: 'inline-flex',
 		alignItems: 'center',
@@ -76,31 +78,26 @@
 		_hover: { color: 'fg.primary' }
 	});
 
-	let lastTabId = $state<string | null>(null);
 	let pasteError = $state<string | null>(null);
+	let pasteErrorTimer: number | null = null;
 	let canvasEl = $state<HTMLElement | null>(null);
 	let outputEl = $state<HTMLElement | null>(null);
 	let outputVisible = $state(true);
 
-	// $effect: drag reset is a UI side effect not derivable from state
-	// Subscription: $derived can't reset drag UI on tab change.
-	$effect(() => {
-		const tabId = activeTabId;
-		if (tabId === lastTabId) return;
-		lastTabId = tabId;
-		if (drag.active) {
-			drag.end();
-			return;
-		}
-		drag.clearTarget();
-	});
+	function clearPasteErrorTimer(): void {
+		if (pasteErrorTimer === null) return;
+		window.clearTimeout(pasteErrorTimer);
+		pasteErrorTimer = null;
+	}
 
-	// Timer: clear paste error after 3s — $derived can't schedule timeouts
-	$effect(() => {
-		if (!pasteError) return;
-		const timer = window.setTimeout(() => (pasteError = null), 3000);
-		return () => window.clearTimeout(timer);
-	});
+	function showPasteError(message: string): void {
+		pasteError = message;
+		clearPasteErrorTimer();
+		pasteErrorTimer = window.setTimeout(() => {
+			pasteError = null;
+			pasteErrorTimer = null;
+		}, 3000);
+	}
 
 	function observeOutput(node: HTMLElement): () => void {
 		const observer = new IntersectionObserver(
@@ -139,17 +136,17 @@
 			const text = await navigator.clipboard.readText();
 			const parsed: unknown = JSON.parse(text);
 			if (!isClipboardStep(parsed)) {
-				pasteError = 'Clipboard does not contain a valid step';
+				showPasteError('Clipboard does not contain a valid step');
 				return;
 			}
 			if (!(parsed.type in stepTypes) && !isChartStep(parsed.type)) {
-				pasteError = `Unknown step type: ${parsed.type}`;
+				showPasteError(`Unknown step type: ${parsed.type}`);
 				return;
 			}
 			const target = buildTarget(index);
 			onPasteStep(parsed, target);
 		} catch {
-			pasteError = 'Could not read clipboard';
+			showPasteError('Could not read clipboard');
 		}
 	}
 
@@ -274,61 +271,72 @@
 		return buildTarget(fallback.index);
 	}
 
-	// DOM: $derived can't update drop target from pointer.
-	$effect(() => {
-		if (!drag.active) return;
-		if (drag.pointerX === null || drag.pointerY === null) return;
-		const target = resolveTargetFromPoint(drag.pointerX, drag.pointerY);
+	function updateDropTargetFromPoint(x: number, y: number): void {
+		const target = resolveTargetFromPoint(x, y);
 		if (!target) {
 			drag.clearTarget();
 			return;
 		}
-		const valid = isValidTarget(target.index);
-		drag.setTarget(target, valid);
-	});
+		drag.setTarget(target, isValidTarget(target.index));
+	}
 
-	// Lifecycle: register synchronous target resolver so commit() can
-	// resolve the drop target even if the reactive $effect above hasn't run yet.
-	$effect(() => {
+	let edgeScrollRaf = 0;
+
+	function startEdgeScroll(): void {
+		if (edgeScrollRaf) return;
+		const loop = () => {
+			if (!drag.active || drag.pointerY === null) {
+				edgeScrollRaf = 0;
+				return;
+			}
+			if (canvasEl) autoScroll(canvasEl, drag.pointerY);
+			edgeScrollRaf = window.requestAnimationFrame(loop);
+		};
+		edgeScrollRaf = window.requestAnimationFrame(loop);
+	}
+
+	function handleWindowPointerMove(event: PointerEvent): void {
+		if (!drag.active) return;
+		updateDropTargetFromPoint(event.clientX, event.clientY);
+		if (canvasEl) autoScroll(canvasEl, event.clientY);
+		startEdgeScroll();
+	}
+
+	onMount(() => {
 		drag.setTargetResolver((x: number, y: number) => {
 			const target = resolveTargetFromPoint(x, y);
 			if (!target) return null;
 			return { target, valid: isValidTarget(target.index) };
 		});
-		return () => drag.setTargetResolver(null);
+		return () => {
+			drag.setTargetResolver(null);
+			if (drag.active) {
+				drag.end();
+				return;
+			}
+			drag.clearTarget();
+		};
+	});
+
+	onDestroy(() => {
+		clearPasteErrorTimer();
+		if (edgeScrollRaf) window.cancelAnimationFrame(edgeScrollRaf);
 	});
 
 	const scrollThreshold = 60;
 	const scrollSpeed = 15;
 
-	function autoScroll(canvasEl: HTMLElement, pointerY: number) {
+	function autoScroll(canvas: HTMLElement, pointerY: number) {
 		const viewportHeight = window.innerHeight;
 
 		if (pointerY > viewportHeight - scrollThreshold) {
-			canvasEl.scrollTop += scrollSpeed;
+			canvas.scrollTop += scrollSpeed;
 		}
 
 		if (pointerY < scrollThreshold) {
-			canvasEl.scrollTop -= scrollSpeed;
+			canvas.scrollTop -= scrollSpeed;
 		}
 	}
-
-	// DOM: $derived can't auto-scroll while dragging.
-	$effect(() => {
-		if (!drag.active) return;
-		if (drag.pointerY === null) return;
-
-		const canvas = document.querySelector('.pipeline-canvas') as HTMLElement | null;
-		if (!canvas) return;
-
-		const handleScroll = () => {
-			if (!drag.active || drag.pointerY === null) return;
-			autoScroll(canvas, drag.pointerY);
-		};
-
-		const intervalId = window.setInterval(handleScroll, 16);
-		return () => window.clearInterval(intervalId);
-	});
 
 	const insertControls = [
 		'insert-controls-group',
@@ -390,6 +398,7 @@
 				onChangeDatasource={_onChangeDatasource}
 				onRenameTab={_onRenameTab}
 				onDuplicateTab={_onDuplicateTab}
+				onResourceConfigChange={_onResourceConfigChange}
 				{readOnly}
 			/>
 			{#if shouldShowInsert(0)}
@@ -760,6 +769,8 @@
 		</button>
 	{/if}
 </div>
+
+<svelte:window onpointermove={handleWindowPointerMove} />
 
 <style>
 	.insert-zone.ready:hover :global(.connection-line) {

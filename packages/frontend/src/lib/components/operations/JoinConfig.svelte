@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { Schema } from '$lib/types/schema';
 	import type { JoinConfigData } from '$lib/types/operation-config';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
@@ -30,8 +31,6 @@
 
 	let { schema, config = $bindable(defaultConfig) }: Props = $props();
 
-	// Use config.right_source as single source of truth for selection.
-	let loadedRightSource = $state('');
 	let rightSchema = $state<Schema | null>(null);
 	let rightSchemaLoading = $state(false);
 	let rightSchemaError = $state<string | null>(null);
@@ -41,20 +40,9 @@
 	const rightColumns = $derived(rightSchema?.columns ?? []);
 	const isCrossJoin = $derived(config.how === 'cross');
 
-	// Load right schema when config.right_source changes.
-	// Network: $derived can't fetch schema for selected datasource.
-	$effect(() => {
+	onMount(() => {
 		const source = config.right_source ?? '';
-		if (!source) {
-			loadGeneration += 1;
-			loadedRightSource = '';
-			rightSchema = null;
-			rightSchemaError = null;
-			rightSchemaLoading = false;
-			return;
-		}
-		if (source === loadedRightSource) return;
-		loadedRightSource = source;
+		if (!source) return;
 		void loadRightSchema(source);
 	});
 
@@ -110,17 +98,18 @@
 	function retryRightSchema(): void {
 		const source = config.right_source;
 		if (!source) return;
-		// Allow the effect / explicit load to run again for the same id.
-		loadedRightSource = source;
 		void loadRightSchema(source, { forceRefresh: true });
 	}
 
 	function selectRightSource(id: string): void {
 		config.right_source = id;
-		// Effect loads when the id changes; re-selecting the same id still reloads.
-		if (id === loadedRightSource) {
-			void loadRightSchema(id);
+		if (!id) {
+			rightSchema = null;
+			rightSchemaError = null;
+			rightSchemaLoading = false;
+			return;
 		}
+		void loadRightSchema(id);
 	}
 
 	function addJoinColumn() {

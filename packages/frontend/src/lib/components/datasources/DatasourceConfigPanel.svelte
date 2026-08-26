@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import {
 		getDatasource,
@@ -10,7 +10,7 @@
 	} from '$lib/api/datasource';
 	import { BuildsStore } from '$lib/stores/builds.svelte';
 	import { CircleAlert } from '@lucide/svelte';
-	import type { DataSource, SchemaInfo, ColumnSchema } from '$lib/types/datasource';
+	import type { DataSource, ColumnSchema } from '$lib/types/datasource';
 	import {
 		datasourceFileConfig,
 		datasourceIsAnalysisOutput,
@@ -35,6 +35,58 @@
 	import { resolveColumnType } from '$lib/utils/column-types';
 	import { css, tabButton } from '$lib/styles/panda';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
+
+	function initialCsvConfig(ds: DataSource): CsvConfig {
+		if (!datasourceIsCsv(ds)) {
+			return {
+				delimiter: ',',
+				quote_char: '"',
+				has_header: true,
+				skip_rows: 0,
+				encoding: 'utf8'
+			};
+		}
+		const opts = datasourceFileConfig(ds)?.csv_options;
+		return {
+			delimiter: opts?.delimiter ?? ',',
+			quote_char: opts?.quote_char ?? '"',
+			has_header: opts?.has_header ?? true,
+			skip_rows: opts?.skip_rows ?? 0,
+			encoding: opts?.encoding ?? 'utf8'
+		};
+	}
+
+	function initialExcelConfig(ds: DataSource): ExcelConfig {
+		if (!datasourceIsExcel(ds)) {
+			return {
+				sheet_name: '',
+				table_name: '',
+				named_range: '',
+				cell_range: '',
+				start_row: 0,
+				start_col: 0,
+				end_col: 0,
+				end_row: null,
+				has_header: true
+			};
+		}
+		const fileSource = datasourceFileConfig(ds);
+		const cellRangeValue = fileSource?.cell_range;
+		const sheetValue = fileSource?.sheet_name;
+		const tableValue = fileSource?.table_name;
+		const rangeValue = fileSource?.named_range;
+		return {
+			sheet_name: typeof sheetValue === 'string' ? sheetValue : '',
+			table_name: typeof tableValue === 'string' ? tableValue : '',
+			named_range: typeof rangeValue === 'string' ? rangeValue : '',
+			cell_range: typeof cellRangeValue === 'string' ? cellRangeValue : '',
+			start_row: fileSource?.start_row ?? 0,
+			start_col: fileSource?.start_col ?? 0,
+			end_col: fileSource?.end_col ?? 0,
+			end_row: fileSource?.end_row ?? null,
+			has_header: fileSource?.has_header ?? true
+		};
+	}
 
 	interface Props {
 		datasource: DataSource;
@@ -71,23 +123,22 @@
 	const buildRunsStore = new BuildsStore();
 	let runsRequested = false;
 
-	// Network: keep run history dormant until the user opens the Runs tab.
-	$effect(() => {
-		if (activeTab !== 'runs' || !datasource.id) return;
-		if (!untrack(() => runsRequested)) {
+	onDestroy(() => {
+		buildRunsStore.close();
+	});
+
+	function selectTab(
+		tab: 'general' | 'schema' | 'csv' | 'excel' | 'runs' | 'health' | 'schedules'
+	) {
+		activeTab = tab;
+		if (tab !== 'runs' || !datasource.id) return;
+		if (!runsRequested) {
 			buildRunsStore.load({ datasource_id: datasource.id, limit: 50 });
 			runsRequested = true;
 			return;
 		}
 		buildRunsStore.silentRefresh();
-	});
-
-	// Subscription: keep any in-flight runs requests alive during normal tab switches.
-	$effect(() => {
-		return () => {
-			buildRunsStore.close();
-		};
-	});
+	}
 
 	const updateMutation = createMutation(() => ({
 		mutationFn: async (update: {
@@ -108,9 +159,14 @@
 		}
 	}));
 
-	let name = $state('');
-	let description = $state('');
-	let columns = $state.raw<ColumnSchema[]>([]);
+	const seed = untrack(() => datasource);
+	const isCustomFreshness =
+		seed.freshness_threshold_minutes != null &&
+		!FRESHNESS_THRESHOLD_OPTIONS.some(
+			(option) => option.minutes === seed.freshness_threshold_minutes
+		);
+	let name = $state(seed.name);
+	let description = $state(seed.description ?? '');
 	let hasChanges = $state(false);
 	let configDirty = $state(false);
 	let isRefreshing = $state(false);
@@ -127,10 +183,10 @@
 	let descriptionDraft = $state('');
 	let descriptionError = $state<string | null>(null);
 	let descriptionExpanded = $state<Record<string, boolean>>({});
-	let currentDatasourceId = $state<string | null>(null);
-	let freshnessThreshold = $state<number | null>(null);
-	let customFreshnessThreshold = $state('');
-	let isCustomFreshnessThreshold = $state(false);
+	const initialFreshnessThreshold = seed.freshness_threshold_minutes ?? null;
+	let freshnessThreshold = $state<number | null>(initialFreshnessThreshold);
+	let customFreshnessThreshold = $state(isCustomFreshness ? String(initialFreshnessThreshold) : '');
+	let isCustomFreshnessThreshold = $state(isCustomFreshness);
 
 	const descriptionMutation = createMutation(() => ({
 		mutationFn: async (payload: { columnName: string; description: string | null }) => {
@@ -141,7 +197,6 @@
 			return result.value;
 		},
 		onSuccess: (schema) => {
-			setSchema(schema);
 			queryClient.setQueryData(['datasource-schema', datasource.id], schema);
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
 			editingColumn = null;
@@ -151,117 +206,17 @@
 		}
 	}));
 
-	// Subscription: $derived can't reset state only when the selected datasource changes.
-	$effect(() => {
-		const ds = datasource;
-		if (!ds) return;
-		if (currentDatasourceId === ds.id) return;
-		currentDatasourceId = ds.id;
-		buildRunsStore.reset();
-		runsRequested = false;
+	let csvConfig = $state<CsvConfig>(initialCsvConfig(seed));
+	let excelConfig = $state<ExcelConfig>(initialExcelConfig(seed));
 
-		// Reset all state for new datasource
-		name = ds.name;
-		description = ds.description ?? '';
-		columns = [];
-		hasChanges = false;
-		configDirty = false;
-		isRefreshing = false;
-		refreshError = null;
-		schemaChanged = false;
-		schemaDiff = null;
-		activeTab = 'general';
-		statsOpen = false;
-		statsColumn = null;
-		editingColumn = null;
-		descriptionDraft = '';
-		descriptionError = null;
-		descriptionExpanded = {};
-		freshnessThreshold = ds.freshness_threshold_minutes ?? null;
-		isCustomFreshnessThreshold =
-			ds.freshness_threshold_minutes != null &&
-			!FRESHNESS_THRESHOLD_OPTIONS.some(
-				(option) => option.minutes === ds.freshness_threshold_minutes
-			);
-		customFreshnessThreshold = isCustomFreshnessThreshold
-			? String(ds.freshness_threshold_minutes)
-			: '';
-
-		// Initialize type-specific config
-		const fileSource = getFileSource(ds);
-		if (isCsv(ds) && fileSource) {
-			const opts = fileSource.csv_options;
-			csvConfig = {
-				delimiter: opts?.delimiter ?? ',',
-				quote_char: opts?.quote_char ?? '"',
-				has_header: opts?.has_header ?? true,
-				skip_rows: opts?.skip_rows ?? 0,
-				encoding: opts?.encoding ?? 'utf8'
-			};
-		}
-		if (isExcel(ds) && fileSource) {
-			const cellRangeValue = fileSource.cell_range;
-			const cellRange = typeof cellRangeValue === 'string' ? cellRangeValue : '';
-			const sheetValue = fileSource.sheet_name;
-			const sheetName = typeof sheetValue === 'string' ? sheetValue : '';
-			const tableValue = fileSource.table_name;
-			const tableName = typeof tableValue === 'string' ? tableValue : '';
-			const rangeValue = fileSource.named_range;
-			const namedRange = typeof rangeValue === 'string' ? rangeValue : '';
-			const endRowValue = fileSource.end_row ?? null;
-			excelConfig = {
-				sheet_name: sheetName,
-				table_name: tableName,
-				named_range: namedRange,
-				cell_range: cellRange,
-				start_row: fileSource.start_row ?? 0,
-				start_col: fileSource.start_col ?? 0,
-				end_col: fileSource.end_col ?? 0,
-				end_row: endRowValue,
-				has_header: fileSource.has_header ?? true
-			};
-		}
-	});
-
-	// CSV-specific state
-	let csvConfig = $state<CsvConfig>({
-		delimiter: ',',
-		quote_char: '"',
-		has_header: true,
-		skip_rows: 0,
-		encoding: 'utf8'
-	});
-
-	// Excel-specific state
-	let excelConfig = $state<ExcelConfig>({
-		sheet_name: '',
-		table_name: '',
-		named_range: '',
-		cell_range: '',
-		start_row: 0,
-		start_col: 0,
-		end_col: 0,
-		end_row: null,
-		has_header: true
-	});
-
-	// Network: $derived can't sync columns from async schema fetch.
-	$effect(() => {
-		if (!schemaQuery.data) return;
-		setSchema(schemaQuery.data);
-	});
-
-	function setSchema(value: SchemaInfo | null | undefined) {
-		if (!value) return;
-		if (!value.columns?.length) {
-			columns = [];
-			return;
-		}
-		columns = value.columns.map((col) => ({
+	const columns = $derived.by(() => {
+		const value = schemaQuery.data;
+		if (!value?.columns?.length) return [];
+		return value.columns.map((col) => ({
 			...col,
 			dtype: resolveColumnType(col.dtype)
 		}));
-	}
+	});
 
 	function getSelectedDescription(name: string | null): string | null {
 		if (!name) return null;
@@ -447,7 +402,7 @@
 				.map((col) => col.name);
 			schemaChanged = added.length > 0 || removed.length > 0 || types.length > 0;
 			schemaDiff = schemaChanged ? { added, removed, types } : null;
-			setSchema(nextSchema);
+			queryClient.setQueryData(['datasource-schema', datasource.id], nextSchema);
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-preview', datasource.id] });
 		} catch (error) {
@@ -550,7 +505,7 @@
 	>
 		<button
 			class={tabButton({ active: activeTab === 'general' })}
-			onclick={() => (activeTab = 'general')}
+			onclick={() => selectTab('general')}
 			role="tab"
 			aria-selected={activeTab === 'general'}
 		>
@@ -558,7 +513,7 @@
 		</button>
 		<button
 			class={tabButton({ active: activeTab === 'schema' })}
-			onclick={() => (activeTab = 'schema')}
+			onclick={() => selectTab('schema')}
 			role="tab"
 			aria-selected={activeTab === 'schema'}
 		>
@@ -567,7 +522,7 @@
 		{#if csv}
 			<button
 				class={tabButton({ active: activeTab === 'csv' })}
-				onclick={() => (activeTab = 'csv')}
+				onclick={() => selectTab('csv')}
 				role="tab"
 				aria-selected={activeTab === 'csv'}
 			>
@@ -577,7 +532,7 @@
 		{#if excel}
 			<button
 				class={tabButton({ active: activeTab === 'excel' })}
-				onclick={() => (activeTab = 'excel')}
+				onclick={() => selectTab('excel')}
 				role="tab"
 				aria-selected={activeTab === 'excel'}
 			>
@@ -586,7 +541,7 @@
 		{/if}
 		<button
 			class={tabButton({ active: activeTab === 'runs' })}
-			onclick={() => (activeTab = 'runs')}
+			onclick={() => selectTab('runs')}
 			role="tab"
 			aria-selected={activeTab === 'runs'}
 		>
@@ -594,7 +549,7 @@
 		</button>
 		<button
 			class={tabButton({ active: activeTab === 'health' })}
-			onclick={() => (activeTab = 'health')}
+			onclick={() => selectTab('health')}
 			role="tab"
 			aria-selected={activeTab === 'health'}
 		>
@@ -603,7 +558,7 @@
 		{#if scheduleAnalysisId || rawSchedulable}
 			<button
 				class={tabButton({ active: activeTab === 'schedules' })}
-				onclick={() => (activeTab = 'schedules')}
+				onclick={() => selectTab('schedules')}
 				role="tab"
 				aria-selected={activeTab === 'schedules'}
 			>

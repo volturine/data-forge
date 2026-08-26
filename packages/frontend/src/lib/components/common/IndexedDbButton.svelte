@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { Check, Copy, Database, LoaderCircle, X } from '@lucide/svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { idbEntries, idbDelete, idbClear } from '$lib/utils/indexeddb';
@@ -57,11 +58,8 @@
 		}, 1500);
 	}
 
-	// Cleanup: $derived can't clear pending timers on destroy.
-	$effect(() => {
-		return () => {
-			if (copyTimer !== null) window.clearTimeout(copyTimer);
-		};
+	onDestroy(() => {
+		if (copyTimer !== null) window.clearTimeout(copyTimer);
 	});
 
 	async function refresh() {

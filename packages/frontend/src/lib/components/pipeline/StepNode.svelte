@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { PipelineStep } from '$lib/types/analysis';
 	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
 	import InlineDataTable from '$lib/components/pipeline/InlineDataTable.svelte';
@@ -162,6 +163,12 @@
 		if (rowCount === null) return '';
 		return `${rowCount.toLocaleString()} rows`;
 	});
+	const previewRowLimit = $derived(
+		typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100
+	);
+	const tableResetKey = $derived(
+		`${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${previewRowLimit}:${rowCountPipelineKey}:${JSON.stringify(rowCountDatasourceConfig)}`
+	);
 
 	async function calculateRowCount() {
 		if (!analysisId || !analysisPipeline) return;
@@ -200,10 +207,8 @@
 		}, 1200);
 	}
 
-	$effect(() => {
-		return () => {
-			if (copyTimer !== null) window.clearTimeout(copyTimer);
-		};
+	onDestroy(() => {
+		if (copyTimer !== null) window.clearTimeout(copyTimer);
 	});
 
 	let dragging = $state(false);
@@ -541,13 +546,15 @@
 
 		{#if step.type === 'view' && datasourceId && analysisId}
 			<div class={css({ borderTopWidth: '1' })}>
-				<InlineDataTable
-					{analysisId}
-					{datasourceId}
-					pipeline={allSteps}
-					stepId={step.id}
-					rowLimit={typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100}
-				/>
+				{#key tableResetKey}
+					<InlineDataTable
+						{analysisId}
+						{datasourceId}
+						pipeline={allSteps}
+						stepId={step.id}
+						rowLimit={previewRowLimit}
+					/>
+				{/key}
 			</div>
 		{/if}
 

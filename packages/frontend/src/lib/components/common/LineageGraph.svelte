@@ -187,7 +187,7 @@
 		const bounds = getBounds();
 		if (!bounds) {
 			pan = { x: 0, y: 0 };
-			scale = 1;
+			applyScale(1);
 			return;
 		}
 		const padding = 80;
@@ -200,11 +200,16 @@
 		const scaledWidth = contentWidth * nextScale;
 		const scaledHeight = contentHeight * nextScale;
 		const minPanY = padding - bounds.minY * nextScale;
-		scale = nextScale;
+		applyScale(nextScale);
 		pan = {
 			x: panelOffset + (usableWidth - scaledWidth) / 2 - (bounds.minX - padding) * nextScale,
 			y: Math.max((viewHeight - scaledHeight) / 2 - (bounds.minY - padding) * nextScale, minPanY)
 		};
+	}
+
+	function applyScale(next: number) {
+		scale = next;
+		zoomPercent = Math.round(next * 100);
 	}
 
 	function clamp(value: number, min: number, max: number) {
@@ -221,12 +226,11 @@
 		positionSnapshot = next;
 	}
 
-	// DOM: $derived can't apply layout/reset bounds.
-	$effect(() => {
+	function attachGraph(_node: HTMLElement): void {
 		void layoutNodes;
 		applyDeterministicLayout(layoutMode);
 		resetViewToBounds();
-	});
+	}
 
 	/* ---------- canvas size (fixed, no expansion) ---------- */
 	const canvasWidth = $derived.by(() => {
@@ -332,7 +336,7 @@
 			x: mx - ((mx - pan.x) / scale) * next,
 			y: my - ((my - pan.y) / scale) * next
 		};
-		scale = next;
+		applyScale(next);
 	}
 
 	function resetView() {
@@ -351,7 +355,7 @@
 			x: cx - ((cx - pan.x) / scale) * next,
 			y: cy - ((cy - pan.y) / scale) * next
 		};
-		scale = next;
+		applyScale(next);
 	}
 
 	export function zoomInView() {
@@ -366,7 +370,7 @@
 			x: cx - ((cx - pan.x) / scale) * next,
 			y: cy - ((cy - pan.y) / scale) * next
 		};
-		scale = next;
+		applyScale(next);
 	}
 
 	export function zoomOutView() {
@@ -378,11 +382,6 @@
 		resetView();
 		applyDeterministicLayout(mode);
 	}
-
-	// Subscription: $derived can't sync zoom percent.
-	$effect(() => {
-		zoomPercent = Math.round(scale * 100);
-	});
 
 	const _transform = $derived(`translate(${pan.x}px, ${pan.y}px) scale(${scale})`);
 
@@ -503,6 +502,7 @@
 				backgroundColor: 'bg.secondary'
 			})}
 			data-testid="lineage-canvas"
+			{@attach attachGraph}
 			bind:clientWidth={viewWidth}
 			bind:clientHeight={viewHeight}
 			onpointerdown={startPan}

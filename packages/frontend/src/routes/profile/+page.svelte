@@ -30,8 +30,10 @@
 	const activeTab = $derived(resolveTab(page.url.hash));
 	const ns = useNamespace();
 	const systemTabKey = $derived(ns.ready ? ns.value : '');
+	const activated = new SvelteSet<TabKey>(['account', resolveTab(page.url.hash)]);
 
 	function selectTab(key: TabKey) {
+		activated.add(key);
 		goto(resolve(`/profile#${key}` as '/'), {
 			replaceState: true,
 			keepFocus: true,
@@ -52,14 +54,9 @@
 		const target = document.getElementById(`tab-${tabs[next].key}`);
 		target?.focus();
 	}
-
-	const activated = new SvelteSet<TabKey>(['account']);
-
-	// Subscription: activated tabs must be retained after the hash changes for lazy tab mounting.
-	$effect(() => {
-		activated.add(activeTab);
-	});
 </script>
+
+<svelte:window onhashchange={() => activated.add(resolveTab(page.url.hash))} />
 
 <div
 	class={css({

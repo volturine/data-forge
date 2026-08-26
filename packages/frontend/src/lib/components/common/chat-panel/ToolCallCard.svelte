@@ -12,6 +12,7 @@
 		Copy,
 		ClipboardCheck
 	} from '@lucide/svelte';
+	import { onDestroy } from 'svelte';
 	import { css } from '$lib/styles/panda';
 	import { chatStore } from '$lib/stores/chat.svelte';
 	import type { ToolCall } from '$lib/stores/chat.svelte';
@@ -36,20 +37,20 @@
 	);
 
 	let copiedId = $state<string | null>(null);
+	let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async function copyToClipboard(text: string, id: string) {
 		await navigator.clipboard.writeText(text).catch(() => {});
 		copiedId = id;
-	}
-
-	// Auto-clear the copied indicator; timer is cancelled on teardown
-	$effect(() => {
-		if (!copiedId) return;
-		const id = copiedId;
-		const timer = setTimeout(() => {
+		if (copiedTimer) clearTimeout(copiedTimer);
+		copiedTimer = setTimeout(() => {
+			copiedTimer = null;
 			if (copiedId === id) copiedId = null;
 		}, 2000);
-		return () => clearTimeout(timer);
+	}
+
+	onDestroy(() => {
+		if (copiedTimer) clearTimeout(copiedTimer);
 	});
 </script>
 

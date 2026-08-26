@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type {
 		AnalysisTab,
 		AnalysisTabIcebergConfig,
@@ -74,6 +75,7 @@
 	});
 	let toggling = $state(false);
 	let hiddenOverride = $state<boolean | null>(null);
+	let hiddenOverrideId = $state<string | null>(null);
 	let buildStarting = $state(false);
 	let previewOpen = $state(false);
 	let error = $state<string | null>(null);
@@ -181,7 +183,11 @@
 		// Optional enrichment — do not keep retrying forever if the data-plane is degraded.
 		retry: 1
 	}));
-	const hidden = $derived(hiddenOverride ?? outputDatasourceQuery.data?.is_hidden ?? true);
+	const hidden = $derived(
+		hiddenOverrideId === outputDatasourceId
+			? (hiddenOverride ?? outputDatasourceQuery.data?.is_hidden ?? true)
+			: (outputDatasourceQuery.data?.is_hidden ?? true)
+	);
 
 	const healthChecksQuery = createQuery(() => ({
 		queryKey: ['healthchecks', outputDatasourceId],
@@ -424,21 +430,26 @@
 		}
 		const nextHidden = !current.is_hidden;
 		hiddenOverride = nextHidden;
+		hiddenOverrideId = outputDatasourceId;
 		toggling = true;
 		const result = await updateDatasource(outputDatasourceId, { is_hidden: nextHidden });
 		result.match(
 			(datasource) => {
-				hiddenOverride = datasource.is_hidden;
 				queryClient.setQueryData(['datasource', outputDatasourceId], datasource);
+				hiddenOverride = null;
 				void queryClient.invalidateQueries({ queryKey: ['datasources'] });
 				toggling = false;
 			},
 			(err) => {
-				hiddenOverride = outputDatasourceQuery.data?.is_hidden ?? true;
+				hiddenOverride = null;
 				error = err.message;
 				toggling = false;
 			}
 		);
+	}
+
+	function unpausePreviews(): void {
+		analysisStore.previews.paused = false;
 	}
 
 	async function handleManualBuild() {
@@ -453,7 +464,7 @@
 		if (analysisStore.isDirty()) {
 			const saveResult = await analysisStore.save();
 			if (saveResult.isErr()) {
-				analysisStore.previews.paused = false;
+				unpausePreviews();
 				error = saveResult.error.message;
 				buildStarting = false;
 				return;
@@ -466,7 +477,7 @@
 			datasourceStore.datasources
 		);
 		if (!pipeline) {
-			analysisStore.previews.paused = false;
+			unpausePreviews();
 			error = datasourceStore.loaded
 				? 'Unable to build analysis payload.'
 				: 'Datasources are still loading. Please try again.';
@@ -474,47 +485,24 @@
 			return;
 		}
 		if (!outputConfig) {
-			analysisStore.previews.paused = false;
+			unpausePreviews();
 			error =
 				'Output configuration is incomplete. Fill in explicit output settings before building.';
 			buildStarting = false;
 			return;
 		}
+		buildStore.onSettled = (status) => {
+			unpausePreviews();
+			if (status !== 'completed' || !outputDatasourceId) return;
+			void queryClient.invalidateQueries({ queryKey: ['datasources'] });
+			void queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
+		};
 		buildStore.start({
 			analysis_pipeline: pipeline,
 			tab_id: activeTab?.id ?? null
 		});
 		buildStarting = false;
 	}
-
-	$effect(() => {
-		if (buildBusy) return;
-		analysisStore.previews.paused = false;
-	});
-
-	$effect(() => {
-		const outputId = outputDatasourceId;
-		const datasource = outputDatasourceQuery.data;
-		if (!outputId) {
-			hiddenOverride = null;
-			return;
-		}
-		hiddenOverride = datasource?.is_hidden ?? null;
-	});
-
-	let lastCompletedBuildId = $state<string | null>(null);
-	$effect(() => {
-		if (!outputDatasourceId) {
-			lastCompletedBuildId = null;
-			return;
-		}
-		if (buildStore.status !== 'completed' || !buildStore.buildId) return;
-		if (lastCompletedBuildId === buildStore.buildId) return;
-		lastCompletedBuildId = buildStore.buildId;
-		// First successful build creates the output datasource row (often hidden).
-		void queryClient.invalidateQueries({ queryKey: ['datasources'] });
-		void queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
-	});
 
 	function closeBuildPreview() {
 		previewOpen = false;
@@ -551,6 +539,7 @@
 		result.match(
 			(cancelled) => {
 				buildStore.markCancelled(cancelled);
+				unpausePreviews();
 				showCancelToast('Build cancelled');
 			},
 			(err) => {
@@ -569,13 +558,11 @@
 		}
 	});
 
-	$effect(() => {
-		return () => {
-			if (cancelToastTimer !== null) {
-				clearTimeout(cancelToastTimer);
-				cancelToastTimer = null;
-			}
-		};
+	onDestroy(() => {
+		if (cancelToastTimer !== null) {
+			clearTimeout(cancelToastTimer);
+			cancelToastTimer = null;
+		}
 	});
 </script>
 

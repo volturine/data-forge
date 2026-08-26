@@ -2,6 +2,7 @@
 	import { EditorView, basicSetup } from 'codemirror';
 	import { EditorState } from '@codemirror/state';
 	import { python } from '@codemirror/lang-python';
+	import { fromAction } from 'svelte/attachments';
 	import { css } from '$lib/styles/panda';
 
 	interface Props {
@@ -37,9 +38,9 @@
 		{ dark: true }
 	);
 
-	function init(host: HTMLElement) {
+	function init(host: HTMLElement, doc: string) {
 		const state = EditorState.create({
-			doc: value,
+			doc,
 			extensions: [
 				basicSetup,
 				python(),
@@ -58,6 +59,18 @@
 		});
 		view = new EditorView({ state, parent: host });
 		return {
+			update(next: string) {
+				if (!view || skipUpdate) return;
+				const current = view.state.doc.toString();
+				if (current === next) return;
+				programmatic = true;
+				view.dispatch({
+					changes: { from: 0, to: current.length, insert: next }
+				});
+				queueMicrotask(() => {
+					programmatic = false;
+				});
+			},
 			destroy() {
 				view?.destroy();
 				view = null;
@@ -65,20 +78,7 @@
 		};
 	}
 
-	// DOM: $derived can't update CodeMirror imperatively.
-	$effect(() => {
-		if (!view) return;
-		if (skipUpdate) return;
-		const current = view.state.doc.toString();
-		if (current === value) return;
-		programmatic = true;
-		view.dispatch({
-			changes: { from: 0, to: current.length, insert: value }
-		});
-		queueMicrotask(() => {
-			programmatic = false;
-		});
-	});
+	const attachEditor = fromAction(init, () => value);
 </script>
 
 <div
@@ -89,5 +89,5 @@
 	})}
 	style:height
 >
-	<div class={css({ height: 'full' })} use:init></div>
+	<div class={css({ height: 'full' })} {@attach attachEditor}></div>
 </div>

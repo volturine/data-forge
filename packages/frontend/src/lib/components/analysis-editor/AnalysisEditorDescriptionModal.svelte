@@ -13,13 +13,8 @@
 
 	let { open, description, editorReadOnly, onSave, onClose }: Props = $props();
 
-	let descriptionDraft = $state('');
-
-	$effect(() => {
-		if (open) {
-			descriptionDraft = description ?? '';
-		}
-	});
+	// svelte-ignore state_referenced_locally
+	let descriptionDraft = $state(description ?? '');
 
 	function closeDescriptionModal() {
 		onClose();

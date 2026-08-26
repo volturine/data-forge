@@ -39,8 +39,7 @@ export function createDraftController(deps: DraftControllerDeps) {
 		draftLoaded = true;
 	}
 
-	// Storage: $derived can't hydrate from IndexedDB.
-	$effect(() => {
+	function hydrate(): void {
 		const storageKey = deps.getStorageKey();
 		if (!storageKey || draftLoaded || deps.blockedFromHydration()) return;
 		if (!deps.hasTabs()) return;
@@ -90,7 +89,6 @@ export function createDraftController(deps: DraftControllerDeps) {
 					return;
 				}
 				if (!Array.isArray(parsed.tabs)) {
-					void idbDelete(currentStorageKey);
 					draftLoaded = true;
 					return;
 				}
@@ -99,17 +97,11 @@ export function createDraftController(deps: DraftControllerDeps) {
 				draftLoaded = true;
 			})
 			.catch(() => {
-				// Corrupt draft storage must not take down the analysis page.
 				if (draftLoadGate.isCurrent(token)) draftLoaded = true;
 			});
+	}
 
-		return () => {
-			draftLoadGate.invalidate();
-		};
-	});
-
-	// Timer: $derived can't debounce draft persistence.
-	$effect(() => {
+	function schedulePersist(): void {
 		const storageKey = deps.getStorageKey();
 		if (!storageKey || !draftLoaded || deps.readOnly()) return;
 		if (!deps.hasTabs()) return;
@@ -117,19 +109,27 @@ export function createDraftController(deps: DraftControllerDeps) {
 		if (draftTimer) window.clearTimeout(draftTimer);
 		draftTimer = window.setTimeout(() => {
 			void idbSet(storageKey, JSON.stringify(payload));
+			draftTimer = null;
 		}, 400);
-		return () => {
-			if (draftTimer) window.clearTimeout(draftTimer);
-		};
-	});
+	}
+
+	function flush(): void {
+		if (draftTimer) window.clearTimeout(draftTimer);
+		draftTimer = null;
+		draftLoadGate.invalidate();
+	}
 
 	return {
 		get draftLoaded() {
 			return draftLoaded;
 		},
 		markLoaded,
+		hydrate,
+		schedulePersist,
+		flush,
 		reset() {
 			draftLoaded = false;
+			flush();
 		},
 		invalidate: () => draftLoadGate.invalidate()
 	};

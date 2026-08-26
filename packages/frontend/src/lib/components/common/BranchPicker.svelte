@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { ChevronDown, Plus } from '@lucide/svelte';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
 	import { css } from '$lib/styles/panda';
@@ -28,7 +29,6 @@
 	}: Props = $props();
 
 	let searchValue = $state('');
-	let menuOpen = $state(false);
 	let popoverRect = $state({ left: 0, top: 0, width: 240 });
 
 	const normalizedBranches = $derived(branches);
@@ -120,28 +120,33 @@
 		searchValue = '';
 	}
 
+	function handleResize() {
+		updatePopoverPosition(lastTrigger);
+	}
+
+	function bindPopoverListeners() {
+		window.addEventListener('resize', handleResize);
+		window.addEventListener('scroll', handleResize, true);
+	}
+
+	function unbindPopoverListeners() {
+		window.removeEventListener('resize', handleResize);
+		window.removeEventListener('scroll', handleResize, true);
+	}
+
 	function handleOpen(trigger?: HTMLButtonElement | HTMLInputElement) {
-		menuOpen = true;
 		lastTrigger = trigger ?? null;
 		updatePopoverPosition(trigger ?? null);
+		unbindPopoverListeners();
+		bindPopoverListeners();
 	}
 
 	function handleClose() {
-		menuOpen = false;
 		searchValue = '';
+		unbindPopoverListeners();
 	}
 
-	// DOM: $derived can't track resize/scroll.
-	$effect(() => {
-		if (!menuOpen) return;
-		const handleResize = () => updatePopoverPosition(lastTrigger);
-		window.addEventListener('resize', handleResize);
-		window.addEventListener('scroll', handleResize, true);
-		return () => {
-			window.removeEventListener('resize', handleResize);
-			window.removeEventListener('scroll', handleResize, true);
-		};
-	});
+	onDestroy(unbindPopoverListeners);
 </script>
 
 <SearchableDropdown

@@ -36,10 +36,11 @@
 	import DurationTrendChart from '$lib/components/common/DurationTrendChart.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { getDurationStats, type DurationStatsResponse } from '$lib/api/engine-runs';
+	import { getDurationStats } from '$lib/api/engine-runs';
 	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
 	import { elapsedSince, formatDuration } from '$lib/utils/format-duration';
 	import { endOfDayEpoch, startOfDayEpoch } from '$lib/utils/temporal';
+	import { onDestroy, onMount } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { css, spinner, button, emptyText, input } from '$lib/styles/panda';
 
@@ -79,8 +80,6 @@
 	let sortDir = $state<'asc' | 'desc'>('desc');
 	let syncingExpandedId: string | null = null;
 	let nowMs = $state(Date.now());
-	let durationStats = $state<DurationStatsResponse | null>(null);
-	let durationStatsLoading = $state(false);
 	const detailStores = new SvelteMap<string, BuildStreamStore>();
 	const detailSnapshots = new SvelteMap<string, BuildRunDetail>();
 	const detailPayloads = new SvelteMap<string, BuildPayloadData>();
@@ -101,11 +100,9 @@
 	const buildsStore = new BuildsStore();
 	const ns = useNamespace();
 
-	$effect(() => {
-		const params = queryParams;
-		buildsStore.load(params);
-		return () => buildsStore.close();
-	});
+	function applyListQuery(): void {
+		buildsStore.load(queryParams);
+	}
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources-lookup', ns.value],
@@ -263,14 +260,37 @@
 
 	function prevPage() {
 		if (page > 1) page--;
+		applyListQuery();
 	}
 
 	function nextPage() {
 		if (filteredRuns.length >= limit) page++;
+		applyListQuery();
+	}
+
+	function closeIdleDetailStores(exceptId: string | null): void {
+		for (const [buildId, store] of detailStores) {
+			if (buildId === exceptId) continue;
+			store.close();
+		}
+	}
+
+	function clearExpanded(): void {
+		expandedLiveId = null;
+		expandedStore = null;
+		expandedPayload = null;
 	}
 
 	function toggleExpand(id: string) {
-		expandedId = expandedId === id ? null : id;
+		if (expandedId === id) {
+			expandedId = null;
+			closeIdleDetailStores(null);
+			clearExpanded();
+			return;
+		}
+		expandedId = id;
+		closeIdleDetailStores(id);
+		void syncExpandedRun(id);
 	}
 
 	function resolveName(id: string, map: Map<string, string>): string {
@@ -319,7 +339,12 @@
 
 	function summaryDurationMs(run: BuildRunSummary): number {
 		const cancelled = pendingCancelled.get(run.build_id);
-		if (cancelled?.duration_ms !== null && cancelled?.duration_ms !== undefined) {
+		if (
+			cancelled &&
+			canCancelBuildLifecycleStatus(run.status) &&
+			cancelled.duration_ms !== null &&
+			cancelled.duration_ms !== undefined
+		) {
 			return cancelled.duration_ms;
 		}
 		const status = currentStatus(run);
@@ -342,70 +367,38 @@
 		(pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined
 	);
 
-	$effect(() => {
-		const analysisId = statsAnalysisId;
-		const datasourceId = statsDatasourceId;
-		if (!analysisId && !datasourceId) {
-			durationStats = null;
-			return;
-		}
-		let cancelled = false;
-		durationStatsLoading = true;
-		void getDurationStats({
-			analysis_id: analysisId,
-			datasource_id: datasourceId,
-			kind: 'build',
-			limit: 20
-		}).match(
-			(stats) => {
-				if (cancelled) return;
-				durationStats = stats;
-				durationStatsLoading = false;
-			},
-			() => {
-				if (cancelled) return;
-				durationStats = null;
-				durationStatsLoading = false;
-			}
-		);
-		return () => {
-			cancelled = true;
-		};
-	});
+	const durationStatsQuery = createQuery(() => ({
+		queryKey: ['duration-stats', statsAnalysisId, statsDatasourceId],
+		queryFn: async () => {
+			const result = await getDurationStats({
+				analysis_id: statsAnalysisId,
+				datasource_id: statsDatasourceId,
+				kind: 'build',
+				limit: 20
+			});
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		enabled: !ns.switching && !!(statsAnalysisId || statsDatasourceId)
+	}));
+	const durationStats = $derived(durationStatsQuery.data ?? null);
+	const durationStatsLoading = $derived(durationStatsQuery.isLoading);
 
 	function currentStatus(
 		run: BuildRunSummary
 	): 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' {
-		if (pendingCancelled.has(run.build_id)) return 'cancelled';
+		if (pendingCancelled.has(run.build_id) && canCancelBuildLifecycleStatus(run.status)) {
+			return 'cancelled';
+		}
 		return run.status;
 	}
 
-	// Live clock for running build elapsed timers
-	$effect(() => {
-		const hasRunning = runs.some((run) => {
+	const hasActiveBuild = $derived(
+		runs.some((run) => {
 			const status = currentStatus(run);
 			return status === 'running' || status === 'queued';
-		});
-		if (!hasRunning) return;
-		const timer = setInterval(() => {
-			nowMs = Date.now();
-		}, 1000);
-		return () => clearInterval(timer);
-	});
-
-	// Keep the history list current while any build is active so rows advance
-	// from running/queued to a terminal status without a manual refresh.
-	$effect(() => {
-		const hasActiveBuild = runs.some((run) => {
-			const status = currentStatus(run);
-			return status === 'running' || status === 'queued';
-		});
-		if (!hasActiveBuild) return;
-		const timer = setInterval(() => {
-			buildsStore.silentRefresh();
-		}, HISTORY_AUTO_REFRESH_MS);
-		return () => clearInterval(timer);
-	});
+		})
+	);
 
 	function cancelledAt(run: BuildRunSummary): string | null {
 		return pendingCancelled.get(run.build_id)?.cancelled_at ?? run.cancelled_at ?? null;
@@ -439,6 +432,14 @@
 		cancelTarget = null;
 	}
 
+	const cancelDialogOpen = $derived.by(() => {
+		const target = cancelTarget;
+		if (!target) return false;
+		const latest = runs.find((run) => run.build_id === target.id);
+		if (!latest) return false;
+		return canCancelBuildLifecycleStatus(latest.status);
+	});
+
 	function updateCancelledRun(buildId: string, cancelled: CancelBuildResponse): void {
 		pendingCancelled.set(buildId, cancelled);
 		const current = runs.find((run) => run.build_id === buildId);
@@ -451,19 +452,6 @@
 			elapsed_ms: cancelled.duration_ms ?? current.elapsed_ms
 		});
 	}
-
-	$effect(() => {
-		for (const [buildId] of pendingCancelled) {
-			const run = runs.find((item) => item.build_id === buildId);
-			if (!run) {
-				pendingCancelled.delete(buildId);
-				continue;
-			}
-			if (!canCancelBuildLifecycleStatus(run.status)) {
-				pendingCancelled.delete(buildId);
-			}
-		}
-	});
 
 	async function confirmCancelRun(): Promise<void> {
 		const target = cancelTarget;
@@ -554,6 +542,7 @@
 		replaceRun(detail);
 		setDetailPayload(detail);
 		if (canCancelBuildLifecycleStatus(detail.status)) {
+			store.onSettled = () => persistExpanded(store, detail.build_id);
 			store.watch(detail.build_id);
 			store.applySnapshot(detail);
 			expandedLiveId = detail.build_id;
@@ -565,78 +554,44 @@
 		expandedStore = store;
 	}
 
-	$effect(() => {
-		for (const [buildId, store] of detailStores) {
-			if (buildId === expandedId) continue;
+	function persistExpanded(store: BuildStreamStore, liveId: string): void {
+		if (expandedLiveId !== liveId) return;
+		expandedLiveId = null;
+		void getBuild(liveId).match(
+			(persisted) => {
+				if (expandedId !== liveId) return;
+				store.close();
+				setDetailPayload(persisted);
+				replaceRun(persisted);
+				store.applySnapshot(persisted);
+				expandedStore = store;
+			},
+			(err) => {
+				console.warn('Failed to fetch persisted build after live watch ended:', err.message);
+			}
+		);
+	}
+
+	onMount(() => {
+		applyListQuery();
+		const elapsed = setInterval(() => {
+			nowMs = Date.now();
+		}, 1000);
+		const poll = setInterval(() => {
+			if (hasActiveBuild) buildsStore.silentRefresh();
+		}, HISTORY_AUTO_REFRESH_MS);
+		return () => {
+			clearInterval(elapsed);
+			clearInterval(poll);
+			buildsStore.close();
+		};
+	});
+
+	onDestroy(() => {
+		for (const store of detailStores.values()) {
 			store.close();
 		}
-		const expandedRun = runs.find((run) => run.build_id === expandedId) ?? null;
-		if (!expandedRun) {
-			expandedLiveId = null;
-			expandedStore = null;
-			expandedPayload = null;
-			return;
-		}
-		void syncExpandedRun(expandedRun.build_id);
-	});
-
-	$effect(() => {
-		const liveId = expandedLiveId;
-		const store = expandedStore;
-		if (!liveId || !store || !store.done) return;
-		expandedLiveId = null;
-		void getBuild(liveId).match(
-			(persisted) => {
-				if (expandedId !== liveId) return;
-				store.close();
-				setDetailPayload(persisted);
-				replaceRun(persisted);
-				store.applySnapshot(persisted);
-				expandedStore = store;
-			},
-			(err) => {
-				console.warn('Failed to fetch persisted build after build done:', err.message);
-			}
-		);
-	});
-
-	$effect(() => {
-		const liveId = expandedLiveId;
-		const store = expandedStore;
-		if (!liveId || !store || store.status !== 'disconnected' || store.done) return;
-		expandedLiveId = null;
-		void getBuild(liveId).match(
-			(persisted) => {
-				if (expandedId !== liveId) return;
-				store.close();
-				setDetailPayload(persisted);
-				replaceRun(persisted);
-				store.applySnapshot(persisted);
-				expandedStore = store;
-			},
-			(err) => {
-				console.warn('Failed to fetch persisted build after WS disconnect:', err.message);
-			}
-		);
-	});
-
-	$effect(() => {
-		const target = cancelTarget;
-		if (!target) return;
-		const latest = runs.find((run) => run.build_id === target.id);
-		if (!latest || (latest.status !== 'queued' && latest.status !== 'running')) {
-			cancelTarget = null;
-			cancelPending = false;
-		}
-	});
-
-	$effect(() => {
-		return () => {
-			for (const store of detailStores.values()) {
-				store.close();
-			}
-			detailStores.clear();
-		};
+		detailStores.clear();
 	});
 </script>
 
@@ -684,7 +639,14 @@
 						aria-label="Search builds"
 						placeholder="Search builds..."
 						class={input({ variant: 'search' })}
-						bind:value={search}
+						bind:value={
+							() => search,
+							(next) => {
+								search = next;
+								page = 1;
+								applyListQuery();
+							}
+						}
 					/>
 				</div>
 			</div>
@@ -717,7 +679,14 @@
 						aria-label="Search builds"
 						placeholder="Search by name, ID, datasource, or analysis..."
 						class={input({ variant: 'search' })}
-						bind:value={search}
+						bind:value={
+							() => search,
+							(next) => {
+								search = next;
+								page = 1;
+								applyListQuery();
+							}
+						}
 					/>
 				</div>
 			{/if}
@@ -743,7 +712,14 @@
 				})}
 				id="builds-kind-filter"
 				aria-label="Filter by type"
-				bind:value={kindFilter}
+				bind:value={
+					() => kindFilter,
+					(next) => {
+						kindFilter = next;
+						page = 1;
+						applyListQuery();
+					}
+				}
 			>
 				<option value="">All types</option>
 				<option value="download">Download</option>
@@ -773,7 +749,14 @@
 				})}
 				id="builds-status-filter"
 				aria-label="Filter by status"
-				bind:value={statusFilter}
+				bind:value={
+					() => statusFilter,
+					(next) => {
+						statusFilter = next;
+						page = 1;
+						applyListQuery();
+					}
+				}
 			>
 				<option value="all">All statuses</option>
 				<option value="running">Running</option>
@@ -1311,12 +1294,14 @@
 
 										{#if expandedStore}
 											<div class={css({ width: '100%', overflowX: 'hidden' })}>
-												<BuildPreview
-													store={expandedStore}
-													title={engineRunKindLabel(effectiveKind(run))}
-													requestJson={expandedPayload?.requestJson ?? null}
-													resultJson={expandedPayload?.resultJson ?? null}
-												/>
+												{#key run.build_id}
+													<BuildPreview
+														store={expandedStore}
+														title={engineRunKindLabel(effectiveKind(run))}
+														requestJson={expandedPayload?.requestJson ?? null}
+														resultJson={expandedPayload?.resultJson ?? null}
+													/>
+												{/key}
 											</div>
 										{/if}
 									</td>
@@ -1365,7 +1350,7 @@
 </div>
 
 <ConfirmDialog
-	show={cancelTarget !== null}
+	show={cancelDialogOpen}
 	heading="Cancel this build?"
 	message="Cancel this build? Any partial results will be discarded."
 	confirmText={cancelPending ? 'Cancelling...' : 'Cancel Build'}

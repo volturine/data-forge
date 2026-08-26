@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { Copy, Download, X } from '@lucide/svelte';
@@ -33,6 +33,7 @@
 		polars: false,
 		sql: false
 	});
+	let copiedTimer: number | null = null;
 
 	const exportResponse = $derived(exportByFormat[exportFormat]);
 	const exportWarnings = $derived(exportResponse?.warnings ?? []);
@@ -83,7 +84,12 @@
 		if (!exportCode) return;
 		try {
 			await navigator.clipboard.writeText(exportCode);
+			if (copiedTimer !== null) window.clearTimeout(copiedTimer);
 			exportCopied = true;
+			copiedTimer = window.setTimeout(() => {
+				exportCopied = false;
+				copiedTimer = null;
+			}, 1200);
 		} catch {
 			exportError = 'Clipboard write failed. Copy manually from the code block.';
 		}
@@ -102,26 +108,16 @@
 		exportCopied = false;
 	}
 
-	$effect(() => {
+	onMount(() => {
 		if (!open) return;
-		// Run the open transition imperatively: loadExportCode reads and writes
-		// reactive state, so tracking it here would re-trigger this effect and
-		// reset the response it just loaded.
-		untrack(() => {
-			exportScopeTabId = scopeTabId;
-			exportFormat = 'polars';
-			resetExportState();
-			void loadExportCode('polars');
-		});
+		exportScopeTabId = scopeTabId;
+		exportFormat = 'polars';
+		resetExportState();
+		void loadExportCode('polars');
 	});
 
-	// Timer: copied state is transient UI feedback.
-	$effect(() => {
-		if (!exportCopied) return;
-		const timer = window.setTimeout(() => {
-			exportCopied = false;
-		}, 1200);
-		return () => window.clearTimeout(timer);
+	onDestroy(() => {
+		if (copiedTimer !== null) window.clearTimeout(copiedTimer);
 	});
 </script>
 

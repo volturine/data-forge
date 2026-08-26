@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { CheckCircle, XCircle, Save, Loader2 } from '@lucide/svelte';
 	import { getSettings, updateSettings, isMasked, MASKED_PLACEHOLDER } from '$lib/api/settings';
 	import type { AppSettings } from '$lib/api/settings';
@@ -26,14 +27,13 @@
 	let ollama_endpoint_url = $state('http://localhost:11434');
 	let ollama_default_model = $state('llama3.2');
 
-	// Network: load settings on mount.
-	$effect(() => {
+	onMount(() => {
 		loading = true;
 		feedback = null;
 		openrouter_api_key_dirty = false;
 		openai_api_key_dirty = false;
 		let aborted = false;
-		getSettings().match(
+		void getSettings().match(
 			(s) => {
 				if (aborted) return;
 				openrouter_api_key = isMasked(s.openrouter_api_key) ? '' : s.openrouter_api_key;

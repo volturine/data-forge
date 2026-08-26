@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DragState } from './drag.svelte';
 import type { DropTarget, TargetResolver } from './drag.svelte';
 
@@ -7,6 +7,10 @@ describe('DragState', () => {
 
 	beforeEach(() => {
 		state = new DragState();
+	});
+
+	afterEach(() => {
+		state.end();
 	});
 
 	describe('initial state', () => {
@@ -316,6 +320,25 @@ describe('DragState', () => {
 			state.startMove('step-2', 'sort', 2, 70, 80);
 			state.commit();
 			expect(resolver).toHaveBeenCalledOnce();
+		});
+	});
+
+	describe('drag chrome', () => {
+		test('Escape cancels an active drag', () => {
+			state.start('filter', 'library', 1, 10, 20);
+			window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+			expect(state.active).toBe(false);
+			expect(state.type).toBeNull();
+		});
+
+		test('pointerup commits using the current target', () => {
+			const handler = vi.fn();
+			state.startMove('step-1', 'filter', 1, 100, 200, handler);
+			state.setTarget({ index: 1, parentId: 'a', nextId: 'b' });
+			window.dispatchEvent(new PointerEvent('pointerup', { clientX: 120, clientY: 220 }));
+			expect(handler).toHaveBeenCalledOnce();
+			expect(handler).toHaveBeenCalledWith('step-1', { index: 1, parentId: 'a', nextId: 'b' });
+			expect(state.active).toBe(false);
 		});
 	});
 

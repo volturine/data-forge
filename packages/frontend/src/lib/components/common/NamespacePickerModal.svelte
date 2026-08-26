@@ -20,7 +20,6 @@
 	let searchQuery = $state('');
 	const debouncedSearch = new Debounced(() => searchQuery, 200);
 	let popoverRect = $state({ left: 0, top: 0, width: 360 });
-	let lastAnchor = $state<HTMLElement | null>(null);
 
 	const namespacesQuery = createQuery(() => ({
 		queryKey: ['namespaces'],
@@ -80,13 +79,13 @@
 		onEscape: handleClose,
 		onOutsideClick: (target: Node) => {
 			if (popupRef?.contains(target)) return;
-			if (lastAnchor?.contains(target)) return;
+			if (anchor?.contains(target)) return;
 			handleClose();
 		}
 	});
 
 	function updatePopoverPosition() {
-		const node = lastAnchor;
+		const node = anchor;
 		if (!node) return;
 		const rect = node.getBoundingClientRect();
 		const width = Math.max(rect.width, 240);
@@ -113,30 +112,22 @@
 	function portal(node: HTMLElement, rect: { left: number; top: number; width: number }) {
 		document.body.appendChild(node);
 		applyPopoverPosition(node, rect);
+		updatePopoverPosition();
+		applyPopoverPosition(node, popoverRect);
+		const handleResize = () => updatePopoverPosition();
+		window.addEventListener('resize', handleResize);
+		window.addEventListener('scroll', handleResize, true);
 		return {
 			update(next: { left: number; top: number; width: number }) {
 				applyPopoverPosition(node, next);
 			},
 			destroy() {
+				window.removeEventListener('resize', handleResize);
+				window.removeEventListener('scroll', handleResize, true);
 				node.remove();
 			}
 		};
 	}
-
-	// DOM: $derived can't track anchor position.
-	$effect(() => {
-		if (!open) return;
-		lastAnchor = anchor;
-		if (!lastAnchor) return;
-		updatePopoverPosition();
-		const handleResize = () => updatePopoverPosition();
-		window.addEventListener('resize', handleResize);
-		window.addEventListener('scroll', handleResize, true);
-		return () => {
-			window.removeEventListener('resize', handleResize);
-			window.removeEventListener('scroll', handleResize, true);
-		};
-	});
 
 	function focusInput(node: HTMLInputElement): void {
 		node.focus();

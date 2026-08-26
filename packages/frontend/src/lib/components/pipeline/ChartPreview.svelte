@@ -88,19 +88,16 @@
 	const areaSelectEnabled = $derived(Boolean(config.area_selection_enabled));
 	const zoomActive = $derived(Boolean(zoomTransform));
 
-	// Subscription: $derived can't reset zoom state.
-	$effect(() => {
-		if (zoomEnabled) return;
-		zoomTransform = null;
-		zoomBehavior = null;
-		zoomTarget = null;
-	});
-
-	// Subscription: $derived can't clear selection sets.
-	$effect(() => {
-		if (selectEnabled) return;
-		selectedKeys.clear();
-	});
+	function resetInteractionIfDisabled(): void {
+		if (!zoomEnabled) {
+			if (zoomTransform !== null) zoomTransform = null;
+			if (zoomBehavior !== null) zoomBehavior = null;
+			if (zoomTarget !== null) zoomTarget = null;
+		}
+		if (!selectEnabled && selectedKeys.size > 0) {
+			selectedKeys.clear();
+		}
+	}
 
 	function resetZoom() {
 		if (!zoomTransform) return;
@@ -1044,11 +1041,10 @@
 		downloadBlob(blob, 'chart.csv');
 	}
 
-	/* ── Main render effect ── */
-
-	// DOM: $derived can't render SVG imperatively.
-	$effect(() => {
-		if (!chartEl || data.length === 0) return;
+	function attachChart(node: HTMLDivElement): (() => void) | void {
+		chartEl = node;
+		resetInteractionIfDisabled();
+		if (data.length === 0) return;
 		const renderers: Record<ChartType, ChartRenderer> = {
 			bar: renderBar,
 			horizontal_bar: renderHorizontalBar,
@@ -1060,11 +1056,11 @@
 			scatter: renderScatter,
 			boxplot: renderBoxplot
 		};
-		return observeChart(chartEl, (element, width, chartHeight) => {
+		return observeChart(node, (element, width, chartHeight) => {
 			htmlLegend = null;
 			renderers[chartType](element, width, chartHeight);
 		});
-	});
+	}
 
 	/* ═══════════════════════════════════════════════════
 	   CHART RENDERERS
@@ -4093,7 +4089,7 @@
 		bind:this={wrapperEl}
 		style="height: {height}px"
 	>
-		<div class={css({ width: '100%', height: '100%' })} bind:this={chartEl}>
+		<div class={css({ width: '100%', height: '100%' })} {@attach attachChart}>
 			{#if data.length === 0}
 				<div
 					class={css({

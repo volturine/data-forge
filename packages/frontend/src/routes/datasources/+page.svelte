@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
+	import { afterNavigate, goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { listDatasources, deleteDatasource, getDatasource } from '$lib/api/datasource';
 	import {
@@ -21,7 +23,6 @@
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
 	import BuildComparisonPanel from '$lib/components/datasources/BuildComparisonPanel.svelte';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, spinner } from '$lib/styles/panda';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
@@ -40,7 +41,6 @@
 
 	const selectedId = $derived(page.url.searchParams.get('id'));
 	const activeSelectedId = $derived(!ns.switching ? selectedId : null);
-	let lastSelectionKey = '';
 
 	const query = createQuery(() => ({
 		queryKey: ['datasources', ns.value, showHidden],
@@ -57,7 +57,10 @@
 		queryFn: async () => {
 			if (!activeSelectedId) return null;
 			const result = await getDatasource(activeSelectedId);
-			if (result.isErr()) throw new Error(result.error.message);
+			if (result.isErr()) {
+				if (result.error.status === 404) selectDatasource(null);
+				throw new Error(result.error.message);
+			}
 			return result.value;
 		},
 		enabled: !!activeSelectedId,
@@ -97,13 +100,6 @@
 			selectedDatasourceQuery.data ?? datasources.find((d) => d.id === activeSelectedId) ?? null
 		);
 	});
-	const staleSelection = $derived(
-		!!activeSelectedId &&
-			!!query.data &&
-			!selectedDatasourceQuery.isFetching &&
-			!selectedDatasourceQuery.data &&
-			!datasources.some((d) => d.id === activeSelectedId)
-	);
 	const previewDatasource = $derived(selectedDatasource);
 	const effectiveConfig = $derived.by(() => snapshotConfig ?? previewDatasource?.config ?? null);
 	const previewKey = $derived.by(() => {
@@ -113,27 +109,25 @@
 		return `${ds.id}:${JSON.stringify(config)}`;
 	});
 
-	// Navigation: URL-driven selection still needs local transient state reset.
-	$effect(() => {
-		const key = `${ns.value}:${selectedId ?? ''}`;
-		if (key === lastSelectionKey) return;
-		lastSelectionKey = key;
+	function resetPreviewLocals(): void {
 		showComparison = false;
 		snapshotConfig = null;
-	});
-
-	// Navigation: clear stale selection only after both the list and direct lookup miss.
-	$effect(() => {
-		if (!staleSelection) return;
-		selectDatasource(null);
-	});
+	}
 
 	function selectDatasource(id: string | null) {
-		showComparison = false;
-		snapshotConfig = null;
+		resetPreviewLocals();
 		const url = id ? `/datasources?id=${id}` : '/datasources';
 		goto(resolve(url as '/'), { replaceState: true });
 	}
+
+	onMount(() => {
+		window.addEventListener('dataforge:namespace-will-change', resetPreviewLocals);
+		return () => {
+			window.removeEventListener('dataforge:namespace-will-change', resetPreviewLocals);
+		};
+	});
+
+	afterNavigate(resetPreviewLocals);
 
 	function handleDelete(id: string) {
 		deletingId = id;
@@ -527,120 +521,125 @@
 
 	<!-- Right Pane -->
 	<main class={css({ flex: '1', overflow: 'hidden' })}>
-		{#if selectedDatasource}
-			<div class={css({ height: '100%', display: 'flex', flexDirection: 'column' })}>
-				<div
-					class={css({
-						display: 'flex',
-						alignItems: 'center',
-						borderBottomWidth: '1',
-						backgroundColor: 'bg.secondary',
-						padding: '3',
-						justifyContent: 'space-between',
-						gap: '3'
-					})}
-				>
-					<div class={css({ flex: '1', minWidth: '0' })}>
-						{#if selectedDatasource.source_type === 'iceberg'}
-							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-								<div class={css({ flex: '1', minWidth: '0' })}>
-									<SnapshotPicker
-										datasourceId={selectedDatasource.id}
-										datasourceConfig={effectiveConfig ?? selectedDatasource.config}
-										label="Time Travel"
-										branch={activeBranch}
-										showDelete
-										showBuildPreviews={datasourceIsAnalysisOutput(selectedDatasource) ||
-											datasourceNeedsExternalIngest(selectedDatasource)}
-										onConfigChange={handleSnapshotConfigChange}
-									/>
-								</div>
+		{#key `${ns.value}:${selectedId ?? ''}`}
+			{#if selectedDatasource}
+				<div class={css({ height: '100%', display: 'flex', flexDirection: 'column' })}>
+					<div
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							borderBottomWidth: '1',
+							backgroundColor: 'bg.secondary',
+							padding: '3',
+							justifyContent: 'space-between',
+							gap: '3'
+						})}
+					>
+						<div class={css({ flex: '1', minWidth: '0' })}>
+							{#if selectedDatasource.source_type === 'iceberg'}
 								<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-									<GitBranch size={14} class={css({ color: 'fg.tertiary' })} />
-									<BranchPicker
-										branches={branchOptions}
-										value={activeBranch}
-										placeholder="Select branch"
-										onChange={(value: string) => {
-											snapshotConfig = {
-												...(effectiveConfig ?? selectedDatasource?.config ?? {}),
-												branch: value
-											} as Record<string, unknown>;
-										}}
-									/>
+									<div class={css({ flex: '1', minWidth: '0' })}>
+										<SnapshotPicker
+											datasourceId={selectedDatasource.id}
+											datasourceConfig={effectiveConfig ?? selectedDatasource.config}
+											label="Time Travel"
+											branch={activeBranch}
+											showDelete
+											showBuildPreviews={datasourceIsAnalysisOutput(selectedDatasource) ||
+												datasourceNeedsExternalIngest(selectedDatasource)}
+											onConfigChange={handleSnapshotConfigChange}
+										/>
+									</div>
+									<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+										<GitBranch size={14} class={css({ color: 'fg.tertiary' })} />
+										<BranchPicker
+											branches={branchOptions}
+											value={activeBranch}
+											placeholder="Select branch"
+											onChange={(value: string) => {
+												snapshotConfig = {
+													...(effectiveConfig ?? selectedDatasource?.config ?? {}),
+													branch: value
+												} as Record<string, unknown>;
+											}}
+										/>
+									</div>
+									<button
+										class={css({
+											backgroundColor: 'transparent',
+											color: 'fg.secondary',
+											borderColor: 'transparent',
+											paddingX: '2',
+											paddingY: '1',
+											'&:hover:not(:disabled)': {
+												backgroundColor: 'bg.hover',
+												color: 'fg.primary'
+											},
+											borderWidth: '1',
+											fontSize: 'xs'
+										})}
+										onclick={() => (showComparison = !showComparison)}
+										aria-pressed={showComparison}
+									>
+										{#if showComparison}
+											Hide comparison
+										{:else}
+											Compare builds
+										{/if}
+									</button>
 								</div>
-								<button
-									class={css({
-										backgroundColor: 'transparent',
-										color: 'fg.secondary',
-										borderColor: 'transparent',
-										paddingX: '2',
-										paddingY: '1',
-										'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.primary' },
-										borderWidth: '1',
-										fontSize: 'xs'
-									})}
-									onclick={() => (showComparison = !showComparison)}
-									aria-pressed={showComparison}
-								>
-									{#if showComparison}
-										Hide comparison
-									{:else}
-										Compare builds
-									{/if}
-								</button>
-							</div>
+							{:else}
+								<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
+									Time travel is available for Iceberg datasources.
+								</div>
+							{/if}
+						</div>
+					</div>
+					<div class={css({ flex: '1', minHeight: '0', overflow: 'auto' })}>
+						{#if showComparison}
+							<BuildComparisonPanel datasource={selectedDatasource} branch={activeBranch} />
+						{:else if previewDatasource}
+							{#key previewKey}
+								<DatasourcePreview
+									datasourceId={previewDatasource.id}
+									datasource={previewDatasource}
+									datasourceConfig={effectiveConfig ?? previewDatasource.config}
+								/>
+							{/key}
 						{:else}
-							<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
-								Time travel is available for Iceberg datasources.
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'center',
+									height: '100%'
+								})}
+							>
+								<div class={spinner()}></div>
 							</div>
 						{/if}
 					</div>
 				</div>
-				<div class={css({ flex: '1', minHeight: '0', overflow: 'auto' })}>
-					{#if showComparison}
-						<BuildComparisonPanel datasource={selectedDatasource} branch={activeBranch} />
-					{:else if previewDatasource}
-						{#key previewKey}
-							<DatasourcePreview
-								datasourceId={previewDatasource.id}
-								datasource={previewDatasource}
-								datasourceConfig={effectiveConfig ?? previewDatasource.config}
-							/>
-						{/key}
-					{:else}
-						<div
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								height: '100%'
-							})}
-						>
-							<div class={spinner()}></div>
-						</div>
-					{/if}
+			{:else}
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						height: '100%',
+						justifyContent: 'center',
+						color: 'fg.muted',
+						backgroundColor: 'bg.secondary'
+					})}
+				>
+					<div class={css({ textAlign: 'center' })}>
+						<p class={css({ fontSize: 'lg', fontWeight: 'medium', marginBottom: '2' })}>
+							No datasource selected
+						</p>
+						<p class={css({ fontSize: 'sm' })}>Select a datasource from the list to preview</p>
+					</div>
 				</div>
-			</div>
-		{:else}
-			<div
-				class={css({
-					display: 'flex',
-					alignItems: 'center',
-					height: '100%',
-					justifyContent: 'center',
-					color: 'fg.muted',
-					backgroundColor: 'bg.secondary'
-				})}
-			>
-				<div class={css({ textAlign: 'center' })}>
-					<p class={css({ fontSize: 'lg', fontWeight: 'medium', marginBottom: '2' })}>
-						No datasource selected
-					</p>
-					<p class={css({ fontSize: 'sm' })}>Select a datasource from the list to preview</p>
-				</div>
-			</div>
-		{/if}
+			{/if}
+		{/key}
 	</main>
 </div>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { Schema } from '$lib/types/schema';
 	import type { UnionByNameConfigData } from '$lib/types/operation-config';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -77,15 +78,9 @@
 		schemaErrors = rest;
 	}
 
-	// Network: $derived can't trigger async schema loads for pre-populated or externally-changed sources.
-	$effect(() => {
-		const current = new Set(config.sources);
-		for (const id of current) {
+	onMount(() => {
+		for (const id of config.sources) {
 			if (!loaded.has(id)) void loadSourceSchema(id);
-		}
-		const stale = [...loaded].filter((id) => !current.has(id));
-		for (const id of stale) {
-			removeSourceSchema(id);
 		}
 	});
 </script>

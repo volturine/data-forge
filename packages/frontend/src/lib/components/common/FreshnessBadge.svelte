@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { chip } from '$lib/styles/panda';
 	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
 	import { freshnessStatus, type FreshnessStatus } from '$lib/utils/freshness';
@@ -13,7 +14,7 @@
 
 	let now = $state(Date.now());
 
-	$effect(() => {
+	onMount(() => {
 		if (!live) return;
 		const interval = setInterval(() => {
 			now = Date.now();

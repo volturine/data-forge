@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { onMount } from 'svelte';
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { createUdf, getUdf, updateUdf } from '$lib/api/udf';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
@@ -29,26 +30,11 @@
 	let saving = $state(false);
 	let lastArgs = $state('');
 	let dirty = $state(false);
+	let hydratedId = $state('');
 
-	let initialized = $state(false);
-
-	const query = createQuery(() => ({
-		queryKey: ['udf', udfId],
-		enabled: mode === 'edit' && !!udfId,
-		queryFn: async () => {
-			if (!udfId) throw new Error('Missing UDF id');
-			const result = await getUdf(udfId);
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		}
-	}));
-
-	// Network: $derived can't hydrate form state from query result.
-	$effect(() => {
-		if (mode !== 'edit') return;
-		if (initialized) return;
-		if (!query.data) return;
-		const data = query.data as Udf;
+	function applyUdf(data: Udf) {
+		if (hydratedId === data.id) return;
+		hydratedId = data.id;
 		name = data.name;
 		description = data.description ?? '';
 		tags = (data.tags ?? []).join(', ');
@@ -56,7 +42,25 @@
 		outputDtype = data.signature?.output_dtype ?? '';
 		code = data.code;
 		lastArgs = '';
-		initialized = true;
+		dirty = false;
+	}
+
+	const query = createQuery(() => ({
+		queryKey: ['udf', udfId],
+		enabled: mode === 'edit' && !!udfId,
+		staleTime: 0,
+		queryFn: async () => {
+			if (!udfId) throw new Error('Missing UDF id');
+			const result = await getUdf(udfId);
+			if (result.isErr()) throw new Error(result.error.message);
+			applyUdf(result.value);
+			return result.value;
+		}
+	}));
+
+	onMount(() => {
+		if (mode !== 'edit') return;
+		if (query.data) applyUdf(query.data as Udf);
 	});
 
 	const saveMutation = createMutation(() => ({
@@ -121,8 +125,13 @@
 		return lines.join('\n');
 	}
 
+	function markDirty() {
+		dirty = true;
+	}
+
 	function updateInputs(next: UdfInput[]) {
 		inputs = next;
+		markDirty();
 		const params = next.map((item, index) => item.label?.trim() || `arg${index + 1}`);
 		const sig = params.join(', ');
 		if (!sig && !code.trim().startsWith('def udf')) return;
@@ -132,13 +141,6 @@
 	}
 
 	const canSave = $derived(name.trim().length > 0 && code.trim().length > 0);
-
-	// Subscription: $derived can't track mutation across multiple form fields.
-	$effect(() => {
-		void [name, description, tags, code, inputs, outputDtype];
-		if (!initialized && mode === 'edit') return;
-		dirty = true;
-	});
 </script>
 
 <div
@@ -257,13 +259,19 @@
 						id="udf-name"
 						type="text"
 						bind:value={name}
+						oninput={markDirty}
 						placeholder="UDF name"
 						class={input()}
 					/>
 				</div>
 				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
 					<label for="udf-description" class={label({ variant: 'field' })}>Description</label>
-					<textarea id="udf-description" rows="3" bind:value={description} class={input()}
+					<textarea
+						id="udf-description"
+						rows="3"
+						bind:value={description}
+						oninput={markDirty}
+						class={input()}
 					></textarea>
 				</div>
 				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
@@ -272,6 +280,7 @@
 						id="udf-tags"
 						type="text"
 						bind:value={tags}
+						oninput={markDirty}
 						placeholder="math, text, date"
 						class={input()}
 					/>
@@ -293,7 +302,10 @@
 					<label class={label()} for="udf-output">Output dtype</label>
 					<ColumnTypeDropdown
 						value={outputDtype}
-						onChange={(val) => (outputDtype = val)}
+						onChange={(val) => {
+							outputDtype = val;
+							markDirty();
+						}}
 						placeholder="Optional"
 					/>
 				</div>
@@ -317,7 +329,7 @@
 						>Define a function named <code>udf</code></span
 					>
 				</div>
-				<CodeEditor bind:value={code} height="360px" />
+				<CodeEditor bind:value={code} height="360px" onEdit={markDirty} />
 			</div>
 
 			{#if error}

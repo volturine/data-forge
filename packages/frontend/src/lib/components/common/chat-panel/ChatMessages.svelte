@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ArrowDown, CircleAlert, RotateCcw, X, Eye, Play, History, Trash2 } from '@lucide/svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { css } from '$lib/styles/panda';
 	import { chatStore } from '$lib/stores/chat.svelte';
@@ -19,10 +20,6 @@
 	let messagesEl: HTMLElement | undefined;
 	let userScrolledUp = $state(false);
 
-	function bindMessages(el: HTMLElement) {
-		messagesEl = el;
-	}
-
 	function handleScroll() {
 		if (!messagesEl) return;
 		const { scrollTop, scrollHeight, clientHeight } = messagesEl;
@@ -40,67 +37,61 @@
 		userScrolledUp = false;
 	}
 
-	// DOM scroll after timeline update — $derived cannot trigger rAF
-	const timelineLength = $derived(chatStore.timeline.length);
-	const isLoading = $derived(chatStore.loading);
-	$effect(() => {
-		void timelineLength;
-		void isLoading;
-		if (!userScrolledUp && messagesEl) {
-			requestAnimationFrame(() => {
-				requestAnimationFrame(() => {
-					messagesEl?.scrollTo({ top: messagesEl.scrollHeight, behavior: 'smooth' });
-				});
-			});
-		}
-	});
-
-	// Timers created by injected copy buttons — cleared when the effect tears down
 	const pendingTimers = new SvelteSet<ReturnType<typeof setTimeout>>();
-	$effect(() => () => {
+	onDestroy(() => {
 		for (const t of pendingTimers) clearTimeout(t);
 	});
 
-	// DOM mutation: $derived can't inject buttons into rendered HTML.
-	$effect(() => {
-		void timelineLength;
-		if (!messagesEl) return;
+	function injectCopyButtons(root: HTMLElement): HTMLButtonElement[] {
 		const buttons: HTMLButtonElement[] = [];
-		requestAnimationFrame(() => {
-			const blocks = messagesEl?.querySelectorAll('.chat-markdown pre');
-			if (!blocks) return;
-			for (const block of blocks) {
-				if (block.querySelector('.code-copy-btn')) continue;
-				const pre = block as HTMLElement;
-				pre.style.position = 'relative';
-				const btn = document.createElement('button');
-				btn.className = 'code-copy-btn';
-				btn.title = 'Copy code';
-				btn.innerHTML =
-					'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
-				btn.addEventListener('click', () => {
-					const code = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
-					void navigator.clipboard.writeText(code).then(() => {
+		const blocks = root.querySelectorAll('.chat-markdown pre');
+		for (const block of blocks) {
+			if (block.querySelector('.code-copy-btn')) continue;
+			const pre = block as HTMLElement;
+			pre.style.position = 'relative';
+			const btn = document.createElement('button');
+			btn.className = 'code-copy-btn';
+			btn.title = 'Copy code';
+			btn.innerHTML =
+				'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+			btn.addEventListener('click', () => {
+				const code = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
+				void navigator.clipboard.writeText(code).then(() => {
+					btn.innerHTML =
+						'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+					const t = setTimeout(() => {
+						pendingTimers.delete(t);
 						btn.innerHTML =
-							'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
-						const t = setTimeout(() => {
-							pendingTimers.delete(t);
-							btn.innerHTML =
-								'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
-						}, 2000);
-						pendingTimers.add(t);
-					});
+							'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+					}, 2000);
+					pendingTimers.add(t);
 				});
-				pre.appendChild(btn);
-				buttons.push(btn);
-			}
+			});
+			pre.appendChild(btn);
+			buttons.push(btn);
+		}
+		return buttons;
+	}
+
+	function attachMessages(node: HTMLElement): () => void {
+		messagesEl = node;
+		void chatStore.timeline.length;
+		void chatStore.loading;
+		const buttons: HTMLButtonElement[] = [];
+		if (!userScrolledUp) {
+			requestAnimationFrame(() => {
+				requestAnimationFrame(() => {
+					node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
+				});
+			});
+		}
+		requestAnimationFrame(() => {
+			buttons.push(...injectCopyButtons(node));
 		});
 		return () => {
-			for (const btn of buttons) {
-				btn.remove();
-			}
+			for (const btn of buttons) btn.remove();
 		};
-	});
+	}
 
 	function isGrouped(idx: number): boolean {
 		return timelineEntriesAreGrouped(chatStore.timeline, idx);
@@ -116,11 +107,8 @@
 		'What tools are available?'
 	];
 
-	/** Reactive elapsed timer — ticks every second while a tool is running. */
 	let elapsedTick = $state(nowEpochMs());
-	$effect(() => {
-		const hasRunning = chatStore.toolCalls.some((tc) => tc.status === 'running' && tc.startedAt);
-		if (!hasRunning) return;
+	onMount(() => {
 		const iv = setInterval(() => {
 			elapsedTick = nowEpochMs();
 		}, 1000);
@@ -166,7 +154,7 @@
 		minHeight: '0',
 		position: 'relative'
 	})}
-	use:bindMessages
+	{@attach attachMessages}
 	onscroll={handleScroll}
 >
 	<!-- Empty state -->
