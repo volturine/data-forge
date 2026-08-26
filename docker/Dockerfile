@@ -82,7 +82,7 @@ COPY packages/backend/ /app/packages/backend/
 COPY --from=protocol-builder /app/packages/backend/buf /app/packages/backend/buf
 COPY --from=protocol-builder /app/packages/backend/dataforge_protocol /app/packages/backend/dataforge_protocol
 WORKDIR /app/packages/backend
-RUN if [ "$INSTALL_DEV" = "true" ]; then uv sync --frozen --group dev; else uv sync --frozen; fi
+RUN if [ "$INSTALL_DEV" = "true" ]; then uv sync --frozen --group dev; else uv sync --frozen --no-dev; fi
 
 FROM app-runtime AS api
 COPY --from=api-builder --chown=appuser:appgroup /app/packages/backend /app/packages/backend
