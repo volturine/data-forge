@@ -126,12 +126,9 @@ jobs:
     env:
       PORT: "8001"
       FRONTEND_PORT: "3001"
-      # Match the pre-Docker parallel e2e default (4). Bootstrap is now bounded
-      # and fails visibly, so we no longer serialize browsers to hide shell hangs.
-      # No Playwright retries.
-      # Four browsers match pre-Docker e2e. Engine admission queues above the
-      # real production-style capacity instead of increasing the limit for CI.
-      PW_E2E_WORKERS: "4"
+      # Leave compute headroom for auto-previews and cleanup that overlap the
+      # browser test which initiated them. No Playwright retries.
+      PW_E2E_WORKERS: "2"
       BUILD_WORKER_MIN_PROCESSES: "4"
       BUILD_WORKER_MAX_PROCESSES: "4"
       COMPUTE_REQUEST_CONCURRENCY: "4"
