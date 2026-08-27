@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { preflightExcel, preflightExcelFromPath, previewExcel } from '$lib/api/excel';
 	import type { ExcelParams } from '$lib/api/excel';
 	import DataTable from '$lib/components/common/DataTable.svelte';
@@ -57,21 +57,9 @@
 	let error = $state<string | null>(null);
 	let dirty = $state(false);
 	let initialized = $state(false);
-	let suppressNotification = $state(false);
 
 	let previewTimer: ReturnType<typeof setTimeout> | null = null;
-
-	const config = $derived<ExcelConfig>({
-		sheet_name: selectedSheet,
-		table_name: selectedTable,
-		named_range: selectedRange,
-		cell_range: cellRangeInput.trim() || '',
-		start_row: startRow,
-		start_col: startCol,
-		end_col: endCol,
-		end_row: endRow,
-		has_header: excelHeader
-	});
+	let preflightToken = 0;
 
 	const previewColumns = $derived.by(() => {
 		if (previewGrid.length === 0) return [] as string[];
@@ -95,29 +83,20 @@
 		});
 	});
 
-	// Subscription: $derived can't notify parent callbacks.
-	$effect(() => {
+	function emitConfig() {
 		if (!onConfigChange || !initialized) return;
-		if (suppressNotification) {
-			suppressNotification = false;
-			return;
-		}
-		onConfigChange(config);
-	});
-
-	// Subscription: $derived can't sync external config.
-	$effect(() => {
-		const next = initialConfig;
-		if (!next) return;
-		const normalized = normalizeConfig(next);
-		if (isConfigEqual(normalized, config)) {
-			if (!initialized) initialized = true;
-			return;
-		}
-		suppressNotification = true;
-		applyConfig(normalized);
-		initialized = true;
-	});
+		onConfigChange({
+			sheet_name: selectedSheet,
+			table_name: selectedTable,
+			named_range: selectedRange,
+			cell_range: cellRangeInput.trim() || '',
+			start_row: startRow,
+			start_col: startCol,
+			end_col: endCol,
+			end_row: endRow,
+			has_header: excelHeader
+		});
+	}
 
 	function resetPreviewState() {
 		sheetNames = [];
@@ -129,7 +108,6 @@
 		error = null;
 		dirty = false;
 		initialized = false;
-		suppressNotification = false;
 	}
 
 	function normalizeConfig(value: Partial<ExcelConfig>): ExcelConfig {
@@ -146,20 +124,6 @@
 		};
 	}
 
-	function isConfigEqual(a: ExcelConfig, b: ExcelConfig): boolean {
-		return (
-			a.sheet_name === b.sheet_name &&
-			a.table_name === b.table_name &&
-			a.named_range === b.named_range &&
-			a.cell_range === b.cell_range &&
-			a.start_row === b.start_row &&
-			a.start_col === b.start_col &&
-			a.end_col === b.end_col &&
-			a.end_row === b.end_row &&
-			a.has_header === b.has_header
-		);
-	}
-
 	function applyConfig(next: ExcelConfig) {
 		selectedSheet = next.sheet_name;
 		selectedTable = next.table_name;
@@ -174,7 +138,14 @@
 		excelHeader = next.has_header;
 	}
 
-	async function runPreflight(): Promise<void> {
+	const seedConfig = untrack(() => initialConfig);
+	if (seedConfig) {
+		applyConfig(normalizeConfig(seedConfig));
+		initialized = true;
+	}
+
+	async function runPreflight(token?: number): Promise<void> {
+		const current = token ?? preflightToken;
 		error = null;
 		previewLoading = true;
 		const params: ExcelParams = {
@@ -193,6 +164,7 @@
 			mode === 'upload'
 				? await preflightExcel(file as File, params)
 				: await preflightExcelFromPath(filePath as string, params);
+		if (current !== preflightToken) return;
 		result.match(
 			(data) => {
 				preflightId = data.preflight_id;
@@ -213,6 +185,7 @@
 				dirty = false;
 				initialized = true;
 				previewLoading = false;
+				emitConfig();
 			},
 			(err) => {
 				error = err.message || 'Preflight failed';
@@ -259,6 +232,7 @@
 				}
 				dirty = false;
 				previewLoading = false;
+				emitConfig();
 			},
 			(err) => {
 				error = err.message || 'Preview failed';
@@ -294,6 +268,7 @@
 		endRowManual = false;
 		schedulePreview();
 		dirty = false;
+		emitConfig();
 	}
 
 	function applyTable(table: string) {
@@ -308,6 +283,7 @@
 		endRowManual = false;
 		schedulePreview();
 		dirty = false;
+		emitConfig();
 	}
 
 	function applyNamedRange(range: string) {
@@ -322,6 +298,7 @@
 		endRowManual = false;
 		schedulePreview();
 		dirty = false;
+		emitConfig();
 	}
 
 	function applyCellRange(range: string) {
@@ -335,6 +312,7 @@
 		endRow = null;
 		endRowManual = false;
 		markDirty();
+		emitConfig();
 	}
 
 	function handleCellRangeInput(event: Event) {
@@ -345,6 +323,7 @@
 		endRowManual = false;
 		endRow = null;
 		markDirty();
+		emitConfig();
 	}
 
 	function handleCellRangeBlur() {
@@ -352,6 +331,7 @@
 		if (!trimmed) {
 			cellRange = '';
 			markDirty();
+			emitConfig();
 			return;
 		}
 		applyCellRange(trimmed);
@@ -365,6 +345,7 @@
 
 	function handleHeaderToggle() {
 		markDirty();
+		emitConfig();
 	}
 
 	function cellLabel(col: number): string {
@@ -384,27 +365,15 @@
 		previewTimer = null;
 	});
 
-	// Network: $derived can't run preflight.
-	$effect(() => {
-		if (mode === 'upload') {
-			if (!file) {
-				resetPreviewState();
-				return;
-			}
-			untrack(() => {
-				resetPreviewState();
-				void runPreflight();
-			});
-			return;
-		}
-		if (!filePath) {
-			resetPreviewState();
-			return;
-		}
-		untrack(() => {
-			resetPreviewState();
-			void runPreflight();
-		});
+	onMount(() => {
+		const source = mode === 'upload' ? file : filePath;
+		if (!source) return;
+		const token = ++preflightToken;
+		resetPreviewState();
+		void runPreflight(token);
+		return () => {
+			preflightToken += 1;
+		};
 	});
 </script>
 

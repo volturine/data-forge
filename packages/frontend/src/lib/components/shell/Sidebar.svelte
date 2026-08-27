@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
+	import { onDestroy } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
 	import {
 		LayoutGrid,
@@ -65,6 +66,7 @@
 		queryFn: async () => {
 			const result = await listFavoriteAnalyses();
 			if (result.isErr()) throw new Error(result.error.message);
+			favoriteStore.sync(result.value);
 			return result.value;
 		}
 	}));
@@ -153,21 +155,22 @@
 
 	const profileActive = $derived(currentPath.startsWith('/profile'));
 
-	function openEngines(): void {
-		enginesOpen = true;
+	function setEnginesOpen(next: boolean): void {
+		if (enginesOpen === next) return;
+		enginesOpen = next;
+		if (next) {
+			enginesStore.startStream();
+			return;
+		}
+		enginesStore.stopStream();
 	}
 
-	$effect(() => {
-		const analyses = analysesQuery.data;
-		if (!analyses) return;
-		favoriteStore.sync(analyses);
-	});
+	function openEngines(): void {
+		setEnginesOpen(true);
+	}
 
-	// Subscription: opening the popup is an explicit on-demand owner of the engines stream.
-	$effect(() => {
-		if (!enginesOpen) return;
-		enginesStore.startStream();
-		return () => enginesStore.stopStream();
+	onDestroy(() => {
+		if (enginesOpen) enginesStore.stopStream();
 	});
 </script>
 
@@ -490,7 +493,7 @@
 				{/if}
 			</button>
 
-			<EnginesPopup bind:open={enginesOpen} anchor={enginesTrigger} />
+			<EnginesPopup bind:open={() => enginesOpen, setEnginesOpen} anchor={enginesTrigger} />
 		</div>
 
 		<button

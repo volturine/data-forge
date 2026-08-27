@@ -58,6 +58,39 @@ export class DragState {
 	/** Synchronous target resolver set by PipelineCanvas */
 	private targetResolver: TargetResolver | null = null;
 
+	private chromeAttached = false;
+
+	private handleDragKeydown = (event: KeyboardEvent) => {
+		if (!this.active) return;
+		if (event.key !== 'Escape') return;
+		event.preventDefault();
+		this.cancel();
+	};
+
+	private handleDragPointerFinish = (event: PointerEvent) => {
+		if (!this.active) return;
+		this.setPointer(event.clientX, event.clientY);
+		this.commit();
+	};
+
+	private attachChrome(): void {
+		if (this.chromeAttached) return;
+		this.chromeAttached = true;
+		window.addEventListener('keydown', this.handleDragKeydown);
+		window.addEventListener('pointerup', this.handleDragPointerFinish);
+		window.addEventListener('pointercancel', this.handleDragPointerFinish);
+		document.body.classList.add('touch-dragging');
+	}
+
+	private detachChrome(): void {
+		if (!this.chromeAttached) return;
+		this.chromeAttached = false;
+		window.removeEventListener('keydown', this.handleDragKeydown);
+		window.removeEventListener('pointerup', this.handleDragPointerFinish);
+		window.removeEventListener('pointercancel', this.handleDragPointerFinish);
+		document.body.classList.remove('touch-dragging');
+	}
+
 	/** Start a drag operation for a new step from library */
 	start(type: string, source: DragSource, pointerId: number, pointerX: number, pointerY: number) {
 		if (this.active) return;
@@ -70,6 +103,7 @@ export class DragState {
 		this.pointerX = pointerX;
 		this.pointerY = pointerY;
 		this.dropHandler = null;
+		this.attachChrome();
 	}
 
 	/** Start a reorder operation for an existing step */
@@ -91,6 +125,7 @@ export class DragState {
 		this.pointerX = pointerX;
 		this.pointerY = pointerY;
 		this.dropHandler = onDrop ?? null;
+		this.attachChrome();
 	}
 
 	/** Update the current drop target */
@@ -158,6 +193,7 @@ export class DragState {
 
 	/** End the drag operation and reset all state */
 	end() {
+		this.detachChrome();
 		this.releaseCapture();
 		this.dropHandler = null;
 		this.type = null;
@@ -172,43 +208,3 @@ export class DragState {
 }
 
 export const drag = new DragState();
-
-// Module-level effects for global drag behavior
-$effect.root(() => {
-	// Escape key listener to cancel active drags
-	$effect(() => {
-		if (!drag.active) return;
-		const handleKeydown = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') {
-				e.preventDefault();
-				drag.cancel();
-			}
-		};
-		window.addEventListener('keydown', handleKeydown);
-		return () => window.removeEventListener('keydown', handleKeydown);
-	});
-
-	// DOM: global pointerup/mouseup to commit or clean up drags when the
-	// captured element misses the event (e.g., pointer released outside).
-	$effect(() => {
-		if (!drag.active) return;
-		const finish = (e: PointerEvent) => {
-			if (!drag.active) return;
-			drag.setPointer(e.clientX, e.clientY);
-			drag.commit();
-		};
-		window.addEventListener('pointerup', finish);
-		window.addEventListener('pointercancel', finish);
-		return () => {
-			window.removeEventListener('pointerup', finish);
-			window.removeEventListener('pointercancel', finish);
-		};
-	});
-
-	// Body class management for touch-dragging
-	$effect(() => {
-		if (!drag.active) return;
-		document.body.classList.add('touch-dragging');
-		return () => document.body.classList.remove('touch-dragging');
-	});
-});

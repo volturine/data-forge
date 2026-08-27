@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { formatDateDisplay, formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
 	import { formatRelativeTime } from '$lib/utils/relative-time';
 	import { css } from '$lib/styles/panda';
@@ -13,7 +14,7 @@
 
 	let now = $state(Date.now());
 
-	$effect(() => {
+	onMount(() => {
 		if (!live) return;
 		const interval = setInterval(() => {
 			now = Date.now();

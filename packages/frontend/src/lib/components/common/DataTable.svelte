@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import {
 		createTable,
 		getCoreRowModel,
@@ -123,35 +124,20 @@
 		hoverId: ''
 	};
 
-	let lastTooltipUpdate = { text: '', x: 0, y: 0, visible: false };
-
-	// DOM: $derived can't position tooltip via measurements.
-	$effect(() => {
-		if (!tipRef) return;
-		if (
-			tipState.text === lastTooltipUpdate.text &&
-			tipState.x === lastTooltipUpdate.x &&
-			tipState.y === lastTooltipUpdate.y &&
-			tipState.visible === lastTooltipUpdate.visible
-		) {
-			return;
-		}
-		lastTooltipUpdate = {
-			text: tipState.text,
-			x: tipState.x,
-			y: tipState.y,
-			visible: tipState.visible
-		};
+	function applyTip() {
+		const node = tipRef;
+		if (!node) return;
 		if (!tipState.visible) {
-			tipRef.style.opacity = '0';
-			tipRef.style.visibility = 'hidden';
+			node.style.opacity = '0';
+			node.style.visibility = 'hidden';
 			return;
 		}
-		tipRef.style.setProperty('--tip-left', `${tipState.x}px`);
-		tipRef.style.setProperty('--tip-top', `${tipState.y}px`);
-		tipRef.style.opacity = '1';
-		tipRef.style.visibility = 'visible';
-	});
+		node.textContent = tipState.text;
+		node.style.left = `${tipState.x}px`;
+		node.style.top = `${tipState.y}px`;
+		node.style.opacity = '1';
+		node.style.visibility = 'visible';
+	}
 
 	function setWidth(node: HTMLElement, size: number) {
 		node.style.width = `${size}px`;
@@ -462,6 +448,7 @@
 			tipState.timer = null;
 		}
 		tipState.visible = false;
+		applyTip();
 	}
 
 	function tipShow(event: MouseEvent, id: string, value: string) {
@@ -478,6 +465,7 @@
 		}
 		if (!overflow) {
 			tipState.visible = false;
+			applyTip();
 			return;
 		}
 		const rect = valueEl.getBoundingClientRect();
@@ -488,8 +476,17 @@
 		tipState.timer = window.setTimeout(() => {
 			if (tipState.hoverId !== hoverId) return;
 			tipState.visible = true;
+			applyTip();
 		}, columnHoverDelayMs);
 	}
+
+	onDestroy(() => {
+		if (tipState.timer) window.clearTimeout(tipState.timer);
+		for (const timer of copyTimers.values()) {
+			window.clearTimeout(timer);
+		}
+		copyTimers.clear();
+	});
 </script>
 
 <div

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { untrack } from 'svelte';
+	import { afterNavigate } from '$app/navigation';
+	import { onDestroy, onMount } from 'svelte';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { MediaQuery } from 'svelte/reactivity';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
@@ -50,37 +50,35 @@
 	let isSaving = $state(false);
 	let saveError = $state('');
 
-	// Cleanup: $derived can't clear pending timers on destroy.
-	$effect(() => {
-		return () => {
-			actions.clearTabErrorTimer();
-			buildStore.close();
-		};
-	});
-
-	let isDirty = $state(false);
+	const isDirty = $derived(analysisStore.isDirty());
 	let lastLoadedVersion = $state<string | null>(null);
 
 	const lock = createEditorLockController({
 		validAnalysisId: () => validAnalysisId,
 		getDraftLoaded: () => draft.draftLoaded,
 		getIsSaving: () => isSaving,
-		getIsDirty: () => isDirty
+		getIsDirty: () => isDirty,
+		onOwned: () => draft.hydrate(),
+		onLockedByOther: () => snapBackFromRemoteLock()
 	});
-	lock.startSessionWatcher();
 	const editorAccessState = $derived(lock.editorAccessState);
-	const lockedByOther = $derived(lock.lockedByOther);
 	const lockReadOnly = $derived(lock.lockReadOnly);
 	const editorReadOnly = $derived(lock.editorReadOnly);
 
-	function markUnsaved() {
+	function persistDraft(): void {
 		if (editorReadOnly) return;
-		isDirty = true;
+		draft.schedulePersist();
+	}
+
+	function markUnsaved() {
+		persistDraft();
+		hydrateInferredSchemas();
 	}
 
 	function handleSelectStep(stepId: string) {
 		selectedStepId = stepId;
 		rightPaneCollapsed = false;
+		draft.schedulePersist();
 	}
 
 	const actions = createAnalysisEditorActions({
@@ -102,19 +100,25 @@
 		}
 	});
 
+	onDestroy(() => {
+		actions.clearTabErrorTimer();
+		buildStore.close();
+		lock.stop();
+		draft.flush();
+	});
+
 	const storageKey = $derived(validAnalysisId ? `analysis-draft:${validAnalysisId}` : null);
 
-	// Timer: $derived can't schedule schema refresh.
-	$effect(() => {
-		if (!analysisId) return;
-		if (lastAnalysisId !== analysisId) {
-			analysisStore.reset();
-			schemaStore.reset();
-			selectedStepId = null;
-			lastAnalysisId = analysisId;
-		}
+	function resetForAnalysisId(id: string | null): void {
+		if (!id) return;
+		if (lastAnalysisId === id) return;
+		analysisStore.reset();
+		schemaStore.reset();
+		selectedStepId = null;
+		lastAnalysisId = id;
 		draft.reset();
-	});
+		lock.sync(validAnalysisId);
+	}
 
 	const draft = createDraftController({
 		getStorageKey: () => storageKey,
@@ -147,20 +151,28 @@
 			rightPaneCollapsed = parsed.rightPaneCollapsed;
 			if (parsed.configPosition) configPosition = parsed.configPosition;
 			if (parsed.bottomPaneHeight) bottomPaneHeight = parsed.bottomPaneHeight;
-			isDirty = true;
 		}
-	});
-
-	// Subscription: $derived can't sync store side effects.
-	$effect(() => {
-		if (!analysisId) return;
-		isDirty = analysisStore.isDirty();
 	});
 
 	let leftPaneCollapsed = $state(false);
 	let rightPaneCollapsed = $state(false);
 	let configPosition = $state<'right' | 'bottom'>('right');
 	let bottomPaneHeight = $state(300);
+
+	function setLeftPaneCollapsed(next: boolean): void {
+		leftPaneCollapsed = next;
+		persistDraft();
+	}
+
+	function setRightPaneCollapsed(next: boolean): void {
+		rightPaneCollapsed = next;
+		persistDraft();
+	}
+
+	function setConfigPosition(next: 'right' | 'bottom'): void {
+		configPosition = next;
+		persistDraft();
+	}
 	let isResizingBottomPane = $state(false);
 	let showVersionModal = $state(false);
 	let showDescriptionModal = $state(false);
@@ -168,23 +180,24 @@
 	let exportScopeTabId = $state<string | null>(null);
 	let tabContextMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
 
-	// Responsive: auto-collapse panes on narrow screens
-	const isNarrowScreen = new MediaQuery('max-width: 900px');
-	const isMobileScreen = new MediaQuery('max-width: 600px');
-
-	// Subscription: $derived can't auto-collapse on media query.
-	$effect(() => {
-		if (isNarrowScreen.current && !leftPaneCollapsed) {
-			leftPaneCollapsed = true;
-		}
-	});
-
-	// Subscription: $derived can't auto-collapse on media query.
-	$effect(() => {
-		if (isMobileScreen.current && !rightPaneCollapsed) {
-			rightPaneCollapsed = true;
-		}
-	});
+	function bindPaneMedia(): () => void {
+		const narrow = window.matchMedia('max-width: 900px');
+		const mobile = window.matchMedia('max-width: 600px');
+		const onNarrow = () => {
+			if (narrow.matches) leftPaneCollapsed = true;
+		};
+		const onMobile = () => {
+			if (mobile.matches) rightPaneCollapsed = true;
+		};
+		onNarrow();
+		onMobile();
+		narrow.addEventListener('change', onNarrow);
+		mobile.addEventListener('change', onMobile);
+		return () => {
+			narrow.removeEventListener('change', onNarrow);
+			mobile.removeEventListener('change', onMobile);
+		};
+	}
 
 	const analysisQuery = createQuery(() => ({
 		queryKey: analysisQueryKey(analysisId ?? ''),
@@ -194,53 +207,34 @@
 			if (!analysisId) throw new Error('Analysis ID is required');
 			if (!validAnalysisId) throw new Error('Invalid analysis ID format');
 			const cached = queryClient.getQueryData<AnalysisDetail>(analysisQueryKey(validAnalysisId));
+			if (cached && analysisStore.current?.id !== validAnalysisId) {
+				analysisStore.applyAnalysis(cached.analysis);
+				analysisStore.currentRevision = cached.version;
+				lastLoadedVersion = cached.version;
+			}
 			const detail = await fetchAnalysis(validAnalysisId, cached?.etag);
-			// 304: serve from TanStack Query's cache; the hydration effect below keeps
-			// the store in sync without clobbering local edits.
 			if ('notModified' in detail) {
 				if (!cached) throw new Error('Analysis cache is empty after 304');
+				draft.hydrate();
+				sourceSchemaLoader.load();
 				return cached;
 			}
 			analysisStore.applyAnalysis(detail.analysis);
 			analysisStore.currentRevision = detail.version;
 			lastLoadedVersion = detail.version;
-			isDirty = false;
+			draft.hydrate();
+			sourceSchemaLoader.load();
 			return detail;
 		},
 		retry: false
 	}));
-
-	// Hydration: sync query data into the analysis store for cached reads where queryFn
-	// doesn't run. Uses untrack() on analysisQuery.data to avoid an infinite loop —
-	// applyAnalysis() mutates $state which triggers re-renders that would recreate the
-	// query result object with a new data reference, re-triggering this effect.
-	$effect(() => {
-		const id = validAnalysisId;
-		if (!id) return;
-		const data = untrack(() => analysisQuery.data);
-		if (!data || data.analysis.id !== id) return;
-		if (analysisStore.current?.id === id) return;
-		analysisStore.applyAnalysis(data.analysis);
-		analysisStore.currentRevision = data.version;
-		lastLoadedVersion = data.version;
-		isDirty = false;
-	});
 
 	const currentAnalysis = $derived(analysisStore.current ?? analysisQuery.data?.analysis ?? null);
 	const analysisFavorite = $derived(
 		validAnalysisId ? favoriteStore.isFavorite(validAnalysisId) : false
 	);
 
-	let resetForRemoteLock = $state(false);
-
-	// Locking: another owner means this view must snap back to persisted backend state.
-	$effect(() => {
-		if (!lockedByOther) {
-			resetForRemoteLock = false;
-			return;
-		}
-		if (resetForRemoteLock) return;
-		resetForRemoteLock = true;
+	function snapBackFromRemoteLock(): void {
 		lock.setRemoteSyncPending(true);
 		lock.setRemoteSyncFailed(false);
 
@@ -248,7 +242,6 @@
 		showVersionModal = false;
 		saveError = '';
 		actions.dismissTabError();
-		isDirty = false;
 		analysisStore.setResourceConfig(null);
 
 		if (storageKey) {
@@ -263,27 +256,23 @@
 					lock.setRemoteSyncFailed(result.isError);
 				})
 				.finally(() => {
-					if (analysisId === syncAnalysisId) lock.setRemoteSyncPending(false);
+					if (analysisId !== syncAnalysisId) return;
+					lock.setRemoteSyncPending(false);
+					draft.hydrate();
 				});
 			return;
 		}
 		lock.setRemoteSyncPending(false);
-	});
+		draft.hydrate();
+	}
 
-	// DOM: context menu dismissal is event-driven and cannot be expressed as derived state.
-	$effect(() => {
+	function handleWindowPointerDown(event: PointerEvent) {
 		if (!tabContextMenu) return;
-		const onPointerDown = (event: PointerEvent) => {
-			const target = event.target as Node | null;
-			const menu = document.querySelector('[data-testid="analysis-tab-context-menu"]');
-			if (menu && target && menu.contains(target)) {
-				return;
-			}
-			tabContextMenu = null;
-		};
-		window.addEventListener('pointerdown', onPointerDown);
-		return () => window.removeEventListener('pointerdown', onPointerDown);
-	});
+		const target = event.target as Node | null;
+		const menu = document.querySelector('[data-testid="analysis-tab-context-menu"]');
+		if (menu && target && menu.contains(target)) return;
+		tabContextMenu = null;
+	}
 
 	const analysisTabs = $derived.by(() => {
 		const title = analysisStore.current?.name ?? analysisQuery.data?.analysis.name ?? 'Analysis';
@@ -298,23 +287,19 @@
 		queryFn: async () => {
 			const result = await listDatasources(false);
 			if (result.isErr()) {
+				datasourceStore.loaded = true;
 				throw new Error(result.error.message);
 			}
 			datasourceStore.datasources = result.value;
+			datasourceStore.loaded = true;
+			sourceSchemaLoader.load();
 			return result.value;
 		}
 	}));
 
-	// Sync: $derived can't write to an external store.
-	$effect(() => {
-		if (datasourcesQuery.isSuccess || datasourcesQuery.isError) {
-			datasourceStore.loaded = true;
-		}
-	});
-
-	setupEngineDefaultsEffect(() => validAnalysisId);
-	setupEngineWarmupEffect(() => validAnalysisId);
-	setupInferredSchemaHydrationEffect(() => validAnalysisId);
+	const loadEngineDefaults = setupEngineDefaultsEffect(() => validAnalysisId);
+	const engineWarmup = setupEngineWarmupEffect(() => validAnalysisId);
+	const hydrateInferredSchemas = setupInferredSchemaHydrationEffect(() => validAnalysisId);
 
 	const activeTab = $derived(analysisStore.activeTab);
 	const datasourceId = $derived(activeTab?.datasource?.id ?? null);
@@ -328,14 +313,21 @@
 	});
 	const previewDatasourceId = $derived(datasourceId ?? schemaKey ?? null);
 
-	const isLoadingSchemaGetter = setupSourceSchemaLoadingEffect({
+	const sourceSchemaLoader = setupSourceSchemaLoadingEffect({
 		validAnalysisId: () => validAnalysisId,
 		analysisId: () => analysisId,
 		datasourceId: () => datasourceId,
 		schemaKey: () => schemaKey,
-		datasources: () => datasourcesQuery.data
+		datasources: () => (datasourceStore.loaded ? datasourceStore.datasources : undefined)
 	});
-	const isLoadingSchema = $derived(isLoadingSchemaGetter());
+	const isLoadingSchema = $derived(sourceSchemaLoader.isLoading());
+
+	function refreshEditorServices(): void {
+		loadEngineDefaults();
+		engineWarmup.start();
+		hydrateInferredSchemas();
+		sourceSchemaLoader.load();
+	}
 
 	const currentDatasource = $derived.by(() => {
 		if (!datasourceId) return null;
@@ -367,7 +359,6 @@
 		}
 		analysisStore.save().match(
 			() => {
-				isDirty = false;
 				selectedStepId = null;
 				isSaving = false;
 				void datasourcesQuery.refetch();
@@ -403,7 +394,6 @@
 			if (currentTabId && analysisStore.tabs.some((t) => t.id === currentTabId)) {
 				analysisStore.activeTabId = currentTabId;
 			}
-			isDirty = false;
 		}
 	}
 
@@ -420,6 +410,7 @@
 
 		function onUp() {
 			isResizingBottomPane = false;
+			persistDraft();
 			window.removeEventListener('pointermove', onMove);
 			window.removeEventListener('pointerup', onUp);
 		}
@@ -430,11 +421,30 @@
 
 	function handleCloseConfig() {
 		selectedStepId = null;
+		persistDraft();
 	}
 
 	function handleSelectTab(tabId: string) {
 		analysisStore.setActiveTab(tabId);
+		draft.schedulePersist();
+		hydrateInferredSchemas();
+		sourceSchemaLoader.load();
 	}
+
+	onMount(() => {
+		resetForAnalysisId(analysisId);
+		refreshEditorServices();
+		const unbindPane = bindPaneMedia();
+		return () => {
+			unbindPane();
+			engineWarmup.stop();
+		};
+	});
+
+	afterNavigate(() => {
+		resetForAnalysisId(analysisId);
+		refreshEditorServices();
+	});
 
 	async function toggleFavorite() {
 		if (!validAnalysisId || !currentAnalysis) return;
@@ -483,7 +493,6 @@
 		analysisStore.currentRevision = restored.version;
 		lastLoadedVersion = restored.version;
 		selectedStepId = null;
-		isDirty = false;
 	}
 
 	function openExportModal(tabId: string | null = null) {
@@ -526,9 +535,9 @@
 			saveButtonLabel={lock.saveButtonLabel}
 			lockButtonLabel={lock.lockButtonLabel}
 			lockButtonDisabled={lock.lockButtonDisabled}
-			bind:leftPaneCollapsed
-			bind:rightPaneCollapsed
-			bind:configPosition
+			bind:leftPaneCollapsed={() => leftPaneCollapsed, setLeftPaneCollapsed}
+			bind:rightPaneCollapsed={() => rightPaneCollapsed, setRightPaneCollapsed}
+			bind:configPosition={() => configPosition, setConfigPosition}
 			onToggleFavorite={toggleFavorite}
 			onEditDescription={openDescriptionModal}
 			onCommitTitle={(name) => {
@@ -607,26 +616,29 @@
 						'& > *': { width: '100%' }
 					})}
 				>
-					<PipelineCanvas
-						{buildStore}
-						steps={analysisStore.pipeline}
-						analysisId={analysisId || undefined}
-						datasourceId={previewDatasourceId || undefined}
-						datasource={currentDatasource}
-						{datasourceLabel}
-						tabName={analysisStore.activeTab?.name}
-						activeTab={analysisStore.activeTab}
-						onStepClick={handleSelectStep}
-						onStepDelete={actions.handleDeleteStep}
-						onStepToggle={actions.handleToggleStep}
-						onInsertStep={actions.handleInsertStep}
-						onPasteStep={actions.handlePasteStep}
-						onMoveStep={actions.handleMoveStep}
-						onChangeDatasource={() => actions.openDatasourceModal('change')}
-						onRenameTab={actions.handleRenameSourceTab}
-						onDuplicateTab={actions.handleDuplicateActiveTab}
-						readOnly={editorReadOnly}
-					/>
+					{#key analysisStore.activeTabId}
+						<PipelineCanvas
+							{buildStore}
+							steps={analysisStore.pipeline}
+							analysisId={analysisId || undefined}
+							datasourceId={previewDatasourceId || undefined}
+							datasource={currentDatasource}
+							{datasourceLabel}
+							tabName={analysisStore.activeTab?.name}
+							activeTab={analysisStore.activeTab}
+							onStepClick={handleSelectStep}
+							onStepDelete={actions.handleDeleteStep}
+							onStepToggle={actions.handleToggleStep}
+							onInsertStep={actions.handleInsertStep}
+							onPasteStep={actions.handlePasteStep}
+							onMoveStep={actions.handleMoveStep}
+							onChangeDatasource={() => actions.openDatasourceModal('change')}
+							onRenameTab={actions.handleRenameSourceTab}
+							onDuplicateTab={actions.handleDuplicateActiveTab}
+							onResourceConfigChange={persistDraft}
+							readOnly={editorReadOnly}
+						/>
+					{/key}
 				</div>
 
 				{#if configPosition === 'bottom'}
@@ -662,14 +674,16 @@
 							})}
 							onpointerdown={handleBottomPaneResizeStart}
 						></div>
-						<StepConfig
-							step={selectedStepState}
-							schema={schemaStore.calculatedSchema}
-							{isLoadingSchema}
-							onClose={handleCloseConfig}
-							onConfigApply={markUnsaved}
-							readOnly={editorReadOnly}
-						/>
+						{#key selectedStepId}
+							<StepConfig
+								step={selectedStepState}
+								schema={schemaStore.calculatedSchema}
+								{isLoadingSchema}
+								onClose={handleCloseConfig}
+								onConfigApply={markUnsaved}
+								readOnly={editorReadOnly}
+							/>
+						{/key}
 					</div>
 				{/if}
 			</div>
@@ -693,14 +707,16 @@
 							: {})
 					})}
 				>
-					<StepConfig
-						step={selectedStepState}
-						schema={schemaStore.calculatedSchema}
-						{isLoadingSchema}
-						onClose={handleCloseConfig}
-						onConfigApply={markUnsaved}
-						readOnly={editorReadOnly}
-					/>
+					{#key selectedStepId}
+						<StepConfig
+							step={selectedStepState}
+							schema={schemaStore.calculatedSchema}
+							{isLoadingSchema}
+							onClose={handleCloseConfig}
+							onConfigApply={markUnsaved}
+							readOnly={editorReadOnly}
+						/>
+					{/key}
 				</div>
 			{/if}
 		</div>
@@ -714,6 +730,7 @@
 		if (!isDirty) return;
 		e.preventDefault();
 	}}
+	onpointerdown={handleWindowPointerDown}
 />
 
 {#if actions.tabError}
@@ -778,13 +795,15 @@
 	</div>
 {/if}
 
-<AnalysisEditorDescriptionModal
-	open={showDescriptionModal}
-	description={currentAnalysis?.description ?? null}
-	{editorReadOnly}
-	onSave={saveDescription}
-	onClose={closeDescriptionModal}
-/>
+{#key showDescriptionModal}
+	<AnalysisEditorDescriptionModal
+		open={showDescriptionModal}
+		description={currentAnalysis?.description ?? null}
+		{editorReadOnly}
+		onSave={saveDescription}
+		onClose={closeDescriptionModal}
+	/>
+{/key}
 
 <AnalysisEditorVersionModal
 	open={showVersionModal}
@@ -798,15 +817,17 @@
 	}}
 />
 
-<AnalysisEditorExportModal
-	open={showExportModal}
-	{validAnalysisId}
-	scopeTabId={exportScopeTabId}
-	tabs={analysisTabs}
-	onClose={() => {
-		showExportModal = false;
-		exportScopeTabId = null;
-	}}
-/>
+{#key showExportModal}
+	<AnalysisEditorExportModal
+		open={showExportModal}
+		{validAnalysisId}
+		scopeTabId={exportScopeTabId}
+		tabs={analysisTabs}
+		onClose={() => {
+			showExportModal = false;
+			exportScopeTabId = null;
+		}}
+	/>
+{/key}
 
 <DragPreview />

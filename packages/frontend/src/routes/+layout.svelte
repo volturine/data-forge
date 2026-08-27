@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { onMount } from 'svelte';
 	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import favicon from '$lib/assets/favicon.svg';
 	import { css, spinner } from '$lib/styles/panda';
@@ -25,7 +26,6 @@
 	import { AppLifecycle } from '$lib/services/app-lifecycle';
 	import { appBootstrap } from '$lib/services/app-bootstrap.svelte';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
-	import { untrack } from 'svelte';
 	import 'styled-system/styles.css';
 
 	let { children } = $props();
@@ -50,42 +50,26 @@
 	];
 	const onAuthPage = $derived(authPaths.some((p) => currentPath.startsWith(p)));
 
-	// Single orchestrator: config ∥ auth, then namespace. Layout only renders phase.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		untrack(() => void appBootstrap.start());
-	});
-
 	const shellPhase = $derived(appBootstrap.phase(onAuthPage));
 	const bootstrapError = $derived(appBootstrap.errorFor(onAuthPage));
-	const ready = $derived(appBootstrap.appReady);
 
-	// Navigation: $derived can't redirect; side effect redirects unauthenticated users.
-	$effect(() => {
-		if (!ready) return;
-		if (!configStore.authRequired) {
-			if (onAuthPage) void goto(resolve('/'));
-			return;
-		}
-		if (authStore.authenticated) return;
-		if (authStore.bootstrapFailed) return;
-		if (onAuthPage) return;
-		// Only redirect when we know the user is unauthenticated — not on probe failure.
-		if (authStore.status !== 'unauthenticated') return;
-		void goto(resolve('/login'));
-	});
+	function applyTheme(next: 'light' | 'dark'): void {
+		theme = next;
+		document.documentElement.setAttribute('data-theme', next);
+		document.body.setAttribute('data-theme', next);
+		void idbSet('theme', next);
+	}
 
-	// DOM: $derived can't sync theme to DOM/storage.
-	$effect(() => {
-		document.documentElement.setAttribute('data-theme', theme);
-		document.body.setAttribute('data-theme', theme);
-		void idbSet('theme', theme);
-	});
+	function bindNamespaceServices(): void {
+		if (!isNamespaceReady()) return;
+		favoriteStore.setNamespace(namespaceState.value);
+		void analysisStore.initialize(namespaceState.value);
+	}
 
 	if (typeof window !== 'undefined') {
 		void idbGet<'light' | 'dark'>('theme').then((value) => {
 			if (!value) return;
-			theme = value;
+			applyTheme(value);
 		});
 
 		void idbGet<boolean>('sidebar_collapsed').then((value) => {
@@ -94,40 +78,21 @@
 		});
 	}
 
-	// State: favorites are namespace-scoped and reset on namespace changes.
-	$effect(() => {
-		if (!isNamespaceReady()) return;
-		favoriteStore.setNamespace(namespaceState.value);
-		void analysisStore.initialize(namespaceState.value);
-	});
+	function redirectIfNeeded(): void {
+		if (!appBootstrap.appReady) return;
+		if (!configStore.authRequired) {
+			if (onAuthPage) void goto(resolve('/'));
+			return;
+		}
+		if (authStore.authenticated) return;
+		if (authStore.bootstrapFailed) return;
+		if (onAuthPage) return;
+		if (authStore.status !== 'unauthenticated') return;
+		void goto(resolve('/login'));
+	}
 
-	// Subscription: $derived can't install listeners.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		if (!configStore.config) return;
-		const cleanup = installAuditListeners();
-		return cleanup;
-	});
-
-	// Cleanup: $derived can't teardown app-scoped resources.
-	$effect(() => {
-		return () => appLifecycle.destroy();
-	});
-
-	// Websocket: keep engines status lazy and only active during compute work.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		if (!ready) return;
-		if (!computeActivityStore.active) return;
-		untrack(() => enginesStore.startStream());
-		return () => enginesStore.stopStream();
-	});
-
-	// DOM: shell controls need one painted frame after ready before JS-bound buttons are reliable.
-	$effect(() => {
+	function enableShell(_node: HTMLElement): () => void {
 		shellInteractive = false;
-		if (typeof window === 'undefined') return;
-		if (!ready) return;
 		let frameA = 0;
 		let frameB = 0;
 		frameA = window.requestAnimationFrame(() => {
@@ -140,66 +105,48 @@
 			window.cancelAnimationFrame(frameB);
 			shellInteractive = false;
 		};
-	});
+	}
 
-	// DOM: global capture-phase arbiter for overlay Escape / outside-click.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		function onKeydown(event: KeyboardEvent) {
-			if (event.key !== 'Escape') return;
-			if (overlayStack.handleEscape()) {
-				event.preventDefault();
-				event.stopImmediatePropagation();
+	function toggleTheme(): void {
+		applyTheme(theme === 'light' ? 'dark' : 'light');
+	}
+
+	function onOverlayKeydown(event: KeyboardEvent): void {
+		if (event.key !== 'Escape') return;
+		if (overlayStack.handleEscape()) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+		}
+	}
+
+	function onOverlayMousedown(event: MouseEvent): void {
+		const target = event.target as Node | null;
+		if (!target) return;
+		overlayStack.handleOutsideClick(target);
+	}
+
+	function onWindowError(event: Event): void {
+		const errorEvent = event as ErrorEvent;
+		track({
+			event: 'client_error',
+			action: 'error',
+			page: currentPath,
+			meta: {
+				message: errorEvent.message,
+				filename: errorEvent.filename,
+				lineno: errorEvent.lineno
 			}
-		}
-		function onMousedown(event: MouseEvent) {
-			const target = event.target as Node | null;
-			if (!target) return;
-			overlayStack.handleOutsideClick(target);
-		}
-		window.addEventListener('keydown', onKeydown, true);
-		window.addEventListener('mousedown', onMousedown, true);
-		return () => {
-			window.removeEventListener('keydown', onKeydown, true);
-			window.removeEventListener('mousedown', onMousedown, true);
-		};
-	});
+		});
+	}
 
-	// Subscription: $derived can't update audit page.
-	$effect(() => {
-		if (!configStore.config) return;
-		setAuditPage(currentPath);
-	});
-
-	// Subscription: $derived can't attach global listeners.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		const onError = (event: ErrorEvent) => {
-			track({
-				event: 'client_error',
-				action: 'error',
-				page: currentPath,
-				meta: { message: event.message, filename: event.filename, lineno: event.lineno }
-			});
-		};
-		const onReject = (event: PromiseRejectionEvent) => {
-			track({
-				event: 'client_error',
-				action: 'unhandledrejection',
-				page: currentPath,
-				meta: { reason: String(event.reason) }
-			});
-		};
-		window.addEventListener('error', onError);
-		window.addEventListener('unhandledrejection', onReject);
-		return () => {
-			window.removeEventListener('error', onError);
-			window.removeEventListener('unhandledrejection', onReject);
-		};
-	});
-
-	function toggleTheme() {
-		theme = theme === 'light' ? 'dark' : 'light';
+	function onWindowReject(event: Event): void {
+		const rejection = event as PromiseRejectionEvent;
+		track({
+			event: 'client_error',
+			action: 'unhandledrejection',
+			page: currentPath,
+			meta: { reason: String(rejection.reason) }
+		});
 	}
 
 	function toggleSidebar() {
@@ -235,6 +182,7 @@
 					replaceState: true
 				});
 				appLifecycle.activateNamespace();
+				bindNamespaceServices();
 			}
 		});
 	}
@@ -274,7 +222,32 @@
 		favorites: favoriteStore,
 		schema: schemaStore
 	});
+
+	onMount(() => {
+		void appBootstrap.start().then(() => {
+			bindNamespaceServices();
+			redirectIfNeeded();
+		});
+		applyTheme(theme);
+		const cleanupAudit = installAuditListeners();
+		return () => {
+			cleanupAudit?.();
+			appLifecycle.destroy();
+		};
+	});
+
+	afterNavigate(() => {
+		setAuditPage(currentPath);
+		redirectIfNeeded();
+	});
 </script>
+
+<svelte:window
+	onkeydowncapture={onOverlayKeydown}
+	onmousedowncapture={onOverlayMousedown}
+	onerror={onWindowError}
+	onunhandledrejection={onWindowReject}
+/>
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
@@ -330,7 +303,7 @@
 	{:else if shellPhase === 'auth'}
 		{@render children()}
 	{:else}
-		<div class={css({ display: 'flex', height: '100vh' })}>
+		<div class={css({ display: 'flex', height: '100vh' })} {@attach enableShell}>
 			<div
 				class={css({ position: 'relative', flexShrink: 0 })}
 				onmouseenter={() => (sidebarHovered = true)}

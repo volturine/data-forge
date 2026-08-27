@@ -101,11 +101,26 @@
 	}: Props = $props();
 	const stepLabel = $derived(step ? getStepTypeConfig(step.type).label : '');
 	let fetchingPivotSchema = $state(false);
-	let draftStepId = $state<string | null>(null);
-	let draftConfig = $state<Record<string, unknown>>({});
-	// True when draftConfig has been synchronized with the current step.
-	// Prevents config components from rendering with stale/empty config before
-	// the $effect below runs (which fires after the first render frame).
+
+	function cloneConfig(
+		config: Record<string, unknown> | null | undefined
+	): Record<string, unknown> {
+		const payload = config ?? {};
+		return cloneJson(payload);
+	}
+
+	function draftFromStep(current: PipelineStep | null | undefined): Record<string, unknown> {
+		if (!current) return {};
+		return cloneConfig(
+			normalizeConfig(current.type, (current.config as Record<string, unknown>) ?? {}) as Record<
+				string,
+				unknown
+			>
+		);
+	}
+
+	let draftStepId = $state<string | null>(step?.id ?? null);
+	let draftConfig = $state<Record<string, unknown>>(draftFromStep(step));
 	const draftReady = $derived(step !== null && draftStepId === step.id);
 
 	const inputSchema = $derived(
@@ -147,29 +162,6 @@
 	const unionByNameConfigBinding = bindDraftConfig<UnionByNameConfigData>();
 	const notificationConfigBinding = bindDraftConfig<NotificationConfigData>();
 	const aiConfigBinding = bindDraftConfig<AIConfigData>();
-
-	function cloneConfig(
-		config: Record<string, unknown> | null | undefined
-	): Record<string, unknown> {
-		const payload = config ?? {};
-		return cloneJson(payload);
-	}
-
-	// Subscription: $derived can't sync draft config.
-	$effect(() => {
-		if (!step) {
-			draftStepId = null;
-			draftConfig = {};
-			return;
-		}
-		if (draftStepId === step.id) return;
-		draftStepId = step.id;
-		const normalizedConfig = normalizeConfig(
-			step.type,
-			(step.config as Record<string, unknown>) ?? {}
-		) as Record<string, unknown>;
-		draftConfig = cloneConfig(normalizedConfig);
-	});
 
 	const hasChanges = $derived(
 		!!step &&

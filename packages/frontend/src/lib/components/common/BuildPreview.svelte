@@ -51,7 +51,7 @@
 	}: Props = $props();
 
 	type PreviewTab = 'steps' | 'plan' | 'config' | 'resources' | 'logs' | 'results' | 'payload';
-	let activeTab = $state<PreviewTab>('steps');
+	let requestedTab = $state<PreviewTab>('steps');
 	let logsRef = $state<HTMLElement>();
 	let planView = $state<'optimized' | 'unoptimized'>('optimized');
 	let logLevel = $state<'all' | 'warning' | 'error'>('all');
@@ -165,23 +165,21 @@
 		return 'fg.muted';
 	}
 
-	// DOM: scroll logs to bottom when new entries arrive, unless user paused
-	$effect(() => {
-		if (store.logs.length > 0 && logsRef && activeTab === 'logs' && !scrollPaused) {
-			logsRef.scrollTop = logsRef.scrollHeight;
-		}
+	const activeTab = $derived.by((): PreviewTab => {
+		if (requestedTab === 'plan' && !hasPlans) return 'steps';
+		if (requestedTab === 'config' && !hasConfig) return 'steps';
+		if (requestedTab === 'resources' && !hasResources) return 'steps';
+		if (requestedTab === 'results' && !hasResults) return 'steps';
+		if (requestedTab === 'payload' && !hasPayload) return 'steps';
+		return requestedTab;
 	});
 
-	// DOM: must imperatively reset activeTab because $derived cannot write to local mutable state
-	$effect(() => {
-		const invalid =
-			(activeTab === 'plan' && !hasPlans) ||
-			(activeTab === 'config' && !hasConfig) ||
-			(activeTab === 'resources' && !hasResources) ||
-			(activeTab === 'results' && !hasResults) ||
-			(activeTab === 'payload' && !hasPayload);
-		if (invalid) activeTab = 'steps';
-	});
+	function attachLogs(node: HTMLElement): void {
+		logsRef = node;
+		if (store.logs.length > 0 && activeTab === 'logs' && !scrollPaused) {
+			node.scrollTop = node.scrollHeight;
+		}
+	}
 </script>
 
 {#snippet sparkline(data: number[], max: number, warn: number)}
@@ -406,7 +404,7 @@
 			aria-selected={activeTab === 'steps'}
 			aria-controls="build-panel-steps"
 			class={tabButton({ active: activeTab === 'steps' })}
-			onclick={() => (activeTab = 'steps')}
+			onclick={() => (requestedTab = 'steps')}
 		>
 			<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 				<ListOrdered size={12} />
@@ -419,7 +417,7 @@
 				aria-selected={activeTab === 'plan'}
 				aria-controls="build-panel-plan"
 				class={tabButton({ active: activeTab === 'plan' })}
-				onclick={() => (activeTab = 'plan')}
+				onclick={() => (requestedTab = 'plan')}
 			>
 				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<FileText size={12} />
@@ -433,7 +431,7 @@
 				aria-selected={activeTab === 'config'}
 				aria-controls="build-panel-config"
 				class={tabButton({ active: activeTab === 'config' })}
-				onclick={() => (activeTab = 'config')}
+				onclick={() => (requestedTab = 'config')}
 			>
 				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<Settings size={12} />
@@ -447,7 +445,7 @@
 				aria-selected={activeTab === 'resources'}
 				aria-controls="build-panel-resources"
 				class={tabButton({ active: activeTab === 'resources' })}
-				onclick={() => (activeTab = 'resources')}
+				onclick={() => (requestedTab = 'resources')}
 			>
 				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<Activity size={12} />
@@ -464,7 +462,7 @@
 				aria-selected={activeTab === 'logs'}
 				aria-controls="build-panel-logs"
 				class={tabButton({ active: activeTab === 'logs' })}
-				onclick={() => (activeTab = 'logs')}
+				onclick={() => (requestedTab = 'logs')}
 			>
 				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<Terminal size={12} />
@@ -479,7 +477,7 @@
 				aria-selected={activeTab === 'results'}
 				aria-controls="build-panel-results"
 				class={tabButton({ active: activeTab === 'results' })}
-				onclick={() => (activeTab = 'results')}
+				onclick={() => (requestedTab = 'results')}
 			>
 				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<FileText size={12} />
@@ -494,7 +492,7 @@
 				aria-selected={activeTab === 'payload'}
 				aria-controls="build-panel-payload"
 				class={tabButton({ active: activeTab === 'payload' })}
-				onclick={() => (activeTab = 'payload')}
+				onclick={() => (requestedTab = 'payload')}
 			>
 				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<FileCode size={12} />
@@ -1065,7 +1063,7 @@
 					</div>
 				</div>
 				<div
-					bind:this={logsRef}
+					{@attach attachLogs}
 					onscroll={handleLogScroll}
 					class={css({
 						maxHeight: 'listLg',

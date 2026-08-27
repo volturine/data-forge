@@ -20,7 +20,6 @@
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import { css, label, stepConfig, input } from '$lib/styles/panda';
-	import { normalizeConfig } from '$lib/utils/step-config-defaults';
 
 	type PlotConfigData = Omit<PlotConfigBase, 'aggregation' | 'chart_type' | 'stack_mode'> & {
 		chart_type:
@@ -117,31 +116,7 @@
 
 	const configDefaults = defaultConfig satisfies Record<string, unknown>;
 
-	function toPlotConfig(value: PlotConfigData | Record<string, unknown>): PlotConfigData {
-		const normalized = normalizeConfig('chart', value);
-		return { ...defaultConfig, ...normalized } as PlotConfigData;
-	}
-
 	let { schema, config = $bindable(configDefaults) }: Props = $props();
-	const initialConfig = toPlotConfig(config);
-	let plotConfig = $state(initialConfig);
-	let syncedConfig = $state(JSON.stringify(initialConfig));
-
-	// Bindable config must receive chart edits back from the local form state.
-	$effect(() => {
-		const next = toPlotConfig(config);
-		const nextJson = JSON.stringify(next);
-		if (nextJson === syncedConfig) return;
-		plotConfig = next;
-		syncedConfig = nextJson;
-	});
-
-	$effect(() => {
-		const nextJson = JSON.stringify(plotConfig);
-		if (nextJson === syncedConfig) return;
-		config = plotConfig;
-		syncedConfig = nextJson;
-	});
 
 	let activeTab = $state<'data' | 'look'>('data');
 
@@ -175,71 +150,71 @@
 	] satisfies Array<{ value: PlotConfigData['aggregation']; label: string }>;
 
 	const needsAggregation = $derived(
-		plotConfig.chart_type === 'bar' ||
-			plotConfig.chart_type === 'horizontal_bar' ||
-			plotConfig.chart_type === 'line' ||
-			plotConfig.chart_type === 'area' ||
-			plotConfig.chart_type === 'pie' ||
-			plotConfig.chart_type === 'heatgrid'
+		config.chart_type === 'bar' ||
+			config.chart_type === 'horizontal_bar' ||
+			config.chart_type === 'line' ||
+			config.chart_type === 'area' ||
+			config.chart_type === 'pie' ||
+			config.chart_type === 'heatgrid'
 	);
-	const needsBins = $derived(plotConfig.chart_type === 'histogram');
+	const needsBins = $derived(config.chart_type === 'histogram');
 	const needsGroup = $derived(
-		plotConfig.chart_type === 'scatter' ||
-			plotConfig.chart_type === 'bar' ||
-			plotConfig.chart_type === 'horizontal_bar' ||
-			plotConfig.chart_type === 'line' ||
-			plotConfig.chart_type === 'area' ||
-			plotConfig.chart_type === 'pie'
+		config.chart_type === 'scatter' ||
+			config.chart_type === 'bar' ||
+			config.chart_type === 'horizontal_bar' ||
+			config.chart_type === 'line' ||
+			config.chart_type === 'area' ||
+			config.chart_type === 'pie'
 	);
 	const showStackMode = $derived(
-		plotConfig.chart_type === 'bar' ||
-			plotConfig.chart_type === 'horizontal_bar' ||
-			plotConfig.chart_type === 'area'
+		config.chart_type === 'bar' ||
+			config.chart_type === 'horizontal_bar' ||
+			config.chart_type === 'area'
 	);
-	const needsHeatgridY = $derived(plotConfig.chart_type === 'heatgrid');
-	const showAreaOpacity = $derived(plotConfig.chart_type === 'area');
+	const needsHeatgridY = $derived(config.chart_type === 'heatgrid');
+	const showAreaOpacity = $derived(config.chart_type === 'area');
 	const needsYAxis = $derived(
-		plotConfig.chart_type !== 'histogram' &&
-			plotConfig.chart_type !== 'pie' &&
-			plotConfig.chart_type !== 'heatgrid'
+		config.chart_type !== 'histogram' &&
+			config.chart_type !== 'pie' &&
+			config.chart_type !== 'heatgrid'
 	);
 	const showSort = $derived(
-		plotConfig.chart_type === 'bar' ||
-			plotConfig.chart_type === 'horizontal_bar' ||
-			plotConfig.chart_type === 'area' ||
-			plotConfig.chart_type === 'line' ||
-			plotConfig.chart_type === 'pie' ||
-			plotConfig.chart_type === 'histogram'
+		config.chart_type === 'bar' ||
+			config.chart_type === 'horizontal_bar' ||
+			config.chart_type === 'area' ||
+			config.chart_type === 'line' ||
+			config.chart_type === 'pie' ||
+			config.chart_type === 'histogram'
 	);
 	const showLegend = $derived(
-		plotConfig.chart_type !== 'histogram' && plotConfig.chart_type !== 'heatgrid'
+		config.chart_type !== 'histogram' && config.chart_type !== 'heatgrid'
 	);
 	const showSeriesColors = $derived(
-		plotConfig.chart_type === 'bar' ||
-			plotConfig.chart_type === 'horizontal_bar' ||
-			plotConfig.chart_type === 'area' ||
-			plotConfig.chart_type === 'line' ||
-			plotConfig.chart_type === 'scatter' ||
-			plotConfig.chart_type === 'pie'
+		config.chart_type === 'bar' ||
+			config.chart_type === 'horizontal_bar' ||
+			config.chart_type === 'area' ||
+			config.chart_type === 'line' ||
+			config.chart_type === 'scatter' ||
+			config.chart_type === 'pie'
 	);
-	const showGroupSort = $derived(needsGroup && Boolean(plotConfig.group_column));
+	const showGroupSort = $derived(needsGroup && Boolean(config.group_column));
 	const showDateBucket = $derived(
-		plotConfig.chart_type === 'bar' ||
-			plotConfig.chart_type === 'horizontal_bar' ||
-			plotConfig.chart_type === 'line' ||
-			plotConfig.chart_type === 'area' ||
-			plotConfig.chart_type === 'pie'
+		config.chart_type === 'bar' ||
+			config.chart_type === 'horizontal_bar' ||
+			config.chart_type === 'line' ||
+			config.chart_type === 'area' ||
+			config.chart_type === 'pie'
 	);
 	const showInteractivity = $derived(
-		plotConfig.chart_type === 'bar' ||
-			plotConfig.chart_type === 'horizontal_bar' ||
-			plotConfig.chart_type === 'line' ||
-			plotConfig.chart_type === 'area' ||
-			plotConfig.chart_type === 'scatter'
+		config.chart_type === 'bar' ||
+			config.chart_type === 'horizontal_bar' ||
+			config.chart_type === 'line' ||
+			config.chart_type === 'area' ||
+			config.chart_type === 'scatter'
 	);
-	const showAreaSelection = $derived(plotConfig.chart_type === 'scatter');
+	const showAreaSelection = $derived(config.chart_type === 'scatter');
 	const showAxisFormatting = $derived(
-		plotConfig.chart_type !== 'pie' && plotConfig.chart_type !== 'heatgrid'
+		config.chart_type !== 'pie' && config.chart_type !== 'heatgrid'
 	);
 
 	function parseSeriesColors(value: string): string[] {
@@ -267,16 +242,14 @@
 	let refColor = $state('');
 
 	const yMinDisplay = $derived(
-		yMinDirty ? yMinInput : plotConfig.y_axis_min === null ? '' : String(plotConfig.y_axis_min)
+		yMinDirty ? yMinInput : config.y_axis_min === null ? '' : String(config.y_axis_min)
 	);
 	const yMaxDisplay = $derived(
-		yMaxDirty ? yMaxInput : plotConfig.y_axis_max === null ? '' : String(plotConfig.y_axis_max)
+		yMaxDirty ? yMaxInput : config.y_axis_max === null ? '' : String(config.y_axis_max)
 	);
-	const decimalDisplay = $derived(
-		decimalDirty ? decimalInput : String(plotConfig.decimal_places ?? 0)
-	);
+	const decimalDisplay = $derived(decimalDirty ? decimalInput : String(config.decimal_places ?? 0));
 	const areaOpacityDisplay = $derived(
-		areaOpacityDirty ? areaOpacityInput : String(plotConfig.area_opacity ?? 0.35)
+		areaOpacityDirty ? areaOpacityInput : String(config.area_opacity ?? 0.35)
 	);
 
 	function setYAxisMin(value: string) {
@@ -301,15 +274,15 @@
 
 	function commitYAxisMin() {
 		if (yMinInput.trim() === '') {
-			plotConfig.y_axis_min = null;
+			config.y_axis_min = null;
 			normalizeAxisRange();
 			yMinDirty = false;
 			yMinInput = '';
 			return;
 		}
 		const parsed = Number(yMinInput);
-		plotConfig.y_axis_min = Number.isNaN(parsed) ? null : parsed;
-		if (plotConfig.y_axis_min === null) {
+		config.y_axis_min = Number.isNaN(parsed) ? null : parsed;
+		if (config.y_axis_min === null) {
 			yMinInput = '';
 		}
 		normalizeAxisRange();
@@ -318,15 +291,15 @@
 
 	function commitYAxisMax() {
 		if (yMaxInput.trim() === '') {
-			plotConfig.y_axis_max = null;
+			config.y_axis_max = null;
 			normalizeAxisRange();
 			yMaxDirty = false;
 			yMaxInput = '';
 			return;
 		}
 		const parsed = Number(yMaxInput);
-		plotConfig.y_axis_max = Number.isNaN(parsed) ? null : parsed;
-		if (plotConfig.y_axis_max === null) {
+		config.y_axis_max = Number.isNaN(parsed) ? null : parsed;
+		if (config.y_axis_max === null) {
 			yMaxInput = '';
 		}
 		normalizeAxisRange();
@@ -336,12 +309,12 @@
 	function commitDecimalPlaces() {
 		const parsed = Number(decimalInput);
 		if (Number.isNaN(parsed)) {
-			decimalInput = String(plotConfig.decimal_places ?? 0);
+			decimalInput = String(config.decimal_places ?? 0);
 			decimalDirty = false;
 			return;
 		}
 		const clamped = Math.max(0, Math.min(4, Math.round(parsed)));
-		plotConfig.decimal_places = clamped;
+		config.decimal_places = clamped;
 		decimalInput = String(clamped);
 		decimalDirty = false;
 	}
@@ -349,30 +322,30 @@
 	function commitAreaOpacity() {
 		const parsed = Number(areaOpacityInput);
 		if (Number.isNaN(parsed)) {
-			areaOpacityInput = String(plotConfig.area_opacity ?? 0.35);
+			areaOpacityInput = String(config.area_opacity ?? 0.35);
 			areaOpacityDirty = false;
 			return;
 		}
 		const clamped = Math.max(0, Math.min(1, parsed));
-		plotConfig.area_opacity = clamped;
+		config.area_opacity = clamped;
 		areaOpacityInput = String(clamped);
 		areaOpacityDirty = false;
 	}
 
 	function normalizeAxisRange() {
-		if (plotConfig.y_axis_min === null || plotConfig.y_axis_max === null) return;
-		if (plotConfig.y_axis_min <= plotConfig.y_axis_max) return;
-		const minValue = plotConfig.y_axis_min;
-		plotConfig.y_axis_min = plotConfig.y_axis_max;
-		plotConfig.y_axis_max = minValue;
-		yMinInput = String(plotConfig.y_axis_min);
-		yMaxInput = String(plotConfig.y_axis_max);
+		if (config.y_axis_min === null || config.y_axis_max === null) return;
+		if (config.y_axis_min <= config.y_axis_max) return;
+		const minValue = config.y_axis_min;
+		config.y_axis_min = config.y_axis_max;
+		config.y_axis_max = minValue;
+		yMinInput = String(config.y_axis_min);
+		yMaxInput = String(config.y_axis_max);
 	}
 
 	function addOverlay() {
 		if (!overlayValue) return;
-		plotConfig.overlays = [
-			...plotConfig.overlays,
+		config.overlays = [
+			...config.overlays,
 			{
 				chart_type: overlayType,
 				y_column: overlayValue,
@@ -387,11 +360,11 @@
 	}
 
 	function removeOverlay(index: number) {
-		plotConfig.overlays = plotConfig.overlays.filter((_, i) => i !== index);
+		config.overlays = config.overlays.filter((_, i) => i !== index);
 	}
 
 	function updateOverlay(index: number, next: Partial<OverlayConfig>) {
-		plotConfig.overlays = plotConfig.overlays.map((entry, i) =>
+		config.overlays = config.overlays.map((entry, i) =>
 			i === index ? { ...entry, ...next } : entry
 		);
 	}
@@ -400,8 +373,8 @@
 		if (refValue.trim() === '') return;
 		const parsed = Number(refValue);
 		if (Number.isNaN(parsed)) return;
-		plotConfig.reference_lines = [
-			...plotConfig.reference_lines,
+		config.reference_lines = [
+			...config.reference_lines,
 			{
 				axis: refAxis,
 				value: parsed,
@@ -416,11 +389,11 @@
 	}
 
 	function removeReferenceLine(index: number) {
-		plotConfig.reference_lines = plotConfig.reference_lines.filter((_, i) => i !== index);
+		config.reference_lines = config.reference_lines.filter((_, i) => i !== index);
 	}
 
 	function updateReferenceLine(index: number, next: Partial<ReferenceLineConfig>) {
-		plotConfig.reference_lines = plotConfig.reference_lines.map((entry, i) =>
+		config.reference_lines = config.reference_lines.map((entry, i) =>
 			i === index ? { ...entry, ...next } : entry
 		);
 	}
@@ -452,7 +425,7 @@
 			{#each chartTypeGrid as ct (ct.value)}
 				<button
 					type="button"
-					class={plotConfig.chart_type === ct.value
+					class={config.chart_type === ct.value
 						? css({
 								display: 'flex',
 								flexDirection: 'column',
@@ -484,9 +457,9 @@
 								cursor: 'pointer',
 								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 							})}
-					onclick={() => (plotConfig.chart_type = ct.value)}
+					onclick={() => (config.chart_type = ct.value)}
 					title={ct.label}
-					aria-pressed={plotConfig.chart_type === ct.value}
+					aria-pressed={config.chart_type === ct.value}
 					aria-label={ct.label}
 				>
 					<ct.icon size={18} class={ct.rotate ? css({ rotate: '90deg' }) : ''} aria-hidden="true" />
@@ -583,13 +556,13 @@
 				<span id={`${uid}-plot-x`}><SectionHeader>X Column</SectionHeader></span>
 				<ColumnDropdown
 					{schema}
-					value={plotConfig.x_column}
-					onChange={(val) => (plotConfig.x_column = val)}
+					value={config.x_column}
+					onChange={(val) => (config.x_column = val)}
 					placeholder="Select column..."
 				/>
 			</div>
 
-			{#if plotConfig.chart_type !== 'histogram' && plotConfig.chart_type !== 'heatgrid'}
+			{#if config.chart_type !== 'histogram' && config.chart_type !== 'heatgrid'}
 				<div
 					class={css({
 						marginBottom: '0',
@@ -604,8 +577,8 @@
 					<span id={`${uid}-plot-y`}><SectionHeader>Y Column</SectionHeader></span>
 					<ColumnDropdown
 						{schema}
-						value={plotConfig.y_column}
-						onChange={(val) => (plotConfig.y_column = val)}
+						value={config.y_column}
+						onChange={(val) => (config.y_column = val)}
 						placeholder="Select column..."
 					/>
 				</div>
@@ -626,8 +599,8 @@
 					<span id={`${uid}-plot-heat-y`}><SectionHeader>Heat Grid Y Column</SectionHeader></span>
 					<ColumnDropdown
 						{schema}
-						value={plotConfig.y_column}
-						onChange={(val) => (plotConfig.y_column = val)}
+						value={config.y_column}
+						onChange={(val) => (config.y_column = val)}
 						placeholder="Select column..."
 					/>
 				</div>
@@ -652,7 +625,7 @@
 						min="2"
 						max="100"
 						class={input()}
-						bind:value={plotConfig.bins}
+						bind:value={config.bins}
 					/>
 				</div>
 			{/if}
@@ -672,7 +645,7 @@
 					<span id={`${uid}-plot-agg`}><SectionHeader>Aggregation</SectionHeader></span>
 					<select
 						id={`${uid}-aggregation`}
-						bind:value={plotConfig.aggregation}
+						bind:value={config.aggregation}
 						class={input({ variant: 'secondary' })}
 					>
 						{#each aggregations as agg (agg.value)}
@@ -697,7 +670,7 @@
 					<span id={`${uid}-plot-stack`}><SectionHeader>Stack Mode</SectionHeader></span>
 					<select
 						id={`${uid}-stack-mode`}
-						bind:value={plotConfig.stack_mode}
+						bind:value={config.stack_mode}
 						class={input({ variant: 'secondary' })}
 					>
 						<option value="grouped">Grouped</option>
@@ -722,8 +695,8 @@
 					<span id={`${uid}-plot-group`}><SectionHeader>Segment By</SectionHeader></span>
 					<ColumnDropdown
 						{schema}
-						value={plotConfig.group_column ?? ''}
-						onChange={(val) => (plotConfig.group_column = val || null)}
+						value={config.group_column ?? ''}
+						onChange={(val) => (config.group_column = val || null)}
 						placeholder="Optional group column..."
 						clearable
 					/>
@@ -748,7 +721,7 @@
 							<label class={label()} for={`${uid}-group-sort-by`}>Sort By</label>
 							<select
 								id={`${uid}-group-sort-by`}
-								bind:value={plotConfig.group_sort_by}
+								bind:value={config.group_sort_by}
 								class={input({ variant: 'plotSelect' })}
 							>
 								<option value={null}>Default</option>
@@ -761,21 +734,21 @@
 							<label class={label()} for={`${uid}-group-sort-order`}>Order</label>
 							<select
 								id={`${uid}-group-sort-order`}
-								bind:value={plotConfig.group_sort_order}
+								bind:value={config.group_sort_order}
 								class={input({ variant: 'plotSelect' })}
 							>
 								<option value="asc">Ascending</option>
 								<option value="desc">Descending</option>
 							</select>
 						</div>
-						{#if plotConfig.group_sort_by === 'custom'}
+						{#if config.group_sort_by === 'custom'}
 							<div>
 								<div class={label()}>Sort Column</div>
 								<div>
 									<ColumnDropdown
 										{schema}
-										value={plotConfig.group_sort_column ?? ''}
-										onChange={(val) => (plotConfig.group_sort_column = val)}
+										value={config.group_sort_column ?? ''}
+										onChange={(val) => (config.group_sort_column = val)}
 										placeholder="Select column..."
 									/>
 								</div>
@@ -803,7 +776,7 @@
 							<label class={label()} for={`${uid}-date-bucket`}>Bucket</label>
 							<select
 								id={`${uid}-date-bucket`}
-								bind:value={plotConfig.date_bucket}
+								bind:value={config.date_bucket}
 								class={input({ variant: 'plotSelect' })}
 							>
 								<option value={null}>None</option>
@@ -820,7 +793,7 @@
 							<label class={label()} for={`${uid}-date-ordinal`}>Ordinal</label>
 							<select
 								id={`${uid}-date-ordinal`}
-								bind:value={plotConfig.date_ordinal}
+								bind:value={config.date_ordinal}
 								class={input({ variant: 'plotSelect' })}
 							>
 								<option value={null}>None</option>
@@ -861,7 +834,7 @@
 							<label class={label()} for={`${uid}-sort-by`}>Sort By</label>
 							<select
 								id={`${uid}-sort-by`}
-								bind:value={plotConfig.sort_by}
+								bind:value={config.sort_by}
 								class={input({ variant: 'plotSelect' })}
 							>
 								<option value={null}>Default</option>
@@ -874,21 +847,21 @@
 							<label class={label()} for={`${uid}-sort-order`}>Order</label>
 							<select
 								id={`${uid}-sort-order`}
-								bind:value={plotConfig.sort_order}
+								bind:value={config.sort_order}
 								class={input({ variant: 'plotSelect' })}
 							>
 								<option value="asc">Ascending</option>
 								<option value="desc">Descending</option>
 							</select>
 						</div>
-						{#if plotConfig.sort_by === 'custom'}
+						{#if config.sort_by === 'custom'}
 							<div>
 								<div class={label()}>Sort Column</div>
 								<div>
 									<ColumnDropdown
 										{schema}
-										value={plotConfig.sort_column ?? ''}
-										onChange={(val) => (plotConfig.sort_column = val)}
+										value={config.sort_column ?? ''}
+										onChange={(val) => (config.sort_column = val)}
 										placeholder="Select column..."
 									/>
 								</div>
@@ -930,7 +903,7 @@
 							<input
 								id={`${uid}-plot-zoom`}
 								type="checkbox"
-								bind:checked={plotConfig.pan_zoom_enabled}
+								bind:checked={config.pan_zoom_enabled}
 							/>
 							<span>Pan & Zoom</span>
 						</label>
@@ -952,7 +925,7 @@
 							<input
 								id={`${uid}-plot-select`}
 								type="checkbox"
-								bind:checked={plotConfig.selection_enabled}
+								bind:checked={config.selection_enabled}
 							/>
 							<span>Click Selection</span>
 						</label>
@@ -975,7 +948,7 @@
 								<input
 									id={`${uid}-plot-area-select`}
 									type="checkbox"
-									bind:checked={plotConfig.area_selection_enabled}
+									bind:checked={config.area_selection_enabled}
 								/>
 								<span>Area Selection (scatter)</span>
 							</label>
@@ -1069,9 +1042,9 @@
 					</button>
 				</div>
 
-				{#if plotConfig.overlays.length > 0}
+				{#if config.overlays.length > 0}
 					<div class={css({ display: 'grid', gap: '2' })}>
-						{#each plotConfig.overlays as overlay, index (index)}
+						{#each config.overlays as overlay, index (index)}
 							<div
 								class={css({
 									display: 'flex',
@@ -1259,9 +1232,9 @@
 					</button>
 				</div>
 
-				{#if plotConfig.reference_lines.length > 0}
+				{#if config.reference_lines.length > 0}
 					<div class={css({ display: 'grid', gap: '2' })}>
-						{#each plotConfig.reference_lines as line, index (index)}
+						{#each config.reference_lines as line, index (index)}
 							<div
 								class={css({
 									display: 'flex',
@@ -1382,8 +1355,8 @@
 					id={`${uid}-title`}
 					type="text"
 					class={input()}
-					value={plotConfig.title ?? ''}
-					oninput={(e) => (plotConfig.title = e.currentTarget.value)}
+					value={config.title ?? ''}
+					oninput={(e) => (config.title = e.currentTarget.value)}
 					placeholder="Optional title"
 				/>
 			</div>
@@ -1403,7 +1376,7 @@
 					<span id={`${uid}-plot-legend`}><SectionHeader>Legend Position</SectionHeader></span>
 					<select
 						id={`${uid}-legend-position`}
-						bind:value={plotConfig.legend_position}
+						bind:value={config.legend_position}
 						class={input({ variant: 'secondary' })}
 					>
 						<option value="right">Right</option>
@@ -1435,8 +1408,8 @@
 								id={`${uid}-axis-x-label`}
 								type="text"
 								class={input()}
-								value={plotConfig.x_axis_label ?? ''}
-								oninput={(e) => (plotConfig.x_axis_label = e.currentTarget.value)}
+								value={config.x_axis_label ?? ''}
+								oninput={(e) => (config.x_axis_label = e.currentTarget.value)}
 								placeholder="Optional label"
 							/>
 						</div>
@@ -1446,8 +1419,8 @@
 								id={`${uid}-axis-y-label`}
 								type="text"
 								class={input()}
-								value={plotConfig.y_axis_label ?? ''}
-								oninput={(e) => (plotConfig.y_axis_label = e.currentTarget.value)}
+								value={config.y_axis_label ?? ''}
+								oninput={(e) => (config.y_axis_label = e.currentTarget.value)}
 								placeholder="Optional label"
 							/>
 						</div>
@@ -1456,7 +1429,7 @@
 								<label class={label()} for={`${uid}-axis-y-scale`}>Y Axis Scale</label>
 								<select
 									id={`${uid}-axis-y-scale`}
-									bind:value={plotConfig.y_axis_scale}
+									bind:value={config.y_axis_scale}
 									class={input({ variant: 'plotSelect' })}
 								>
 									<option value="linear">Linear</option>
@@ -1492,7 +1465,7 @@
 							<label class={label()} for={`${uid}-axis-units`}>Display Units</label>
 							<select
 								id={`${uid}-axis-units`}
-								bind:value={plotConfig.display_units}
+								bind:value={config.display_units}
 								class={input({ variant: 'plotSelect' })}
 							>
 								<option value="">None</option>
@@ -1573,8 +1546,8 @@
 						id={`${uid}-series-colors`}
 						type="text"
 						class={input()}
-						value={plotConfig.series_colors.join(', ')}
-						oninput={(e) => (plotConfig.series_colors = parseSeriesColors(e.currentTarget.value))}
+						value={config.series_colors.join(', ')}
+						oninput={(e) => (config.series_colors = parseSeriesColors(e.currentTarget.value))}
 						placeholder="#4A8FE7, #50B88E, #E8A838"
 					/>
 					<p
@@ -1608,7 +1581,7 @@
 					{#each [{ value: 'small', label: 'S' }, { value: 'medium', label: 'M' }, { value: 'large', label: 'L' }, { value: 'xlarge', label: 'XL' }] as opt (opt.value)}
 						<button
 							type="button"
-							class={(plotConfig.chart_height ?? 'medium') === opt.value
+							class={(config.chart_height ?? 'medium') === opt.value
 								? css({
 										flex: '1',
 										paddingY: '1.5',
@@ -1636,9 +1609,8 @@
 										letterSpacing: 'wide2',
 										_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 									})}
-							onclick={() =>
-								(plotConfig.chart_height = opt.value as PlotConfigData['chart_height'])}
-							aria-pressed={(plotConfig.chart_height ?? 'medium') === opt.value}
+							onclick={() => (config.chart_height = opt.value as PlotConfigData['chart_height'])}
+							aria-pressed={(config.chart_height ?? 'medium') === opt.value}
 						>
 							{opt.label}
 						</button>

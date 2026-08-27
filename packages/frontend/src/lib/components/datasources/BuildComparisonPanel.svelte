@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { compareDatasourceSnapshots, listIcebergSnapshots } from '$lib/api/datasource';
 	import type { IcebergSnapshotInfo, SnapshotCompareResponse } from '$lib/api/datasource';
@@ -40,12 +41,8 @@
 	});
 
 	const engineRunsStore = new BuildsStore();
-	// Network: fetch datasource build history only when run history is the comparison source.
-	$effect(() => {
-		if (logicalBuildMode) {
-			engineRunsStore.close();
-			return;
-		}
+	onMount(() => {
+		if (logicalBuildMode) return;
 		engineRunsStore.load({ datasource_id: datasource.id, limit: 50 });
 		return () => engineRunsStore.close();
 	});

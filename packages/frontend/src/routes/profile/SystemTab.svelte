@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { CheckCircle, XCircle, Save, Loader2, Database, ChevronDown } from '@lucide/svelte';
 	import { getSettings, updateSettings } from '$lib/api/settings';
@@ -20,17 +21,15 @@
 	let internalTablesError = $state<string | null>(null);
 	let togglingKey = $state<string | null>(null);
 	const collapsedSchemas = new SvelteSet<string>();
-	const initializedSchemaNames = new SvelteSet<string>();
 
 	const ns = useNamespace();
 	let idb = $state(false);
 
-	// Network: load global system settings on mount.
-	$effect(() => {
+	onMount(() => {
+		let aborted = false;
 		loading = true;
 		feedback = null;
-		let aborted = false;
-		getSettings().match(
+		void getSettings().match(
 			(s) => {
 				if (aborted) return;
 				idb = s.public_idb_debug;
@@ -41,31 +40,26 @@
 				loading = false;
 			}
 		);
-		return () => {
-			aborted = true;
-		};
-	});
 
-	// Network: internal onboard state is namespace-scoped, so reload when namespace changes.
-	$effect(() => {
-		const currentNamespace = ns.value;
 		internalTablesLoading = true;
 		internalTablesError = null;
 		togglingKey = null;
-		feedback = null;
-		let aborted = false;
-		listInternalPostgresTables().match(
+		void listInternalPostgresTables().match(
 			(tables) => {
-				if (aborted || ns.value !== currentNamespace) return;
+				if (aborted) return;
 				internalTables = tables;
 				internalTablesLoading = false;
+				for (const table of tables) {
+					collapsedSchemas.add(table.schema_name);
+				}
 			},
 			(error) => {
-				if (aborted || ns.value !== currentNamespace) return;
+				if (aborted) return;
 				internalTablesError = error.message;
 				internalTablesLoading = false;
 			}
 		);
+
 		return () => {
 			aborted = true;
 		};
@@ -120,20 +114,6 @@
 			groups.push({ schemaName: table.schema_name, tables: [table] });
 		}
 		return groups;
-	});
-
-	$effect(() => {
-		const currentSchemaNames = new Set(groupedInternalTables.map((group) => group.schemaName));
-		for (const schemaName of currentSchemaNames) {
-			if (initializedSchemaNames.has(schemaName)) continue;
-			initializedSchemaNames.add(schemaName);
-			collapsedSchemas.add(schemaName);
-		}
-		for (const schemaName of initializedSchemaNames) {
-			if (currentSchemaNames.has(schemaName)) continue;
-			initializedSchemaNames.delete(schemaName);
-			collapsedSchemas.delete(schemaName);
-		}
 	});
 
 	function toggleSchemaGroup(schemaName: string) {

@@ -51,6 +51,7 @@ export class BuildStreamStore {
 	results = $state.raw<BuildTabResult[]>([]);
 	error = $state<string | null>(null);
 	duration = $state<number | null>(null);
+	onSettled: ((status: BuildStatus) => void) | null = null;
 
 	private connection: { close: () => void } | null = null;
 	private generation = 0;
@@ -73,6 +74,11 @@ export class BuildStreamStore {
 			: 0
 	);
 	progressPct = $derived(Math.min(Math.max(Math.round(this.progress * 100), 0), 100));
+
+	private emitSettled(): void {
+		if (!this.done && !(this.status === 'disconnected' && this.error)) return;
+		this.onSettled?.(this.status);
+	}
 
 	start(request: BuildRequest): void {
 		this.reset();
@@ -98,6 +104,7 @@ export class BuildStreamStore {
 				this.releaseActivityLease();
 				this.error = err.message;
 				this.status = 'disconnected';
+				this.emitSettled();
 			}
 		);
 	}
@@ -274,6 +281,7 @@ export class BuildStreamStore {
 		if (generation !== this.generation) return;
 		if (!this.shouldReconnect || this.done) {
 			if (!this.done) this.status = 'disconnected';
+			this.emitSettled();
 			return;
 		}
 		this.scheduleReconnect(buildId, generation);
@@ -288,6 +296,7 @@ export class BuildStreamStore {
 			this.pendingError = null;
 			this.releaseActivityLease();
 		}
+		this.emitSettled();
 	}
 
 	applySnapshot(build: BuildRunDetail, lastSequence = 0): void {
@@ -339,6 +348,7 @@ export class BuildStreamStore {
 			this.clearRefreshTimer();
 			this.releaseActivityLease();
 		}
+		this.emitSettled();
 	}
 
 	applyEvent(event: BuildEvent): void {
@@ -486,6 +496,7 @@ export class BuildStreamStore {
 				this.releaseActivityLease();
 				break;
 		}
+		this.emitSettled();
 	}
 
 	private retainActivity(): void {

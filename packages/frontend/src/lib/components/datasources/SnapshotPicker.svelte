@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount, untrack } from 'svelte';
 	import { listIcebergSnapshots } from '$lib/api/datasource';
 	import { apiRequest } from '$lib/api/client';
 	import { Trash2, ChevronDown, Clock } from '@lucide/svelte';
@@ -37,48 +38,60 @@
 		branch = null
 	}: Props = $props();
 
-	let snapshotsOpen = $state(false);
-	let hasOpened = $state(false);
+	const initialUi = untrack(
+		() => (datasourceConfig.time_travel_ui as Record<string, unknown> | undefined) ?? {}
+	);
+	const startOpen = untrack(() =>
+		persistOpen
+			? Boolean(initialUi.open)
+			: initialUi.open !== undefined
+				? Boolean(initialUi.open)
+				: false
+	);
+	let snapshotsOpen = $state(startOpen);
 	let triggerRef = $state<HTMLButtonElement>();
 	let popoverRef = $state<HTMLDivElement>();
 	let popoverRect = $state({ left: 0, top: 0, width: 320 });
 	let snapshotsLoading = $state(false);
 	let snapshotsError = $state<string | null>(null);
-	let snapshotMonth = $state('');
-	let selectedDay = $state('');
+	let snapshotsLoaded = $state(false);
+	let snapshotMonth = $state(typeof initialUi.month === 'string' ? initialUi.month : '');
+	let selectedDay = $state(typeof initialUi.day === 'string' ? initialUi.day : '');
 	let snapshotList = $state<
 		Array<{ id: string; timestamp: number; operation?: string | null; is_current?: boolean }>
 	>([]);
-	let timeTravelId = $state<string | null>(null);
-	let timeTravelLabel = $state<string | null>(null);
-	let missingSnapshotId = $state<string | null>(null);
-	const calendarDays = $derived.by(() => computeCalendarDays(snapshotMonth, filteredSnapshotList));
+	const timeTravelId = $derived(
+		(datasourceConfig.time_travel_snapshot_id as string | null | undefined) ?? null
+	);
+	const timeTravelTs = $derived(
+		datasourceConfig.time_travel_snapshot_timestamp_ms as number | null | undefined
+	);
+	const timeTravelLabel = $derived(
+		timeTravelId && timeTravelTs ? formatSnapshotLabel(timeTravelTs) : null
+	);
 	let deleteConfirmId = $state<string | null>(null);
 	let deleteLoading = $state(false);
 	let deleteError = $state<string | null>(null);
-	let lastDatasourceId = $state<string | null>(null);
-	// Subscription: $derived can't reset snapshot state on datasource switch.
-	$effect(() => {
-		if (datasourceId === lastDatasourceId) return;
-		lastDatasourceId = datasourceId;
-		snapshotList = [];
-		snapshotsError = null;
-		snapshotsLoading = false;
-		selectedDay = '';
-		timeTravelId = null;
-		timeTravelLabel = null;
-		snapshotMonth = '';
-		snapshotsOpen = false;
-		hasOpened = false;
-		deleteConfirmId = null;
-		deleteLoading = false;
-		deleteError = null;
-	});
 	const filteredSnapshotList = $derived(snapshotList);
+	const calendarDays = $derived.by(() => computeCalendarDays(snapshotMonth, filteredSnapshotList));
+	const effectiveSelectedDay = $derived.by(() => {
+		if (!selectedDay) return '';
+		if (filteredSnapshotList.some((snap) => formatSnapshotKey(snap.timestamp) === selectedDay)) {
+			return selectedDay;
+		}
+		return '';
+	});
 	const filteredSnapshots = $derived(
-		selectedDay
-			? filteredSnapshotList.filter((snap) => formatSnapshotKey(snap.timestamp) === selectedDay)
+		effectiveSelectedDay
+			? filteredSnapshotList.filter(
+					(snap) => formatSnapshotKey(snap.timestamp) === effectiveSelectedDay
+				)
 			: []
+	);
+	const missingSnapshotId = $derived(
+		timeTravelId && snapshotsLoaded && !snapshotList.some((snap) => snap.id === timeTravelId)
+			? timeTravelId
+			: null
 	);
 
 	const currentSnapshot = $derived(snapshotList.find((snap) => snap.is_current) ?? null);
@@ -96,28 +109,6 @@
 			if (triggerRef?.contains(target)) return;
 			closeSnapshots();
 		}
-	});
-
-	// Subscription: $derived can't sync state from config — config is external and may change at any time.
-	$effect(() => {
-		const ui = (datasourceConfig.time_travel_ui as Record<string, unknown>) ?? {};
-		if (persistOpen && !hasOpened) {
-			snapshotsOpen = (ui.open as boolean | undefined) ?? false;
-			if (snapshotsOpen) hasOpened = true;
-		}
-		if (!persistOpen && ui.open !== undefined) {
-			snapshotsOpen = Boolean(ui.open);
-		}
-		const nextMonth = ui.month as string | undefined;
-		if (nextMonth !== undefined) snapshotMonth = nextMonth;
-		const nextDay = ui.day as string | undefined;
-		if (nextDay !== undefined) selectedDay = nextDay;
-		const configTravelId = datasourceConfig.time_travel_snapshot_id as string | null | undefined;
-		if (configTravelId !== undefined) {
-			timeTravelId = configTravelId ?? null;
-		}
-		const ts = datasourceConfig.time_travel_snapshot_timestamp_ms as number | null;
-		timeTravelLabel = timeTravelId && ts ? formatSnapshotLabel(ts) : null;
 	});
 
 	function formatSnapshotKey(timestampMs: number) {
@@ -153,13 +144,7 @@
 			}))
 			.sort((a, b) => b.timestamp - a.timestamp);
 		snapshotList = list;
-		if (!timeTravelId) {
-			missingSnapshotId = null;
-		} else if (list.some((snap) => snap.id === timeTravelId)) {
-			missingSnapshotId = null;
-		} else {
-			missingSnapshotId = timeTravelId;
-		}
+		snapshotsLoaded = true;
 		const monthSource = showBuildPreviews ? filteredSnapshotList : list;
 		const monthOptions = Array.from(
 			new Set(monthSource.map((snap) => formatSnapshotKey(snap.timestamp).slice(0, 7)))
@@ -217,36 +202,11 @@
 		updateUi({ month: monthKey, day: '' });
 	}
 
-	// Subscription: $derived can't clear day selection when filtered list changes.
-	$effect(() => {
-		if (!snapshotsOpen) return;
-		if (!filteredSnapshotList.length) return;
-		if (!selectedDay) return;
-		const hasMatch = filteredSnapshotList.some(
-			(snap) => formatSnapshotKey(snap.timestamp) === selectedDay
-		);
-		if (hasMatch) return;
-		selectedDay = '';
-		updateUi({ day: '' });
-	});
-
-	// Subscription: $derived can't select month on open when snapshot list changes.
-	$effect(() => {
-		if (!snapshotsOpen) return;
-		const source = showBuildPreviews ? filteredSnapshotList : snapshotList;
-		if (!source.length) return;
-		const monthOptions = Array.from(
-			new Set(source.map((snap) => formatSnapshotKey(snap.timestamp).slice(0, 7)))
-		).sort((a, b) => (a > b ? -1 : 1));
-		if (!monthOptions.length) return;
-		if (snapshotMonth && monthOptions.includes(snapshotMonth)) return;
-		selectMonth(monthOptions[0]);
-	});
-
 	function loadSnapshots() {
 		if (!datasourceId) return;
 		snapshotsLoading = true;
 		snapshotsError = null;
+		snapshotsLoaded = false;
 		snapshotList = [];
 		getIcebergSnapshots(datasourceId).match(
 			(result) => {
@@ -256,10 +216,15 @@
 			(error) => {
 				snapshotsError = error.message || 'Failed to load snapshots';
 				snapshotsLoading = false;
+				snapshotsLoaded = true;
 				snapshotList = [];
 			}
 		);
 	}
+
+	onMount(() => {
+		if (snapshotsOpen) loadSnapshots();
+	});
 
 	function getIcebergSnapshots(nextId: string) {
 		const branchValue = branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
@@ -270,20 +235,15 @@
 	}
 
 	function setSnapshot(snapshotId: string | null, timestampMs?: number) {
-		timeTravelId = snapshotId;
 		const nextConfig = { ...datasourceConfig };
 		if (snapshotId === null) {
 			delete nextConfig.time_travel_snapshot_id;
 			delete nextConfig.time_travel_snapshot_timestamp_ms;
-			timeTravelLabel = null;
-			missingSnapshotId = null;
 		} else {
 			nextConfig.time_travel_snapshot_id = snapshotId;
 			if (timestampMs != null) {
 				nextConfig.time_travel_snapshot_timestamp_ms = timestampMs;
-				timeTravelLabel = formatSnapshotLabel(timestampMs);
 			}
-			missingSnapshotId = null;
 		}
 		onConfigChange?.(nextConfig);
 		onSelect?.(snapshotId, timestampMs);
@@ -326,7 +286,6 @@
 		if (disabled) return;
 		const next = !snapshotsOpen;
 		snapshotsOpen = next;
-		hasOpened = true;
 		if (persistOpen) {
 			updateUi({ open: next });
 		}
@@ -366,7 +325,6 @@
 				deleteConfirmId = null;
 				deleteLoading = false;
 				snapshotsOpen = true;
-				hasOpened = true;
 				if (persistOpen) {
 					updateUi({ open: true });
 				}
@@ -649,7 +607,7 @@
 														_hover: { backgroundColor: 'bg.hover' }
 													}
 												: { cursor: 'default', opacity: '0.4' },
-											selectedDay === day.key && { backgroundColor: 'bg.tertiary' }
+											effectiveSelectedDay === day.key && { backgroundColor: 'bg.tertiary' }
 										)}
 										onclick={() => day.count > 0 && selectDay(day.key)}
 										type="button"
@@ -690,7 +648,7 @@
 							borderWidth: '1'
 						})}
 					>
-						{#if selectedDay}
+						{#if effectiveSelectedDay}
 							{#each filteredSnapshots as snap (snap.id)}
 								<div
 									class={css(

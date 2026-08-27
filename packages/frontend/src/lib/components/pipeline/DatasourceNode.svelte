@@ -42,6 +42,7 @@
 		onChangeDatasource?: () => void;
 		onRenameTab?: (name: string) => void;
 		onDuplicateTab?: () => void;
+		onResourceConfigChange?: () => void;
 		readOnly?: boolean;
 	}
 
@@ -54,6 +55,7 @@
 		onChangeDatasource,
 		onRenameTab,
 		onDuplicateTab,
+		onResourceConfigChange,
 		readOnly = false
 	}: Props = $props();
 
@@ -91,6 +93,7 @@
 		const defaultThreads = defaults?.max_threads ?? 0;
 		const storeValue = value === defaultThreads ? undefined : value || undefined;
 		analysisStore.setResourceConfig({ ...current, max_threads: storeValue });
+		onResourceConfigChange?.();
 	}
 
 	// Memory: show effective value (default when not overridden)
@@ -108,6 +111,7 @@
 		const defaultMemoryGb = Math.floor((defaults?.max_memory_mb ?? 0) / 1024);
 		const storeValue = value === defaultMemoryGb ? undefined : value ? value * 1024 : undefined;
 		analysisStore.setResourceConfig({ ...current, max_memory_mb: storeValue });
+		onResourceConfigChange?.();
 	}
 
 	const standardMemoryOptions = [1, 2, 4, 8, 16, 32, 64];

@@ -10,6 +10,8 @@ export type EditorLockControllerDeps = {
 	getDraftLoaded: () => boolean;
 	getIsSaving: () => boolean;
 	getIsDirty: () => boolean;
+	onOwned?: () => void;
+	onLockedByOther?: () => void;
 };
 
 export function createEditorLockController(deps: EditorLockControllerDeps) {
@@ -60,53 +62,74 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 		editorAccessState === 'pending' || editorAccessState === 'locked'
 	);
 
+	let sessionCleanup: (() => void) | null = null;
+
+	function closeSession(): void {
+		sessionCleanup?.();
+		sessionCleanup = null;
+	}
+
+	function openSession(id: string): void {
+		closeSession();
+		lockMode = 'pending';
+		let alive = true;
+		const session = openLockSession({
+			resourceType: 'analysis',
+			resourceId: id,
+			onStatus(lock, ownsLock) {
+				if (!alive) return;
+				if (lock === null) {
+					lockMode = 'pending';
+					session.acquire();
+					return;
+				}
+				const next = ownsLock ? 'owned' : 'other';
+				const becameOwned = next === 'owned' && lockMode !== 'owned';
+				const becameOther = next === 'other' && lockMode !== 'other';
+				lockMode = next;
+				if (becameOwned) deps.onOwned?.();
+				if (becameOther) deps.onLockedByOther?.();
+			},
+			onError(error: LockSessionError) {
+				if (!alive) return;
+				if (error.statusCode === 409) {
+					const becameOther = lockMode !== 'other';
+					lockMode = 'other';
+					if (becameOther) deps.onLockedByOther?.();
+					return;
+				}
+				lockMode = 'error';
+			}
+		});
+		session.acquire();
+		sessionCleanup = () => {
+			alive = false;
+			session.close();
+			lockMode = lockIntent === 'released' ? 'released' : 'pending';
+		};
+	}
+
+	function sync(id: string | null): void {
+		if (!id) {
+			closeSession();
+			return;
+		}
+		if (lockIntent === 'released') {
+			closeSession();
+			lockMode = 'released';
+			return;
+		}
+		openSession(id);
+	}
+
 	function handleToggle(): void {
 		if (editorAccessState === 'pending' || editorAccessState === 'locked') return;
 		lockIntent = lockIntent === 'released' ? 'editing' : 'released';
+		sync(deps.validAnalysisId());
 	}
 
-	function startSessionWatcher(): void {
-		// Websocket: $derived can't manage lock acquire + websocket watcher lifecycle.
-		$effect(() => {
-			const nextId = deps.validAnalysisId();
-			if (!nextId) return;
-			const id = nextId;
-			if (lockIntent === 'released') {
-				lockMode = 'released';
-				return;
-			}
-
-			lockMode = 'pending';
-			let alive = true;
-			const session = openLockSession({
-				resourceType: 'analysis',
-				resourceId: id,
-				onStatus(lock, ownsLock) {
-					if (!alive) return;
-					if (lock === null) {
-						lockMode = 'pending';
-						session.acquire();
-						return;
-					}
-					lockMode = ownsLock ? 'owned' : 'other';
-				},
-				onError(error: LockSessionError) {
-					if (!alive) return;
-					if (error.statusCode === 409) {
-						lockMode = 'other';
-						return;
-					}
-					lockMode = 'error';
-				}
-			});
-			session.acquire();
-
-			return () => {
-				alive = false;
-				session.close();
-				lockMode = lockIntent === 'released' ? 'released' : 'pending';
-			};
-		});
+	function stop(): void {
+		closeSession();
 	}
 
 	return {
@@ -153,7 +176,8 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 			return lockButtonDisabled;
 		},
 		handleToggle,
-		startSessionWatcher
+		sync,
+		stop
 	};
 }
 

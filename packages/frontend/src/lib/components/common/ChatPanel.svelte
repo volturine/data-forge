@@ -11,6 +11,7 @@
 		Minimize2,
 		Plus
 	} from '@lucide/svelte';
+	import { onMount } from 'svelte';
 	import { css, iconButton } from '$lib/styles/panda';
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { chatStore } from '$lib/stores/chat.svelte';
@@ -38,11 +39,23 @@
 	const anyPanelOpen = $derived(configOpen || toolsOpen || sessionsOpen);
 	if (typeof window !== 'undefined') layout.restore();
 
+	function focusInput() {
+		requestAnimationFrame(() => inputEl?.focus());
+	}
+
+	function focusPanel(node: HTMLElement) {
+		requestAnimationFrame(() => {
+			const textarea = node.querySelector('textarea');
+			if (textarea instanceof HTMLTextAreaElement) textarea.focus();
+		});
+	}
+
 	async function stopGeneration() {
 		if (chatStore.sessionId) {
 			await stopChatGeneration(chatStore.sessionId);
 		}
 		chatStore.loading = false;
+		focusInput();
 	}
 
 	async function handleSend() {
@@ -54,7 +67,7 @@
 			messagesRef?.resetScroll();
 			if (inputEl) {
 				inputEl.style.height = 'auto';
-				requestAnimationFrame(() => inputEl?.focus());
+				focusInput();
 			}
 		}
 	}
@@ -66,7 +79,7 @@
 			inputValue = text;
 			return;
 		}
-		requestAnimationFrame(() => inputEl?.focus());
+		focusInput();
 	}
 
 	function togglePanel(panel: 'config' | 'tools' | 'sessions') {
@@ -91,24 +104,23 @@
 		}
 	}
 
-	// event listener side effect — must imperatively add/remove from window
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		function onPatch(e: Event) {
-			const detail = (e as CustomEvent<ChatUiPatchEvent>).detail;
-			const resource = detail.resource;
-			if (!resource) return;
-			if (resource === 'analysis' || resource === 'analyses') {
-				void queryClient.invalidateQueries({ queryKey: ['analyses'] });
-				void queryClient.invalidateQueries({ queryKey: ['analysis'] });
-			} else if (resource === 'datasource' || resource === 'datasources') {
-				void queryClient.invalidateQueries({ queryKey: ['datasources'] });
-			} else if (resource === 'healthcheck' || resource === 'healthchecks') {
-				void queryClient.invalidateQueries({ queryKey: ['healthchecks'] });
-			} else if (resource === 'scheduler' || resource === 'schedules') {
-				void queryClient.invalidateQueries({ queryKey: ['schedules'] });
-			}
+	function onPatch(e: Event) {
+		const detail = (e as CustomEvent<ChatUiPatchEvent>).detail;
+		const resource = detail.resource;
+		if (!resource) return;
+		if (resource === 'analysis' || resource === 'analyses') {
+			void queryClient.invalidateQueries({ queryKey: ['analyses'] });
+			void queryClient.invalidateQueries({ queryKey: ['analysis'] });
+		} else if (resource === 'datasource' || resource === 'datasources') {
+			void queryClient.invalidateQueries({ queryKey: ['datasources'] });
+		} else if (resource === 'healthcheck' || resource === 'healthchecks') {
+			void queryClient.invalidateQueries({ queryKey: ['healthchecks'] });
+		} else if (resource === 'scheduler' || resource === 'schedules') {
+			void queryClient.invalidateQueries({ queryKey: ['schedules'] });
 		}
+	}
+
+	onMount(() => {
 		window.addEventListener('chat:ui_patch', onPatch);
 		return () => window.removeEventListener('chat:ui_patch', onPatch);
 	});
@@ -126,29 +138,18 @@
 		}
 	});
 
-	// DOM focus after state change — $derived cannot call focus()
-	$effect(() => {
-		if (chatStore.open && !chatStore.loading && inputEl) {
-			requestAnimationFrame(() => inputEl?.focus());
-		}
-	});
-
-	// Cmd/Ctrl+K to open & focus chat
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		function onGlobalKey(e: KeyboardEvent) {
-			if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-				e.preventDefault();
-				if (!chatStore.open) {
-					void chatStore.open_panel();
-				}
-				requestAnimationFrame(() => inputEl?.focus());
+	function onGlobalKey(e: KeyboardEvent) {
+		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+			e.preventDefault();
+			if (!chatStore.open) {
+				void chatStore.open_panel();
 			}
+			focusInput();
 		}
-		window.addEventListener('keydown', onGlobalKey);
-		return () => window.removeEventListener('keydown', onGlobalKey);
-	});
+	}
 </script>
+
+<svelte:window onkeydown={onGlobalKey} />
 
 <ConfirmDialog
 	show={chatStore.confirmClose}
@@ -180,6 +181,7 @@
 		style:width="{layout.panelWidth}px"
 		style:height="{layout.activeHeight}px"
 		use:overlayStack.action={chatOverlayConfig}
+		use:focusPanel
 	>
 		<!-- Corner resize handle (top-left) -->
 		<div
@@ -439,11 +441,16 @@
 			<ChatMessages
 				bind:this={messagesRef}
 				onSendPrompt={(text) => void handleSendPrompt(text)}
-				onFocusInput={() => inputEl?.focus()}
+				onFocusInput={focusInput}
 			/>
 		{/if}
 
-		<ChatComposer bind:inputValue onSend={handleSend} onStop={stopGeneration} />
+		<ChatComposer
+			bind:inputValue
+			bind:textareaEl={inputEl}
+			onSend={handleSend}
+			onStop={stopGeneration}
+		/>
 	</div>
 {/if}
 

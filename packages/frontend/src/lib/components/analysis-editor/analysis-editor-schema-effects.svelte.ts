@@ -12,9 +12,8 @@ import { createAsyncGate } from '$lib/utils/async-gate';
 import { track } from '$lib/utils/audit-log';
 import { isUuid } from '$lib/utils/analysis-tab';
 
-// Network: $derived can't fetch engine defaults.
-export function setupEngineDefaultsEffect(validAnalysisId: () => string | null) {
-	$effect(() => {
+export function setupEngineDefaultsEffect(validAnalysisId: () => string | null): () => void {
+	return () => {
 		const id = validAnalysisId();
 		if (!id || analysisStore.engineDefaults) return;
 		getEngineDefaults().match(
@@ -30,17 +29,25 @@ export function setupEngineDefaultsEffect(validAnalysisId: () => string | null) 
 				});
 			}
 		);
-	});
+	};
 }
 
-// Network: warm the compute engine shortly after the route knows the analysis id.
-// A small delay still overlaps engine startup with analysis fetch/layout work,
-// but avoids spawning engines for transient hidden setup pages that redirect
-// away immediately after creation/import.
-export function setupEngineWarmupEffect(validAnalysisId: () => string | null) {
-	let warmedEngineIdentityCache = $state<string | null>(null);
+export function setupEngineWarmupEffect(validAnalysisId: () => string | null): {
+	start: () => void;
+	stop: () => void;
+} {
+	let warmedEngineIdentityCache: string | null = null;
+	let alive = false;
+	let timer = 0;
 
-	$effect(() => {
+	function stop(): void {
+		alive = false;
+		if (timer) window.clearTimeout(timer);
+		timer = 0;
+	}
+
+	function start(): void {
+		stop();
 		const id = validAnalysisId();
 		if (!id) {
 			analysisStore.previews.paused = false;
@@ -53,8 +60,8 @@ export function setupEngineWarmupEffect(validAnalysisId: () => string | null) {
 			return;
 		}
 		warmedEngineIdentityCache = nextKey;
-		let alive = true;
-		const timer = window.setTimeout(() => {
+		alive = true;
+		timer = window.setTimeout(() => {
 			if (!alive) return;
 			spawnAnalysisEngine(id, analysisStore.resourceConfig ?? undefined).match(
 				() => {
@@ -73,19 +80,18 @@ export function setupEngineWarmupEffect(validAnalysisId: () => string | null) {
 				}
 			);
 		}, 300);
-		return () => {
-			alive = false;
-			window.clearTimeout(timer);
-		};
-	});
+	}
+
+	return { start, stop };
 }
 
-// Network: $derived can't hydrate inferred schemas for expression/with_columns steps.
-export function setupInferredSchemaHydrationEffect(validAnalysisId: () => string | null) {
+export function setupInferredSchemaHydrationEffect(
+	validAnalysisId: () => string | null
+): () => void {
 	const hydratedGates = new SvelteSet<string>();
 	const inferredSchemaGate = createAsyncGate();
 
-	$effect(() => {
+	return () => {
 		const id = validAnalysisId();
 		if (!id) return;
 		const tab = analysisStore.activeTab;
@@ -132,11 +138,7 @@ export function setupInferredSchemaHydrationEffect(validAnalysisId: () => string
 				}
 			);
 		}
-
-		return () => {
-			inferredSchemaGate.invalidate();
-		};
-	});
+	};
 }
 
 export type SourceSchemaLoaderDeps = {
@@ -147,16 +149,14 @@ export type SourceSchemaLoaderDeps = {
 	datasources: () => DataSource[] | undefined;
 };
 
-// Network: $derived can't load schema via network calls.
-export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps) {
+export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps): {
+	load: () => void;
+	isLoading: () => boolean;
+} {
 	let isLoadingSchema = $state(false);
 	const pendingSourceSchemaKeys = new SvelteSet<string>();
 
-	function isLoading(): boolean {
-		return isLoadingSchema;
-	}
-
-	$effect(() => {
+	function load(): void {
 		const datasourceIdValue = deps.datasourceId();
 		const schemaId = deps.schemaKey();
 		if (!schemaId) return;
@@ -247,7 +247,10 @@ export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps) {
 				isLoadingSchema = false;
 			}
 		);
-	});
+	}
 
-	return isLoading;
+	return {
+		load,
+		isLoading: () => isLoadingSchema
+	};
 }
