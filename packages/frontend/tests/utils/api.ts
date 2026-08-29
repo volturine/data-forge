@@ -145,6 +145,21 @@ export async function createDatasource(
 	});
 }
 
+export async function createCsvDatasource(
+	request: E2ERequest,
+	name: string,
+	csv: string,
+	namespace?: string
+): Promise<string> {
+	return withAuthedPage(request, async (page) => {
+		const target = namespace ?? (await resolveHelperDefaultNamespace(page));
+		await prepareHelperNamespace(page, target);
+		const { id } = await uploadDatasourceViaUi(page, name, { csv });
+		datasourceRegistry.set(id, { name, namespace: target });
+		return id;
+	});
+}
+
 export async function createLargeDatasource(
 	request: E2ERequest,
 	name: string,
