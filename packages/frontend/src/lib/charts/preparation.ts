@@ -1,5 +1,4 @@
 export type ChartRow = Record<string, unknown>;
-export type StackRow = { x: string } & Record<string, number>;
 
 export function numberValue(value: unknown): number {
 	if (typeof value === 'number') return value;
@@ -48,37 +47,4 @@ export function groupOrder(
 		const comparison = (values.get(left) ?? '').localeCompare(values.get(right) ?? '');
 		return options.order === 'asc' ? comparison : -comparison;
 	});
-}
-
-export function stackRows(
-	data: ChartRow[],
-	labels: string[],
-	groups: string[],
-	groupColumn: string
-): { rows: StackRow[]; totals: number[] } {
-	const indexed = new Map<string, StackRow>();
-	for (const label of labels) {
-		const row = { x: label } as StackRow;
-		for (const group of groups) row[group] = 0;
-		indexed.set(label, row);
-	}
-	for (const item of data) {
-		const label = stringValue(item.x);
-		const group = stringValue(item[groupColumn]);
-		const row = indexed.get(label);
-		if (row) row[group] = (row[group] ?? 0) + numberValue(item.y);
-	}
-	const rows = labels.map((label) => indexed.get(label) ?? ({ x: label } as StackRow));
-	return {
-		rows,
-		totals: rows.map((row) => groups.reduce((sum, group) => sum + (row[group] ?? 0), 0))
-	};
-}
-
-export function datumKey(group: string, label: string): string {
-	return `${group}::${label}`;
-}
-
-export function pointKey(group: string, label: string, value: number): string {
-	return `${group}::${label}::${value}`;
 }
