@@ -4,28 +4,38 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      weekly-batch:
+        patterns:
+          - "*"
 
   - package-ecosystem: docker
     directory: /docker
     schedule:
       interval: weekly
+    groups:
+      weekly-batch:
+        patterns:
+          - "*"
 
-  - package-ecosystem: npm
+  - package-ecosystem: bun
     directory: /packages/frontend
     schedule:
       interval: weekly
+    groups:
+      weekly-batch:
+        patterns:
+          - "*"
 
   - package-ecosystem: uv
-    directory: /packages/backend
+    directories:
+      - /packages/backend
+      - /packages/scheduler
+      - /packages/worker
     schedule:
       interval: weekly
-
-  - package-ecosystem: uv
-    directory: /packages/scheduler
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: uv
-    directory: /packages/worker
-    schedule:
-      interval: weekly
+    groups:
+      weekly-batch:
+        group-by: dependency-name
+        patterns:
+          - "*"

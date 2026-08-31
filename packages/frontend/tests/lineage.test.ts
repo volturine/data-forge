@@ -57,7 +57,7 @@ test.describe('Lineage – layout switching', () => {
 		await waitForLineageToolbar(page);
 		const verticalBtn = page.locator('button[title="Vertical tree layout"]');
 		await verticalBtn.click();
-		await expect(page.getByText('Vertical')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Vertical', exact: true })).toBeVisible();
 	});
 
 	test('clicking Grid layout button switches to grid mode', async ({ page }) => {
@@ -65,7 +65,7 @@ test.describe('Lineage – layout switching', () => {
 		await waitForLineageToolbar(page);
 		const gridBtn = page.locator('button[title="Grid layout"]');
 		await gridBtn.click();
-		await expect(page.getByText('Grid')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Grid', exact: true })).toBeVisible();
 	});
 
 	test('clicking Horizontal layout button restores horizontal mode', async ({ page }) => {
@@ -73,7 +73,7 @@ test.describe('Lineage – layout switching', () => {
 		await waitForLineageToolbar(page);
 		await page.locator('button[title="Grid layout"]').click();
 		await page.locator('button[title="Horizontal tree layout"]').click();
-		await expect(page.getByText('Horizontal')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Horizontal', exact: true })).toBeVisible();
 	});
 });
 
