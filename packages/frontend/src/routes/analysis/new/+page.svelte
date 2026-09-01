@@ -791,8 +791,7 @@
 								rows="4"
 								bind:value={description}
 								class={input({ variant: 'dialog' })}
-								placeholder="Optional context for collaborators and AI generation."
-							></textarea>
+								placeholder="Optional context for collaborators and AI generation."></textarea>
 						</label>
 					</div>
 				</section>

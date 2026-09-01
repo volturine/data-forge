@@ -492,8 +492,7 @@
 							rows="4"
 							maxlength="4000"
 							disabled={loading}
-							class={input({ variant: 'textarea' })}
-						></textarea>
+							class={input({ variant: 'textarea' })}></textarea>
 						<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
 							Optional. Plain text only, up to 4,000 characters.
 						</p>
@@ -762,8 +761,7 @@
 						rows="4"
 						maxlength="4000"
 						disabled={loading}
-						class={input({ variant: 'textarea' })}
-					></textarea>
+						class={input({ variant: 'textarea' })}></textarea>
 					<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
 						Optional. Plain text only, up to 4,000 characters.
 					</p>
@@ -794,8 +792,7 @@
 						placeholder="SELECT * FROM table"
 						rows="5"
 						disabled={loading}
-						class={input({ variant: 'textarea' })}
-					></textarea>
+						class={input({ variant: 'textarea' })}></textarea>
 				</div>
 
 				<button

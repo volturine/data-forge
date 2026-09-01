@@ -395,13 +395,7 @@ export interface BuildRunListResponse {
 }
 
 export type BuildStatus =
-	| 'connecting'
-	| 'queued'
-	| 'running'
-	| 'completed'
-	| 'failed'
-	| 'cancelled'
-	| 'disconnected';
+	'connecting' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'disconnected';
 
 export type BuildStatusTone = 'accent' | 'success' | 'warning' | 'error';
 export type BuildLifecycleStatusTone = 'success' | 'active' | 'warning' | 'error';

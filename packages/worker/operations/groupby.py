@@ -30,7 +30,7 @@ class GroupByAggregationDefinition:
     expr_factory: GroupByAggregationExpr
 
     @classmethod
-    def require(cls, value: GroupByAggregationFunction | str) -> "GroupByAggregationDefinition":
+    def require(cls, value: GroupByAggregationFunction | str) -> GroupByAggregationDefinition:
         try:
             function = GroupByAggregationFunction.require(value)
         except ValueError as exc:

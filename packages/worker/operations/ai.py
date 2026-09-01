@@ -134,7 +134,7 @@ class AIParams(OperationParams):
         return ai_provider_name(parse_ai_provider(v))
 
     @model_validator(mode="after")
-    def _validate_input_columns(self) -> "AIParams":
+    def _validate_input_columns(self) -> AIParams:
         if not self.input_columns:
             raise ValueError("At least one input column is required (input_columns)")
         return self

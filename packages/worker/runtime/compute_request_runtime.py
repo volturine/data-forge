@@ -855,9 +855,10 @@ def _error_message(exc: Exception) -> str:
 def _error_result(exc: Exception) -> compute_pb2.ComputeErrorResult:
     if isinstance(exc, BackendWorkerRpcError):
         result = compute_pb2.ComputeErrorResult(error=exc.error, status_code=exc.status_code)
-        protocol_error_code = f"ERROR_CODE_{exc.error_code}" if exc.error_code is not None else None
-        if protocol_error_code in errors_pb2.ErrorCode.keys():
-            result.error_code = cast(errors_pb2.ErrorCode, errors_pb2.ErrorCode.Value(protocol_error_code))
+        if exc.error_code is not None:
+            protocol_error_code = f"ERROR_CODE_{exc.error_code}"
+            if protocol_error_code in errors_pb2.ErrorCode.DESCRIPTOR.values_by_name:
+                result.error_code = cast(errors_pb2.ErrorCode, errors_pb2.ErrorCode.Value(protocol_error_code))
         if exc.details:
             result.details.CopyFrom(dict_to_struct(exc.details))
         return result

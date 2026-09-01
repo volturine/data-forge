@@ -336,8 +336,7 @@
 						rows="5"
 						placeholder="def udf(*args):&#10;    return ..."
 						bind:value={exprCode}
-						oninput={() => (codeEdited = true)}
-					></textarea>
+						oninput={() => (codeEdited = true)}></textarea>
 					<label
 						class={css({
 							display: 'inline-flex',

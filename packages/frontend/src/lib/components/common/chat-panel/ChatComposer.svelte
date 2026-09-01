@@ -394,8 +394,7 @@
 			onpaste={handlePaste}
 			placeholder={inputPlaceholder}
 			disabled={!chatStore.configured || chatStore.loading}
-			rows={1}
-		></textarea>
+			rows={1}></textarea>
 		{#if chatStore.loading}
 			<button
 				class={iconButton()}

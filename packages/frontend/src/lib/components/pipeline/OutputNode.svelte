@@ -1472,8 +1472,7 @@
 										oninput={(e) =>
 											updateNotification({
 												body_template: e.currentTarget.value
-											})}
-									></textarea>
+											})}></textarea>
 									<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
 										&#123;&#123;analysis_name&#125;&#125;, &#123;&#123;status&#125;&#125;,
 										&#123;&#123;duration_ms&#125;&#125;, &#123;&#123;row_count&#125;&#125;

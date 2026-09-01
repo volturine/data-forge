@@ -150,23 +150,21 @@ function stepsFromExecutionEntries(
 	const steps = entries
 		.filter((entry) => !isPlanExecutionEntry(entry))
 		.sort((a, b) => a.order - b.order);
-	return steps.map(
-		(entry, index): BuildStepSnapshot => ({
-			build_step_index: index,
-			step_index: index,
-			step_id: entry.key,
-			step_name: entry.label,
-			step_type: buildStepTypeFromExecutionEntry(entry),
-			tab_id: tabId,
-			tab_name: tabName,
-			state: buildStepStateFromEngineRunStatus(runStatus, {
-				isLastStep: index === steps.length - 1
-			}),
-			duration_ms: entry.duration_ms,
-			row_count: null,
-			error: null
-		})
-	);
+	return steps.map((entry, index): BuildStepSnapshot => ({
+		build_step_index: index,
+		step_index: index,
+		step_id: entry.key,
+		step_name: entry.label,
+		step_type: buildStepTypeFromExecutionEntry(entry),
+		tab_id: tabId,
+		tab_name: tabName,
+		state: buildStepStateFromEngineRunStatus(runStatus, {
+			isLastStep: index === steps.length - 1
+		}),
+		duration_ms: entry.duration_ms,
+		row_count: null,
+		error: null
+	}));
 }
 
 function queryPlansFromExecutionEntries(
@@ -177,14 +175,12 @@ function queryPlansFromExecutionEntries(
 	return entries
 		.filter((entry) => isPlanExecutionEntry(entry))
 		.filter((e) => e.optimized_plan || e.unoptimized_plan)
-		.map(
-			(entry): BuildQueryPlanSnapshot => ({
-				tab_id: tabId,
-				tab_name: tabName,
-				optimized_plan: entry.optimized_plan ?? '',
-				unoptimized_plan: entry.unoptimized_plan ?? ''
-			})
-		);
+		.map((entry): BuildQueryPlanSnapshot => ({
+			tab_id: tabId,
+			tab_name: tabName,
+			optimized_plan: entry.optimized_plan ?? '',
+			unoptimized_plan: entry.unoptimized_plan ?? ''
+		}));
 }
 
 export function engineRunBuildDetail(run: EngineRun): BuildRunDetail {

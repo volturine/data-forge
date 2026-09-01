@@ -172,8 +172,7 @@
 			placeholder="Add context about what this dataset represents, when to use it, and any caveats."
 			rows="5"
 			maxlength="4000"
-			class={input({ variant: 'textarea' })}
-		></textarea>
+			class={input({ variant: 'textarea' })}></textarea>
 		{#if description.trim().length === 0}
 			<p class={emptyText({ size: 'inline' })}>No description added yet.</p>
 		{/if}

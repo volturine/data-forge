@@ -211,7 +211,7 @@ class ChartAggregationDefinition:
     expr_factory: ChartAggregationExpr
 
     @classmethod
-    def require(cls, value: ChartAggregation | str) -> "ChartAggregationDefinition":
+    def require(cls, value: ChartAggregation | str) -> ChartAggregationDefinition:
         try:
             aggregation = ChartAggregation.require(value)
         except ValueError as exc:
@@ -444,7 +444,7 @@ def _build_histogram(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     # one O(n) filter per bin.
     binned = df.select(((pl.col("value") - fmin) / bin_width).floor().cast(pl.Int64).clip(0, bins - 1).alias("bin_index")).group_by("bin_index").len()
 
-    index_to_count = dict(zip(binned["bin_index"].to_list(), binned["len"].to_list()))
+    index_to_count = dict(zip(binned["bin_index"].to_list(), binned["len"].to_list(), strict=True))
     counts = [int(index_to_count.get(i, 0)) for i in range(bins)]
 
     result = pl.LazyFrame(

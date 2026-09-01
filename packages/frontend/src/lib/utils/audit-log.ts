@@ -85,13 +85,11 @@ function extractFields(form: HTMLFormElement): AuditField[] {
 	const fields: AuditField[] = [];
 	const elements = Array.from(form.elements);
 	for (const element of elements) {
-		if (
-			!(
-				element instanceof HTMLInputElement ||
-				element instanceof HTMLSelectElement ||
-				element instanceof HTMLTextAreaElement
-			)
-		) {
+		if (!(
+			element instanceof HTMLInputElement ||
+			element instanceof HTMLSelectElement ||
+			element instanceof HTMLTextAreaElement
+		)) {
 			continue;
 		}
 		if (element.closest('[data-audit="off"]')) continue;

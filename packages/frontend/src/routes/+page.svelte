@@ -474,8 +474,7 @@
 				rows="4"
 				class={input({ variant: 'dialog' })}
 				bind:value={duplicateDescription}
-				placeholder="Optional override. Leave empty to reuse the source description."
-			></textarea>
+				placeholder="Optional override. Leave empty to reuse the source description."></textarea>
 		</label>
 	</div>
 

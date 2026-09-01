@@ -182,8 +182,7 @@
 					bind:value={editDescriptionValue}
 					onkeydown={(e) => {
 						if (e.key === 'Escape') cancelEditDescription();
-					}}
-				></textarea>
+					}}></textarea>
 				<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<button
 						class={css({

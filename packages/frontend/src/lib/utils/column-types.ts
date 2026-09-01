@@ -82,13 +82,7 @@ export type ColumnType =
  * Column type categories for grouping and color-coding
  */
 export type ColumnTypeCategory =
-	| 'string'
-	| 'integer'
-	| 'float'
-	| 'temporal'
-	| 'boolean'
-	| 'complex'
-	| 'other';
+	'string' | 'integer' | 'float' | 'temporal' | 'boolean' | 'complex' | 'other';
 
 /**
  * Complete configuration for a column type

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Iterator, Mapping
+from typing import Any
 
 import pyarrow as pa  # type: ignore[import-untyped]
 

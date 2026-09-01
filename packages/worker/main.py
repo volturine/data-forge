@@ -28,8 +28,6 @@ from runtime.logging import configure_logging
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
 from runtime.worker_runtime import (
     build_worker_loop,
-)
-from runtime.worker_runtime import (
     worker_id as build_worker_id,
 )
 from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient, client_from_env

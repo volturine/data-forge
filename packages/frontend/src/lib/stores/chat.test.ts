@@ -153,8 +153,7 @@ describe('ChatStore — pure local logic', () => {
 			store.provider = 'openrouter';
 			store.settings = makeSettings({ openrouter_api_key: '••••••••' });
 			const applyDefaults = Reflect.get(store, '_applyProviderDefaults') as
-				| (() => void)
-				| undefined;
+				(() => void) | undefined;
 			expect(applyDefaults).toBeTypeOf('function');
 			applyDefaults?.call(store);
 			expect(store.apiKey).toBe('');
@@ -166,8 +165,7 @@ describe('ChatStore — pure local logic', () => {
 			store.apiKey = '';
 			store.sessionId = 'session-1';
 			const refreshConfigured = Reflect.get(store, '_refreshConfigured') as
-				| (() => void)
-				| undefined;
+				(() => void) | undefined;
 			expect(refreshConfigured).toBeTypeOf('function');
 			refreshConfigured?.call(store);
 			expect(store.configured).toBe(true);
@@ -216,8 +214,7 @@ describe('ChatStore — pure local logic', () => {
 			store.settings = makeSettings();
 			store.sessionId = 'session-1';
 			const refreshConfigured = Reflect.get(store, '_refreshConfigured') as
-				| (() => void)
-				| undefined;
+				(() => void) | undefined;
 			expect(refreshConfigured).toBeTypeOf('function');
 			refreshConfigured?.call(store);
 			expect(store.configured).toBe(true);

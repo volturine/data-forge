@@ -30,7 +30,7 @@ async def datasource_delete_loop(stop_event: asyncio.Event, *, manager: ProcessM
                 continue
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=_DATASOURCE_DELETE_POLL_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
     finally:
         client.close()

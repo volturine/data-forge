@@ -271,8 +271,7 @@
 						rows="3"
 						bind:value={description}
 						oninput={markDirty}
-						class={input()}
-					></textarea>
+						class={input()}></textarea>
 				</div>
 				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
 					<label for="udf-tags" class={label({ variant: 'field' })}>Tags (comma-separated)</label>

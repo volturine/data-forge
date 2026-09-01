@@ -158,11 +158,9 @@ class ProcessManager:
         for loop, future in waiters:
             if future.done():
                 continue
-            try:
+            # Loop closed — waiter is gone.
+            with contextlib.suppress(RuntimeError):
                 loop.call_soon_threadsafe(future.set_result, None)
-            except RuntimeError:
-                # Loop closed — waiter is gone.
-                pass
 
     @staticmethod
     def _resolve_waiter(waiter: _SpawnWaiter, *, owns_admission: bool = False, error: RuntimeError | None = None) -> None:
@@ -174,10 +172,8 @@ class ProcessManager:
             else:
                 waiter.future.set_exception(error)
 
-        try:
+        with contextlib.suppress(RuntimeError):
             waiter.loop.call_soon_threadsafe(resolve)
-        except RuntimeError:
-            pass
 
     def _reserve_capacity_locked(self) -> _CapacityAdmission | None:
         if self._capacity_used_locked() < settings.max_concurrent_engines:

@@ -188,8 +188,7 @@
 										resize: 'vertical',
 										_focus: { outline: 'none' },
 										_focusVisible: { borderColor: 'border.accent' }
-									})}
-								></textarea>
+									})}></textarea>
 								<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 									<button
 										type="button"

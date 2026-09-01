@@ -60,8 +60,7 @@
 			bind:value={config.expression}
 			placeholder="e.g., pl.col(&quot;price&quot;) * 1.2"
 			rows="4"
-			aria-describedby="expr-expression-help"
-		></textarea>
+			aria-describedby="expr-expression-help"></textarea>
 		<span
 			id="expr-expression-help"
 			class={css({

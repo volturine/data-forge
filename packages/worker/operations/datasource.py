@@ -48,7 +48,7 @@ class DatasourceParams(OperationParams):
 
 
 class DatasourceHandler(OperationHandler):
-    SOURCE_LOADERS: dict[str, Callable[["DatasourceHandler", DatasourceParams], pl.LazyFrame]] = {}
+    SOURCE_LOADERS: dict[str, Callable[[DatasourceHandler, DatasourceParams], pl.LazyFrame]] = {}
 
     def __call__(
         self,

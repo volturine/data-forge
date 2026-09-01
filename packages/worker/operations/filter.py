@@ -21,7 +21,7 @@ class FilterOperatorDefinition:
     column_expression: ColumnFilterExpr | None = None
 
     @classmethod
-    def require(cls, operator: FilterOperator | str) -> "FilterOperatorDefinition":
+    def require(cls, operator: FilterOperator | str) -> FilterOperatorDefinition:
         parsed = FilterOperator.require_supported(operator)
         for definition in FILTER_OPERATOR_DEFINITIONS:
             if definition.operator == parsed:
@@ -138,7 +138,7 @@ class FilterCondition(BaseModel):
         return self.value_type == FilterValueType.COLUMN
 
     @model_validator(mode="after")
-    def validate_condition(self) -> "FilterCondition":
+    def validate_condition(self) -> FilterCondition:
         if self.operator.is_null_check:
             return self
         if self.uses_column_value and not self.compare_column:
