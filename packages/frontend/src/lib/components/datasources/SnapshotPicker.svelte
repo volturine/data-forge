@@ -150,8 +150,7 @@
 			new Set(monthSource.map((snap) => formatSnapshotKey(snap.timestamp).slice(0, 7)))
 		).sort((a, b) => (a > b ? -1 : 1));
 		const persistedMonth = (datasourceConfig.time_travel_ui as Record<string, unknown>)?.month as
-			| string
-			| undefined;
+			string | undefined;
 		if (persistedMonth && monthOptions.includes(persistedMonth)) {
 			selectMonth(persistedMonth);
 			return;

@@ -164,9 +164,7 @@ export function patchTemporalForBun(): void {
 				input: {
 					timeZone: string;
 					plainTime:
-						| string
-						| Temporal.PlainTime
-						| { hour?: number; minute?: number; second?: number };
+						string | Temporal.PlainTime | { hour?: number; minute?: number; second?: number };
 				}
 			) {
 				const time = clock(input.plainTime);

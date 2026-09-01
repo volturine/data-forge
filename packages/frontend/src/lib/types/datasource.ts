@@ -130,10 +130,7 @@ export interface AnalysisDataSource extends DataSourceBase {
 }
 
 export type DataSource =
-	| FileDataSource
-	| DatabaseDataSource
-	| IcebergDataSource
-	| AnalysisDataSource;
+	FileDataSource | DatabaseDataSource | IcebergDataSource | AnalysisDataSource;
 
 const SOURCE_TYPES = new Set<SourceType>(['file', 'database', 'iceberg', 'analysis']);
 const DATASOURCE_FILE_TYPES = new Set<DataSourceFileType>([

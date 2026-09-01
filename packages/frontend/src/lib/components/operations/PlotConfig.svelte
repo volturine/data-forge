@@ -33,15 +33,7 @@
 			| 'pie'
 			| 'boxplot';
 		aggregation:
-			| 'sum'
-			| 'mean'
-			| 'count'
-			| 'min'
-			| 'max'
-			| 'median'
-			| 'std'
-			| 'variance'
-			| 'unique_count';
+			'sum' | 'mean' | 'count' | 'min' | 'max' | 'median' | 'std' | 'variance' | 'unique_count';
 		group_sort_by: 'name' | 'value' | 'custom' | null;
 		group_sort_order: 'asc' | 'desc';
 		group_sort_column: string | null;

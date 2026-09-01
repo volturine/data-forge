@@ -36,8 +36,7 @@ export interface ApiResponse<T> {
 
 /** Conditional (If-None-Match) request result — `data` is absent on 304. */
 export type ApiConditionalResponse<T> =
-	| { notModified: true; headers: Headers }
-	| { notModified: false; headers: Headers; data: T };
+	{ notModified: true; headers: Headers } | { notModified: false; headers: Headers; data: T };
 
 let namespaceEpoch = 0;
 const namespaceRequests = new Set<AbortController>();

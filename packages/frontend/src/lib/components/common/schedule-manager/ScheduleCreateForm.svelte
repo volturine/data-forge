@@ -279,8 +279,7 @@
 				paddingX: '2',
 				paddingY: '1.5',
 				fontSize: 'xs'
-			})}
-		></textarea>
+			})}></textarea>
 	</div>
 
 	<!-- Trigger Section -->

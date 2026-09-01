@@ -391,8 +391,7 @@
 				id="udf-import-json"
 				placeholder="Paste exported JSON here..."
 				bind:value={importText}
-				class={input()}
-			></textarea>
+				class={input()}></textarea>
 			<label class={label({ variant: 'inline' })}>
 				<input id="udf-overwrite-import" type="checkbox" bind:checked={overwriteImport} />
 				Overwrite existing by name

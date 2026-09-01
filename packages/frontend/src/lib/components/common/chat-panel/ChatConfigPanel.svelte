@@ -231,8 +231,7 @@
 			bind:value={systemPromptDraft}
 			placeholder="Leave empty to use mode default ({chatStore.mode})"
 			rows={2}
-			disabled={!!chatStore.sessionId}
-		></textarea>
+			disabled={!!chatStore.sessionId}></textarea>
 	</div>
 
 	<button

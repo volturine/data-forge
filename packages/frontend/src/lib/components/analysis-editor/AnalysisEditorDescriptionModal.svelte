@@ -80,8 +80,7 @@
 			})}
 			bind:value={descriptionDraft}
 			placeholder="What is this analysis for?"
-			data-testid="analysis-description-input"
-		></textarea>
+			data-testid="analysis-description-input"></textarea>
 	</div>
 	<div
 		class={css({

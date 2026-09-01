@@ -77,8 +77,7 @@ export interface UsageInfo {
 }
 
 export type TimelineEntry =
-	| { kind: 'message'; item: ChatMessage }
-	| { kind: 'tool'; item: ToolCall };
+	{ kind: 'message'; item: ChatMessage } | { kind: 'tool'; item: ToolCall };
 
 export interface ToolDraft {
 	args: Record<string, unknown>;
