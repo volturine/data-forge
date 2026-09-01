@@ -26,6 +26,13 @@ updates:
       weekly-batch:
         patterns:
           - "*"
+    ignore:
+      # TypeScript 7 needs svelte-check --tsgo plus both TS 6 and TS 7
+      # installed, and typescript-eslint (<6.1.0) / @sveltejs/kit (^5 || ^6)
+      # peers still reject it.
+      - dependency-name: typescript
+        versions:
+          - ">=7"
 
   - package-ecosystem: uv
     directories:
