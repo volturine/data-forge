@@ -20,6 +20,48 @@
     indent-width   = 4
     extend-exclude = ["buf", "dataforge_protocol"]
 
+    [tool.ruff.lint]
+        select = [
+            "I",
+            "E",
+            "D",
+            "F",
+            "UP",
+            "B",
+            "SIM",
+        ]
+
+        ignore = [
+            "E203",
+            "D100",
+            "D101",
+            "D102",
+            "D103",
+            "D104",
+            "D105",
+            "D106",
+            "D107",
+            "D205",
+            "D212",
+            "UP045",
+            "N812",
+            "COM812",
+            "RET504",
+            "RUF100",
+            "B008",
+            "B904",
+        ]
+
+        [tool.ruff.lint.isort]
+            combine-as-imports = true
+            known-first-party = ["scheduler_grpc"]
+
+        [tool.ruff.lint.pydocstyle]
+            convention = "google"
+
+        [tool.ruff.lint.pyupgrade]
+            keep-runtime-typing = true
+
 [tool.mypy]
     mypy_path = [
         ".",

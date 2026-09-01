@@ -25,17 +25,9 @@ from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.build_events import (
     BuildCancelledError,
     BuildEmitter,
-)
-from runtime.build_events import (
     BuildEventContext as _BuildEventBase,
-)
-from runtime.build_events import (
     build_event as _build_event,
-)
-from runtime.build_events import (
     emit_build_event as _emit_build_event,
-)
-from runtime.build_events import (
     emit_progress as _emit_progress,
 )
 from runtime.compute_manager import EngineCapacityFull, ProcessManager
@@ -60,17 +52,9 @@ from runtime.exceptions import (
 )
 from runtime.healthchecks import (
     HealthCheckResult as _HealthCheckEvalResult,
-)
-from runtime.healthchecks import (
     load_lazy_frame as _load_healthcheck_lazy,
-)
-from runtime.healthchecks import (
     persist_results as _persist_healthcheck_results,
-)
-from runtime.healthchecks import (
     resolve_build_status as _resolve_build_status,
-)
-from runtime.healthchecks import (
     run_healthchecks as _run_worker_healthchecks,
 )
 from runtime.iceberg_catalog import load_runtime_catalog
@@ -94,18 +78,12 @@ from runtime.object_store import (
 )
 from runtime.resource_observation import (
     observe_stream_task as _observe_stream_task,
-)
-from runtime.resource_observation import (
     resource_summary as _resource_summary,
-)
-from runtime.resource_observation import (
     stop_stream_task as _stop_stream_task,
-)
-from runtime.resource_observation import (
     stream_resource_events as _stream_resource_events,
 )
 from runtime.time import utc_now as _utcnow
-from runtime.worker_runtime_client import ClaimedBuildJob, HealthCheckSpec, client_from_env
+from runtime.worker_runtime_client import ClaimedBuildJob, DatasourceMetadata, HealthCheckSpec, client_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -481,7 +459,7 @@ def _upsert_output_datasource(
     worker_id: str | None = None,
     build_result_json: dict[str, object] | None = None,
     notification_deliveries: list[dict[str, object]] | None = None,
-) -> object:
+) -> DatasourceMetadata:
     """Create or update the output datasource for an export.
 
     If ``result_id`` points to an existing row, update it in-place.
@@ -2340,7 +2318,7 @@ def export_data(
             build_result_json=build_result_summary if publication_claim is not None else None,
             notification_deliveries=notification_deliveries,
         )
-        ds_id = str(getattr(target_ds, "id"))
+        ds_id = str(target_ds.id)
         if publication_claim is not None:
             _persist_healthcheck_results(hc_results)
         read_duration_ms = result_data.get("read_duration_ms") if isinstance(result_data, dict) else None

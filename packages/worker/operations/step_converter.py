@@ -177,7 +177,7 @@ class FrontendStep:
     is_applied: bool | None = None
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, object]) -> "FrontendStep":
+    def from_mapping(cls, payload: Mapping[str, object]) -> FrontendStep:
         allowed_keys = {"id", "type", "step_type", "config", "depends_on", "is_applied"}
         unknown_keys = sorted(set(payload) - allowed_keys)
         if unknown_keys:
@@ -194,10 +194,7 @@ class FrontendStep:
             raise ValueError("Step must have an id field")
 
         raw_config = protocol_payload.get("config")
-        if isinstance(raw_config, dict):
-            config = raw_config
-        else:
-            config = {}
+        config = raw_config if isinstance(raw_config, dict) else {}
 
         raw_deps = protocol_payload.get("depends_on")
         if raw_deps is None:

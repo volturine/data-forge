@@ -118,7 +118,7 @@ def test_engine_job_retention_is_bounded(monkeypatch) -> None:
         for index in range(105):
             state = jobs.submit(job_id=f"job-{index}", kind="preview", payload={})
             with state.condition:
-                state.condition.wait_for(lambda: state.done, timeout=1)
+                state.condition.wait_for(lambda state=state: state.done, timeout=1)
         assert len(jobs._jobs) == 8
         assert "job-0" not in jobs._jobs
         assert "job-104" in jobs._jobs

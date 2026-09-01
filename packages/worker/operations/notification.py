@@ -26,7 +26,7 @@ class NotificationParams(OperationParams):
     batch_size: int = 10
 
     @model_validator(mode="after")
-    def _validate(self) -> "NotificationParams":
+    def _validate(self) -> NotificationParams:
         if not self.recipient and not self.subscriber_ids and not self.recipient_column:
             raise ValueError("recipient is required")
         if not self.input_columns:

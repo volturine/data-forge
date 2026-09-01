@@ -36,7 +36,7 @@ class BuildEventContext:
         current_output_id: str | None = None,
         current_output_name: str | None = None,
         engine_run_id: str | None = None,
-    ) -> "BuildEventContext":
+    ) -> BuildEventContext:
         return cls(
             build_id=build.build_id,
             analysis_id=analysis_id,

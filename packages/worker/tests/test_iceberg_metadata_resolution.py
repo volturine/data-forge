@@ -24,9 +24,9 @@ def test_empty_listing_without_fallback_raises() -> None:
     with (
         patch("runtime.iceberg_metadata.list_metadata_files", return_value=[]),
         patch("runtime.iceberg_metadata.object_exists") as exists,
+        pytest.raises(IcebergMetadataPathNotFoundError),
     ):
-        with pytest.raises(IcebergMetadataPathNotFoundError):
-            resolve_iceberg_branch_metadata_path("s3://bucket/clean/ds-1/master", "master")
+        resolve_iceberg_branch_metadata_path("s3://bucket/clean/ds-1/master", "master")
     exists.assert_not_called()
 
 

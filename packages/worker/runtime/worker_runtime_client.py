@@ -15,21 +15,15 @@ import grpc
 from dataforge_protocol import analysis_pb2, common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
 from runtime.protocol_mapping import (
     datasource_record_payload as _datasource_record_payload,
-)
-from runtime.protocol_mapping import (
     datetime_to_timestamp,
     dict_to_struct,
     enum_to_proto_value,
     optional_struct_to_dict,
     optional_timestamp_to_datetime,
     proto_value_to_enum_name,
-    struct_to_dict,
-)
-from runtime.protocol_mapping import (
     schema_info_payload as _schema_info_payload,
-)
-from runtime.protocol_mapping import (
     schema_info_proto as _schema_info_proto,
+    struct_to_dict,
 )
 
 _TOKEN_METADATA_KEY = "x-internal-token"
