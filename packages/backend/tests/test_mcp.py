@@ -1013,6 +1013,8 @@ class TestRouterRegistrationOnboarding:
         from fastapi import APIRouter, FastAPI
         from fastapi.routing import APIRoute
 
+        from modules.mcp import registry as reg
+
         leaf = MCPRouter(prefix='/leaf', tags=['leaf'])
 
         @leaf.get('/value', mcp=True)
@@ -1024,7 +1026,7 @@ class TestRouterRegistrationOnboarding:
         app = FastAPI()
         app.include_router(v1)
 
-        route = next(r for r in app.routes if isinstance(r, APIRoute) and r.path == '/api/v1/leaf/value')
+        route = next(r for r, _ in reg._collect_api_routes(list(app.routes)) if isinstance(r, APIRoute) and r.path == '/leaf/value')
         meta = get_mcp_route_meta(route)
         assert isinstance(meta, dict)
         assert meta['name'] == 'value'
@@ -1052,7 +1054,7 @@ class TestRouterRegistrationOnboarding:
         app = FastAPI()
         app.include_router(v1)
 
-        app_route = next(r for r in app.routes if isinstance(r, APIRoute) and r.path == '/api/v1/demo/item/{item_id}')
+        app_route = next(r for r, _ in reg._collect_api_routes(list(app.routes)) if isinstance(r, APIRoute) and r.path == '/demo/item/{item_id}')
         app_meta = dict(get_mcp_route_meta(app_route) or {})
         app_meta['confirm_required'] = False
         app_meta['name'] = 'stable_override_name'

@@ -12,8 +12,9 @@ from modules.mcp.router import get_mcp_route_meta
 from modules.mcp.tool_output import format_output_hint, top_level_output_fields
 
 
-def _route_openapi_operation(route: APIRoute, schema: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
-    path_item = schema.get('paths', {}).get(route.path)
+def _route_openapi_operation(route: APIRoute, schema: dict[str, Any], effective_path: str | None = None) -> tuple[str, dict[str, Any]] | None:
+    lookup_path = effective_path or route.path
+    path_item = schema.get('paths', {}).get(lookup_path)
     if not isinstance(path_item, dict):
         return None
     allowed_methods = route.methods or set()
@@ -215,18 +216,47 @@ def _build_tool(route_data: dict, components: dict) -> MCPToolDefinition:
     )
 
 
+def _collect_api_routes(routes: list[Any]) -> list[tuple[APIRoute, str]]:
+    """Recursively collect (APIRoute, effective_path) pairs, unwrapping _IncludedRouter wrappers.
+
+    FastAPI ≥0.137 stores sub-routers as ``_IncludedRouter`` nodes instead of
+    flattening them into ``app.routes``.  Each ``_IncludedRouter`` lazily
+    resolves its children via ``effective_candidates()`` which may yield more
+    ``_IncludedRouter`` instances or ``_EffectiveRouteContext`` wrappers around
+    the original ``APIRoute``.
+
+    Returns ``(route, effective_path)`` where *effective_path* includes any
+    prefix applied by ``include_router`` (e.g. ``/api/v1/analysis``).
+    """
+    collected: list[tuple[APIRoute, str]] = []
+    for route in routes:
+        if isinstance(route, APIRoute):
+            collected.append((route, route.path))
+            continue
+        # FastAPI ≥0.137 _IncludedRouter – unwrap via effective_candidates()
+        if hasattr(route, 'effective_candidates'):
+            for candidate in route.effective_candidates():
+                if isinstance(candidate, APIRoute):
+                    collected.append((candidate, candidate.path))
+                elif hasattr(candidate, 'effective_candidates'):
+                    collected.extend(_collect_api_routes([candidate]))
+                elif hasattr(candidate, 'original_route'):
+                    original = candidate.original_route
+                    if isinstance(original, APIRoute):
+                        # _EffectiveRouteContext stores the prefixed path
+                        effective_path = getattr(candidate, 'path', original.path)
+                        collected.append((original, effective_path))
+    return collected
+
+
 def _marked_routes(app: FastAPI) -> list[dict[str, Any]]:
     """Return metadata for routes onboarded via MCP route registration."""
     marked: list[dict[str, Any]] = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for route, effective_path in _collect_api_routes(list(app.routes)):
         route_meta = get_mcp_route_meta(route)
         if not isinstance(route_meta, dict):
             continue
         meta = dict(route_meta)
-        if not route.path.startswith('/api/v1/'):
-            continue
         # Routes in this codebase are single-method; MCP exposes one tool per route.
         method = next(
             (candidate for raw in (route.methods or set()) if (candidate := MCPHttpMethod.from_route_method(raw)) is not None),
@@ -237,7 +267,7 @@ def _marked_routes(app: FastAPI) -> list[dict[str, Any]]:
         endpoint = route.endpoint
         fallback = endpoint.__name__ if hasattr(endpoint, '__name__') else route.name
         name = meta.get('name') or fallback
-        marked.append({'route': route, 'method': method.value, 'name': name, 'meta': meta})
+        marked.append({'route': route, 'method': method.value, 'name': name, 'meta': meta, 'effective_path': effective_path})
     return marked
 
 
@@ -249,14 +279,15 @@ def build_tool_registry(app: FastAPI) -> list[MCPToolDefinition]:
     tools: list[MCPToolDefinition] = []
     for item in marked:
         route = item['route']
-        op_item = _route_openapi_operation(route, schema)
+        effective_path = item.get('effective_path', route.path)
+        op_item = _route_openapi_operation(route, schema, effective_path)
         if op_item is None:
             continue
         method, op = op_item
         tool = _build_tool(
             {
                 'method': method,
-                'path': route.path,
+                'path': effective_path,
                 'operation': op,
                 'name': item['name'],
                 'meta': item['meta'],
