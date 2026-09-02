@@ -56,7 +56,7 @@
 		"@lucide/svelte": "^1.35.0",
 		"@tanstack/charts": "0.16.0",
 		"@tanstack/svelte-query": "^6.1.48",
-		"@tanstack/table-core": "~8.21.3",
+		"@tanstack/svelte-table": "^9.2.4",
 		"codemirror": "^6.0.2",
 		"d3-scale": "^4.0.2",
 		"d3-scale-chromatic": "^3.1.0",
