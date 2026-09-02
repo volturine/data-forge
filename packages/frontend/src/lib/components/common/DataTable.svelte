@@ -2,16 +2,23 @@
 	import { onDestroy } from 'svelte';
 	import {
 		createTable,
-		getCoreRowModel,
-		getSortedRowModel,
+		createTableState,
+		createSortedRowModel,
+		columnOrderingFeature,
+		columnPinningFeature,
+		columnSizingFeature,
+		columnResizingFeature,
+		columnVisibilityFeature,
+		rowSortingFeature,
+		tableFeatures,
 		type ColumnDef,
-		type ColumnSizingInfoState,
-		type ColumnSizingState,
 		type ColumnPinningState,
-		type SortingState,
+		type ColumnSizingState,
 		type HeaderGroup,
-		type Row
-	} from '@tanstack/table-core';
+		type Row,
+		type SortingState,
+		type columnResizingState
+	} from '@tanstack/svelte-table';
 	import {
 		Check,
 		Copy,
@@ -84,22 +91,6 @@
 		columnSearch = $bindable('')
 	}: Props = $props();
 
-	let sorting = $state<SortingState>([]);
-	let columnSizing = $state<ColumnSizingState>({});
-	let columnSizingInfo = $state<ColumnSizingInfoState>({
-		columnSizingStart: [],
-		deltaOffset: null,
-		deltaPercentage: null,
-		isResizingColumn: false,
-		startOffset: null,
-		startSize: null
-	});
-
-	// Non-reactive resize tracking to avoid table re-renders during resize
-	const resizeOffset = { delta: 0, start: 0 };
-	let columnVisibility = $state<Record<string, boolean>>({});
-	let columnOrder = $state<string[]>([]);
-	let columnPinning = $state<ColumnPinningState>({ left: [], right: [] });
 	let columnMenuRef = $state<HTMLElement>();
 	let activeColumn = $state<string | null>(null);
 	let dragColumn = $state<string | null>(null);
@@ -155,121 +146,157 @@
 
 	let initialSize = $state(defaultColumnWidthPx);
 
-	const table = $derived.by(() => {
-		if (data.length === 0 || columns.length === 0) return null;
-
-		const columnDefs: ColumnDef<RowData>[] = columns.map((col) => ({
-			id: col,
-			accessorKey: col,
-			header: col,
-			size: initialSize,
-			minSize: minColumnWidthPx
-		}));
-
-		return createTable({
-			data,
-			columns: columnDefs,
-			state: {
-				sorting,
-				columnSizing,
-				columnSizingInfo,
-				columnPinning,
-				columnVisibility: effectiveVisibility,
-				expanded: {},
-				grouping: [],
-				rowSelection: {},
-				columnOrder
-			},
-			onSortingChange: () => {},
-			onColumnVisibilityChange: (updater) => {
-				columnVisibility = typeof updater === 'function' ? updater(columnVisibility) : updater;
-			},
-			onColumnOrderChange: (updater) => {
-				columnOrder = typeof updater === 'function' ? updater(columnOrder) : updater;
-			},
-			onColumnPinningChange: (updater) => {
-				columnPinning = typeof updater === 'function' ? updater(columnPinning) : updater;
-			},
-			onColumnSizingChange: (updater) => {
-				columnSizing = normalizeSizing(
-					typeof updater === 'function' ? updater(columnSizing) : updater
-				);
-			},
-			onColumnSizingInfoChange: (updater) => {
-				const next = typeof updater === 'function' ? updater(columnSizingInfo) : updater;
-				// Only update reactive state when resize starts/ends, not during
-				const wasResizing = columnSizingInfo.isResizingColumn !== false;
-				const isResizing = next.isResizingColumn !== false;
-
-				if (wasResizing && isResizing) {
-					// During resize - update non-reactive offset only
-					resizeOffset.delta = next.deltaOffset ?? 0;
-					resizeOffset.start = next.startOffset ?? 0;
-					document.documentElement.style.setProperty('--resize-delta', `${resizeOffset.delta}px`);
-					return;
-				}
-				// Resize start/end - update reactive state
-				columnSizingInfo = next;
-				resizeOffset.delta = next.deltaOffset ?? 0;
-				resizeOffset.start = next.startOffset ?? 0;
-				if (!isResizing) {
-					document.documentElement.style.removeProperty('--resize-delta');
-				}
-			},
-			getCoreRowModel: getCoreRowModel(),
-			getSortedRowModel: getSortedRowModel(),
-			onStateChange: () => {},
-			columnResizeMode: 'onChange',
-			enableColumnResizing: enableResize,
-			renderFallbackValue: null
-		});
+	const [sorting, setSorting] = createTableState<SortingState>([]);
+	const [columnSizing, setColumnSizing] = createTableState<ColumnSizingState>({});
+	const [columnResizing, setColumnResizing] = createTableState<columnResizingState>({
+		columnSizingStart: [],
+		deltaOffset: null,
+		deltaPercentage: null,
+		isResizingColumn: false,
+		startOffset: null,
+		startSize: null
 	});
 
-	const headerGroups = $derived<HeaderGroup<RowData>[]>(table ? table.getHeaderGroups() : []);
-	const rows = $derived<Row<RowData>[]>(table ? table.getRowModel().rows : []);
-	const compact = $derived(density === 'compact');
+	// Non-reactive resize tracking to avoid table re-renders during resize
+	const resizeOffset = { delta: 0, start: 0 };
+	const [columnVisibility, setColumnVisibility] = createTableState<Record<string, boolean>>({});
+	const [columnOrder, setColumnOrder] = createTableState<string[]>([]);
+	const [columnPinning, setColumnPinning] = createTableState<ColumnPinningState>({
+		start: [],
+		end: []
+	});
 	const effectiveVisibility = $derived(
 		columns.reduce(
 			(acc, col) => {
 				const term = columnSearch.trim().toLowerCase();
 				const matches = term ? col.toLowerCase().includes(term) : true;
-				acc[col] = (columnVisibility[col] ?? true) && matches;
+				acc[col] = (columnVisibility()[col] ?? true) && matches;
 				return acc;
 			},
 			{} as Record<string, boolean>
 		)
 	);
 
+	const columnDefs = $derived<ColumnDef<typeof features, RowData>[]>(
+		columns.map((col) => ({
+			id: col,
+			accessorKey: col,
+			header: col,
+			size: initialSize,
+			minSize: minColumnWidthPx
+		}))
+	);
+
+	const features = tableFeatures({
+		rowSortingFeature,
+		columnOrderingFeature,
+		columnPinningFeature,
+		columnSizingFeature,
+		columnResizingFeature,
+		columnVisibilityFeature,
+		sortedRowModel: createSortedRowModel()
+	});
+
+	const table = createTable({
+		features,
+		get columns() {
+			return columnDefs;
+		},
+		get data() {
+			return data;
+		},
+		state: {
+			get sorting() {
+				return sorting();
+			},
+			get columnSizing() {
+				return columnSizing();
+			},
+			get columnResizing() {
+				return columnResizing();
+			},
+			get columnPinning() {
+				return columnPinning();
+			},
+			get columnVisibility() {
+				return effectiveVisibility;
+			},
+			get columnOrder() {
+				return columnOrder();
+			}
+		},
+		onSortingChange: () => {},
+		onColumnVisibilityChange: setColumnVisibility,
+		onColumnOrderChange: setColumnOrder,
+		onColumnPinningChange: setColumnPinning,
+		onColumnSizingChange: (updater) => {
+			setColumnSizing(
+				normalizeSizing(typeof updater === 'function' ? updater(columnSizing()) : updater)
+			);
+		},
+		onColumnResizingChange: (updater) => {
+			const next = typeof updater === 'function' ? updater(columnResizing()) : updater;
+			// Only update reactive state when resize starts/ends, not during
+			const wasResizing = columnResizing().isResizingColumn !== false;
+			const isResizing = next.isResizingColumn !== false;
+
+			if (wasResizing && isResizing) {
+				// During resize - update non-reactive offset only
+				resizeOffset.delta = next.deltaOffset ?? 0;
+				resizeOffset.start = next.startOffset ?? 0;
+				document.documentElement.style.setProperty('--resize-delta', `${resizeOffset.delta}px`);
+				return;
+			}
+			// Resize start/end - update reactive state
+			setColumnResizing(next);
+			resizeOffset.delta = next.deltaOffset ?? 0;
+			resizeOffset.start = next.startOffset ?? 0;
+			if (!isResizing) {
+				document.documentElement.style.removeProperty('--resize-delta');
+			}
+		},
+		columnResizeMode: 'onChange',
+		get enableColumnResizing() {
+			return enableResize;
+		},
+		renderFallbackValue: null
+	});
+
+	const headerGroups = $derived<HeaderGroup<typeof features, RowData>[]>(table.getHeaderGroups());
+	const rows = $derived<Row<typeof features, RowData>[]>(table.getRowModel().rows);
+	const compact = $derived(density === 'compact');
+
 	function normalizeSizing(next: ColumnSizingState): ColumnSizingState {
 		const safe = Object.fromEntries(
 			Object.entries(next).map(([key, value]) => [key, Math.max(minColumnWidthPx, value)])
 		);
 		if (!panelWidth) return safe;
-		const order = columnOrder.length ? columnOrder : columns;
-		const visible = order.filter((col) => columnVisibility[col] ?? true);
+		const currentOrder = columnOrder();
+		const order = currentOrder.length ? currentOrder : columns;
+		const visible = order.filter((col) => columnVisibility()[col] ?? true);
 		if (!visible.length) return safe;
 		const total = visible.reduce((sum, col) => {
-			const current = safe[col] ?? columnSizing[col] ?? initialSize;
+			const current = safe[col] ?? columnSizing()[col] ?? initialSize;
 			return sum + current;
 		}, 0);
 		if (total >= panelWidth) return safe;
 		const last = visible[visible.length - 1];
-		const lastSize = safe[last] ?? columnSizing[last] ?? initialSize;
+		const lastSize = safe[last] ?? columnSizing()[last] ?? initialSize;
 		return { ...safe, [last]: lastSize + (panelWidth - total) };
 	}
 
 	function toggleColumnVisibility(columnId: string) {
-		const visible = columnVisibility[columnId] ?? true;
-		columnVisibility = { ...columnVisibility, [columnId]: !visible };
+		const visible = columnVisibility()[columnId] ?? true;
+		setColumnVisibility({ ...columnVisibility(), [columnId]: !visible });
 	}
 
 	function pinColumn(columnId: string, side: 'left' | 'right' | 'none') {
-		const left = (columnPinning.left ?? []).filter((id) => id !== columnId);
-		const right = (columnPinning.right ?? []).filter((id) => id !== columnId);
-		columnPinning = {
-			left: side === 'left' ? [...left, columnId] : left,
-			right: side === 'right' ? [...right, columnId] : right
-		};
+		const start = columnPinning().start.filter((id) => id !== columnId);
+		const end = columnPinning().end.filter((id) => id !== columnId);
+		setColumnPinning({
+			start: side === 'left' ? [...start, columnId] : start,
+			end: side === 'right' ? [...end, columnId] : end
+		});
 	}
 
 	function toggleColumnMenu(columnId: string) {
@@ -310,14 +337,15 @@
 		if (!dragColumn) return;
 		if (dragOver) {
 			const source = dragColumn;
-			const order = columnOrder.length ? [...columnOrder] : [...columns];
+			const currentOrder = columnOrder();
+			const order = currentOrder.length ? [...currentOrder] : [...columns];
 			const sourceIndex = order.indexOf(source);
 			const targetIndex = order.indexOf(dragOver);
 			if (sourceIndex !== -1 && targetIndex !== -1) {
 				const updated = [...order];
 				const [item] = updated.splice(sourceIndex, 1);
 				updated.splice(targetIndex, 0, item);
-				columnOrder = updated;
+				setColumnOrder(updated);
 			}
 		}
 		dragColumn = null;
@@ -329,10 +357,10 @@
 
 	function setSort(columnId: string, direction: 'asc' | 'desc' | 'none') {
 		if (direction === 'none') {
-			sorting = [];
+			setSorting([]);
 			return;
 		}
-		sorting = [{ id: columnId, desc: direction === 'desc' }];
+		setSorting([{ id: columnId, desc: direction === 'desc' }]);
 		if (onSort) {
 			onSort(columnId, direction);
 		}
@@ -660,7 +688,7 @@
 					borderCollapse: 'collapse',
 					fontSize: 'sm'
 				})}
-				use:setWidth={table?.getTotalSize() ?? 0}
+				use:setWidth={table.getTotalSize()}
 			>
 				<thead
 					class={css({
@@ -735,7 +763,7 @@
 														justifyContent: 'center'
 													})}
 												>
-													{#if (columnPinning.left ?? []).includes(header.id) || (columnPinning.right ?? []).includes(header.id)}
+													{#if columnPinning().start.includes(header.id) || columnPinning().end.includes(header.id)}
 														<Pin
 															class={css({ alignSelf: 'center', color: 'fg.muted' })}
 															size={12}
@@ -896,7 +924,7 @@
 												>Unpin</button
 											>
 											<button class={menuItem()} onclick={() => toggleColumnVisibility(header.id)}>
-												{(columnVisibility[header.id] ?? true) ? 'Hide column' : 'Show column'}
+												{(columnVisibility()[header.id] ?? true) ? 'Hide column' : 'Show column'}
 											</button>
 											{#if onColumnStats}
 												<button
