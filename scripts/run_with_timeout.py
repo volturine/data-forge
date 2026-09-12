@@ -7,7 +7,13 @@ import sys
 import time
 from collections.abc import Sequence
 
-from typing_extensions import Self
+try:
+    from typing import Self
+except ImportError:
+    try:
+        from typing_extensions import Self
+    except ImportError:
+        Self = object  # type: ignore[assignment,misc]
 
 
 def parse_args() -> argparse.Namespace:

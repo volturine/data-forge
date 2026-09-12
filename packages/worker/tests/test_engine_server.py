@@ -124,3 +124,85 @@ def test_engine_job_retention_is_bounded(monkeypatch) -> None:
         assert "job-104" in jobs._jobs
     finally:
         jobs.shutdown()
+
+
+def test_engine_server_warm_mode_and_initialize(monkeypatch) -> None:
+    def execute(*, job_id: str, kind: str, payload: dict, progress_callback):
+        return EngineResult(job_id=job_id, data={"rows": []}, error=None)
+
+    monkeypatch.setattr(engine_server, "_execute_job", execute)
+    server = grpc.server(ThreadPoolExecutor(max_workers=4))
+    servicer = PolarsEngineServicer(
+        engine_identity="",
+        application_version="test",
+        token="",
+        on_shutdown=lambda: None,
+    )
+    engine_runtime_pb2_grpc.add_PolarsEngineServiceServicer_to_server(servicer, server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    server.start()
+    channel = grpc.insecure_channel(f"127.0.0.1:{port}")
+    stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(channel)
+
+    try:
+        # 1. Uninitialized warm probe
+        health = stub.Health(engine_runtime_pb2.EngineHealthRequest())
+        assert not health.ready
+        assert health.engine_identity == ""
+
+        # 2. Uninitialized submit rejected
+        with pytest.raises(grpc.RpcError) as exc_info:
+            stub.SubmitJob(
+                engine_runtime_pb2.EngineSubmitJobRequest(
+                    protocol_version=ENGINE_PROTOCOL_VERSION,
+                    job_id="warm-job",
+                    kind="preview",
+                    payload_json=b"{}",
+                )
+            )
+        assert exc_info.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+        # 3. Initialize RPC
+        init_resp = stub.Initialize(
+            engine_runtime_pb2.EngineInitializeRequest(
+                protocol_version=ENGINE_PROTOCOL_VERSION,
+                engine_identity="analysis-warm-1",
+                token="warm-token-123",
+                object_store_endpoint="http://rustfs:9000",
+                object_store_region="us-east-1",
+                object_store_access_key="key",
+                object_store_secret_key="secret",
+                polars_max_threads=4,
+                polars_streaming_chunk_size=1000,
+            )
+        )
+        assert init_resp.ready
+        assert init_resp.engine_identity == "analysis-warm-1"
+
+        # 4. Authenticated health
+        auth_health = stub.Health(
+            engine_runtime_pb2.EngineHealthRequest(),
+            metadata=(("x-engine-token", "warm-token-123"),),
+        )
+        assert auth_health.ready
+        assert auth_health.engine_identity == "analysis-warm-1"
+
+        # 5. Unauthenticated rejected after init
+        with pytest.raises(grpc.RpcError) as exc_info:
+            stub.Health(engine_runtime_pb2.EngineHealthRequest())
+        assert exc_info.value.code() == grpc.StatusCode.UNAUTHENTICATED
+
+        # 6. SubmitJob succeeds with token
+        submitted = stub.SubmitJob(
+            engine_runtime_pb2.EngineSubmitJobRequest(
+                protocol_version=ENGINE_PROTOCOL_VERSION,
+                job_id="job-initialized",
+                kind="preview",
+                payload_json=b"{}",
+            ),
+            metadata=(("x-engine-token", "warm-token-123"),),
+        )
+        assert submitted.job_id == "job-initialized"
+    finally:
+        channel.close()
+        server.stop(grace=0)

@@ -149,6 +149,15 @@ def _client():
         return _S3_CLIENT
 
 
+def reset_object_store_client() -> None:
+    """Reset cached S3 client and bucket readiness state."""
+    global _S3_CLIENT
+    with _S3_CLIENT_LOCK:
+        _S3_CLIENT = None
+    with _BUCKETS_READY_LOCK:
+        _BUCKETS_READY.clear()
+
+
 def ensure_bucket_exists(bucket: str | None = None) -> str:
     """Ensure a namespace bucket exists. Defaults to the current namespace bucket."""
     if bucket is None:
