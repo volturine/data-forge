@@ -19,9 +19,11 @@ from google.protobuf.timestamp_pb2 import Timestamp
 
 from dataforge_protocol import engine_runtime_pb2, engine_runtime_pb2_grpc
 from runtime.compute_engine import PolarsComputeEngine
+from runtime.config import settings
 from runtime.domain.compute.base import EngineResult
 from runtime.export_formats import get_export_format
 from runtime.json_values import dict_to_struct, encode_json_bytes
+from runtime.object_store import reset_object_store_client
 
 logger = logging.getLogger(__name__)
 
@@ -236,9 +238,9 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
     def __init__(
         self,
         *,
-        engine_identity: str,
-        application_version: str,
-        token: str,
+        engine_identity: str = "unknown",
+        application_version: str = "unknown",
+        token: str = "",
         on_shutdown: Callable[[], None],
         heartbeat_timeout_seconds: int = 15,
     ) -> None:
@@ -248,14 +250,19 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
         self._on_shutdown = on_shutdown
         self._jobs = _EngineJobs()
         self._shutdown = threading.Event()
+        self._lock = threading.Lock()
+        self._initialized = bool(token and engine_identity and engine_identity != "unknown")
         self._last_heartbeat = time.monotonic()
         self._heartbeat_timeout_seconds = heartbeat_timeout_seconds
         threading.Thread(target=self._watch_heartbeat, name="engine-heartbeat-watchdog", daemon=True).start()
 
     def _watch_heartbeat(self) -> None:
         while not self._shutdown.wait(max(1.0, self._heartbeat_timeout_seconds / 3)):
-            if time.monotonic() - self._last_heartbeat <= self._heartbeat_timeout_seconds:
-                continue
+            with self._lock:
+                if not self._initialized:
+                    continue
+                if time.monotonic() - self._last_heartbeat <= self._heartbeat_timeout_seconds:
+                    continue
             logger.error("Worker heartbeat expired; stopping orphaned engine %s", self._engine_identity)
             self._shutdown.set()
             self._jobs.shutdown()
@@ -271,18 +278,74 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
         context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid engine token")
         return False
 
+    def Initialize(self, request: engine_runtime_pb2.EngineInitializeRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineInitializeResponse:
+        if request.protocol_version != ENGINE_PROTOCOL_VERSION:
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                f"Engine protocol version mismatch: expected {ENGINE_PROTOCOL_VERSION}, got {request.protocol_version}",
+            )
+        with self._lock:
+            if self._initialized and (self._engine_identity != request.engine_identity or self._token != request.token):
+                context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    f"Engine already initialized for {self._engine_identity}",
+                )
+            self._engine_identity = request.engine_identity
+            self._token = request.token
+            os.environ["ENGINE_IDENTITY"] = request.engine_identity
+            os.environ["ENGINE_RPC_TOKEN"] = request.token
+            if request.object_store_endpoint:
+                os.environ["OBJECT_STORE_ENDPOINT"] = request.object_store_endpoint
+                settings.object_store_endpoint = request.object_store_endpoint
+            if request.object_store_region:
+                os.environ["OBJECT_STORE_REGION"] = request.object_store_region
+                settings.object_store_region = request.object_store_region
+            if request.object_store_access_key:
+                os.environ["OBJECT_STORE_ACCESS_KEY"] = request.object_store_access_key
+                settings.object_store_access_key = request.object_store_access_key
+            if request.object_store_secret_key:
+                os.environ["OBJECT_STORE_SECRET_KEY"] = request.object_store_secret_key
+                settings.object_store_secret_key = request.object_store_secret_key
+            if request.HasField("object_store_session_token") and request.object_store_session_token:
+                os.environ["OBJECT_STORE_SESSION_TOKEN"] = request.object_store_session_token
+                settings.object_store_session_token = request.object_store_session_token
+            if request.polars_max_threads > 0:
+                os.environ["POLARS_MAX_THREADS"] = str(request.polars_max_threads)
+            if request.polars_streaming_chunk_size > 0:
+                os.environ["POLARS_STREAMING_CHUNK_SIZE"] = str(request.polars_streaming_chunk_size)
+                settings.polars_streaming_chunk_size = request.polars_streaming_chunk_size
+            reset_object_store_client()
+            self._initialized = True
+            self._last_heartbeat = time.monotonic()
+            return engine_runtime_pb2.EngineInitializeResponse(
+                engine_identity=self._engine_identity,
+                ready=True,
+            )
+
     def Health(self, request: engine_runtime_pb2.EngineHealthRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineHealthResponse:
+        with self._lock:
+            if not self._initialized:
+                return engine_runtime_pb2.EngineHealthResponse(
+                    engine_identity="",
+                    protocol_version=ENGINE_PROTOCOL_VERSION,
+                    application_version=self._application_version,
+                    ready=False,
+                )
         self._require_token(context)
-        self._last_heartbeat = time.monotonic()
-        return engine_runtime_pb2.EngineHealthResponse(
-            engine_identity=self._engine_identity,
-            protocol_version=ENGINE_PROTOCOL_VERSION,
-            application_version=self._application_version,
-            ready=not self._shutdown.is_set(),
-        )
+        with self._lock:
+            self._last_heartbeat = time.monotonic()
+            return engine_runtime_pb2.EngineHealthResponse(
+                engine_identity=self._engine_identity,
+                protocol_version=ENGINE_PROTOCOL_VERSION,
+                application_version=self._application_version,
+                ready=not self._shutdown.is_set(),
+            )
 
     def SubmitJob(self, request: engine_runtime_pb2.EngineSubmitJobRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineJobReference:
         self._require_token(context)
+        with self._lock:
+            if not self._initialized:
+                context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Engine is not initialized")
         if request.protocol_version != ENGINE_PROTOCOL_VERSION:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Engine protocol version mismatch")
         try:
@@ -299,6 +362,9 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
 
     def WatchJob(self, request: engine_runtime_pb2.EngineWatchJobRequest, context: grpc.ServicerContext) -> Iterator[engine_runtime_pb2.EngineJobEvent]:
         self._require_token(context)
+        with self._lock:
+            if not self._initialized:
+                context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Engine is not initialized")
         state = self._jobs.get(request.job_id)
         if state is None:
             context.abort(grpc.StatusCode.NOT_FOUND, "Engine job was not found")
@@ -358,6 +424,9 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
 
     def GetJobResult(self, request: engine_runtime_pb2.EngineGetJobResultRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineJobResult:
         self._require_token(context)
+        with self._lock:
+            if not self._initialized:
+                context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Engine is not initialized")
         state = self._jobs.pop_completed(request.job_id)
         if state is None:
             context.abort(grpc.StatusCode.NOT_FOUND, "Engine job was not found")
@@ -375,7 +444,15 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
         return engine_runtime_pb2.EngineShutdownResponse(accepted=True)
 
 
-def run_engine_server(*, host: str, port: int, engine_identity: str, application_version: str, token: str, heartbeat_timeout_seconds: int = 15) -> None:
+def run_engine_server(
+    *,
+    host: str,
+    port: int,
+    engine_identity: str = "unknown",
+    application_version: str = "unknown",
+    token: str = "",
+    heartbeat_timeout_seconds: int = 15,
+) -> None:
     server = grpc.server(
         ThreadPoolExecutor(max_workers=8), options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024))
     )

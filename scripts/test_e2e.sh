@@ -3,6 +3,10 @@ set -euo pipefail
 set -a; source docker/env/e2e.env; set +a
 PORT="${E2E_PORT:-${PORT}}"
 FRONTEND_PORT="${E2E_FRONTEND_PORT:-${FRONTEND_PORT}}"
+if [ -n "${E2E_FRONTEND_PORT:-}" ]; then
+    CORS_ORIGINS="http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT}"
+    AUTH_FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
+fi
 # Playwright forces FORCE_COLOR=1 for worker processes, so drop NO_COLOR to
 # keep the warning scanner clean and avoid conflicting color policies.
 unset NO_COLOR
@@ -42,7 +46,7 @@ RUSTFS_LABEL="data-forge.test-rustfs=1"
 RUSTFS_PORT=""
 ENGINE_NETWORK_LABEL="data-forge.test-engine-network=1"
 pick_host_port() {
-    python - "$@" <<'PY'
+    python3 - "$@" <<'PY'
 import socket
 import sys
 

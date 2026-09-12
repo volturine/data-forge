@@ -161,52 +161,20 @@ def _engine_object_store_endpoint() -> str:
     return endpoint
 
 
-def _credential_payload(*, identity: compute_pb2.EngineIdentity, token: str, resources: dict[str, int], credentials: ObjectStoreCredentials) -> str:
-    payload: dict[str, str] = {
-        "ENGINE_IDENTITY": identity.resource_id,
-        "ENGINE_RPC_TOKEN": token,
-        "OBJECT_STORE_ENDPOINT": _engine_object_store_endpoint(),
-        "OBJECT_STORE_REGION": settings.object_store_region,
-        "OBJECT_STORE_ACCESS_KEY": credentials.access_key,
-        "OBJECT_STORE_SECRET_KEY": credentials.secret_key,
-    }
-    if resources["max_threads"]:
-        payload["POLARS_MAX_THREADS"] = str(resources["max_threads"])
-    if resources["streaming_chunk_size"]:
-        payload["POLARS_STREAMING_CHUNK_SIZE"] = str(resources["streaming_chunk_size"])
-    if credentials.session_token:
-        payload["OBJECT_STORE_SESSION_TOKEN"] = credentials.session_token
-    return json.dumps(payload, separators=(",", ":"))
-
-
-def _write_bootstrap(
-    container: Any,
-    *,
-    identity: compute_pb2.EngineIdentity,
-    token: str,
-    resources: dict[str, int],
-    credentials: ObjectStoreCredentials,
-) -> None:
-    """Stage the launch payload in the engine's tmpfs, not its long-lived environment."""
-    result = container.exec_run(
-        ["/bin/sh", "-c", "umask 077 && printf '%s' \"$ENGINE_BOOTSTRAP_JSON\" > /run/dataforge-secrets/engine.json"],
-        environment={"ENGINE_BOOTSTRAP_JSON": _credential_payload(identity=identity, token=token, resources=resources, credentials=credentials)},
-    )
-    if result.exit_code != 0:
-        raise RuntimeError(f"Engine credential bootstrap failed: {result.output!r}")
+# Credential bootstrap is passed in-memory via gRPC Initialize RPC, eliminating exec_run.
 
 
 class DockerComputeEngine(ComputeEngine):
     def __init__(
         self,
-        identity: compute_pb2.EngineIdentity,
+        identity: compute_pb2.EngineIdentity | None = None,
         resource_config: dict[str, object] | None = None,
         *,
         namespace: str | None = None,
         supervisor_id: str = "worker",
     ) -> None:
-        self.identity = identity
-        self.analysis_id = identity.resource_id
+        self.identity = identity if identity is not None else compute_pb2.EngineIdentity(resource_id="")
+        self.analysis_id = self.identity.resource_id
         self.resource_config = resource_config or {}
         self.effective_resources: dict[str, object] = {}
         self.current_job_id: str | None = None
@@ -220,6 +188,7 @@ class DockerComputeEngine(ComputeEngine):
         self._token = ""
         self._alive = False
         self._shutdown_requested = False
+        self._is_warm = identity is None
         self.image_digest: str | None = None
         self.exit_code: int | None = None
         self.oom_killed: bool | None = None
@@ -256,6 +225,11 @@ class DockerComputeEngine(ComputeEngine):
         return self._container_id
 
     @property
+    def is_warm(self) -> bool:
+        with self._lock:
+            return self._is_warm and self._alive
+
+    @property
     def lifecycle_status(self) -> str:
         if self._shutdown_requested and self._alive:
             return "stopping"
@@ -279,6 +253,9 @@ class DockerComputeEngine(ComputeEngine):
             self.termination_reason = "container_stopped"
 
     def start(self) -> None:
+        if self._is_warm:
+            self.start_warm()
+            return
         with self._lock:
             if self._alive:
                 return
@@ -316,10 +293,6 @@ class DockerComputeEngine(ComputeEngine):
                 "environment": {
                     "ENGINE_RPC_HOST": "0.0.0.0",
                     "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
-                    "ENGINE_BOOTSTRAP_PATH": "/run/dataforge-secrets/engine.json",
-                    "ENGINE_BOOTSTRAP_TIMEOUT_SECONDS": str(settings.engine_start_timeout_seconds),
-                    # Worker may miss a couple of heartbeats under host load before
-                    # declaring the engine dead; keep the container watchdog looser.
                     "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
                     "APP_VERSION": _ENGINE_APPLICATION_VERSION,
                 },
@@ -330,7 +303,7 @@ class DockerComputeEngine(ComputeEngine):
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
                 "read_only": True,
-                "tmpfs": {"/run/dataforge-secrets": "rw,noexec,nosuid,size=64k", "/tmp": "rw,noexec,nosuid,size=256m"},
+                "tmpfs": {"/tmp": "rw,noexec,nosuid,size=256m"},
                 "restart_policy": {"Name": "no"},
                 "auto_remove": False,
             }
@@ -344,13 +317,6 @@ class DockerComputeEngine(ComputeEngine):
             self._container_id = str(container.id)
             try:
                 container.start()
-                _write_bootstrap(
-                    container,
-                    identity=self.identity,
-                    token=self._token,
-                    resources=resources,
-                    credentials=credentials,
-                )
                 self._client = client
                 self._container = container
                 target = f"{container.name}:{settings.engine_rpc_port}"
@@ -365,7 +331,7 @@ class DockerComputeEngine(ComputeEngine):
                     options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024)),
                 )
                 self._stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(self._channel)
-                self._await_health()
+                self._initialize(resources=resources, credentials=credentials)
                 self._alive = True
                 self._heartbeat_stop.clear()
                 self._heartbeat_thread = threading.Thread(
@@ -383,25 +349,154 @@ class DockerComputeEngine(ComputeEngine):
     def _metadata(self) -> tuple[tuple[str, str], ...]:
         return ((_ENGINE_TOKEN_METADATA_KEY, self._token),)
 
-    def _await_health(self) -> None:
+    def _initialize(self, *, resources: dict[str, int], credentials: ObjectStoreCredentials) -> None:
+        assert self._stub is not None
+        deadline = time.monotonic() + settings.engine_start_timeout_seconds
+        req = engine_runtime_pb2.EngineInitializeRequest(
+            protocol_version=ENGINE_PROTOCOL_VERSION,
+            engine_identity=self.identity.resource_id,
+            token=self._token,
+            object_store_endpoint=_engine_object_store_endpoint(),
+            object_store_region=settings.object_store_region,
+            object_store_access_key=credentials.access_key,
+            object_store_secret_key=credentials.secret_key,
+            object_store_session_token=credentials.session_token or "",
+            polars_max_threads=resources["max_threads"],
+            polars_streaming_chunk_size=resources["streaming_chunk_size"],
+        )
+        last_error: Exception | None = None
+        while time.monotonic() < deadline:
+            try:
+                resp = self._stub.Initialize(req, timeout=2.0)
+                if resp.ready and resp.engine_identity == self.identity.resource_id:
+                    return
+                last_error = RuntimeError("Engine initialization did not return ready status")
+            except grpc.RpcError as exc:
+                last_error = exc
+            time.sleep(0.05)
+        raise RuntimeError(f"Timed out waiting for engine initialization: {last_error}")
+
+    def _await_listening(self) -> None:
         assert self._stub is not None
         deadline = time.monotonic() + settings.engine_start_timeout_seconds
         last_error: Exception | None = None
         while time.monotonic() < deadline:
             try:
-                health = self._stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=1, metadata=self._metadata())
-                if (
-                    health.ready
-                    and health.engine_identity == self.identity.resource_id
-                    and health.protocol_version == ENGINE_PROTOCOL_VERSION
-                    and health.application_version == _ENGINE_APPLICATION_VERSION
-                ):
-                    return
-                last_error = RuntimeError("Engine health identity or protocol did not match launch specification")
+                self._stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=1.0)
+                return
             except grpc.RpcError as exc:
                 last_error = exc
-            time.sleep(0.1)
-        raise RuntimeError(f"Timed out waiting for engine container health: {last_error}")
+            time.sleep(0.05)
+        raise RuntimeError(f"Timed out waiting for warm engine container to start listening: {last_error}")
+
+    def start_warm(self) -> None:
+        with self._lock:
+            if self._alive:
+                return
+            self._shutdown_requested = False
+            _validate_engine_image_reference()
+            client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
+            try:
+                daemon_cpu_count, image_id = _resolve_launch_context(client)
+                resources = _effective_resources(self.resource_config, runtime_cpu_count=daemon_cpu_count)
+            except Exception:
+                client.close()
+                raise
+            self.effective_resources = cast(dict[str, object], resources)
+            self.image_digest = settings.engine_image.split("@", 1)[1] if "@" in settings.engine_image else image_id
+
+            warm_id = uuid.uuid4().hex[:12]
+            labels = {
+                "io.dataforge.managed": "true",
+                "io.dataforge.deployment": settings.deployment_id,
+                "io.dataforge.scope": "warm",
+                "io.dataforge.supervisor": self._supervisor_id,
+                "io.dataforge.owner": self._supervisor_id,
+                "io.dataforge.protocol-version": str(ENGINE_PROTOCOL_VERSION),
+                "io.dataforge.image-digest": self.image_digest,
+                "io.dataforge.created-at": datetime.now(UTC).isoformat(),
+            }
+            create_kwargs: dict[str, object] = {
+                "image": settings.engine_image,
+                "name": f"dataforge-engine-warm-{warm_id}",
+                "command": ["python3", "engine_main.py"],
+                "environment": {
+                    "ENGINE_RPC_HOST": "0.0.0.0",
+                    "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
+                    "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
+                    "APP_VERSION": _ENGINE_APPLICATION_VERSION,
+                },
+                "labels": labels,
+                "network": settings.engine_docker_network,
+                "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
+                "pids_limit": 256,
+                "cap_drop": ["ALL"],
+                "security_opt": ["no-new-privileges:true"],
+                "read_only": True,
+                "tmpfs": {"/tmp": "rw,noexec,nosuid,size=256m"},
+                "restart_policy": {"Name": "no"},
+                "auto_remove": False,
+            }
+            nano_cpus = _container_nano_cpus(resources["max_threads"])
+            if nano_cpus is not None:
+                create_kwargs["nano_cpus"] = nano_cpus
+            if settings.engine_connect_host:
+                create_kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
+                create_kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}
+            container = client.containers.create(**create_kwargs)
+            self._container_id = str(container.id)
+            try:
+                container.start()
+                self._client = client
+                self._container = container
+                target = f"{container.name}:{settings.engine_rpc_port}"
+                if settings.engine_connect_host:
+                    container.reload()
+                    bindings = container.attrs["NetworkSettings"]["Ports"].get(f"{settings.engine_rpc_port}/tcp") or []
+                    if not bindings:
+                        raise RuntimeError("Docker did not publish an engine RPC port")
+                    target = f"{settings.engine_connect_host}:{bindings[0]['HostPort']}"
+                self._channel = grpc.insecure_channel(
+                    target,
+                    options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024)),
+                )
+                self._stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(self._channel)
+                self._await_listening()
+                self._alive = True
+            except Exception:
+                with contextlib.suppress(Exception):
+                    container.remove(force=True)
+                client.close()
+                raise
+
+    def bind_identity(
+        self,
+        identity: compute_pb2.EngineIdentity,
+        *,
+        resource_config: dict[str, object] | None = None,
+        namespace: str | None = None,
+    ) -> None:
+        with self._lock:
+            if not self._alive or self._stub is None:
+                raise RuntimeError("Cannot bind identity to an unstarted engine")
+            self.identity = identity
+            self.analysis_id = identity.resource_id
+            self._namespace = namespace or get_namespace()
+            if resource_config is not None:
+                self.resource_config = resource_config
+            credentials = resolve_engine_credentials(self._namespace, self.identity)
+            resources = _effective_resources(self.resource_config)
+            self.effective_resources = cast(dict[str, object], resources)
+            self._token = uuid.uuid4().hex
+            self._initialize(resources=resources, credentials=credentials)
+            self._is_warm = False
+            self._heartbeat_stop.clear()
+            self._heartbeat_thread = threading.Thread(
+                target=self._heartbeat_loop,
+                name=f"engine-heartbeat-{self.identity.resource_id}",
+                daemon=True,
+            )
+            self._heartbeat_thread.start()
 
     def _heartbeat_loop(self) -> None:
         consecutive_failures = 0
@@ -445,7 +540,19 @@ class DockerComputeEngine(ComputeEngine):
                 return False
 
     def check_health(self) -> bool:
-        return self.is_process_alive()
+        if not self.is_process_alive():
+            return False
+        with self._lock:
+            if self._stub is None:
+                return False
+            stub = self._stub
+            is_warm = self._is_warm
+            metadata = () if is_warm else self._metadata()
+        try:
+            health = stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=1, metadata=metadata)
+            return True if is_warm else bool(health.ready)
+        except grpc.RpcError:
+            return False
 
     def _submit(self, kind: str, payload: dict[str, object], *, job_id: str | None = None) -> str:
         with self._lock:

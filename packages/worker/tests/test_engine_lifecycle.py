@@ -12,6 +12,7 @@ from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_manager import EngineCapacityFull, ProcessManager
 from runtime.config import settings
+from runtime.domain.compute.base import ComputeEngine
 
 
 class _FakeEngine:
@@ -276,3 +277,74 @@ async def test_same_identity_prewarm_shares_pending_admission(monkeypatch) -> No
         assert manager.get_engine(identity) is not None
     finally:
         manager.shutdown_all()
+
+
+class _FakeWarmEngine(_FakeEngine):
+    def __init__(self, resource_id: str = "", resource_config: dict | None = None) -> None:
+        super().__init__(resource_id, resource_config)
+        self.bound_identities: list[compute_pb2.EngineIdentity] = []
+        self._is_warm = not bool(resource_id)
+
+    def bind_identity(self, identity: compute_pb2.EngineIdentity, *, resource_config: dict | None = None, namespace: str | None = None) -> None:
+        self.analysis_id = identity.resource_id
+        self.bound_identities.append(identity)
+        self._is_warm = False
+
+    @property
+    def is_warm(self) -> bool:
+        return self._is_warm
+
+
+def test_process_manager_warm_pool_replenishes_and_claims(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "engine_warm_pool_size", 2)
+    monkeypatch.setattr(settings, "max_concurrent_engines", 3)
+
+    created_warm: list[_FakeWarmEngine] = []
+
+    def warm_factory() -> ComputeEngine:
+        engine = _FakeWarmEngine()
+        created_warm.append(engine)
+        return cast(ComputeEngine, engine)
+
+    manager = ProcessManager(
+        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        warm_engine_factory=warm_factory,
+    )
+
+    try:
+        # Wait for warm pool to replenish up to 2
+        for _ in range(50):
+            if len(manager._warm_pool) == 2:
+                break
+            time.sleep(0.02)
+        assert len(manager._warm_pool) == 2
+        assert len(created_warm) == 2
+        assert all(w.is_process_alive() for w in created_warm)
+
+        # Spawn engine 1 -> should claim from warm pool
+        id1 = _analysis_identity("analysis-claimed-1")
+        info1 = manager.spawn_engine(id1)
+        claimed_engine = cast(_FakeWarmEngine, info1.engine)
+        assert claimed_engine in created_warm
+        assert claimed_engine.bound_identities == [id1]
+        assert not claimed_engine.is_warm
+
+        # Replenisher should create 1 more warm engine to get back to 2 (total 1 live + 2 warm = 3)
+        for _ in range(50):
+            if len(manager._warm_pool) == 2 and len(created_warm) == 3:
+                break
+            time.sleep(0.02)
+        assert len(manager._warm_pool) == 2
+        assert len(created_warm) == 3
+
+        # Spawn engine 2 -> claims another warm engine (total 2 live + 1 warm = 3)
+        id2 = _analysis_identity("analysis-claimed-2")
+        info2 = manager.spawn_engine(id2)
+        assert cast(_FakeWarmEngine, info2.engine) in created_warm
+
+        # Cannot replenish beyond max_concurrent_engines (3 total)
+        time.sleep(0.1)
+        assert len(manager._warm_pool) <= 1
+    finally:
+        manager.shutdown_all()
+        assert all(not w.is_process_alive() for w in created_warm)

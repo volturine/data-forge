@@ -10,11 +10,30 @@ import "google/protobuf/timestamp.proto";
 // the durable backend compute-request protocol: it carries already-normalized
 // Polars work to exactly one engine identity.
 service PolarsEngineService {
+  rpc Initialize(EngineInitializeRequest) returns (EngineInitializeResponse);
   rpc Health(EngineHealthRequest) returns (EngineHealthResponse);
   rpc SubmitJob(EngineSubmitJobRequest) returns (EngineJobReference);
   rpc WatchJob(EngineWatchJobRequest) returns (stream EngineJobEvent);
   rpc GetJobResult(EngineGetJobResultRequest) returns (EngineJobResult);
   rpc Shutdown(EngineShutdownRequest) returns (EngineShutdownResponse);
+}
+
+message EngineInitializeRequest {
+  int32 protocol_version = 1 [(buf.validate.field).int32.gte = 1];
+  string engine_identity = 2 [(buf.validate.field).string.min_len = 1];
+  string token = 3 [(buf.validate.field).string.min_len = 1];
+  string object_store_endpoint = 4;
+  string object_store_region = 5;
+  string object_store_access_key = 6;
+  string object_store_secret_key = 7;
+  optional string object_store_session_token = 8;
+  int32 polars_max_threads = 9 [(buf.validate.field).int32.gte = 0];
+  int32 polars_streaming_chunk_size = 10 [(buf.validate.field).int32.gte = 0];
+}
+
+message EngineInitializeResponse {
+  string engine_identity = 1 [(buf.validate.field).string.min_len = 1];
+  bool ready = 2;
 }
 
 message EngineHealthRequest {}

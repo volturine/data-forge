@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import threading
+import time
 from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -105,6 +106,7 @@ class ProcessManager:
         engine_factory: EngineFactory | None = None,
         on_snapshot: EngineSnapshotListener | None = None,
         *,
+        warm_engine_factory: Callable[[], ComputeEngine] | None = None,
         supervisor_id: str = "worker",
     ) -> None:
         self._engines: dict[EngineIdentityKey, EngineInfo] = {}
@@ -139,6 +141,20 @@ class ProcessManager:
         if self._idle_ttl_seconds > 0:
             self._reaper_thread = threading.Thread(target=self._reap_idle_engines_loop, name="engine-idle-reaper", daemon=True)
             self._reaper_thread.start()
+        self._warm_pool: deque[ComputeEngine] = deque()
+        self._warm_engine_factory = warm_engine_factory or (
+            (lambda: DockerComputeEngine(supervisor_id=self._supervisor_id)) if self._uses_docker_runtime else None
+        )
+        self._warm_replenish_trigger = threading.Event()
+        self._warm_replenish_thread: threading.Thread | None = None
+        if self._warm_engine_factory is not None and settings.engine_warm_pool_size > 0:
+            self._warm_replenish_thread = threading.Thread(
+                target=self._replenish_warm_pool_loop,
+                name="engine-warm-pool-replenisher",
+                daemon=True,
+            )
+            self._warm_replenish_thread.start()
+            self._warm_replenish_trigger.set()
 
     def _engine_factory(self, identity: EngineIdentity, resource_config: dict | None = None) -> ComputeEngine:
         """Create an engine and wire capacity wakeups when its job slot frees."""
@@ -176,7 +192,7 @@ class ProcessManager:
             waiter.loop.call_soon_threadsafe(resolve)
 
     def _reserve_capacity_locked(self) -> _CapacityAdmission | None:
-        if self._capacity_used_locked() < settings.max_concurrent_engines:
+        if self._capacity_used_locked() < settings.max_concurrent_engines or self._warm_pool:
             self._capacity_starts += 1
             return _CapacityAdmission()
         idle_key, idle_info = self._find_idle_engine_locked()
@@ -239,11 +255,11 @@ class ProcessManager:
                 evicted[1].engine.shutdown()
 
     def can_admit_spawn(self) -> bool:
-        """True if a new engine can start now (free slot or idle eviction)."""
+        """True if a new engine can start now (free slot, warm pool, or idle eviction)."""
         with self._capacity_changed:
             if self._closed:
                 return False
-            return self._capacity_used_locked() < settings.max_concurrent_engines or self._find_idle_engine_locked()[0] is not None
+            return self._capacity_used_locked() < settings.max_concurrent_engines or bool(self._warm_pool) or self._find_idle_engine_locked()[0] is not None
 
     async def wait_for_capacity(self) -> None:
         """Park until capacity may have freed. No compute runner involved."""
@@ -252,7 +268,7 @@ class ProcessManager:
         with self._capacity_changed:
             if self._closed:
                 raise RuntimeError("Process manager is shut down")
-            if self._capacity_used_locked() < settings.max_concurrent_engines or self._find_idle_engine_locked()[0] is not None:
+            if self._capacity_used_locked() < settings.max_concurrent_engines or bool(self._warm_pool) or self._find_idle_engine_locked()[0] is not None:
                 return
             self._capacity_waiters.append((loop, future))
         try:
@@ -391,9 +407,31 @@ class ProcessManager:
                 idle_engine_info.engine.shutdown()
                 changed_namespaces.add(evict_info[0].namespace)
 
-            logger.info("Spawning new engine for key %s", qualified_key)
-            engine = self._engine_factory(identity, normalized_config)
-            engine.start()
+            warm_engine: ComputeEngine | None = None
+            with self._capacity_changed:
+                while self._warm_pool:
+                    candidate = self._warm_pool.popleft()
+                    if candidate.check_health():
+                        warm_engine = candidate
+                        break
+                    else:
+                        with contextlib.suppress(Exception):
+                            candidate.shutdown()
+
+            if warm_engine is not None:
+                logger.info("Claiming warm engine from pool for key %s", qualified_key)
+                engine = warm_engine
+                bind_id = getattr(engine, "bind_identity", None)
+                if callable(bind_id):
+                    bind_id(identity, resource_config=normalized_config, namespace=namespace)
+                bind_cap = getattr(engine, "bind_capacity_notifier", None)
+                if callable(bind_cap):
+                    bind_cap(self.notify_capacity_changed)
+                self._warm_replenish_trigger.set()
+            else:
+                logger.info("Spawning new engine for key %s", qualified_key)
+                engine = self._engine_factory(identity, normalized_config)
+                engine.start()
             if not engine.is_process_alive():
                 engine.shutdown()
                 raise RuntimeError(f"Failed to start engine for {qualified_key}")
@@ -449,8 +487,8 @@ class ProcessManager:
         return idle_key, idle_info
 
     def _capacity_used_locked(self) -> int:
-        """Live engines plus in-flight starts that already hold a ticket."""
-        return len(self._engines) + self._capacity_starts
+        """Live engines, warm standby engines, plus in-flight starts that already hold a ticket."""
+        return len(self._engines) + len(self._warm_pool) + self._capacity_starts
 
     def _try_claim_capacity_slot(self, qualified_key: EngineIdentityKey) -> tuple[tuple[EngineIdentityKey, EngineInfo] | None, bool]:
         """Non-blocking capacity claim. Returns (evict_target, ticket_held).
@@ -463,6 +501,10 @@ class ProcessManager:
                 raise RuntimeError("Process manager is shut down")
             if self._spawn_waiters:
                 return None, False
+            if self._warm_pool:
+                self._capacity_starts += 1
+                self._capacity_changed.notify_all()
+                return None, True
             used = self._capacity_used_locked()
             max_engines = settings.max_concurrent_engines
             if used < max_engines:
@@ -645,10 +687,15 @@ class ProcessManager:
 
     def shutdown_all(self) -> None:
         self._reaper_stop.set()
+        self._warm_replenish_trigger.set()
         if self._reaper_thread is not None and self._reaper_thread.is_alive():
             self._reaper_thread.join(timeout=1.0)
+        if self._warm_replenish_thread is not None and self._warm_replenish_thread.is_alive():
+            self._warm_replenish_thread.join(timeout=1.0)
         with self._capacity_changed:
             self._closed = True
+            warm_to_stop = list(self._warm_pool)
+            self._warm_pool.clear()
             spawn_events = list(self._engine_events.values())
             capacity_waiters = list(self._capacity_waiters)
             self._capacity_waiters.clear()
@@ -683,6 +730,9 @@ class ProcessManager:
             info.engine.shutdown()
         for _key, info, _identity in admitted_evictions:
             info.engine.shutdown()
+        for warm_eng in warm_to_stop:
+            with contextlib.suppress(Exception):
+                warm_eng.shutdown()
         if changed_namespaces:
             self._emit_snapshot_for_namespaces(changed_namespaces)
 
@@ -709,6 +759,40 @@ class ProcessManager:
                 self._on_snapshot(self._list_engine_statuses_for_namespace(namespace))
             finally:
                 reset_namespace(token)
+
+    def _replenish_warm_pool_loop(self) -> None:
+        while not self._closed and not self._reaper_stop.is_set():
+            self._warm_replenish_trigger.wait(timeout=1.0)
+            self._warm_replenish_trigger.clear()
+            if self._closed or self._reaper_stop.is_set() or self._warm_engine_factory is None:
+                break
+            while not self._closed and not self._reaper_stop.is_set():
+                with self._capacity_changed:
+                    target_warm = settings.engine_warm_pool_size
+                    current_warm = len(self._warm_pool)
+                    used = len(self._engines) + len(self._warm_pool) + self._capacity_starts
+                    if current_warm >= target_warm or used >= settings.max_concurrent_engines:
+                        break
+                    self._capacity_starts += 1
+                new_engine: ComputeEngine | None = None
+                try:
+                    new_engine = self._warm_engine_factory()
+                    new_engine.start()
+                except Exception:
+                    logger.warning("Failed to start warm engine for pool", exc_info=True)
+                    if new_engine is not None:
+                        with contextlib.suppress(Exception):
+                            new_engine.shutdown()
+                    time.sleep(1.0)
+                finally:
+                    with self._capacity_changed:
+                        self._capacity_starts = max(0, self._capacity_starts - 1)
+                        if new_engine is not None and not self._closed and not self._reaper_stop.is_set():
+                            self._warm_pool.append(new_engine)
+                        elif new_engine is not None:
+                            with contextlib.suppress(Exception):
+                                new_engine.shutdown()
+                        self._capacity_changed.notify_all()
 
     def _reap_idle_engines_loop(self) -> None:
         while not self._reaper_stop.wait(self._idle_reap_interval_seconds):
