@@ -63,10 +63,12 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 	);
 
 	let sessionCleanup: (() => void) | null = null;
+	let sessionResourceId: string | null = null;
 
 	function closeSession(): void {
 		sessionCleanup?.();
 		sessionCleanup = null;
+		sessionResourceId = null;
 	}
 
 	function openSession(id: string): void {
@@ -102,6 +104,7 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 			}
 		});
 		session.acquire();
+		sessionResourceId = id;
 		sessionCleanup = () => {
 			alive = false;
 			session.close();
@@ -119,6 +122,9 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 			lockMode = 'released';
 			return;
 		}
+		// Re-syncing the same resource must not tear down a live session; the
+		// editor calls sync on every mount and navigation to the same analysis.
+		if (sessionResourceId === id) return;
 		openSession(id);
 	}
 

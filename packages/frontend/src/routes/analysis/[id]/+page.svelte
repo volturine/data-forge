@@ -39,7 +39,6 @@
 	const queryClient = useQueryClient();
 	const analysisId = $derived($page.params.id ?? null);
 	const validAnalysisId = $derived(analysisId && isUuid(analysisId) ? analysisId : null);
-	let lastAnalysisId = $state<string | null>(null);
 
 	let selectedStepId = $state<string | null>(null);
 	const buildStore = new BuildStreamStore();
@@ -111,13 +110,11 @@
 
 	function resetForAnalysisId(id: string | null): void {
 		if (!id) return;
-		if (lastAnalysisId === id) return;
+		if (analysisStore.current?.id === id) return;
 		analysisStore.reset();
 		schemaStore.reset();
 		selectedStepId = null;
-		lastAnalysisId = id;
 		draft.reset();
-		lock.sync(validAnalysisId);
 	}
 
 	const draft = createDraftController({
@@ -230,6 +227,22 @@
 	}));
 
 	const currentAnalysis = $derived(analysisStore.current ?? analysisQuery.data?.analysis ?? null);
+
+	// Readiness of the editor itself: the working copy holds this analysis, the
+	// pipeline is populated (resolveTabs always yields at least one tab for a
+	// loaded analysis, so an empty tab list means "not loaded yet"), and the
+	// draft finished hydrating (which waits for the editor lock session).
+	const editorReady = $derived.by(() => {
+		if (!validAnalysisId || analysisStore.current?.id !== validAnalysisId) return false;
+		if (analysisStore.tabs.length === 0) return false;
+		return draft.draftLoaded || lock.editorAccessState !== 'pending';
+	});
+
+	const editorGate = $derived.by(() => {
+		if (editorReady) return 'ready';
+		if (analysisQuery.isError && !analysisQuery.data) return 'error';
+		return 'loading';
+	});
 	const analysisFavorite = $derived(
 		validAnalysisId ? favoriteStore.isFavorite(validAnalysisId) : false
 	);
@@ -433,6 +446,7 @@
 
 	onMount(() => {
 		resetForAnalysisId(analysisId);
+		lock.sync(validAnalysisId);
 		refreshEditorServices();
 		const unbindPane = bindPaneMedia();
 		return () => {
@@ -443,6 +457,7 @@
 
 	afterNavigate(() => {
 		resetForAnalysisId(analysisId);
+		lock.sync(validAnalysisId);
 		refreshEditorServices();
 	});
 
@@ -508,9 +523,12 @@
 	}
 </script>
 
-{#if analysisQuery.isPending}
-	<AnalysisEditorLoadGate isLoading={true} error={null} />
-{:else if analysisQuery.data}
+{#if editorGate !== 'ready'}
+	<AnalysisEditorLoadGate
+		isLoading={editorGate === 'loading'}
+		error={editorGate === 'error' ? analysisQuery.error : null}
+	/>
+{:else}
 	<div
 		class={css({
 			display: 'flex',
@@ -523,7 +541,7 @@
 		<AnalysisEditorHeader
 			tabs={analysisStore.tabs}
 			activeTabId={analysisStore.activeTab?.id ?? null}
-			titleName={currentAnalysis?.name ?? analysisQuery.data?.analysis.name}
+			titleName={currentAnalysis?.name ?? analysisQuery.data?.analysis.name ?? ''}
 			description={currentAnalysis?.description ?? null}
 			favorite={analysisFavorite}
 			loading={analysisStore.loading}
@@ -721,8 +739,6 @@
 			{/if}
 		</div>
 	</div>
-{:else}
-	<AnalysisEditorLoadGate isLoading={false} error={analysisQuery.error} />
 {/if}
 
 <svelte:window

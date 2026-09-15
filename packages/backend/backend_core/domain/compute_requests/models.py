@@ -654,6 +654,14 @@ def response_payload(envelope: compute_pb2.ComputeResponseEnvelope) -> dict[str,
     if selected == 'row_count':
         payload.setdefault('row_count', 0)
         _restore_int64(payload, 'row_count')
+    if selected == 'engine_status':
+        engine_result = cast(compute_pb2.EngineStatusResult, value)
+        if engine_result.HasField('lifecycle_status'):
+            payload['lifecycle_status'] = _enum_token_from_number(enums_pb2.EngineInstanceStatus.DESCRIPTOR, engine_result.lifecycle_status)
+        defaults = payload.get('defaults')
+        if isinstance(defaults, dict):
+            for key in ('max_threads', 'max_memory_mb', 'streaming_chunk_size'):
+                defaults.setdefault(key, 0)
     if selected == 'error':
         error = cast(compute_pb2.ComputeErrorResult, value)
         if error.HasField('error_code'):

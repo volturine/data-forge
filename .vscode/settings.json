@@ -46,5 +46,6 @@
       "pythonPath": "${workspaceFolder}/packages/worker-manager/.venv/bin/python"
     }
   ],
-  "projectManager.hg.ignoredFolders": ["out", "typings", "test", ".haxelib"]
+  "projectManager.hg.ignoredFolders": ["out", "typings", "test", ".haxelib"],
+  "python.languageServer": "None"
 }

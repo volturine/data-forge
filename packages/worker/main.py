@@ -70,7 +70,12 @@ def _manager_heartbeat_loop(
     heartbeat_seconds: float = 5.0,
 ) -> None:
     while not stop_signal.wait(heartbeat_seconds):
-        client.heartbeat_worker(worker_id=worker_id, active_jobs=0)
+        try:
+            client.heartbeat_worker(worker_id=worker_id, active_jobs=0)
+        except Exception as error:
+            # A backend restart or transient outage must not kill the heartbeat
+            # thread; the next tick retries against the current backend.
+            logger.warning("Runtime worker heartbeat failed: %s", error)
 
 
 async def _watch_process_stop_signal(stop_signal: ProcessEvent, stop_event: asyncio.Event) -> None:

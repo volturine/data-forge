@@ -641,6 +641,51 @@ def test_column_stats_response_preserves_required_zero_defaults(test_db_session)
     }
 
 
+def test_engine_status_response_restores_enum_token_and_zero_defaults(test_db_session) -> None:
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
+        request_json={
+            'engine_identity': {
+                'scope': 'analysis_interactive',
+                'reuse_policy': 'shared',
+                'analysis_id': 'analysis-1',
+                'resource_id': 'analysis-1',
+            },
+            'resource_config': {},
+        },
+    )
+    worker_id, claim_token, lease_generation = _claim_identity(test_db_session, request)
+
+    completed = compute_requests_service.mark_request_completed(
+        test_db_session,
+        request.id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+        response_envelope=_response(
+            request,
+            {
+                'analysis_id': 'analysis-1',
+                'resource_id': 'analysis-1',
+                'status': 'ENGINE_STATUS_HEALTHY',
+                'lifecycle_status': 'ENGINE_INSTANCE_STATUS_IDLE',
+                'defaults': {},
+            },
+        ),
+    )
+    assert completed is not None
+
+    assert compute_requests_service.response_payload(completed) == {
+        'analysis_id': 'analysis-1',
+        'resource_id': 'analysis-1',
+        'status': 1,
+        'lifecycle_status': 'idle',
+        'defaults': {'max_threads': 0, 'max_memory_mb': 0, 'streaming_chunk_size': 0},
+    }
+
+
 def test_reclaimed_request_rejects_stale_completion(test_db_session) -> None:
     request = _create_request(
         test_db_session,
