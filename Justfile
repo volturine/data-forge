@@ -31,12 +31,28 @@ dev:
     set -euo pipefail
     just generate-protocol
     set -a; source docker/env/dev.env; set +a
+    just engine-image "$DF_ENGINE_IMAGE"
+    # Worker runs on the host: engines are spawned in Docker on a dedicated
+    # network and reached via published host ports (same topology as e2e).
+    export ENGINE_IMAGE="$DF_ENGINE_IMAGE"
+    export ENGINE_DOCKER_NETWORK="$DF_ENGINE_DOCKER_NETWORK"
+    export ENGINE_CONNECT_HOST=127.0.0.1
+    docker network inspect "$ENGINE_DOCKER_NETWORK" >/dev/null 2>&1 || docker network create "$ENGINE_DOCKER_NETWORK" >/dev/null
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_postgres.py
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_rustfs.py
     (cd packages/backend && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
     (cd packages/scheduler && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
     (cd packages/worker && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
     (cd packages/frontend && bun run dev) & wait
+
+# Ensure the polars engine image exists locally; build it if missing.
+engine-image tag:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! docker image inspect "{{tag}}" >/dev/null 2>&1; then
+        echo "Engine image {{tag}} not found; building..."
+        docker build -f docker/Dockerfile --target engine -t "{{tag}}" .
+    fi
 
 # Build the frontend and run the three fixed production roles from source.
 prod:
