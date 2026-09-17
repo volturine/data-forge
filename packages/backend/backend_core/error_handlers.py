@@ -76,9 +76,13 @@ def _log_app_error(exc: AppError, status: int) -> None:
     extra = {'error_code': exc.error_code, 'details': exc.details}
     if status >= 500:
         logger.error(msg, extra=extra, exc_info=True)
+    elif status in (401, 403):
+        # Authentication and authorization failures stay visible: repeated
+        # rejections are a signal worth reading in the logs.
+        logger.warning(msg, extra=extra)
     else:
-        # Expected client-facing failures (4xx: bad credentials, expired
-        # tokens, validation errors) are normal app behavior, not problems.
+        # Other 4xx (not found, validation) are normal app behavior: the
+        # client asked for something invalid and was told so.
         logger.info(msg, extra=extra)
 
 

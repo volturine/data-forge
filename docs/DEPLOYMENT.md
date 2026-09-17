@@ -75,7 +75,7 @@ compose files mirror this directory's topology and follow the same registry.
 ### Configure and start
 
 1. Review `docker/env/prod.env` and replace every `replace-with-...` value.
-2. Set the four image variables to tags published from the same release. `DF_ENGINE_IMAGE` must be available to the local Docker daemon before the worker starts.
+2. Set the four image variables to tags published from the same release. `DF_ENGINE_IMAGE` must be available to the local Docker daemon before the worker starts. Pin it to a `repository@sha256:<digest>` reference when engines must stay byte-identical across launches; a tag is accepted (and logged as unpinned) so custom engine images with extra libraries can be used.
 3. Set `DF_AUTH_FRONTEND_URL`, OAuth callback URLs, and `DF_CORS_ORIGINS` to the
    public HTTPS origin.
 4. Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the deployment host. The worker is the only service with Docker access; this permission is equivalent to administrative host access.

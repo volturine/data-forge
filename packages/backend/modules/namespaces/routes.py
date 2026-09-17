@@ -86,6 +86,8 @@ def create_namespace_endpoint(
     storage = _storage_response(name)
     namespace_paths(name)
     _provision_namespace_bucket(name)
-    register_namespace(session, name)
+    # Credentials before registration: a namespace that engines cannot open is
+    # not usable, so a failure here must not leave one registered.
     provision_namespace_engine_credentials(session, name)
+    register_namespace(session, name)
     return NamespaceResponse(name=name, storage=storage, created_bucket=True)

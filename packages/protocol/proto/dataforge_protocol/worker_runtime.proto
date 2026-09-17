@@ -264,8 +264,6 @@ message WorkerEngineCredentialsRequest {
 message WorkerEngineCredentialsResponse {
   string access_key = 1;
   string secret_key = 2;
-  string endpoint = 3;
-  string region = 4;
 }
 
 message WorkerAnalysisMetadataRequest {

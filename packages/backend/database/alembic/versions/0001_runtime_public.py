@@ -69,6 +69,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('access_key'),
+        sa.UniqueConstraint('namespace', 'role', name='uq_namespace_engine_credentials_role'),
     )
     op.create_index('ix_namespace_engine_credentials_namespace', 'namespace_engine_credentials', ['namespace'])
     op.create_table(

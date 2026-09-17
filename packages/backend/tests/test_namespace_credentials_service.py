@@ -1,4 +1,8 @@
+import json
+import os
+
 import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from backend_core.namespace_credentials_service import (
@@ -91,3 +95,52 @@ def test_resolve_returns_decrypted_secret(session, fake_admin):
 def test_resolve_missing_namespace_raises(session, fake_admin):
     with pytest.raises(NamespaceCredentialError, match='No reader credentials provisioned'):
         resolve_namespace_engine_credentials(session, 'missing-ns', 'reader')
+
+
+def test_duplicate_role_for_a_namespace_is_rejected_by_the_database(session, fake_admin):
+    """Concurrent provisioning across API processes must not create two identities."""
+    provision_namespace_engine_credentials(session, 'tenant-a')
+
+    session.add(
+        NamespaceEngineCredential(
+            id='duplicate',
+            namespace='tenant-a',
+            role='reader',
+            access_key='dfg-tenant-a-reader-duplicate',
+            secret_key_encrypted='secret',
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+
+def test_policy_failures_are_reported_not_swallowed(session, monkeypatch):
+    class FailingAdmin(FakeAdmin):
+        async def policy_add(self, policy_name: str, policy_path: str) -> str:
+            raise RuntimeError('admin API rejected the policy')
+
+    monkeypatch.setattr('backend_core.namespace_credentials_service._admin_client', lambda: FailingAdmin())
+
+    with pytest.raises(NamespaceCredentialError, match='Failed to provision engine credentials'):
+        provision_namespace_engine_credentials(session, 'tenant-a')
+
+    assert session.exec(select(NamespaceEngineCredential)).all() == []
+
+
+def test_policy_documents_are_written_to_unique_paths(session, monkeypatch):
+    seen_paths: list[str] = []
+
+    class PathRecordingAdmin(FakeAdmin):
+        async def policy_add(self, policy_name: str, policy_path: str) -> str:
+            seen_paths.append(policy_path)
+            with open(policy_path, encoding='utf-8') as policy_file:
+                assert json.load(policy_file)['Statement']
+            return ''
+
+    monkeypatch.setattr('backend_core.namespace_credentials_service._admin_client', lambda: PathRecordingAdmin())
+
+    provision_namespace_engine_credentials(session, 'tenant-a')
+
+    assert len(set(seen_paths)) == len(seen_paths) == 2
+    assert not any(os.path.exists(path) for path in seen_paths)

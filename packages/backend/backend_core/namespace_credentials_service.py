@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import hashlib
 import json
 import os
 import secrets as crypto_secrets
+import tempfile
 import uuid
 from urllib.parse import urlparse
 
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from backend_core.config import settings
@@ -56,30 +58,48 @@ async def _create_role_identity(admin, namespace: str, role: str) -> tuple[str, 
     access_key = _generate_access_key(namespace, role)
     secret_key = crypto_secrets.token_urlsafe(32)
     policy_name = f'namespace-{namespace}-{role}'
-    policy_path = f'/tmp/{policy_name}.json'
+    # The admin client reads the policy from disk, and several API processes can
+    # provision at once, so each call writes its own file.
+    handle, policy_path = tempfile.mkstemp(prefix=f'{policy_name}-', suffix='.json')
     try:
-        with open(policy_path, 'w', encoding='utf-8') as policy_file:
+        with os.fdopen(handle, 'w', encoding='utf-8') as policy_file:
             json.dump(_policy_document(namespace, role), policy_file)
         await admin.user_add(access_key, secret_key)
-        with contextlib.suppress(Exception):
-            # The policy document is deterministic per namespace and role;
-            # reuse the existing one when it was provisioned before.
-            await admin.policy_add(policy_name, policy_path)
+        # add-canned-policy is a PUT: it creates or replaces, so re-running it
+        # for an existing namespace role is how the policy stays current.
+        await admin.policy_add(policy_name, policy_path)
         await admin.policy_set(policy_name, user=access_key)
     finally:
         os.remove(policy_path)
     return access_key, secret_key
 
 
+def _lock_namespace_credentials(session: Session, namespace: str) -> None:
+    """Serialize provisioning for one namespace across API processes.
+
+    Every API process runs the same startup provisioning against the same
+    database, and namespace creation can be retried concurrently. The lock is
+    held until the transaction ends, so the check and the insert below decide
+    one winner; the unique (namespace, role) constraint is the backstop.
+    """
+    bind = session.get_bind()
+    if bind.dialect.name != 'postgresql':
+        return
+    key = int.from_bytes(hashlib.sha256(f'engine-credentials:{namespace}'.encode()).digest()[:8], 'big', signed=True)
+    session.connection().execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': key})
+
+
 def provision_namespace_engine_credentials(session: Session, namespace: str) -> None:
     """Create object-store identities for the namespace's engine roles.
 
-    Idempotent: roles that already have active records are left untouched.
+    Idempotent: roles that already have records are left untouched.
     """
+    _lock_namespace_credentials(session, namespace)
     existing = session.exec(select(NamespaceEngineCredential).where(NamespaceEngineCredential.namespace == namespace)).all()
     existing_roles = {row.role for row in existing}
     missing_roles = [role for role in _ENGINE_CREDENTIAL_ROLES if role not in existing_roles]
     if not missing_roles:
+        session.rollback()
         return
 
     admin = _admin_client()
@@ -90,6 +110,7 @@ def provision_namespace_engine_credentials(session: Session, namespace: str) -> 
     try:
         identities = asyncio.run(provision_all())
     except Exception as exc:
+        session.rollback()
         raise NamespaceCredentialError(f'Failed to provision engine credentials for namespace {namespace!r}') from exc
     for role, (access_key, secret_key) in identities.items():
         session.add(
@@ -119,11 +140,3 @@ def resolve_namespace_engine_credentials(session: Session, namespace: str, role:
     if row is None:
         raise NamespaceCredentialError(f'No {role} credentials provisioned for namespace {namespace!r}')
     return row.access_key, decrypt_secret(row.secret_key_encrypted)
-
-
-def engine_object_store_config() -> dict[str, str]:
-    """Endpoint and region metadata returned alongside engine credentials."""
-    return {
-        'endpoint': settings.object_store_endpoint,
-        'region': settings.object_store_region,
-    }

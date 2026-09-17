@@ -134,24 +134,17 @@ async def _provision_default_namespace_credentials() -> None:
     The object store may still be coming up during a cold container start,
     so retry briefly before failing the launch.
     """
-    from backend_core.namespace_credentials_service import (
-        NamespaceCredentialError,
-        provision_namespace_engine_credentials,
-    )
+    from backend_core.namespace_credentials_service import NamespaceCredentialError, provision_namespace_engine_credentials
 
-    delay_seconds = 2.0
-    for attempt in range(5):
-        session = next(get_settings_db())
+    attempts = 5
+    for attempt in range(1, attempts + 1):
         try:
-            await asyncio.to_thread(provision_namespace_engine_credentials, session, settings.default_namespace)
+            await asyncio.to_thread(run_settings_db, provision_namespace_engine_credentials, settings.default_namespace)
             return
         except NamespaceCredentialError:
-            session.close()
-            if attempt == 4:
+            if attempt == attempts:
                 raise
-            await asyncio.sleep(delay_seconds)
-        finally:
-            session.close()
+            await asyncio.sleep(2.0)
 
 
 async def _wait_until_stopped(stop_event: asyncio.Event, delay_seconds: float) -> bool:
