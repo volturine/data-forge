@@ -28,6 +28,7 @@ service WorkerRuntimeService {
   rpc PublishDatasourceSchemaCache(WorkerPublishDatasourceSchemaCacheRequest) returns (WorkerPublishDatasourceSchemaCacheResponse);
   rpc GetDatasourceMetadata(WorkerDatasourceMetadataRequest) returns (WorkerDatasourceMetadataResponse);
   rpc GetUdfCodes(WorkerUdfCodesRequest) returns (WorkerUdfCodesResponse);
+  rpc GetEngineCredentials(WorkerEngineCredentialsRequest) returns (WorkerEngineCredentialsResponse);
   rpc GetAnalysisMetadata(WorkerAnalysisMetadataRequest) returns (WorkerAnalysisMetadataResponse);
   rpc GetBuildCancelStatus(WorkerBuildCancelStatusRequest) returns (WorkerBuildCancelStatusResponse);
   rpc UpdateBuildResult(WorkerUpdateBuildResultRequest) returns (RuntimeWorkerResponse);
@@ -248,6 +249,23 @@ message WorkerUdfCodesRequest {
 
 message WorkerUdfCodesResponse {
   map<string, string> codes = 1;
+}
+
+message WorkerEngineCredentialsRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string role = 2 [(buf.validate.field).string = {
+    in: [
+      "reader",
+      "builder"
+    ]
+  }];
+}
+
+message WorkerEngineCredentialsResponse {
+  string access_key = 1;
+  string secret_key = 2;
+  string endpoint = 3;
+  string region = 4;
 }
 
 message WorkerAnalysisMetadataRequest {

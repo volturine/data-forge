@@ -144,10 +144,10 @@ Edit `docker/env/prod.env`:
 
 - set `DATABASE_URL` to PostgreSQL;
 - set the four `OBJECT_STORE_*` values (endpoint, region, access key, secret).
-  Each product namespace is an S3 bucket (name == bucket);
-- provision separate namespace reader and builder object-store identities and
-  set `ENGINE_OBJECT_STORE_CREDENTIALS_JSON`; production rejects the platform
-  object-store credentials for engine containers;
+  Each product namespace is an S3 bucket (name == bucket). The backend
+  provisions namespace-scoped reader/builder engine identities and serves them
+  to workers over the authenticated internal gRPC API — no per-namespace
+  object-store configuration is required;
 - replace `INTERNAL_API_TOKEN` and `SETTINGS_ENCRYPTION_KEY`;
 - set `DATA_DIR` to a writable, durable local directory for process scratch;
 - set the public auth and OAuth URLs;

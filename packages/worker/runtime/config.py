@@ -43,8 +43,6 @@ class WorkerSettings:
     engine_start_timeout_seconds: int
     engine_shutdown_grace_seconds: int
     engine_heartbeat_interval_seconds: int
-    engine_object_store_credentials_json: str
-    engine_allow_global_object_store_credentials: bool
     engine_warm_pool_size: int
     deployment_id: str
 
@@ -110,8 +108,6 @@ settings = WorkerSettings(
     engine_start_timeout_seconds=_read_int("ENGINE_START_TIMEOUT_SECONDS", 30, min_value=1),
     engine_shutdown_grace_seconds=_read_int("ENGINE_SHUTDOWN_GRACE_SECONDS", 10, min_value=1),
     engine_heartbeat_interval_seconds=_read_int("ENGINE_HEARTBEAT_INTERVAL_SECONDS", 5, min_value=1),
-    engine_object_store_credentials_json=os.environ.get("ENGINE_OBJECT_STORE_CREDENTIALS_JSON", ""),
-    engine_allow_global_object_store_credentials=_read_bool("ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS", False),
     engine_warm_pool_size=_read_int("ENGINE_WARM_POOL_SIZE", 0, min_value=0, max_value=10),
     deployment_id=os.environ.get("DATAFORGE_DEPLOYMENT_ID", "dataforge").strip() or "dataforge",
 )

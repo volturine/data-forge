@@ -466,6 +466,15 @@ class WorkerRuntimeClient:
         )
         return dict(response.codes)
 
+    def engine_credentials(self, *, namespace: str, role: str) -> worker_runtime_pb2.WorkerEngineCredentialsResponse:
+        return self._call(
+            lambda: self._stub.GetEngineCredentials(
+                worker_runtime_pb2.WorkerEngineCredentialsRequest(namespace=namespace, role=role),
+                timeout=self._timeout_seconds,
+                metadata=self._metadata(),
+            )
+        )
+
     def analysis_name(self, *, namespace: str, analysis_id: str) -> str | None:
         response = self._call(
             lambda: self._stub.GetAnalysisMetadata(

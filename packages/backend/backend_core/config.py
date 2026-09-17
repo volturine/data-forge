@@ -184,6 +184,7 @@ class Settings(BaseSettings):
 
     # Server-side log flush interval in seconds
     log_flush_interval_seconds: int = Field(default=5, alias='LOG_FLUSH_INTERVAL_SECONDS')
+    log_requests_enabled: bool = Field(default=True, alias='LOG_REQUESTS_ENABLED')
 
     # Max queued log batches before dropping
     log_queue_max_size: int = Field(default=2000, alias='LOG_QUEUE_MAX_SIZE')

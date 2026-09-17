@@ -6,6 +6,7 @@ from backend_core.data_plane_client import client_from_settings
 from backend_core.database import get_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import list_namespaces, namespace_paths, normalize_namespace
+from backend_core.namespace_credentials_service import provision_namespace_engine_credentials
 from backend_core.namespace_storage import NAMESPACE_NAME_RULES, namespace_storage_plan
 from backend_core.namespaces_service import list_runtime_namespaces, register_namespace
 from modules.auth.dependencies import get_current_user
@@ -86,4 +87,5 @@ def create_namespace_endpoint(
     namespace_paths(name)
     _provision_namespace_bucket(name)
     register_namespace(session, name)
+    provision_namespace_engine_credentials(session, name)
     return NamespaceResponse(name=name, storage=storage, created_bucket=True)

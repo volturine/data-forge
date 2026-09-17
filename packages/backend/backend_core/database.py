@@ -188,11 +188,17 @@ def run_settings_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P
 
 def _shared_tables():
     from backend_core.persistence.engine_instances.models import EngineInstance
-    from backend_core.persistence.namespaces.models import RuntimeNamespace
+    from backend_core.persistence.namespaces.models import NamespaceEngineCredential, RuntimeNamespace
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
     from backend_core.persistence.settings.models import AppSettings
 
-    table_names = {AppSettings.__tablename__, EngineInstance.__tablename__, RuntimeNamespace.__tablename__, RuntimeWorker.__tablename__}
+    table_names = {
+        AppSettings.__tablename__,
+        EngineInstance.__tablename__,
+        NamespaceEngineCredential.__tablename__,
+        RuntimeNamespace.__tablename__,
+        RuntimeWorker.__tablename__,
+    }
     return [table for table in AppSettings.metadata.sorted_tables if table.name in table_names]
 
 

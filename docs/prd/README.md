@@ -63,7 +63,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Kaggle Connection](backlog/kaggle-connection.md)
 - [Local Subdomain Serving](backlog/local-subdomain-serving.md)
 - [Mobile-first UI](backlog/mobile-first-ui.md)
-- [Namespace Credential Management](backlog/namespace-credential-management.md) — backend-owned provisioning, rotation, revocation, and migration from operator configuration
+- [Namespace Credential Management](backlog/namespace-credential-management.md) — backend-owned namespace engine credentials (provisioning and worker serving shipped; rotation, revocation, and audit open)
 - [Snapshot Rollback](backlog/snapshot-rollback.md)
 - [Tauri Hybrid Desktop](backlog/tauri-hybrid-desktop.md)
 - [Time Since Last Updated](backlog/time-since-last-updated.md)

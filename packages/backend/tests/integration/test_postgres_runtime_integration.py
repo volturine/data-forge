@@ -151,7 +151,6 @@ def engine_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str,
             'ENGINE_DOCKER_NETWORK': network_name,
             'ENGINE_OBJECT_STORE_ENDPOINT': f'http://{rustfs_container.name}:9000',
             'ENGINE_CONNECT_HOST': '127.0.0.1',
-            'ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS': 'true',
         }
     finally:
         run_command(['docker', 'network', 'disconnect', '--force', network_name, rustfs_container.name], env=docker_env(), check=False, timeout=120)

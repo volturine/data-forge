@@ -128,6 +128,32 @@ def _mark_running_builds_orphaned_across_namespaces() -> int:
     return count
 
 
+async def _provision_default_namespace_credentials() -> None:
+    """Ensure the default namespace has engine credentials at startup.
+
+    The object store may still be coming up during a cold container start,
+    so retry briefly before failing the launch.
+    """
+    from backend_core.namespace_credentials_service import (
+        NamespaceCredentialError,
+        provision_namespace_engine_credentials,
+    )
+
+    delay_seconds = 2.0
+    for attempt in range(5):
+        session = next(get_settings_db())
+        try:
+            await asyncio.to_thread(provision_namespace_engine_credentials, session, settings.default_namespace)
+            return
+        except NamespaceCredentialError:
+            session.close()
+            if attempt == 4:
+                raise
+            await asyncio.sleep(delay_seconds)
+        finally:
+            session.close()
+
+
 async def _wait_until_stopped(stop_event: asyncio.Event, delay_seconds: float) -> bool:
     stop_task = asyncio.create_task(stop_event.wait())
     delay_task = asyncio.create_task(asyncio.sleep(delay_seconds))
@@ -183,6 +209,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await asyncio.to_thread(ensure_backend_public_tables)
     await asyncio.to_thread(run_settings_db, ensure_default_user)
+    await _provision_default_namespace_credentials()
     await asyncio.to_thread(_register_api_worker, api_worker_id)
     await asyncio.to_thread(run_db, udf_service.seed_defaults)
 
@@ -319,7 +346,8 @@ async def security_headers(request: Request, call_next) -> Response:
     return response
 
 
-app.add_middleware(RequestLoggingMiddleware)
+if settings.log_requests_enabled:
+    app.add_middleware(RequestLoggingMiddleware)
 
 # Include API Routers (prefix already defined in api/router.py)
 app.include_router(router)
@@ -351,7 +379,9 @@ async def health() -> dict[str, str]:
 
 
 @app.get('/health/ready')
-async def readiness(session: Session = Depends(get_settings_db)) -> JSONResponse:
+def readiness(session: Session = Depends(get_settings_db)) -> JSONResponse:
+    # Sync route on purpose: the checks block (DB, filesystem, object-store
+    # probe) and must run in the threadpool, not on the event loop.
     """Readiness check - verifies app can handle requests.
     Checks database connectivity and filesystem.
     """

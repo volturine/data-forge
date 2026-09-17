@@ -913,6 +913,34 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
+    async def GetEngineCredentials(
+        self, request: worker_runtime_pb2.WorkerEngineCredentialsRequest, context: grpc.aio.ServicerContext
+    ) -> worker_runtime_pb2.WorkerEngineCredentialsResponse:
+        from backend_core.namespace_credentials_service import (
+            NamespaceCredentialError,
+            engine_object_store_config,
+            resolve_namespace_engine_credentials,
+        )
+
+        session_gen = get_db()
+        session = next(session_gen)
+        try:
+            try:
+                access_key, secret_key = resolve_namespace_engine_credentials(session, request.namespace, request.role)
+            except NamespaceCredentialError as exc:
+                await context.abort(grpc.StatusCode.NOT_FOUND, str(exc))
+                raise
+            config = engine_object_store_config()
+            return worker_runtime_pb2.WorkerEngineCredentialsResponse(
+                access_key=access_key,
+                secret_key=secret_key,
+                endpoint=config['endpoint'],
+                region=config['region'],
+            )
+        finally:
+            close_rpc_session(session_gen)
+
+    @_run_async_handler_in_thread
     async def GetAnalysisMetadata(
         self, request: worker_runtime_pb2.WorkerAnalysisMetadataRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerAnalysisMetadataResponse:
