@@ -124,8 +124,6 @@ jobs:
     permissions:
       contents: read
     env:
-      PORT: "8001"
-      FRONTEND_PORT: "3001"
       # Leave compute headroom for auto-previews and cleanup that overlap the
       # browser test which initiated them. No Playwright retries.
       PW_E2E_WORKERS: "2"
@@ -162,10 +160,6 @@ jobs:
 
       - name: Generate protocol code
         run: just generate-protocol
-
-      - name: Install backend dependencies
-        working-directory: packages/backend
-        run: uv sync
 
       - name: Install frontend dependencies
         working-directory: packages/frontend

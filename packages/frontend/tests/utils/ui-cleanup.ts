@@ -2,6 +2,7 @@ import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 import { findAnalysisIdByName, unregisterAnalysis, type E2EStorageState } from './api.js';
 import { installE2eContextGuards } from './page-guards.js';
+import { seedShardNamespace } from './namespace.js';
 import {
 	gotoAnalysesGallery,
 	gotoUdfLibrary,
@@ -233,14 +234,17 @@ async function waitForHealthChecksList(page: Page, timeout: number): Promise<voi
 }
 
 export async function createCleanupPage(browser: Browser, sessionState: E2EStorageState) {
-	const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
-	const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
+	const baseURL = process.env.PLAYWRIGHT_BASE_URL;
+	if (!baseURL) {
+		throw new Error('PLAYWRIGHT_BASE_URL must be set before running Playwright e2e tests');
+	}
 	const context = await browser.newContext({
 		baseURL,
 		storageState: structuredClone(sessionState)
 	});
 	installE2eContextGuards(context);
 	const page = await context.newPage();
+	await seedShardNamespace(page);
 	return { page, context };
 }
 

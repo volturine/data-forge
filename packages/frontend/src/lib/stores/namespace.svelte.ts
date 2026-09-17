@@ -1,6 +1,7 @@
 import { registerNamespace } from '$lib/api/namespaces';
 import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 import { configStore } from '$lib/stores/config.svelte';
+import { SvelteURLSearchParams } from 'svelte/reactivity';
 
 const NAMESPACE_KEY = 'namespace';
 
@@ -69,6 +70,22 @@ export async function initNamespace(): Promise<void> {
 
 	pending = (async () => {
 		markPending();
+
+		// Deep-link hint wins over the stored namespace: /?namespace=x seeds this
+		// browser profile with x (persisted below), so tests and shared links can
+		// target a namespace without clicking through the picker.
+		const urlNamespace = new SvelteURLSearchParams(window.location.search).get('namespace');
+		if (isValid(urlNamespace)) {
+			await idbSet(NAMESPACE_KEY, urlNamespace);
+			markReady(urlNamespace);
+			// Provisioning is fire-and-forget: failures surface on the first
+			// namespaced data request instead of blocking navigation.
+			registerNamespace(urlNamespace).match(
+				() => {},
+				() => {}
+			);
+			return;
+		}
 
 		const stored = await idbGet<string>(NAMESPACE_KEY);
 		if (isValid(stored)) {

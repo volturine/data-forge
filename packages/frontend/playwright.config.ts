@@ -26,8 +26,10 @@ function shardSuffixFromArgs(): string {
 	return `-shard-${current}-of-${total}`;
 }
 
-const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
+const baseURL = process.env.PLAYWRIGHT_BASE_URL;
+if (!baseURL) {
+	throw new Error('PLAYWRIGHT_BASE_URL must be set before running Playwright e2e tests');
+}
 const ciArgs = process.env.CI ? ['--disable-dev-shm-usage', '--disable-gpu'] : [];
 const artifactsRoot = path.resolve(process.cwd(), 'tests', '.artifacts');
 const shardSuffix = shardSuffixFromArgs();
@@ -53,9 +55,11 @@ export default defineConfig({
 	use: {
 		baseURL,
 		// Fail stuck clicks/gotos in seconds instead of sitting until the 120s
-		// test wall (default 0 = unlimited until test timeout).
-		actionTimeout: 15_000,
-		navigationTimeout: 15_000,
+		// test wall (default 0 = unlimited until test timeout). 30s also bounds
+		// response waits on runtime flows (engine spawn + preview) that
+		// legitimately take 11-23s under parallel load.
+		actionTimeout: 30_000,
+		navigationTimeout: 30_000,
 		trace: 'on-first-retry',
 		screenshot: 'only-on-failure'
 	},

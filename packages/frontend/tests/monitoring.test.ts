@@ -98,7 +98,7 @@ async function refreshBuildHistory(page: import('@playwright/test').Page) {
 				response.url().includes('/api/v1/compute/builds') &&
 				response.request().method() === 'GET' &&
 				response.ok(),
-			{ timeout: 5_000 }
+			{ timeout: 15_000 }
 		)
 		.catch(() => null);
 	await page.getByRole('button', { name: /Refresh History/i }).click();
@@ -648,7 +648,7 @@ test.describe('Monitoring – Builds tab', () => {
 			const panel = page.locator('#panel-builds');
 			await expect(panel).toBeVisible({ timeout: 5_000 });
 			await page.getByLabel(/Search builds/i).fill(ds);
-			const previewRow = await waitForDatasourcePreviewRow(page, panel, dsId);
+			const previewRow = await waitForDatasourcePreviewRow(page, panel, dsId, readyTimeoutMs());
 			await expect(previewRow).toContainText('Preview');
 			await expect(previewRow).toHaveAttribute('data-build-kind', 'preview');
 		} finally {
@@ -681,7 +681,7 @@ test.describe('Monitoring – Builds tab', () => {
 			// Search by unique name so the row is not lost under the unfiltered
 			// 50-row page limit when many parallel workers create builds.
 			await page.getByLabel(/Search builds/i).fill(ds);
-			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 15_000);
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, buildTimeoutMs());
 			await expect(buildRow).toBeVisible({ timeout: 5_000 });
 
 			await page.getByLabel(/Search builds/i).fill('ZZZNOMATCH');
@@ -701,7 +701,7 @@ test.describe('Monitoring – Builds tab', () => {
 			await gotoMonitoringTab(page, 'builds');
 			const panel = page.locator('#panel-builds');
 			await page.getByLabel(/Search builds/i).fill(ds);
-			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 15_000);
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, buildTimeoutMs());
 			await expect(buildRow).toHaveAttribute('data-build-kind', 'build');
 			await expect(buildRow).toContainText('Build');
 			await expect(buildRow).not.toContainText('Preview');
@@ -912,7 +912,7 @@ test.describe('Monitoring – Builds tab', () => {
 			await gotoMonitoringTab(page, 'builds');
 			const panel = page.locator('#panel-builds');
 			await page.getByLabel(/Search builds/i).fill(ds);
-			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 15_000);
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, buildTimeoutMs());
 			const buildRowId = await buildRow.getAttribute('data-build-row');
 			if (!buildRowId) throw new Error('Expected build row id');
 
@@ -936,7 +936,7 @@ test.describe('Monitoring – Builds tab', () => {
 			await gotoMonitoringTab(page, 'builds');
 			const panel = page.locator('#panel-builds');
 			await page.getByLabel(/Search builds/i).fill(ds);
-			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 15_000);
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, buildTimeoutMs());
 			const buildRowId = await buildRow.getAttribute('data-build-row');
 			if (!buildRowId) throw new Error('Expected build row id');
 
@@ -968,7 +968,7 @@ test.describe('Monitoring – Builds tab', () => {
 			await gotoMonitoringTab(page, 'builds');
 			const panel = page.locator('#panel-builds');
 			await page.getByLabel(/Search builds/i).fill(ds);
-			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, 15_000);
+			const buildRow = await waitForDatasourceBuildRow(page, panel, dsId, buildTimeoutMs());
 			const buildRowId = await buildRow.getAttribute('data-build-row');
 			if (!buildRowId) throw new Error('Expected build row id');
 

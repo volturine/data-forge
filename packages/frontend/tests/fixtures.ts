@@ -8,6 +8,7 @@ import {
 	type WorkerAuth
 } from './utils/api.js';
 import { installE2eContextGuards } from './utils/page-guards.js';
+import { seedShardNamespace } from './utils/namespace.js';
 import { createRequestTrace } from './utils/request-trace.js';
 import { waitForLayoutReady } from './utils/readiness.js';
 
@@ -101,6 +102,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 				storageState: structuredClone(workerAuth.sessionState)
 			});
 			installE2eContextGuards(context);
+			const seedPage = await context.newPage();
+			await seedShardNamespace(seedPage);
+			await seedPage.close();
 			await use(context);
 			await context.close();
 		},

@@ -1,0 +1,216 @@
+# E2E topology: every service in one Docker network, nothing published to the
+# host. The Playwright runner (started by scripts/test_e2e.sh) joins the same
+# network and tests against http://api:8000 — the api image serves the built
+# SPA, so there is no separate frontend service.
+#
+# Variable values come from scripts/test_e2e.sh, which sources
+# docker/env/e2e.env and exports E2E_DOCKER_NETWORK / DOCKER_SOCKET_GID /
+# E2E_DEPLOYMENT_ID before invoking compose.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    command: ["postgres", "-c", "max_connections=500"]
+    environment:
+      POSTGRES_DB: dataforge
+      POSTGRES_USER: dataforge
+      POSTGRES_PASSWORD: dataforge
+    volumes:
+      - pg-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dataforge -d dataforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0-rc.1
+    environment:
+      RUSTFS_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+    command: ["/data"]
+    volumes:
+      - rustfs-data:/data
+
+  api:
+    image: data-forge-api:e2e
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENV_FILE: ""
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+      DEBUG: ${DEBUG}
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: /app/data
+      DATABASE_URL: ${DATABASE_URL}
+      DISTRIBUTED_RUNTIME_ENABLED: "true"
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_HOST: 0.0.0.0
+      INTERNAL_GRPC_PORT: ${INTERNAL_GRPC_PORT}
+      WORKER_DATA_PLANE_GRPC_TARGET: worker:50052
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE}
+      DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW}
+      DATABASE_POOL_TIMEOUT: ${DATABASE_POOL_TIMEOUT}
+      DEFAULT_NAMESPACE: ${DEFAULT_NAMESPACE}
+      UPLOAD_CHUNK_SIZE: ${UPLOAD_CHUNK_SIZE}
+      OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+      POLARS_CORES_AVAILABLE: ${POLARS_CORES_AVAILABLE}
+      POLARS_MAX_MEMORY_MB: ${POLARS_MAX_MEMORY_MB}
+      POLARS_STREAMING_CHUNK_SIZE: ${POLARS_STREAMING_CHUNK_SIZE}
+      MAX_CONCURRENT_ENGINES: ${MAX_CONCURRENT_ENGINES}
+      COMPUTE_REQUEST_CONCURRENCY: ${COMPUTE_REQUEST_CONCURRENCY}
+      BUILD_WORKER_MIN_PROCESSES: ${BUILD_WORKER_MIN_PROCESSES}
+      BUILD_WORKER_MAX_PROCESSES: ${BUILD_WORKER_MAX_PROCESSES}
+      BUILD_WORKER_IDLE_EXIT_SECONDS: ${BUILD_WORKER_IDLE_EXIT_SECONDS}
+      WORKERS: ${WORKERS}
+      WORKER_CONNECTIONS: ${WORKER_CONNECTIONS}
+      LOG_LEVEL: ${LOG_LEVEL}
+      UVICORN_ACCESS_LOG: ${UVICORN_ACCESS_LOG}
+      LOG_QUEUE_OVERFLOW: ${LOG_QUEUE_OVERFLOW}
+      LOG_MAX_BODY_SIZE: ${LOG_MAX_BODY_SIZE}
+      PERSIST_PREVIEW_RUNS: ${PERSIST_PREVIEW_RUNS}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY}
+      AUTH_REQUIRED: ${AUTH_REQUIRED}
+      VERIFY_EMAIL_ADDRESS: ${VERIFY_EMAIL_ADDRESS}
+      DEFAULT_USER_EMAIL: ${DEFAULT_USER_EMAIL}
+      DEFAULT_USER_PASSWORD: ${DEFAULT_USER_PASSWORD}
+      DEFAULT_USER_NAME: ${DEFAULT_USER_NAME}
+      AUTH_FRONTEND_URL: ${AUTH_FRONTEND_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      TIMEZONE: ${TIMEZONE}
+      NORMALIZE_TZ: ${NORMALIZE_TZ}
+    volumes:
+      - data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready').status==200 else 1)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  scheduler:
+    image: data-forge-scheduler:e2e
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      ENV_FILE: ""
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+      DEBUG: ${DEBUG}
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: /app/data
+      DATABASE_URL: ${DATABASE_URL}
+      DISTRIBUTED_RUNTIME_ENABLED: "true"
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_TARGET: api:50051
+      DEFAULT_NAMESPACE: ${DEFAULT_NAMESPACE}
+      OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+      WORKERS: "1"
+      SCHEDULER_CHECK_INTERVAL: ${SCHEDULER_CHECK_INTERVAL}
+      LOG_LEVEL: ${LOG_LEVEL}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY}
+      TIMEZONE: ${TIMEZONE}
+    volumes:
+      - data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\\\"select count(*) from public.runtime_workers where kind='scheduler' and stopped_at is null\\\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  worker:
+    image: data-forge-worker:e2e
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      ENV_FILE: ""
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+      DEBUG: ${DEBUG}
+      # Full production mode: digest-pinned image references are recommended
+      # but not enforced; namespace-scoped engine credentials are mandatory.
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: /app/data
+      DATABASE_URL: ${DATABASE_URL}
+      DISTRIBUTED_RUNTIME_ENABLED: "true"
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_TARGET: api:50051
+      WORKER_DATA_PLANE_GRPC_HOST: 0.0.0.0
+      WORKER_DATA_PLANE_GRPC_PORT: ${WORKER_DATA_PLANE_GRPC_PORT}
+      DEFAULT_NAMESPACE: ${DEFAULT_NAMESPACE}
+      OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+      WORKERS: "1"
+      POLARS_CORES_AVAILABLE: ${POLARS_CORES_AVAILABLE}
+      POLARS_MAX_MEMORY_MB: ${POLARS_MAX_MEMORY_MB}
+      POLARS_STREAMING_CHUNK_SIZE: ${POLARS_STREAMING_CHUNK_SIZE}
+      MAX_CONCURRENT_ENGINES: ${MAX_CONCURRENT_ENGINES}
+      COMPUTE_REQUEST_CONCURRENCY: ${COMPUTE_REQUEST_CONCURRENCY}
+      BUILD_WORKER_MIN_PROCESSES: ${BUILD_WORKER_MIN_PROCESSES}
+      BUILD_WORKER_MAX_PROCESSES: ${BUILD_WORKER_MAX_PROCESSES}
+      BUILD_WORKER_IDLE_EXIT_SECONDS: ${BUILD_WORKER_IDLE_EXIT_SECONDS}
+      LOG_LEVEL: ${LOG_LEVEL}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY}
+      TIMEZONE: ${TIMEZONE}
+      NORMALIZE_TZ: ${NORMALIZE_TZ}
+      ENGINE_DOCKER_HOST: unix:///var/run/docker.sock
+      ENGINE_DOCKER_NETWORK: ${E2E_DOCKER_NETWORK}
+      ENGINE_IMAGE: data-forge-polars-engine:e2e
+      ENGINE_RPC_PORT: "50053"
+      ENGINE_WARM_POOL_SIZE: "2"
+      ENGINE_START_TIMEOUT_SECONDS: ${E2E_ENGINE_START_TIMEOUT_SECONDS}
+      ENGINE_SHUTDOWN_GRACE_SECONDS: "10"
+      ENGINE_HEARTBEAT_INTERVAL_SECONDS: "5"
+      ENGINE_OBJECT_STORE_ENDPOINT: http://rustfs:9000
+      ENGINE_IDLE_TTL_SECONDS: ${E2E_ENGINE_IDLE_TTL_SECONDS}
+      ENGINE_IDLE_REAP_INTERVAL_SECONDS: ${E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS}
+      DATAFORGE_DEPLOYMENT_ID: ${E2E_DEPLOYMENT_ID}
+    volumes:
+      - data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_SOCKET_GID}"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\\\"select count(*) from public.runtime_workers where kind='build_manager' and stopped_at is null\\\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  data:
+  pg-data:
+  rustfs-data:
+
+networks:
+  default:
+    name: ${E2E_DOCKER_NETWORK}

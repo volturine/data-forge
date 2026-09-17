@@ -30,3 +30,5 @@ node_modules/
 .docker-home/
 
 *__pycache__/
+.reqtrace/
+pi-session-*.html
