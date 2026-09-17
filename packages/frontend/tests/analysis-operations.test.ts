@@ -16,8 +16,10 @@ import { uid } from './utils/uid.js';
 import type { Browser } from '@playwright/test';
 import { readyTimeoutMs, waitForInlinePreviewReady } from './utils/readiness.js';
 
-const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
+const baseURL = process.env.PLAYWRIGHT_BASE_URL;
+if (!baseURL) {
+	throw new Error('PLAYWRIGHT_BASE_URL must be set before running Playwright e2e tests');
+}
 
 let sharedBaseDatasourceName = '';
 let sharedBaseDatasourceId = '';

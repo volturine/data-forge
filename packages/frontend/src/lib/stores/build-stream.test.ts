@@ -153,12 +153,8 @@ const MINIMAL_BUILD_REQUEST = {
 	analysis_pipeline: {
 		analysis_id: 'analysis-1',
 		tabs: []
-	}
-} satisfies BuildRequest;
-
-const BUILD_REQUEST_WITH_NULL_TAB = {
-	...MINIMAL_BUILD_REQUEST,
-	tab_id: null
+	},
+	tab_id: 'tab-1'
 } satisfies BuildRequest;
 
 function makeDetail(overrides: Partial<BuildRunDetail> = {}): BuildRunDetail {
@@ -237,7 +233,7 @@ describe('BuildStreamStore', () => {
 
 	test('start requests a live build and connects to its detail stream', () => {
 		const store = new BuildStreamStore();
-		store.start(BUILD_REQUEST_WITH_NULL_TAB);
+		store.start(MINIMAL_BUILD_REQUEST);
 
 		expect(mockRetainActivity).toHaveBeenCalledTimes(1);
 		expect(mockStartRuntimeBuild).toHaveBeenCalledWith({
@@ -245,7 +241,7 @@ describe('BuildStreamStore', () => {
 				analysis_id: 'analysis-1',
 				tabs: []
 			},
-			tab_id: null
+			tab_id: 'tab-1'
 		});
 		expect(MockWebSocket.instances).toHaveLength(1);
 		const socket = MockWebSocket.instances[0];
@@ -281,7 +277,7 @@ describe('BuildStreamStore', () => {
 		store.watch('build-1');
 		const first = MockWebSocket.instances[0];
 
-		store.start(BUILD_REQUEST_WITH_NULL_TAB);
+		store.start(MINIMAL_BUILD_REQUEST);
 		const second = MockWebSocket.instances[1];
 
 		first.emit('close', { code: 1000, reason: 'stale close' });

@@ -491,6 +491,12 @@
 			buildStarting = false;
 			return;
 		}
+		if (!activeTab) {
+			unpausePreviews();
+			error = 'No active tab to build.';
+			buildStarting = false;
+			return;
+		}
 		buildStore.onSettled = (status) => {
 			unpausePreviews();
 			if (status !== 'completed' || !outputDatasourceId) return;
@@ -499,7 +505,7 @@
 		};
 		buildStore.start({
 			analysis_pipeline: pipeline,
-			tab_id: activeTab?.id ?? null
+			tab_id: activeTab.id
 		});
 		buildStarting = false;
 	}
