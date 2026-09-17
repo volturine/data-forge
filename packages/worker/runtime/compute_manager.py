@@ -408,16 +408,18 @@ class ProcessManager:
                 idle_engine_info.engine.shutdown()
                 changed_namespaces.add(evict_info[0].namespace)
 
+            # Health checks are engine RPCs: pop under the lock, probe outside it.
             warm_engine: ComputeEngine | None = None
-            with self._capacity_changed:
-                while self._warm_pool:
-                    candidate = self._warm_pool.popleft()
-                    if candidate.check_health():
-                        warm_engine = candidate
-                        break
-                    else:
-                        with contextlib.suppress(Exception):
-                            candidate.shutdown()
+            while warm_engine is None:
+                with self._capacity_changed:
+                    candidate = self._warm_pool.popleft() if self._warm_pool else None
+                if candidate is None:
+                    break
+                if candidate.check_health():
+                    warm_engine = candidate
+                else:
+                    with contextlib.suppress(Exception):
+                        candidate.shutdown()
 
             if warm_engine is not None:
                 logger.info("Claiming warm engine from pool for key %s", qualified_key)
@@ -474,12 +476,16 @@ class ProcessManager:
         return {k: v for k in _RESOURCE_KEYS if (v := config.get(k)) is not None and v != defaults.get(k)}
 
     def _find_idle_engine_locked(self) -> tuple[EngineIdentityKey | None, EngineInfo | None]:
-        """Pick the least-recently-used engine with no reservation and no active job."""
+        """Pick the least-recently-used engine with no reservation and no active job.
+
+        Reads in-memory liveness only. This runs on every capacity decision
+        while the engines lock is held, so it must never touch Docker.
+        """
         idle_key: EngineIdentityKey | None = None
         idle_info: EngineInfo | None = None
         for active_key, info in self._engines.items():
             engine = info.engine
-            if info.active_reservations or (engine.current_job_id and engine.is_process_alive()):
+            if info.active_reservations or (engine.current_job_id and engine.last_known_alive):
                 continue
             if idle_info is not None and info.last_activity >= idle_info.last_activity:
                 continue
@@ -620,9 +626,12 @@ class ProcessManager:
                     current_engine_run_id=None,
                 )
 
+            # Status is a read of tracked state, not a probe: snapshots cover
+            # every engine in the namespace and run inline on engine lifecycle
+            # changes. The heartbeat loop owns liveness and marks an engine dead
+            # as soon as it stops answering.
             engine = info.engine
-            engine.check_health()
-            is_alive = engine.is_process_alive()
+            is_alive = engine.last_known_alive
             resource_config = (self._normalize_config(engine.resource_config) or None) if engine.resource_config else None
             effective_resources = engine.effective_resources or None
 
@@ -786,34 +795,36 @@ class ProcessManager:
             # pool faster than sequential spawns can refill it, and every wait
             # for a fresh spawn is a preview/build paying full container boot.
             while not self._closed and not self._reaper_stop.is_set():
-                deficit: list[int] = []
                 with self._capacity_changed:
                     target_warm = settings.engine_warm_pool_size
                     current_warm = len(self._warm_pool)
-                    used = len(self._engines) + len(self._warm_pool) + self._capacity_starts
-                    if current_warm >= target_warm or used >= settings.max_concurrent_engines:
+                    used = self._capacity_used_locked()
+                    headroom = settings.max_concurrent_engines - used
+                    # Never reserve past max_concurrent_engines: the spawns below
+                    # are all started at once, so the whole batch has to fit.
+                    batch_size = min(target_warm - current_warm, headroom)
+                    if batch_size <= 0:
                         break
-                    deficit = list(range(target_warm - current_warm))
-                    self._capacity_starts += len(deficit)
-                if not deficit:
-                    continue
+                    self._capacity_starts += batch_size
 
-                def spawn_item(_item: int, _factory: Callable[[], ComputeEngine] = factory) -> ComputeEngine | None:
-                    return self._spawn_warm_engine(_factory)
+                with ThreadPoolExecutor(max_workers=batch_size) as pool:
+                    engines = [future.result() for future in [pool.submit(self._spawn_warm_engine, factory) for _ in range(batch_size)]]
 
-                with ThreadPoolExecutor(max_workers=len(deficit)) as pool:
-                    engines = list(pool.map(spawn_item, deficit))
                 with self._capacity_changed:
-                    self._capacity_starts = max(0, self._capacity_starts - len(deficit))
+                    self._capacity_starts = max(0, self._capacity_starts - batch_size)
                     for engine in engines:
-                        if engine is not None and not self._closed and not self._reaper_stop.is_set():
-                            self._warm_pool.append(engine)
-                        elif engine is not None:
+                        if engine is None:
+                            continue
+                        if self._closed or self._reaper_stop.is_set():
                             with contextlib.suppress(Exception):
                                 engine.shutdown()
-                    if any(engine is None for engine in engines):
-                        time.sleep(1.0)
+                            continue
+                        self._warm_pool.append(engine)
                     self._capacity_changed.notify_all()
+                if any(engine is None for engine in engines):
+                    # Back off outside the lock: engines lock is the runtime's
+                    # hot path and holding it here stalls every claim.
+                    time.sleep(1.0)
 
     def _reap_idle_engines_loop(self) -> None:
         while not self._reaper_stop.wait(self._idle_reap_interval_seconds):
@@ -828,10 +839,17 @@ class ProcessManager:
         now = datetime.now(UTC)
         stale: list[tuple[EngineIdentityKey, EngineInfo]] = []
         changed_namespaces: set[str] = set()
+        with self._engines_lock:
+            tracked = list(self._engines.items())
+        # Refreshing liveness is Docker I/O, one round trip per engine. It runs
+        # before the lock is taken so reaping never blocks claims.
+        liveness = {key: info.engine.is_process_alive() for key, info in tracked}
         with self._capacity_changed:
-            for key, info in list(self._engines.items()):
+            for key, info in tracked:
+                if self._engines.get(key) is not info:
+                    continue
                 engine = info.engine
-                is_alive = engine.is_process_alive()
+                is_alive = liveness[key]
                 is_busy = bool(engine.current_job_id and is_alive)
                 idle_seconds = (now - info.last_activity).total_seconds()
                 if is_alive and (info.active_reservations or is_busy or idle_seconds < self._idle_ttl_seconds):

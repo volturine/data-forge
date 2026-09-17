@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeVar, cast
@@ -12,6 +13,32 @@ from dataforge_protocol import common_pb2, iceberg_pb2, iceberg_pb2_grpc, object
 
 _TOKEN_METADATA_KEY = 'x-internal-token'
 _MAX_DATA_PLANE_MESSAGE_BYTES = 128 * 1024 * 1024
+
+_channel_lock = threading.Lock()
+_channels: dict[str, grpc.Channel] = {}
+
+
+def _shared_channel(target: str) -> grpc.Channel:
+    """One channel per target for the whole process.
+
+    A client is constructed per request handler; gRPC channels are thread-safe
+    and multiplex concurrent calls, so building one per client charged every
+    request a DNS, TCP and HTTP/2 handshake.
+    """
+    with _channel_lock:
+        channel = _channels.get(target)
+        if channel is None:
+            channel = grpc.insecure_channel(
+                target,
+                options=(
+                    ('grpc.max_send_message_length', _MAX_DATA_PLANE_MESSAGE_BYTES),
+                    ('grpc.max_receive_message_length', _MAX_DATA_PLANE_MESSAGE_BYTES),
+                ),
+            )
+            _channels[target] = channel
+        return channel
+
+
 _T = TypeVar('_T')
 
 
@@ -59,13 +86,7 @@ class WorkerDataPlaneClient:
         self._token = token if token is not None else settings.internal_api_token
         self._timeout_seconds = timeout_seconds
         self._trivial_timeout_seconds = trivial_timeout_seconds
-        self._channel = grpc.insecure_channel(
-            self._target,
-            options=(
-                ('grpc.max_send_message_length', _MAX_DATA_PLANE_MESSAGE_BYTES),
-                ('grpc.max_receive_message_length', _MAX_DATA_PLANE_MESSAGE_BYTES),
-            ),
-        )
+        self._channel = _shared_channel(self._target)
         self._object_store = object_store_pb2_grpc.ObjectStoreServiceStub(self._channel)
         self._iceberg = iceberg_pb2_grpc.IcebergServiceStub(self._channel)
 
@@ -239,7 +260,7 @@ class WorkerDataPlaneClient:
         return ((_TOKEN_METADATA_KEY, self._token),)
 
     def close(self) -> None:
-        self._channel.close()
+        """Release the client. The channel is process-shared and stays open."""
 
     def __enter__(self) -> WorkerDataPlaneClient:
         return self

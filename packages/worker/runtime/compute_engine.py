@@ -113,6 +113,11 @@ class PolarsComputeEngine:
         """Check if the subprocess is still alive."""
         return self.process is not None and self.process.is_alive()
 
+    @property
+    def last_known_alive(self) -> bool:
+        """Local subprocess liveness is already a cheap in-memory check."""
+        return self.is_process_alive()
+
     def check_health(self) -> bool:
         """Check process health and reset state if process died unexpectedly.
 

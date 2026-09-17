@@ -19,3 +19,13 @@ def sample_datasource(tmp_path):
             "options": {},
         },
     )
+
+
+@pytest.fixture(autouse=True)
+def _clear_engine_credential_cache():
+    """Engine credentials are cached for the worker's lifetime; isolate tests."""
+    from runtime.engine_credentials import _cache
+
+    _cache.clear()
+    yield
+    _cache.clear()

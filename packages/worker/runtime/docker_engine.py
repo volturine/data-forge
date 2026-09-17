@@ -39,6 +39,11 @@ _docker_runtime_lock = threading.Lock()
 _cached_daemon_cpu_count: int | None = None
 _validated_image_ref: str | None = None
 _validated_image_id: str | None = None
+
+# Docker inspections are the most frequent engine I/O in the runtime (capacity
+# decisions, status snapshots, idle reaping). One second of staleness is
+# invisible to those decisions and keeps the daemon off the hot path.
+_LIVENESS_CACHE_SECONDS = 1.0
 _validated_network: str | None = None
 
 
@@ -203,6 +208,11 @@ class DockerComputeEngine(ComputeEngine):
         self.oom_killed: bool | None = None
         self.termination_reason: str | None = None
         self._lock = threading.RLock()
+        # Liveness is tracked separately from the lifecycle lock: start(),
+        # bind_identity() and shutdown() hold _lock for as long as a container
+        # boot takes, and no status or capacity decision may queue behind that.
+        self._liveness_lock = threading.Lock()
+        self._liveness_checked_at = 0.0
         self._pending_results: dict[str, EngineResult] = {}
         self._pending_progress: dict[str, deque[EngineProgressEvent]] = {}
         self._active_job_ids: set[str] = set()
@@ -538,20 +548,39 @@ class DockerComputeEngine(ComputeEngine):
                             self._capacity_notifier()
                     return
 
+    @property
+    def last_known_alive(self) -> bool:
+        """Liveness from in-memory state; no Docker or RPC round trip."""
+        return self._alive
+
     def is_process_alive(self) -> bool:
-        with self._lock:
-            if not self._alive or self._container is None:
-                return False
-            try:
-                self._container.reload()
-                running = self._container.status == "running"
-                if not running:
-                    self._alive = False
-                    self._capture_termination(self._container)
-                return running
-            except Exception:
+        """Liveness backed by Docker, rate-limited and never lock-blocked.
+
+        The daemon round trip is cached for _LIVENESS_CACHE_SECONDS and skipped
+        entirely while another thread is already probing, so a caller can never
+        stall on one slow container inspection. The heartbeat loop keeps
+        ``_alive`` current between probes.
+        """
+        container = self._container
+        if not self._alive or container is None:
+            return False
+        if time.monotonic() - self._liveness_checked_at < _LIVENESS_CACHE_SECONDS:
+            return self._alive
+        if not self._liveness_lock.acquire(blocking=False):
+            return self._alive
+        try:
+            container.reload()
+            running = container.status == "running"
+            self._liveness_checked_at = time.monotonic()
+            if not running:
                 self._alive = False
-                return False
+                self._capture_termination(container)
+            return running
+        except Exception:
+            self._alive = False
+            return False
+        finally:
+            self._liveness_lock.release()
 
     def check_health(self) -> bool:
         if not self.is_process_alive():
@@ -569,30 +598,37 @@ class DockerComputeEngine(ComputeEngine):
             return False
 
     def _submit(self, kind: str, payload: dict[str, object], *, job_id: str | None = None) -> str:
+        if not self.is_process_alive():
+            self.start()
         with self._lock:
-            if not self.is_process_alive():
-                self.start()
-            assert self._stub is not None
+            if self._stub is None:
+                raise RuntimeError(f"Engine {self.identity.resource_id} has no RPC channel")
+            stub = self._stub
+            metadata = self._metadata()
             job_id = job_id or str(uuid.uuid4())
             self._active_job_ids.add(job_id)
             self._publish_current_job_id(job_id)
-            try:
-                self._stub.SubmitJob(
-                    engine_runtime_pb2.EngineSubmitJobRequest(
-                        protocol_version=ENGINE_PROTOCOL_VERSION,
-                        job_id=job_id,
-                        kind=kind,
-                        payload_json=encode_json_bytes(payload),
-                    ),
-                    timeout=settings.engine_start_timeout_seconds,
-                    metadata=self._metadata(),
-                )
-            except Exception:
+        # The submit RPC runs unlocked: it waits for the engine to accept the
+        # job, and holding the lifecycle lock across it blocks shutdown, status
+        # and every other caller of this engine for the full submit timeout.
+        try:
+            stub.SubmitJob(
+                engine_runtime_pb2.EngineSubmitJobRequest(
+                    protocol_version=ENGINE_PROTOCOL_VERSION,
+                    job_id=job_id,
+                    kind=kind,
+                    payload_json=encode_json_bytes(payload),
+                ),
+                timeout=settings.engine_start_timeout_seconds,
+                metadata=metadata,
+            )
+        except Exception:
+            with self._lock:
                 self._active_job_ids.discard(job_id)
                 self._publish_current_job_id(next(iter(self._active_job_ids), None))
-                raise
-            threading.Thread(target=self._watch_job, args=(job_id,), name=f"engine-watch-{job_id}", daemon=True).start()
-            return job_id
+            raise
+        threading.Thread(target=self._watch_job, args=(job_id,), name=f"engine-watch-{job_id}", daemon=True).start()
+        return job_id
 
     def preview(
         self, datasource_config: dict, steps: list[dict], row_limit: int = 1000, offset: int = 0, additional_datasources: dict[str, dict] | None = None

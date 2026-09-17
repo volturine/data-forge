@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
 from pathlib import Path
 
 import grpc
@@ -386,3 +388,93 @@ def test_resolve_launch_context_caches_daemon_and_image_lookups(monkeypatch) -> 
     assert client.info_calls == 1
     assert client.images.calls == 1
     assert client.networks.calls == 1
+
+
+def test_engine_credentials_are_cached_per_namespace_and_role(monkeypatch) -> None:
+    requests: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def engine_credentials(self, *, namespace: str, role: str):
+            requests.append((namespace, role))
+            return worker_runtime_pb2.WorkerEngineCredentialsResponse(access_key="ns-reader", secret_key="ns-secret")
+
+    monkeypatch.setattr("runtime.engine_credentials.client_from_env", lambda: FakeClient())
+
+    first = resolve_engine_credentials("tenant-a", _identity())
+    second = resolve_engine_credentials("tenant-a", _identity())
+
+    assert first == second
+    assert requests == [("tenant-a", "reader")]
+
+
+class _FakeContainer:
+    def __init__(self, status: str = "running") -> None:
+        self.status = status
+        self.reloads = 0
+
+    def reload(self) -> None:
+        self.reloads += 1
+
+
+def test_liveness_probe_is_rate_limited(monkeypatch) -> None:
+    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    container = _FakeContainer()
+    engine._container = container
+    engine._alive = True
+
+    assert engine.is_process_alive()
+    assert engine.is_process_alive()
+    assert container.reloads == 1
+
+    # Cached liveness answers without any daemon round trip at all.
+    assert engine.last_known_alive is True
+    assert container.reloads == 1
+
+
+def test_liveness_probe_does_not_wait_for_the_lifecycle_lock() -> None:
+    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    engine._container = _FakeContainer()
+    engine._alive = True
+    lock_held = threading.Event()
+    release = threading.Event()
+
+    def hold_lifecycle_lock() -> None:
+        with engine._lock:
+            lock_held.set()
+            release.wait(5)
+
+    holder = threading.Thread(target=hold_lifecycle_lock, daemon=True)
+    holder.start()
+    try:
+        assert lock_held.wait(2)
+        # A container boot can hold the lifecycle lock for minutes; status and
+        # capacity callers must not queue behind it.
+        started = time.monotonic()
+        assert engine.is_process_alive()
+        assert time.monotonic() - started < 1.0
+    finally:
+        release.set()
+        holder.join(timeout=5)
+
+
+def test_submit_releases_the_lifecycle_lock_during_the_rpc(monkeypatch) -> None:
+    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    engine._container = _FakeContainer()
+    engine._alive = True
+    engine._token = "token"
+    lock_free_during_rpc = threading.Event()
+
+    class FakeStub:
+        def SubmitJob(self, request, timeout=None, metadata=None):  # noqa: N802 - gRPC stub name
+            probe = threading.Thread(target=lambda: engine._lock.acquire(timeout=2) and (lock_free_during_rpc.set(), engine._lock.release()))
+            probe.start()
+            probe.join(timeout=3)
+            return engine_runtime_pb2.EngineJobReference(job_id=request.job_id)
+
+    engine._stub = FakeStub()
+    monkeypatch.setattr(engine, "_watch_job", lambda job_id: None)
+
+    job_id = engine._submit("preview", {})
+
+    assert job_id
+    assert lock_free_during_rpc.is_set()

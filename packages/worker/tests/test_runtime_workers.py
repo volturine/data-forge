@@ -536,3 +536,21 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
         runtime_process.ENGINE_REQUEST_KINDS,
     ]
     assert ("stop_worker", {"worker_id": "manager-1"}) in client.calls
+
+
+def test_runtime_clients_share_one_channel_per_target(monkeypatch) -> None:
+    """Creating a client per hop must not create a connection per hop."""
+    from runtime import worker_runtime_client as client_module
+
+    monkeypatch.setattr(client_module, "_channels", {})
+    monkeypatch.setenv("INTERNAL_GRPC_TARGET", "api:50051")
+    monkeypatch.setenv("INTERNAL_API_TOKEN", "token")
+
+    first = client_module.client_from_env()
+    second = client_module.client_from_env()
+
+    assert first._channel is second._channel
+
+    # Releasing a client leaves the shared channel usable for the next hop.
+    first.close()
+    assert client_module.client_from_env()._channel is second._channel

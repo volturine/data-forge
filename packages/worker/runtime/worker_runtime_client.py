@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import os
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -27,6 +28,27 @@ from runtime.protocol_mapping import (
 )
 
 _TOKEN_METADATA_KEY = "x-internal-token"
+
+_channel_lock = threading.Lock()
+_channels: dict[str, grpc.Channel] = {}
+
+
+def _shared_channel(target: str) -> grpc.Channel:
+    """One channel per target for the whole process.
+
+    gRPC channels are thread-safe and multiplex concurrent calls. The runtime
+    creates a client per hop (metadata lookups, engine runs, snapshots), so a
+    channel per client meant a DNS, TCP and HTTP/2 handshake on every call and
+    a socket left open until garbage collection.
+    """
+    with _channel_lock:
+        channel = _channels.get(target)
+        if channel is None:
+            channel = grpc.insecure_channel(target)
+            _channels[target] = channel
+        return channel
+
+
 _T = TypeVar("_T")
 
 
@@ -138,7 +160,7 @@ class WorkerRuntimeClient:
         self._token = token
         self._timeout_seconds = timeout_seconds
         self._registration_retry_seconds = registration_retry_seconds
-        self._channel = grpc.insecure_channel(target)
+        self._channel = _shared_channel(target)
         self._stub = worker_runtime_pb2_grpc.WorkerRuntimeServiceStub(self._channel)
 
     def register_worker(self, *, worker_id: str, kind: str, hostname: str, pid: int, capacity: int, active_jobs: int = 0) -> None:
@@ -943,7 +965,7 @@ class WorkerRuntimeClient:
         return [TelegramTarget(chat_id=target.chat_id, bot_token=target.bot_token) for target in response.targets]
 
     def close(self) -> None:
-        self._channel.close()
+        """Release the client. The channel is process-shared and stays open."""
 
     def __enter__(self) -> WorkerRuntimeClient:
         return self

@@ -37,6 +37,10 @@ class _FakeEngine:
     def is_process_alive(self) -> bool:
         return self._alive
 
+    @property
+    def last_known_alive(self) -> bool:
+        return self._alive
+
     def check_health(self) -> bool:
         return self._alive
 
@@ -348,3 +352,102 @@ def test_process_manager_warm_pool_replenishes_and_claims(monkeypatch) -> None:
     finally:
         manager.shutdown_all()
         assert all(not w.is_process_alive() for w in created_warm)
+
+
+def test_capacity_decisions_never_probe_the_engine_runtime(monkeypatch) -> None:
+    """Capacity scans run under the engines lock, so they must not do engine I/O.
+
+    A container inspection or engine RPC can hang for as long as a container
+    boot takes. When a capacity scan performs one, every claim, release and
+    status call in the worker queues behind it.
+    """
+    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    hang_probes = threading.Event()
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+
+    class HangingProbeEngine(_FakeEngine):
+        def is_process_alive(self) -> bool:
+            if hang_probes.is_set():
+                probe_started.set()
+                release_probe.wait(10)
+            return self._alive
+
+    busy = HangingProbeEngine("analysis-busy")
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, busy))
+    try:
+        manager.spawn_engine(_analysis_identity("analysis-busy"))
+        busy.current_job_id = "job-1"
+
+        # Somebody (idle reaper, status refresh) is inside a stuck probe.
+        hang_probes.set()
+        stuck = threading.Thread(target=busy.is_process_alive, daemon=True)
+        stuck.start()
+        assert probe_started.wait(2)
+
+        started = time.monotonic()
+        assert manager.can_admit_spawn() is False
+        assert time.monotonic() - started < 1.0
+    finally:
+        release_probe.set()
+        hang_probes.clear()
+        manager.shutdown_all()
+
+
+def test_engine_status_reads_tracked_liveness_without_probing() -> None:
+    class CountingEngine(_FakeEngine):
+        def __init__(self, resource_id: str, resource_config: dict | None = None) -> None:
+            super().__init__(resource_id, resource_config)
+            self.probes = 0
+
+        def is_process_alive(self) -> bool:
+            self.probes += 1
+            return self._alive
+
+        def check_health(self) -> bool:
+            self.probes += 1
+            return self._alive
+
+    engine = CountingEngine("analysis-status")
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, engine))
+    try:
+        identity = _analysis_identity("analysis-status")
+        manager.spawn_engine(identity)
+        probes_after_spawn = engine.probes
+
+        status = manager.get_engine_status(identity)
+
+        assert status.status == "healthy"
+        assert engine.probes == probes_after_spawn
+    finally:
+        manager.shutdown_all()
+
+
+def test_warm_pool_never_reserves_beyond_max_concurrent_engines(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "engine_warm_pool_size", 4)
+    monkeypatch.setattr(settings, "max_concurrent_engines", 2)
+
+    created: list[_FakeWarmEngine] = []
+
+    def warm_factory() -> ComputeEngine:
+        engine = _FakeWarmEngine()
+        created.append(engine)
+        return cast(ComputeEngine, engine)
+
+    manager = ProcessManager(
+        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        warm_engine_factory=warm_factory,
+    )
+    try:
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and len(manager._warm_pool) < 2:
+            time.sleep(0.02)
+
+        assert len(manager._warm_pool) == 2
+        # The whole deficit is spawned at once, so the batch has to fit in the
+        # remaining capacity; a warm pool larger than the cap starves real work.
+        time.sleep(0.2)
+        assert len(created) == 2
+        assert manager._capacity_starts == 0
+    finally:
+        manager.shutdown_all()

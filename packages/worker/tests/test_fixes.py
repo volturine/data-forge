@@ -439,6 +439,10 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         def is_process_alive(self) -> bool:
             return self.alive
 
+        @property
+        def last_known_alive(self) -> bool:
+            return self.alive
+
         def check_health(self) -> bool:
             return self.alive
 

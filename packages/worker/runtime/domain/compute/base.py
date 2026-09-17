@@ -162,6 +162,16 @@ class ComputeEngine(Protocol):
     def is_process_alive(self) -> bool:
         raise NotImplementedError
 
+    @property
+    def last_known_alive(self) -> bool:
+        """Liveness from in-memory state only, without touching the runtime.
+
+        Callers holding a manager lock must use this: probing Docker or the
+        engine RPC while the engines lock is held stalls every other engine
+        operation behind one slow daemon round trip.
+        """
+        raise NotImplementedError
+
     def check_health(self) -> bool:
         raise NotImplementedError
 
