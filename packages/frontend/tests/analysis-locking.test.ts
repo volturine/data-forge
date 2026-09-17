@@ -2,13 +2,13 @@ import { test, expect } from './fixtures.js';
 import { createAnalysisViaUi, registerViaUi, uploadDatasourceViaUi } from './utils/user-flows.js';
 import { gotoAnalysisEditor, gotoReadOnlyAnalysisEditor } from './utils/analysis.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { e2eBaseURL } from './utils/base-url.js';
 
 test.describe('Analyses – multi-user locking', () => {
 	test('second account stays read-only until the active editor leaves, then takes over', async ({
 		browser
 	}) => {
-		const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
-		const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
+		const baseURL = e2eBaseURL();
 		const id = Date.now().toString(36);
 		const datasourceName = `e2e-lock-ds-${id}`;
 		const analysisName = `E2E Lock ${id}`;

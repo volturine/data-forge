@@ -8,14 +8,13 @@ import {
 	type WorkerAuth
 } from './utils/api.js';
 import { installE2eContextGuards } from './utils/page-guards.js';
-import { seedShardNamespace } from './utils/namespace.js';
+import { e2eBaseURL } from './utils/base-url.js';
 import { createRequestTrace } from './utils/request-trace.js';
 import { waitForLayoutReady } from './utils/readiness.js';
 
 export { expect } from '@playwright/test';
 
-const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
+const baseURL = e2eBaseURL();
 const authRequired = process.env.AUTH_REQUIRED !== 'false';
 
 async function expectSignedIn(page: Page): Promise<void> {
@@ -102,9 +101,6 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 				storageState: structuredClone(workerAuth.sessionState)
 			});
 			installE2eContextGuards(context);
-			const seedPage = await context.newPage();
-			await seedShardNamespace(seedPage);
-			await seedPage.close();
 			await use(context);
 			await context.close();
 		},

@@ -5,29 +5,13 @@ import { dialogByTextbox } from './locators.js';
 const SIDEBAR = 'aside[aria-label="Main navigation"]';
 
 /**
- * Namespace this run's tests operate in.
+ * The namespace every test runs in.
  *
- * Parallel Playwright shards share one app stack, so each shard works inside
- * its own namespace (its own bucket, engine credentials, and data) to avoid
- * cross-shard interference. Empty env = the app's default namespace.
+ * All Playwright shards share one app stack and one namespace: tests isolate
+ * themselves by unique resource names, not by namespace. Namespaces are a
+ * product feature, exercised by namespace-isolation.test.ts alone.
  */
-export function shardNamespace(): string {
-	return process.env.E2E_NAMESPACE || 'default';
-}
-
-/**
- * Seed a fresh browser profile with the shard namespace.
- *
- * The app stores the active namespace in IndexedDB (per profile), which
- * storageState does not carry — a seeded first navigation does. No-op when the
- * run uses the default namespace.
- */
-export async function seedShardNamespace(page: Page): Promise<void> {
-	const target = shardNamespace();
-	if (target === 'default') return;
-	await page.goto(`/?namespace=${target}`, { waitUntil: 'domcontentloaded', timeout: 15_000 });
-	await waitForAppShell(page);
-}
+export const DEFAULT_NAMESPACE = 'default';
 
 /**
  * Switch to a namespace via the sidebar picker.
@@ -69,7 +53,7 @@ export async function expectNamespace(page: Page, name: string): Promise<void> {
 /** Restore the shared worker context after a test that changes namespace. */
 export async function restoreDefaultNamespace(page: Page): Promise<void> {
 	await waitForAppShell(page);
-	const target = shardNamespace();
+	const target = DEFAULT_NAMESPACE;
 	const picker = page.getByRole('button', { name: 'Select namespace' });
 	if ((await picker.textContent())?.trim() === target) return;
 	await switchNamespace(page, target);

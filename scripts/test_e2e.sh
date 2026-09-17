@@ -28,7 +28,8 @@ COMPOSE=(docker compose -p dataforge-e2e -f docker/compose.e2e.yaml)
 
 ENGINE_IMAGE="data-forge-polars-engine:e2e"
 
-DOCKER_SOCKET_GID="$(stat -c %g /var/run/docker.sock)"
+# GNU stat (Linux/CI) and BSD stat (macOS) spell the same query differently.
+DOCKER_SOCKET_GID="$(stat -c %g /var/run/docker.sock 2>/dev/null || stat -f %g /var/run/docker.sock)"
 export DOCKER_SOCKET_GID
 
 PLAYWRIGHT_VERSION="$(node -p "require('./packages/frontend/node_modules/playwright/package.json').version")"
