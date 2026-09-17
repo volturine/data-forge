@@ -74,6 +74,13 @@ def _protocol_request_payload(request: BaseModel) -> dict[str, object]:
     return payload
 
 
+# Completion arrives over Postgres NOTIFY (response_hub), so the database read
+# below is only a safety net for a lost notification. It used to run every 50ms
+# for the whole life of a request: twenty synchronous queries per second per
+# in-flight preview, all on the event loop that serves every other request.
+_RESPONSE_SAFETY_POLL_SECONDS = 1.0
+
+
 def _ensure_runtime_available(runtime_probe: RuntimeAvailabilityProbe) -> None:
     if runtime_probe.available(kind=RuntimeWorkerKind.BUILD_MANAGER):
         return
@@ -116,20 +123,21 @@ async def _submit_and_wait(
 ):
     request = _submit(session, kind=kind, command=command, runtime_probe=runtime_probe)
     wait_task = asyncio.create_task(response_hub.wait(request.id))
-    while True:
-        session.expire_all()
-        completed = compute_requests_service.get_request(session, request.id)
-        if completed is None:
-            wait_task.cancel()
-            raise PipelineExecutionError(f'Compute request {request.id} disappeared')
-        if completed.status in {enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED, enums_pb2.COMPUTE_REQUEST_STATUS_FAILED}:
-            wait_task.cancel()
-            break
-        session.rollback()
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(wait_task), timeout=0.05)
-        if wait_task.done():
-            wait_task = asyncio.create_task(response_hub.wait(request.id))
+    try:
+        while True:
+            session.expire_all()
+            completed = compute_requests_service.get_request(session, request.id)
+            if completed is None:
+                raise PipelineExecutionError(f'Compute request {request.id} disappeared')
+            if completed.status in {enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED, enums_pb2.COMPUTE_REQUEST_STATUS_FAILED}:
+                break
+            session.rollback()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.shield(wait_task), timeout=_RESPONSE_SAFETY_POLL_SECONDS)
+            if wait_task.done():
+                wait_task = asyncio.create_task(response_hub.wait(request.id))
+    finally:
+        wait_task.cancel()
     if completed.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED:
         return completed
     payload = compute_requests_service.response_payload(completed)

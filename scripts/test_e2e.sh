@@ -136,8 +136,10 @@ run_playwright_shard() {
     local shard_index="$1"
     local shard_total="$2"
     cd "${ROOT_DIR}/packages/frontend"
-    local output_dir="$PWD/tests/.artifacts/playwright/test-results"
-    local report_dir="$PWD/tests/.artifacts/playwright/playwright-report"
+    # Playwright wipes its output directory on start, so shards that share one
+    # directory delete each other's artifacts mid-run.
+    local output_dir="$PWD/tests/.artifacts/playwright/test-results/shard${shard_index}"
+    local report_dir="$PWD/tests/.artifacts/playwright/playwright-report/shard${shard_index}"
     local timeout_seconds="${E2E_TIMEOUT_SECONDS:-0}"
     if [ "$timeout_seconds" -eq 0 ]; then
         timeout_seconds=3600
@@ -169,9 +171,9 @@ run_playwright_shard() {
             -w /work/packages/frontend \
             -e PW_E2E_WORKERS \
             -e PLAYWRIGHT_BASE_URL=http://api:8000 \
-            "${trace_args[@]}" \
-            -e PLAYWRIGHT_OUTPUT_DIR=/work/packages/frontend/tests/.artifacts/playwright/test-results \
-            -e PLAYWRIGHT_HTML_OUTPUT_DIR=/work/packages/frontend/tests/.artifacts/playwright/playwright-report \
+            ${trace_args[@]+"${trace_args[@]}"} \
+            -e PLAYWRIGHT_OUTPUT_DIR=/work/packages/frontend/tests/.artifacts/playwright/test-results/shard${shard_index} \
+            -e PLAYWRIGHT_HTML_OUTPUT_DIR=/work/packages/frontend/tests/.artifacts/playwright/playwright-report/shard${shard_index} \
             -e CI \
             -e PLAYWRIGHT_JSON_REPORT \
             "${PLAYWRIGHT_IMAGE}" \
@@ -206,7 +208,9 @@ case "$action" in
         docker run --rm --network none -v "${ROOT_DIR}:/work" --entrypoint sh \
             "${PLAYWRIGHT_IMAGE}" -c "chown -R $(id -u):$(id -g) /work/packages/frontend/tests/.artifacts" >/dev/null 2>&1 || true
         rm -rf "${PLAYWRIGHT_ARTIFACTS_DIR}"
-        mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/test-results" "${PLAYWRIGHT_ARTIFACTS_DIR}/playwright-report"
+        for shard in $(seq 1 "${E2E_SHARDS:-2}"); do
+            mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/test-results/shard${shard}" "${PLAYWRIGHT_ARTIFACTS_DIR}/playwright-report/shard${shard}"
+        done
         echo "Running ${shards} Playwright shard container(s), ${PW_E2E_WORKERS} browser workers each"
         pids=()
         set +e
