@@ -508,7 +508,9 @@ async def start_build(
         (tab for tab in tabs if isinstance(tab, dict) and isinstance(tab.get('id'), str) and tab.get('id') == request.tab_id),
         None,
     )
-    active_tab = selected_tab if isinstance(selected_tab, dict) else next((tab for tab in tabs if isinstance(tab, dict)), None)
+    if not isinstance(selected_tab, dict):
+        raise HTTPException(status_code=404, detail=f'Build request tab {request.tab_id} not found in analysis pipeline')
+    active_tab = selected_tab
     current_kind = EngineRunKind.BUILD.value
     current_datasource_id: str | None = None
     current_tab_id: str | None = None
@@ -584,7 +586,7 @@ async def start_build(
             current_tab_name=current_tab_name,
             current_output_id=current_output_id,
             current_output_name=current_output_name,
-            total_tabs=len(tabs),
+            total_tabs=1,
             started_at=started_at,
             placeholders=placeholders,
         ),

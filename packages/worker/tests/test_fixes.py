@@ -713,6 +713,7 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
 ) -> None:
     pipeline = {
         "analysis_id": "analysis-1",
+        "tab_id": "tab-1",
         "tabs": [
             {
                 "id": "tab-1",

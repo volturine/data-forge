@@ -540,7 +540,7 @@ class BuildRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     analysis_pipeline: AnalysisPipelinePayload
-    tab_id: str | None = None
+    tab_id: str
 
     def pipeline_payload(self) -> dict[str, object]:
         pipeline = self.analysis_pipeline.model_dump(mode='json')

@@ -233,7 +233,7 @@ export interface CancelBuildResponse {
 
 export interface BuildRequest {
 	analysis_pipeline: AnalysisPipelinePayload;
-	tab_id?: string | null;
+	tab_id: string;
 }
 
 export type EnginesSnapshotMessage = {

@@ -7,7 +7,6 @@ import re
 import tempfile
 import time
 import uuid
-from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -2635,54 +2634,24 @@ def download_step(
             os.remove(tmp_output)
 
 
-def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
-    """Find all tab IDs that the target tab depends on via lazyframe inputs (including itself)."""
-    output_to_tab: dict[str, str] = {}
-    tab_input: dict[str, str] = {}
+def _build_execution_tabs(pipeline: dict) -> list[dict]:
+    """The single tab to execute for this build.
 
-    for tab in tabs:
-        tid = tab.get("id")
-        output = tab.get("output") if isinstance(tab, dict) else None
-        output_id = output.get("result_id") if isinstance(output, dict) else None
-        datasource = tab.get("datasource") if isinstance(tab, dict) else None
-        input_id = datasource.get("id") if isinstance(datasource, dict) else None
-        if tid and output_id:
-            output_to_tab[str(output_id)] = str(tid)
-        if tid and input_id:
-            tab_input[str(tid)] = str(input_id)
-
-    required: set[str] = set()
-    queue: deque[str] = deque([target_tab_id])
-    while queue:
-        current = queue.popleft()
-        if current in required:
-            continue
-        required.add(current)
-        input_ds = tab_input.get(current)
-        if input_ds and input_ds in output_to_tab:
-            upstream = output_to_tab[input_ds]
-            if upstream not in required:
-                queue.append(upstream)
-
-    return required
-
-
-def _build_execution_tabs(pipeline: dict) -> tuple[list[dict], str | None]:
+    Builds are always tab-scoped: the tab's input datasource inlines the
+    upstream tabs' steps into its own pipeline, so upstream tabs are
+    recomputed lazily as part of it and are not built separately.
+    """
     tabs = pipeline.get("tabs", [])
     if not isinstance(tabs, list) or not tabs:
         raise ValueError("analysis_pipeline missing tabs")
 
-    selected_tab_id = pipeline.get("tab_id")
-    required_tabs: set[str] | None = None
-    if selected_tab_id:
-        required_tabs = _resolve_upstream_tabs(tabs, str(selected_tab_id))
-
-    execution_tabs: list[dict] = []
-    for tab in tabs:
-        if required_tabs and tab.get("id") not in required_tabs:
-            continue
-        execution_tabs.append(tab)
-    return execution_tabs, str(selected_tab_id) if selected_tab_id is not None else None
+    tab_id = pipeline.get("tab_id")
+    if not isinstance(tab_id, str) or not tab_id:
+        raise ValueError("analysis_pipeline missing tab_id")
+    selected = next((tab for tab in tabs if isinstance(tab, dict) and str(tab.get("id")) == tab_id), None)
+    if selected is None:
+        raise ValueError(f"analysis_pipeline missing tab {tab_id}")
+    return [selected]
 
 
 def _resolve_live_output_metadata(output_config: dict, tab_name: str) -> tuple[str | None, str | None]:
@@ -2701,7 +2670,7 @@ def _resolve_live_output_metadata(output_config: dict, tab_name: str) -> tuple[s
     return None, tab_name
 
 
-def _count_total_build_steps(tabs: list[dict], selected_tab_id: str | None) -> int:
+def _count_total_build_steps(tabs: list[dict]) -> int:
     total = 0
     for tab in tabs:
         output_config = tab.get("output") if isinstance(tab, dict) else None
@@ -2709,8 +2678,6 @@ def _count_total_build_steps(tabs: list[dict], selected_tab_id: str | None) -> i
         if not isinstance(steps, list):
             continue
         if not isinstance(output_config, dict) or "filename" not in output_config:
-            if selected_tab_id and str(tab.get("id")) != selected_tab_id:
-                continue
             total += max(len(steps), 1)
             continue
         total += len(steps) + 2
@@ -3043,10 +3010,10 @@ async def run_analysis_build_stream(
     if not isinstance(pipeline, dict):
         raise ValueError("analysis_pipeline is required")
 
-    execution_tabs, selected_tab_id = _build_execution_tabs(pipeline)
+    execution_tabs = _build_execution_tabs(pipeline)
     analysis_id = pipeline.get("analysis_id")
     analysis_id_value = str(analysis_id) if analysis_id is not None else ""
-    total_steps = _count_total_build_steps(execution_tabs, selected_tab_id)
+    total_steps = _count_total_build_steps(execution_tabs)
     build.total_steps = total_steps
     build.total_tabs = len(execution_tabs)
     started_perf = time.perf_counter()
@@ -3118,17 +3085,6 @@ async def run_analysis_build_stream(
         build.current_tab_name = tab_name
 
         if not isinstance(output_config, dict) or "filename" not in output_config:
-            if selected_tab_id and tab_id != selected_tab_id:
-                tabs_built += 1
-                results.append(
-                    {
-                        "tab_id": tab_id,
-                        "tab_name": tab_name,
-                        "status": BuildTabStatus.SUCCESS,
-                    }
-                )
-                build_step_base += max(len(steps), 1)
-                continue
             error = f"Tab {tab_id} missing output configuration"
             has_failures = True
             results.append(
