@@ -1,22 +1,22 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 import grpc
-import pytest
 
-from dataforge_protocol import compute_pb2, engine_runtime_pb2, enums_pb2
+from dataforge_protocol import compute_pb2, engine_runtime_pb2, enums_pb2, worker_runtime_pb2
 from runtime.config import settings
 from runtime.docker_engine import (
     DockerComputeEngine,
+    _container_name,
     _effective_resources,
     _engine_object_store_endpoint,
-    _validate_engine_image_reference,
     reconcile_deployment_containers,
     validate_engine_runtime_readiness,
 )
-from runtime.engine_credentials import resolve_engine_credentials, validate_configured_engine_credentials
+from runtime.engine_credentials import resolve_engine_credentials
 
 
 def test_effective_resources_resolves_zero_threads_to_logical_cpu_count(monkeypatch) -> None:
@@ -49,59 +49,61 @@ def _identity(scope: int = enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE) -> compu
     )
 
 
-def test_production_engine_credentials_are_namespace_scoped(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "prod_mode_enabled", True)
-    monkeypatch.setattr(settings, "object_store_access_key", "platform-key")
-    monkeypatch.setattr(settings, "object_store_secret_key", "platform-secret")
-    monkeypatch.setattr(
-        settings,
-        "engine_object_store_credentials_json",
-        '{"tenant-a":{"reader":{"access_key":"tenant-reader","secret_key":"tenant-secret"}}}',
-    )
+def test_engine_credentials_fetch_namespace_scoped_identity_from_backend(monkeypatch) -> None:
+    requests: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def engine_credentials(self, *, namespace: str, role: str):
+            requests.append((namespace, role))
+            return worker_runtime_pb2.WorkerEngineCredentialsResponse(
+                access_key="ns-reader",
+                secret_key="ns-secret",
+            )
+
+    monkeypatch.setattr("runtime.engine_credentials.client_from_env", lambda: FakeClient())
 
     credentials = resolve_engine_credentials("tenant-a", _identity())
 
-    assert credentials.access_key == "tenant-reader"
-    assert credentials.secret_key == "tenant-secret"
+    assert requests == [("tenant-a", "reader")]
+    assert credentials.access_key == "ns-reader"
+    assert credentials.secret_key == "ns-secret"
+
+    resolve_engine_credentials("tenant-b", _identity(enums_pb2.ENGINE_SCOPE_BUILD))
+    assert requests[-1] == ("tenant-b", "builder")
 
 
-def test_production_engine_rejects_platform_credentials(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "prod_mode_enabled", True)
-    monkeypatch.setattr(settings, "object_store_access_key", "platform-key")
-    monkeypatch.setattr(settings, "object_store_secret_key", "platform-secret")
-    monkeypatch.setattr(
-        settings,
-        "engine_object_store_credentials_json",
-        '{"tenant-a":{"reader":{"access_key":"platform-key","secret_key":"platform-secret"}}}',
-    )
+def test_unpinned_engine_image_warns_in_prod_but_is_allowed(monkeypatch, caplog) -> None:
+    from runtime.docker_engine import _warn_unpinned_engine_image
 
-    with pytest.raises(RuntimeError, match="must not reuse platform"):
-        resolve_engine_credentials("tenant-a", _identity())
-
-
-def test_production_readiness_requires_complete_static_credential_map(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "prod_mode_enabled", True)
-    monkeypatch.setattr(settings, "object_store_access_key", "platform-key")
-    monkeypatch.setattr(settings, "object_store_secret_key", "platform-secret")
-    monkeypatch.setattr(
-        settings,
-        "engine_object_store_credentials_json",
-        '{"tenant-a":{"reader":{"access_key":"reader","secret_key":"reader-secret"}}}',
-    )
-
-    with pytest.raises(RuntimeError, match="builder"):
-        validate_configured_engine_credentials()
-
-
-def test_production_requires_immutable_engine_digest(monkeypatch) -> None:
     monkeypatch.setattr(settings, "prod_mode_enabled", True)
     monkeypatch.setattr(settings, "engine_image", "registry.example/dataforge-engine:latest")
 
-    with pytest.raises(RuntimeError, match="immutable"):
-        _validate_engine_image_reference()
+    with caplog.at_level(logging.WARNING):
+        _warn_unpinned_engine_image()
+
+    assert "not digest-pinned" in caplog.text
 
     monkeypatch.setattr(settings, "engine_image", f"registry.example/dataforge-engine@sha256:{'a' * 64}")
-    _validate_engine_image_reference()
+    _warn_unpinned_engine_image()
+    assert caplog.text.count("not digest-pinned") == 1
+
+
+def test_container_name_is_dns_safe_and_bounded(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "engine_connect_host", "")
+    identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        resource_id="4675dc19-dced-4163-b9b2-d168e2cad57d",
+        analysis_id="analysis-1",
+    )
+
+    name = _container_name(identity=identity, namespace="default")
+    second = _container_name(identity=identity, namespace="default")
+
+    # Docker resolves container names as DNS labels: max 63 chars, no "_".
+    assert len(name) <= 63
+    assert "_" not in name
+    assert name != second  # full-identity hash suffix keeps them unique
 
 
 def test_engine_object_store_endpoint_prefers_private_network_override(monkeypatch) -> None:
@@ -315,14 +317,13 @@ def test_runtime_readiness_checks_credentials_image_and_network(monkeypatch) -> 
         def close(self) -> None:
             calls.append("close")
 
-    monkeypatch.setattr("runtime.docker_engine._validate_engine_image_reference", lambda: calls.append("image-reference"))
-    monkeypatch.setattr("runtime.docker_engine.validate_configured_engine_credentials", lambda: calls.append("credentials"))
+    monkeypatch.setattr("runtime.docker_engine._warn_unpinned_engine_image", lambda: calls.append("image-reference"))
     monkeypatch.setattr("runtime.docker_engine._resolve_launch_context", lambda client: calls.append("docker") or (4, "sha256:abc"))
     monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
 
     validate_engine_runtime_readiness()
 
-    assert calls == ["image-reference", "credentials", "docker", "close"]
+    assert calls == ["image-reference", "docker", "close"]
 
 
 def test_container_nano_cpus_skips_hard_quota_for_host_connected_engines(monkeypatch) -> None:

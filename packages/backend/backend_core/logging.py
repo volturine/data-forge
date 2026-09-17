@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import contextlib
 import json
 import logging
 import logging.handlers
@@ -168,6 +169,8 @@ class DatabaseLogWriter:
         self._dropped_count = 0
         self._database_url = database_url.replace('postgresql+psycopg://', 'postgresql://', 1)
         self._conn: psycopg.Connection | None = None
+        self._insert_conn: psycopg.Connection | None = None
+        self._insert_conn_lock = threading.Lock()
         self._buffers: dict[tuple[DatabaseLogKind, date], list[dict[str, Any]]] = {}
         self._flush_interval = flush_interval
         self._last_flush = time.monotonic()
@@ -304,6 +307,11 @@ class DatabaseLogWriter:
         self._queue.put((DatabaseLogKind.STOP, []))
         self._worker.join()
         self.flush()
+        with self._insert_conn_lock:
+            if self._insert_conn:
+                with contextlib.suppress(Exception):
+                    self._insert_conn.close()
+                self._insert_conn = None
         if self._conn:
             self._conn.close()
 
@@ -374,19 +382,33 @@ class DatabaseLogWriter:
         if not rows:
             return
         try:
-            with self._lock_for_insert() as conn:
+            with self._insert_connection() as conn:
                 kind.insert_rows(conn, rows, day)
         except Exception as e:
             _logger.error(f'Failed to insert {len(rows)} rows to {kind.value}/{day}: {e}', exc_info=True)
 
     @contextmanager
-    def _lock_for_insert(self):
-        conn = psycopg.connect(self._database_url, autocommit=False)
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+    def _insert_connection(self):
+        """Reuse one persistent connection for log inserts.
+
+        Opening a new connection per flush batch produced connection storms
+        under load; inserts are small and frequent, so the connection is kept
+        open, guarded by a lock (timer flushes and the writer thread can
+        overlap), and re-established after failures.
+        """
+        with self._insert_conn_lock:
+            try:
+                if self._insert_conn is None or self._insert_conn.closed:
+                    self._insert_conn = psycopg.connect(self._database_url, autocommit=False)
+                yield self._insert_conn
+                self._insert_conn.commit()
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._insert_conn.rollback()
+                with contextlib.suppress(Exception):
+                    self._insert_conn.close()
+                self._insert_conn = None
+                raise
 
 
 class DatabaseLogHandler(logging.Handler):

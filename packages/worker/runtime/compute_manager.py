@@ -7,6 +7,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -760,39 +761,59 @@ class ProcessManager:
             finally:
                 reset_namespace(token)
 
+    def _spawn_warm_engine(self, factory: Callable[[], ComputeEngine]) -> ComputeEngine | None:
+        """Start one warm engine, reserving capacity. Returns None on failure."""
+        new_engine: ComputeEngine | None = None
+        try:
+            new_engine = factory()
+            new_engine.start()
+            return new_engine
+        except Exception:
+            logger.warning("Failed to start warm engine for pool", exc_info=True)
+            if new_engine is not None:
+                with contextlib.suppress(Exception):
+                    new_engine.shutdown()
+            return None
+
     def _replenish_warm_pool_loop(self) -> None:
         while not self._closed and not self._reaper_stop.is_set():
             self._warm_replenish_trigger.wait(timeout=1.0)
             self._warm_replenish_trigger.clear()
             if self._closed or self._reaper_stop.is_set() or self._warm_engine_factory is None:
                 break
+            factory = self._warm_engine_factory
+            # Refill the whole deficit concurrently: a burst of claims drains the
+            # pool faster than sequential spawns can refill it, and every wait
+            # for a fresh spawn is a preview/build paying full container boot.
             while not self._closed and not self._reaper_stop.is_set():
+                deficit: list[int] = []
                 with self._capacity_changed:
                     target_warm = settings.engine_warm_pool_size
                     current_warm = len(self._warm_pool)
                     used = len(self._engines) + len(self._warm_pool) + self._capacity_starts
                     if current_warm >= target_warm or used >= settings.max_concurrent_engines:
                         break
-                    self._capacity_starts += 1
-                new_engine: ComputeEngine | None = None
-                try:
-                    new_engine = self._warm_engine_factory()
-                    new_engine.start()
-                except Exception:
-                    logger.warning("Failed to start warm engine for pool", exc_info=True)
-                    if new_engine is not None:
-                        with contextlib.suppress(Exception):
-                            new_engine.shutdown()
-                    time.sleep(1.0)
-                finally:
-                    with self._capacity_changed:
-                        self._capacity_starts = max(0, self._capacity_starts - 1)
-                        if new_engine is not None and not self._closed and not self._reaper_stop.is_set():
-                            self._warm_pool.append(new_engine)
-                        elif new_engine is not None:
+                    deficit = list(range(target_warm - current_warm))
+                    self._capacity_starts += len(deficit)
+                if not deficit:
+                    continue
+
+                def spawn_item(_item: int, _factory: Callable[[], ComputeEngine] = factory) -> ComputeEngine | None:
+                    return self._spawn_warm_engine(_factory)
+
+                with ThreadPoolExecutor(max_workers=len(deficit)) as pool:
+                    engines = list(pool.map(spawn_item, deficit))
+                with self._capacity_changed:
+                    self._capacity_starts = max(0, self._capacity_starts - len(deficit))
+                    for engine in engines:
+                        if engine is not None and not self._closed and not self._reaper_stop.is_set():
+                            self._warm_pool.append(engine)
+                        elif engine is not None:
                             with contextlib.suppress(Exception):
-                                new_engine.shutdown()
-                        self._capacity_changed.notify_all()
+                                engine.shutdown()
+                    if any(engine is None for engine in engines):
+                        time.sleep(1.0)
+                    self._capacity_changed.notify_all()
 
     def _reap_idle_engines_loop(self) -> None:
         while not self._reaper_stop.wait(self._idle_reap_interval_seconds):

@@ -10,12 +10,7 @@ from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from backend_core.exceptions import (
-    AppError,
-    DataSourceSnapshotError,
-    InvalidIdError,
-    PipelineValidationError,
-)
+from backend_core.exceptions import AppError
 from dataforge_protocol import errors_pb2
 
 logger = logging.getLogger(__name__)
@@ -81,17 +76,10 @@ def _log_app_error(exc: AppError, status: int) -> None:
     extra = {'error_code': exc.error_code, 'details': exc.details}
     if status >= 500:
         logger.error(msg, extra=extra, exc_info=True)
-    elif status == 404 or isinstance(
-        exc,
-        (
-            InvalidIdError,
-            DataSourceSnapshotError,
-            PipelineValidationError,
-        ),
-    ):
-        logger.info(msg, extra=extra)
     else:
-        logger.warning(msg, extra=extra)
+        # Expected client-facing failures (4xx: bad credentials, expired
+        # tokens, validation errors) are normal app behavior, not problems.
+        logger.info(msg, extra=extra)
 
 
 def _raise_http(exc: Exception, operation: str, value_error_status: int | None) -> Never:

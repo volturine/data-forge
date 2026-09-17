@@ -13,6 +13,11 @@
 		buildDatasourcePreviewPipelinePayload,
 		normalizeSnapshotConfig
 	} from '$lib/utils/analysis-pipeline';
+	import {
+		toComputeError,
+		isTransientComputeError,
+		computeRetryDelay
+	} from '$lib/utils/compute-retry';
 	import { css } from '$lib/styles/panda';
 
 	interface Props {
@@ -82,13 +87,16 @@
 			} satisfies StepPreviewRequest;
 			const result = await previewStepData(request);
 			if (result.isErr()) {
-				throw new Error(result.error.message);
+				throw toComputeError(result.error);
 			}
 			return result.value;
 		},
 		staleTime: 30000,
 		refetchOnMount: false,
-		retry: false,
+		// Transient compute failures (engine busy, runtime saturated, network)
+		// resolve on retry; validation errors stay terminal.
+		retry: (failureCount, error) => isTransientComputeError(error) && failureCount < 3,
+		retryDelay: computeRetryDelay,
 		enabled: !!datasourceId && !!analysisPipeline && !ns.switching && canPreviewDatasource
 	}));
 

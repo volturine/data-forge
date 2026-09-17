@@ -243,6 +243,7 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
         token: str = "",
         on_shutdown: Callable[[], None],
         heartbeat_timeout_seconds: int = 15,
+        init_timeout_seconds: int = 0,
     ) -> None:
         self._engine_identity = engine_identity
         self._application_version = application_version
@@ -254,13 +255,30 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
         self._initialized = bool(token and engine_identity and engine_identity != "unknown")
         self._last_heartbeat = time.monotonic()
         self._heartbeat_timeout_seconds = heartbeat_timeout_seconds
+        # Deadline for the first Initialize: an engine whose worker died between
+        # container start and initialization would otherwise run forever. The
+        # spawner sets this for identity-scoped engines; warm pool engines are
+        # created uninitialized on purpose and pass 0 (no deadline).
+        self._created_at = time.monotonic()
+        self._init_timeout_seconds = init_timeout_seconds
         threading.Thread(target=self._watch_heartbeat, name="engine-heartbeat-watchdog", daemon=True).start()
 
     def _watch_heartbeat(self) -> None:
         while not self._shutdown.wait(max(1.0, self._heartbeat_timeout_seconds / 3)):
             with self._lock:
                 if not self._initialized:
-                    continue
+                    if self._init_timeout_seconds <= 0:
+                        continue
+                    if time.monotonic() - self._created_at < self._init_timeout_seconds:
+                        continue
+                    logger.error(
+                        "No worker initialization within %ss; stopping orphaned engine",
+                        self._init_timeout_seconds,
+                    )
+                    self._shutdown.set()
+                    self._jobs.shutdown()
+                    self._on_shutdown()
+                    return
                 if time.monotonic() - self._last_heartbeat <= self._heartbeat_timeout_seconds:
                     continue
             logger.error("Worker heartbeat expired; stopping orphaned engine %s", self._engine_identity)
@@ -452,6 +470,7 @@ def run_engine_server(
     application_version: str = "unknown",
     token: str = "",
     heartbeat_timeout_seconds: int = 15,
+    init_timeout_seconds: int = 0,
 ) -> None:
     server = grpc.server(
         ThreadPoolExecutor(max_workers=8), options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024))
@@ -467,6 +486,7 @@ def run_engine_server(
             token=token,
             on_shutdown=stop_server,
             heartbeat_timeout_seconds=heartbeat_timeout_seconds,
+            init_timeout_seconds=init_timeout_seconds,
         ),
         server,
     )
@@ -487,6 +507,7 @@ def main() -> None:
         application_version=os.environ.get("APP_VERSION", "unknown"),
         token=os.environ.get("ENGINE_RPC_TOKEN", ""),
         heartbeat_timeout_seconds=int(os.environ.get("ENGINE_HEARTBEAT_TIMEOUT_SECONDS", "15")),
+        init_timeout_seconds=int(os.environ.get("ENGINE_INIT_TIMEOUT_SECONDS", "0")),
     )
 
 

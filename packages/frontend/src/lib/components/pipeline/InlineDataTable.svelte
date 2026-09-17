@@ -2,6 +2,11 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
+	import {
+		toComputeError,
+		isTransientComputeError,
+		computeRetryDelay
+	} from '$lib/utils/compute-retry';
 	import { hashPipeline } from '$lib/utils/hash';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
@@ -90,7 +95,7 @@
 				resource_config: analysisStore.resourceConfig
 			});
 			if (result.isErr()) {
-				throw new Error(result.error.message);
+				throw toComputeError(result.error);
 			}
 			schemaStore.syncPreviewSchema(stepId, result.value, pipelineKey);
 			return result.value;
@@ -98,7 +103,10 @@
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
-		retry: false,
+		// Transient compute failures (engine busy, runtime saturated, network)
+		// resolve on retry; validation errors stay terminal.
+		retry: (failureCount, error) => isTransientComputeError(error) && failureCount < 3,
+		retryDelay: computeRetryDelay,
 		enabled: isActiveStep && !!analysisPipeline && !analysisStore.previews.paused
 	}));
 

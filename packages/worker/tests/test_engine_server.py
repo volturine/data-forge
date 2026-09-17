@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
@@ -203,6 +204,76 @@ def test_engine_server_warm_mode_and_initialize(monkeypatch) -> None:
             metadata=(("x-engine-token", "warm-token-123"),),
         )
         assert submitted.job_id == "job-initialized"
+    finally:
+        channel.close()
+        server.stop(grace=0)
+
+
+def test_uninitialized_engine_stops_after_init_deadline(monkeypatch) -> None:
+    shutdowns: list[str] = []
+
+    def execute(*, job_id: str, kind: str, payload: dict, progress_callback):
+        return EngineResult(job_id=job_id, data={"rows": []}, error=None)
+
+    monkeypatch.setattr(engine_server, "_execute_job", execute)
+    server = grpc.server(ThreadPoolExecutor(max_workers=4))
+    servicer = PolarsEngineServicer(
+        engine_identity="",
+        application_version="test",
+        token="",
+        on_shutdown=lambda: shutdowns.append("stopped"),
+        heartbeat_timeout_seconds=15,
+        init_timeout_seconds=1,
+    )
+    engine_runtime_pb2_grpc.add_PolarsEngineServiceServicer_to_server(servicer, server)
+    server.start()
+
+    try:
+        # Watchdog checks every ~1s; the 1s deadline must fire and stop the
+        # engine because no Initialize arrived.
+        deadline = time.monotonic() + 10
+        while not shutdowns and time.monotonic() < deadline:
+            time.sleep(0.2)
+        assert shutdowns == ["stopped"]
+    finally:
+        server.stop(grace=0)
+
+
+def test_initialized_engine_ignores_init_deadline(monkeypatch) -> None:
+    def execute(*, job_id: str, kind: str, payload: dict, progress_callback):
+        return EngineResult(job_id=job_id, data={"rows": []}, error=None)
+
+    monkeypatch.setattr(engine_server, "_execute_job", execute)
+    server = grpc.server(ThreadPoolExecutor(max_workers=4))
+    servicer = PolarsEngineServicer(
+        engine_identity="",
+        application_version="test",
+        token="",
+        on_shutdown=lambda: None,
+        heartbeat_timeout_seconds=15,
+        init_timeout_seconds=1,
+    )
+    engine_runtime_pb2_grpc.add_PolarsEngineServiceServicer_to_server(servicer, server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    server.start()
+    channel = grpc.insecure_channel(f"127.0.0.1:{port}")
+    stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(channel)
+
+    try:
+        stub.Initialize(
+            engine_runtime_pb2.EngineInitializeRequest(
+                protocol_version=ENGINE_PROTOCOL_VERSION,
+                engine_identity="analysis-1",
+                token="token",
+            )
+        )
+        # Initialized before the deadline: the engine must stay up past it.
+        time.sleep(2)
+        health = stub.Health(
+            engine_runtime_pb2.EngineHealthRequest(),
+            metadata=(("x-engine-token", "token"),),
+        )
+        assert health.ready
     finally:
         channel.close()
         server.stop(grace=0)

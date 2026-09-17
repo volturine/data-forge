@@ -13,6 +13,11 @@
 	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
+	import {
+		toComputeError,
+		isTransientComputeError,
+		computeRetryDelay
+	} from '$lib/utils/compute-retry';
 	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from '@lucide/svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
@@ -117,13 +122,16 @@
 				page: 1,
 				resource_config: analysisStore.resourceConfig
 			});
-			if (result.isErr()) throw new Error(result.error.message);
+			if (result.isErr()) throw toComputeError(result.error);
 			return result.value;
 		},
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
-		retry: false,
+		// Transient compute failures (engine busy, runtime saturated, network)
+		// resolve on retry; validation errors stay terminal.
+		retry: (failureCount, error) => isTransientComputeError(error) && failureCount < 3,
+		retryDelay: computeRetryDelay,
 		enabled:
 			isChart &&
 			isApplied &&
@@ -175,18 +183,28 @@
 		if (isLoadingRowCount) return;
 		rowCountLoads.set(rowCountKey, true);
 		rowCountErrors.delete(rowCountKey);
-		const result = await getStepRowCount({
-			analysis_pipeline: analysisPipeline!,
-			tab_id: analysisStore.activeTab?.id ?? null,
-			target_step_id: step.id
-		});
-		rowCountLoads.set(rowCountKey, false);
-		if (result.isErr()) {
-			rowCountErrors.set(rowCountKey, result.error.message);
-			return;
+		// Transient compute failures (engine busy, runtime saturated, network)
+		// resolve on retry; validation errors stay terminal.
+		const attempts = 3;
+		for (let attempt = 0; ; attempt++) {
+			const result = await getStepRowCount({
+				analysis_pipeline: analysisPipeline!,
+				tab_id: analysisStore.activeTab?.id ?? null,
+				target_step_id: step.id
+			});
+			if (result.isOk()) {
+				rowCounts.set(rowCountKey, result.value.row_count);
+				rowCountErrors.delete(rowCountKey);
+				break;
+			}
+			if (attempt >= attempts - 1 || !isTransientComputeError(toComputeError(result.error))) {
+				rowCountLoads.set(rowCountKey, false);
+				rowCountErrors.set(rowCountKey, result.error.message);
+				return;
+			}
+			await new Promise((resolve) => setTimeout(resolve, computeRetryDelay(attempt)));
 		}
-		rowCounts.set(rowCountKey, result.value.row_count);
-		rowCountErrors.delete(rowCountKey);
+		rowCountLoads.set(rowCountKey, false);
 	}
 
 	let copyFeedback = $state(false);

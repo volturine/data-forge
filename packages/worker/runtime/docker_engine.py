@@ -22,7 +22,7 @@ from google.protobuf import json_format
 from dataforge_protocol import compute_pb2, engine_runtime_pb2, engine_runtime_pb2_grpc, enums_pb2
 from runtime.config import settings
 from runtime.domain.compute.base import ComputeEngine, EngineProgressEvent, EngineResult
-from runtime.engine_credentials import ObjectStoreCredentials, resolve_engine_credentials, validate_configured_engine_credentials
+from runtime.engine_credentials import ObjectStoreCredentials, resolve_engine_credentials
 from runtime.engine_server import ENGINE_PROTOCOL_VERSION
 from runtime.export_formats import get_export_format
 from runtime.json_values import encode_json_bytes
@@ -42,9 +42,15 @@ _validated_image_id: str | None = None
 _validated_network: str | None = None
 
 
-def _validate_engine_image_reference() -> None:
+def _warn_unpinned_engine_image() -> None:
+    # Digest pinning keeps every engine launch on a byte-identical image, but
+    # tag references (e.g. custom engine builds with extra libraries) remain
+    # supported: the resolved image id is recorded per engine either way.
     if settings.prod_mode_enabled and _IMAGE_DIGEST_RE.fullmatch(settings.engine_image) is None:
-        raise RuntimeError("Production ENGINE_IMAGE must use an immutable repository@sha256:digest reference")
+        logger.warning(
+            "ENGINE_IMAGE %s is not digest-pinned; engines may drift across launches. Prefer a repository@sha256:<digest> reference.",
+            settings.engine_image,
+        )
 
 
 def _resolve_launch_context(client: Any) -> tuple[int | None, str]:
@@ -60,8 +66,6 @@ def _resolve_launch_context(client: Any) -> tuple[int | None, str]:
             _cached_daemon_cpu_count = ncpu if isinstance(ncpu, int) else 0
         if _validated_image_ref != settings.engine_image or not _validated_image_id:
             image = client.images.get(settings.engine_image)
-            if settings.prod_mode_enabled and settings.engine_image not in image.attrs.get("RepoDigests", []):
-                raise RuntimeError(f"Docker image does not match configured immutable digest: {settings.engine_image}")
             _validated_image_ref = settings.engine_image
             _validated_image_id = str(image.id)
         if _validated_network != settings.engine_docker_network:
@@ -74,8 +78,7 @@ def _resolve_launch_context(client: Any) -> tuple[int | None, str]:
 
 def validate_engine_runtime_readiness() -> None:
     """Fail before worker registration if Docker or launch inputs are unavailable."""
-    _validate_engine_image_reference()
-    validate_configured_engine_credentials()
+    _warn_unpinned_engine_image()
     client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
     try:
         _resolve_launch_context(client)
@@ -112,13 +115,19 @@ def _identity_scope(identity: compute_pb2.EngineIdentity) -> str:
 
 def _safe_name(value: str) -> str:
     normalized = "".join(char.lower() if char.isalnum() else "-" for char in value).strip("-")
-    return normalized[:40] or "engine"
+    return normalized or "engine"
 
 
 def _container_name(*, identity: compute_pb2.EngineIdentity, namespace: str) -> str:
     payload = f"{namespace}:{identity.scope}:{identity.resource_id}:{uuid.uuid4()}".encode()
     suffix = sha256(payload).hexdigest()[:12]
-    return f"dataforge-engine-{_safe_name(namespace)}-{_safe_name(identity.resource_id)}-{suffix}"
+    # Docker DNS resolves container names as DNS labels, capped at 63 chars.
+    # The full-identity hash suffix keeps names unique when the namespace or
+    # resource id parts are truncated.
+    prefix = "dataforge-engine-"
+    ns_part = _safe_name(namespace)[:15]
+    resource_part = _safe_name(identity.resource_id)[:15]
+    return f"{prefix}{ns_part}-{resource_part}-{suffix}"[:63]
 
 
 def _effective_resources(resource_config: dict[str, object], *, runtime_cpu_count: int | None = None) -> dict[str, int]:
@@ -260,7 +269,7 @@ class DockerComputeEngine(ComputeEngine):
             if self._alive:
                 return
             self._shutdown_requested = False
-            _validate_engine_image_reference()
+            _warn_unpinned_engine_image()
             credentials = resolve_engine_credentials(self._namespace, self.identity)
             client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
             try:
@@ -294,6 +303,9 @@ class DockerComputeEngine(ComputeEngine):
                     "ENGINE_RPC_HOST": "0.0.0.0",
                     "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
                     "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
+                    # Orphan guard: if the worker dies between container start and
+                    # initialization, the engine stops itself instead of leaking.
+                    "ENGINE_INIT_TIMEOUT_SECONDS": str(max(120, settings.engine_start_timeout_seconds * 2)),
                     "APP_VERSION": _ENGINE_APPLICATION_VERSION,
                 },
                 "labels": labels,
@@ -394,7 +406,7 @@ class DockerComputeEngine(ComputeEngine):
             if self._alive:
                 return
             self._shutdown_requested = False
-            _validate_engine_image_reference()
+            _warn_unpinned_engine_image()
             client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
             try:
                 daemon_cpu_count, image_id = _resolve_launch_context(client)
@@ -424,6 +436,8 @@ class DockerComputeEngine(ComputeEngine):
                     "ENGINE_RPC_HOST": "0.0.0.0",
                     "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
                     "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
+                    # Warm engines stay uninitialized until claimed; no deadline.
+                    "ENGINE_INIT_TIMEOUT_SECONDS": "0",
                     "APP_VERSION": _ENGINE_APPLICATION_VERSION,
                 },
                 "labels": labels,
