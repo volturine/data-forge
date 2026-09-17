@@ -122,7 +122,10 @@ async def _submit_and_wait(
     runtime_probe: RuntimeAvailabilityProbe,
 ):
     request = _submit(session, kind=kind, command=command, runtime_probe=runtime_probe)
-    wait_task = asyncio.create_task(response_hub.wait(request.id))
+    # Waiting from the version observed so far means a completion published
+    # before this task parks is seen immediately instead of waiting out a poll.
+    seen_version = 0
+    wait_task = asyncio.create_task(response_hub.wait(request.id, last_seen=seen_version))
     try:
         while True:
             session.expire_all()
@@ -135,7 +138,8 @@ async def _submit_and_wait(
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(asyncio.shield(wait_task), timeout=_RESPONSE_SAFETY_POLL_SECONDS)
             if wait_task.done():
-                wait_task = asyncio.create_task(response_hub.wait(request.id))
+                seen_version = wait_task.result()
+                wait_task = asyncio.create_task(response_hub.wait(request.id, last_seen=seen_version))
     finally:
         wait_task.cancel()
     if completed.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED:
