@@ -248,7 +248,10 @@ verify:
     #!/usr/bin/env bash
     set -euo pipefail
     before="$(git status --porcelain=v1 --untracked-files=all)"
-    env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py -- just check
+    # svelte-check's clean summary reads "0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS";
+    # the scanner matches the bare word, and a real failure exits nonzero anyway.
+    env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py \
+        --ignore-pattern '0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS' -- just check
     after="$(git status --porcelain=v1 --untracked-files=all)"
     if [ "$before" != "$after" ]; then
         echo 'Verification mutated the worktree:' >&2

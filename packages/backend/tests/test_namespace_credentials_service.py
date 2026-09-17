@@ -42,7 +42,7 @@ def session():
 @pytest.fixture
 def fake_admin(monkeypatch) -> FakeAdmin:
     admin = FakeAdmin()
-    monkeypatch.setattr('backend_core.namespace_credentials_service._admin_client', lambda: admin)
+    monkeypatch.setattr('backend_core.namespace_credentials_service._admin_client', lambda _session: admin)
     return admin
 
 
@@ -120,7 +120,7 @@ def test_policy_failures_are_reported_not_swallowed(session, monkeypatch):
         async def policy_add(self, policy_name: str, policy_path: str) -> str:
             raise RuntimeError('admin API rejected the policy')
 
-    monkeypatch.setattr('backend_core.namespace_credentials_service._admin_client', lambda: FailingAdmin())
+    monkeypatch.setattr('backend_core.namespace_credentials_service._admin_client', lambda _session: FailingAdmin())
 
     with pytest.raises(NamespaceCredentialError, match='Failed to provision engine credentials'):
         provision_namespace_engine_credentials(session, 'tenant-a')
@@ -138,7 +138,7 @@ def test_policy_documents_are_written_to_unique_paths(session, monkeypatch):
                 assert json.load(policy_file)['Statement']
             return ''
 
-    monkeypatch.setattr('backend_core.namespace_credentials_service._admin_client', lambda: PathRecordingAdmin())
+    monkeypatch.setattr('backend_core.namespace_credentials_service._admin_client', lambda _session: PathRecordingAdmin())
 
     provision_namespace_engine_credentials(session, 'tenant-a')
 

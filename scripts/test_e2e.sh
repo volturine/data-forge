@@ -28,10 +28,6 @@ COMPOSE=(docker compose -p dataforge-e2e -f docker/compose.e2e.yaml)
 
 ENGINE_IMAGE="data-forge-polars-engine:e2e"
 
-# GNU stat (Linux/CI) and BSD stat (macOS) spell the same query differently.
-DOCKER_SOCKET_GID="$(stat -c %g /var/run/docker.sock 2>/dev/null || stat -f %g /var/run/docker.sock)"
-export DOCKER_SOCKET_GID
-
 PLAYWRIGHT_VERSION="$(node -p "require('./packages/frontend/node_modules/playwright/package.json').version")"
 PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
 
@@ -44,8 +40,18 @@ build_images() {
     DOCKER_BUILDKIT=1 docker build -q -f docker/Dockerfile --target engine -t "${ENGINE_IMAGE}" . >/dev/null
 }
 
+resolve_docker_socket_gid() {
+    # The gid the worker needs is the one *containers* see: on Docker Desktop
+    # the daemon runs in a VM where the socket is root-owned, which does not
+    # match the host inode. Ask a container instead of stat-ing the host.
+    DOCKER_SOCKET_GID="$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+        --entrypoint stat "data-forge-worker:e2e" -c %g /var/run/docker.sock)"
+    export DOCKER_SOCKET_GID
+}
+
 stack_up() {
     build_images
+    resolve_docker_socket_gid
     echo "Starting e2e stack (postgres, rustfs, api, scheduler, worker)"
     "${COMPOSE[@]}" up -d --wait
     echo "E2E stack is ready"

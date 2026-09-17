@@ -48,9 +48,14 @@ _validated_network: str | None = None
 
 
 def _warn_unpinned_engine_image() -> None:
-    # Digest pinning keeps every engine launch on a byte-identical image, but
-    # tag references (e.g. custom engine builds with extra libraries) remain
-    # supported: the resolved image id is recorded per engine either way.
+    """Report an unpinned engine image once, at worker startup.
+
+    Digest pinning keeps every engine launch on a byte-identical image, but tag
+    references (custom engine builds with extra libraries) remain supported: the
+    resolved image id is recorded per engine either way. This is configuration,
+    so it is checked when the runtime is validated, not on every launch — at
+    engine-spawn rates the warning buries every other line in the log.
+    """
     if settings.prod_mode_enabled and _IMAGE_DIGEST_RE.fullmatch(settings.engine_image) is None:
         logger.warning(
             "ENGINE_IMAGE %s is not digest-pinned; engines may drift across launches. Prefer a repository@sha256:<digest> reference.",
@@ -279,7 +284,6 @@ class DockerComputeEngine(ComputeEngine):
             if self._alive:
                 return
             self._shutdown_requested = False
-            _warn_unpinned_engine_image()
             credentials = resolve_engine_credentials(self._namespace, self.identity)
             client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
             try:
@@ -416,7 +420,6 @@ class DockerComputeEngine(ComputeEngine):
             if self._alive:
                 return
             self._shutdown_requested = False
-            _warn_unpinned_engine_image()
             client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
             try:
                 daemon_cpu_count, image_id = _resolve_launch_context(client)

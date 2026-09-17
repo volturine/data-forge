@@ -9,6 +9,7 @@ import tempfile
 import uuid
 from urllib.parse import urlparse
 
+import aiohttp
 from sqlalchemy import text
 from sqlmodel import Session, select
 
@@ -23,7 +24,7 @@ class NamespaceCredentialError(Exception):
     """Raised when namespace engine credentials cannot be provisioned or resolved."""
 
 
-def _admin_client():
+def _admin_client(session):
     from miniopy_async import MinioAdmin
     from miniopy_async.credentials import StaticProvider
 
@@ -36,7 +37,19 @@ def _admin_client():
         StaticProvider(settings.object_store_access_key, settings.object_store_secret_key),
         region=settings.object_store_region,
         secure=parsed.scheme == 'https',
+        session=session,
     )
+
+
+async def _provision_roles(namespace: str, roles: list[str]) -> dict[str, tuple[str, str]]:
+    """Create one object-store identity per role.
+
+    The admin client never closes a session it opened itself, so the session is
+    owned here and closed on the way out.
+    """
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+        admin = _admin_client(session)
+        return {role: await _create_role_identity(admin, namespace, role) for role in roles}
 
 
 def _policy_document(namespace: str, role: str) -> dict:
@@ -102,13 +115,8 @@ def provision_namespace_engine_credentials(session: Session, namespace: str) -> 
         session.rollback()
         return
 
-    admin = _admin_client()
-
-    async def provision_all():
-        return {role: await _create_role_identity(admin, namespace, role) for role in missing_roles}
-
     try:
-        identities = asyncio.run(provision_all())
+        identities = asyncio.run(_provision_roles(namespace, missing_roles))
     except Exception as exc:
         session.rollback()
         raise NamespaceCredentialError(f'Failed to provision engine credentials for namespace {namespace!r}') from exc
