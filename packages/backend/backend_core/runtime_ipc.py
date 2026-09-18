@@ -142,6 +142,25 @@ def notify_compute_response(request_id: str) -> None:
     _send_api_message({'kind': RuntimePayloadKind.COMPUTE_RESPONSE.value, 'request_id': request_id}, listener=RuntimeListenerKind.API)
 
 
+def notify_api_lock(
+    namespace: str,
+    resource_type: str,
+    resource_id: str,
+    status_payload: dict[str, object],
+) -> None:
+    _send_api_message(
+        {
+            'kind': 'lock',
+            'namespace': namespace,
+            'resource_type': resource_type,
+            'resource_id': resource_id,
+            'status': status_payload,
+            'source_pid': os.getpid(),
+        },
+        listener=RuntimeListenerKind.API,
+    )
+
+
 def notify_runtime_payload(payload: dict[str, object]) -> None:
     kind = RuntimePayloadKind.from_payload(payload)
     if kind is None:

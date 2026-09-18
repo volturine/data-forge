@@ -155,8 +155,9 @@ class TestShouldRun:
         assert should_run('0 * * * *', last) is True
 
     def test_not_due_schedule(self):
-        """Schedule that ran 1 second ago with hourly cron should not be due."""
-        last = datetime.now(UTC) - timedelta(seconds=1)
+        """A run after the most recent hourly boundary should not be due."""
+        now = datetime.now(UTC)
+        last = now.replace(minute=30, second=0, microsecond=0)
         assert should_run('0 * * * *', last) is False
 
     def test_every_minute_after_delay(self):

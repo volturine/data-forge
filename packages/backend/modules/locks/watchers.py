@@ -3,6 +3,8 @@ from collections import defaultdict
 
 from fastapi import WebSocket
 
+from backend_core.websocket import safe_send_json
+
 LockKey = tuple[str, str, str]
 
 
@@ -38,3 +40,22 @@ class LockWatcherRegistry:
 
 
 registry = LockWatcherRegistry()
+
+
+async def notify_watchers(
+    namespace: str,
+    resource_type: str,
+    resource_id: str,
+    payload: dict[str, object],
+) -> None:
+    stale: list[WebSocket] = []
+    for websocket in await registry.sockets(namespace, resource_type, resource_id):
+        try:
+            sent = await safe_send_json(websocket, payload)
+        except Exception:
+            stale.append(websocket)
+            continue
+        if not sent:
+            stale.append(websocket)
+    for websocket in stale:
+        await registry.discard(websocket, namespace, resource_type, resource_id)

@@ -601,11 +601,13 @@ class DockerComputeEngine(ComputeEngine):
             return False
 
     def _submit(self, kind: str, payload: dict[str, object], *, job_id: str | None = None) -> str:
-        if not self.is_process_alive():
-            self.start()
         with self._lock:
-            if self._stub is None:
-                raise RuntimeError(f"Engine {self.identity.resource_id} has no RPC channel")
+            # Check, restart and job registration stay atomic: an engine that is
+            # shut down (idle reaping, a crash) between the check and the
+            # registration has to be restarted, not reported as broken.
+            if not self.is_process_alive():
+                self.start()
+            assert self._stub is not None
             stub = self._stub
             metadata = self._metadata()
             job_id = job_id or str(uuid.uuid4())

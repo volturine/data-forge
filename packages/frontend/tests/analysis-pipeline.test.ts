@@ -13,7 +13,11 @@ import {
 	deleteAnalysisViaUI,
 	deleteDatasourceViaUI
 } from './utils/ui-cleanup.js';
-import { readyTimeoutMs, waitForInlinePreviewReady } from './utils/readiness.js';
+import {
+	readyTimeoutMs,
+	waitForChartPreviewReady,
+	waitForInlinePreviewReady
+} from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -804,8 +808,8 @@ test.describe('Pipeline data – pass-through operations', () => {
 		);
 		try {
 			await gotoAnalysisEditor(page, aId);
+			await waitForChartPreviewReady(page);
 			const chart = page.locator('[data-testid="chart-preview"]');
-			await expect(chart).toBeVisible({ timeout: readyTimeoutMs() });
 			await expect(chart.locator('svg')).toBeVisible({ timeout: readyTimeoutMs() });
 
 			await screenshot(page, 'analysis/pipeline', 'chart-plot-bar');

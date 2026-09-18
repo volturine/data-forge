@@ -103,6 +103,15 @@
 	const data = $derived(query.data);
 	const isLoading = $derived(query.isLoading);
 	const error = $derived(query.error);
+	const errorMessage = $derived(error instanceof Error ? error.message : '');
+	const previewState = $derived.by(() => {
+		if (!canPreviewDatasource) return 'inactive';
+		if (!analysisPipeline) return 'waiting-for-payload';
+		if (isLoading) return 'loading';
+		if (error) return 'error';
+		if (data) return 'ready';
+		return 'idle';
+	});
 
 	const canPrev = $derived(page > 1);
 	const pageSize = $derived(data?.data?.length ?? 0);
@@ -126,7 +135,10 @@
 		display: 'flex',
 		flexDirection: 'column'
 	})}
-	data-preview-ready={data && !isLoading ? 'true' : undefined}
+	data-testid="datasource-preview"
+	data-preview-ready={data && !isLoading && !error ? 'true' : undefined}
+	data-preview-state={previewState}
+	data-preview-error={errorMessage || undefined}
 >
 	{#if !canPreviewDatasource}
 		<div

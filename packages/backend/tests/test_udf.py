@@ -20,6 +20,7 @@ from modules.udf.service import (
     get_udf,
     import_udfs,
     list_udfs,
+    seed_defaults,
     update_udf,
 )
 
@@ -177,6 +178,14 @@ class TestUdfCRUD:
         with pytest.raises(AppError, match='UDF .* not found') as exc_info:
             delete_udf(test_db_session, 'nonexistent-id')
         assert exc_info.value.error_code == 'UDF_NOT_FOUND'
+
+    def test_seed_defaults_is_idempotent(self, test_db_session):
+        first = seed_defaults(test_db_session)
+        second = seed_defaults(test_db_session)
+
+        assert [udf.name for udf in first] == ['Ratio', 'Coalesce', 'Normalize']
+        assert second == []
+        assert sorted(udf.name for udf in list_udfs(test_db_session)) == ['Coalesce', 'Normalize', 'Ratio']
 
 
 class TestUdfListing:

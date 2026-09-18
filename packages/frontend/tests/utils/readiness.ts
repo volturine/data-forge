@@ -19,6 +19,49 @@ async function waitForAnyVisible(locator: Locator, timeout: number): Promise<voi
 	await expect(locator.filter({ visible: true }).first()).toBeVisible({ timeout });
 }
 
+async function waitForPreviewReady(
+	page: Page,
+	preview: Locator,
+	timeout: number,
+	label: string
+): Promise<void> {
+	const deadline = Date.now() + timeout;
+
+	while (true) {
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) {
+			const state = await preview
+				.getAttribute('data-preview-state', { timeout: 100 })
+				.catch(() => null);
+			throw new Error(
+				`${label} did not become ready within ${timeout}ms (state=${state ?? 'missing'})`
+			);
+		}
+
+		const pollTimeout = Math.min(remaining, 100);
+		const state = await preview
+			.getAttribute('data-preview-state', { timeout: pollTimeout })
+			.catch(() => null);
+		if (state === 'error') {
+			const message =
+				(await preview
+					.getAttribute('data-preview-error', { timeout: pollTimeout })
+					.catch(() => null)) ?? `${label} failed`;
+			throw new Error(`${label} failed before ready: ${message}`);
+		}
+
+		if (
+			(await preview
+				.getAttribute('data-preview-ready', { timeout: pollTimeout })
+				.catch(() => null)) === 'true'
+		) {
+			return;
+		}
+
+		await page.waitForTimeout(Math.min(100, deadline - Date.now()));
+	}
+}
+
 type MonitoringTabKey = 'builds' | 'schedules' | 'health';
 
 /**
@@ -124,23 +167,9 @@ export async function waitForDatasourcePreviewReady(
 ): Promise<void> {
 	await waitForLayoutReady(page, timeout);
 	await expect(page.locator('[data-ds-config]')).toBeVisible({ timeout });
-
-	const ready = page.locator('[data-preview-ready="true"]');
-	const failure = page.locator(':text("Failed to fetch"), :text("Preview failed")');
-	await expect(ready).toBeVisible({ timeout });
-	if (
-		await failure
-			.first()
-			.isVisible()
-			.catch(() => false)
-	) {
-		const message =
-			(await failure
-				.first()
-				.textContent()
-				.catch(() => null)) ?? 'Preview failed';
-		throw new Error(`Datasource preview failed before ready: ${message}`);
-	}
+	const preview = page.locator('[data-testid="datasource-preview"]');
+	await expect(preview).toBeVisible({ timeout });
+	await waitForPreviewReady(page, preview, timeout, 'Datasource preview');
 }
 
 /**
@@ -158,30 +187,22 @@ export async function waitForInlinePreviewReady(
 	timeout = readyTimeoutMs()
 ): Promise<void> {
 	await waitForLayoutReady(page, timeout);
-	const table = page.locator('[data-testid="inline-data-table"]');
+	const table = page.locator('[data-testid="inline-data-table"]').filter({ visible: true }).first();
 	await expect(table).toBeVisible({ timeout });
+	await waitForPreviewReady(page, table, timeout, 'Inline preview');
+}
 
-	const failure = page.locator(':text("Preview failed")');
-	await expect(table.filter({ visible: true }).first()).toHaveAttribute(
-		'data-preview-ready',
-		'true',
-		{
-			timeout
-		}
-	);
-	if (
-		await failure
-			.first()
-			.isVisible()
-			.catch(() => false)
-	) {
-		const message =
-			(await failure
-				.first()
-				.textContent()
-				.catch(() => null)) ?? 'Preview failed';
-		throw new Error(`Inline preview failed before ready: ${message}`);
-	}
+export async function waitForChartPreviewReady(
+	page: Page,
+	timeout = readyTimeoutMs()
+): Promise<void> {
+	await waitForLayoutReady(page, timeout);
+	const preview = page
+		.locator('[data-testid="chart-preview-container"]')
+		.filter({ visible: true })
+		.first();
+	await expect(preview).toBeVisible({ timeout });
+	await waitForPreviewReady(page, preview, timeout, 'Chart preview');
 }
 
 export async function waitForAnalysisLoadError(

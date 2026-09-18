@@ -478,3 +478,26 @@ def test_submit_releases_the_lifecycle_lock_during_the_rpc(monkeypatch) -> None:
 
     assert job_id
     assert lock_free_during_rpc.is_set()
+
+
+def test_submit_restarts_an_engine_that_was_shut_down(monkeypatch) -> None:
+    """A reaped or crashed engine is restarted by the next job, not reported broken."""
+    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    submitted: list[str] = []
+
+    class FakeStub:
+        def SubmitJob(self, request, timeout=None, metadata=None):  # noqa: N802 - gRPC stub name
+            submitted.append(request.job_id)
+            return engine_runtime_pb2.EngineJobReference(job_id=request.job_id)
+
+    def fake_start() -> None:
+        engine._container = _FakeContainer()
+        engine._stub = FakeStub()
+        engine._alive = True
+
+    monkeypatch.setattr(engine, "start", fake_start)
+    monkeypatch.setattr(engine, "_watch_job", lambda job_id: None)
+
+    job_id = engine._submit("preview", {})
+
+    assert submitted == [job_id]

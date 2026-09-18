@@ -2,7 +2,7 @@ import ast
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from sqlmodel import Session
 
 from backend_core.exceptions import UdfValidationError, udf_not_found
@@ -17,6 +17,8 @@ from modules.udf.schemas import (
     UdfSignatureSchema,
     UdfUpdateSchema,
 )
+
+_DEFAULT_SEED_LOCK_ID = 0x4446475544465344
 
 
 def _validate_code(code: str) -> None:
@@ -43,10 +45,10 @@ def _get_udf_model(session: Session, udf_id: str) -> Udf:
     return udf
 
 
-def create_udf(session: Session, data: UdfCreateSchema, owner_id: str | None = None) -> UdfResponseSchema:
+def _new_udf(data: UdfCreateSchema, owner_id: str | None = None) -> Udf:
     _validate_code(data.code)
     now = datetime.now(UTC)
-    udf = Udf(
+    return Udf(
         id=str(uuid.uuid4()),
         name=data.name,
         description=data.description,
@@ -58,6 +60,10 @@ def create_udf(session: Session, data: UdfCreateSchema, owner_id: str | None = N
         created_at=now,
         updated_at=now,
     )
+
+
+def create_udf(session: Session, data: UdfCreateSchema, owner_id: str | None = None) -> UdfResponseSchema:
+    udf = _new_udf(data, owner_id)
     session.add(udf)
     session.commit()
     session.refresh(udf)
@@ -192,11 +198,18 @@ def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseS
     return [UdfResponseSchema.model_validate(udf) for udf in imported]
 
 
+def _lock_default_seed(session: Session) -> None:
+    """Serialize default UDF seeding across API worker processes."""
+    if session.get_bind().dialect.name != 'postgresql':
+        return
+    session.execute(
+        text('SELECT pg_advisory_xact_lock(:lock_id)'),
+        {'lock_id': _DEFAULT_SEED_LOCK_ID},
+    )
+
+
 def seed_defaults(session: Session) -> list[UdfResponseSchema]:
-    result = session.execute(select(Udf))
-    existing = result.scalars().first()
-    if existing:
-        return []
+    _lock_default_seed(session)
 
     defaults = [
         UdfCreateSchema(
@@ -249,4 +262,14 @@ def seed_defaults(session: Session) -> list[UdfResponseSchema]:
         ),
     ]
 
-    return [create_udf(session, item) for item in defaults]
+    existing_names = set(session.execute(select(col(Udf.name))).scalars())
+    missing = [item for item in defaults if item.name not in existing_names]
+    if not missing:
+        return []
+
+    seeded = [_new_udf(item) for item in missing]
+    session.add_all(seeded)
+    session.commit()
+    for udf in seeded:
+        session.refresh(udf)
+    return [UdfResponseSchema.model_validate(udf) for udf in seeded]

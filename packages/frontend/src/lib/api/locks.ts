@@ -240,25 +240,28 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 
 	connect();
 
+	function release(): void {
+		wantsAcquire = false;
+		attemptedAcquireOnExistingLock = false;
+		if (!opened) return;
+		awaitingAcquire = false;
+		const token = ownedToken;
+		ownedToken = null;
+		if (!token) return;
+		const message: Record<string, unknown> = { action: 'release', lock_token: token };
+		send(message);
+	}
+
 	return {
 		acquire(ttlSeconds?: number) {
 			wantsAcquire = true;
 			attemptedAcquireOnExistingLock = false;
 			sendAcquire(ttlSeconds);
 		},
-		release() {
-			wantsAcquire = false;
-			attemptedAcquireOnExistingLock = false;
-			if (!opened) return;
-			awaitingAcquire = false;
-			const message: Record<string, unknown> = { action: 'release' };
-			if (ownedToken) {
-				message.lock_token = ownedToken;
-				ownedToken = null;
-			}
-			send(message);
-		},
+		release,
 		close() {
+			if (closed) return;
+			release();
 			closed = true;
 			cleanup();
 		}

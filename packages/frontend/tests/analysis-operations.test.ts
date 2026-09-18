@@ -14,7 +14,11 @@ import {
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
 import type { Browser } from '@playwright/test';
-import { readyTimeoutMs, waitForInlinePreviewReady } from './utils/readiness.js';
+import {
+	readyTimeoutMs,
+	waitForChartPreviewReady,
+	waitForInlinePreviewReady
+} from './utils/readiness.js';
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL;
 if (!baseURL) {
@@ -403,8 +407,8 @@ test.describe('Analyses – chart config and preview', () => {
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
 			// Chart preview should render (contains an SVG)
+			await waitForChartPreviewReady(page);
 			const chartPreview = page.locator('[data-testid="chart-preview"]');
-			await expect(chartPreview).toBeVisible({ timeout: readyTimeoutMs() });
 			await expect(chartPreview.locator('svg')).toBeVisible({ timeout: readyTimeoutMs() });
 
 			await screenshot(page, 'analysis/operations', 'chart-preview-rendered');

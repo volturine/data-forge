@@ -107,14 +107,19 @@ wait_for_runtime_drain() {
     echo "Waiting for e2e runtime work to drain"
     # Let ordinary asynchronous work finish, but do not let a request orphaned
     # by a destructive navigation test dominate the local suite runtime.
+    local runtime_schema="${DEFAULT_NAMESPACE:-default}"
+    if [[ ! "$runtime_schema" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        echo "Invalid DEFAULT_NAMESPACE for runtime drain query: ${runtime_schema}" >&2
+        return 1
+    fi
     local deadline=$((SECONDS + 15))
     while true; do
         local active_runtime_work
         active_runtime_work="$(
             "${COMPOSE[@]}" exec -T postgres psql -U dataforge -d dataforge -Atc \
                 "SELECT
-                    (SELECT count(*) FROM public.compute_requests WHERE status IN (1, 2)) +
-                    (SELECT count(*) FROM public.build_jobs WHERE status IN ('queued', 'leased', 'running'));" \
+                    (SELECT count(*) FROM \"${runtime_schema}\".compute_requests WHERE status IN (1, 2)) +
+                    (SELECT count(*) FROM \"${runtime_schema}\".build_jobs WHERE status IN ('queued', 'leased', 'running'));" \
                 2>/dev/null || echo 1
         )"
         active_runtime_work="${active_runtime_work//$'\n'/}"

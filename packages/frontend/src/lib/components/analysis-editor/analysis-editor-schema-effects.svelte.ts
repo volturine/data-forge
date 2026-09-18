@@ -39,37 +39,40 @@ export function setupEngineWarmupEffect(validAnalysisId: () => string | null): {
 	let warmedEngineIdentityCache: string | null = null;
 	let alive = false;
 	let timer = 0;
+	let generation = 0;
 
 	function stop(): void {
 		alive = false;
+		generation += 1;
 		if (timer) window.clearTimeout(timer);
 		timer = 0;
+		analysisStore.previews.paused = false;
 	}
 
 	function start(): void {
 		stop();
 		const id = validAnalysisId();
 		if (!id) {
-			analysisStore.previews.paused = false;
 			warmedEngineIdentityCache = null;
 			return;
 		}
 		const nextKey = `${id}:${JSON.stringify(analysisStore.resourceConfig ?? {})}`;
 		if (warmedEngineIdentityCache === nextKey) {
-			analysisStore.previews.paused = false;
 			return;
 		}
 		warmedEngineIdentityCache = nextKey;
 		alive = true;
+		analysisStore.previews.paused = true;
+		const requestGeneration = generation;
 		timer = window.setTimeout(() => {
-			if (!alive) return;
+			if (!alive || requestGeneration !== generation) return;
 			spawnAnalysisEngine(id, analysisStore.resourceConfig ?? undefined).match(
 				() => {
-					if (!alive) return;
+					if (!alive || requestGeneration !== generation) return;
 					analysisStore.previews.paused = false;
 				},
 				(err) => {
-					if (!alive) return;
+					if (!alive || requestGeneration !== generation) return;
 					track({
 						event: 'engine_error',
 						action: 'prewarm',

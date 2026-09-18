@@ -204,6 +204,30 @@ describe('openLockSession', () => {
 		expect(socket.sent).toHaveLength(1);
 	});
 
+	test('close releases an owned lock before closing the websocket', () => {
+		const session = openLockSession({
+			resourceType: 'analysis',
+			resourceId: 'a-5-release',
+			onStatus: () => {}
+		});
+
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+		session.acquire();
+		socket.emit('message', {
+			data: JSON.stringify({
+				type: 'status',
+				resource_type: 'analysis',
+				resource_id: 'a-5-release',
+				lock: { owner_id: 'client-1', lock_token: 'tok-release' }
+			})
+		});
+
+		session.close();
+
+		expect(JSON.parse(socket.sent[2])).toEqual({ action: 'release', lock_token: 'tok-release' });
+	});
+
 	test('reconnects and re-watches after a transient close', () => {
 		const statuses: Array<{ ownsLock: boolean } | null> = [];
 		const session = openLockSession({

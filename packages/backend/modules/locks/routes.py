@@ -5,6 +5,8 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 from sqlmodel import Session
 
+from backend_core import runtime_ipc
+from backend_core.config import settings
 from backend_core.database import get_db, run_db, run_settings_db
 from backend_core.dependencies import get_lock_owner_id, resolve_lock_owner_id
 from backend_core.error_handlers import handle_errors
@@ -60,18 +62,25 @@ async def _send_error(websocket: WebSocket, error: str, status_code: int) -> Non
 
 async def _notify_watchers(resource_type: str, resource_id: str, lock: schemas.LockStatusResponse | None) -> None:
     payload = _status_payload(resource_type, resource_id, lock)
-    stale: list[WebSocket] = []
     namespace = get_namespace()
-    for websocket in await watchers.registry.sockets(namespace, resource_type, resource_id):
-        try:
-            sent = await safe_send_json(websocket, payload)
-        except Exception:
-            stale.append(websocket)
-            continue
-        if not sent:
-            stale.append(websocket)
-    for websocket in stale:
-        await watchers.registry.discard(websocket, namespace, resource_type, resource_id)
+    await watchers.notify_watchers(namespace, resource_type, resource_id, payload)
+    if not settings.distributed_runtime_enabled:
+        return
+    try:
+        await run_in_threadpool(
+            runtime_ipc.notify_api_lock,
+            namespace,
+            resource_type,
+            resource_id,
+            payload,
+        )
+    except Exception:
+        logger.warning(
+            'Failed to publish cross-process lock update for %s %s',
+            resource_type,
+            resource_id,
+            exc_info=True,
+        )
 
 
 async def _lookup_lock_status(resource_type: str, resource_id: str) -> tuple[schemas.LockStatusResponse | None, bool]:

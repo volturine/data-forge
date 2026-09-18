@@ -7,7 +7,7 @@ import {
 	deleteDatasourceViaUI,
 	freeWarmEnginesViaUI
 } from './utils/ui-cleanup.js';
-import { readyTimeoutMs } from './utils/readiness.js';
+import { readyTimeoutMs, waitForChartPreviewReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -179,8 +179,8 @@ test.describe('Charts – chart types render', () => {
 			);
 			try {
 				await gotoAnalysisEditor(page, aId);
+				await waitForChartPreviewReady(page);
 				const chart = page.locator('[data-testid="chart-preview"]');
-				await expect(chart).toBeVisible({ timeout: readyTimeoutMs() });
 				await expect(chart.locator('svg').first()).toBeVisible({ timeout: readyTimeoutMs() });
 				if (spec.chart_type === 'bar') {
 					const svg = chart.locator('svg').first();

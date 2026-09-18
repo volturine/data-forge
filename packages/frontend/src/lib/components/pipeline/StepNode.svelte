@@ -103,6 +103,7 @@
 			datasourceStore.datasources
 		);
 	});
+	const chartConfigured = $derived(((step.config?.x_column as string | undefined) ?? '') !== '');
 
 	const chartQuery = createQuery(() => ({
 		queryKey: [
@@ -138,8 +139,20 @@
 			!!datasourceId &&
 			!!analysisId &&
 			!!analysisPipeline &&
-			((step.config?.x_column as string | undefined) ?? '') !== ''
+			!analysisStore.previews.paused &&
+			chartConfigured
 	}));
+	const chartPreviewState = $derived.by(() => {
+		if (!isChart || !isApplied || !chartConfigured) return 'inactive';
+		if (!analysisPipeline || !datasourceId || !analysisId) return 'waiting-for-payload';
+		if (analysisStore.previews.paused || chartQuery.isFetching) return 'loading';
+		if (chartQuery.error) return 'error';
+		if (chartQuery.data) return 'ready';
+		return 'idle';
+	});
+	const chartPreviewError = $derived(
+		chartQuery.error instanceof Error ? chartQuery.error.message : ''
+	);
 
 	const rowCounts = new SvelteMap<string, number>();
 
@@ -595,7 +608,13 @@
 		{/if}
 
 		{#if isChart && datasourceId && analysisId}
-			<div class={css({ borderTopWidth: '1' })}>
+			<div
+				class={css({ borderTopWidth: '1' })}
+				data-testid="chart-preview-container"
+				data-preview-ready={chartPreviewState === 'ready' ? 'true' : undefined}
+				data-preview-state={chartPreviewState}
+				data-preview-error={chartPreviewError || undefined}
+			>
 				{#if !isApplied}
 					<div
 						class={css({
@@ -616,7 +635,7 @@
 							<span>Apply to preview</span>
 						{/if}
 					</div>
-				{:else if chartQuery.isFetching}
+				{:else if analysisStore.previews.paused || chartQuery.isFetching}
 					<div
 						class={css({
 							display: 'flex',

@@ -146,7 +146,7 @@
 <div
 	class={css({ contain: 'content', width: 'full', height: 'panel', overflow: 'hidden' })}
 	data-testid="inline-data-table"
-	data-preview-ready={data && !isLoading && !error && data.columns.length > 0 ? 'true' : undefined}
+	data-preview-ready={data && !isLoading && !error ? 'true' : undefined}
 	data-preview-state={previewState}
 	data-preview-columns={data?.columns.length ?? 0}
 	data-preview-error={errorMessage || undefined}

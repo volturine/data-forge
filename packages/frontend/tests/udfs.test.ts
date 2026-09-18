@@ -242,6 +242,13 @@ test.describe('UDFs – export & import', () => {
 				chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
 			}
 			const exportedJson = Buffer.concat(chunks).toString('utf8');
+			// Export returns the whole library. Import only this test's UDF:
+			// re-importing everything duplicates the seeded UDFs for every other
+			// test sharing the app, and the duplicates outlive this test.
+			const exported = JSON.parse(exportedJson) as { udfs: Array<{ name: string }> };
+			const ownUdfs = exported.udfs.filter((entry) => entry.name === udf);
+			expect(ownUdfs).toHaveLength(1);
+			const importJson = JSON.stringify({ ...exported, udfs: ownUdfs });
 
 			// Delete the UDF via UI first
 			await deleteUdfViaUI(page, udf, { strict: true });
@@ -255,7 +262,7 @@ test.describe('UDFs – export & import', () => {
 			await importBtn.click();
 			const importDialog = dialogByHeading(page, /Import UDFs/i);
 			await expect(importDialog).toBeVisible();
-			await page.locator('#udf-import-json').fill(exportedJson);
+			await page.locator('#udf-import-json').fill(importJson);
 			await importDialog.getByRole('button', { name: /^Import$/i }).click();
 			await expect(importDialog.getByRole('heading', { name: /Import UDFs/i })).not.toBeVisible({
 				timeout: 5_000
