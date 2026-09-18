@@ -29,13 +29,11 @@ export async function closeBuildPreviewIfOpen(page: Page): Promise<void> {
 
 	const closeBtn = page.getByRole('button', { name: 'Close build preview' });
 	if (await closeBtn.isVisible().catch(() => false)) {
-		await closeBtn.click({ timeout: 5_000 }).catch(() => undefined);
+		await closeBtn.click({ timeout: 5_000 });
 	} else {
-		await page.keyboard.press('Escape').catch(() => undefined);
+		await page.keyboard.press('Escape');
 	}
-	await expect(preview)
-		.toBeHidden({ timeout: 5_000 })
-		.catch(() => undefined);
+	await expect(preview).toBeHidden({ timeout: 5_000 });
 }
 
 /**
@@ -54,25 +52,42 @@ export async function openEnginesPopup(page: Page): Promise<Locator> {
 	await expect(trigger).toBeVisible({ timeout: 5_000 });
 	await trigger.click({ timeout: 5_000 });
 	await expect(popup).toBeVisible({ timeout: 5_000 });
-	// Settle stream: loading ends, empty state, or at least one row.
-	await Promise.race([
-		popup.getByText('Loading engines...').waitFor({ state: 'hidden', timeout: 5_000 }),
-		popup.getByText('No engines running').waitFor({ state: 'visible', timeout: 5_000 }),
-		popup.locator('[data-engine-row]').first().waitFor({ state: 'visible', timeout: 5_000 })
-	]).catch(() => undefined);
+	// Settle stream: loading ends with either an empty state or a real row.
+	// A timeout here must fail cleanup; treating an unsettled stream as empty
+	// leaves the engine alive and contaminates the next test.
+	await expect
+		.poll(
+			async () => {
+				if (
+					await popup
+						.getByText('No engines running')
+						.isVisible()
+						.catch(() => false)
+				) {
+					return 'empty';
+				}
+				if (
+					await popup
+						.locator('[data-engine-row]')
+						.first()
+						.isVisible()
+						.catch(() => false)
+				) {
+					return 'rows';
+				}
+				return 'loading';
+			},
+			{ timeout: 10_000, message: 'Engine monitor did not publish a settled snapshot' }
+		)
+		.not.toBe('loading');
 	return popup;
 }
 
 export async function closeEnginesPopup(page: Page): Promise<void> {
 	const popup = page.locator('[data-engines-popup="true"]');
 	if (!(await popup.isVisible().catch(() => false))) return;
-	await popup
-		.getByLabel('Close engines')
-		.click({ timeout: 1_000 })
-		.catch(() => undefined);
-	await expect(popup)
-		.toBeHidden({ timeout: 2_000 })
-		.catch(() => undefined);
+	await popup.getByLabel('Close engines').click({ timeout: 1_000 });
+	await expect(popup).toBeHidden({ timeout: 2_000 });
 }
 
 async function confirmEngineShutdownDialog(page: Page): Promise<void> {
@@ -88,9 +103,7 @@ async function confirmEngineShutdownDialog(page: Page): Promise<void> {
 	await confirm
 		.getByRole('button', { name: /^(Shut down|Cancel job & shut down)$/ })
 		.click({ timeout: 3_000 });
-	await expect(confirm)
-		.toBeHidden({ timeout: 5_000 })
-		.catch(() => undefined);
+	await expect(confirm).toBeHidden({ timeout: 5_000 });
 }
 
 /**
@@ -153,12 +166,7 @@ export async function freeWarmEnginesViaUI(
 	// Build Preview modal blocks Engines clicks; dismiss before opening the popup.
 	await closeBuildPreviewIfOpen(page);
 
-	let popup: Locator;
-	try {
-		popup = await openEnginesPopup(page);
-	} catch {
-		return;
-	}
+	const popup = await openEnginesPopup(page);
 
 	if (
 		await popup
@@ -177,13 +185,11 @@ export async function freeWarmEnginesViaUI(
 		if (!(await row.isVisible().catch(() => false))) continue;
 
 		const power = popup.locator(`[data-engine-shutdown="${key}"]`);
-		if (!(await power.isEnabled().catch(() => false))) continue;
+		await expect(power).toBeEnabled({ timeout: 2_000 });
 
-		await power.click({ timeout: 2_000 }).catch(() => undefined);
-		await confirmEngineShutdownDialog(page).catch(() => undefined);
-		await expect(row)
-			.toBeHidden({ timeout: 10_000 })
-			.catch(() => undefined);
+		await power.click({ timeout: 2_000 });
+		await confirmEngineShutdownDialog(page);
+		await expect(row).toBeHidden({ timeout: 10_000 });
 	}
 
 	await closeEnginesPopup(page);
@@ -199,10 +205,8 @@ function confirmDialog(page: Page, heading: string | RegExp): Locator {
 async function closeFloatingPanels(page: Page): Promise<void> {
 	const enginesPopup = page.locator('[data-engines-popup="true"]');
 	if (await enginesPopup.isVisible().catch(() => false)) {
-		await enginesPopup
-			.getByLabel('Close engines')
-			.click({ timeout: 1_000 })
-			.catch(() => undefined);
+		await enginesPopup.getByLabel('Close engines').click({ timeout: 1_000 });
+		await expect(enginesPopup).toBeHidden({ timeout: 2_000 });
 	}
 }
 
@@ -306,11 +310,15 @@ async function runCleanupWithFallback(
 ): Promise<void> {
 	try {
 		await cleanup(sourcePage);
-	} catch {
+	} catch (sourceError) {
 		try {
 			await withIsolatedCleanupPage(sourcePage, cleanup);
 		} catch (isolatedError) {
-			console.warn(`[ui-cleanup] ${label} failed for "${targetName}":`, isolatedError);
+			throw new AggregateError(
+				[sourceError, isolatedError],
+				`[ui-cleanup] ${label} failed for "${targetName}" on both test and isolated cleanup pages`,
+				{ cause: isolatedError }
+			);
 		}
 	}
 }
@@ -321,7 +329,7 @@ async function deleteDatasourceViaUIOnPage(
 	options?: { id?: string }
 ): Promise<void> {
 	await page.goto('/datasources', { waitUntil: 'domcontentloaded', timeout: 15_000 });
-	await waitForDatasourceList(page, 1_500).catch(() => undefined);
+	await waitForDatasourceList(page, 5_000);
 	const row = options?.id
 		? page.locator(`[data-ds-id="${options.id}"]`).first()
 		: page.locator(`[data-ds-row="${name}"]`).first();
@@ -329,28 +337,21 @@ async function deleteDatasourceViaUIOnPage(
 		const toggle = page.locator('button[title="Show auto-generated datasources"]');
 		if (await toggle.isVisible().catch(() => false)) {
 			await toggle.click({ timeout: 5_000 });
-			await waitForDatasourceList(page, 1_500).catch(() => undefined);
+			await waitForDatasourceList(page, 5_000);
 		}
 	}
 	if (!(await row.isVisible().catch(() => false))) return;
 	const datasourceId = options?.id ?? (await row.getAttribute('data-ds-id'));
 	if (datasourceId) {
-		await shutdownDatasourcePreviewEngineViaUI(page, datasourceId).catch((error) => {
-			console.warn(
-				`[e2e] shutdownDatasourcePreviewEngineViaUI before UI delete failed for ${datasourceId}:`,
-				error
-			);
-		});
+		await shutdownDatasourcePreviewEngineViaUI(page, datasourceId);
 	}
 	const deleteResponse = datasourceId
-		? page
-				.waitForResponse(
-					(response) =>
-						response.request().method() === 'DELETE' &&
-						response.url().includes(`/api/v1/datasource/${datasourceId}`),
-					{ timeout: 5_000 }
-				)
-				.catch(() => null)
+		? page.waitForResponse(
+				(response) =>
+					response.request().method() === 'DELETE' &&
+					response.url().includes(`/api/v1/datasource/${datasourceId}`),
+				{ timeout: 5_000 }
+			)
 		: Promise.resolve(null);
 	const deleteButton = row.locator('button[title="Delete"]');
 	await expect(deleteButton).toBeEnabled({ timeout: 1_500 });
@@ -365,16 +366,7 @@ async function deleteDatasourceViaUIOnPage(
 		}
 	});
 	await expect(dialog).toBeHidden({ timeout: 5_000 });
-	await expect(row)
-		.toBeHidden({ timeout: 5_000 })
-		.catch(async () => {
-			await page.goto('/datasources', {
-				waitUntil: 'domcontentloaded',
-				timeout: 15_000
-			});
-			await waitForDatasourceList(page, 5_000);
-			await expect(row).toBeHidden({ timeout: 5_000 });
-		});
+	await expect(row).toBeHidden({ timeout: 5_000 });
 }
 
 export async function deleteDatasourceViaUI(
@@ -414,19 +406,16 @@ async function deleteAnalysisViaUIOnPage(
 	options?: { skipNavigation?: boolean }
 ): Promise<void> {
 	if (!options?.skipNavigation) {
-		await gotoAnalysesGallery(page, 1_500).catch(() => undefined);
+		await gotoAnalysesGallery(page, 5_000);
 	}
-	await closeFloatingPanels(page);
 	await closeFloatingPanels(page);
 	const card = page.locator(`[data-analysis-card="${name}"]`);
 	try {
-		await card.waitFor({ state: 'visible', timeout: 1_500 });
-	} catch {
+		await card.waitFor({ state: 'visible', timeout: 5_000 });
+	} catch (error) {
 		const knownId = findAnalysisIdByName(name);
 		if (knownId) {
-			// Card gone but engine may still be warm — free via Engines popup.
-			await shutdownAnalysisEngineViaUI(page, knownId).catch(() => undefined);
-			unregisterAnalysis(knownId);
+			throw new Error(`Analysis card "${name}" was not published for cleanup`, { cause: error });
 		}
 		return;
 	}
@@ -434,22 +423,15 @@ async function deleteAnalysisViaUIOnPage(
 	// Free Docker engine via visible Engines UI before deleting the analysis card.
 	// Analysis DELETE also queues durable shutdown as a backstop.
 	if (analysisId) {
-		await shutdownAnalysisEngineViaUI(page, analysisId).catch((error) => {
-			console.warn(
-				`[e2e] shutdownAnalysisEngineViaUI before UI delete failed for ${analysisId}:`,
-				error
-			);
-		});
+		await shutdownAnalysisEngineViaUI(page, analysisId);
 	}
 	const deleteResponse = analysisId
-		? page
-				.waitForResponse(
-					(response) =>
-						response.request().method() === 'DELETE' &&
-						response.url().includes(`/api/v1/analysis/${analysisId}`),
-					{ timeout: 5_000 }
-				)
-				.catch(() => null)
+		? page.waitForResponse(
+				(response) =>
+					response.request().method() === 'DELETE' &&
+					response.url().includes(`/api/v1/analysis/${analysisId}`),
+				{ timeout: 5_000 }
+			)
 		: Promise.resolve(null);
 	await card.getByRole('button', { name: /Delete analysis/ }).click({ timeout: 5_000 });
 	const dialog = confirmDialog(page, 'Delete Analysis');
@@ -466,12 +448,7 @@ async function deleteAnalysisViaUIOnPage(
 	if (await deleteError.isVisible().catch(() => false)) {
 		throw new Error((await deleteError.textContent()) ?? `Failed to delete analysis ${name}`);
 	}
-	await expect(card)
-		.toBeHidden({ timeout: 5_000 })
-		.catch(async () => {
-			await gotoAnalysesGallery(page, 5_000);
-			await expect(card).toBeHidden({ timeout: 5_000 });
-		});
+	await expect(card).toBeHidden({ timeout: 5_000 });
 	if (analysisId) unregisterAnalysis(analysisId);
 }
 

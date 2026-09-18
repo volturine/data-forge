@@ -27,10 +27,10 @@ async function cleanupBuildPreviewResources(
 	// Free exclusive build engine once if still warm, then gallery deletes
 	// (analysis/datasource delete each shut their engines once — no freeWarm stack).
 	if (buildId) {
-		await freeWarmEnginesViaUI(page, { buildIds: [buildId] }).catch(() => undefined);
+		await freeWarmEnginesViaUI(page, { buildIds: [buildId] });
 	}
-	await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
-	await deleteDatasourceViaUI(page, datasourceName).catch(() => undefined);
+	await deleteAnalysisViaUI(page, analysisName);
+	await deleteDatasourceViaUI(page, datasourceName);
 }
 
 async function startBuildAndCaptureId(page: Page): Promise<string | undefined> {

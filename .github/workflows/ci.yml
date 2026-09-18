@@ -123,17 +123,8 @@ jobs:
     timeout-minutes: 35
     permissions:
       contents: read
-    env:
-      # Leave compute headroom for auto-previews and cleanup that overlap the
-      # browser test which initiated them. No Playwright retries.
-      PW_E2E_WORKERS: "2"
-      BUILD_WORKER_MIN_PROCESSES: "4"
-      BUILD_WORKER_MAX_PROCESSES: "4"
-      COMPUTE_REQUEST_CONCURRENCY: "4"
-      MAX_CONCURRENT_ENGINES: "8"
-      POLARS_MAX_MEMORY_MB: "256"
-      E2E_TIMEOUT_SECONDS: "1500"
-      LOG_LEVEL: "warning"
+    # E2E runtime defaults are centralized in docker/env/e2e.env so local and
+    # CI runs exercise the same concurrency, memory, and timeout settings.
     steps:
       - uses: actions/checkout@v7
 

@@ -14,7 +14,6 @@ from backend_core.lease_observability import record_lease_transition
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.sqlmodel_typing import sa
-from backend_core.time import utc_now as _utcnow
 from backend_core.transactions import committed
 from backend_core.transitions import TransitionOutcome, TransitionResult, applied, rejected
 
@@ -38,7 +37,10 @@ def stage_job(
     max_attempts: int = 1,
     available_at: datetime | None = None,
 ) -> BuildJob:
-    now = _utcnow()
+    # Claims compare availability against PostgreSQL CURRENT_TIMESTAMP. Use the
+    # same clock when staging so a host/database clock skew cannot hide a fresh
+    # job from the very next worker claim.
+    now = _database_now(session)
     job = BuildJob(
         id=str(uuid.uuid4()),
         build_id=build_id,

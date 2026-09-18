@@ -159,7 +159,7 @@ async def _run_once(
     try:
         await _execute_request(claimed, manager)
     except ComputeRequestLeaseLost:
-        logger.warning("Compute request %s lease was lost; execution drained without publication", claimed.id)
+        logger.warning("Compute request %s lease was lost; execution was cancelled without publication", claimed.id)
     return True
 
 
@@ -177,14 +177,39 @@ async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManag
     try:
         while True:
             # Gate: do not take a compute runner until admission allows spawn/reuse.
-            owns_admission = await manager.await_spawn_admission(identity)
+            admission_task = asyncio.create_task(manager.await_spawn_admission(identity))
+            owns_admission = False
+            execution = None
             try:
-                execution = loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
+                done, _pending = await asyncio.wait(
+                    {admission_task, renewal},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if renewal in done:
+                    # A capacity waiter must not become a stale runner after its
+                    # durable claim expires.  ProcessManager also removes the
+                    # waiter and returns any admission when this task is
+                    # cancelled below.
+                    await renewal
+                    raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
+                owns_admission = admission_task.result()
+
+                async def run_execution() -> None:
+                    await loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
+
+                execution = asyncio.create_task(run_execution())
                 done, _pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
                 if renewal in done:
                     try:
                         await renewal
                     except ComputeRequestLeaseLost:
+                        if identity is not None:
+                            with contextlib.suppress(Exception):
+                                await asyncio.to_thread(
+                                    manager.shutdown_engine,
+                                    identity,
+                                    namespace=claimed.namespace,
+                                )
                         await asyncio.gather(execution, return_exceptions=True)
                         raise
                     raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
@@ -196,6 +221,9 @@ async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManag
                     # reuse admission and execution. Rejoin the FIFO queue.
                     continue
             finally:
+                if not admission_task.done():
+                    admission_task.cancel()
+                await asyncio.gather(admission_task, return_exceptions=True)
                 manager.release_spawn_admission(identity, owned=owns_admission)
     finally:
         renewal_stop.set()

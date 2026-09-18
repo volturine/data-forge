@@ -41,7 +41,6 @@ from modules.auth.models import (
     VerificationToken,
     VerificationTokenType,
 )
-from modules.auth.routes import invalidate_me_cache
 from modules.auth.schemas import UserPublic
 from modules.auth.service import (
     _DEFAULT_USER_LOCK_ID,
@@ -163,7 +162,6 @@ def auth_db_session(auth_engine):
 def auth_client(auth_db_session: Session, auth_engine, monkeypatch):
     monkeypatch.setattr('backend_core.config.settings.debug', True)
     ensure_default_user(auth_db_session)
-    invalidate_me_cache()
 
     def override_get_settings_db():
         yield auth_db_session
@@ -176,7 +174,6 @@ def auth_client(auth_db_session: Session, auth_engine, monkeypatch):
         yield client
     app.dependency_overrides.clear()
     clear_settings_engine_override()
-    invalidate_me_cache()
 
 
 class TestPasswordHashing:

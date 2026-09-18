@@ -220,6 +220,31 @@ describe('EnginesStore', () => {
 		expect(store.engines[0]?.analysis_id).toBe('a-2');
 	});
 
+	test('shutdownEngine keeps the row until the API confirms shutdown', async () => {
+		const stream = mockStreamConnection();
+		const engines = [makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' })];
+		let resolveShutdown!: () => void;
+		mockShutdownEngine.mockReturnValue({
+			match: (onOk: () => void) =>
+				new Promise<void>((resolve) => {
+					resolveShutdown = () => {
+						onOk();
+						resolve();
+					};
+				})
+		});
+
+		store.startStream();
+		stream.emitSnapshot(engines);
+		const shutdown = store.shutdownEngine(engines[0]!);
+
+		expect(store.engines).toEqual(engines);
+		resolveShutdown();
+		await shutdown;
+
+		expect(store.engines).toEqual([]);
+	});
+
 	test('shutdownEngine keeps a pending engine hidden across snapshots', async () => {
 		const stream = mockStreamConnection();
 		const engines = [
@@ -251,7 +276,7 @@ describe('EnginesStore', () => {
 		stream.emitSnapshot(engines);
 
 		await expect(store.shutdownEngine(engines[0]!)).rejects.toThrow('Permission denied');
-		expect(store.engines).toEqual([]);
+		expect(store.engines).toEqual(engines);
 		expect(store.error).toBe('Permission denied');
 		stream.emitSnapshot(engines);
 		expect(store.engines).toEqual(engines);

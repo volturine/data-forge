@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import threading
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -416,6 +417,55 @@ async def test_compute_request_renewal_reports_lost_claim(monkeypatch) -> None:
 
     with pytest.raises(compute_request_runtime.ComputeRequestLeaseLost, match="no longer active"):
         await compute_request_runtime._renew_compute_lease(claimed, stop_event=asyncio.Event())
+
+
+@pytest.mark.asyncio
+async def test_compute_request_lease_loss_stops_engine_execution(monkeypatch) -> None:
+    stopped = threading.Event()
+    execution_started = asyncio.Event()
+    shutdown_calls: list[tuple[str, str | None]] = []
+    loop = asyncio.get_running_loop()
+
+    class _Manager:
+        async def await_spawn_admission(self, _identity):
+            return False
+
+        def release_spawn_admission(self, _identity, *, owned: bool) -> None:
+            assert owned is False
+
+        def shutdown_engine(self, identity, *, namespace: str | None = None) -> None:
+            shutdown_calls.append((identity.resource_id, namespace))
+            stopped.set()
+
+    async def lose_lease(_claimed, *, stop_event: asyncio.Event) -> None:
+        del stop_event
+        await execution_started.wait()
+        raise compute_request_runtime.ComputeRequestLeaseLost("lease lost")
+
+    def run_engine(_claimed, _manager) -> None:
+        loop.call_soon_threadsafe(execution_started.set)
+        assert stopped.wait(timeout=2)
+
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", lose_lease)
+    monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", run_engine)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-lease-loss",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-lease-loss"),
+    )
+
+    with pytest.raises(compute_request_runtime.ComputeRequestLeaseLost, match="lease lost"):
+        await asyncio.wait_for(
+            compute_request_runtime._execute_request(claimed, cast(Any, _Manager())),
+            timeout=2,
+        )
+
+    assert shutdown_calls == [("analysis-from-proto", "tenant-a")]
 
 
 def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot(monkeypatch) -> None:

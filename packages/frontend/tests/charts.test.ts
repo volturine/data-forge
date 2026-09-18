@@ -4,8 +4,7 @@ import { gotoAnalysisEditor } from './utils/analysis.js';
 import {
 	createCleanupPage,
 	deleteAnalysisViaUI,
-	deleteDatasourceViaUI,
-	freeWarmEnginesViaUI
+	deleteDatasourceViaUI
 } from './utils/ui-cleanup.js';
 import { readyTimeoutMs, waitForChartPreviewReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
@@ -112,7 +111,6 @@ function chartSpecs(): Array<{ chart_type: string; config: ChartStepConfig }> {
 test.describe('Charts – chart types render', () => {
 	let dsId: string;
 	let dsName: string;
-	const analysisNames: string[] = [];
 
 	test.beforeAll(async ({ request }) => {
 		dsName = `e2e-chart-types-ds-${uid()}`;
@@ -121,10 +119,7 @@ test.describe('Charts – chart types render', () => {
 
 	test.afterAll(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-		for (const name of analysisNames) {
-			await deleteAnalysisViaUI(page, name).catch(() => undefined);
-		}
-		await deleteDatasourceViaUI(page, dsName).catch(() => undefined);
+		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
 		await context.close();
 	});
@@ -132,7 +127,6 @@ test.describe('Charts – chart types render', () => {
 	for (const spec of chartSpecs()) {
 		test(`chart_type "${spec.chart_type}" renders an svg`, async ({ page, request }) => {
 			const analysisName = `E2E Chart ${spec.chart_type} ${uid()}`;
-			analysisNames.push(analysisName);
 			const stepId = crypto.randomUUID();
 			const tabId = crypto.randomUUID();
 			const resultId = crypto.randomUUID();
@@ -192,7 +186,7 @@ test.describe('Charts – chart types render', () => {
 				}
 				await screenshot(page, 'charts', spec.chart_type);
 			} finally {
-				await freeWarmEnginesViaUI(page, { analysisIds: [aId] });
+				await deleteAnalysisViaUI(page, analysisName);
 			}
 		});
 	}
