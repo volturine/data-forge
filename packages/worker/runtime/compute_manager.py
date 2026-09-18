@@ -109,6 +109,7 @@ class ProcessManager:
         *,
         warm_engine_factory: Callable[[], ComputeEngine] | None = None,
         supervisor_id: str = "worker",
+        warm_pool_size: int | None = None,
     ) -> None:
         self._engines: dict[EngineIdentityKey, EngineInfo] = {}
         self._engine_identities: dict[EngineIdentityKey, EngineIdentity] = {}
@@ -137,6 +138,7 @@ class ProcessManager:
         self._on_snapshot = on_snapshot
         self._idle_ttl_seconds = settings.engine_idle_ttl_seconds
         self._idle_reap_interval_seconds = settings.engine_idle_reap_interval_seconds
+        self._warm_pool_size = settings.engine_warm_pool_size if warm_pool_size is None else warm_pool_size
         self._reaper_stop = threading.Event()
         self._reaper_thread: threading.Thread | None = None
         if self._idle_ttl_seconds > 0:
@@ -148,7 +150,7 @@ class ProcessManager:
         )
         self._warm_replenish_trigger = threading.Event()
         self._warm_replenish_thread: threading.Thread | None = None
-        if self._warm_engine_factory is not None and settings.engine_warm_pool_size > 0:
+        if self._warm_engine_factory is not None and self._warm_pool_size > 0:
             self._warm_replenish_thread = threading.Thread(
                 target=self._replenish_warm_pool_loop,
                 name="engine-warm-pool-replenisher",
@@ -796,7 +798,7 @@ class ProcessManager:
             # for a fresh spawn is a preview/build paying full container boot.
             while not self._closed and not self._reaper_stop.is_set():
                 with self._capacity_changed:
-                    target_warm = settings.engine_warm_pool_size
+                    target_warm = self._warm_pool_size
                     current_warm = len(self._warm_pool)
                     used = self._capacity_used_locked()
                     headroom = settings.max_concurrent_engines - used

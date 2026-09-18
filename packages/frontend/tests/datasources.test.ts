@@ -21,12 +21,12 @@ test.describe('Datasources – list & management', () => {
 	let sharedListDatasource = '';
 	const sharedDescription = 'Primary customer dataset for retention analysis and reporting.';
 
-	test.beforeAll(async ({ request }) => {
-		sharedListDatasource = `e2e-description-list-${uid()}`;
+	test.beforeEach(async ({ request }) => {
+		sharedListDatasource = `e2e-description-test-${uid()}`;
 		await createDatasource(request, sharedListDatasource, undefined, sharedDescription);
 	});
 
-	test.afterAll(async ({ browser, workerAuth }) => {
+	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteDatasourceViaUI(page, sharedListDatasource);
 		await page.close();
@@ -41,7 +41,7 @@ test.describe('Datasources – list & management', () => {
 			await expect(row).toBeVisible();
 			await expect(row.getByText(description)).toBeVisible();
 		} finally {
-			// shared datasource cleaned in afterAll
+			// Test-owned datasource is cleaned in afterEach.
 		}
 	});
 
@@ -52,7 +52,7 @@ test.describe('Datasources – list & management', () => {
 			await expect(page.locator(`[data-ds-row="${ds}"]`)).toBeVisible();
 			await screenshot(page, 'datasources', 'list-with-datasource');
 		} finally {
-			// shared datasource cleaned in afterAll
+			// Test-owned datasource is cleaned in afterEach.
 		}
 	});
 
@@ -65,7 +65,7 @@ test.describe('Datasources – list & management', () => {
 			// uploaded files have "Import" badge
 			await expect(row.getByText('Import', { exact: true })).toBeVisible();
 		} finally {
-			// shared datasource cleaned in afterAll
+			// Test-owned datasource is cleaned in afterEach.
 		}
 	});
 
@@ -80,7 +80,7 @@ test.describe('Datasources – list & management', () => {
 			await expect(row).not.toBeVisible();
 			await expect(page.getByText(/No datasources match/i)).toBeVisible();
 		} finally {
-			// shared datasource cleaned in afterAll
+			// Test-owned datasource is cleaned in afterEach.
 		}
 	});
 
@@ -95,7 +95,7 @@ test.describe('Datasources – list & management', () => {
 			await page.locator(`[data-ds-row="${ds}"]`).click();
 			await expect(page.getByText(/No datasource selected/i)).not.toBeVisible();
 		} finally {
-			// shared datasource cleaned in afterAll
+			// Test-owned datasource is cleaned in afterEach.
 		}
 	});
 
@@ -211,12 +211,12 @@ test.describe('Datasources – upload page', () => {
 test.describe('Datasources – detail view', () => {
 	let ds: string;
 
-	test.beforeAll(async ({ request }) => {
-		ds = `e2e-detail-view-${uid()}`;
+	test.beforeEach(async ({ request }) => {
+		ds = `e2e-detail-view-test-${uid()}`;
 		await createDatasource(request, ds);
 	});
 
-	test.afterAll(async ({ browser, workerAuth }) => {
+	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteDatasourceViaUI(page, ds);
 		await page.close();

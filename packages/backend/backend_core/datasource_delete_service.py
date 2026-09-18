@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
+from backend_core import compute_requests_service
 from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.exceptions import datasource_not_found
@@ -61,6 +62,8 @@ def finalize_delete(session: Session, datasource_id: str) -> bool:
     """
     datasource = get_datasource(session, datasource_id)
     if datasource is None:
+        return False
+    if compute_requests_service.has_active_request_for_datasource(session, datasource_id):
         return False
     snapshot = {
         'id': str(datasource.id),

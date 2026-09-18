@@ -13,11 +13,7 @@
 	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
-	import {
-		toComputeError,
-		isTransientComputeError,
-		computeRetryDelay
-	} from '$lib/utils/compute-retry';
+	import { toComputeError } from '$lib/utils/compute-error';
 	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from '@lucide/svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
@@ -129,10 +125,7 @@
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
-		// Transient compute failures (engine busy, runtime saturated, network)
-		// resolve on retry; validation errors stay terminal.
-		retry: (failureCount, error) => isTransientComputeError(error) && failureCount < 3,
-		retryDelay: computeRetryDelay,
+		retry: false,
 		enabled:
 			isChart &&
 			isApplied &&
@@ -196,28 +189,24 @@
 		if (isLoadingRowCount) return;
 		rowCountLoads.set(rowCountKey, true);
 		rowCountErrors.delete(rowCountKey);
-		// Transient compute failures (engine busy, runtime saturated, network)
-		// resolve on retry; validation errors stay terminal.
-		const attempts = 3;
-		for (let attempt = 0; ; attempt++) {
+		try {
 			const result = await getStepRowCount({
-				analysis_pipeline: analysisPipeline!,
+				analysis_pipeline: analysisPipeline,
 				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: step.id
 			});
 			if (result.isOk()) {
 				rowCounts.set(rowCountKey, result.value.row_count);
-				rowCountErrors.delete(rowCountKey);
-				break;
-			}
-			if (attempt >= attempts - 1 || !isTransientComputeError(toComputeError(result.error))) {
-				rowCountLoads.set(rowCountKey, false);
+			} else {
+				rowCounts.delete(rowCountKey);
 				rowCountErrors.set(rowCountKey, result.error.message);
-				return;
 			}
-			await new Promise((resolve) => setTimeout(resolve, computeRetryDelay(attempt)));
+		} catch (error) {
+			rowCounts.delete(rowCountKey);
+			rowCountErrors.set(rowCountKey, error instanceof Error ? error.message : String(error));
+		} finally {
+			rowCountLoads.set(rowCountKey, false);
 		}
-		rowCountLoads.set(rowCountKey, false);
 	}
 
 	let copyFeedback = $state(false);

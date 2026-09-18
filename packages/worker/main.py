@@ -117,6 +117,10 @@ async def run_build_worker_process(
             worker_id=worker_id,
         ),
         supervisor_id=worker_id,
+        # The manager process owns the interactive request warm pool. Build
+        # children share the Docker daemon and must not each create another
+        # copy of the configured warm pool.
+        warm_pool_size=0,
     )
 
     from builds.build_execution import run_queued_build_job

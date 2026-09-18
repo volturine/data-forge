@@ -87,6 +87,24 @@ def _stored_response(request: ComputeRequest) -> compute_pb2.ComputeResponseEnve
     return compute_pb2.ComputeResponseEnvelope.FromString(request.response_envelope)
 
 
+def test_has_active_request_for_datasource_tracks_queued_work(test_db_session) -> None:
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+
+    assert compute_requests_service.has_active_request_for_datasource(test_db_session, 'datasource-1') is True
+    assert compute_requests_service.has_active_request_for_datasource(test_db_session, 'datasource-2') is False
+
+    request.status = enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
+    test_db_session.add(request)
+    test_db_session.commit()
+
+    assert compute_requests_service.has_active_request_for_datasource(test_db_session, 'datasource-1') is False
+
+
 def _response(
     request: ComputeRequest,
     payload: dict[str, object],

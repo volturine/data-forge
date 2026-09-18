@@ -13,37 +13,17 @@ import {
 } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
-import type { Browser } from '@playwright/test';
 import {
 	readyTimeoutMs,
 	waitForChartPreviewReady,
 	waitForInlinePreviewReady
 } from './utils/readiness.js';
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL;
-if (!baseURL) {
-	throw new Error('PLAYWRIGHT_BASE_URL must be set before running Playwright e2e tests');
-}
-
 let sharedBaseDatasourceName = '';
 let sharedBaseDatasourceId = '';
 let sharedAuxDatasourceName = '';
 let sharedDateDatasourceName = '';
 let sharedDateDatasourceId = '';
-
-function workerRequest(
-	browser: Browser,
-	workerAuth: { workerIndex: number; sessionState: E2ERequest['sessionState'] },
-	helperContext: E2ERequest['helperContext']
-): E2ERequest {
-	return {
-		browser,
-		sessionState: workerAuth.sessionState,
-		helperContext,
-		workerIndex: workerAuth.workerIndex,
-		baseURL
-	} as unknown as E2ERequest;
-}
 
 async function createTrackedAnalysis(
 	request: E2ERequest,
@@ -53,20 +33,19 @@ async function createTrackedAnalysis(
 	return createAnalysis(request, analysisName, datasourceId);
 }
 
-test.beforeAll(async ({ browser, workerAuth, helperContext }) => {
-	const request = workerRequest(browser, workerAuth, helperContext);
+test.beforeEach(async ({ request }) => {
 	const id = uid();
-	sharedBaseDatasourceName = `e2e-ops-base-${id}`;
-	sharedAuxDatasourceName = `e2e-ops-aux-${id}`;
-	sharedDateDatasourceName = `e2e-ops-date-${id}`;
+	sharedBaseDatasourceName = `e2e-ops-test-base-${id}`;
+	sharedAuxDatasourceName = `e2e-ops-test-aux-${id}`;
+	sharedDateDatasourceName = `e2e-ops-test-date-${id}`;
 	sharedBaseDatasourceId = await createDatasource(request, sharedBaseDatasourceName);
 	await createDatasource(request, sharedAuxDatasourceName);
 	sharedDateDatasourceId = await createDatasourceWithDates(request, sharedDateDatasourceName);
 });
 
-test.afterAll(async ({ browser, workerAuth }) => {
+test.afterEach(async ({ browser, workerAuth }) => {
 	const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-	// Per-test freeWarm already shut engines. Suite teardown only removes shared DS.
+	// Per-test freeWarm already shut engines. Teardown removes only this test's DS.
 	for (const name of [
 		sharedBaseDatasourceName,
 		sharedAuxDatasourceName,

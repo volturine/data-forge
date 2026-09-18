@@ -354,6 +354,30 @@ def test_process_manager_warm_pool_replenishes_and_claims(monkeypatch) -> None:
         assert all(not w.is_process_alive() for w in created_warm)
 
 
+def test_process_manager_can_disable_warm_pool(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "engine_warm_pool_size", 2)
+    created_warm: list[_FakeWarmEngine] = []
+
+    def warm_factory() -> ComputeEngine:
+        engine = _FakeWarmEngine()
+        created_warm.append(engine)
+        return cast(ComputeEngine, engine)
+
+    manager = ProcessManager(
+        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        warm_engine_factory=warm_factory,
+        warm_pool_size=0,
+    )
+
+    try:
+        time.sleep(0.05)
+        assert len(manager._warm_pool) == 0
+        assert created_warm == []
+        assert manager._warm_replenish_thread is None
+    finally:
+        manager.shutdown_all()
+
+
 def test_capacity_decisions_never_probe_the_engine_runtime(monkeypatch) -> None:
     """Capacity scans run under the engines lock, so they must not do engine I/O.
 

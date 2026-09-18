@@ -68,6 +68,7 @@ def _process_pending_datasource_delete(
         manager.shutdown_engine(identity, namespace=namespace)
 
     deleted = client.finalize_datasource_delete(namespace=namespace, datasource_id=datasource_id)
-    if deleted:
-        logger.info("Deleted pending datasource %s in namespace %s", datasource_id, namespace)
+    if not deleted:
+        return False
+    logger.info("Deleted pending datasource %s in namespace %s", datasource_id, namespace)
     return True

@@ -19,12 +19,12 @@ async function latestNode(page: Parameters<typeof gotoAnalysisEditor>[0], stepTy
 let sharedDatasourceId = '';
 let sharedDatasourceName = '';
 
-test.beforeAll(async ({ request }) => {
-	sharedDatasourceName = `e2e-editor-shared-ds-${uid()}`;
+test.beforeEach(async ({ request }) => {
+	sharedDatasourceName = `e2e-editor-test-ds-${uid()}`;
 	sharedDatasourceId = await createDatasource(request, sharedDatasourceName);
 });
 
-test.afterAll(async ({ browser, workerAuth }) => {
+test.afterEach(async ({ browser, workerAuth }) => {
 	const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 	await deleteDatasourceViaUI(page, sharedDatasourceName);
 	await page.close();
@@ -165,12 +165,12 @@ test.describe('Analyses – step library labels', () => {
 	let aId = '';
 	let aName: string;
 
-	test.beforeAll(async ({ request }) => {
+	test.beforeEach(async ({ request }) => {
 		aName = `E2E Labels ${uid()}`;
 		aId = await createAnalysis(request, aName, sharedDatasourceId);
 	});
 
-	test.afterAll(async ({ browser, workerAuth }) => {
+	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteAnalysisViaUI(page, aName);
 		await page.close();

@@ -18,7 +18,7 @@ from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.exceptions import datasource_not_found
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
-from backend_core.sqlmodel_typing import sa
+from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import datasource_pb2
 from modules.datasource.schema_protocol import schema_info_payload
 from modules.datasource.schemas import (
@@ -110,13 +110,16 @@ def publish_ingest(
 
 
 def publish_schema_cache(session: Session, *, datasource_id: str, schema_info: datasource_pb2.SchemaInfo) -> datasource_pb2.SchemaInfo:
-    datasource = session.get(DataSource, datasource_id)
-    if datasource is None:
+    statement = (
+        update(DataSource)
+        .where(sa(DataSource.id == datasource_id), col(DataSource.is_pending_delete).is_(False))
+        .values(schema_cache=_schema_cache_payload(schema_info))
+    )
+    publication = cast(CursorResult[Any], session.execute(statement))
+    if publication.rowcount != 1:
+        session.rollback()
         raise datasource_not_found(datasource_id)
-    datasource.schema_cache = _schema_cache_payload(schema_info)
-    session.add(datasource)
     session.commit()
-    session.refresh(datasource)
     return attach_column_descriptions(session, datasource_id, schema_info)
 
 

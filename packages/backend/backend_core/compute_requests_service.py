@@ -1,8 +1,9 @@
 import uuid
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+from google.protobuf import json_format
 from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
@@ -137,6 +138,39 @@ def response_payload(request: ComputeRequest) -> dict[str, object]:
 
 def get_request(session: Session, request_id: str) -> ComputeRequest | None:
     return session.get(ComputeRequest, request_id)
+
+
+def _contains_value(value: object, target: str) -> bool:
+    if isinstance(value, Mapping):
+        return any(_contains_value(item, target) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_value(item, target) for item in value)
+    return value == target
+
+
+def has_active_request_for_datasource(session: Session, datasource_id: str) -> bool:
+    """Return whether queued or running compute work still references a datasource.
+
+    Compute requests carry their pipeline in protobuf rather than relational
+    columns. Decoding the small set of active requests here lets datasource
+    finalization wait for analysis engines as well as datasource-preview
+    engines, whose identities do not contain every source datasource they use.
+    """
+    table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
+    statement = select(ComputeRequest).where(
+        table.c.status.in_(
+            [
+                enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
+                enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
+            ]
+        )
+    )
+    for request in session.execute(statement).scalars():
+        envelope = command_envelope_for_request(request)
+        payload = json_format.MessageToDict(envelope.command, preserving_proto_field_name=True)
+        if _contains_value(payload, datasource_id):
+            return True
+    return False
 
 
 def claim_next_request(

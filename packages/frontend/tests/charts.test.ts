@@ -112,12 +112,12 @@ test.describe('Charts – chart types render', () => {
 	let dsId: string;
 	let dsName: string;
 
-	test.beforeAll(async ({ request }) => {
-		dsName = `e2e-chart-types-ds-${uid()}`;
+	test.beforeEach(async ({ request }) => {
+		dsName = `e2e-chart-types-test-ds-${uid()}`;
 		dsId = await createCsvDatasource(request, dsName, CHART_CSV);
 	});
 
-	test.afterAll(async ({ browser, workerAuth }) => {
+	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();

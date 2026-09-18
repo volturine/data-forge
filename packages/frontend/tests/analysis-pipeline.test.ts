@@ -156,12 +156,12 @@ test.describe('Pipeline data verification', () => {
 	let dsId: string;
 	let dsName: string;
 
-	test.beforeAll(async ({ request }) => {
-		dsName = `e2e-pipe-ds-${uid()}`;
+	test.beforeEach(async ({ request }) => {
+		dsName = `e2e-pipe-test-ds-${uid()}`;
 		dsId = await createDatasource(request, dsName);
 	});
 
-	test.afterAll(async ({ browser, workerAuth }) => {
+	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
@@ -742,12 +742,12 @@ test.describe('Pipeline data – pass-through operations', () => {
 	let dsId: string;
 	let dsName: string;
 
-	test.beforeAll(async ({ request }) => {
-		dsName = `e2e-pipe-passthrough-ds-${uid()}`;
+	test.beforeEach(async ({ request }) => {
+		dsName = `e2e-pipe-passthrough-test-ds-${uid()}`;
 		dsId = await createDatasource(request, dsName);
 	});
 
-	test.afterAll(async ({ browser, workerAuth }) => {
+	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
@@ -927,12 +927,12 @@ test.describe('Pipeline data – timeseries', () => {
 	let dateDsId: string;
 	let dateDsName: string;
 
-	test.beforeAll(async ({ request }) => {
-		dateDsName = `e2e-pipe-date-ds-${uid()}`;
+	test.beforeEach(async ({ request }) => {
+		dateDsName = `e2e-pipe-date-test-ds-${uid()}`;
 		dateDsId = await createDatasourceWithDates(request, dateDsName);
 	});
 
-	test.afterAll(async ({ browser, workerAuth }) => {
+	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteDatasourceViaUI(page, dateDsName);
 		await page.close();
@@ -1031,14 +1031,14 @@ test.describe('Pipeline data – union by name', () => {
 	let dsName1: string;
 	let dsName2: string;
 
-	test.beforeAll(async ({ request }) => {
-		dsName1 = `e2e-pipe-union-ds1-${uid()}`;
-		dsName2 = `e2e-pipe-union-ds2-${uid()}`;
+	test.beforeEach(async ({ request }) => {
+		dsName1 = `e2e-pipe-union-test-ds1-${uid()}`;
+		dsName2 = `e2e-pipe-union-test-ds2-${uid()}`;
 		dsId1 = await createDatasource(request, dsName1);
 		dsId2 = await createDatasource(request, dsName2);
 	});
 
-	test.afterAll(async ({ browser, workerAuth }) => {
+	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteDatasourceViaUI(page, dsName1);
 		await deleteDatasourceViaUI(page, dsName2);

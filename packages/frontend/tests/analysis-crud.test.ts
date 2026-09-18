@@ -490,14 +490,14 @@ test.describe('Analyses – detail page', () => {
 	let dsName: string;
 	let aName: string;
 
-	test.beforeAll(async ({ request }) => {
+	test.beforeEach(async ({ request }) => {
 		dsName = `e2e-detail-ds-${uid()}`;
 		aName = `E2E Detail ${uid()}`;
 		dsId = await createDatasource(request, dsName);
 		aId = await createAnalysis(request, aName, dsId);
 	});
 
-	test.afterAll(async ({ browser, workerAuth }) => {
+	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteAnalysisViaUI(page, aName);
 		await deleteDatasourceViaUI(page, dsName);

@@ -762,6 +762,33 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(m
 
 
 @pytest.mark.asyncio
+async def test_pending_datasource_delete_waits_when_backend_defers_finalization(monkeypatch) -> None:
+    datasource_id = "datasource-3"
+    finalized: list[tuple[str, str]] = []
+    manager = SimpleNamespace(
+        get_engine=lambda _identity, *, namespace=None: None,
+        shutdown_engine=lambda _identity, *, namespace=None: None,
+    )
+
+    def finalize_delete(*, namespace: str, datasource_id: str) -> bool:
+        finalized.append((namespace, datasource_id))
+        return False
+
+    client = SimpleNamespace(
+        pending_datasource_deletes=lambda: [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)],
+        finalize_datasource_delete=finalize_delete,
+        close=lambda: None,
+    )
+
+    monkeypatch.setattr(datasource_delete_runtime, "worker_runtime_client", lambda: client)
+
+    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client))
+
+    assert handled is False
+    assert finalized == [("default", datasource_id)]
+
+
+@pytest.mark.asyncio
 async def test_run_analysis_build_stream_shuts_down_build_engine_after_completion(
     monkeypatch,
 ) -> None:

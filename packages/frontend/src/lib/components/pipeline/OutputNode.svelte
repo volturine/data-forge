@@ -180,8 +180,8 @@
 			return result.value;
 		},
 		enabled: canUseOutput,
-		// Optional enrichment — do not keep retrying forever if the data-plane is degraded.
-		retry: 1
+		// Optional enrichment has a terminal error state and must not delay output state.
+		retry: false
 	}));
 	const hidden = $derived(
 		hiddenOverrideId === outputDatasourceId
