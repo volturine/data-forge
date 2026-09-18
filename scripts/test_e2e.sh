@@ -53,7 +53,11 @@ stack_up() {
     build_images
     resolve_docker_socket_gid
     echo "Starting e2e stack (postgres, rustfs, api, scheduler, worker)"
-    "${COMPOSE[@]}" up -d --wait
+    if ! "${COMPOSE[@]}" up -d --wait; then
+        echo "E2E stack failed readiness; capturing service logs" >&2
+        dump_service_logs
+        return 1
+    fi
     echo "E2E stack is ready"
 }
 
