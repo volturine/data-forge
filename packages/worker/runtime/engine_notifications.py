@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import asdict
 
 from runtime.domain.compute.base import EngineStatusInfo
 from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
+
+logger = logging.getLogger(__name__)
 
 
 def worker_runtime_client() -> WorkerRuntimeClient:
@@ -42,6 +45,13 @@ def create_snapshot_notifier(
             return
         if worker_id is None:
             raise ValueError("worker_id is required when persist callback is not provided")
-        persist_engine_snapshot(worker_id=worker_id, namespace=namespace, statuses=list(statuses))
+        try:
+            persist_engine_snapshot(worker_id=worker_id, namespace=namespace, statuses=list(statuses))
+        except Exception:
+            # Engine state is also recoverable from the worker/runtime APIs. A
+            # transient API worker replacement must not turn a successful
+            # engine start into a failed compute request merely because its
+            # live projection could not be persisted.
+            logger.warning("Failed to publish engine snapshot for namespace %s", namespace, exc_info=True)
 
     return notify

@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import tempfile
-import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -354,6 +353,7 @@ def _record_from_proto_dict(payload: dict[str, object]) -> DataSourceRecord:
 def create_file_datasource(
     client: WorkerRuntimeClient,
     *,
+    datasource_id: str,
     namespace: str,
     database_url: str,
     name: str,
@@ -373,7 +373,6 @@ def create_file_datasource(
     cell_range: str | None = None,
     owner_id: str | None = None,
 ) -> DataSourceRecord:
-    datasource_id = str(uuid.uuid4())
     resolved_file_type = DataSourceFileType.require(file_type)
     resolved_file_path = _validate_source_file_path(file_path, resolved_file_type)
     source_config = _validated_file_source_config(
@@ -450,6 +449,7 @@ def create_file_datasource(
 def create_database_datasource(
     client: WorkerRuntimeClient,
     *,
+    datasource_id: str,
     namespace: str,
     database_url: str,
     name: str,
@@ -459,7 +459,6 @@ def create_database_datasource(
     branch: str = "master",
     owner_id: str | None = None,
 ) -> DataSourceRecord:
-    datasource_id = str(uuid.uuid4())
     source_config = {
         "source_type": DataSourceType.DATABASE.value,
         "connection_string": connection_string,
@@ -528,6 +527,7 @@ def create_database_datasource(
 def create_iceberg_datasource(
     client: WorkerRuntimeClient,
     *,
+    datasource_id: str,
     namespace: str,
     database_url: str,
     name: str,
@@ -545,7 +545,6 @@ def create_iceberg_datasource(
     if not isinstance(branch, str) or not branch.strip():
         raise DataSourceValidationError("Branch is required", details={"source_type": source_type})
     branch_name = branch.strip()
-    datasource_id = str(uuid.uuid4())
     run_id = _create_ingest_run(
         client,
         namespace=namespace,

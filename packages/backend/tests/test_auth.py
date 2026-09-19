@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -895,6 +895,9 @@ class TestAuthRoutes:
         monkeypatch.setattr('backend_core.auth_config.settings.default_user_name', 'Guest User')
         ensure_default_user(auth_db_session)
 
+        close = Mock(wraps=auth_db_session.close)
+        monkeypatch.setattr(auth_db_session, 'close', close)
+
         app = FastAPI()
 
         def override_get_settings_db():
@@ -919,6 +922,7 @@ class TestAuthRoutes:
         assert resp_current.json()['email'] == 'guest@example.com'
         assert resp_optional.status_code == 200
         assert resp_optional.json()['email'] == 'guest@example.com'
+        assert close.call_count >= 2
 
     def test_get_current_user_returns_401_when_auth_required(
         self,

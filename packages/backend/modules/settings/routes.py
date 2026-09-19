@@ -107,7 +107,7 @@ def write_settings(
 @handle_errors(operation='test smtp')
 async def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user)) -> TestResult:
     """Send a test email via SMTP to verify email notification settings. Requires 'to' address in body."""
-    smtp = settings_store.get_resolved_smtp()
+    smtp = await run_in_threadpool(settings_store.get_resolved_smtp)
     host = str(smtp.get('host', ''))
     port = int(str(smtp.get('port', 587)))
     smtp_user = str(smtp.get('user', ''))
@@ -133,7 +133,7 @@ async def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user
 @handle_errors(operation='test telegram')
 async def test_telegram(body: TestTelegramRequest, user: User = Depends(get_current_user)) -> TestResult:
     """Send a test message to a Telegram chat to verify bot settings. Requires chat_id in body."""
-    resolved = settings_store.get_resolved_telegram_settings()
+    resolved = await run_in_threadpool(settings_store.get_resolved_telegram_settings)
     token = str(resolved.get('token', ''))
     if not resolved.get('enabled'):
         return TestResult(success=False, message='Telegram bot token not configured')
@@ -169,7 +169,7 @@ async def detect_telegram_chat(
     """
     from modules.telegram.bot import telegram_bot
 
-    resolved = settings_store.get_resolved_telegram_settings()
+    resolved = await run_in_threadpool(settings_store.get_resolved_telegram_settings)
     token = str(resolved.get('token', ''))
     if not resolved.get('enabled'):
         return DetectTelegramResponse(success=False, message='Telegram bot token not configured')
@@ -178,7 +178,7 @@ async def detect_telegram_chat(
     if was_running:
         await run_in_threadpool(telegram_bot.pause)
     try:
-        offset = telegram_bot.get_offset(token)
+        offset = await run_in_threadpool(telegram_bot.get_offset, token)
         resp = await run_in_threadpool(
             telegram_bot.get_updates,
             token,
@@ -229,7 +229,7 @@ async def detect_custom_bot_chat(
     if was_running:
         await run_in_threadpool(telegram_bot.pause)
     try:
-        offset = telegram_bot.get_offset(body.bot_token)
+        offset = await run_in_threadpool(telegram_bot.get_offset, body.bot_token)
         resp = await run_in_threadpool(
             telegram_bot.get_updates,
             body.bot_token,

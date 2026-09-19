@@ -5,7 +5,7 @@ import contextlib
 from pathlib import Path
 from typing import cast
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import BaseModel
 from sqlmodel import Session
 
@@ -120,26 +120,43 @@ async def _submit_and_wait(
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
     runtime_probe: RuntimeAvailabilityProbe,
+    http_request: Request | None = None,
 ):
-    request = _submit(session, kind=kind, command=command, runtime_probe=runtime_probe)
+    request = await asyncio.to_thread(
+        _submit,
+        session,
+        kind=kind,
+        command=command,
+        runtime_probe=runtime_probe,
+    )
     # Waiting from the version observed so far means a completion published
     # before this task parks is seen immediately instead of waiting out a poll.
     seen_version = 0
     wait_task = asyncio.create_task(response_hub.wait(request.id, last_seen=seen_version))
     try:
         while True:
-            session.expire_all()
-            completed = compute_requests_service.get_request(session, request.id)
+            if http_request is not None and await http_request.is_disconnected():
+                raise asyncio.CancelledError
+            completed = await asyncio.to_thread(_read_request, session, request.id)
             if completed is None:
                 raise PipelineExecutionError(f'Compute request {request.id} disappeared')
             if completed.status in {enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED, enums_pb2.COMPUTE_REQUEST_STATUS_FAILED}:
                 break
-            session.rollback()
+            await asyncio.to_thread(session.rollback)
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(asyncio.shield(wait_task), timeout=_RESPONSE_SAFETY_POLL_SECONDS)
             if wait_task.done():
                 seen_version = wait_task.result()
                 wait_task = asyncio.create_task(response_hub.wait(request.id, last_seen=seen_version))
+    except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(
+                compute_requests_service.cancel_queued_request,
+                session,
+                request.id,
+                reason='Compute request cancelled because the HTTP client disconnected',
+            )
+        raise
     finally:
         wait_task.cancel()
     if completed.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED:
@@ -150,6 +167,12 @@ async def _submit_and_wait(
     if isinstance(status_code, int):
         raise HTTPException(status_code=status_code, detail=message)
     raise PipelineExecutionError(message)
+
+
+def _read_request(session: Session, request_id: str):
+    """Read a durable compute request without blocking the API event loop."""
+    session.expire_all()
+    return compute_requests_service.get_request(session, request_id)
 
 
 def _resource_config_message(resource_config: dict[str, object]) -> compute_pb2.EngineResourceConfig:
@@ -175,13 +198,15 @@ async def preview_step(
     request: compute_schemas.StepPreviewRequest,
     *,
     runtime_probe: RuntimeAvailabilityProbe,
+    http_request: Request | None = None,
 ) -> compute_schemas.StepPreviewResponse:
-    _require_active_pipeline_datasources(session, request.analysis_pipeline)
+    await asyncio.to_thread(_require_active_pipeline_datasources, session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
+        http_request=http_request,
     )
     return compute_schemas.StepPreviewResponse.model_validate(compute_requests_service.response_payload(completed))
 
@@ -191,13 +216,15 @@ async def get_step_schema(
     request: compute_schemas.StepSchemaRequest,
     *,
     runtime_probe: RuntimeAvailabilityProbe,
+    http_request: Request | None = None,
 ) -> compute_schemas.StepSchemaResponse:
-    _require_active_pipeline_datasources(session, request.analysis_pipeline)
+    await asyncio.to_thread(_require_active_pipeline_datasources, session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
         command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
+        http_request=http_request,
     )
     return compute_schemas.StepSchemaResponse.model_validate(compute_requests_service.response_payload(completed))
 
@@ -207,13 +234,15 @@ async def get_step_row_count(
     request: compute_schemas.StepRowCountRequest,
     *,
     runtime_probe: RuntimeAvailabilityProbe,
+    http_request: Request | None = None,
 ) -> compute_schemas.StepRowCountResponse:
-    _require_active_pipeline_datasources(session, request.analysis_pipeline)
+    await asyncio.to_thread(_require_active_pipeline_datasources, session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
         command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
+        http_request=http_request,
     )
     return compute_schemas.StepRowCountResponse.model_validate(compute_requests_service.response_payload(completed))
 
@@ -224,7 +253,7 @@ async def download_step(
     *,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> tuple[bytes, str, str]:
-    _require_active_pipeline_datasources(session, request.analysis_pipeline)
+    await asyncio.to_thread(_require_active_pipeline_datasources, session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
@@ -234,13 +263,14 @@ async def download_step(
     if not completed.artifact_path or not completed.artifact_name or not completed.artifact_content_type:
         raise PipelineExecutionError('Download artifact missing from compute response')
     data_plane = client_from_settings()
-    if data_plane.classify_object_url(completed.artifact_path).is_object_store:
-        data = data_plane.download_object_bytes(completed.artifact_path)
-        data_plane.delete_object(completed.artifact_path)
+    classification = await asyncio.to_thread(data_plane.classify_object_url, completed.artifact_path)
+    if classification.is_object_store:
+        data = await asyncio.to_thread(data_plane.download_object_bytes, completed.artifact_path)
+        await asyncio.to_thread(data_plane.delete_object, completed.artifact_path)
         return data, completed.artifact_name, completed.artifact_content_type
     path = Path(completed.artifact_path)
-    data = path.read_bytes()
-    path.unlink(missing_ok=True)
+    data = await asyncio.to_thread(path.read_bytes)
+    await asyncio.to_thread(path.unlink, missing_ok=True)
     return data, completed.artifact_name, completed.artifact_content_type
 
 
@@ -250,7 +280,7 @@ async def export_data(
     *,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> compute_schemas.ExportResponse:
-    _require_active_pipeline_datasources(session, request.analysis_pipeline)
+    await asyncio.to_thread(_require_active_pipeline_datasources, session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
@@ -499,6 +529,13 @@ async def shutdown_engine(
     identity: EngineIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
+    await asyncio.to_thread(
+        compute_requests_service.cancel_active_requests_for_engine,
+        session,
+        namespace=get_namespace(),
+        identity=identity,
+        reason='Compute request cancelled because its engine was shut down',
+    )
     await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
@@ -514,6 +551,12 @@ def request_engine_shutdown(
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
     """Durably queue engine shutdown without coupling an API response to its completion."""
+    compute_requests_service.cancel_active_requests_for_engine(
+        session,
+        namespace=get_namespace(),
+        identity=identity,
+        reason='Compute request cancelled because its engine was shut down',
+    )
     _submit(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,

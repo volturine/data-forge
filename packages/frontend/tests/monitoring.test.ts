@@ -11,7 +11,7 @@ import {
 	deleteScheduleViaUI,
 	deleteHealthCheckViaUI,
 	deleteAnalysisViaUI,
-	freeWarmEnginesViaUI
+	freeWarmEngines
 } from './utils/ui-cleanup.js';
 import {
 	buildTimeoutMs,
@@ -886,13 +886,13 @@ test.describe('Monitoring – Builds tab', () => {
 				await expect(row).toContainText('Build');
 				await expect(row).not.toContainText('Preview');
 				// Free the exclusive build engine once the run is terminal.
-				await freeWarmEnginesViaUI(page, { buildIds: [buildId] });
+				await freeWarmEngines(page, { buildIds: [buildId] });
 			}
 
 			await page.goto(`/datasources?id=${dsId}`);
 			await waitForDatasourcePreviewReady(page);
 			// Preview finished — free the warm datasource-preview container.
-			await freeWarmEnginesViaUI(page, { datasourceIds: [dsId] });
+			await freeWarmEngines(page, { datasourceIds: [dsId] });
 
 			await gotoMonitoringTab(monitorPage, 'builds');
 			await monitorPage.getByLabel(/Search builds/i).fill(ds);

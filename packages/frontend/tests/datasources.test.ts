@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures.js';
 import { createDatasource, createLargeDatasource } from './utils/api.js';
 import { createCleanupPage, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { uploadDatasourceViaUi } from './utils/user-flows.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import {
@@ -19,16 +20,22 @@ import { dialogByHeading } from './utils/locators.js';
  */
 test.describe('Datasources – list & management', () => {
 	let sharedListDatasource = '';
+	let sharedListDatasourceId = '';
 	const sharedDescription = 'Primary customer dataset for retention analysis and reporting.';
 
 	test.beforeEach(async ({ request }) => {
 		sharedListDatasource = `e2e-description-test-${uid()}`;
-		await createDatasource(request, sharedListDatasource, undefined, sharedDescription);
+		sharedListDatasourceId = await createDatasource(
+			request,
+			sharedListDatasource,
+			undefined,
+			sharedDescription
+		);
 	});
 
 	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-		await deleteDatasourceViaUI(page, sharedListDatasource);
+		await deleteDatasourceViaUI(page, sharedListDatasource, { id: sharedListDatasourceId });
 		await page.close();
 		await context.close();
 	});
@@ -186,39 +193,24 @@ test.describe('Datasources – upload page', () => {
 
 	test('CSV upload creates datasource', async ({ page }) => {
 		const dsName = `e2e-upload-${Date.now()}`;
-		await page.goto('/datasources/new');
-
-		const fileInput = page.locator('#file-input');
-		await fileInput.setInputFiles({
-			name: `${dsName}.csv`,
-			mimeType: 'text/csv',
-			buffer: Buffer.from('id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n')
-		});
-
-		const uploadBtn = page.getByRole('button', { name: 'Upload', exact: true });
-		await expect(uploadBtn).toBeEnabled({ timeout: 5_000 });
-		await uploadBtn.click();
-
-		// Wait for navigation away from /new, then verify the datasource exists in the list
-		await expect(page).toHaveURL((url) => !url.pathname.endsWith('/new'), { timeout: 5_000 });
-		await page.goto('/datasources');
-		await expect(page.locator(`[data-ds-row="${dsName}"]`)).toBeVisible({ timeout: 5_000 });
-
-		await deleteDatasourceViaUI(page, dsName);
+		const { id } = await uploadDatasourceViaUi(page, dsName);
+		await expect(page.locator(`[data-ds-id="${id}"]`)).toBeVisible({ timeout: readyTimeoutMs() });
+		await deleteDatasourceViaUI(page, dsName, { id });
 	});
 });
 
 test.describe('Datasources – detail view', () => {
 	let ds: string;
+	let dsId = '';
 
 	test.beforeEach(async ({ request }) => {
 		ds = `e2e-detail-view-test-${uid()}`;
-		await createDatasource(request, ds);
+		dsId = await createDatasource(request, ds);
 	});
 
 	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-		await deleteDatasourceViaUI(page, ds);
+		await deleteDatasourceViaUI(page, ds, { id: dsId });
 		await page.close();
 		await context.close();
 	});

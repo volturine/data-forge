@@ -156,7 +156,14 @@ async def acquire_lock(
     session: Session = Depends(get_db),
     owner_id: str = Depends(get_lock_owner_id),
 ) -> schemas.LockStatusResponse:
-    lock = service.acquire_lock(session, body.resource_type, body.resource_id, owner_id, body.ttl_seconds)
+    lock = await run_in_threadpool(
+        service.acquire_lock,
+        session,
+        body.resource_type,
+        body.resource_id,
+        owner_id,
+        body.ttl_seconds,
+    )
     await _notify_watchers(body.resource_type, body.resource_id, lock)
     return lock
 
@@ -172,7 +179,7 @@ async def get_lock_status(
     resource_id: str,
     session: Session = Depends(get_db),
 ) -> schemas.LockStatusResponse | None:
-    lock, cleaned = service.lookup_lock_status(session, resource_type, resource_id)
+    lock, cleaned = await run_in_threadpool(service.lookup_lock_status, session, resource_type, resource_id)
     if cleaned:
         await _notify_watchers(resource_type, resource_id, None)
     return lock
@@ -191,7 +198,15 @@ async def heartbeat_lock(
     session: Session = Depends(get_db),
     owner_id: str = Depends(get_lock_owner_id),
 ) -> schemas.LockStatusResponse:
-    lock = service.heartbeat_lock(session, resource_type, resource_id, owner_id, body.lock_token, body.ttl_seconds)
+    lock = await run_in_threadpool(
+        service.heartbeat_lock,
+        session,
+        resource_type,
+        resource_id,
+        owner_id,
+        body.lock_token,
+        body.ttl_seconds,
+    )
     await _notify_watchers(resource_type, resource_id, lock)
     return lock
 
@@ -209,7 +224,14 @@ async def release_lock(
     session: Session = Depends(get_db),
     owner_id: str = Depends(get_lock_owner_id),
 ) -> schemas.LockReleaseResponse:
-    released = service.release_lock(session, resource_type, resource_id, owner_id, body.lock_token)
+    released = await run_in_threadpool(
+        service.release_lock,
+        session,
+        resource_type,
+        resource_id,
+        owner_id,
+        body.lock_token,
+    )
     if released:
         await _notify_watchers(resource_type, resource_id, None)
     return schemas.LockReleaseResponse(released=released)
@@ -219,11 +241,14 @@ async def release_lock(
 async def lock_websocket(websocket: WebSocket) -> None:
     token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
     namespace = get_namespace()
+    # Accept before doing the database lookup. Navigation can close a socket
+    # while authentication is still pending; sending the initial message from
+    # the CONNECTING state then turns an ordinary disconnect into a 500.
+    await websocket.accept()
     owner_id = await _get_websocket_owner_id(websocket)
     watch_type: str | None = None
     watch_id: str | None = None
     watch_token: str | None = None
-    await websocket.accept()
     await safe_send_json(websocket, schemas.LockWebsocketConnectedMessage().model_dump(mode='json'))
     try:
         while True:

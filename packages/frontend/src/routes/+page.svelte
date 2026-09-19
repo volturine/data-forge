@@ -40,6 +40,11 @@
 			}
 			return result.value;
 		},
+		// Analyses can be created or removed from another page, tab, or user.
+		// Refresh on every gallery mount so navigation never presents a cached
+		// list that omits a just-created analysis.
+		staleTime: 0,
+		refetchOnMount: 'always',
 		enabled: !ns.switching
 	}));
 

@@ -1,8 +1,9 @@
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.exceptions import AppError
@@ -32,6 +33,25 @@ def test_create_datasource_persists_metadata(test_db_session: Session) -> None:
     stored = test_db_session.get(DataSource, datasource_id)
     assert stored is not None
     assert stored.revision == 1
+
+
+def test_create_datasource_replay_returns_existing_row(test_db_session: Session) -> None:
+    datasource_id = str(uuid.uuid4())
+    kwargs: dict[str, Any] = {
+        'datasource_id': datasource_id,
+        'name': 'Replay-safe',
+        'description': 'desc',
+        'source_type': DataSourceType.ICEBERG.value,
+        'config': {'metadata_path': 's3://bucket/clean/replay/master', 'branch': 'master'},
+        'owner_id': None,
+    }
+
+    first = publication_service.create_datasource(test_db_session, **kwargs)
+    replay = publication_service.create_datasource(test_db_session, **kwargs)
+
+    rows = test_db_session.exec(select(DataSource).where(DataSource.id == datasource_id)).all()
+    assert replay.id == first.id == datasource_id
+    assert len(rows) == 1
 
 
 def test_publish_ingest_fences_on_revision(test_db_session: Session) -> None:

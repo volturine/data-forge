@@ -179,6 +179,7 @@ run_playwright_shard() {
             -v "${ROOT_DIR}:/work" \
             -w /work/packages/frontend \
             -e PW_E2E_WORKERS \
+            -e DEFAULT_NAMESPACE \
             -e PLAYWRIGHT_BASE_URL=http://api:8000 \
             ${trace_args[@]+"${trace_args[@]}"} \
             -e PLAYWRIGHT_OUTPUT_DIR=/work/packages/frontend/tests/.artifacts/playwright/test-results/shard${shard_index} \

@@ -641,7 +641,11 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         if request.protocol_version != _BUILD_JOB_PROTOCOL_VERSION:
             raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute worker protocol version is incompatible')
         reclaimable_owner_ids = run_settings_db(runtime_worker_service.reclaimable_worker_ids, kind=RuntimeWorkerKind.BUILD_MANAGER)
-        for namespace in run_settings_db(list_runtime_namespaces):
+        namespaces = run_settings_db(list_runtime_namespaces)
+        if namespaces:
+            offset = request.compute_namespace_offset % len(namespaces)
+            namespaces = namespaces[offset:] + namespaces[:offset]
+        for namespace in namespaces:
             token = set_namespace_context(namespace)
             try:
                 compute_request = run_db(

@@ -65,19 +65,21 @@ export const importAnalysis = (data: ImportAnalysisRequest): ResultAsync<Analysi
 
 export function getAnalysisWithHeaders(
 	id: string,
-	previousEtag?: string
+	previousEtag?: string,
+	options?: RequestInit
 ): ResultAsync<AnalysisDetailResult, ApiError> {
-	const headers: Record<string, string> = {};
-	if (previousEtag) headers['If-None-Match'] = previousEtag;
-	return apiConditionalRequestWithHeaders<Analysis>(`/v1/analysis/${id}`, { headers }).andThen(
-		(result): ResultAsync<AnalysisDetailResult, ApiError> => {
-			if (result.notModified) return okAsync({ notModified: true });
-			const etag = result.headers.get('ETag');
-			const version = result.headers.get('X-Analysis-Version');
-			if (!etag || !version) return errAsync(missingAnalysisRevision());
-			return okAsync({ analysis: result.data, etag, version });
-		}
-	);
+	const headers = new Headers(options?.headers);
+	if (previousEtag) headers.set('If-None-Match', previousEtag);
+	return apiConditionalRequestWithHeaders<Analysis>(`/v1/analysis/${id}`, {
+		...options,
+		headers
+	}).andThen((result): ResultAsync<AnalysisDetailResult, ApiError> => {
+		if (result.notModified) return okAsync({ notModified: true });
+		const etag = result.headers.get('ETag');
+		const version = result.headers.get('X-Analysis-Version');
+		if (!etag || !version) return errAsync(missingAnalysisRevision());
+		return okAsync({ analysis: result.data, etag, version });
+	});
 }
 
 export function updateAnalysis(

@@ -56,7 +56,7 @@ def validate(current_revision: int, analysis_id: str, if_match: str | None) -> N
     raise HTTPException(status_code=412, detail='Analysis version mismatch')
 
 
-async def require(
+def require(
     analysis_id: AnalysisId,
     if_match: str | None = Header(default=None, alias='If-Match'),
     session: Session = Depends(get_db),

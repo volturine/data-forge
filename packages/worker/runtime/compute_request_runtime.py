@@ -14,7 +14,12 @@ from datasources import execution as datasource_execution
 from datasources.schemas import CSVOptions
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
-from runtime.compute_manager import EngineCapacityFull, ProcessManager
+from runtime.compute_manager import (
+    ENGINE_ADMISSION_PRIORITY_INTERACTIVE,
+    ENGINE_ADMISSION_PRIORITY_LIFECYCLE,
+    EngineCapacityFull,
+    ProcessManager,
+)
 from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import request_hub
@@ -31,9 +36,17 @@ _COMPUTE_REQUEST_MAX_WORKERS = max(
     1,
     min(settings.compute_request_concurrency, max(settings.build_worker_max_processes, 6)),
 )
-_COMPUTE_REQUEST_EXECUTOR = ThreadPoolExecutor(
+_NON_ENGINE_REQUEST_EXECUTOR = ThreadPoolExecutor(
     max_workers=_COMPUTE_REQUEST_MAX_WORKERS,
-    thread_name_prefix="compute-request",
+    thread_name_prefix="non-engine-request",
+)
+_ENGINE_REQUEST_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_COMPUTE_REQUEST_MAX_WORKERS,
+    thread_name_prefix="engine-request",
+)
+_LIFECYCLE_REQUEST_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_COMPUTE_REQUEST_MAX_WORKERS,
+    thread_name_prefix="lifecycle-request",
 )
 _DATASOURCE_REQUEST_KINDS = {
     enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
@@ -45,17 +58,22 @@ _DATASOURCE_REQUEST_KINDS = {
     enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
 }
 NON_ENGINE_REQUEST_KINDS = frozenset({*_DATASOURCE_REQUEST_KINDS, enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE})
-ENGINE_REQUEST_KINDS = frozenset(
+INTERACTIVE_ENGINE_REQUEST_KINDS = frozenset(
     {
         enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
         enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
         enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
         enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
+    }
+)
+ENGINE_LIFECYCLE_REQUEST_KINDS = frozenset(
+    {
         enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
         enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
     }
 )
+ENGINE_REQUEST_KINDS = INTERACTIVE_ENGINE_REQUEST_KINDS | ENGINE_LIFECYCLE_REQUEST_KINDS
 ALL_REQUEST_KINDS = NON_ENGINE_REQUEST_KINDS | ENGINE_REQUEST_KINDS
 
 
@@ -70,6 +88,12 @@ def compute_request_worker_count() -> int:
 def _compute_request_kind_name(kind: enums_pb2.ComputeRequestKind) -> str:
     enum_name = enums_pb2.ComputeRequestKind.Name(kind)
     return enum_name.removeprefix("COMPUTE_REQUEST_KIND_").lower()
+
+
+def _engine_admission_priority(kind: enums_pb2.ComputeRequestKind) -> int:
+    if kind in ENGINE_LIFECYCLE_REQUEST_KINDS:
+        return ENGINE_ADMISSION_PRIORITY_LIFECYCLE
+    return ENGINE_ADMISSION_PRIORITY_INTERACTIVE
 
 
 @dataclass(frozen=True)
@@ -92,9 +116,14 @@ def next_compute_request(
     worker_id: str,
     *,
     allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
+    compute_namespace_offset: int = 0,
 ) -> ClaimedComputeRequest | None:
     with worker_runtime_client() as client:
-        claimed = client.claim_compute_request(worker_id=worker_id, allowed_kinds=allowed_kinds)
+        claimed = client.claim_compute_request(
+            worker_id=worker_id,
+            allowed_kinds=allowed_kinds,
+            compute_namespace_offset=compute_namespace_offset,
+        )
     if claimed is None:
         return None
     return ClaimedComputeRequest(
@@ -115,11 +144,19 @@ async def compute_request_loop(
     worker_id: str,
     manager: ProcessManager,
     allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
+    compute_namespace_offset: int = 0,
 ) -> None:
+    namespace_offset = compute_namespace_offset
     last_seen = request_hub.version()
     while not stop_event.is_set():
         try:
-            handled = await _run_once(worker_id=worker_id, manager=manager, allowed_kinds=allowed_kinds)
+            handled = await _run_once(
+                worker_id=worker_id,
+                manager=manager,
+                allowed_kinds=allowed_kinds,
+                compute_namespace_offset=namespace_offset,
+            )
+            namespace_offset += 1
             if handled:
                 last_seen = request_hub.version()
                 continue
@@ -152,8 +189,13 @@ async def _run_once(
     worker_id: str,
     manager: ProcessManager,
     allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
+    compute_namespace_offset: int = 0,
 ) -> bool:
-    claimed = next_compute_request(worker_id, allowed_kinds=allowed_kinds)
+    claimed = next_compute_request(
+        worker_id,
+        allowed_kinds=allowed_kinds,
+        compute_namespace_offset=compute_namespace_offset,
+    )
     if claimed is None:
         return False
     try:
@@ -177,8 +219,9 @@ async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManag
     try:
         while True:
             # Gate: do not take a compute runner until admission allows spawn/reuse.
-            admission_task = asyncio.create_task(manager.await_spawn_admission(identity))
+            admission_task = asyncio.create_task(manager.await_spawn_admission(identity, priority=_engine_admission_priority(claimed.kind)))
             owns_admission = False
+            request_reserved = False
             execution = None
             try:
                 done, _pending = await asyncio.wait(
@@ -193,9 +236,19 @@ async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManag
                     await renewal
                     raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
                 owns_admission = admission_task.result()
+                reserve_request = getattr(manager, "reserve_engine_request", None)
+                if identity is not None and callable(reserve_request):
+                    reserve_request(identity, namespace=claimed.namespace)
+                    request_reserved = True
 
                 async def run_execution() -> None:
-                    await loop.run_in_executor(_COMPUTE_REQUEST_EXECUTOR, _execute_request_sync, claimed, manager)
+                    if claimed.kind in NON_ENGINE_REQUEST_KINDS:
+                        executor = _NON_ENGINE_REQUEST_EXECUTOR
+                    elif claimed.kind in ENGINE_LIFECYCLE_REQUEST_KINDS:
+                        executor = _LIFECYCLE_REQUEST_EXECUTOR
+                    else:
+                        executor = _ENGINE_REQUEST_EXECUTOR
+                    await loop.run_in_executor(executor, _execute_request_sync, claimed, manager)
 
                 execution = asyncio.create_task(run_execution())
                 done, _pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
@@ -224,6 +277,10 @@ async def _execute_request(claimed: ClaimedComputeRequest, manager: ProcessManag
                 if not admission_task.done():
                     admission_task.cancel()
                 await asyncio.gather(admission_task, return_exceptions=True)
+                if identity is not None and request_reserved:
+                    release_request = getattr(manager, "release_engine_request", None)
+                    if callable(release_request):
+                        release_request(identity, namespace=claimed.namespace)
                 manager.release_spawn_admission(identity, owned=owns_admission)
     finally:
         renewal_stop.set()
@@ -349,6 +406,7 @@ def _execute_datasource_command(client: WorkerRuntimeClient, claimed: ClaimedCom
             )
         record = datasource_execution.create_file_datasource(
             client,
+            datasource_id=claimed.id,
             namespace=namespace,
             database_url=database_url,
             name=create_file.name,
@@ -375,6 +433,7 @@ def _execute_datasource_command(client: WorkerRuntimeClient, claimed: ClaimedCom
         create_database = command.create_database
         record = datasource_execution.create_database_datasource(
             client,
+            datasource_id=claimed.id,
             namespace=namespace,
             database_url=database_url,
             name=create_database.name,
@@ -391,6 +450,7 @@ def _execute_datasource_command(client: WorkerRuntimeClient, claimed: ClaimedCom
         create_iceberg = command.create_iceberg
         record = datasource_execution.create_iceberg_datasource(
             client,
+            datasource_id=claimed.id,
             namespace=namespace,
             database_url=database_url,
             name=create_iceberg.name,

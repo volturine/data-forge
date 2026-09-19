@@ -1,4 +1,5 @@
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Iterator
 
 import psycopg
 from fastapi import FastAPI, Request
@@ -128,3 +129,61 @@ class TestRequestLoggingMiddleware:
         assert len(writer.payloads) == 1
         assert writer.payloads[0]['path'] == '/stream'
         assert writer.payloads[0]['chunk_index'] == 0
+
+    def test_handler_can_observe_disconnect_after_logged_body_replay(self) -> None:
+        writer = _InMemoryWriter()
+        sent: list[dict] = []
+        body_messages: Iterator[dict[str, object]] = iter(
+            [
+                {'type': 'http.request', 'body': b'', 'more_body': False},
+                {'type': 'http.disconnect'},
+            ]
+        )
+
+        async def receive() -> dict:
+            return next(body_messages)
+
+        async def send(message: dict) -> None:
+            sent.append(message)
+
+        async def app(scope: dict, receive_for_app, send_for_app) -> None:
+            request = Request(scope, receive_for_app)
+            await request.body()
+            disconnected = await request.is_disconnected()
+            status = 204 if disconnected else 200
+            await send_for_app({'type': 'http.response.start', 'status': status, 'headers': []})
+            await send_for_app({'type': 'http.response.body', 'body': b'', 'more_body': False})
+
+        middleware = RequestLoggingMiddleware(app, writer=writer)
+        scope = {
+            'type': 'http',
+            'method': 'POST',
+            'path': '/disconnect',
+            'raw_path': b'/disconnect',
+            'query_string': b'',
+            'headers': [(b'content-length', b'0')],
+            'scheme': 'http',
+            'client': ('127.0.0.1', 1234),
+            'server': ('testserver', 80),
+        }
+
+        asyncio.run(middleware(scope, receive, send))
+
+        assert sent[0]['status'] == 204
+        assert writer.payloads[0]['status'] == 204
+
+    def test_handler_can_check_disconnect_after_logged_body_while_connected(self) -> None:
+        app = FastAPI()
+        writer = _InMemoryWriter()
+        app.add_middleware(RequestLoggingMiddleware, writer=writer)
+
+        @app.post('/connected')
+        async def connected(request: Request) -> dict[str, bool]:
+            await request.body()
+            return {'disconnected': await request.is_disconnected()}
+
+        with TestClient(app) as client:
+            response = client.post('/connected', content=b'{}')
+
+        assert response.status_code == 200
+        assert response.json() == {'disconnected': False}

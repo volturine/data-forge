@@ -22,6 +22,7 @@ import {
 let sharedBaseDatasourceName = '';
 let sharedBaseDatasourceId = '';
 let sharedAuxDatasourceName = '';
+let sharedAuxDatasourceId = '';
 let sharedDateDatasourceName = '';
 let sharedDateDatasourceId = '';
 
@@ -39,20 +40,20 @@ test.beforeEach(async ({ request }) => {
 	sharedAuxDatasourceName = `e2e-ops-test-aux-${id}`;
 	sharedDateDatasourceName = `e2e-ops-test-date-${id}`;
 	sharedBaseDatasourceId = await createDatasource(request, sharedBaseDatasourceName);
-	await createDatasource(request, sharedAuxDatasourceName);
+	sharedAuxDatasourceId = await createDatasource(request, sharedAuxDatasourceName);
 	sharedDateDatasourceId = await createDatasourceWithDates(request, sharedDateDatasourceName);
 });
 
 test.afterEach(async ({ browser, workerAuth }) => {
 	const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 	// Per-test freeWarm already shut engines. Teardown removes only this test's DS.
-	for (const name of [
-		sharedBaseDatasourceName,
-		sharedAuxDatasourceName,
-		sharedDateDatasourceName
+	for (const resource of [
+		{ name: sharedBaseDatasourceName, id: sharedBaseDatasourceId },
+		{ name: sharedAuxDatasourceName, id: sharedAuxDatasourceId },
+		{ name: sharedDateDatasourceName, id: sharedDateDatasourceId }
 	]) {
-		if (name) {
-			await deleteDatasourceViaUI(page, name);
+		if (resource.name && resource.id) {
+			await deleteDatasourceViaUI(page, resource.name, { id: resource.id });
 		}
 	}
 	await page.close();

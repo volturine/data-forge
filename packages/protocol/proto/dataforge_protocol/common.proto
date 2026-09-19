@@ -11,6 +11,9 @@ message RuntimeWorkerRequest {
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
   int32 protocol_version = 2;
   repeated ComputeRequestKind allowed_compute_request_kinds = 3;
+  // The worker advances this cursor between claims so a busy namespace cannot
+  // starve requests in the other registered namespaces.
+  int32 compute_namespace_offset = 4;
 }
 
 message RuntimeWorkerResponse {

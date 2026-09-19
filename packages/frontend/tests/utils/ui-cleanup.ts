@@ -1,8 +1,15 @@
 import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
-import { findAnalysisIdByName, unregisterAnalysis, type E2EStorageState } from './api.js';
+import {
+	findAnalysisIdByName,
+	findDatasourceIdsByName,
+	unregisterAnalysis,
+	unregisterDatasource,
+	type E2EStorageState
+} from './api.js';
 import { installE2eContextGuards } from './page-guards.js';
 import { e2eBaseURL } from './base-url.js';
+import { DEFAULT_NAMESPACE } from './namespace.js';
 import {
 	gotoAnalysesGallery,
 	gotoUdfLibrary,
@@ -11,11 +18,29 @@ import {
 	waitForLayoutReady
 } from './readiness.js';
 
-/** Matches product `engineIdentityKey` (`scope:resource_id`). */
 export type EngineUiScope = 'analysis_interactive' | 'datasource_preview' | 'build';
 
-function engineIdentityKey(scope: EngineUiScope, resourceId: string): string {
-	return `${scope}:${resourceId}`;
+function engineApiSegment(scope: EngineUiScope): string {
+	return scope === 'datasource_preview'
+		? 'datasource-preview'
+		: scope === 'build'
+			? 'build'
+			: 'analysis';
+}
+
+async function shutdownEngineForCleanup(
+	page: Page,
+	scope: EngineUiScope,
+	resourceId: string
+): Promise<void> {
+	const endpoint =
+		'/api/v1/compute/engine/' + engineApiSegment(scope) + '/' + encodeURIComponent(resourceId);
+	const response = await page.context().request.delete(endpoint, { headers: cleanupHeaders() });
+	if (!response.ok() && response.status() !== 404) {
+		throw new Error(
+			`Failed to shut down ${scope} engine ${resourceId}: ${(await responseFailure(response)).message}`
+		);
+	}
 }
 
 /**
@@ -90,58 +115,14 @@ export async function closeEnginesPopup(page: Page): Promise<void> {
 	await expect(popup).toBeHidden({ timeout: 2_000 });
 }
 
-async function confirmEngineShutdownDialog(page: Page): Promise<void> {
-	const confirm = page
-		.getByRole('dialog')
-		.filter({
-			has: page.getByRole('heading', {
-				name: /Shut down idle engine|Cancel job and shut down engine/i
-			})
-		})
-		.first();
-	await expect(confirm).toBeVisible({ timeout: 3_000 });
-	await confirm
-		.getByRole('button', { name: /^(Shut down|Cancel job & shut down)$/ })
-		.click({ timeout: 3_000 });
-	await expect(confirm).toBeHidden({ timeout: 5_000 });
-}
-
 /**
- * Product Engines UI: power → confirm → row gone.
- * Opens the popup once; if the engine is already gone, returns immediately.
+ * Shut down owned engines through exact API identities.
+ *
+ * This is teardown, not an Engines-popup test. The live engine stream can
+ * remove a row between lookup and click, so using the authenticated API keeps
+ * cleanup independent from DOM churn and cannot select another resource.
  */
-export async function shutdownEngineViaUI(
-	page: Page,
-	resourceId: string,
-	scope: EngineUiScope = 'analysis_interactive'
-): Promise<void> {
-	await freeWarmEnginesViaUI(page, {
-		analysisIds: scope === 'analysis_interactive' ? [resourceId] : [],
-		datasourceIds: scope === 'datasource_preview' ? [resourceId] : [],
-		buildIds: scope === 'build' ? [resourceId] : []
-	});
-}
-
-export async function shutdownAnalysisEngineViaUI(page: Page, analysisId: string): Promise<void> {
-	await freeWarmEnginesViaUI(page, { analysisIds: [analysisId] });
-}
-
-export async function shutdownDatasourcePreviewEngineViaUI(
-	page: Page,
-	datasourceId: string
-): Promise<void> {
-	await freeWarmEnginesViaUI(page, { datasourceIds: [datasourceId] });
-}
-
-export async function shutdownBuildEngineViaUI(page: Page, buildId: string): Promise<void> {
-	await freeWarmEnginesViaUI(page, { buildIds: [buildId] });
-}
-
-/**
- * Shut down owned engines through one Engines popup session.
- * Skips missing rows in milliseconds — teardown must stay cheaper than spawn.
- */
-export async function freeWarmEnginesViaUI(
+export async function freeWarmEngines(
 	page: Page,
 	targets: {
 		analysisIds?: Iterable<string>;
@@ -151,48 +132,21 @@ export async function freeWarmEnginesViaUI(
 ): Promise<void> {
 	if (page.isClosed()) return;
 
-	const keys: string[] = [];
-	for (const id of targets.buildIds ?? []) {
-		if (id) keys.push(engineIdentityKey('build', id));
+	const resources: Array<{ scope: EngineUiScope; resourceId: string }> = [];
+	for (const resourceId of targets.buildIds ?? []) {
+		resources.push({ scope: 'build', resourceId });
 	}
-	for (const id of targets.analysisIds ?? []) {
-		if (id) keys.push(engineIdentityKey('analysis_interactive', id));
+	for (const resourceId of targets.analysisIds ?? []) {
+		resources.push({ scope: 'analysis_interactive', resourceId });
 	}
-	for (const id of targets.datasourceIds ?? []) {
-		if (id) keys.push(engineIdentityKey('datasource_preview', id));
-	}
-	if (keys.length === 0) return;
-
-	// Build Preview modal blocks Engines clicks; dismiss before opening the popup.
-	await closeBuildPreviewIfOpen(page);
-
-	const popup = await openEnginesPopup(page);
-
-	if (
-		await popup
-			.getByText('No engines running')
-			.isVisible()
-			.catch(() => false)
-	) {
-		await closeEnginesPopup(page);
-		return;
+	for (const resourceId of targets.datasourceIds ?? []) {
+		resources.push({ scope: 'datasource_preview', resourceId });
 	}
 
-	for (const key of keys) {
-		if (page.isClosed()) return;
-		const row = popup.locator(`[data-engine-row="${key}"]`);
-		// Already free — do not pay multi-second waits.
-		if (!(await row.isVisible().catch(() => false))) continue;
-
-		const power = popup.locator(`[data-engine-shutdown="${key}"]`);
-		await expect(power).toBeEnabled({ timeout: 2_000 });
-
-		await power.click({ timeout: 2_000 });
-		await confirmEngineShutdownDialog(page);
-		await expect(row).toBeHidden({ timeout: 10_000 });
+	for (const resource of resources) {
+		if (!resource.resourceId || page.isClosed()) return;
+		await shutdownEngineForCleanup(page, resource.scope, resource.resourceId);
 	}
-
-	await closeEnginesPopup(page);
 }
 
 function confirmDialog(page: Page, heading: string | RegExp): Locator {
@@ -251,6 +205,60 @@ type CleanupSession = {
 	context: BrowserContext;
 	page: Page;
 };
+
+function cleanupHeaders(): Record<string, string> {
+	return { 'X-Namespace': DEFAULT_NAMESPACE };
+}
+
+async function responseFailure(response: import('@playwright/test').APIResponse): Promise<Error> {
+	const body = await response.text().catch(() => '');
+	return new Error(`HTTP ${response.status()} ${body.slice(0, 300)}`);
+}
+
+async function deleteDatasourceById(page: Page, name: string, datasourceId: string): Promise<void> {
+	const response = await page
+		.context()
+		.request.delete(`/api/v1/datasource/${encodeURIComponent(datasourceId)}`, {
+			headers: cleanupHeaders()
+		});
+	if (!response.ok() && response.status() !== 404) {
+		throw new Error(
+			`Failed to delete datasource ${name} (${datasourceId}): ${(await responseFailure(response)).message}`
+		);
+	}
+	unregisterDatasource(datasourceId);
+}
+
+async function deleteAnalysisById(page: Page, name: string, analysisId: string): Promise<void> {
+	const headers = cleanupHeaders();
+	const current = await page
+		.context()
+		.request.get(`/api/v1/analysis/${encodeURIComponent(analysisId)}`, { headers });
+	if (current.status() === 404) {
+		unregisterAnalysis(analysisId);
+		return;
+	}
+	if (!current.ok()) {
+		throw new Error(
+			`Failed to read analysis ${name} (${analysisId}): ${(await responseFailure(current)).message}`
+		);
+	}
+	const version = current.headers()['x-analysis-version'];
+	if (!version) {
+		throw new Error(`Analysis ${name} (${analysisId}) did not return X-Analysis-Version`);
+	}
+	const response = await page
+		.context()
+		.request.delete(`/api/v1/analysis/${encodeURIComponent(analysisId)}`, {
+			headers: { ...headers, 'If-Match': version }
+		});
+	if (!response.ok() && response.status() !== 404) {
+		throw new Error(
+			`Failed to delete analysis ${name} (${analysisId}): ${(await responseFailure(response)).message}`
+		);
+	}
+	unregisterAnalysis(analysisId);
+}
 
 const cleanupSessions = new WeakMap<BrowserContext, Promise<CleanupSession>>();
 
@@ -328,6 +336,17 @@ async function deleteDatasourceViaUIOnPage(
 	name: string,
 	options?: { id?: string }
 ): Promise<void> {
+	const registeredIds = findDatasourceIdsByName(name);
+	const datasourceId = options?.id ?? (registeredIds.length === 1 ? registeredIds[0] : undefined);
+	if (datasourceId) {
+		await deleteDatasourceById(page, name, datasourceId);
+		return;
+	}
+	if (registeredIds.length > 1) {
+		throw new Error(
+			`Datasource name "${name}" has ambiguous test ownership: ${registeredIds.join(', ')}`
+		);
+	}
 	await page.goto('/datasources', { waitUntil: 'domcontentloaded', timeout: 15_000 });
 	await waitForDatasourceList(page, 5_000);
 	const row = options?.id
@@ -341,15 +360,15 @@ async function deleteDatasourceViaUIOnPage(
 		}
 	}
 	if (!(await row.isVisible().catch(() => false))) return;
-	const datasourceId = options?.id ?? (await row.getAttribute('data-ds-id'));
-	if (datasourceId) {
-		await shutdownDatasourcePreviewEngineViaUI(page, datasourceId);
+	const visibleDatasourceId = options?.id ?? (await row.getAttribute('data-ds-id'));
+	if (visibleDatasourceId) {
+		await freeWarmEngines(page, { datasourceIds: [visibleDatasourceId] });
 	}
-	const deleteResponse = datasourceId
+	const deleteResponse = visibleDatasourceId
 		? page.waitForResponse(
 				(response) =>
 					response.request().method() === 'DELETE' &&
-					response.url().includes(`/api/v1/datasource/${datasourceId}`),
+					response.url().includes(`/api/v1/datasource/${visibleDatasourceId}`),
 				{ timeout: 5_000 }
 			)
 		: Promise.resolve(null);
@@ -367,6 +386,7 @@ async function deleteDatasourceViaUIOnPage(
 	});
 	await expect(dialog).toBeHidden({ timeout: 5_000 });
 	await expect(row).toBeHidden({ timeout: 5_000 });
+	if (visibleDatasourceId) unregisterDatasource(visibleDatasourceId);
 }
 
 export async function deleteDatasourceViaUI(
@@ -403,8 +423,13 @@ async function resolveAnalysisIdFromCard(card: Locator, name: string): Promise<s
 async function deleteAnalysisViaUIOnPage(
 	page: Page,
 	name: string,
-	options?: { skipNavigation?: boolean }
+	options?: { id?: string; skipNavigation?: boolean }
 ): Promise<void> {
+	const ownedAnalysisId = options?.id ?? findAnalysisIdByName(name);
+	if (ownedAnalysisId) {
+		await deleteAnalysisById(page, name, ownedAnalysisId);
+		return;
+	}
 	if (!options?.skipNavigation) {
 		await gotoAnalysesGallery(page, 5_000);
 	}
@@ -420,10 +445,10 @@ async function deleteAnalysisViaUIOnPage(
 		return;
 	}
 	const analysisId = await resolveAnalysisIdFromCard(card, name);
-	// Free Docker engine via visible Engines UI before deleting the analysis card.
+	// Free the exact engine identity before deleting the analysis card.
 	// Analysis DELETE also queues durable shutdown as a backstop.
 	if (analysisId) {
-		await shutdownAnalysisEngineViaUI(page, analysisId);
+		await freeWarmEngines(page, { analysisIds: [analysisId] });
 	}
 	const deleteResponse = analysisId
 		? page.waitForResponse(
@@ -455,7 +480,7 @@ async function deleteAnalysisViaUIOnPage(
 export async function deleteAnalysisViaUI(
 	page: Page,
 	name: string,
-	options?: { skipNavigation?: boolean }
+	options?: { id?: string; skipNavigation?: boolean }
 ): Promise<void> {
 	await runCleanupWithFallback(page, 'deleteAnalysisViaUI', name, async (cleanupPage) => {
 		await deleteAnalysisViaUIOnPage(cleanupPage, name, options);

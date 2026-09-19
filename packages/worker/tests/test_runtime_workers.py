@@ -350,6 +350,7 @@ def test_next_idle_child_pid_skips_busy_workers(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_run_build_worker_process_passes_worker_runtime_client(monkeypatch) -> None:
     calls: list[tuple[str, object]] = []
+    manager_kwargs: dict[str, object] = {}
     stop_event = asyncio.Event()
     client = FakeWorkerRuntimeClient()
 
@@ -371,11 +372,12 @@ async def test_run_build_worker_process_passes_worker_runtime_client(monkeypatch
     monkeypatch.setattr(runtime_process, "worker_runtime_client", lambda: client)
     monkeypatch.setattr(runtime_process, "build_worker_loop", fake_build_worker_loop)
     monkeypatch.setattr(runtime_process, "build_worker_id", lambda: "worker-1")
-    monkeypatch.setattr(
-        runtime_process,
-        "ProcessManager",
-        lambda **kwargs: SimpleNamespace(shutdown_all=lambda: calls.append(("shutdown_all", None))),
-    )
+
+    def fake_process_manager(**kwargs):
+        manager_kwargs.update(kwargs)
+        return SimpleNamespace(shutdown_all=lambda: calls.append(("shutdown_all", None)))
+
+    monkeypatch.setattr(runtime_process, "ProcessManager", fake_process_manager)
 
     await runtime_process.run_build_worker_process(stop_event=stop_event)
 
@@ -383,6 +385,7 @@ async def test_run_build_worker_process_passes_worker_runtime_client(monkeypatch
 
     assert "build_worker_loop" in names
     assert names[-1:] == ["shutdown_all"]
+    assert manager_kwargs["warm_pool_size"] == 0
 
 
 @pytest.mark.asyncio
@@ -429,6 +432,7 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
     monkeypatch,
 ) -> None:
     calls: list[tuple[str, object]] = []
+    manager_kwargs: dict[str, object] = {}
     stop_event = asyncio.Event()
     client = FakeWorkerRuntimeClient()
     monkeypatch.setattr(client, "queued_build_job_count", lambda: 1)
@@ -505,7 +509,7 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
     monkeypatch.setattr(
         runtime_process,
         "ProcessManager",
-        lambda **kwargs: SimpleNamespace(shutdown_all=lambda: calls.append(("shutdown_all", None))),
+        lambda **kwargs: manager_kwargs.update(kwargs) or SimpleNamespace(shutdown_all=lambda: calls.append(("shutdown_all", None))),
     )
     monkeypatch.setattr(runtime_process.settings, "build_worker_min_processes", 0, raising=False)
     monkeypatch.setattr(runtime_process.settings, "build_worker_max_processes", 2, raising=False)
@@ -524,16 +528,21 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
     assert register_payload["worker_id"] == "manager-1"
     assert register_payload["kind"] == "build_manager"
     assert register_payload["capacity"] == 2
+    assert manager_kwargs["warm_pool_size"] == runtime_process.settings.engine_warm_pool_size
     request_lanes = [payload for name, payload in calls if name == "compute_request_loop"]
     assert request_lanes == [
         runtime_process.NON_ENGINE_REQUEST_KINDS,
         runtime_process.NON_ENGINE_REQUEST_KINDS,
         runtime_process.NON_ENGINE_REQUEST_KINDS,
         runtime_process.NON_ENGINE_REQUEST_KINDS,
-        runtime_process.ENGINE_REQUEST_KINDS,
-        runtime_process.ENGINE_REQUEST_KINDS,
-        runtime_process.ENGINE_REQUEST_KINDS,
-        runtime_process.ENGINE_REQUEST_KINDS,
+        runtime_process.INTERACTIVE_ENGINE_REQUEST_KINDS,
+        runtime_process.INTERACTIVE_ENGINE_REQUEST_KINDS,
+        runtime_process.INTERACTIVE_ENGINE_REQUEST_KINDS,
+        runtime_process.INTERACTIVE_ENGINE_REQUEST_KINDS,
+        runtime_process.ENGINE_LIFECYCLE_REQUEST_KINDS,
+        runtime_process.ENGINE_LIFECYCLE_REQUEST_KINDS,
+        runtime_process.ENGINE_LIFECYCLE_REQUEST_KINDS,
+        runtime_process.ENGINE_LIFECYCLE_REQUEST_KINDS,
     ]
     assert ("stop_worker", {"worker_id": "manager-1"}) in client.calls
 

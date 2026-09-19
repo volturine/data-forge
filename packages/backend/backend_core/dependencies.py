@@ -49,7 +49,12 @@ def get_optional_lock_owner_id(
     request: Request,
     session: Session = Depends(get_settings_db),
 ) -> str | None:
-    return resolve_lock_owner_id(session, _resolve_session_token(request))
+    try:
+        return resolve_lock_owner_id(session, _resolve_session_token(request))
+    finally:
+        # Lock ownership is resolved before the endpoint starts. Do not keep
+        # the settings transaction open while the endpoint waits on a lock.
+        session.close()
 
 
 def get_runtime_availability_probe(

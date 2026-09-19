@@ -1,5 +1,4 @@
 import {
-	expect,
 	type APIRequestContext,
 	type Browser,
 	type BrowserContext,
@@ -66,20 +65,12 @@ const udfRegistry = new Map<string, { name: string }>();
 
 /**
  * Default app namespace used by helpers unless a test passes another.
- * Read from the visible sidebar namespace control (not /api/v1/config).
- * Memoized per worker after first shell load.
+ * This is configuration, not mutable browser state: the shared helper context
+ * is deliberately reused and may be left on a test-specific namespace.
  */
-let helperDefaultNamespace: string | undefined;
+const helperDefaultNamespace = process.env.DEFAULT_NAMESPACE?.trim() || 'default';
 
-async function resolveHelperDefaultNamespace(page: Page): Promise<string> {
-	if (!helperDefaultNamespace) {
-		await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
-		await waitForLayoutReady(page);
-		const label = page.getByRole('button', { name: 'Select namespace' });
-		await expect(label).toBeVisible({ timeout: 5_000 });
-		const text = (await label.innerText()).trim();
-		helperDefaultNamespace = text || 'default';
-	}
+async function resolveHelperDefaultNamespace(_page: Page): Promise<string> {
 	return helperDefaultNamespace;
 }
 
@@ -196,7 +187,7 @@ export async function deleteDatasource(
 	if (!entry) return;
 	await withAuthedPage(request, async (page) => {
 		await prepareHelperNamespace(page, namespace ?? entry.namespace);
-		await deleteDatasourceViaUI(page, entry.name);
+		await deleteDatasourceViaUI(page, entry.name, { id });
 	});
 }
 
@@ -399,7 +390,7 @@ export async function createHealthCheck(
 }
 
 export async function spawnEngine(_request: E2ERequest, _analysisId: string): Promise<void> {
-	// Engines are started through visible user actions / analysis prewarm.
+	// Engines are started through visible user actions and compute requests.
 }
 
 export async function waitForNoEngineJob(
@@ -423,6 +414,16 @@ export function findAnalysisIdByName(name: string): string | null {
 
 export function unregisterAnalysis(analysisId: string): void {
 	analysisRegistry.delete(analysisId);
+}
+
+export function findDatasourceIdsByName(name: string): string[] {
+	return [...datasourceRegistry.entries()]
+		.filter(([, entry]) => entry.name === name)
+		.map(([id]) => id);
+}
+
+export function unregisterDatasource(datasourceId: string): void {
+	datasourceRegistry.delete(datasourceId);
 }
 
 export function registeredAnalysisIds(): string[] {

@@ -20,7 +20,7 @@ router = MCPRouter(prefix='/healthchecks', tags=['healthchecks'], dependencies=[
 
 @router.get('', response_model=list[schemas.HealthCheckResponse], mcp=True)
 @handle_errors(operation='list healthchecks')
-async def list_healthchecks(
+def list_healthchecks(
     datasource_id: str,
     search: str | None = None,
     limit: int = 100,
@@ -36,7 +36,7 @@ async def list_healthchecks(
 
 @router.get('/all', response_model=list[schemas.HealthCheckResponse], mcp=True)
 @handle_errors(operation='list all healthchecks')
-async def list_all_healthchecks(
+def list_all_healthchecks(
     search: str | None = None,
     limit: int = 100,
     offset: int = 0,
@@ -48,7 +48,7 @@ async def list_all_healthchecks(
 
 @router.get('/results', response_model=list[schemas.HealthCheckResultResponse], mcp=True)
 @handle_errors(operation='list healthcheck results')
-async def list_results(datasource_id: str, limit: int = 10, session: Session = Depends(get_db)):
+def list_results(datasource_id: str, limit: int = 10, session: Session = Depends(get_db)):
     """List recent healthcheck results for a datasource."""
     parsed_id = parse_datasource_id(datasource_id)
     try:
@@ -60,14 +60,14 @@ async def list_results(datasource_id: str, limit: int = 10, session: Session = D
 
 @router.get('/results/all', response_model=list[schemas.HealthCheckResultResponse], mcp=True)
 @handle_errors(operation='list all healthcheck results')
-async def list_all_results(limit: int = 10, session: Session = Depends(get_db)):
+def list_all_results(limit: int = 10, session: Session = Depends(get_db)):
     """List recent healthcheck results across all datasources."""
     return [schemas.HealthCheckResultResponse.model_validate(item) for item in service.list_all_results(session, limit)]
 
 
 @router.post('', response_model=schemas.HealthCheckResponse, mcp=True)
 @handle_errors(operation='create healthcheck')
-async def create_healthcheck(payload: schemas.HealthCheckCreate, session: Session = Depends(get_db)):
+def create_healthcheck(payload: schemas.HealthCheckCreate, session: Session = Depends(get_db)):
     """Create a healthcheck for a datasource.
 
     Requires: datasource_id, name, check_type (one of: row_count, column_null, column_unique,
@@ -83,7 +83,7 @@ async def create_healthcheck(payload: schemas.HealthCheckCreate, session: Sessio
 
 @router.put('/{healthcheck_id}', response_model=schemas.HealthCheckResponse, mcp=True)
 @handle_errors(operation='update healthcheck')
-async def update_healthcheck(
+def update_healthcheck(
     healthcheck_id: HealthcheckId,
     payload: schemas.HealthCheckUpdate,
     session: Session = Depends(get_db),
@@ -99,6 +99,6 @@ async def update_healthcheck(
 
 @router.delete('/{healthcheck_id}', status_code=204, mcp=True)
 @handle_errors(operation='delete healthcheck')
-async def delete_healthcheck(healthcheck_id: HealthcheckId, session: Session = Depends(get_db)):
+def delete_healthcheck(healthcheck_id: HealthcheckId, session: Session = Depends(get_db)):
     """Delete a healthcheck by ID. Use GET /healthchecks?datasource_id=... to find healthcheck IDs."""
     service.delete_healthcheck(session, parse_healthcheck_id(healthcheck_id))

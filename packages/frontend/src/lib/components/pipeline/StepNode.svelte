@@ -8,6 +8,7 @@
 	import {
 		previewStepData,
 		getStepRowCount,
+		throwIfAborted,
 		downloadStep,
 		type StepPreviewResponse
 	} from '$lib/api/compute';
@@ -111,14 +112,17 @@
 			JSON.stringify(chartDatasourceConfig)
 		],
 		queryFn: async (): Promise<StepPreviewResponse> => {
-			const result = await previewStepData({
+			const request = {
 				analysis_pipeline: analysisPipeline!,
 				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: step.id,
 				row_limit: 5000,
 				page: 1,
 				resource_config: analysisStore.resourceConfig
-			});
+			};
+			const signal = previewSignal(request);
+			const result = await previewStepData(request, { signal });
+			throwIfAborted(signal);
 			if (result.isErr()) throw toComputeError(result.error);
 			return result.value;
 		},
@@ -183,29 +187,57 @@
 	const tableResetKey = $derived(
 		`${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${previewRowLimit}:${rowCountPipelineKey}:${JSON.stringify(rowCountDatasourceConfig)}`
 	);
+	let rowCountAbortController: AbortController | null = null;
+	let previewRequestKey: string | null = null;
+	let previewRequestController = new AbortController();
+
+	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
+		const nextKey = JSON.stringify(request);
+		if (previewRequestKey !== nextKey) {
+			if (previewRequestKey !== null) previewRequestController.abort();
+			previewRequestKey = nextKey;
+			previewRequestController = new AbortController();
+		}
+		return previewRequestController.signal;
+	}
 
 	async function calculateRowCount() {
 		if (!analysisId || !analysisPipeline) return;
 		if (isLoadingRowCount) return;
-		rowCountLoads.set(rowCountKey, true);
-		rowCountErrors.delete(rowCountKey);
+		const requestKey = rowCountKey;
+		const requestPipeline = analysisPipeline;
+		const requestTabId = analysisStore.activeTab?.id ?? null;
+		const controller = new AbortController();
+		rowCountAbortController?.abort();
+		rowCountAbortController = controller;
+		rowCountLoads.set(requestKey, true);
+		rowCountErrors.delete(requestKey);
 		try {
-			const result = await getStepRowCount({
-				analysis_pipeline: analysisPipeline,
-				tab_id: analysisStore.activeTab?.id ?? null,
-				target_step_id: step.id
-			});
+			const result = await getStepRowCount(
+				{
+					analysis_pipeline: requestPipeline,
+					tab_id: requestTabId,
+					target_step_id: step.id
+				},
+				{ signal: controller.signal }
+			);
+			throwIfAborted(controller.signal);
 			if (result.isOk()) {
-				rowCounts.set(rowCountKey, result.value.row_count);
+				rowCounts.set(requestKey, result.value.row_count);
 			} else {
-				rowCounts.delete(rowCountKey);
-				rowCountErrors.set(rowCountKey, result.error.message);
+				rowCounts.delete(requestKey);
+				rowCountErrors.set(requestKey, result.error.message);
 			}
 		} catch (error) {
-			rowCounts.delete(rowCountKey);
-			rowCountErrors.set(rowCountKey, error instanceof Error ? error.message : String(error));
+			if (!controller.signal.aborted) {
+				rowCounts.delete(requestKey);
+				rowCountErrors.set(requestKey, error instanceof Error ? error.message : String(error));
+			}
 		} finally {
-			rowCountLoads.set(rowCountKey, false);
+			if (rowCountAbortController === controller) {
+				rowCountAbortController = null;
+				rowCountLoads.set(requestKey, false);
+			}
 		}
 	}
 
@@ -228,6 +260,8 @@
 	}
 
 	onDestroy(() => {
+		previewRequestController.abort();
+		rowCountAbortController?.abort();
 		if (copyTimer !== null) window.clearTimeout(copyTimer);
 	});
 

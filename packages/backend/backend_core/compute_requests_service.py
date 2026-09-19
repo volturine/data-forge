@@ -28,27 +28,27 @@ from backend_core.transactions import committed
 from backend_core.transitions import TransitionOutcome, TransitionResult, applied, rejected
 from dataforge_protocol import compute_pb2, enums_pb2
 
-_BLOCKING_REQUEST_KINDS = frozenset(
+_HIGH_PRIORITY_REQUEST_KINDS = frozenset(
     {
         enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
         enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
         enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
+        enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
         enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
         enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
+        enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
         enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
         enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
     }
 )
 
-_INTERACTIVE_REQUEST_KINDS = frozenset(
+_USER_CREATE_REQUEST_KINDS = frozenset(
     {
-        enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
-        enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
-        enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
+        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
     }
 )
 
@@ -64,8 +64,8 @@ def _database_now(session: Session) -> datetime:
 
 def _request_priority_clause(table):
     return case(
-        *[(table.c.kind == kind, 0) for kind in _BLOCKING_REQUEST_KINDS],
-        *[(table.c.kind == kind, 1) for kind in _INTERACTIVE_REQUEST_KINDS],
+        *[(table.c.kind == kind, 0) for kind in _HIGH_PRIORITY_REQUEST_KINDS],
+        *[(table.c.kind == kind, 1) for kind in _USER_CREATE_REQUEST_KINDS],
         else_=2,
     )
 
@@ -138,6 +138,148 @@ def response_payload(request: ComputeRequest) -> dict[str, object]:
 
 def get_request(session: Session, request_id: str) -> ComputeRequest | None:
     return session.get(ComputeRequest, request_id)
+
+
+def _engine_identity_for_command(command: compute_pb2.ComputeCommand) -> compute_pb2.EngineIdentity | None:
+    command_name = command.WhichOneof('command')
+    if command_name in {'spawn_engine', 'configure_engine', 'shutdown_engine'}:
+        return getattr(command, command_name).engine_identity
+    if command_name == 'preview':
+        preview = command.preview
+        if preview.HasField('engine_identity'):
+            return preview.engine_identity
+        if preview.HasField('analysis_id') and preview.analysis_id:
+            return compute_pb2.EngineIdentity(
+                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                analysis_id=preview.analysis_id,
+                resource_id=preview.analysis_id,
+            )
+        return None
+    if command_name in {'schema', 'row_count', 'download', 'export'}:
+        interactive = getattr(command, command_name)
+        if interactive.HasField('analysis_id') and interactive.analysis_id:
+            return compute_pb2.EngineIdentity(
+                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                analysis_id=interactive.analysis_id,
+                resource_id=interactive.analysis_id,
+            )
+    return None
+
+
+def _same_engine_identity(left: compute_pb2.EngineIdentity, right: compute_pb2.EngineIdentity) -> bool:
+    return left.scope == right.scope and left.reuse_policy == right.reuse_policy and left.resource_id == right.resource_id
+
+
+def _retire_request(session: Session, request: ComputeRequest, *, reason: str, now: datetime) -> None:
+    request.status = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+    request.error_message = reason
+    request.response_envelope = response_envelope(
+        kind=kind_from_proto(request.kind),
+        request_id=request.id,
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
+        payload={'error': reason},
+        error_message=reason,
+    ).SerializeToString()
+    request.completed_at = now
+    request.updated_at = now
+    request.lease_owner = None
+    request.claim_token = None
+    request.lease_expires_at = None
+    request.claimed_at = None
+    request.last_renewed_at = None
+    session.add(request)
+    runtime_outbox_service.enqueue_compute_response_notification(session, request_id=request.id)
+
+
+def cancel_queued_request(session: Session, request_id: str, *, reason: str) -> ComputeRequest | None:
+    """Retire a request whose HTTP client went away before execution started.
+
+    A running request is deliberately left alone: shared engines may be
+    executing other users' work and the durable worker has no safe way to
+    cancel one job without taking that shared engine down. Queued work can be
+    retired atomically, which is the important boundary for abandoned page
+    previews because it prevents them from occupying the compute queue later.
+    """
+    table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
+    statement = select(ComputeRequest).where(table.c.id == request_id).where(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED).with_for_update()
+    request = session.execute(statement).scalars().first()
+    if request is None:
+        session.rollback()
+        return None
+
+    _retire_request(session, request, reason=reason, now=_utcnow())
+    session.commit()
+    session.refresh(request)
+    record_lease_transition(
+        kind='compute_request',
+        transition='cancel',
+        outcome=TransitionOutcome.APPLIED,
+        entity_id=request.id,
+        owner_id='http-client',
+        claim_token='cancelled',
+        generation=request.lease_generation,
+        attempt=request.attempts,
+    )
+    return request
+
+
+def cancel_active_requests_for_engine(
+    session: Session,
+    *,
+    namespace: str,
+    identity: compute_pb2.EngineIdentity,
+    reason: str,
+) -> int:
+    """Retire active requests that target an engine being explicitly shut down.
+
+    Requests are durable and may already have been claimed by a capacity
+    waiter when the engine teardown is staged. Matching both queued and
+    running protocol commands here closes that race at the queue owner instead
+    of allowing old page work to recreate the engine after teardown. A worker
+    that was already executing the request will observe the retired lease when
+    it publishes its result.
+    """
+    table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
+    statement = (
+        select(ComputeRequest)
+        .where(table.c.namespace == namespace)
+        .where(
+            table.c.status.in_(
+                [
+                    enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
+                    enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
+                ]
+            )
+        )
+        .with_for_update()
+    )
+    requests = list(session.execute(statement).scalars().all())
+    now = _utcnow()
+    cancelled = 0
+    for request in requests:
+        envelope = command_envelope_for_request(request)
+        request_identity = _engine_identity_for_command(envelope.command)
+        if request_identity is None or not _same_engine_identity(request_identity, identity):
+            continue
+        _retire_request(session, request, reason=reason, now=now)
+        record_lease_transition(
+            kind='compute_request',
+            transition='cancel',
+            outcome=TransitionOutcome.APPLIED,
+            entity_id=request.id,
+            owner_id='engine-shutdown',
+            claim_token='cancelled',
+            generation=request.lease_generation,
+            attempt=request.attempts,
+        )
+        cancelled += 1
+    if cancelled:
+        session.commit()
+    else:
+        session.rollback()
+    return cancelled
 
 
 def _contains_value(value: object, target: str) -> bool:

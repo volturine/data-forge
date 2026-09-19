@@ -10,14 +10,17 @@
 	interface Props {
 		open: boolean;
 		selected: string;
-		onSelect: (value: string) => void;
+		onSelect: (value: string) => void | Promise<void>;
+		onSelectError?: (message: string) => void;
 		onClose: () => void;
 		anchor?: HTMLElement | null;
 	}
 
-	let { open, selected, onSelect, onClose, anchor = null }: Props = $props();
+	let { open, selected, onSelect, onSelectError, onClose, anchor = null }: Props = $props();
 
 	let searchQuery = $state('');
+	let selecting = $state(false);
+	let selectionError = $state<string | null>(null);
 	const debouncedSearch = new Debounced(() => searchQuery, 200);
 	let popoverRect = $state({ left: 0, top: 0, width: 360 });
 
@@ -61,18 +64,34 @@
 	let popupRef = $state<HTMLElement | null>(null);
 
 	function handleClose() {
+		if (selecting) return;
 		onClose();
 		searchQuery = '';
+		selectionError = null;
 	}
 
-	function handleSelect(value: string) {
-		handleClose();
-		void onSelect(value);
+	async function handleSelect(value: string): Promise<void> {
+		if (selecting) return;
+		selecting = true;
+		selectionError = null;
+		// The selection starts an application-wide namespace transition. Do not
+		// keep an overlay open while provisioning and route invalidation finish.
+		onClose();
+		try {
+			await onSelect(value);
+			searchQuery = '';
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			selectionError = message;
+			onSelectError?.(message);
+		} finally {
+			selecting = false;
+		}
 	}
 
-	function handleCreate() {
+	async function handleCreate(): Promise<void> {
 		if (!normalizedCandidate) return;
-		handleSelect(normalizedCandidate);
+		await handleSelect(normalizedCandidate);
 	}
 
 	const overlayConfig = $derived<OverlayConfig>({
@@ -190,10 +209,20 @@
 				type="text"
 				{@attach focusInput}
 				bind:value={searchQuery}
+				disabled={selecting}
 				placeholder="Search or create (lowercase)..."
 				aria-label="Search namespaces"
 				autocomplete="off"
 			/>
+
+			{#if selectionError}
+				<div
+					class={css({ paddingX: '1', fontSize: '2xs', color: 'error', lineHeight: 'snug' })}
+					role="alert"
+				>
+					{selectionError}
+				</div>
+			{/if}
 
 			{#if invalidCandidate}
 				<div class={css({ paddingX: '1', fontSize: '2xs', color: 'error', lineHeight: 'snug' })}>
@@ -238,6 +267,7 @@
 								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 							})}
 							onclick={() => void handleCreate()}
+							disabled={selecting}
 							type="button"
 						>
 							<div
@@ -313,6 +343,7 @@
 								_hover: { backgroundColor: 'bg.hover' }
 							})}
 							onclick={() => void handleSelect(name)}
+							disabled={selecting}
 							type="button"
 						>
 							<span

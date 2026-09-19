@@ -4,21 +4,24 @@ import logging
 import os
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import grpc
+import pytest
 
 from dataforge_protocol import compute_pb2, engine_runtime_pb2, enums_pb2, worker_runtime_pb2
 from runtime.config import settings
 from runtime.docker_engine import (
     DockerComputeEngine,
     _container_name,
+    _container_rpc_target,
     _effective_resources,
     _engine_object_store_endpoint,
     reconcile_deployment_containers,
     validate_engine_runtime_readiness,
 )
-from runtime.engine_credentials import resolve_engine_credentials
+from runtime.engine_credentials import ObjectStoreCredentials, resolve_engine_credentials
 
 
 def test_effective_resources_resolves_zero_threads_to_logical_cpu_count(monkeypatch) -> None:
@@ -106,6 +109,39 @@ def test_container_name_is_dns_safe_and_bounded(monkeypatch) -> None:
     assert len(name) <= 63
     assert "_" not in name
     assert name != second  # full-identity hash suffix keeps them unique
+
+
+def test_container_rpc_target_uses_unique_container_dns_name(monkeypatch) -> None:
+    class Container:
+        name = "/dataforge-engine-analysis-abc123"
+        status = "running"
+
+        def reload(self) -> None:
+            return None
+
+    monkeypatch.setattr(settings, "engine_rpc_port", 50053)
+
+    assert _container_rpc_target(Container()) == "dataforge-engine-analysis-abc123:50053"
+
+
+def test_container_rpc_target_waits_through_transient_startup_states(monkeypatch) -> None:
+    class Container:
+        name = "/dataforge-engine-analysis-starting"
+        status = "created"
+
+        def __init__(self) -> None:
+            self.reloads = 0
+
+        def reload(self) -> None:
+            self.reloads += 1
+            if self.reloads >= 2:
+                self.status = "running"
+
+    monkeypatch.setattr(settings, "engine_rpc_port", 50053)
+    container = Container()
+
+    assert _container_rpc_target(container) == "dataforge-engine-analysis-starting:50053"
+    assert container.reloads == 2
 
 
 def test_engine_object_store_endpoint_prefers_private_network_override(monkeypatch) -> None:
@@ -208,6 +244,72 @@ def test_periodic_reconciliation_removes_only_stopped_owned_containers(monkeypat
     assert removed == ["stopped", "dead"]
 
 
+def test_periodic_reconciliation_removes_old_untracked_running_containers(monkeypatch) -> None:
+    removed: list[str] = []
+    old = (datetime.now(UTC) - timedelta(seconds=10)).isoformat()
+    current = datetime.now(UTC).isoformat()
+
+    class Api:
+        def containers(self, *, all: bool, filters: dict[str, object]):
+            assert all
+            return [
+                {"Id": "old-running", "State": "running", "Labels": {"io.dataforge.created-at": old}},
+                {"Id": "new-running", "State": "running", "Labels": {"io.dataforge.created-at": current}},
+                {"Id": "unknown-created-at", "State": "running", "Labels": {}},
+            ]
+
+        def remove_container(self, container_id: str, *, force: bool) -> None:
+            assert force
+            removed.append(container_id)
+
+    class Client:
+        api = Api()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
+    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+
+    assert (
+        reconcile_deployment_containers(
+            supervisor_id="worker-1",
+            running_grace_seconds=5,
+        )
+        == 1
+    )
+    assert removed == ["old-running"]
+
+
+def test_startup_reconciliation_removes_untracked_running_containers(monkeypatch) -> None:
+    removed: list[str] = []
+
+    class Api:
+        def containers(self, *, all: bool, filters: dict[str, object]):
+            assert all
+            return [
+                {"Id": "tracked", "State": "running"},
+                {"Id": "orphan-running", "State": "running"},
+                {"Id": "orphan-created", "State": "created"},
+            ]
+
+        def remove_container(self, container_id: str, *, force: bool) -> None:
+            assert force
+            removed.append(container_id)
+
+    class Client:
+        api = Api()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
+    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+
+    assert reconcile_deployment_containers(supervisor_id="worker-1", keep_container_ids={"tracked"}) == 2
+    assert removed == ["orphan-running", "orphan-created"]
+
+
 def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) -> None:
     engine = DockerComputeEngine(_identity())
     engine._shutdown_requested = True
@@ -218,6 +320,36 @@ def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) ->
     assert result is not None
     assert result.error == "Engine shutdown requested"
     assert result.error_kind == "engine_shutdown"
+
+
+def test_initialize_fails_fast_on_identity_collision(monkeypatch) -> None:
+    engine = DockerComputeEngine(_identity())
+    calls = 0
+
+    class AlreadyInitialized(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.FAILED_PRECONDITION
+
+        def details(self):
+            return "Engine already initialized for another-engine"
+
+    class Stub:
+        def Initialize(self, request, timeout):  # noqa: N802 - gRPC stub name
+            nonlocal calls
+            del request, timeout
+            calls += 1
+            raise AlreadyInitialized()
+
+    engine._stub = Stub()  # type: ignore[assignment]
+    monkeypatch.setattr(settings, "engine_start_timeout_seconds", 120)
+
+    with pytest.raises(RuntimeError, match="Engine identity collision"):
+        engine._initialize(
+            resources={"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
+            credentials=ObjectStoreCredentials(access_key="access", secret_key="secret"),
+        )
+
+    assert calls == 1
 
 
 def test_oom_exit_is_reported_with_container_details() -> None:

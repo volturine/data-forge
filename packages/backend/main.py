@@ -175,7 +175,13 @@ async def api_worker_heartbeat_loop(stop_event: asyncio.Event, worker_id: str, *
     while not stop_event.is_set():
         if await _wait_until_stopped(stop_event, heartbeat_seconds):
             return
-        _heartbeat_api_worker(worker_id)
+        # The heartbeat uses a synchronous SQLAlchemy session. Keep a slow
+        # database checkout/query from blocking this Uvicorn worker's event
+        # loop and starving normal HTTP requests.
+        try:
+            await asyncio.to_thread(_heartbeat_api_worker, worker_id)
+        except Exception:
+            logger.warning('API worker heartbeat failed', exc_info=True)
 
 
 @asynccontextmanager

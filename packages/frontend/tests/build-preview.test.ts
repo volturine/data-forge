@@ -3,11 +3,7 @@ import type { Locator, Page } from '@playwright/test';
 import { test, expect } from './fixtures.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { createDatasource, createAnalysis } from './utils/api.js';
-import {
-	deleteAnalysisViaUI,
-	deleteDatasourceViaUI,
-	freeWarmEnginesViaUI
-} from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI, deleteDatasourceViaUI, freeWarmEngines } from './utils/ui-cleanup.js';
 import { readyTimeoutMs } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
@@ -22,15 +18,17 @@ async function cleanupBuildPreviewResources(
 	page: Page,
 	analysisName: string,
 	datasourceName: string,
+	analysisId: string,
+	datasourceId: string,
 	buildId?: string
 ): Promise<void> {
 	// Free exclusive build engine once if still warm, then gallery deletes
 	// (analysis/datasource delete each shut their engines once — no freeWarm stack).
 	if (buildId) {
-		await freeWarmEnginesViaUI(page, { buildIds: [buildId] });
+		await freeWarmEngines(page, { buildIds: [buildId] });
 	}
-	await deleteAnalysisViaUI(page, analysisName);
-	await deleteDatasourceViaUI(page, datasourceName);
+	await deleteAnalysisViaUI(page, analysisName, { id: analysisId });
+	await deleteDatasourceViaUI(page, datasourceName, { id: datasourceId });
 }
 
 async function startBuildAndCaptureId(page: Page): Promise<string | undefined> {
@@ -87,7 +85,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-terminal');
 		} finally {
-			await cleanupBuildPreviewResources(page, aName, dsName, buildId);
+			await cleanupBuildPreviewResources(page, aName, dsName, aId, dsId, buildId);
 		}
 	});
 
@@ -116,7 +114,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-modal-closed');
 		} finally {
-			await cleanupBuildPreviewResources(page, aName, dsName, buildId);
+			await cleanupBuildPreviewResources(page, aName, dsName, aId, dsId, buildId);
 		}
 	});
 });

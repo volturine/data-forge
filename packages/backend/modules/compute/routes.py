@@ -151,13 +151,16 @@ def _build_list_snapshot_message(session: Session, namespace: str) -> schemas.Bu
 
 
 async def _replay_build_events(websocket: WebSocket, build_id: str, after_sequence: int) -> int | None:
-    session_gen = get_db()
-    session = next(session_gen)
-    try:
-        rows = build_run_service.list_build_events_after(session, build_id, after_sequence)
-    finally:
-        session.close()
-        session_gen.close()
+    def _load_events() -> list[Any]:
+        session_gen = get_db()
+        session = next(session_gen)
+        try:
+            return build_run_service.list_build_events_after(session, build_id, after_sequence)
+        finally:
+            session.close()
+            session_gen.close()
+
+    rows = await run_in_threadpool(_load_events)
     latest = after_sequence
     for row in rows:
         if not await safe_send_json(websocket, build_run_service.serialize_event_row(row)):
@@ -240,26 +243,32 @@ def _build_triggered_by(user: User | None) -> str:
 
 
 async def _send_build_snapshot(websocket: WebSocket, build_id: str) -> None:
-    session_gen = get_db()
-    session = next(session_gen)
-    try:
-        message = _build_snapshot_message(session, build_id)
-    finally:
-        session.close()
-        session_gen.close()
+    def _load_snapshot() -> schemas.BuildSnapshotMessage | None:
+        session_gen = get_db()
+        session = next(session_gen)
+        try:
+            return _build_snapshot_message(session, build_id)
+        finally:
+            session.close()
+            session_gen.close()
+
+    message = await run_in_threadpool(_load_snapshot)
     if message is None:
         raise HTTPException(status_code=404, detail='Build not found')
     await safe_send_json(websocket, message.model_dump(mode='json'))
 
 
 async def _send_build_list_snapshot(websocket: WebSocket, namespace: str) -> None:
-    session_gen = get_db()
-    session = next(session_gen)
-    try:
-        message = _build_list_snapshot_message(session, namespace)
-    finally:
-        session.close()
-        session_gen.close()
+    def _load_snapshot() -> schemas.BuildListSnapshotMessage:
+        session_gen = get_db()
+        session = next(session_gen)
+        try:
+            return _build_list_snapshot_message(session, namespace)
+        finally:
+            session.close()
+            session_gen.close()
+
+    message = await run_in_threadpool(_load_snapshot)
     await safe_send_json(websocket, message.model_dump(mode='json'))
 
 
@@ -301,18 +310,23 @@ def _resolved_default_max_memory_mb() -> int:
 
 
 async def _send_engine_snapshot(websocket: WebSocket) -> None:
-    session_gen = get_settings_db()
-    session = next(session_gen)
-    try:
-        defaults: dict[str, object] = {
-            'max_threads': settings.polars_cores_available,
-            'max_memory_mb': settings.polars_max_memory_mb,
-            'streaming_chunk_size': settings.polars_streaming_chunk_size,
-        }
-        message = load_engine_snapshot(session, namespace=get_namespace(), defaults=defaults)
-    finally:
-        session.close()
-        session_gen.close()
+    namespace = get_namespace()
+
+    def _load_snapshot():
+        session_gen = get_settings_db()
+        session = next(session_gen)
+        try:
+            defaults: dict[str, object] = {
+                'max_threads': settings.polars_cores_available,
+                'max_memory_mb': settings.polars_max_memory_mb,
+                'streaming_chunk_size': settings.polars_streaming_chunk_size,
+            }
+            return load_engine_snapshot(session, namespace=namespace, defaults=defaults)
+        finally:
+            session.close()
+            session_gen.close()
+
+    message = await run_in_threadpool(_load_snapshot)
     await safe_send_json(websocket, message.model_dump(mode='json'))
 
 
@@ -375,7 +389,7 @@ async def preview_step(
             tab_id=normalized.tab_id,
             request_json=normalized.model_dump(mode='json'),
         )
-    return await executor_client.preview_step(session, normalized, runtime_probe=runtime_probe)
+    return await executor_client.preview_step(session, normalized, runtime_probe=runtime_probe, http_request=http_request)
 
 
 @router.post('/schema', response_model=schemas.StepSchemaResponse, mcp=True)
@@ -408,7 +422,7 @@ async def get_step_schema(
             analysis_pipeline=normalized.analysis_pipeline.model_dump(mode='json'),
             tab_id=normalized.tab_id,
         )
-    return await executor_client.get_step_schema(session, normalized, runtime_probe=runtime_probe)
+    return await executor_client.get_step_schema(session, normalized, runtime_probe=runtime_probe, http_request=http_request)
 
 
 @router.post('/row-count', response_model=schemas.StepRowCountResponse, mcp=True)
@@ -438,7 +452,7 @@ async def get_step_row_count(
             tab_id=normalized.tab_id,
             request_json=normalized.model_dump(mode='json'),
         )
-    return await executor_client.get_step_row_count(session, normalized, runtime_probe=runtime_probe)
+    return await executor_client.get_step_row_count(session, normalized, runtime_probe=runtime_probe, http_request=http_request)
 
 
 @router.get(
@@ -493,7 +507,7 @@ async def start_build(
     user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    if not runtime_probe.available(kind=RuntimeWorkerKind.BUILD_MANAGER):
+    if not await run_in_threadpool(runtime_probe.available, kind=RuntimeWorkerKind.BUILD_MANAGER):
         raise HTTPException(status_code=503, detail='Compute runtime unavailable')
 
     pipeline = normalize_pipeline_step_configs_for_protocol(request.pipeline_payload())
@@ -548,8 +562,9 @@ async def start_build(
         if isinstance(branch_name, str) and branch_name.strip():
             safe_branch = re.sub(r'[^a-zA-Z0-9_]+', '_', branch_name).strip('_')
             table_name = f'{result_id}_{safe_branch}'
+            namespace = get_namespace()
             data_plane = client_from_settings()
-            warehouse_path = data_plane.build_object_url('exports', namespace=get_namespace())
+            warehouse_path = await run_in_threadpool(data_plane.build_object_url, 'exports', namespace=namespace)
             placeholder_source_type = datasource_service.DataSourceType.ICEBERG
             placeholder_config = {
                 'catalog_type': 'sql',
@@ -557,9 +572,9 @@ async def start_build(
                 'namespace': namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else 'outputs',
                 'table': table_name,
                 'table_name': output_name if isinstance(output_name, str) and output_name.strip() else table_name,
-                'metadata_path': data_plane.build_object_url('exports', str(result_id), namespace=get_namespace()),
+                'metadata_path': await run_in_threadpool(data_plane.build_object_url, 'exports', str(result_id), namespace=namespace),
                 'branch': branch_name,
-                'namespace_name': get_namespace(),
+                'namespace_name': namespace,
                 'reader': 'native',
             }
         placeholders.append(
@@ -571,7 +586,8 @@ async def start_build(
                 config=placeholder_config,
             )
         )
-    commands.start_build(
+    await run_in_threadpool(
+        commands.start_build,
         session,
         commands.StartBuildCommand(
             build_id=build_id,
@@ -591,14 +607,14 @@ async def start_build(
             placeholders=placeholders,
         ),
     )
-    detail = _get_durable_build_detail(session, build_id)
+    detail = await run_in_threadpool(_get_durable_build_detail, session, build_id)
     if detail is None:
         raise HTTPException(status_code=500, detail='Failed to create build')
     await build_hub.publish(BuildNotification(namespace=namespace, build_id=build_id, latest_sequence=0))
     from backend_core.domain.build_jobs.live import hub as build_job_hub
 
     build_job_hub.publish()
-    runtime_outbox_service.dispatch_pending_events(session)
+    await run_in_threadpool(runtime_outbox_service.dispatch_pending_events, session)
     return detail
 
 
@@ -609,7 +625,7 @@ async def cancel_build(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    detail = _get_durable_build_detail(session, build_id)
+    detail = await run_in_threadpool(_get_durable_build_detail, session, build_id)
     if detail is None:
         raise HTTPException(status_code=404, detail='Build not found')
     if detail.status not in {
@@ -628,7 +644,7 @@ async def cancel_build(
         emitted_at=_utcnow(),
     )
     try:
-        event_row = commands.cancel_build(session, detail=detail, event=cancellation_event)
+        event_row = await run_in_threadpool(commands.cancel_build, session, detail=detail, event=cancellation_event)
     except commands.BuildCancellationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -647,7 +663,7 @@ async def cancel_build(
 
 @router.get('/builds', response_model=schemas.BuildRunListResponse, mcp=True)
 @handle_errors(operation='list builds')
-async def list_builds(
+def list_builds(
     request: Request,
     analysis_id: str | None = None,
     datasource_id: str | None = None,
@@ -693,7 +709,7 @@ async def list_builds(
 
 @router.get('/builds/{build_id}', response_model=schemas.BuildRunDetail, mcp=True)
 @handle_errors(operation='get build')
-async def get_build(
+def get_build(
     build_id: str,
     session: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
@@ -1004,13 +1020,17 @@ async def build_list_stream(websocket: WebSocket) -> None:
             updated = await _wait_for_namespace_build_update(websocket, namespace, last_seen)
             if updated is None:
                 return
-            session_gen = get_db()
-            session = next(session_gen)
-            try:
-                payload = _build_list_snapshot_message(session, namespace).model_dump(mode='json')
-            finally:
-                session.close()
-                session_gen.close()
+
+            def _load_payload() -> dict[str, Any]:
+                session_gen = get_db()
+                session = next(session_gen)
+                try:
+                    return _build_list_snapshot_message(session, namespace).model_dump(mode='json')
+                finally:
+                    session.close()
+                    session_gen.close()
+
+            payload = await run_in_threadpool(_load_payload)
             sent = await safe_send_json(websocket, payload)
             if not sent:
                 return
@@ -1052,13 +1072,17 @@ async def build_stream(websocket: WebSocket, build_id: str) -> None:
     try:
         await _require_websocket_user(websocket)
         while True:
-            session_gen = get_db()
-            session = next(session_gen)
-            try:
-                message = _build_snapshot_message(session, build_id)
-            finally:
-                session.close()
-                session_gen.close()
+
+            def _load_snapshot() -> schemas.BuildSnapshotMessage | None:
+                session_gen = get_db()
+                session = next(session_gen)
+                try:
+                    return _build_snapshot_message(session, build_id)
+                finally:
+                    session.close()
+                    session_gen.close()
+
+            message = await run_in_threadpool(_load_snapshot)
             if message is None or message.build.namespace != get_namespace():
                 raise HTTPException(status_code=404, detail='Build not found')
             if message.last_sequence <= last_sequence:

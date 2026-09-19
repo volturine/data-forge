@@ -33,7 +33,7 @@ router = MCPRouter(prefix='/analysis', tags=['analysis'], dependencies=[Depends(
 
 @router.post('/validate', mcp=True)
 @handle_errors(operation='validate analysis', value_error_status=400)
-async def validate_analysis(
+def validate_analysis(
     data: schemas.AnalysisCreateSchema,
     session: Session = Depends(get_db),
 ):
@@ -43,7 +43,7 @@ async def validate_analysis(
 
 @router.post('', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='create analysis', value_error_status=400)
-async def create_analysis(
+def create_analysis(
     data: schemas.AnalysisCreateSchema,
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -67,7 +67,7 @@ async def create_analysis(
 
 @router.get('/templates', response_model=list[schemas.AnalysisTemplateSummarySchema], mcp=True)
 @handle_errors(operation='list analysis templates', value_error_status=404)
-async def list_analysis_templates():
+def list_analysis_templates():
     """List built-in analysis templates available in the guided creation flow."""
     return service.list_analysis_templates()
 
@@ -78,14 +78,14 @@ async def list_analysis_templates():
     mcp=True,
 )
 @handle_errors(operation='get analysis template', value_error_status=404)
-async def get_analysis_template(template_id: str):
+def get_analysis_template(template_id: str):
     """Get one analysis template including the step skeleton used for creation."""
     return service.get_analysis_template(template_id)
 
 
 @router.post('/generate', response_model=schemas.GeneratedAnalysisResponseSchema, mcp=True)
 @handle_errors(operation='generate analysis pipeline', value_error_status=400)
-async def generate_analysis_pipeline(
+def generate_analysis_pipeline(
     data: schemas.GenerateAnalysisSchema,
     session: Session = Depends(get_db),
 ):
@@ -95,7 +95,7 @@ async def generate_analysis_pipeline(
 
 @router.post('/import', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='import analysis', value_error_status=400)
-async def import_analysis(
+def import_analysis(
     data: schemas.ImportAnalysisSchema,
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -107,14 +107,14 @@ async def import_analysis(
 
 @router.get('', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
 @handle_errors(operation='list analyses')
-async def list_analyses(session: Session = Depends(get_db)):
+def list_analyses(session: Session = Depends(get_db)):
     """List all analyses as gallery items with id, name, and thumbnail metadata."""
     return service.list_analyses(session)
 
 
 @router.get('/favorites', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
 @handle_errors(operation='list favorite analyses')
-async def list_favorite_analyses(
+def list_favorite_analyses(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -124,7 +124,7 @@ async def list_favorite_analyses(
 
 @router.get('/step-types', mcp=True)
 @handle_errors(operation='list step types')
-async def list_step_types():
+def list_step_types():
     """List all available pipeline step types with descriptions and config schemas.
 
     Use this to discover what operations are available and what configuration
@@ -135,7 +135,7 @@ async def list_step_types():
 
 @router.get('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='get analysis', value_error_status=404)
-async def get_analysis(
+def get_analysis(
     analysis_id: AnalysisId,
     response: Response,
     if_none_match: str | None = Header(default=None),
@@ -154,7 +154,7 @@ async def get_analysis(
 
 @router.post('/{analysis_id}/duplicate', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='duplicate analysis', value_error_status=400)
-async def duplicate_analysis(
+def duplicate_analysis(
     analysis_id: AnalysisId,
     data: schemas.DuplicateAnalysisSchema,
     session: Session = Depends(get_db),
@@ -167,7 +167,7 @@ async def duplicate_analysis(
 
 @router.put('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='update analysis')
-async def update_analysis(
+def update_analysis(
     analysis_id: AnalysisId,
     response: Response,
     data: schemas.AnalysisUpdateSchema,
@@ -192,7 +192,7 @@ async def update_analysis(
     mcp=True,
 )
 @handle_errors(operation='favorite analysis', value_error_status=404)
-async def favorite_analysis(
+def favorite_analysis(
     analysis_id: AnalysisId,
     user_id: str = Depends(get_current_user_id),
     session: Session = Depends(get_db),
@@ -208,7 +208,7 @@ async def favorite_analysis(
     mcp_confirm_required=True,
 )
 @handle_errors(operation='unfavorite analysis', value_error_status=404)
-async def unfavorite_analysis(
+def unfavorite_analysis(
     analysis_id: AnalysisId,
     user_id: str = Depends(get_current_user_id),
     session: Session = Depends(get_db),
@@ -219,7 +219,7 @@ async def unfavorite_analysis(
 
 @router.delete('/{analysis_id}', status_code=204, mcp=True, mcp_confirm_required=True)
 @handle_errors(operation='delete analysis', value_error_status=404)
-async def delete_analysis(
+def delete_analysis(
     analysis_id: AnalysisId,
     _analysis: Analysis = Depends(require_analysis_revision),
     session: Session = Depends(get_db),
@@ -302,6 +302,7 @@ async def preview_analysis(
             tab_id=None,
         ),
         runtime_probe=runtime_probe,
+        http_request=request,
     )
 
     return {
@@ -317,7 +318,7 @@ async def preview_analysis(
     mcp=True,
 )
 @handle_errors(operation='export analysis code', value_error_status=400)
-async def export_analysis_code(
+def export_analysis_code(
     analysis_id: AnalysisId,
     data: schemas.CodeExportRequestSchema,
     session: Session = Depends(get_db),
@@ -362,7 +363,7 @@ class UpdateStepBody(BaseModel):
 
 @router.post('/{analysis_id}/tabs/{tab_id}/steps', mcp=True)
 @handle_errors(operation='add step', value_error_status=400)
-async def add_step(
+def add_step(
     analysis_id: AnalysisId,
     tab_id: str,
     data: AddStepBody,
@@ -398,7 +399,7 @@ async def add_step(
 
 @router.put('/{analysis_id}/tabs/{tab_id}/steps/{step_id}', mcp=True)
 @handle_errors(operation='update step', value_error_status=400)
-async def update_step(
+def update_step(
     analysis_id: AnalysisId,
     tab_id: str,
     step_id: str,
@@ -456,7 +457,7 @@ async def update_step(
 
 @router.delete('/{analysis_id}/tabs/{tab_id}/steps/{step_id}', status_code=204, mcp=True, mcp_confirm_required=True)
 @handle_errors(operation='remove step', value_error_status=400)
-async def remove_step(
+def remove_step(
     analysis_id: AnalysisId,
     tab_id: str,
     step_id: str,
@@ -480,7 +481,7 @@ class DeriveTabBody(BaseModel):
 
 @router.post('/{analysis_id}/tabs/{tab_id}/derive', mcp=True)
 @handle_errors(operation='derive tab', value_error_status=400)
-async def derive_tab(
+def derive_tab(
     analysis_id: AnalysisId,
     tab_id: str,
     data: DeriveTabBody,
@@ -504,7 +505,7 @@ class DuplicateTabBody(BaseModel):
 
 @router.post('/{analysis_id}/tabs/{tab_id}/duplicate', mcp=True)
 @handle_errors(operation='duplicate tab', value_error_status=400)
-async def duplicate_tab(
+def duplicate_tab(
     analysis_id: AnalysisId,
     tab_id: str,
     data: DuplicateTabBody,

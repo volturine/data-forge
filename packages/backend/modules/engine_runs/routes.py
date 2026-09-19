@@ -19,7 +19,7 @@ router = MCPRouter(prefix='/engine-runs', tags=['engine-runs'])
 
 @router.get('/compare', response_model=schemas.BuildComparisonResponse, mcp=True)
 @handle_errors(operation='compare engine runs')
-async def compare_runs(
+def compare_runs(
     run_a: str,
     run_b: str,
     datasource_id: str | None = None,
@@ -40,7 +40,7 @@ async def compare_runs(
 
 @router.get('/stats', response_model=schemas.DurationStatsResponse, mcp=True)
 @handle_errors(operation='get duration stats')
-async def duration_stats(
+def duration_stats(
     analysis_id: str | None = None,
     datasource_id: str | None = None,
     kind: EngineRunKind | None = None,
@@ -62,7 +62,7 @@ async def duration_stats(
 
 @router.get('', response_model=list[schemas.EngineRunResponseSchema], mcp=True)
 @handle_errors(operation='list engine runs')
-async def list_runs(
+def list_runs(
     analysis_id: str | None = None,
     datasource_id: str | None = None,
     kind: EngineRunKind | None = None,
@@ -89,7 +89,7 @@ async def list_runs(
 
 @router.get('/{run_id}', response_model=schemas.EngineRunResponseSchema, mcp=True)
 @handle_errors(operation='get engine run')
-async def get_run(run_id: EngineRunId, session: Session = Depends(get_db)):
+def get_run(run_id: EngineRunId, session: Session = Depends(get_db)):
     """Get a single engine run by ID with full request/result JSON and step timings."""
     run = service.get_engine_run(session, parse_engine_run_id(run_id))
     if not run:

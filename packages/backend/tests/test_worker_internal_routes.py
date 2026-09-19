@@ -8,6 +8,7 @@ import pytest
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
 from sqlmodel import Session, select
 
+import backend_grpc.server as backend_grpc_server
 from backend_core import build_jobs_service, build_runs_service, compute_requests_service, engine_instances_service, engine_runs_service
 from backend_core.config import settings
 from backend_core.database import run_settings_db
@@ -18,6 +19,7 @@ from backend_core.domain.compute_requests.models import command_from_payload, re
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
 from backend_core.domain.engine_runs.schemas import EngineRunKind
+from backend_core.namespace import get_namespace
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
@@ -487,6 +489,36 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     )
     test_db_session.refresh(failed_request)
     assert failed_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+
+
+@pytest.mark.asyncio
+async def test_compute_request_claim_rotates_namespace_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    claimed_namespaces: list[str] = []
+
+    def fake_run_settings_db(func, *args, **kwargs):
+        if func is backend_grpc_server.runtime_worker_service.reclaimable_worker_ids:
+            return set()
+        if func is backend_grpc_server.list_runtime_namespaces:
+            return ['default', 'other']
+        raise AssertionError(f'Unexpected settings database callback: {func!r}')
+
+    def fake_run_db(func, *args, **kwargs):
+        if func is backend_grpc_server.compute_requests_service.claim_next_request:
+            claimed_namespaces.append(get_namespace())
+            return None
+        raise AssertionError(f'Unexpected tenant database callback: {func!r}')
+
+    monkeypatch.setattr(backend_grpc_server, 'run_settings_db', fake_run_settings_db)
+    monkeypatch.setattr(backend_grpc_server, 'run_db', fake_run_db)
+
+    response = await WorkerRuntimeServicer().ClaimComputeRequest(
+        common_pb2.RuntimeWorkerRequest(worker_id='build-manager:fair-claim', protocol_version=2, compute_namespace_offset=1),
+        context,
+    )
+
+    assert not response.HasField('request')
+    assert claimed_namespaces == ['other', 'default']
 
 
 @pytest.mark.asyncio

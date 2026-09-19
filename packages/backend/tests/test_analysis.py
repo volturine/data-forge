@@ -1253,6 +1253,7 @@ class TestAnalysisDelete:
             submitted.append(kwargs)
 
         monkeypatch.setattr(executor_client, '_submit', submit)
+        monkeypatch.setattr(executor_client.compute_requests_service, 'cancel_active_requests_for_engine', lambda *args, **kwargs: 0)
 
         executor_client.request_engine_shutdown(
             cast(Session, object()),

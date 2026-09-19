@@ -14,7 +14,8 @@ from multiprocessing.synchronize import Event as ProcessEvent
 
 from runtime.compute_manager import ProcessManager
 from runtime.compute_request_runtime import (
-    ENGINE_REQUEST_KINDS,
+    ENGINE_LIFECYCLE_REQUEST_KINDS,
+    INTERACTIVE_ENGINE_REQUEST_KINDS,
     NON_ENGINE_REQUEST_KINDS,
     compute_request_loop,
     compute_request_worker_count,
@@ -248,6 +249,9 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
             worker_id=worker_id,
         ),
         supervisor_id=worker_id,
+        # This is the only manager for the application-wide interactive pool.
+        # Build children deliberately pass warm_pool_size=0 below.
+        warm_pool_size=settings.engine_warm_pool_size,
     )
     heartbeat_stop = threading.Event()
     heartbeat_thread = threading.Thread(
@@ -261,14 +265,31 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
     )
     heartbeat_thread.start()
     request_worker_count = compute_request_worker_count()
-    # Claim each work class independently at the configured concurrency. Both
-    # classes share the bounded compute executor, so execution stays capped,
-    # while parked engine admissions cannot prevent datasource work from being
-    # claimed and datasource bursts cannot serialize engine requests.
-    request_lanes = [*([NON_ENGINE_REQUEST_KINDS] * request_worker_count), *([ENGINE_REQUEST_KINDS] * request_worker_count)]
+    # Claim each work class independently at the configured concurrency. The
+    # runtime gives datasource and engine work separate bounded executors, so
+    # parked engine admissions cannot prevent datasource work from executing
+    # and datasource bursts cannot serialize engine requests.
+    # Keep capacity-waiting lifecycle/prewarm requests from occupying every
+    # lane that can claim interactive previews. Shutdown stays in the
+    # non-engine lane because it frees capacity and never waits for a slot.
+    # Each lane advances the namespace cursor independently so a busy default
+    # namespace cannot starve work submitted to another namespace.
+    request_lanes = [
+        *((NON_ENGINE_REQUEST_KINDS, offset) for offset in range(request_worker_count)),
+        *((INTERACTIVE_ENGINE_REQUEST_KINDS, request_worker_count + offset) for offset in range(request_worker_count)),
+        *((ENGINE_LIFECYCLE_REQUEST_KINDS, (2 * request_worker_count) + offset) for offset in range(request_worker_count)),
+    ]
     request_tasks = [
-        asyncio.create_task(compute_request_loop(local_stop, worker_id=worker_id, manager=manager, allowed_kinds=allowed_kinds))
-        for allowed_kinds in request_lanes
+        asyncio.create_task(
+            compute_request_loop(
+                local_stop,
+                worker_id=worker_id,
+                manager=manager,
+                allowed_kinds=allowed_kinds,
+                compute_namespace_offset=namespace_offset,
+            )
+        )
+        for allowed_kinds, namespace_offset in request_lanes
     ]
     datasource_delete_task = asyncio.create_task(datasource_delete_loop(local_stop, manager=manager))
     data_plane_server = start_data_plane_grpc_server_in_thread()

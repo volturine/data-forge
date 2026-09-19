@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
+	import { onDestroy } from 'svelte';
 	import {
 		previewStepData,
+		throwIfAborted,
 		type StepPreviewRequest,
 		type StepPreviewResponse
 	} from '$lib/api/compute';
@@ -31,6 +33,20 @@
 	let columnSearch = $state('');
 	let statsColumn = $state<string | null>(null);
 	let statsOpen = $state(false);
+	let previewRequestKey: string | null = null;
+	let previewRequestController = new AbortController();
+
+	function previewSignal(request: StepPreviewRequest): AbortSignal {
+		const nextKey = JSON.stringify(request);
+		if (previewRequestKey !== nextKey) {
+			if (previewRequestKey !== null) previewRequestController.abort();
+			previewRequestKey = nextKey;
+			previewRequestController = new AbortController();
+		}
+		return previewRequestController.signal;
+	}
+
+	onDestroy(() => previewRequestController.abort());
 
 	function handleColumnStats(columnName: string) {
 		statsColumn = columnName;
@@ -81,7 +97,9 @@
 				row_limit: rowLimit,
 				page
 			} satisfies StepPreviewRequest;
-			const result = await previewStepData(request);
+			const signal = previewSignal(request);
+			const result = await previewStepData(request, { signal });
+			throwIfAborted(signal);
 			if (result.isErr()) {
 				throw toComputeError(result.error);
 			}

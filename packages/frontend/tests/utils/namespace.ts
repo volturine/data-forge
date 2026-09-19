@@ -11,7 +11,7 @@ const SIDEBAR = 'aside[aria-label="Main navigation"]';
  * themselves by unique resource names, not by namespace. Namespaces are a
  * product feature, exercised by namespace-isolation.test.ts alone.
  */
-export const DEFAULT_NAMESPACE = 'default';
+export const DEFAULT_NAMESPACE = process.env.DEFAULT_NAMESPACE?.trim() || 'default';
 
 /**
  * Switch to a namespace via the sidebar picker.
@@ -19,7 +19,11 @@ export const DEFAULT_NAMESPACE = 'default';
  * Preserves the current route — waits for sidebar to reflect the new namespace.
  */
 export async function switchNamespace(page: Page, name: string): Promise<void> {
-	await page.getByRole('button', { name: 'Select namespace' }).click();
+	await waitForAppShell(page);
+	const picker = page.getByRole('button', { name: 'Select namespace' });
+	if ((await picker.textContent())?.trim() === name) return;
+
+	await picker.click();
 	const dialog = dialogByTextbox(page, 'Search namespaces');
 	await expect(dialog).toBeVisible({ timeout: 5_000 });
 

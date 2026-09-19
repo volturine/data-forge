@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from sqlalchemy import update
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from backend_core.domain.datasource.models import DataSourceCreatedBy
@@ -59,6 +60,17 @@ def create_datasource(
     schema_info: datasource_pb2.SchemaInfo | None = None,
 ) -> DataSourceResponse:
     resolved_type = DataSourceType.require(source_type)
+    existing = session.get(DataSource, datasource_id)
+    if existing is not None:
+        # Compute requests are retried at least once when a worker loses its
+        # response connection after committing the publication. The request
+        # ID is the datasource ID for create requests, so replaying the same
+        # request must return the committed row instead of inserting another
+        # row with the same user-visible name.
+        if existing.name != name or existing.source_type != resolved_type or existing.owner_id != owner_id:
+            raise ValueError(f'Datasource publication ID {datasource_id} is already in use')
+        return _response(existing)
+
     datasource = DataSource(
         id=datasource_id,
         name=name,
@@ -71,7 +83,19 @@ def create_datasource(
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
     session.add(datasource)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # Another replay may have committed the same request between the
+        # existence check and this insert. Treat that race exactly like the
+        # already-committed case above.
+        session.rollback()
+        existing = session.get(DataSource, datasource_id)
+        if existing is None:
+            raise
+        if existing.name != name or existing.source_type != resolved_type or existing.owner_id != owner_id:
+            raise ValueError(f'Datasource publication ID {datasource_id} is already in use')
+        return _response(existing)
     session.refresh(datasource)
     return _response(datasource)
 

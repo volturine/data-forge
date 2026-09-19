@@ -222,11 +222,11 @@ export function getDatasource(id: string): ResultAsync<DataSource, ApiError> {
 export function getDatasourceSchema(id: string): ResultAsync<SchemaInfo, ApiError>;
 export function getDatasourceSchema(
 	id: string,
-	options: { sheetName?: string; refresh?: boolean }
+	options: { sheetName?: string; refresh?: boolean; signal?: AbortSignal }
 ): ResultAsync<SchemaInfo, ApiError>;
 export function getDatasourceSchema(
 	id: string,
-	options?: { sheetName?: string; refresh?: boolean }
+	options?: { sheetName?: string; refresh?: boolean; signal?: AbortSignal }
 ): ResultAsync<SchemaInfo, ApiError> {
 	const params = new URLSearchParams();
 	if (options?.sheetName) {
@@ -236,7 +236,10 @@ export function getDatasourceSchema(
 		params.set('refresh', 'true');
 	}
 	const suffix = params.toString() ? `?${params.toString()}` : '';
-	return apiRequest<SchemaInfo>(`/v1/datasource/${id}/schema${suffix}`);
+	return apiRequest<SchemaInfo>(
+		`/v1/datasource/${id}/schema${suffix}`,
+		options?.signal ? { signal: options.signal } : undefined
+	);
 }
 
 export interface HistogramBin {

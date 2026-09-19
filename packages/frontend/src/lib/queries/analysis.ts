@@ -8,9 +8,10 @@ export const analysisQueryKey = (analysisId: string) => ['analysis', analysisId]
 
 export async function fetchAnalysis(
 	analysisId: string,
-	previousEtag?: string
+	previousEtag?: string,
+	options?: RequestInit
 ): Promise<AnalysisDetailResult> {
-	const result = await getAnalysisWithHeaders(analysisId, previousEtag);
+	const result = await getAnalysisWithHeaders(analysisId, previousEtag, options);
 	if (result.isErr()) {
 		throw new Error(result.error.message);
 	}

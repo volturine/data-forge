@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -105,6 +106,92 @@ def test_has_active_request_for_datasource_tracks_queued_work(test_db_session) -
     assert compute_requests_service.has_active_request_for_datasource(test_db_session, 'datasource-1') is False
 
 
+def test_cancel_queued_request_retires_abandoned_work(test_db_session) -> None:
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+
+    cancelled = compute_requests_service.cancel_queued_request(
+        test_db_session,
+        request.id,
+        reason='client disconnected',
+    )
+
+    assert cancelled is not None
+    assert cancelled.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+    assert cancelled.error_message == 'client disconnected'
+    assert compute_requests_service.response_payload(cancelled) == {'error': 'client disconnected'}
+    assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test') is None
+
+
+def test_cancel_queued_request_does_not_take_over_running_work(test_db_session) -> None:
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+    compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test')
+
+    cancelled = compute_requests_service.cancel_queued_request(
+        test_db_session,
+        request.id,
+        reason='client disconnected',
+    )
+
+    assert cancelled is None
+    active = compute_requests_service.get_request(test_db_session, request.id)
+    assert active is not None
+    assert active.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+
+
+def test_cancel_active_requests_for_engine_retires_only_matching_work(test_db_session) -> None:
+    matching_payload = _preview_payload()
+    other_payload = deepcopy(matching_payload)
+    other_payload['analysis_id'] = 'analysis-2'
+    other_pipeline = other_payload['analysis_pipeline']
+    assert isinstance(other_pipeline, dict)
+    other_pipeline['analysis_id'] = 'analysis-2'
+
+    matching = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=matching_payload,
+    )
+    other = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=other_payload,
+    )
+
+    cancelled = compute_requests_service.cancel_active_requests_for_engine(
+        test_db_session,
+        namespace='default',
+        identity=compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id='analysis-1',
+            resource_id='analysis-1',
+        ),
+        reason='analysis was deleted',
+    )
+
+    assert cancelled == 1
+    test_db_session.refresh(matching)
+    test_db_session.refresh(other)
+    assert matching.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+    assert compute_requests_service.response_payload(matching) == {'error': 'analysis was deleted'}
+    assert other.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
+    claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test')
+    assert claimed is not None
+    assert claimed.id == other.id
+
+
 def _response(
     request: ComputeRequest,
     payload: dict[str, object],
@@ -145,7 +232,7 @@ def test_preview_command_converts_all_pipeline_output_enums() -> None:
     assert protocol_output.notification.method == enums_pb2.NOTIFICATION_METHOD_EMAIL
 
 
-def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_db_session) -> None:
+def test_claim_next_request_prioritizes_interactive_preview_over_user_create(test_db_session) -> None:
     create_request = _create_request(
         test_db_session,
         namespace='default',
@@ -162,11 +249,11 @@ def test_claim_next_request_prioritizes_user_create_requests_over_previews(test_
     claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
 
     assert claimed is not None
-    assert claimed.id == create_request.id
+    assert claimed.id == preview.id
     assert claimed.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     assert claimed.lease_expires_at is not None
 
-    remaining = compute_requests_service.get_request(test_db_session, preview.id)
+    remaining = compute_requests_service.get_request(test_db_session, create_request.id)
     assert remaining is not None
     assert remaining.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
 

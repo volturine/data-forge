@@ -239,6 +239,8 @@
 				onclick={onOpenNamespace}
 				type="button"
 				aria-label="Select namespace"
+				disabled={!interactive}
+				aria-busy={interactive ? undefined : 'true'}
 				bind:this={namespaceTrigger}
 			>
 				<span

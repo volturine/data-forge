@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { PipelineStep } from '$lib/types/analysis';
 	import type { Schema } from '$lib/types/schema';
 	import type {
@@ -30,7 +31,7 @@
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { getStepSchema, type StepSchemaResponse } from '$lib/api/compute';
+	import { getStepSchema, throwIfAborted, type StepSchemaResponse } from '$lib/api/compute';
 	import { track } from '$lib/utils/audit-log';
 	import { normalizeConfig } from '$lib/utils/step-config-defaults';
 	import type { NotificationConfigData, AIConfigData } from '$lib/types/operation-config';
@@ -101,6 +102,14 @@
 	}: Props = $props();
 	const stepLabel = $derived(step ? getStepTypeConfig(step.type).label : '');
 	let fetchingPivotSchema = $state(false);
+	let schemaAbortController: AbortController | null = null;
+
+	function startSchemaRequest(): AbortController {
+		schemaAbortController?.abort();
+		const controller = new AbortController();
+		schemaAbortController = controller;
+		return controller;
+	}
 
 	function cloneConfig(
 		config: Record<string, unknown> | null | undefined
@@ -191,18 +200,24 @@
 			fetchingPivotSchema = false;
 			return;
 		}
+		const controller = startSchemaRequest();
 
-		getStepSchema({
-			analysis_id: analysis.id,
-			analysis_pipeline: analysisPipeline,
-			tab_id: analysisStore.activeTab?.id ?? null,
-			target_step_id: step.id
-		})
+		getStepSchema(
+			{
+				analysis_id: analysis.id,
+				analysis_pipeline: analysisPipeline,
+				tab_id: analysisStore.activeTab?.id ?? null,
+				target_step_id: step.id
+			},
+			{ signal: controller.signal }
+		)
 			.map((response: StepSchemaResponse) => {
+				throwIfAborted(controller.signal);
 				schemaStore.setPreviewSchema(step.id, response.columns, response.column_types);
-				fetchingPivotSchema = false;
+				if (schemaAbortController === controller) fetchingPivotSchema = false;
 			})
 			.mapErr((error: unknown) => {
+				if (controller.signal.aborted) return;
 				const err = error instanceof Error ? error.message : String(error);
 				track({
 					event: 'schema_error',
@@ -210,7 +225,7 @@
 					target: step.id,
 					meta: { message: err }
 				});
-				fetchingPivotSchema = false;
+				if (schemaAbortController === controller) fetchingPivotSchema = false;
 			});
 	}
 
@@ -236,17 +251,23 @@
 			datasourceStore.datasources
 		);
 		if (!analysisPipeline) return;
+		const controller = startSchemaRequest();
 		const pipelineHash = hashPipeline(applySteps(analysisStore.pipeline));
-		getStepSchema({
-			analysis_id: analysis.id,
-			analysis_pipeline: analysisPipeline,
-			tab_id: analysisStore.activeTab?.id ?? null,
-			target_step_id: stepId
-		})
+		getStepSchema(
+			{
+				analysis_id: analysis.id,
+				analysis_pipeline: analysisPipeline,
+				tab_id: analysisStore.activeTab?.id ?? null,
+				target_step_id: stepId
+			},
+			{ signal: controller.signal }
+		)
 			.map((response: StepSchemaResponse) => {
+				throwIfAborted(controller.signal);
 				schemaStore.syncPreviewSchema(stepId, response, pipelineHash);
 			})
 			.mapErr((error: unknown) => {
+				if (controller.signal.aborted) return;
 				const err = error instanceof Error ? error.message : String(error);
 				track({
 					event: 'schema_error',
@@ -262,6 +283,10 @@
 		if (!step) return;
 		draftConfig = cloneConfig(step.config as Record<string, unknown>);
 	}
+
+	onDestroy(() => {
+		schemaAbortController?.abort();
+	});
 </script>
 
 {#if step === null}

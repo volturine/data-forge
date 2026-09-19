@@ -18,25 +18,35 @@ def _resolve_session_token(request: Request) -> str | None:
 
 
 def get_current_user(request: Request, session: Session = Depends(get_settings_db)) -> User:
-    token = _resolve_session_token(request)
-    if token:
-        user = validate_session(session, token)
-        if user:
-            return user
-    if not auth_settings.auth_required:
-        return ensure_default_user(session)
-    raise HTTPException(status_code=401, detail='Not authenticated')
+    # Authentication is request setup, not a transaction that should remain
+    # open while the endpoint performs long-running work such as a preview.
+    # FastAPI keeps yield dependencies alive until the endpoint returns, so
+    # release this settings session as soon as the user has been resolved.
+    try:
+        token = _resolve_session_token(request)
+        if token:
+            user = validate_session(session, token)
+            if user:
+                return user
+        if not auth_settings.auth_required:
+            return ensure_default_user(session)
+        raise HTTPException(status_code=401, detail='Not authenticated')
+    finally:
+        session.close()
 
 
 def get_optional_user(request: Request, session: Session = Depends(get_settings_db)) -> User | None:
-    token = _resolve_session_token(request)
-    if token:
-        user = validate_session(session, token)
-        if user:
-            return user
-    if not auth_settings.auth_required:
-        return ensure_default_user(session)
-    return None
+    try:
+        token = _resolve_session_token(request)
+        if token:
+            user = validate_session(session, token)
+            if user:
+                return user
+        if not auth_settings.auth_required:
+            return ensure_default_user(session)
+        return None
+    finally:
+        session.close()
 
 
 def get_optional_user_id(request: Request) -> str | None:

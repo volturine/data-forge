@@ -427,7 +427,8 @@ async def test_compute_request_lease_loss_stops_engine_execution(monkeypatch) ->
     loop = asyncio.get_running_loop()
 
     class _Manager:
-        async def await_spawn_admission(self, _identity):
+        async def await_spawn_admission(self, _identity, *, priority):
+            assert priority == compute_request_runtime.ENGINE_ADMISSION_PRIORITY_INTERACTIVE
             return False
 
         def release_spawn_admission(self, _identity, *, owned: bool) -> None:

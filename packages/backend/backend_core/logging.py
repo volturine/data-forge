@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import atexit
 import contextlib
 import json
@@ -462,7 +461,6 @@ class RequestLoggingMiddleware:
         body_for_log: bytes | None = None
         replay_body_sent = False
         request_complete = False
-        response_complete = asyncio.Event()
         if should_log_body:
             body = await request.body()
             body_for_log = body
@@ -474,8 +472,7 @@ class RequestLoggingMiddleware:
                 if not replay_body_sent:
                     replay_body_sent = True
                     return {'type': 'http.request', 'body': body_for_log or b'', 'more_body': False}
-                await response_complete.wait()
-                return {'type': 'http.disconnect'}
+                return await receive()
 
             if not request_complete:
                 message = await receive()
@@ -486,8 +483,7 @@ class RequestLoggingMiddleware:
                     request_complete = True
                 return message
 
-            await response_complete.wait()
-            return {'type': 'http.disconnect'}
+            return await receive()
 
         response_logged = False
         response_status = 500
@@ -520,18 +516,15 @@ class RequestLoggingMiddleware:
                         response_body,
                     )
                     response_logged = True
-                    response_complete.set()
             await send(message)
 
         try:
             await self.app(scope, receive_for_app, send_wrapper)
         except Exception as exc:
-            response_complete.set()
             duration_ms = (self.get_time() - start) * 1000
             self._log_request(request, None, None, duration_ms, request_id, body_for_log, None, error=str(exc))
             raise
         if not response_logged:
-            response_complete.set()
             duration_ms = (self.get_time() - start) * 1000
             self._log_request(
                 request,
@@ -641,6 +634,10 @@ def configure_logging() -> DatabaseLogWriter:
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
     logging.basicConfig(level=level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     logging.getLogger('httpx').setLevel(logging.WARNING)
+    # The application intentionally uses the existing Iceberg SQL catalog
+    # schema. PyIceberg emits this migration notice on every catalog instance;
+    # keep real catalog errors visible without flooding service diagnostics.
+    logging.getLogger('pyiceberg.catalog.sql').setLevel(logging.ERROR)
 
     _writer = DatabaseLogWriter(
         database_url=settings.database_url, flush_interval=float(settings.log_flush_interval_seconds), overflow_policy=settings.log_queue_overflow

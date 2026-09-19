@@ -118,17 +118,63 @@ def _request_ip_address(request: Request) -> str | None:
     return client_ip(request)
 
 
+def _register_user(
+    session: Session,
+    *,
+    email: str,
+    password: str,
+    display_name: str,
+    email_verified: bool,
+    device_info: str | None,
+    ip_address: str | None,
+) -> tuple[UserPublic, str, str | None]:
+    result = commands.register_user(
+        session,
+        email=email,
+        password=password,
+        display_name=display_name,
+        email_verified=email_verified,
+        device_info=device_info,
+        ip_address=ip_address,
+    )
+    return _build_user_public(session, result.user), result.user_session.id, result.verification_token
+
+
+def _authenticate_oauth_user(
+    session: Session,
+    *,
+    provider: AuthProviderName,
+    provider_subject: str,
+    email: str,
+    display_name: str,
+    avatar_url: str | None,
+    device_info: str | None,
+    ip_address: str | None,
+) -> str:
+    result = commands.authenticate_oauth_user(
+        session,
+        provider=provider,
+        provider_subject=provider_subject,
+        email=email,
+        display_name=display_name,
+        avatar_url=avatar_url,
+        device_info=device_info,
+        ip_address=ip_address,
+    )
+    return result.user_session.id
+
+
 @router.post('/register', response_model=UserPublic)
 @handle_errors(operation='register')
 async def register(
     body: RegisterRequest,
     request: Request,
     response: Response,
-    session: Session = Depends(get_settings_db),
 ) -> UserPublic:
     needs_verification = auth_settings.verify_email_address
-    result = commands.register_user(
-        session,
+    user_public, session_token, verification_token = await asyncio.to_thread(
+        run_settings_db,
+        _register_user,
         email=body.email,
         password=body.password,
         display_name=body.display_name,
@@ -136,15 +182,15 @@ async def register(
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    if result.verification_token is not None:
-        await send_verification_email(result.user.email, result.verification_token)
-    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
-    return _build_user_public(session, result.user)
+    if verification_token is not None:
+        await send_verification_email(user_public.email, verification_token)
+    _set_session_cookie(response, session_token, secure=request_scheme(request) == 'https')
+    return user_public
 
 
 @router.post('/login', response_model=UserPublic)
 @handle_errors(operation='login')
-async def login(
+def login(
     body: LoginRequest,
     request: Request,
     response: Response,
@@ -163,7 +209,7 @@ async def login(
 
 @router.post('/logout')
 @handle_errors(operation='logout')
-async def logout(request: Request, response: Response, session: Session = Depends(get_settings_db)) -> dict[str, bool]:
+def logout(request: Request, response: Response, session: Session = Depends(get_settings_db)) -> dict[str, bool]:
     token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
     if token:
         commands.revoke_session(session, token)
@@ -173,7 +219,7 @@ async def logout(request: Request, response: Response, session: Session = Depend
 
 @router.delete('/account')
 @handle_errors(operation='delete account')
-async def delete_account_route(
+def delete_account_route(
     response: Response,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),
@@ -185,7 +231,7 @@ async def delete_account_route(
 
 @router.post('/verify-email', response_model=MessageResponse)
 @handle_errors(operation='verify email')
-async def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
+def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
     commands.verify_email(session, body.token)
     return MessageResponse(message='Email verified successfully')
 
@@ -194,9 +240,8 @@ async def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_
 @handle_errors(operation='resend verification')
 async def resend_verification_route(
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
 ) -> MessageResponse:
-    delivery = commands.prepare_resend_verification(session, current_user.id)
+    delivery = await asyncio.to_thread(run_settings_db, commands.prepare_resend_verification, current_user.id)
     if delivery is not None:
         email, token = delivery
         await send_verification_email(email, token)
@@ -205,8 +250,8 @@ async def resend_verification_route(
 
 @router.post('/forgot-password', response_model=MessageResponse)
 @handle_errors(operation='forgot password')
-async def forgot_password(body: ForgotPasswordRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    token = commands.create_password_reset_token(session, body.email)
+async def forgot_password(body: ForgotPasswordRequest) -> MessageResponse:
+    token = await asyncio.to_thread(run_settings_db, commands.create_password_reset_token, body.email)
     if token:
         await send_password_reset_email(body.email.strip().lower(), token)
     return MessageResponse(message='If the email exists, a password reset link has been sent')
@@ -214,7 +259,7 @@ async def forgot_password(body: ForgotPasswordRequest, session: Session = Depend
 
 @router.post('/reset-password', response_model=MessageResponse)
 @handle_errors(operation='reset password')
-async def reset_password_route(body: ResetPasswordRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
+def reset_password_route(body: ResetPasswordRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
     commands.reset_password(session, body.token, body.new_password)
     return MessageResponse(message='Password reset successful')
 
@@ -240,7 +285,7 @@ async def me(request: Request) -> UserPublic:
 
 @router.put('/profile', response_model=UserPublic)
 @handle_errors(operation='update profile')
-async def update_profile_route(
+def update_profile_route(
     body: UpdateProfileRequest,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),
@@ -257,7 +302,7 @@ async def update_profile_route(
 
 @router.put('/password')
 @handle_errors(operation='change password')
-async def change_password_route(
+def change_password_route(
     body: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),
@@ -268,7 +313,7 @@ async def change_password_route(
 
 @router.delete('/sessions')
 @handle_errors(operation='revoke all sessions')
-async def revoke_all_sessions_route(
+def revoke_all_sessions_route(
     request: Request,
     response: Response,
     current_user: User = Depends(get_current_user),
@@ -286,7 +331,7 @@ async def revoke_all_sessions_route(
 
 @router.get('/google')
 @handle_errors(operation='google oauth start')
-async def google_oauth_start(request: Request) -> RedirectResponse:
+def google_oauth_start(request: Request) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     params = {
         'client_id': auth_settings.google_client_id,
@@ -313,7 +358,6 @@ async def google_oauth_start(request: Request) -> RedirectResponse:
 async def google_oauth_callback(
     request: Request,
     params: OAuthCallbackParams = Depends(),
-    session: Session = Depends(get_settings_db),
 ) -> RedirectResponse:
     redirect_url = f'{auth_settings.auth_frontend_url}/callback'
     response = RedirectResponse(url=redirect_url)
@@ -345,8 +389,9 @@ async def google_oauth_callback(
     email = info.get('email')
     if not isinstance(subject, str) or not isinstance(email, str):
         raise OAuthError('Google user info missing id or email')
-    result = commands.authenticate_oauth_user(
-        session,
+    result = await asyncio.to_thread(
+        run_settings_db,
+        _authenticate_oauth_user,
         provider=AuthProviderName.GOOGLE,
         provider_subject=subject,
         email=email,
@@ -355,13 +400,13 @@ async def google_oauth_callback(
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
+    _set_session_cookie(response, result, secure=request_scheme(request) == 'https')
     return response
 
 
 @router.get('/github')
 @handle_errors(operation='github oauth start')
-async def github_oauth_start(request: Request) -> RedirectResponse:
+def github_oauth_start(request: Request) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     params = {
         'client_id': auth_settings.github_client_id,
@@ -385,7 +430,6 @@ async def github_oauth_start(request: Request) -> RedirectResponse:
 async def github_oauth_callback(
     request: Request,
     params: OAuthCallbackParams = Depends(),
-    session: Session = Depends(get_settings_db),
 ) -> RedirectResponse:
     redirect_url = f'{auth_settings.auth_frontend_url}/callback'
     response = RedirectResponse(url=redirect_url)
@@ -433,8 +477,9 @@ async def github_oauth_callback(
         email = next((item.get('email') for item in emails if item.get('verified')), None)
     if not isinstance(email, str):
         raise OAuthError('GitHub account has no verified email')
-    result = commands.authenticate_oauth_user(
-        session,
+    result = await asyncio.to_thread(
+        run_settings_db,
+        _authenticate_oauth_user,
         provider=AuthProviderName.GITHUB,
         provider_subject=str(subject),
         email=email,
@@ -443,13 +488,13 @@ async def github_oauth_callback(
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
+    _set_session_cookie(response, result, secure=request_scheme(request) == 'https')
     return response
 
 
 @router.post('/providers/{provider}/unlink')
 @handle_errors(operation='unlink provider')
-async def unlink_provider_route(
+def unlink_provider_route(
     provider: str,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),

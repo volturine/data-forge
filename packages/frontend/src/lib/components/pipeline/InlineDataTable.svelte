@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
+	import { onDestroy } from 'svelte';
+	import { previewStepData, throwIfAborted, type StepPreviewResponse } from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { toComputeError } from '$lib/utils/compute-error';
 	import { hashPipeline } from '$lib/utils/hash';
@@ -30,6 +31,20 @@
 	let { analysisId, datasourceId, pipeline, stepId, rowLimit = 100 }: Props = $props();
 	let currentPage = $state(1);
 	let columnSearch = $state('');
+	let previewRequestKey: string | null = null;
+	let previewRequestController = new AbortController();
+
+	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
+		const nextKey = JSON.stringify(request);
+		if (previewRequestKey !== nextKey) {
+			if (previewRequestKey !== null) previewRequestController.abort();
+			previewRequestKey = nextKey;
+			previewRequestController = new AbortController();
+		}
+		return previewRequestController.signal;
+	}
+
+	onDestroy(() => previewRequestController.abort());
 
 	const activePipeline = $derived(applySteps(pipeline));
 	const isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
@@ -82,14 +97,17 @@
 			datasourceKey
 		],
 		queryFn: async (): Promise<StepPreviewResponse> => {
-			const result = await previewStepData({
+			const request = {
 				analysis_pipeline: analysisPipeline!,
 				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: stepId,
 				row_limit: rowLimit,
 				page: currentPage,
 				resource_config: analysisStore.resourceConfig
-			});
+			};
+			const signal = previewSignal(request);
+			const result = await previewStepData(request, { signal });
+			throwIfAborted(signal);
 			if (result.isErr()) {
 				throw toComputeError(result.error);
 			}

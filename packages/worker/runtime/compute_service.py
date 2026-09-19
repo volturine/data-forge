@@ -2984,12 +2984,21 @@ async def _prewarm_build_engine(manager: ProcessManager, *, build_id: str) -> No
     try:
         while True:
             owns_admission = await manager.await_spawn_admission(identity)
+            request_reserved = False
             try:
+                reserve_request = getattr(manager, "reserve_engine_request", None)
+                if callable(reserve_request):
+                    reserve_request(identity)
+                    request_reserved = True
                 await asyncio.to_thread(manager.spawn_engine, identity)
                 break
             except EngineCapacityFull:
                 continue
             finally:
+                if request_reserved:
+                    release_request = getattr(manager, "release_engine_request", None)
+                    if callable(release_request):
+                        release_request(identity)
                 manager.release_spawn_admission(identity, owned=owns_admission)
         await asyncio.to_thread(manager.set_engine_runtime_context, identity, current_build_id=build_id, current_engine_run_id=None)
     except Exception:

@@ -4,6 +4,7 @@ import {
 	gotoAuthedRoute,
 	gotoMonitoringTab,
 	gotoNewAnalysis,
+	readyTimeoutMs,
 	waitForDatasourceList,
 	waitForUdfList
 } from './readiness.js';
@@ -106,9 +107,13 @@ export async function uploadDatasourceViaUi(
 	if (!datasourceId) {
 		throw new Error(`Could not extract browser-visible datasource id after upload for ${name}`);
 	}
-	await waitForDatasourceList(page, 5_000);
-	const row = page.locator(`[data-ds-row="${name}"]`);
-	await expect(row).toBeVisible({ timeout: 5_000 });
+	await waitForDatasourceList(page, readyTimeoutMs());
+	const row = page.locator(`[data-ds-id="${datasourceId}"]`);
+	await expect(row).toBeVisible({ timeout: readyTimeoutMs() });
+	await expect(
+		page.locator(`[data-ds-row="${name}"]`),
+		`Datasource name "${name}" must identify exactly one created resource`
+	).toHaveCount(1, { timeout: readyTimeoutMs() });
 	return { id: datasourceId };
 }
 

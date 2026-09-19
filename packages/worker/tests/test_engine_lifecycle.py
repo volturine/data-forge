@@ -10,7 +10,12 @@ import pytest
 
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_engine import PolarsComputeEngine
-from runtime.compute_manager import EngineCapacityFull, ProcessManager
+from runtime.compute_manager import (
+    ENGINE_ADMISSION_PRIORITY_INTERACTIVE,
+    ENGINE_ADMISSION_PRIORITY_LIFECYCLE,
+    EngineCapacityFull,
+    ProcessManager,
+)
 from runtime.config import settings
 from runtime.domain.compute.base import ComputeEngine
 
@@ -144,6 +149,82 @@ def test_process_manager_starts_distinct_engines_concurrently() -> None:
         manager.shutdown_all()
 
 
+def test_process_manager_keeps_shutdown_container_owned_until_cleanup_finishes() -> None:
+    shutdown_started = threading.Event()
+    release_shutdown = threading.Event()
+
+    class ContainerEngine(_FakeEngine):
+        @property
+        def container_id(self) -> str:
+            return "container-being-shutdown"
+
+        def shutdown(self) -> None:
+            shutdown_started.set()
+            assert release_shutdown.wait(timeout=2)
+            super().shutdown()
+
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, ContainerEngine(identity.resource_id, resource_config)))
+    identity = _analysis_identity("analysis-shutdown-ownership")
+    try:
+        manager.spawn_engine(identity)
+        shutdown = threading.Thread(target=manager.shutdown_engine, args=(identity,))
+        shutdown.start()
+        assert shutdown_started.wait(timeout=2)
+        assert manager._managed_container_ids() == {"container-being-shutdown"}
+
+        release_shutdown.set()
+        shutdown.join(timeout=2)
+        assert not shutdown.is_alive()
+        assert manager._managed_container_ids() == set()
+    finally:
+        release_shutdown.set()
+        manager.shutdown_all()
+
+
+def test_process_manager_serializes_same_identity_spawn_after_shutdown() -> None:
+    shutdown_started = threading.Event()
+    allow_shutdown = threading.Event()
+    created: list[_FakeEngine] = []
+
+    class BlockingShutdownEngine(_FakeEngine):
+        def __init__(self, resource_id: str, *, block_shutdown: bool) -> None:
+            super().__init__(resource_id)
+            self.block_shutdown = block_shutdown
+
+        def shutdown(self) -> None:
+            if self.block_shutdown:
+                shutdown_started.set()
+                assert allow_shutdown.wait(timeout=2)
+            super().shutdown()
+
+    def factory(identity: compute_pb2.EngineIdentity, resource_config: dict | None = None):
+        engine = BlockingShutdownEngine(identity.resource_id, block_shutdown=not created)
+        created.append(engine)
+        return cast(Any, engine)
+
+    identity = _analysis_identity("analysis-shutdown-restart")
+    manager = ProcessManager(engine_factory=factory)
+    try:
+        original = manager.spawn_engine(identity).engine
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            shutdown = executor.submit(manager.shutdown_engine, identity)
+            assert shutdown_started.wait(timeout=2)
+
+            replacement = executor.submit(manager.spawn_engine, identity)
+            time.sleep(0.05)
+            assert not replacement.done()
+
+            allow_shutdown.set()
+            shutdown.result(timeout=2)
+            restarted = replacement.result(timeout=2).engine
+
+        assert restarted is not original
+        assert restarted.is_process_alive()
+    finally:
+        allow_shutdown.set()
+        manager.shutdown_all()
+
+
 def test_process_manager_defers_when_start_holds_capacity(monkeypatch) -> None:
     """In-flight starts hold a ticket; further spawns raise without blocking the runner."""
     monkeypatch.setattr(settings, "max_concurrent_engines", 1)
@@ -190,6 +271,31 @@ def test_process_manager_defers_while_engine_is_reserved(monkeypatch) -> None:
         assert second_info.engine.is_process_alive()
         assert manager.get_engine(first_identity) is None
     finally:
+        manager.shutdown_all()
+
+
+@pytest.mark.asyncio
+async def test_admitted_reused_engine_is_not_evicted_before_execution(monkeypatch) -> None:
+    """An admitted request keeps its existing engine alive until its runner starts."""
+    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    first_identity = _analysis_identity("analysis-admitted-existing")
+    second_identity = _analysis_identity("analysis-admitted-other")
+    try:
+        manager.spawn_engine(first_identity)
+        owns_admission = await manager.await_spawn_admission(first_identity)
+        assert owns_admission is False
+        manager.reserve_engine_request(first_identity)
+
+        with pytest.raises(EngineCapacityFull):
+            manager.spawn_engine(second_identity)
+        assert manager.get_engine(first_identity) is not None
+
+        manager.release_engine_request(first_identity)
+        manager.spawn_engine(second_identity)
+        assert manager.get_engine(first_identity) is None
+    finally:
+        manager.release_spawn_admission(first_identity, owned=owns_admission)
         manager.shutdown_all()
 
 
@@ -245,6 +351,37 @@ async def test_process_manager_capacity_admission_is_fifo(monkeypatch) -> None:
             assert order == []
         await asyncio.wait_for(asyncio.gather(second_task, third_task), timeout=2)
         assert order == [second.resource_id, third.resource_id]
+    finally:
+        manager.shutdown_all()
+
+
+@pytest.mark.asyncio
+async def test_process_manager_capacity_admission_prioritizes_interactive_work(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    running = _analysis_identity("analysis-priority-running")
+    lifecycle = _analysis_identity("analysis-priority-lifecycle")
+    interactive = _analysis_identity("analysis-priority-interactive")
+    order: list[str] = []
+
+    async def admit_spawn_stop(identity: compute_pb2.EngineIdentity, priority: int) -> None:
+        owns_admission = await manager.await_spawn_admission(identity, priority=priority)
+        try:
+            await asyncio.to_thread(manager.spawn_engine, identity)
+            order.append(identity.resource_id)
+            await asyncio.to_thread(manager.shutdown_engine, identity)
+        finally:
+            manager.release_spawn_admission(identity, owned=owns_admission)
+
+    try:
+        with manager.acquire_engine(running):
+            lifecycle_task = asyncio.create_task(admit_spawn_stop(lifecycle, ENGINE_ADMISSION_PRIORITY_LIFECYCLE))
+            await asyncio.sleep(0.02)
+            interactive_task = asyncio.create_task(admit_spawn_stop(interactive, ENGINE_ADMISSION_PRIORITY_INTERACTIVE))
+            await asyncio.sleep(0.05)
+            assert order == []
+        await asyncio.wait_for(asyncio.gather(lifecycle_task, interactive_task), timeout=2)
+        assert order == [interactive.resource_id, lifecycle.resource_id]
     finally:
         manager.shutdown_all()
 
@@ -415,6 +552,47 @@ def test_capacity_decisions_never_probe_the_engine_runtime(monkeypatch) -> None:
     finally:
         release_probe.set()
         hang_probes.clear()
+        manager.shutdown_all()
+
+
+def test_busy_engine_is_not_evicted_or_reaped_after_liveness_failure(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    identity = _analysis_identity("analysis-busy-after-heartbeat-failure")
+    try:
+        info = manager.spawn_engine(identity)
+        info.engine.current_job_id = "job-running"
+        cast(Any, info.engine)._alive = False
+        manager._idle_ttl_seconds = 0
+
+        assert manager.can_admit_spawn() is False
+        manager._reap_idle_engines_once()
+
+        assert manager.get_engine(identity) is info.engine
+    finally:
+        manager.shutdown_all()
+
+
+def test_dead_engine_is_restarted_instead_of_reused(monkeypatch) -> None:
+    created: list[_FakeEngine] = []
+
+    def factory(identity: compute_pb2.EngineIdentity, resource_config: dict | None) -> _FakeEngine:
+        engine = _FakeEngine(identity.resource_id, resource_config)
+        created.append(engine)
+        return engine
+
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, factory(identity, resource_config)))
+    identity = _analysis_identity("analysis-restart-after-failure")
+    try:
+        first = manager.spawn_engine(identity)
+        cast(Any, first.engine)._alive = False
+
+        second = manager.spawn_engine(identity)
+
+        assert second.engine is not first.engine
+        assert len(created) == 2
+        assert manager.get_engine(identity) is second.engine
+    finally:
         manager.shutdown_all()
 
 

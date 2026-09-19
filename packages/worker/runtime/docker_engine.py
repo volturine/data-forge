@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -96,8 +96,21 @@ def validate_engine_runtime_readiness() -> None:
         client.close()
 
 
-def reconcile_deployment_containers(*, supervisor_id: str | None = None, remove_running: bool = True) -> int:
-    """Remove owned orphan or stopped containers within this deployment."""
+def reconcile_deployment_containers(
+    *,
+    supervisor_id: str | None = None,
+    remove_running: bool = True,
+    keep_container_ids: Collection[str] = (),
+    running_grace_seconds: float = 0,
+) -> int:
+    """Remove owned orphan or stopped containers within this deployment.
+
+    Startup reconciliation may sweep all non-owned containers. A live worker
+    passes the manager's current container IDs and a grace period for running
+    containers. That protects a container created after the Docker snapshot
+    but before it can be registered in the manager, while still retiring
+    containers that the manager has lost.
+    """
     client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
     removed = 0
     try:
@@ -106,14 +119,31 @@ def reconcile_deployment_containers(*, supervisor_id: str | None = None, remove_
             labels.append(f"io.dataforge.supervisor={supervisor_id}")
         containers = client.api.containers(all=True, filters={"label": labels})
         for container in containers:
-            # A launch is visible as ``created`` before ``container.start()``.
-            # Periodic cleanup must not race that transition; only startup and
-            # dead-supervisor cleanup may remove non-terminal containers.
-            if not remove_running and container.get("State") not in {"dead", "exited"}:
+            container_id = str(container["Id"])
+            if container_id in keep_container_ids:
                 continue
-            with contextlib.suppress(Exception):
-                client.api.remove_container(container["Id"], force=True)
+            state = container.get("State")
+            if not remove_running and state not in {"dead", "exited"}:
+                continue
+            if remove_running and state not in {"dead", "exited"} and running_grace_seconds > 0:
+                container_labels = container.get("Labels") or {}
+                created_at_raw = container_labels.get("io.dataforge.created-at") if isinstance(container_labels, dict) else None
+                try:
+                    created_at = datetime.fromisoformat(str(created_at_raw)) if created_at_raw else None
+                except ValueError:
+                    created_at = None
+                if created_at is None or (datetime.now(UTC) - created_at).total_seconds() < running_grace_seconds:
+                    continue
+            try:
+                client.api.remove_container(container_id, force=True)
                 removed += 1
+            except Exception:
+                logger.warning(
+                    "Failed to remove reconciled engine container %s (state=%s)",
+                    container_id[:12],
+                    state,
+                    exc_info=True,
+                )
     finally:
         client.close()
     return removed
@@ -180,6 +210,32 @@ def _engine_object_store_endpoint() -> str:
     return endpoint
 
 
+def _container_rpc_target(container: Any) -> str:
+    """Return a stable RPC address for a running private-network container."""
+    # Docker can return from ``start`` before the network attachment is
+    # visible through ``reload``. Treat that as startup progress, not as a
+    # failed engine: an immediate failure would tear down a healthy container
+    # and let the next same-identity launch race its removal.
+    deadline = time.monotonic() + min(max(settings.engine_start_timeout_seconds, 1.0), 5.0)
+    last_status = "unknown"
+    while time.monotonic() < deadline:
+        container.reload()
+        last_status = str(container.status)
+        if last_status == "running":
+            # Do not pin the gRPC channel to a Docker IP. Docker reuses those
+            # addresses as soon as a container is removed, so an existing
+            # channel can reconnect to a different engine and make an
+            # Initialize RPC look like an identity collision. Container names
+            # are unique per launch and are resolved by Docker's embedded DNS.
+            name = str(getattr(container, "name", "")).lstrip("/")
+            if name:
+                return f"{name}:{settings.engine_rpc_port}"
+        if last_status in {"exited", "dead"}:
+            raise RuntimeError(f"Docker engine container stopped before it received an IP address on {settings.engine_docker_network} (status={last_status})")
+        time.sleep(0.05)
+    raise RuntimeError(f"Docker did not start the engine container on {settings.engine_docker_network} within the startup window (status={last_status})")
+
+
 # Credential bootstrap is passed in-memory via gRPC Initialize RPC, eliminating exec_run.
 
 
@@ -204,6 +260,7 @@ class DockerComputeEngine(ComputeEngine):
         self._container_id: str | None = None
         self._channel: grpc.Channel | None = None
         self._stub: engine_runtime_pb2_grpc.PolarsEngineServiceStub | None = None
+        self._rpc_target: str | None = None
         self._token = ""
         self._alive = False
         self._shutdown_requested = False
@@ -345,13 +402,15 @@ class DockerComputeEngine(ComputeEngine):
                 container.start()
                 self._client = client
                 self._container = container
-                target = f"{container.name}:{settings.engine_rpc_port}"
                 if settings.engine_connect_host:
                     container.reload()
                     bindings = container.attrs["NetworkSettings"]["Ports"].get(f"{settings.engine_rpc_port}/tcp") or []
                     if not bindings:
                         raise RuntimeError("Docker did not publish an engine RPC port")
                     target = f"{settings.engine_connect_host}:{bindings[0]['HostPort']}"
+                else:
+                    target = _container_rpc_target(container)
+                self._rpc_target = target
                 self._channel = grpc.insecure_channel(
                     target,
                     options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024)),
@@ -398,6 +457,10 @@ class DockerComputeEngine(ComputeEngine):
                     return
                 last_error = RuntimeError("Engine initialization did not return ready status")
             except grpc.RpcError as exc:
+                if exc.code() == grpc.StatusCode.FAILED_PRECONDITION and str(exc.details()).startswith("Engine already initialized"):
+                    raise RuntimeError(
+                        f"Engine identity collision for {self.identity.resource_id} at {self._rpc_target} (container {self._container_id}): {exc.details()}"
+                    ) from exc
                 last_error = exc
             time.sleep(0.05)
         raise RuntimeError(f"Timed out waiting for engine initialization: {last_error}")
@@ -476,13 +539,15 @@ class DockerComputeEngine(ComputeEngine):
                 container.start()
                 self._client = client
                 self._container = container
-                target = f"{container.name}:{settings.engine_rpc_port}"
                 if settings.engine_connect_host:
                     container.reload()
                     bindings = container.attrs["NetworkSettings"]["Ports"].get(f"{settings.engine_rpc_port}/tcp") or []
                     if not bindings:
                         raise RuntimeError("Docker did not publish an engine RPC port")
                     target = f"{settings.engine_connect_host}:{bindings[0]['HostPort']}"
+                else:
+                    target = _container_rpc_target(container)
+                self._rpc_target = target
                 self._channel = grpc.insecure_channel(
                     target,
                     options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024)),
@@ -885,6 +950,7 @@ class DockerComputeEngine(ComputeEngine):
             self._client = None
             self._container = None
             self._stub = None
+            self._rpc_target = None
             self._alive = False
             self._active_job_ids.clear()
             transfers = list(self._artifact_transfers.values())

@@ -358,7 +358,7 @@
 			}
 			queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, ds.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] });
-			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ds.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ns.value, ds.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasources'] });
 		}
 	}
@@ -404,7 +404,7 @@
 			schemaDiff = schemaChanged ? { added, removed, types } : null;
 			queryClient.setQueryData(['datasource-schema', datasource.id], nextSchema);
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
-			queryClient.invalidateQueries({ queryKey: ['datasource-preview', datasource.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ns.value, datasource.id] });
 		} catch (error) {
 			refreshError = error instanceof Error ? error.message : 'Failed to ingest datasource schema';
 		} finally {

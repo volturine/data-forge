@@ -243,6 +243,7 @@ class WorkerRuntimeClient:
         *,
         worker_id: str,
         allowed_kinds: frozenset[enums_pb2.ComputeRequestKind],
+        compute_namespace_offset: int = 0,
     ) -> ClaimedComputeRequest | None:
         response = self._call(
             lambda: self._stub.ClaimComputeRequest(
@@ -250,6 +251,7 @@ class WorkerRuntimeClient:
                     worker_id=worker_id,
                     protocol_version=2,
                     allowed_compute_request_kinds=sorted(allowed_kinds),
+                    compute_namespace_offset=compute_namespace_offset,
                 ),
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
