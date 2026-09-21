@@ -288,11 +288,11 @@ def run_settings_connection_locked[T](func: Callable[[Connection], T]) -> T:
     with engine.begin() as connection:
         if connection.dialect.name != 'postgresql':
             return func(connection)
-        connection.execute(text('SELECT pg_advisory_lock(:key)'), {'key': _POSTGRES_INIT_LOCK_KEY})
-        try:
-            return func(connection)
-        finally:
-            connection.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': _POSTGRES_INIT_LOCK_KEY})
+        # Bind the lock to this transaction so a failed DDL transaction rolls
+        # back and releases it without a second SQL statement that would be
+        # rejected by PostgreSQL while the transaction is already aborted.
+        connection.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': _POSTGRES_INIT_LOCK_KEY})
+        return func(connection)
 
 
 def _run_postgres_init_locked(func) -> None:
