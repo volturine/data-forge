@@ -4,6 +4,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
+import anyio
 from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
@@ -395,11 +396,15 @@ async def lock_websocket(websocket: WebSocket) -> None:
         logger.error('Lock websocket error: %s', exc, exc_info=True)
         await _send_error(websocket, 'An internal error occurred', 500)
     finally:
-        if watch_type is not None and watch_id is not None:
-            await watchers.registry.discard(websocket, namespace, watch_type, watch_id)
-        if watch_type is not None and watch_id is not None and watch_token is not None and owner_id is not None:
-            released = await _release_lock(watch_type, watch_id, owner_id, watch_token)
-            if released:
-                await _notify_watchers(watch_type, watch_id, None)
-        reset_namespace(token)
-        await safe_close_websocket(websocket)
+        # A server can cancel a websocket task immediately after delivering a
+        # disconnect. Keep ownership cleanup alive so a lock is not left until
+        # its TTL merely because the disconnect raced the handler shutdown.
+        with anyio.CancelScope(shield=True):
+            if watch_type is not None and watch_id is not None:
+                await watchers.registry.discard(websocket, namespace, watch_type, watch_id)
+            if watch_type is not None and watch_id is not None and watch_token is not None and owner_id is not None:
+                released = await _release_lock(watch_type, watch_id, owner_id, watch_token)
+                if released:
+                    await _notify_watchers(watch_type, watch_id, None)
+            reset_namespace(token)
+            await safe_close_websocket(websocket)
