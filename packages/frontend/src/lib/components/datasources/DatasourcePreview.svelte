@@ -38,8 +38,10 @@
 
 	function previewSignal(request: StepPreviewRequest): AbortSignal {
 		const nextKey = JSON.stringify(request);
-		if (previewRequestKey !== nextKey) {
-			if (previewRequestKey !== null) previewRequestController.abort();
+		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
+			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
+				previewRequestController.abort();
+			}
 			previewRequestKey = nextKey;
 			previewRequestController = new AbortController();
 		}
@@ -112,7 +114,10 @@
 	}));
 
 	const data = $derived(query.data);
-	const isLoading = $derived(query.isLoading);
+	// `isLoading` only describes the first fetch.  Preview data can already be
+	// rendered while TanStack Query is fetching a new page/config, so use the
+	// fetching state for the UI readiness contract just like inline previews do.
+	const isLoading = $derived(query.isFetching);
 	const error = $derived(query.error);
 	const errorMessage = $derived(error instanceof Error ? error.message : '');
 	const previewState = $derived.by(() => {

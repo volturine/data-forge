@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures.js';
-import { createDatasource, createImportedAnalysis, type E2ERequest } from './utils/api.js';
+import { createImportedAnalysis, type E2ERequest } from './utils/api.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
-import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 
 async function createSnippetAnalysis(
@@ -160,15 +160,18 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 
 	test('toolbar export renders both Polars and SQL snippets for pipeline steps', async ({
 		page,
-		request
+		request,
+		sharedDatasource,
+		sharedAuxDatasource
 	}) => {
 		const id = uid();
-		const leftDsName = `e2e-snippet-left-${id}`;
-		const rightDsName = `e2e-snippet-right-${id}`;
 		const analysisName = `E2E Snippet Toolbar ${id}`;
-		const leftDsId = await createDatasource(request, leftDsName);
-		const rightDsId = await createDatasource(request, rightDsName);
-		const analysisId = await createSnippetAnalysis(request, analysisName, leftDsId, rightDsId);
+		const analysisId = await createSnippetAnalysis(
+			request,
+			analysisName,
+			sharedDatasource.id,
+			sharedAuxDatasource.id
+		);
 		try {
 			await gotoAnalysisEditor(page, analysisId);
 			const exportBtn = page.getByTestId('analysis-export-toolbar-button');
@@ -190,14 +193,14 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 			await expect(code).toContainText('ORDER BY');
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
-			await deleteDatasourceViaUI(page, leftDsName);
-			await deleteDatasourceViaUI(page, rightDsName);
 		}
 	});
 
 	test('tab context export supports copy/download and tab-scoped filename', async ({
 		page,
-		request
+		request,
+		sharedDatasource,
+		sharedAuxDatasource
 	}) => {
 		await page.addInitScript(() => {
 			Object.defineProperty(navigator, 'clipboard', {
@@ -212,12 +215,13 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 		});
 
 		const id = uid();
-		const leftDsName = `e2e-snippet-copy-left-${id}`;
-		const rightDsName = `e2e-snippet-copy-right-${id}`;
 		const analysisName = `E2E Snippet Context ${id}`;
-		const leftDsId = await createDatasource(request, leftDsName);
-		const rightDsId = await createDatasource(request, rightDsName);
-		const analysisId = await createSnippetAnalysis(request, analysisName, leftDsId, rightDsId);
+		const analysisId = await createSnippetAnalysis(
+			request,
+			analysisName,
+			sharedDatasource.id,
+			sharedAuxDatasource.id
+		);
 		try {
 			await gotoAnalysisEditor(page, analysisId);
 
@@ -253,17 +257,17 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 			expect(sqlDownload.suggestedFilename()).toMatch(/_left_source\.sql$/);
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
-			await deleteDatasourceViaUI(page, leftDsName);
-			await deleteDatasourceViaUI(page, rightDsName);
 		}
 	});
 
-	test('untranslatable steps surface warnings in export modal', async ({ page, request }) => {
+	test('untranslatable steps surface warnings in export modal', async ({
+		page,
+		request,
+		sharedDatasource
+	}) => {
 		const id = uid();
-		const dsName = `e2e-snippet-warn-${id}`;
 		const analysisName = `E2E Snippet Warnings ${id}`;
-		const dsId = await createDatasource(request, dsName);
-		const analysisId = await createUnsupportedAnalysis(request, analysisName, dsId);
+		const analysisId = await createUnsupportedAnalysis(request, analysisName, sharedDatasource.id);
 		try {
 			await gotoAnalysisEditor(page, analysisId);
 			await page.getByTestId('analysis-export-toolbar-button').click();
@@ -275,7 +279,6 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 			await expect(page.getByTestId('analysis-export-code')).toContainText('Original config');
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });

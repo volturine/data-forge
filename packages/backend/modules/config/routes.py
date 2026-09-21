@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from threading import Lock
 
 from fastapi import Query
 from pydantic import BaseModel
@@ -50,22 +54,26 @@ class FrontendConfigCache:
         self._ttl = ttl
         self._config: FrontendConfig | None = None
         self._expires_at = 0.0
+        self._lock = Lock()
 
     def get_or_create(self, create: Callable[[], FrontendConfig]) -> FrontendConfig:
-        if self._config is not None and time.monotonic() < self._expires_at:
-            return self._config
+        with self._lock:
+            if self._config is not None and time.monotonic() < self._expires_at:
+                return self._config
 
-        config = create()
-        self._config = config
-        self._expires_at = time.monotonic() + self._ttl
-        return config
+            config = create()
+            self._config = config
+            self._expires_at = time.monotonic() + self._ttl
+            return config
 
     def invalidate(self) -> None:
-        self._config = None
-        self._expires_at = 0.0
+        with self._lock:
+            self._config = None
+            self._expires_at = 0.0
 
 
 _frontend_config_cache = FrontendConfigCache(_CONFIG_CACHE_TTL)
+_CONFIG_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix='frontend-config')
 
 
 def invalidate_config_cache() -> None:
@@ -85,9 +93,13 @@ def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
 
 @router.get('', response_model=FrontendConfig, mcp=True)
 @handle_errors(operation='get config')
-def get_config() -> FrontendConfig:
+async def get_config() -> FrontendConfig:
     """Get application configuration: runtime settings, logging settings, feature flags, and default namespace."""
-    return _frontend_config_cache.get_or_create(_build_frontend_config)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _CONFIG_EXECUTOR,
+        partial(_frontend_config_cache.get_or_create, _build_frontend_config),
+    )
 
 
 def _build_frontend_config() -> FrontendConfig:

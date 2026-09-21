@@ -123,6 +123,33 @@
 			</PanelHeader>
 
 			<div class={css({ height: 'listLg', overflowY: 'auto', padding: '5' })}>
+				{#if columnName}
+					<div class={css({ marginBottom: '4' })} data-testid="column-stats-description">
+						<div
+							class={css({
+								fontSize: '2xs',
+								fontWeight: 'semibold',
+								textTransform: 'uppercase',
+								letterSpacing: 'wider',
+								color: 'fg.muted',
+								marginBottom: '1.5'
+							})}
+						>
+							Description
+						</div>
+						<p
+							class={css({
+								margin: '0',
+								fontSize: 'xs',
+								color: columnDescription ? 'fg.primary' : 'fg.muted',
+								whiteSpace: 'pre-wrap',
+								wordBreak: 'break-word'
+							})}
+						>
+							{columnDescription || 'No description'}
+						</p>
+					</div>
+				{/if}
 				{#if loading}
 					<div class={css({ fontSize: 'sm', color: 'fg.muted' })}>Computing stats...</div>
 				{:else if error}
@@ -224,31 +251,6 @@
 										>
 									</div>
 								{/if}
-								<div class={css({ marginTop: '3' })}>
-									<div
-										class={css({
-											fontSize: '2xs',
-											fontWeight: 'semibold',
-											textTransform: 'uppercase',
-											letterSpacing: 'wider',
-											color: 'fg.muted',
-											marginBottom: '1.5'
-										})}
-									>
-										Description
-									</div>
-									<p
-										class={css({
-											margin: '0',
-											fontSize: 'xs',
-											color: columnDescription ? 'fg.primary' : 'fg.muted',
-											whiteSpace: 'pre-wrap',
-											wordBreak: 'break-word'
-										})}
-									>
-										{columnDescription || 'No description'}
-									</p>
-								</div>
 							</div>
 
 							<!-- Numeric stats -->

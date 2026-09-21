@@ -54,6 +54,11 @@ router = MCPRouter(prefix='/datasource', tags=['datasource'])
 
 
 def _require_active_datasource(session: Session, datasource_id: str) -> None:
+    # This is an existence check used before read/compute work. A row lock
+    # here would outlive this short thread-pool task while the endpoint
+    # schedules its real work, serializing every concurrent reader behind the
+    # first request. Compute enqueue paths take the lock in the same task that
+    # commits the durable request instead.
     datasource_delete_service.get_active_datasource(session, datasource_id)
 
 

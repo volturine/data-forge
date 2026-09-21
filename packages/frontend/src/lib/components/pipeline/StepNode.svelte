@@ -142,8 +142,8 @@
 	const chartPreviewState = $derived.by(() => {
 		if (!isChart || !isApplied || !chartConfigured) return 'inactive';
 		if (!analysisPipeline || !datasourceId || !analysisId) return 'waiting-for-payload';
-		if (analysisStore.previews.paused || chartQuery.isFetching) return 'loading';
 		if (chartQuery.error) return 'error';
+		if (analysisStore.previews.paused || chartQuery.isFetching) return 'loading';
 		if (chartQuery.data) return 'ready';
 		return 'idle';
 	});
@@ -193,8 +193,10 @@
 
 	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
 		const nextKey = JSON.stringify(request);
-		if (previewRequestKey !== nextKey) {
-			if (previewRequestKey !== null) previewRequestController.abort();
+		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
+			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
+				previewRequestController.abort();
+			}
 			previewRequestKey = nextKey;
 			previewRequestController = new AbortController();
 		}
@@ -658,6 +660,19 @@
 							<span>Apply to preview</span>
 						{/if}
 					</div>
+				{:else if chartQuery.error}
+					<div
+						class={css({
+							borderTopWidth: '1',
+							borderTopColor: 'border.error',
+							backgroundColor: 'bg.error',
+							padding: '3',
+							fontSize: 'xs',
+							color: 'fg.error'
+						})}
+					>
+						{chartQuery.error.message}
+					</div>
 				{:else if analysisStore.previews.paused || chartQuery.isFetching}
 					<div
 						class={css({
@@ -672,19 +687,6 @@
 					>
 						<span class={spinner({ size: 'sm' })}></span>
 						Loading chart...
-					</div>
-				{:else if chartQuery.error}
-					<div
-						class={css({
-							borderTopWidth: '1',
-							borderTopColor: 'border.error',
-							backgroundColor: 'bg.error',
-							padding: '3',
-							fontSize: 'xs',
-							color: 'fg.error'
-						})}
-					>
-						{chartQuery.error.message}
 					</div>
 				{:else if chartQuery.data}
 					<ChartPreview

@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol
 
+from pyiceberg.exceptions import NoSuchNamespaceError
+
 from backend_core.config import settings
 from backend_core.data_plane_client import WorkerDataPlaneClient, client_from_settings
 from backend_core.domain.datasource.source_types import DataSourceType
@@ -114,6 +116,8 @@ class DatasourceStorageCleanup:
             for _, name in catalog.list_tables(namespace):
                 if name.startswith(dataset_id) and f'{namespace}.{name}' not in identifiers:
                     identifiers.append(f'{namespace}.{name}')
+        except NoSuchNamespaceError:
+            logger.info('Iceberg catalog sweep skipped for missing namespace %s', namespace)
         except Exception as exc:
             logger.warning('Iceberg catalog sweep skipped for namespace %s: %s', namespace, exc)
         for identifier in identifiers:

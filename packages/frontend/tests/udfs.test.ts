@@ -311,6 +311,7 @@ test.describe('UDFs – editor functional flows', () => {
 		const udf = `e2e_create_flow_${uid()}`;
 		try {
 			await page.goto('/udfs/new');
+			await waitForLayoutReady(page);
 			await expect(page.locator('#udf-name')).toBeVisible({ timeout: 5_000 });
 
 			await page.locator('#udf-name').fill(udf);
@@ -366,6 +367,7 @@ test.describe('UDFs – editor functional flows', () => {
 
 	test('Save button is disabled when name is empty', async ({ page }) => {
 		await page.goto('/udfs/new');
+		await waitForLayoutReady(page);
 		await expect(page.locator('[data-testid="udf-save-button"]')).toBeVisible({ timeout: 5_000 });
 
 		// Name starts empty — Save should be disabled
@@ -435,6 +437,7 @@ test.describe('UDFs – error states', () => {
 
 	test('load error displays error state for bad UDF ID', async ({ page }) => {
 		await page.goto(`/udfs/${BAD_ID}`);
+		await waitForLayoutReady(page);
 
 		await expect(page.locator('[data-testid="udf-load-error"]')).toBeVisible({ timeout: 5_000 });
 		await expect(page.getByText('Failed to load UDF.')).toBeVisible();
@@ -444,6 +447,7 @@ test.describe('UDFs – error states', () => {
 
 	test('load error does not crash navigation', async ({ page }) => {
 		await page.goto(`/udfs/${BAD_ID}`);
+		await waitForLayoutReady(page);
 		await expect(page.locator('[data-testid="udf-load-error"]')).toBeVisible({ timeout: 5_000 });
 
 		await page.locator('a[href="/udfs"]').click();

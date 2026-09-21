@@ -123,7 +123,7 @@ def _register_backend_sqlmodel_metadata() -> None:
 
 def _backend_settings_tables() -> list[Any]:
     from backend_core.persistence.engine_instances.models import EngineInstance
-    from backend_core.persistence.namespaces.models import RuntimeNamespace
+    from backend_core.persistence.namespaces.models import NamespaceEngineCredential, RuntimeNamespace
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
     from backend_core.persistence.settings.models import AppSettings
     from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
@@ -137,6 +137,7 @@ def _backend_settings_tables() -> list[Any]:
         AuthProvider.__tablename__,
         RuntimeWorker.__tablename__,
         RuntimeNamespace.__tablename__,
+        NamespaceEngineCredential.__tablename__,
         UserSession.__tablename__,
         VerificationToken.__tablename__,
     }

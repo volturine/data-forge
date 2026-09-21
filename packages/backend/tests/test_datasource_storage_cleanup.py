@@ -1,5 +1,8 @@
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+from pyiceberg.exceptions import NoSuchNamespaceError
 
 from backend_core.datasource_storage import DatasourceStorageCleanup
 
@@ -109,3 +112,26 @@ def test_family_cleanup_failure_does_not_block_metadata_path_delete() -> None:
     deleted = [call.args[0] for call in client.delete_managed_prefix.call_args_list]
     assert metadata_path in deleted
     assert f's3://bucket/exports/{dataset_id}' not in deleted
+
+
+def test_missing_catalog_namespace_is_expected_during_cleanup(caplog) -> None:
+    dataset_id = 'ff77ee88'
+    datasource = _make_datasource(dataset_id, f's3://bucket/exports/{dataset_id}/master')
+    client = _client()
+
+    with (
+        patch('backend_core.datasource_storage.client_from_settings', return_value=client),
+        patch('backend_core.datasource_storage.load_runtime_catalog') as catalog_factory,
+    ):
+        catalog = catalog_factory.return_value
+        catalog.list_tables.side_effect = NoSuchNamespaceError('outputs')
+        with caplog.at_level(logging.WARNING, logger='backend_core.datasource_storage'):
+            DatasourceStorageCleanup().delete(datasource)
+
+    assert not any(record.levelno >= logging.WARNING for record in caplog.records)
+    catalog.table_exists.assert_called_once_with(f'outputs.{datasource.config["table"]}')
+    deleted = [call.args[0] for call in client.delete_managed_prefix.call_args_list]
+    assert deleted == [
+        f's3://bucket/exports/{dataset_id}/master',
+        f's3://bucket/exports/{dataset_id}',
+    ]

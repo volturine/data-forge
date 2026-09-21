@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import secrets as crypto_secrets
 import tempfile
+import time
 import uuid
 from urllib.parse import urlparse
 
@@ -18,6 +20,7 @@ from backend_core.persistence.namespaces.models import NamespaceEngineCredential
 from backend_core.secrets import decrypt_secret, encrypt_secret
 
 _ENGINE_CREDENTIAL_ROLES = ('reader', 'builder')
+logger = logging.getLogger(__name__)
 
 
 class NamespaceCredentialError(Exception):
@@ -49,7 +52,8 @@ async def _provision_roles(namespace: str, roles: list[str]) -> dict[str, tuple[
     """
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
         admin = _admin_client(session)
-        return {role: await _create_role_identity(admin, namespace, role) for role in roles}
+        identities = await asyncio.gather(*(_create_role_identity(admin, namespace, role) for role in roles))
+        return dict(zip(roles, identities, strict=True))
 
 
 def _policy_document(namespace: str, role: str) -> dict:
@@ -68,6 +72,7 @@ def _generate_access_key(namespace: str, role: str) -> str:
 
 
 async def _create_role_identity(admin, namespace: str, role: str) -> tuple[str, str]:
+    started = time.perf_counter()
     access_key = _generate_access_key(namespace, role)
     secret_key = crypto_secrets.token_urlsafe(32)
     policy_name = f'namespace-{namespace}-{role}'
@@ -77,11 +82,26 @@ async def _create_role_identity(admin, namespace: str, role: str) -> tuple[str, 
     try:
         with os.fdopen(handle, 'w', encoding='utf-8') as policy_file:
             json.dump(_policy_document(namespace, role), policy_file)
+        user_started = time.perf_counter()
         await admin.user_add(access_key, secret_key)
+        user_duration_ms = int((time.perf_counter() - user_started) * 1000)
         # add-canned-policy is a PUT: it creates or replaces, so re-running it
         # for an existing namespace role is how the policy stays current.
+        policy_started = time.perf_counter()
         await admin.policy_add(policy_name, policy_path)
+        policy_duration_ms = int((time.perf_counter() - policy_started) * 1000)
+        policy_set_started = time.perf_counter()
         await admin.policy_set(policy_name, user=access_key)
+        policy_set_duration_ms = int((time.perf_counter() - policy_set_started) * 1000)
+        logger.info(
+            'Namespace credential provisioning namespace=%s role=%s total_ms=%s user_ms=%s policy_add_ms=%s policy_set_ms=%s',
+            namespace,
+            role,
+            int((time.perf_counter() - started) * 1000),
+            user_duration_ms,
+            policy_duration_ms,
+            policy_set_duration_ms,
+        )
     finally:
         os.remove(policy_path)
     return access_key, secret_key

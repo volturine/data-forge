@@ -26,19 +26,19 @@
 	import { button, css, input, spinner } from '$lib/styles/panda';
 	import { favoriteStore } from '$lib/stores/favorites.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { analysisQueryKey } from '$lib/queries/analysis';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
+	let deletedAnalysisIds = $state<string[]>([]);
 
 	const query = createQuery(() => ({
 		queryKey: ['analyses', ns.value],
-		queryFn: async () => {
-			const result = await listAnalyses();
+		queryFn: async ({ signal }) => {
+			const result = await listAnalyses({ signal });
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
-			return result.value;
+			return result.value.filter((analysis) => !deletedAnalysisIds.includes(analysis.id));
 		},
 		// Analyses can be created or removed from another page, tab, or user.
 		// Refresh on every gallery mount so navigation never presents a cached
@@ -74,7 +74,7 @@
 	const filteredAndSortedAnalyses = $derived.by(() => {
 		if (!query.data) return [];
 
-		let result = [...query.data];
+		let result = query.data.filter((analysis) => !deletedAnalysisIds.includes(analysis.id));
 
 		if (searchQuery) {
 			const lowerQuery = searchQuery.toLowerCase();
@@ -146,17 +146,49 @@
 		);
 	}
 
+	function markAnalysesDeleted(ids: Iterable<string>) {
+		const next = new SvelteSet(deletedAnalysisIds);
+		for (const id of ids) next.add(id);
+		deletedAnalysisIds = [...next];
+	}
+
+	function restoreAnalyses(ids: Iterable<string>) {
+		const restored = new Set(ids);
+		deletedAnalysisIds = deletedAnalysisIds.filter((id) => !restored.has(id));
+		void queryClient.invalidateQueries({ queryKey: ['analyses', ns.value], exact: true });
+	}
+
 	async function toggleFavorite(id: string) {
+		const analysesKey = ['analyses', ns.value] as const;
+		const favoritesKey = ['favorite-analyses', ns.value] as const;
+		// Stop an older in-flight response from restoring the pre-mutation
+		// favorite list after the mutation has committed.
+		await queryClient.cancelQueries({ queryKey: favoritesKey, exact: true });
 		const next = !favoriteStore.isFavorite(id);
 		const result = next ? await favoriteAnalysis(id) : await unfavoriteAnalysis(id);
 		if (result.isErr()) {
 			deleteError = result.error.message;
 			return;
 		}
-		favoriteStore.apply(id, result.value.is_favorite);
-		void queryClient.invalidateQueries({ queryKey: ['analyses', ns.value] });
-		void queryClient.invalidateQueries({ queryKey: ['favorite-analyses', ns.value] });
-		void queryClient.invalidateQueries({ queryKey: analysisQueryKey(id) });
+		const isFavorite = result.value.is_favorite;
+		favoriteStore.apply(id, isFavorite);
+		// The mutation response is authoritative. Update both visible caches
+		// synchronously so a refetch cannot briefly remove the sidebar link.
+		queryClient.setQueryData<AnalysisGalleryItem[]>(analysesKey, (current) =>
+			current?.map((analysis) =>
+				analysis.id === id ? { ...analysis, is_favorite: isFavorite } : analysis
+			)
+		);
+		const analysis = queryClient
+			.getQueryData<AnalysisGalleryItem[]>(analysesKey)
+			?.find((item) => item.id === id);
+		queryClient.setQueryData<AnalysisGalleryItem[]>(favoritesKey, (current) => {
+			if (!current && !analysis) return current;
+			const existing = current ?? [];
+			const withoutCurrent = existing.filter((item) => item.id !== id);
+			if (!isFavorite) return withoutCurrent;
+			return analysis ? [...withoutCurrent, { ...analysis, is_favorite: true }] : existing;
+		});
 	}
 
 	function requestDuplicate(analysis: AnalysisGalleryItem) {
@@ -171,17 +203,33 @@
 		if (!deleteConfirmId) return;
 		deleteError = '';
 		const id = deleteConfirmId;
+		const analysis = query.data?.find((item) => item.id === id);
+		if (!analysis) {
+			deleteError = 'The analysis is no longer available.';
+			deleteConfirmId = null;
+			return;
+		}
 
-		const result = await deleteAnalysis(id);
-		if (result.isOk()) {
-			removeAnalysesFromCaches([id]);
-			queryClient.invalidateQueries({ queryKey: ['analyses', ns.value] });
-			queryClient.invalidateQueries({ queryKey: ['favorite-analyses', ns.value] });
-			selectedIds.delete(id);
-			deleteConfirmId = null;
-		} else {
+		// Stop an older gallery fetch from writing a pre-delete list after the
+		// mutation commits. The optimistic edit below is the visible state
+		// transition; a failed mutation restores the row from a refetch.
+		markAnalysesDeleted([id]);
+		removeAnalysesFromCaches([id]);
+		selectedIds.delete(id);
+		deleteConfirmId = null;
+		// Publish the visible deletion before waiting on an older gallery fetch.
+		// The list must not stay on the old card while the network mutation is
+		// being scheduled. `revert: false` prevents that fetch from restoring the
+		// pre-delete snapshot after the optimistic update.
+		await queryClient.cancelQueries(
+			{ queryKey: ['analyses', ns.value], exact: true },
+			{ revert: false }
+		);
+
+		const result = await deleteAnalysis(id, analysis.revision);
+		if (result.isErr()) {
+			restoreAnalyses([id]);
 			deleteError = `Failed to delete: ${result.error.message}`;
-			deleteConfirmId = null;
 		}
 	}
 
@@ -196,21 +244,32 @@
 	async function confirmBulkDelete() {
 		deleteError = '';
 		const idsToDelete = Array.from(selectedIds);
-		let failed = 0;
-
-		for (const id of idsToDelete) {
-			const result = await deleteAnalysis(id);
-			if (result.isErr()) failed++;
-		}
-
+		const analysesById = new Map((query.data ?? []).map((analysis) => [analysis.id, analysis]));
+		markAnalysesDeleted(idsToDelete);
 		removeAnalysesFromCaches(idsToDelete);
-		queryClient.invalidateQueries({ queryKey: ['analyses', ns.value] });
-		queryClient.invalidateQueries({ queryKey: ['favorite-analyses', ns.value] });
 		selectedIds.clear();
 		bulkDeleteConfirm = false;
+		// Do not make the gallery wait for an in-flight list request before
+		// reflecting the deletion. The deleted-id guard also keeps an older
+		// response from reintroducing these cards while the DELETEs complete.
+		await queryClient.cancelQueries(
+			{ queryKey: ['analyses', ns.value], exact: true },
+			{ revert: false }
+		);
 
-		if (failed > 0) {
-			deleteError = `Failed to delete ${failed} analysis${failed > 1 ? 'es' : ''}.`;
+		const outcomes = await Promise.all(
+			idsToDelete.map(async (id) => {
+				const analysis = analysesById.get(id);
+				if (!analysis) return { id, error: 'The analysis is no longer available.' };
+				const result = await deleteAnalysis(id, analysis.revision);
+				return result.isErr() ? { id, error: result.error.message } : { id, error: null };
+			})
+		);
+		const failed = outcomes.filter((outcome) => outcome.error !== null);
+
+		if (failed.length > 0) {
+			restoreAnalyses(failed.map((outcome) => outcome.id));
+			deleteError = `Failed to delete ${failed.length} analysis${failed.length > 1 ? 'es' : ''}.`;
 		}
 	}
 
@@ -229,7 +288,7 @@
 		result.match(
 			(analysis) => {
 				duplicateSource = null;
-				void goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
+				void goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: false });
 			},
 			(err) => {
 				duplicateError = err.message;

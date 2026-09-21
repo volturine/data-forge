@@ -492,6 +492,59 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
 
 
 @pytest.mark.asyncio
+async def test_compute_request_claim_does_not_reclaim_the_calling_worker(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    worker_id = f'build-manager:{uuid.uuid4()}'
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
+        request_json={
+            'engine_identity': {
+                'scope': 'analysis_interactive',
+                'reuse_policy': 'shared',
+                'resource_id': 'self-reclaim-regression',
+                'analysis_id': 'self-reclaim-regression',
+            }
+        },
+    )
+    claimed = compute_requests_service.claim_next_request(test_db_session, worker_id=worker_id)
+    assert claimed is not None
+    assert claimed.claim_token is not None
+    original_claim_token = claimed.claim_token
+    original_generation = claimed.lease_generation
+    original_attempts = claimed.attempts
+
+    def fake_run_settings_db(func, *args, **kwargs):
+        if func is backend_grpc_server.runtime_worker_service.reclaimable_worker_ids:
+            return {worker_id}
+        if func is backend_grpc_server.list_runtime_namespaces:
+            return ['default']
+        raise AssertionError(f'Unexpected settings database callback: {func!r}')
+
+    def fake_run_db(func, *args, **kwargs):
+        return func(test_db_session, *args, **kwargs)
+
+    monkeypatch.setattr(backend_grpc_server, 'run_settings_db', fake_run_settings_db)
+    monkeypatch.setattr(backend_grpc_server, 'run_db', fake_run_db)
+
+    response = await WorkerRuntimeServicer().ClaimComputeRequest(
+        compute_claim_request(worker_id, enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE),
+        context,
+    )
+
+    assert not response.HasField('request')
+    test_db_session.expire_all()
+    stored = test_db_session.get(type(request), request.id)
+    assert stored is not None
+    assert stored.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+    assert stored.lease_owner == worker_id
+    assert stored.claim_token == original_claim_token
+    assert stored.lease_generation == original_generation
+    assert stored.attempts == original_attempts
+
+
+@pytest.mark.asyncio
 async def test_compute_request_claim_rotates_namespace_scan(monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     claimed_namespaces: list[str] = []

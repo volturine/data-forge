@@ -1,13 +1,17 @@
 import asyncio
 import logging
+import mimetypes
 import os
 import socket
 import tempfile
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
+import anyio.to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,6 +63,24 @@ register_settings_cache_invalidator(invalidate_resolved_settings_cache)
 ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger(__name__)
 
+# Namespace discovery is a small control-plane query, but it runs for nearly
+# every tenant API request. Keep it out of asyncio's shared default executor:
+# compute submission/polling, object-store work, and request cleanup all use
+# that executor too, so a browser burst could otherwise delay the lookup that
+# decides whether the request may proceed.
+_NAMESPACE_MIDDLEWARE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=16,
+    thread_name_prefix='namespace-middleware',
+)
+
+
+async def _run_namespace_middleware[T](function, *args, **kwargs) -> T:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _NAMESPACE_MIDDLEWARE_EXECUTOR,
+        partial(function, *args, **kwargs),
+    )
+
 
 def _register_api_worker(worker_id: str) -> None:
     def _register(session: Session) -> None:
@@ -90,6 +112,41 @@ def _stop_api_worker(worker_id: str) -> None:
 
 frontend_build_dir = ROOT / 'packages' / 'frontend' / 'build'
 
+# The API image also serves the prerendered SPA.  Keep the small, immutable
+# build in memory so a burst of browser navigations does not consume the
+# shared threadpool on one FileResponse stat/open/send cycle per asset.
+_FRONTEND_ASSET_CACHE: dict[str, tuple[bytes, str | None]] = {}
+_FRONTEND_ASSET_CACHE_ROOT: Path | None = None
+
+
+def _load_frontend_asset_cache() -> None:
+    global _FRONTEND_ASSET_CACHE_ROOT
+
+    root = frontend_build_dir.resolve()
+    assets: dict[str, tuple[bytes, str | None]] = {}
+    if settings.prod_mode_enabled and root.is_dir():
+        for path in root.rglob('*'):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(root).as_posix()
+            assets[relative] = (path.read_bytes(), mimetypes.guess_type(path.name)[0])
+
+    _FRONTEND_ASSET_CACHE_ROOT = root
+    _FRONTEND_ASSET_CACHE.clear()
+    _FRONTEND_ASSET_CACHE.update(assets)
+    logger.info('Loaded %s frontend assets into memory', len(assets))
+
+
+def _cached_frontend_response(relative_path: str) -> Response | None:
+    if frontend_build_dir.resolve() != _FRONTEND_ASSET_CACHE_ROOT:
+        return None
+    cached = _FRONTEND_ASSET_CACHE.get(relative_path)
+    if cached is None:
+        return None
+    content, media_type = cached
+    headers = {'Cache-Control': 'public, max-age=31536000, immutable'} if relative_path.startswith('_app/') else {'Cache-Control': 'no-cache'}
+    return Response(content=content, media_type=media_type, headers=headers)
+
 
 def _resolve_uvicorn_workers() -> int:
     if settings.debug:
@@ -112,6 +169,24 @@ def _resolve_uvicorn_limit_concurrency() -> int | None:
     if settings.worker_connections > 0:
         return settings.worker_connections
     return None
+
+
+def _configure_sync_thread_capacity() -> int:
+    """Align AnyIO's sync-handler limiter with the API database capacity.
+
+    Starlette runs synchronous route handlers and ``run_in_threadpool`` calls
+    through AnyIO's default limiter, which is 40 tokens regardless of
+    ``WORKER_CONNECTIONS``. The API database pool is larger in the E2E/CI
+    topology, so the default silently queues ordinary HTTP handlers while the
+    runtime is processing a browser burst. Do not create more DB-bound work
+    than the configured pool can serve.
+    """
+    configured_connections = max(settings.worker_connections, 1)
+    database_capacity = max(settings.database_pool_size + settings.database_max_overflow, 1)
+    target = min(configured_connections, database_capacity)
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    limiter.total_tokens = max(limiter.total_tokens, target)
+    return int(limiter.total_tokens)
 
 
 def _mark_running_builds_orphaned_across_namespaces() -> int:
@@ -191,6 +266,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # __main__ entirely, and multiple in-process workers would each register
     # runtime workers and split leases unsafely.
     _guard_runtime_workers(_resolve_uvicorn_workers())
+    _configure_sync_thread_capacity()
     # Fail closed at boot if any /v1 route was added without authentication.
     from api.v1.router import verify_v1_auth_coverage
 
@@ -199,6 +275,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.prod_mode_enabled and str(settings.data_dir).startswith(tempfile.gettempdir()):
         raise RuntimeError('DATA_DIR must be set to a persistent location in production')
     await init_db()
+    # Frontend asset serving is on the API process in the containerized
+    # deployment. Load it before accepting requests so the first browser burst
+    # cannot serialize on filesystem access or the default AnyIO threadpool.
+    await asyncio.to_thread(_load_frontend_asset_cache)
     configure_logging()
     logger.info('Starting application...')
     api_worker_id = f'api:{os.getpid()}'
@@ -298,18 +378,34 @@ def _has_valid_session(request: Request) -> bool:
 
 @app.middleware('http')
 async def namespace_middleware(request: Request, call_next) -> Response:
+    # Namespace selection belongs to API calls. Frontend documents/assets and
+    # health probes are process-global and must not pay for a settings-database
+    # lookup (or compete with API requests for the database/threadpool) during
+    # a browser cold-start burst.
+    path = request.url.path
+    is_api_request = path == '/api' or path.startswith('/api/')
+    is_health_request = path == '/health' or path.startswith('/health/')
+    if not is_api_request and not is_health_request:
+        return await call_next(request)
+    # Authentication and public configuration are control-plane endpoints. They
+    # do not address tenant data, so routing them through namespace discovery
+    # only lets a burst of tenant requests starve login/verification and app
+    # bootstrap. Keep them available while the data plane is busy.
+    if path == '/api/v1/config' or path.startswith('/api/v1/auth/'):
+        return await call_next(request)
+
     raw = request.headers.get('X-Namespace')
     token = set_namespace_context(raw)
     try:
         if not auth_settings.auth_required:
-            await asyncio.to_thread(run_settings_db, register_namespace, raw)
+            await _run_namespace_middleware(run_settings_db, register_namespace, raw)
             return await call_next(request)
         normalized = normalize_namespace(raw)
-        known = await asyncio.to_thread(run_settings_db, _namespace_registered, normalized)
-        if not known and not await asyncio.to_thread(_has_valid_session, request):
+        known: bool = await _run_namespace_middleware(run_settings_db, _namespace_registered, normalized)
+        if not known and not await _run_namespace_middleware(_has_valid_session, request):
             return JSONResponse(status_code=403, content={'detail': f'Unknown namespace: {normalized}'})
         if not known:
-            await asyncio.to_thread(run_settings_db, register_namespace, raw)
+            await _run_namespace_middleware(run_settings_db, register_namespace, raw)
             _KNOWN_NAMESPACES.add(normalized)
         return await call_next(request)
     finally:
@@ -353,10 +449,13 @@ app.include_router(router)
 
 
 @app.get('/', response_model=None)
-async def root() -> FileResponse | dict[str, str]:
+async def root() -> Response | dict[str, str]:
     index_path = frontend_build_dir / 'index.html'
 
     if settings.prod_mode_enabled and index_path.exists():
+        cached = _cached_frontend_response('index.html')
+        if cached is not None:
+            return cached
         return FileResponse(str(index_path))
 
     return {
@@ -439,7 +538,7 @@ async def startup() -> dict[str, str]:
 
 
 @app.get('/{full_path:path}', include_in_schema=False, response_model=None)
-async def serve_static_or_index(full_path: str) -> FileResponse:
+async def serve_static_or_index(full_path: str) -> Response:
     if not settings.prod_mode_enabled:
         logger.info('Frontend build not served (development mode or build missing)')
         raise HTTPException(status_code=404, detail='Frontend build not found')
@@ -447,16 +546,33 @@ async def serve_static_or_index(full_path: str) -> FileResponse:
     if full_path.startswith('api/') or full_path == 'api':
         raise HTTPException(status_code=404, detail='Not Found')
 
-    path = (frontend_build_dir / full_path).resolve()
-    if path.is_relative_to(frontend_build_dir.resolve()) and path.is_file():
-        return FileResponse(str(path))
+    frontend_root = frontend_build_dir.resolve()
+    candidates = [frontend_build_dir / full_path]
+    # adapter-static emits prerendered route documents as extensionless
+    # ``<route>.html`` files. Resolve those before falling back to 200.html;
+    # otherwise direct navigation to an auth route renders the empty SPA shell.
+    if full_path and not full_path.endswith(('/', '.html')):
+        candidates.append(frontend_build_dir / f'{full_path}.html')
+    for candidate in candidates:
+        path = candidate.resolve()
+        if path.is_relative_to(frontend_root) and path.is_file():
+            cached = _cached_frontend_response(path.relative_to(frontend_root).as_posix())
+            if cached is not None:
+                return cached
+            return FileResponse(str(path))
 
     fallback_path = frontend_build_dir / '200.html'
     if fallback_path.exists():
+        cached = _cached_frontend_response('200.html')
+        if cached is not None:
+            return cached
         return FileResponse(str(fallback_path))
 
     index_path = frontend_build_dir / 'index.html'
     if index_path.exists():
+        cached = _cached_frontend_response('index.html')
+        if cached is not None:
+            return cached
         return FileResponse(str(index_path))
 
     raise HTTPException(status_code=404, detail='File not found')

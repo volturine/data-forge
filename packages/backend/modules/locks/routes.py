@@ -1,13 +1,15 @@
+import asyncio
 import logging
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
-from sqlmodel import Session
 
 from backend_core import runtime_ipc
 from backend_core.config import settings
-from backend_core.database import get_db, run_db, run_settings_db
+from backend_core.database import run_db, run_settings_db
 from backend_core.dependencies import get_lock_owner_id, resolve_lock_owner_id
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
@@ -22,11 +24,22 @@ from modules.mcp.router import MCPRouter
 
 logger = logging.getLogger(__name__)
 
+# Every editor websocket performs status, acquire, and heartbeat calls through
+# this executor. It must not serialize behind the API's general request pool
+# when the browser workers open many editors at once.
+_LOCK_EXECUTOR = ThreadPoolExecutor(max_workers=32, thread_name_prefix='lock-runtime')
+
+
+async def _run_lock[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_LOCK_EXECUTOR, partial(function, *args, **kwargs))
+
+
 router = MCPRouter(prefix='/locks', tags=['locks'])
 
 
 async def _get_websocket_owner_id(websocket: WebSocket) -> str | None:
-    return await run_in_threadpool(
+    return await _run_lock(
         run_settings_db,
         resolve_lock_owner_id,
         resolve_websocket_session_token(websocket),
@@ -67,7 +80,7 @@ async def _notify_watchers(resource_type: str, resource_id: str, lock: schemas.L
     if not settings.distributed_runtime_enabled:
         return
     try:
-        await run_in_threadpool(
+        await _run_lock(
             runtime_ipc.notify_api_lock,
             namespace,
             resource_type,
@@ -84,7 +97,7 @@ async def _notify_watchers(resource_type: str, resource_id: str, lock: schemas.L
 
 
 async def _lookup_lock_status(resource_type: str, resource_id: str) -> tuple[schemas.LockStatusResponse | None, bool]:
-    return await run_in_threadpool(run_db, service.lookup_lock_status, resource_type, resource_id)
+    return await _run_lock(run_db, service.lookup_lock_status, resource_type, resource_id)
 
 
 async def _heartbeat_lock(
@@ -97,7 +110,7 @@ async def _heartbeat_lock(
     if owner_id is None:
         raise HTTPException(status_code=401, detail='Lock owner identity is required')
     try:
-        return await run_in_threadpool(
+        return await _run_lock(
             run_db,
             service.heartbeat_lock,
             resource_type,
@@ -119,7 +132,7 @@ async def _acquire_lock(
     if owner_id is None:
         raise HTTPException(status_code=401, detail='Lock owner identity is required')
     try:
-        return await run_in_threadpool(
+        return await _run_lock(
             run_db,
             service.acquire_lock,
             resource_type,
@@ -139,7 +152,7 @@ async def _release_lock(
 ) -> bool:
     if owner_id is None:
         raise HTTPException(status_code=401, detail='Lock owner identity is required')
-    return await run_in_threadpool(
+    return await _run_lock(
         run_db,
         service.release_lock,
         resource_type,
@@ -153,12 +166,11 @@ async def _release_lock(
 @handle_errors(operation='acquire lock', value_error_status=409)
 async def acquire_lock(
     body: schemas.LockAcquireRequest,
-    session: Session = Depends(get_db),
     owner_id: str = Depends(get_lock_owner_id),
 ) -> schemas.LockStatusResponse:
-    lock = await run_in_threadpool(
+    lock = await _run_lock(
+        run_db,
         service.acquire_lock,
-        session,
         body.resource_type,
         body.resource_id,
         owner_id,
@@ -177,9 +189,8 @@ async def acquire_lock(
 async def get_lock_status(
     resource_type: str,
     resource_id: str,
-    session: Session = Depends(get_db),
 ) -> schemas.LockStatusResponse | None:
-    lock, cleaned = await run_in_threadpool(service.lookup_lock_status, session, resource_type, resource_id)
+    lock, cleaned = await _lookup_lock_status(resource_type, resource_id)
     if cleaned:
         await _notify_watchers(resource_type, resource_id, None)
     return lock
@@ -195,12 +206,11 @@ async def heartbeat_lock(
     resource_type: str,
     resource_id: str,
     body: schemas.LockHeartbeatRequest,
-    session: Session = Depends(get_db),
     owner_id: str = Depends(get_lock_owner_id),
 ) -> schemas.LockStatusResponse:
-    lock = await run_in_threadpool(
+    lock = await _run_lock(
+        run_db,
         service.heartbeat_lock,
-        session,
         resource_type,
         resource_id,
         owner_id,
@@ -221,12 +231,11 @@ async def release_lock(
     resource_type: str,
     resource_id: str,
     body: schemas.LockReleaseRequest,
-    session: Session = Depends(get_db),
     owner_id: str = Depends(get_lock_owner_id),
 ) -> schemas.LockReleaseResponse:
-    released = await run_in_threadpool(
+    released = await _run_lock(
+        run_db,
         service.release_lock,
-        session,
         resource_type,
         resource_id,
         owner_id,

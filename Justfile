@@ -306,7 +306,12 @@ test-e2e:
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
         just generate-protocol
     fi
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py --cwd . -- scripts/test_e2e.sh
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py --cwd . \
+        --ignore-pattern 'InvalidCredentialsError: Invalid email or password' -- scripts/test_e2e.sh
+
+test-e2e-concurrency browsers='50':
+    DATAFORGE_SKIP_PROTOCOL_GENERATE=1 E2E_SHARDS=1 PW_E2E_WORKERS=1 \
+        E2E_CONCURRENCY_BROWSERS={{browsers}} PLAYWRIGHT_TEST_FILES=tests/concurrency.test.ts just test-e2e
 
 test-e2e-down:
     scripts/test_e2e.sh stack-down

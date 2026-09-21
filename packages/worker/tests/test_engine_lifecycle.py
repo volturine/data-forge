@@ -100,6 +100,30 @@ def test_process_manager_reaps_idle_shared_engines(monkeypatch) -> None:
         manager.shutdown_all()
 
 
+def test_process_manager_does_not_reap_engine_with_request_reservation(monkeypatch) -> None:
+    """An admitted request protects a reused engine until its runner releases it."""
+    monkeypatch.setattr(settings, "engine_idle_ttl_seconds", 0)
+    monkeypatch.setattr(settings, "engine_idle_reap_interval_seconds", 3600)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    identity = _analysis_identity("analysis-reaper-request-reservation")
+    try:
+        engine = manager.spawn_engine(identity).engine
+        manager.reserve_engine_request(identity)
+
+        manager._reap_idle_engines_once()
+
+        assert manager.get_engine(identity) is engine
+        assert engine.is_process_alive()
+
+        manager.release_engine_request(identity)
+        manager._reap_idle_engines_once()
+
+        assert manager.get_engine(identity) is None
+        assert not engine.is_process_alive()
+    finally:
+        manager.shutdown_all()
+
+
 def test_process_manager_shutdown_stops_real_engine_subprocess() -> None:
     identity = compute_pb2.EngineIdentity(
         scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
@@ -270,6 +294,55 @@ def test_process_manager_defers_while_engine_is_reserved(monkeypatch) -> None:
         second_info = manager.spawn_engine(second_identity)
         assert second_info.engine.is_process_alive()
         assert manager.get_engine(first_identity) is None
+    finally:
+        manager.shutdown_all()
+
+
+def test_lease_loss_keeps_shared_engine_for_reuse() -> None:
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    identity = _analysis_identity("analysis-shared-lease-loss")
+    try:
+        engine = manager.spawn_engine(identity).engine
+        manager.reserve_engine_request(identity)
+        manager.reserve_engine_request(identity)
+
+        assert manager.shutdown_engine_after_request_lease_loss(identity) is False
+        assert manager.get_engine(identity) is engine
+        assert engine.is_process_alive()
+
+        manager.release_engine_request(identity)
+        assert manager.shutdown_engine_after_request_lease_loss(identity) is True
+        assert manager.get_engine(identity) is None
+        assert not engine.is_process_alive()
+    finally:
+        manager.shutdown_all()
+
+
+def test_lease_loss_does_not_shutdown_engine_with_active_job() -> None:
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    identity = _analysis_identity("analysis-active-job-lease-loss")
+    try:
+        engine = manager.spawn_engine(identity).engine
+        manager.reserve_engine_request(identity)
+        engine.current_job_id = "job-1"
+
+        assert manager.shutdown_engine_after_request_lease_loss(identity) is False
+        assert manager.get_engine(identity) is not None
+        assert engine.is_process_alive()
+    finally:
+        manager.shutdown_all()
+
+
+def test_lease_loss_does_not_shutdown_idle_engine_before_reaper(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "engine_idle_ttl_seconds", 60)
+    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    identity = _analysis_identity("analysis-idle-lease-loss")
+    try:
+        engine = manager.spawn_engine(identity).engine
+
+        assert manager.shutdown_engine_after_request_lease_loss(identity) is False
+        assert manager.get_engine(identity) is engine
+        assert engine.is_process_alive()
     finally:
         manager.shutdown_all()
 
@@ -489,6 +562,78 @@ def test_process_manager_warm_pool_replenishes_and_claims(monkeypatch) -> None:
     finally:
         manager.shutdown_all()
         assert all(not w.is_process_alive() for w in created_warm)
+
+
+def test_process_manager_waits_for_initial_warm_pool(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "engine_warm_pool_size", 2)
+    monkeypatch.setattr(settings, "max_concurrent_engines", 2)
+
+    manager = ProcessManager(
+        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        warm_engine_factory=lambda: cast(ComputeEngine, _FakeWarmEngine()),
+    )
+    try:
+        assert manager.wait_for_warm_pool_ready(timeout_seconds=1.0)
+        assert len(manager._warm_pool) == 2
+    finally:
+        manager.shutdown_all()
+
+
+@pytest.mark.asyncio
+async def test_warm_pool_admission_reserves_each_engine_once(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "engine_warm_pool_size", 2)
+    monkeypatch.setattr(settings, "max_concurrent_engines", 2)
+
+    manager = ProcessManager(
+        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        warm_engine_factory=lambda: cast(ComputeEngine, _FakeWarmEngine()),
+    )
+    identities = [_analysis_identity(f"analysis-warm-admission-{index}") for index in range(3)]
+    tasks: list[asyncio.Task[bool]] = []
+    try:
+        assert manager.wait_for_warm_pool_ready(timeout_seconds=1.0)
+        tasks = [asyncio.create_task(manager.await_spawn_admission(identity)) for identity in identities]
+        await asyncio.sleep(0.05)
+
+        # Two warm engines can be admitted, but the third must remain queued
+        # until one of those claims is released. The old boolean warm-pool
+        # check admitted all three before any spawn popped the pool.
+        admitted = [task for task in tasks if task.done() and not task.cancelled()]
+        assert len(admitted) == 2
+        assert all(task.result() is True for task in admitted)
+        with manager._capacity_changed:
+            assert manager._capacity_used_locked() <= settings.max_concurrent_engines
+            assert manager._warm_pool_claims == 2
+
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        for identity, task in zip(identities, tasks, strict=True):
+            if task.done() and not task.cancelled() and task.exception() is None and task.result():
+                manager.release_spawn_admission(identity, owned=True)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        manager.shutdown_all()
+
+
+def test_process_manager_warm_pool_readiness_has_a_bounded_timeout(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "engine_warm_pool_size", 1)
+    monkeypatch.setattr(settings, "max_concurrent_engines", 1)
+
+    manager = ProcessManager(
+        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        warm_engine_factory=lambda: (_ for _ in ()).throw(RuntimeError("engine unavailable")),
+    )
+    try:
+        started = time.monotonic()
+        assert not manager.wait_for_warm_pool_ready(timeout_seconds=0.05)
+        assert time.monotonic() - started < 1.0
+    finally:
+        manager.shutdown_all()
 
 
 def test_process_manager_can_disable_warm_pool(monkeypatch) -> None:

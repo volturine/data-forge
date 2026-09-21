@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 
@@ -71,6 +72,30 @@ def test_provision_stores_secrets_encrypted(session, fake_admin):
     rows = session.exec(select(NamespaceEngineCredential)).all()
     assert len(rows) == 2
     assert all(is_encrypted_secret(row.secret_key_encrypted) for row in rows)
+
+
+def test_provision_roles_runs_independent_object_store_operations_concurrently(session, monkeypatch):
+    class OverlapAdmin(FakeAdmin):
+        def __init__(self):
+            super().__init__()
+            self.active_user_adds = 0
+            self.max_active_user_adds = 0
+
+        async def user_add(self, access_key: str, secret_key: str) -> str:
+            self.active_user_adds += 1
+            self.max_active_user_adds = max(self.max_active_user_adds, self.active_user_adds)
+            try:
+                await asyncio.sleep(0)
+                return await super().user_add(access_key, secret_key)
+            finally:
+                self.active_user_adds -= 1
+
+    admin = OverlapAdmin()
+    monkeypatch.setattr('backend_core.namespace_credentials_service._admin_client', lambda _session: admin)
+
+    provision_namespace_engine_credentials(session, 'tenant-a')
+
+    assert admin.max_active_user_adds == 2
 
 
 def test_provision_is_idempotent(session, fake_admin):

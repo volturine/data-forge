@@ -36,8 +36,10 @@
 
 	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
 		const nextKey = JSON.stringify(request);
-		if (previewRequestKey !== nextKey) {
-			if (previewRequestKey !== null) previewRequestController.abort();
+		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
+			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
+				previewRequestController.abort();
+			}
 			previewRequestKey = nextKey;
 			previewRequestController = new AbortController();
 		}
@@ -128,9 +130,9 @@
 	const previewState = $derived.by(() => {
 		if (!isActiveStep) return 'inactive';
 		if (!analysisPipeline) return 'waiting-for-payload';
+		if (error) return 'error';
 		if (analysisStore.previews.paused) return 'paused';
 		if (isLoading) return 'loading';
-		if (error) return 'error';
 		if (data) return 'ready';
 		return 'idle';
 	});

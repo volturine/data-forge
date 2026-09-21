@@ -11,7 +11,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl.utils.cell import get_column_letter, range_boundaries
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import defer
 from sqlmodel import Session
 
@@ -106,21 +106,72 @@ class InternalPostgresOnboarding:
             matches.append(datasource)
         return matches
 
+    def _onboarded_table_keys(self) -> tuple[set[str], set[tuple[str, str]]]:
+        """Load onboarding metadata once for the internal-table listing.
+
+        The old list implementation called ``matching_datasources`` for every
+        physical table. That method loaded every datasource on each call, so a
+        namespace-heavy test run turned this endpoint into an O(tables ×
+        datasources) query loop. Keep both matching rules, but materialize the
+        two lookup sets once per request.
+        """
+        canonical_names: set[str] = set()
+        query_sources: set[tuple[str, str]] = set()
+        connection_string = self.connection_string()
+        datasources = self.session.execute(select(DataSource)).scalars().all()
+        for datasource in datasources:
+            canonical_names.add(datasource.name)
+            query, datasource_connection = datasource.query_and_connection()
+            if datasource_connection != connection_string:
+                continue
+            source = self.query_schema_and_table(query)
+            if source is not None:
+                query_sources.add(source)
+        return canonical_names, query_sources
+
     def list_tables(self) -> list[InternalPostgresTable]:
         rows: list[InternalPostgresTable] = []
-        for schema_name in sorted(self.inspector.get_schema_names()):
-            if schema_name.startswith('pg_') or schema_name == 'information_schema':
-                continue
-            for table_name in sorted(self.inspector.get_table_names(schema=schema_name)):
-                if table_name in _INTERNAL_POSTGRES_EXCLUDED_TABLES:
-                    continue
-                rows.append(
-                    InternalPostgresTable(
-                        schema_name=schema_name,
-                        table_name=table_name,
-                        is_onboarded=bool(self.matching_datasources(schema_name, table_name)),
+        canonical_names, query_sources = self._onboarded_table_keys()
+        bind = self.session.get_bind()
+        physical_tables: list[tuple[str, str]]
+        if bind.dialect.name == 'postgresql':
+            physical_tables = [
+                (str(schema_name), str(table_name))
+                for schema_name, table_name in self.session.execute(
+                    text(
+                        """
+                    SELECT namespace.nspname, relation.relname
+                    FROM pg_catalog.pg_namespace AS namespace
+                    JOIN pg_catalog.pg_class AS relation
+                      ON relation.relnamespace = namespace.oid
+                    WHERE namespace.nspname NOT LIKE 'pg_%'
+                      AND namespace.nspname <> 'information_schema'
+                      AND relation.relkind IN ('r', 'p', 'f')
+                      AND relation.relname <> :excluded_table
+                    ORDER BY namespace.nspname, relation.relname
+                    """
                     ),
+                    {'excluded_table': next(iter(_INTERNAL_POSTGRES_EXCLUDED_TABLES))},
                 )
+                .tuples()
+                .all()
+            ]
+        else:
+            physical_tables = [
+                (schema_name, table_name)
+                for schema_name in sorted(self.inspector.get_schema_names())
+                if not schema_name.startswith('pg_') and schema_name != 'information_schema'
+                for table_name in sorted(self.inspector.get_table_names(schema=schema_name))
+                if table_name not in _INTERNAL_POSTGRES_EXCLUDED_TABLES
+            ]
+        for schema_name, table_name in physical_tables:
+            rows.append(
+                InternalPostgresTable(
+                    schema_name=schema_name,
+                    table_name=table_name,
+                    is_onboarded=(self.datasource_name_for(schema_name, table_name) in canonical_names or (schema_name, table_name) in query_sources),
+                ),
+            )
         return rows
 
     def table_query(self, schema_name: str, table_name: str) -> str:

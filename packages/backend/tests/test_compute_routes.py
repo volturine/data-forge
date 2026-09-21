@@ -1,3 +1,8 @@
+import asyncio
+import threading
+from typing import Any
+from unittest.mock import Mock, call
+
 import pytest
 from sqlalchemy import select
 
@@ -15,8 +20,83 @@ from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
 from backend_core.sqlmodel_typing import sa
+from dataforge_protocol import compute_pb2
 from main import app
 from modules.compute import executor_client, routes as compute_routes
+
+
+def test_terminal_compute_request_releases_session_connection() -> None:
+    session = Mock()
+    request = object()
+
+    executor_client._detach_and_release_request(session, request)
+
+    assert session.method_calls == [
+        call.expunge(request),
+        call.rollback(),
+    ]
+
+
+def test_validated_compute_request_stages_on_one_thread(monkeypatch) -> None:
+    calls: list[tuple[str, int]] = []
+    sentinel = object()
+
+    def validate(session, pipeline) -> None:
+        del session, pipeline
+        calls.append(('validate', threading.get_ident()))
+
+    def submit(session, **kwargs):
+        del session, kwargs
+        calls.append(('submit', threading.get_ident()))
+        return sentinel
+
+    monkeypatch.setattr(executor_client, '_require_active_pipeline_datasources', validate)
+    monkeypatch.setattr(executor_client, '_submit', submit)
+    stub: Any = object()
+
+    result = asyncio.run(
+        asyncio.to_thread(
+            executor_client._stage_validated_request,
+            stub,
+            pipeline=stub,
+            datasource_ids=(),
+            kind=stub,
+            command=stub,
+            runtime_probe=stub,
+        )
+    )
+
+    assert result is sentinel
+    assert [name for name, _ in calls] == ['validate', 'submit']
+    assert calls[0][1] == calls[1][1]
+
+
+def test_validated_direct_datasource_request_checks_deletion_fence(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def validate(session, datasource_id, *, for_update):
+        del session
+        calls.append(f'{datasource_id}:{for_update}')
+
+    def submit(session, **kwargs):
+        del session, kwargs
+        calls.append('submit')
+        return object()
+
+    monkeypatch.setattr(datasource_delete_service, 'get_active_datasource', validate)
+    monkeypatch.setattr(executor_client, '_submit', submit)
+    stub: Any = object()
+
+    executor_client._stage_validated_request(
+        stub,
+        pipeline=None,
+        datasource_ids=('datasource-2', 'datasource-1', 'datasource-1'),
+        kind=stub,
+        command=stub,
+        runtime_probe=stub,
+    )
+
+    assert calls == ['datasource-1:True', 'datasource-2:True', 'submit']
 
 
 class _StubEngine:
@@ -199,6 +279,22 @@ def test_shutdown_engine_returns_not_found_for_unknown_identity(client) -> None:
 
     assert response.status_code == 404
     assert manager.shutdown_calls == []
+
+
+def test_shutdown_engine_queues_worker_shutdown_without_waiting(client, monkeypatch) -> None:
+    shutdown_calls: list[compute_pb2.EngineIdentity] = []
+
+    def request_shutdown(session, *, identity, runtime_probe) -> None:
+        del session, runtime_probe
+        shutdown_calls.append(identity)
+
+    monkeypatch.setattr(executor_client, 'request_engine_shutdown', request_shutdown)
+
+    response = client.delete('/api/v1/compute/engine/build/build-1')
+
+    assert response.status_code == 204
+    assert len(shutdown_calls) == 1
+    assert shutdown_calls[0].build_id == 'build-1'
 
 
 def test_get_engine_defaults_resolves_auto_values(client, monkeypatch) -> None:

@@ -160,6 +160,10 @@ class PipelineExecutionError(PipelineError):
         super().__init__(message=message, error_code='PIPELINE_EXECUTION_ERROR', details=details)
 
 
+class PipelineExecutionCancelledError(PipelineExecutionError):
+    """A compute request ended because its engine was intentionally stopped."""
+
+
 # Compute/Engine Exceptions
 class ComputeError(AppError):
     pass

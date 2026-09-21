@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -125,6 +126,138 @@ def test_engine_job_retention_is_bounded(monkeypatch) -> None:
         assert "job-104" in jobs._jobs
     finally:
         jobs.shutdown()
+
+
+def test_engine_jobs_cancel_queued_job_without_stopping_running_job(monkeypatch) -> None:
+    running_started = threading.Event()
+    release_running = threading.Event()
+
+    def execute(*, job_id: str, **_kwargs):
+        if job_id == "running":
+            running_started.set()
+            assert release_running.wait(timeout=2)
+        return EngineResult(job_id=job_id, data={}, error=None)
+
+    monkeypatch.setattr(engine_server, "_execute_job", execute)
+    jobs = _EngineJobs()
+    try:
+        running = jobs.submit(job_id="running", kind="preview", payload={})
+        assert running_started.wait(timeout=1)
+        queued = jobs.submit(job_id="queued", kind="preview", payload={})
+
+        assert jobs.cancel("queued")
+        with queued.condition:
+            assert queued.condition.wait_for(lambda: queued.done, timeout=1)
+            assert queued.result is not None
+            assert queued.result.error_kind == "job_cancelled"
+
+        release_running.set()
+        with running.condition:
+            assert running.condition.wait_for(lambda: running.done, timeout=1)
+            assert running.result is not None
+            assert running.result.error is None
+    finally:
+        release_running.set()
+        jobs.shutdown()
+
+
+def test_engine_jobs_run_independent_requests_concurrently(monkeypatch) -> None:
+    entered = 0
+    entered_lock = threading.Lock()
+    both_entered = threading.Event()
+    release = threading.Event()
+
+    def execute(*, job_id: str, **_kwargs):
+        nonlocal entered
+        with entered_lock:
+            entered += 1
+            if entered == 2:
+                both_entered.set()
+        assert release.wait(timeout=2)
+        return EngineResult(job_id=job_id, data={}, error=None)
+
+    monkeypatch.setattr(engine_server, "_execute_job", execute)
+    jobs = _EngineJobs(max_workers=2)
+    try:
+        first = jobs.submit(job_id="first", kind="preview", payload={})
+        second = jobs.submit(job_id="second", kind="preview", payload={})
+        assert both_entered.wait(timeout=1), "the second independent job was queued behind the first"
+        release.set()
+        for state in (first, second):
+            with state.condition:
+                assert state.condition.wait_for(lambda state=state: state.done, timeout=1)
+                assert state.result is not None
+                assert state.result.error is None
+    finally:
+        release.set()
+        jobs.shutdown()
+
+
+def test_engine_rpc_control_calls_are_not_starved_by_watch_streams(monkeypatch) -> None:
+    release_jobs = threading.Event()
+
+    def execute(*, job_id: str, **_kwargs):
+        assert release_jobs.wait(timeout=5)
+        return EngineResult(job_id=job_id, data={}, error=None)
+
+    monkeypatch.setattr(engine_server, "_execute_job", execute)
+    server = grpc.server(
+        ThreadPoolExecutor(max_workers=engine_server._engine_rpc_worker_count(4)),
+    )
+    engine_runtime_pb2_grpc.add_PolarsEngineServiceServicer_to_server(
+        PolarsEngineServicer(
+            engine_identity="shared-preview",
+            application_version="test",
+            token="token",
+            on_shutdown=lambda: None,
+            engine_job_concurrency=4,
+        ),
+        server,
+    )
+    port = server.add_insecure_port("127.0.0.1:0")
+    server.start()
+    channel = grpc.insecure_channel(f"127.0.0.1:{port}")
+    stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(channel)
+    metadata = (("x-engine-token", "token"),)
+    watch_pool = ThreadPoolExecutor(max_workers=8)
+    watch_futures = []
+
+    try:
+        for index in range(8):
+            stub.SubmitJob(
+                engine_runtime_pb2.EngineSubmitJobRequest(
+                    protocol_version=ENGINE_PROTOCOL_VERSION,
+                    job_id=f"burst-{index}",
+                    kind="preview",
+                    payload_json=b"{}",
+                ),
+                metadata=metadata,
+            )
+
+        watch_futures = [
+            watch_pool.submit(
+                lambda job_id=job_id: list(
+                    stub.WatchJob(
+                        engine_runtime_pb2.EngineWatchJobRequest(job_id=job_id),
+                        metadata=metadata,
+                    )
+                )
+            )
+            for job_id in (f"burst-{index}" for index in range(8))
+        ]
+
+        # With the old eight-thread server pool these streams consumed every
+        # handler and this call hit its deadline. The production-sized pool
+        # must continue serving liveness/control traffic independently.
+        health = stub.Health(engine_runtime_pb2.EngineHealthRequest(), metadata=metadata, timeout=2)
+        assert health.ready
+    finally:
+        release_jobs.set()
+        for future in watch_futures:
+            future.result(timeout=5)
+        watch_pool.shutdown(wait=True)
+        channel.close()
+        server.stop(grace=0)
 
 
 def test_engine_server_warm_mode_and_initialize(monkeypatch) -> None:

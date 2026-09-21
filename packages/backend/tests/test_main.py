@@ -1,9 +1,11 @@
 import pytest
+from fastapi.responses import FileResponse
 
 from backend_core import runtime_workers_service as runtime_worker_service
 from backend_core.database import run_settings_db
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from main import (
+    _configure_sync_thread_capacity,
     _guard_runtime_workers,
     _resolve_uvicorn_limit_concurrency,
     _resolve_uvicorn_workers,
@@ -11,6 +13,23 @@ from main import (
 
 
 class TestUvicornSettings:
+    @pytest.mark.asyncio
+    async def test_sync_thread_capacity_matches_database_budget(self, monkeypatch) -> None:
+        import anyio.to_thread
+
+        from backend_core.config import settings
+
+        monkeypatch.setattr(settings, 'worker_connections', 64, raising=False)
+        monkeypatch.setattr(settings, 'database_pool_size', 32, raising=False)
+        monkeypatch.setattr(settings, 'database_max_overflow', 16, raising=False)
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        original = limiter.total_tokens
+        try:
+            limiter.total_tokens = 40
+            assert _configure_sync_thread_capacity() == 48
+        finally:
+            limiter.total_tokens = original
+
     def test_resolve_uvicorn_workers_uses_auto_for_non_positive(self, monkeypatch) -> None:
         from backend_core.config import settings
 
@@ -89,3 +108,34 @@ class TestUvicornSettings:
 
         assert stopped is not None
         assert stopped.stopped_at is not None
+
+    @pytest.mark.asyncio
+    async def test_static_route_serves_prerendered_extensionless_document(self, monkeypatch, tmp_path) -> None:
+        import main
+
+        (tmp_path / 'login.html').write_text('<h1>Sign in</h1>', encoding='utf8')
+        (tmp_path / '200.html').write_text('<script>spa fallback</script>', encoding='utf8')
+        monkeypatch.setattr(main.settings, 'prod_mode_enabled', True, raising=False)
+        monkeypatch.setattr(main, 'frontend_build_dir', tmp_path)
+
+        response = await main.serve_static_or_index('login')
+
+        assert isinstance(response, FileResponse)
+        assert response.path == str(tmp_path / 'login.html')
+
+    @pytest.mark.asyncio
+    async def test_static_route_uses_loaded_frontend_asset_cache(self, monkeypatch, tmp_path) -> None:
+        import main
+
+        asset = tmp_path / '_app' / 'immutable' / 'entry.js'
+        asset.parent.mkdir(parents=True)
+        asset.write_bytes(b'console.log("cached");')
+        monkeypatch.setattr(main.settings, 'prod_mode_enabled', True, raising=False)
+        monkeypatch.setattr(main, 'frontend_build_dir', tmp_path)
+
+        main._load_frontend_asset_cache()
+        response = await main.serve_static_or_index('_app/immutable/entry.js')
+
+        assert not isinstance(response, FileResponse)
+        assert response.body == b'console.log("cached");'
+        assert response.headers['cache-control'] == 'public, max-age=31536000, immutable'

@@ -26,11 +26,13 @@ export type AnalysisDetailResult = AnalysisDetail | { notModified: true };
 export const createAnalysis = (data: AnalysisCreate): ResultAsync<Analysis, ApiError> =>
 	apiRequest<Analysis>('/v1/analysis', { method: 'POST', body: JSON.stringify(data) });
 
-export const listAnalyses = (): ResultAsync<AnalysisGalleryItem[], ApiError> =>
-	apiRequest<AnalysisGalleryItem[]>('/v1/analysis');
+export const listAnalyses = (options?: RequestInit): ResultAsync<AnalysisGalleryItem[], ApiError> =>
+	apiRequest<AnalysisGalleryItem[]>('/v1/analysis', options);
 
-export const listFavoriteAnalyses = (): ResultAsync<AnalysisGalleryItem[], ApiError> =>
-	apiRequest<AnalysisGalleryItem[]>('/v1/analysis/favorites');
+export const listFavoriteAnalyses = (
+	options?: RequestInit
+): ResultAsync<AnalysisGalleryItem[], ApiError> =>
+	apiRequest<AnalysisGalleryItem[]>('/v1/analysis/favorites', options);
 
 export const listAnalysisTemplates = (): ResultAsync<AnalysisTemplateSummary[], ApiError> =>
 	apiRequest<AnalysisTemplateSummary[]>('/v1/analysis/templates');
@@ -141,13 +143,10 @@ export const deleteAnalysisVersion = (
 		headers: { 'If-Match': revision }
 	});
 
-export const deleteAnalysis = (id: string): ResultAsync<void, ApiError> =>
-	getAnalysisWithHeaders(id).andThen((result) => {
-		if ('notModified' in result) return errAsync(missingAnalysisRevision());
-		return apiRequest<void>(`/v1/analysis/${id}`, {
-			method: 'DELETE',
-			headers: { 'If-Match': result.version }
-		});
+export const deleteAnalysis = (id: string, revision: number): ResultAsync<void, ApiError> =>
+	apiRequest<void>(`/v1/analysis/${id}`, {
+		method: 'DELETE',
+		headers: { 'If-Match': String(revision) }
 	});
 
 export type AnalysisFavoriteStatus = {

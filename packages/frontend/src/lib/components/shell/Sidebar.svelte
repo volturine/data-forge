@@ -63,8 +63,8 @@
 	const analysesQuery = createQuery(() => ({
 		queryKey: ['favorite-analyses', namespace],
 		enabled: namespace.trim().length > 0,
-		queryFn: async () => {
-			const result = await listFavoriteAnalyses();
+		queryFn: async ({ signal }) => {
+			const result = await listFavoriteAnalyses({ signal });
 			if (result.isErr()) throw new Error(result.error.message);
 			favoriteStore.sync(result.value);
 			return result.value;

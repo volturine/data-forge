@@ -5,11 +5,17 @@ import logging
 
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_manager import ProcessManager
+from runtime.config import settings
 from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
 
 logger = logging.getLogger(__name__)
 
-_DATASOURCE_DELETE_POLL_SECONDS = 0.5
+# Deletion is a recovery sweep, not a request path. Keep it bounded so a
+# worker with no pending deletes does not scan every namespace twice a second.
+_DATASOURCE_DELETE_POLL_SECONDS = max(
+    5.0,
+    float(settings.runtime_reconciliation_poll_interval_seconds),
+)
 
 
 def worker_runtime_client() -> WorkerRuntimeClient:

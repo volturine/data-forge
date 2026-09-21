@@ -172,17 +172,24 @@
 				}
 				await appLifecycle.releaseNamespace();
 			},
-			async afterCommit() {
+			afterCommit() {
 				const nextUrl = new URL(page.url);
 				if (nextUrl.pathname === '/datasources') {
 					nextUrl.searchParams.delete('id');
 				}
+				// The namespace value is already committed and all old namespace
+				// services have been reset. Activate the new scope synchronously so
+				// the shell reflects the selection immediately; waiting for SvelteKit
+				// to invalidate page data here leaves the namespace control disabled
+				// while unrelated page queries drain.
 				appLifecycle.activateNamespace();
-				await goto(resolve(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}` as '/'), {
-					invalidateAll: true,
-					replaceState: true
-				});
 				bindNamespaceServices();
+				void goto(resolve(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}` as '/'), {
+					invalidateAll: false,
+					replaceState: true
+				}).catch((error: unknown) => {
+					namespaceError = error instanceof Error ? error.message : String(error);
+				});
 			}
 		});
 	}

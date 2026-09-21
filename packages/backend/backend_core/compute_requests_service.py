@@ -193,21 +193,31 @@ def _retire_request(session: Session, request: ComputeRequest, *, reason: str, n
     runtime_outbox_service.enqueue_compute_response_notification(session, request_id=request.id)
 
 
-def cancel_queued_request(session: Session, request_id: str, *, reason: str) -> ComputeRequest | None:
-    """Retire a request whose HTTP client went away before execution started.
-
-    A running request is deliberately left alone: shared engines may be
-    executing other users' work and the durable worker has no safe way to
-    cancel one job without taking that shared engine down. Queued work can be
-    retired atomically, which is the important boundary for abandoned page
-    previews because it prevents them from occupying the compute queue later.
-    """
+def _cancel_request(
+    session: Session,
+    request_id: str,
+    *,
+    reason: str,
+    allow_running_engine_request: bool,
+) -> ComputeRequest | None:
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
-    statement = select(ComputeRequest).where(table.c.id == request_id).where(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED).with_for_update()
+    active_statuses = [enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED]
+    if allow_running_engine_request:
+        active_statuses.append(enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
+    statement = select(ComputeRequest).where(table.c.id == request_id).where(table.c.status.in_(active_statuses)).with_for_update()
     request = session.execute(statement).scalars().first()
     if request is None:
         session.rollback()
         return None
+
+    if request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING and allow_running_engine_request:
+        envelope = command_envelope_for_request(request)
+        if _engine_identity_for_command(envelope.command) is None:
+            # Datasource ingestion/publication is not tied to a killable engine.
+            # Let it finish its publication claim instead of creating orphaned
+            # source objects when a browser closes the upload request.
+            session.rollback()
+            return None
 
     _retire_request(session, request, reason=reason, now=_utcnow())
     session.commit()
@@ -223,6 +233,33 @@ def cancel_queued_request(session: Session, request_id: str, *, reason: str) -> 
         attempt=request.attempts,
     )
     return request
+
+
+def cancel_queued_request(session: Session, request_id: str, *, reason: str) -> ComputeRequest | None:
+    """Retire a request whose HTTP client went away before execution started."""
+    return _cancel_request(
+        session,
+        request_id,
+        reason=reason,
+        allow_running_engine_request=False,
+    )
+
+
+def cancel_disconnected_request(session: Session, request_id: str, *, reason: str) -> ComputeRequest | None:
+    """Retire abandoned queue work and running requests backed by an engine.
+
+    A running datasource request must finish because it may be in the middle
+    of publishing a new datasource. Engine-backed work is different: its
+    worker can observe the retired lease and stop the engine, so a preview
+    abandoned by a navigated-away page cannot occupy that engine until the
+    normal five-minute lease expires.
+    """
+    return _cancel_request(
+        session,
+        request_id,
+        reason=reason,
+        allow_running_engine_request=True,
+    )
 
 
 def cancel_active_requests_for_engine(
@@ -411,17 +448,21 @@ def claim_next_request(
         return None
     session.commit()
     claimed = session.get(ComputeRequest, row.id)
-    if claimed is not None:
-        record_lease_transition(
-            kind='compute_request',
-            transition='reclaim' if previous_owner is not None else 'claim',
-            outcome=TransitionOutcome.APPLIED,
-            entity_id=claimed.id,
-            owner_id=worker_id,
-            claim_token=claim_token,
-            generation=claimed.lease_generation,
-            attempt=claimed.attempts,
-        )
+    # A disconnect/engine shutdown can retire the row after the claim commit
+    # and before the gRPC handler serializes it.  Do not turn that harmless
+    # race into a worker-loop error or return a lease-less claim.
+    if claimed is None or claimed.status != enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING or claimed.claim_token is None or claimed.lease_expires_at is None:
+        return None
+    record_lease_transition(
+        kind='compute_request',
+        transition='reclaim' if previous_owner is not None else 'claim',
+        outcome=TransitionOutcome.APPLIED,
+        entity_id=claimed.id,
+        owner_id=worker_id,
+        claim_token=claim_token,
+        generation=claimed.lease_generation,
+        attempt=claimed.attempts,
+    )
     return claimed
 
 

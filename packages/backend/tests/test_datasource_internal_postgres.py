@@ -54,6 +54,45 @@ def test_list_internal_postgres_tables_reports_application_tables(client, test_d
     assert row['is_onboarded'] is False
 
 
+def test_list_internal_postgres_tables_materializes_onboarding_metadata_once(test_db_session, monkeypatch) -> None:
+    test_db_session.add(
+        DataSource(
+            id='internal-canonical-analyses',
+            name='internal.default.analyses',
+            source_type='iceberg',
+            config={},
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.add(
+        DataSource(
+            id='internal-query-analyses',
+            name='legacy-analysis-source',
+            source_type='database',
+            config={
+                'connection_string': service.internal_postgres_connection_string(),
+                'query': 'SELECT * FROM "default"."analyses"',
+            },
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    onboarding = service.InternalPostgresOnboarding(test_db_session)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError('list_tables must not scan datasources per table')
+
+    monkeypatch.setattr(onboarding, 'matching_datasources', fail_if_called)
+
+    rows = onboarding.list_tables()
+
+    row = next(item for item in rows if item.schema_name == 'default' and item.table_name == 'analyses')
+    assert row.is_onboarded is True
+
+
 def test_internal_postgres_display_names_strip_internal_namespace_storage_prefix(test_db_session) -> None:
     namespace_public = DataSource(
         id='namespace-public-ds',

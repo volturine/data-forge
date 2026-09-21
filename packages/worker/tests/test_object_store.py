@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Lock
+
 import pytest
 
 from runtime import object_store
@@ -66,3 +69,35 @@ def test_presigned_put_uses_engine_visible_endpoint_and_signed_content_type(monk
         },
         "expires": 3600,
     }
+
+
+def test_bucket_readiness_does_not_serialize_different_buckets(monkeypatch) -> None:
+    started = Barrier(2)
+    state_lock = Lock()
+    active = 0
+    max_active = 0
+    calls: list[str] = []
+
+    class Client:
+        def head_bucket(self, *, Bucket):
+            nonlocal active, max_active
+            with state_lock:
+                active += 1
+                max_active = max(max_active, active)
+                calls.append(Bucket)
+            try:
+                started.wait(timeout=1)
+            finally:
+                with state_lock:
+                    active -= 1
+
+    client = Client()
+    monkeypatch.setattr(object_store, "_client", lambda: client)
+    object_store.reset_object_store_client()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(object_store.ensure_bucket_exists, ("alpha", "bravo")))
+
+    assert results == ["alpha", "bravo"]
+    assert sorted(calls) == ["alpha", "bravo"]
+    assert max_active == 2

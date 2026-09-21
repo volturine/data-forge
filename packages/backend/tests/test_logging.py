@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator, Iterator
 
 import psycopg
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from backend_core.logging import DatabaseLogKind, DatabaseLogWriter, RequestLoggingMiddleware, redact_logged_body
 from tests.http_client import TestClient
@@ -129,6 +129,21 @@ class TestRequestLoggingMiddleware:
         assert len(writer.payloads) == 1
         assert writer.payloads[0]['path'] == '/stream'
         assert writer.payloads[0]['chunk_index'] == 0
+
+    def test_frontend_asset_body_is_not_captured(self) -> None:
+        app = FastAPI()
+        writer = _InMemoryWriter()
+        app.add_middleware(RequestLoggingMiddleware, writer=writer, max_body_size=0)
+
+        @app.get('/_app/immutable/chunks/app.js')
+        async def asset() -> Response:
+            return Response(content=b'javascript' * 1000, media_type='text/javascript')
+
+        with TestClient(app) as client:
+            response = client.get('/_app/immutable/chunks/app.js')
+
+        assert response.status_code == 200
+        assert writer.payloads[0]['response_json'] is None
 
     def test_handler_can_observe_disconnect_after_logged_body_replay(self) -> None:
         writer = _InMemoryWriter()

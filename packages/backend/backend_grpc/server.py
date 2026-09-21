@@ -7,6 +7,7 @@ import logging
 import threading
 import uuid
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -156,6 +157,16 @@ async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
 
 _THREAD_LOCAL = threading.local()
 
+# Runtime workers use several independent claim/lease lanes.  Running their
+# synchronous database handlers through asyncio's default executor lets claim
+# traffic consume the same threads used by API background work and heartbeats.
+# Keep internal RPC work on its own pool, sized to the configured database
+# connection budget plus headroom for heartbeat/control calls.
+_INTERNAL_RPC_EXECUTOR = ThreadPoolExecutor(
+    max_workers=max(64, settings.database_pool_size + settings.database_max_overflow),
+    thread_name_prefix='internal-runtime-rpc',
+)
+
 
 def _thread_event_loop() -> asyncio.AbstractEventLoop:
     """One reusable event loop per worker thread instead of a fresh loop per RPC."""
@@ -182,7 +193,8 @@ def _run_async_handler_in_thread(func):
             return _thread_event_loop().run_until_complete(func(self, request, context))
 
         try:
-            return await asyncio.to_thread(_run)
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(_INTERNAL_RPC_EXECUTOR, _run)
         except _ThreadedRpcAbort as exc:
             await context.abort(exc.status, exc.details)
 
@@ -641,6 +653,11 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         if request.protocol_version != _BUILD_JOB_PROTOCOL_VERSION:
             raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute worker protocol version is incompatible')
         reclaimable_owner_ids = run_settings_db(runtime_worker_service.reclaimable_worker_ids, kind=RuntimeWorkerKind.BUILD_MANAGER)
+        # A worker must never reclaim its own leases merely because its
+        # heartbeat record is temporarily stale.  The manager is still alive
+        # if it can issue this claim, and self-reclamation races every active
+        # request with a new attempt and invalidates its lease identity.
+        reclaimable_owner_ids.discard(request.worker_id)
         namespaces = run_settings_db(list_runtime_namespaces)
         if namespaces:
             offset = request.compute_namespace_offset % len(namespaces)

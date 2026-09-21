@@ -6,6 +6,7 @@
 		AnalysisTabNotificationConfig,
 		AnalysisTabOutput
 	} from '$lib/types/analysis';
+	import type { DataSource } from '$lib/types/datasource';
 	import type { Subscriber } from '$lib/api/settings';
 	import { getSubscribers } from '$lib/api/settings';
 	import { cancelBuild } from '$lib/api/compute';
@@ -154,8 +155,8 @@
 	const hasReservedOutputId = $derived(isUuid(outputDatasourceId));
 	const datasourcesMembershipQuery = createQuery(() => ({
 		queryKey: ['datasources', ns.value, true],
-		queryFn: async () => {
-			const result = await listDatasources(true, { cache: 'no-store' });
+		queryFn: async ({ signal }) => {
+			const result = await listDatasources(true, { cache: 'no-store', signal });
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -172,7 +173,7 @@
 	const canUseOutput = $derived(hasReservedOutputId && outputExists);
 
 	const outputDatasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', outputDatasourceId],
+		queryKey: ['datasource', ns.value, outputDatasourceId],
 		queryFn: async () => {
 			if (!outputDatasourceId) return null;
 			const result = await getDatasource(outputDatasourceId);
@@ -422,22 +423,28 @@
 	async function toggleHidden() {
 		if (readOnly) return;
 		if (!outputDatasourceId || toggling) return;
-		const current =
-			outputDatasourceQuery.data ?? (await outputDatasourceQuery.refetch()).data ?? null;
-		if (!current) {
-			error = 'Build this output before changing visibility.';
-			return;
-		}
-		const nextHidden = !current.is_hidden;
+		const currentHidden = hidden;
+		const nextHidden = !currentHidden;
 		hiddenOverride = nextHidden;
 		hiddenOverrideId = outputDatasourceId;
 		toggling = true;
 		const result = await updateDatasource(outputDatasourceId, { is_hidden: nextHidden });
 		result.match(
 			(datasource) => {
-				queryClient.setQueryData(['datasource', outputDatasourceId], datasource);
-				hiddenOverride = null;
-				void queryClient.invalidateQueries({ queryKey: ['datasources'] });
+				queryClient.setQueryData(['datasource', ns.value, outputDatasourceId], datasource);
+				queryClient.setQueriesData<DataSource[]>(
+					{ queryKey: ['datasources', ns.value] },
+					(currentList) =>
+						currentList?.map((item) =>
+							item.id === datasource.id ? { ...item, ...datasource } : item
+						)
+				);
+				// Keep the committed value as the immediate source of truth until the
+				// membership query observes the same response. A second click can
+				// otherwise read the old list value and send the first mutation again,
+				// leaving the button visibly stuck on "visible".
+				hiddenOverride = datasource.is_hidden;
+				hiddenOverrideId = datasource.id;
 				toggling = false;
 			},
 			(err) => {
@@ -450,6 +457,29 @@
 
 	function unpausePreviews(): void {
 		analysisStore.previews.paused = false;
+	}
+
+	async function reconcileBuiltOutput(outputId: string, namespace: string): Promise<void> {
+		// The membership query may have started before the build published its
+		// datasource row. Cancel that older request before installing the fresh
+		// result, otherwise its late response can erase the newly visible output.
+		await queryClient.cancelQueries({
+			queryKey: ['datasources', namespace, true],
+			exact: true
+		});
+		const result = await listDatasources(true, { cache: 'no-store' });
+		if (result.isErr() || ns.value !== namespace) return;
+
+		const allDatasources = result.value;
+		const output = allDatasources.find((datasource) => datasource.id === outputId);
+		queryClient.setQueryData(['datasources', namespace, true], allDatasources);
+		queryClient.setQueryData(
+			['datasources', namespace, false],
+			allDatasources.filter((datasource) => !datasource.is_hidden)
+		);
+		if (output) {
+			queryClient.setQueryData(['datasource', namespace, outputId], output);
+		}
 	}
 
 	async function handleManualBuild() {
@@ -500,8 +530,7 @@
 		buildStore.onSettled = (status) => {
 			unpausePreviews();
 			if (status !== 'completed' || !outputDatasourceId) return;
-			void queryClient.invalidateQueries({ queryKey: ['datasources'] });
-			void queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
+			void reconcileBuiltOutput(outputDatasourceId, ns.value);
 		};
 		buildStore.start({
 			analysis_pipeline: pipeline,

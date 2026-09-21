@@ -14,6 +14,7 @@ import {
 	gotoAnalysesGallery,
 	gotoUdfLibrary,
 	gotoMonitoringTab,
+	readyTimeoutMs,
 	waitForDatasourceList,
 	waitForLayoutReady
 } from './readiness.js';
@@ -216,6 +217,10 @@ async function responseFailure(response: import('@playwright/test').APIResponse)
 }
 
 async function deleteDatasourceById(page: Page, name: string, datasourceId: string): Promise<void> {
+	// DELETE marks the row pending and the worker finalizes it after its
+	// preview engine drains. Stop the exact owned engine first so teardown
+	// cannot leave a running preview holding the datasource open.
+	await shutdownEngineForCleanup(page, 'datasource_preview', datasourceId);
 	const response = await page
 		.context()
 		.request.delete(`/api/v1/datasource/${encodeURIComponent(datasourceId)}`, {
@@ -247,6 +252,10 @@ async function deleteAnalysisById(page: Page, name: string, analysisId: string):
 	if (!version) {
 		throw new Error(`Analysis ${name} (${analysisId}) did not return X-Analysis-Version`);
 	}
+	// Analysis DELETE is the single owner of analysis-engine teardown. The API
+	// queues the exact shutdown after the row is deleted; issuing a second
+	// shutdown here races the request worker and can cancel an unrelated
+	// request that reused the same engine identity.
 	const response = await page
 		.context()
 		.request.delete(`/api/v1/analysis/${encodeURIComponent(analysisId)}`, {
@@ -431,12 +440,12 @@ async function deleteAnalysisViaUIOnPage(
 		return;
 	}
 	if (!options?.skipNavigation) {
-		await gotoAnalysesGallery(page, 5_000);
+		await gotoAnalysesGallery(page, readyTimeoutMs());
 	}
 	await closeFloatingPanels(page);
 	const card = page.locator(`[data-analysis-card="${name}"]`);
 	try {
-		await card.waitFor({ state: 'visible', timeout: 5_000 });
+		await card.waitFor({ state: 'visible', timeout: readyTimeoutMs() });
 	} catch (error) {
 		const knownId = findAnalysisIdByName(name);
 		if (knownId) {
@@ -445,17 +454,12 @@ async function deleteAnalysisViaUIOnPage(
 		return;
 	}
 	const analysisId = await resolveAnalysisIdFromCard(card, name);
-	// Free the exact engine identity before deleting the analysis card.
-	// Analysis DELETE also queues durable shutdown as a backstop.
-	if (analysisId) {
-		await freeWarmEngines(page, { analysisIds: [analysisId] });
-	}
 	const deleteResponse = analysisId
 		? page.waitForResponse(
 				(response) =>
 					response.request().method() === 'DELETE' &&
 					response.url().includes(`/api/v1/analysis/${analysisId}`),
-				{ timeout: 5_000 }
+				{ timeout: readyTimeoutMs() }
 			)
 		: Promise.resolve(null);
 	await card.getByRole('button', { name: /Delete analysis/ }).click({ timeout: 5_000 });
@@ -473,7 +477,7 @@ async function deleteAnalysisViaUIOnPage(
 	if (await deleteError.isVisible().catch(() => false)) {
 		throw new Error((await deleteError.textContent()) ?? `Failed to delete analysis ${name}`);
 	}
-	await expect(card).toBeHidden({ timeout: 5_000 });
+	await expect(card).toBeHidden({ timeout: readyTimeoutMs() });
 	if (analysisId) unregisterAnalysis(analysisId);
 }
 
@@ -527,13 +531,19 @@ export async function deleteUdfViaUI(
 	});
 }
 
-async function deleteScheduleViaUIOnPage(page: Page, cronOrName: string): Promise<void> {
+async function deleteScheduleViaUIOnPage(
+	page: Page,
+	cronOrName: string,
+	options?: { id?: string }
+): Promise<void> {
 	await gotoMonitoringTab(page, 'schedules', 1_500);
-	const row = page
-		.locator('tr')
-		.filter({ has: page.getByLabel('Delete schedule') })
-		.filter({ hasText: cronOrName })
-		.first();
+	const row = options?.id
+		? page.locator(`[data-schedule-row="${options.id}"]`)
+		: page
+				.locator('tr')
+				.filter({ has: page.getByLabel('Delete schedule') })
+				.filter({ hasText: cronOrName })
+				.first();
 	await row.waitFor({ state: 'visible', timeout: 1_500 });
 	await row.getByLabel('Delete schedule').click({ timeout: 5_000 });
 	const dialog = confirmDialog(page, 'Delete Schedule');
@@ -543,10 +553,28 @@ async function deleteScheduleViaUIOnPage(page: Page, cronOrName: string): Promis
 		.catch(() => undefined);
 }
 
-export async function deleteScheduleViaUI(page: Page, cronOrName: string): Promise<void> {
+export async function deleteScheduleViaUI(
+	page: Page,
+	cronOrName: string,
+	options?: { id?: string }
+): Promise<void> {
 	await runCleanupWithFallback(page, 'deleteScheduleViaUI', cronOrName, async (cleanupPage) => {
-		await deleteScheduleViaUIOnPage(cleanupPage, cronOrName);
+		await deleteScheduleViaUIOnPage(cleanupPage, cronOrName, options);
 	});
+}
+
+/** Delete exactly the schedule created by the current test. */
+export async function deleteScheduleById(page: Page, scheduleId: string): Promise<void> {
+	const response = await page
+		.context()
+		.request.delete(`/api/v1/schedules/${encodeURIComponent(scheduleId)}`, {
+			headers: cleanupHeaders()
+		});
+	if (!response.ok() && response.status() !== 404) {
+		throw new Error(
+			`Failed to delete schedule ${scheduleId}: ${(await responseFailure(response)).message}`
+		);
+	}
 }
 
 async function deleteHealthCheckViaUIOnPage(page: Page, name: string): Promise<void> {
@@ -566,4 +594,18 @@ export async function deleteHealthCheckViaUI(page: Page, name: string): Promise<
 	await runCleanupWithFallback(page, 'deleteHealthCheckViaUI', name, async (cleanupPage) => {
 		await deleteHealthCheckViaUIOnPage(cleanupPage, name);
 	});
+}
+
+/** Delete exactly the health check created by the current test. */
+export async function deleteHealthCheckById(page: Page, healthCheckId: string): Promise<void> {
+	const response = await page
+		.context()
+		.request.delete(`/api/v1/healthchecks/${encodeURIComponent(healthCheckId)}`, {
+			headers: cleanupHeaders()
+		});
+	if (!response.ok() && response.status() !== 404) {
+		throw new Error(
+			`Failed to delete health check ${healthCheckId}: ${(await responseFailure(response)).message}`
+		);
+	}
 }

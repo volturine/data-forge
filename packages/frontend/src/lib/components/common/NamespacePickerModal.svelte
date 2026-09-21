@@ -74,15 +74,26 @@
 		if (selecting) return;
 		selecting = true;
 		selectionError = null;
-		// The selection starts an application-wide namespace transition. Do not
-		// keep an overlay open while provisioning and route invalidation finish.
-		onClose();
+		let selection: void | Promise<void>;
 		try {
-			await onSelect(value);
-			searchQuery = '';
+			selection = onSelect(value);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			selectionError = message;
+			onSelectError?.(message);
+			selecting = false;
+			return;
+		}
+		// Namespace registration can provision storage and run migrations. Keep
+		// the picker visible while that promise is pending so the user has a
+		// truthful progress surface and the old namespace is never presented as
+		// if the selection had already committed.
+		try {
+			await selection;
+			searchQuery = '';
+			onClose();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
 			onSelectError?.(message);
 		} finally {
 			selecting = false;
@@ -359,6 +370,12 @@
 							</span>
 						</button>
 					{/each}
+				{/if}
+
+				{#if selecting}
+					<div class={css({ paddingX: '1', fontSize: '2xs', color: 'fg.muted' })}>
+						Preparing namespace…
+					</div>
 				{/if}
 			</div>
 		</div>

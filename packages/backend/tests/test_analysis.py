@@ -797,6 +797,7 @@ class TestAnalysisList:
 
         assert item['id'] == sample_analysis.id
         assert item['name'] == sample_analysis.name
+        assert item['revision'] == sample_analysis.revision
         assert item['is_favorite'] is False
 
 
@@ -1308,6 +1309,28 @@ class TestAnalysisDelete:
         result = test_db_session.execute(select(AnalysisDataSource).where(sa(AnalysisDataSource.analysis_id == analysis_id)))
         links_after = result.scalars().all()
         assert len(links_after) == 0
+
+    def test_delete_analysis_stages_hidden_outputs_for_drain(self, client, sample_analysis: Analysis, test_db_session) -> None:
+        output_id = str(uuid.uuid4())
+        output = DataSource(
+            id=output_id,
+            name='Owned output',
+            source_type='analysis',
+            config={'analysis_tab_id': 'tab1'},
+            created_by_analysis_id=sample_analysis.id,
+            is_hidden=True,
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(output)
+        test_db_session.commit()
+
+        response = client.delete(f'/api/v1/analysis/{sample_analysis.id}')
+
+        assert response.status_code == 204
+        stored = test_db_session.get(DataSource, output_id)
+        assert stored is not None
+        assert stored.is_pending_delete is True
+        assert stored.is_hidden is True
 
 
 class TestStepTypes:

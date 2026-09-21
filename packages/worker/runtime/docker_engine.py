@@ -20,6 +20,7 @@ import grpc
 from google.protobuf import json_format
 
 from dataforge_protocol import compute_pb2, engine_runtime_pb2, engine_runtime_pb2_grpc, enums_pb2
+from runtime.compute_request_context import get_compute_request_id
 from runtime.config import settings
 from runtime.domain.compute.base import ComputeEngine, EngineProgressEvent, EngineResult
 from runtime.engine_credentials import ObjectStoreCredentials, resolve_engine_credentials
@@ -377,6 +378,7 @@ class DockerComputeEngine(ComputeEngine):
                     # Orphan guard: if the worker dies between container start and
                     # initialization, the engine stops itself instead of leaking.
                     "ENGINE_INIT_TIMEOUT_SECONDS": str(max(120, settings.engine_start_timeout_seconds * 2)),
+                    "ENGINE_JOB_CONCURRENCY": str(settings.engine_job_concurrency),
                     "APP_VERSION": _ENGINE_APPLICATION_VERSION,
                 },
                 "labels": labels,
@@ -514,6 +516,7 @@ class DockerComputeEngine(ComputeEngine):
                     "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
                     # Warm engines stay uninitialized until claimed; no deadline.
                     "ENGINE_INIT_TIMEOUT_SECONDS": "0",
+                    "ENGINE_JOB_CONCURRENCY": str(settings.engine_job_concurrency),
                     "APP_VERSION": _ENGINE_APPLICATION_VERSION,
                 },
                 "labels": labels,
@@ -675,7 +678,7 @@ class DockerComputeEngine(ComputeEngine):
             assert self._stub is not None
             stub = self._stub
             metadata = self._metadata()
-            job_id = job_id or str(uuid.uuid4())
+            job_id = job_id or get_compute_request_id() or str(uuid.uuid4())
             self._active_job_ids.add(job_id)
             self._publish_current_job_id(job_id)
         # The submit RPC runs unlocked: it waits for the engine to accept the
@@ -759,6 +762,29 @@ class DockerComputeEngine(ComputeEngine):
 
     def get_row_count(self, datasource_config: dict, steps: list[dict], additional_datasources: dict[str, dict] | None = None) -> str:
         return self._submit("row_count", {"datasource_config": datasource_config, "steps": steps, "additional_datasources": additional_datasources or {}})
+
+    def cancel_job(self, job_id: str | None = None) -> bool:
+        expected = job_id or self.current_job_id
+        if not expected:
+            return False
+        with self._lock:
+            stub = self._stub
+            if stub is None or not self._alive:
+                return False
+            metadata = self._metadata()
+        cancel = getattr(stub, "CancelJob", None)
+        if not callable(cancel):
+            return False
+        try:
+            response = cancel(
+                engine_runtime_pb2.EngineCancelJobRequest(job_id=expected),
+                timeout=settings.engine_shutdown_grace_seconds,
+                metadata=metadata,
+            )
+        except grpc.RpcError as exc:
+            logger.warning("Failed to cancel engine job %s: %s", expected, exc)
+            return False
+        return bool(response.accepted)
 
     def _publish_job_result(self, job_id: str, result: EngineResult) -> None:
         with self._lock:

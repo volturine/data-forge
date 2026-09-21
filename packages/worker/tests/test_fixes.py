@@ -5,6 +5,7 @@ import logging
 import os
 import tempfile
 import threading
+import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -31,6 +32,36 @@ from runtime.worker_runtime_client import BackendWorkerRpcError, PendingDatasour
 # ---------------------------------------------------------------------------
 # Build runtime regressions
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compute_request_claims_share_a_bounded_control_plane(monkeypatch) -> None:
+    active = 0
+    peak = 0
+
+    def fake_next_request(*_args, **_kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        time.sleep(0.02)
+        active -= 1
+        return None
+
+    monkeypatch.setattr(compute_request_runtime, "next_compute_request", fake_next_request)
+    claim_semaphore = asyncio.Semaphore(2)
+
+    await asyncio.gather(
+        *(
+            compute_request_runtime._run_once(
+                worker_id=f"worker-{index}",
+                manager=cast(Any, SimpleNamespace()),
+                claim_semaphore=claim_semaphore,
+            )
+            for index in range(8)
+        )
+    )
+
+    assert peak == 2
 
 
 def test_engine_run_execution_entry_proto_uses_typed_fields() -> None:
@@ -427,11 +458,13 @@ async def test_compute_request_lease_loss_stops_engine_execution(monkeypatch) ->
     loop = asyncio.get_running_loop()
 
     class _Manager:
-        async def await_spawn_admission(self, _identity, *, priority):
+        async def await_spawn_admission(self, _identity, *, namespace, priority):
+            assert namespace == "tenant-a"
             assert priority == compute_request_runtime.ENGINE_ADMISSION_PRIORITY_INTERACTIVE
             return False
 
-        def release_spawn_admission(self, _identity, *, owned: bool) -> None:
+        def release_spawn_admission(self, _identity, *, namespace, owned: bool) -> None:
+            assert namespace == "tenant-a"
             assert owned is False
 
         def shutdown_engine(self, identity, *, namespace: str | None = None) -> None:
@@ -466,7 +499,7 @@ async def test_compute_request_lease_loss_stops_engine_execution(monkeypatch) ->
             timeout=2,
         )
 
-    assert shutdown_calls == [("analysis-from-proto", "tenant-a")]
+    assert shutdown_calls == [("datasource-1", "tenant-a")]
 
 
 def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot(monkeypatch) -> None:
@@ -849,8 +882,8 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     manager = cast(
         Any,
         SimpleNamespace(
-            await_spawn_admission=lambda identity: asyncio.sleep(0),
-            release_spawn_admission=lambda identity, *, owned: None,
+            await_spawn_admission=lambda identity, *, namespace: asyncio.sleep(0),
+            release_spawn_admission=lambda identity, *, namespace, owned: None,
             spawn_engine=lambda identity: spawn_calls.append(identity.resource_id),
             shutdown_engine=lambda identity: shutdown_calls.append(identity.resource_id),
             set_engine_runtime_context=lambda identity, current_build_id, current_engine_run_id: None,

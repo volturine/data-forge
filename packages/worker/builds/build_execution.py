@@ -237,7 +237,7 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
     )
     while True:
         # Admit capacity before any build runner work that needs an engine.
-        owns_admission = await manager.await_spawn_admission(build_identity)
+        owns_admission = await manager.await_spawn_admission(build_identity, namespace=build.namespace)
         request_reserved = False
         try:
             reserve_request = getattr(manager, "reserve_engine_request", None)
@@ -261,7 +261,7 @@ async def run_queued_build_job(*, manager: ProcessManager, worker_id: str, claim
                 release_request = getattr(manager, "release_engine_request", None)
                 if callable(release_request):
                     release_request(build_identity, namespace=build.namespace)
-            manager.release_spawn_admission(build_identity, owned=owns_admission)
+            manager.release_spawn_admission(build_identity, namespace=build.namespace, owned=owns_admission)
 
 
 __all__ = ["run_queued_build_job"]

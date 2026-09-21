@@ -38,15 +38,18 @@ async function waitForPreviewReady(
 			);
 		}
 
-		const pollTimeout = Math.min(remaining, 100);
+		// Keep each browser-side lookup on a normal timeout. Passing the tiny
+		// remaining tail of the overall deadline (often 1–100ms) makes
+		// Playwright schedule a negative timer when the browser is busy under
+		// parallel CI load. The outer deadline still bounds this loop.
+		const pollTimeout = 1_000;
 		const state = await preview
 			.getAttribute('data-preview-state', { timeout: pollTimeout })
 			.catch(() => null);
 		if (state === 'error') {
 			const message =
-				(await preview
-					.getAttribute('data-preview-error', { timeout: pollTimeout })
-					.catch(() => null)) ?? `${label} failed`;
+				(await preview.getAttribute('data-preview-error', { timeout: 1_000 }).catch(() => null)) ??
+				`${label} failed`;
 			throw new Error(`${label} failed before ready: ${message}`);
 		}
 
@@ -58,7 +61,10 @@ async function waitForPreviewReady(
 			return;
 		}
 
-		await page.waitForTimeout(Math.min(100, deadline - Date.now()));
+		const sleepMs = Math.min(100, deadline - Date.now());
+		if (sleepMs > 0) {
+			await page.waitForTimeout(sleepMs);
+		}
 	}
 }
 
@@ -108,9 +114,12 @@ export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs())
 }
 
 async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {
-	// Cap navigation so a stuck beforeunload/network cannot sit until the test wall.
+	// Wait only for the navigation commit. Under parallel CI load the SPA can
+	// already have a usable shell while DOMContentLoaded is still delayed by
+	// unrelated browser work; waitForLayoutReady is the actual app readiness
+	// gate and still owns the full timeout.
 	const navigationTimeout = Math.min(timeout, 15_000);
-	await page.goto(path, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
+	await page.goto(path, { waitUntil: 'commit', timeout: navigationTimeout });
 	await waitForLayoutReady(page, timeout);
 }
 

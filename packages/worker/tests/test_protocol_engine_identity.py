@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 from protovalidate import ValidationError, Validator
 
-from dataforge_protocol import compute_pb2, enums_pb2
+from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
+from runtime import compute_request_runtime, compute_service
 
 
 def test_step_preview_request_uses_generated_engine_identity() -> None:
@@ -32,6 +33,61 @@ def test_step_preview_request_rejects_invalid_engine_identity_payload() -> None:
 
     with pytest.raises(ValidationError):
         Validator().validate(identity)
+
+
+def _pipeline(datasource_id: str, analysis_id: str) -> analysis_pb2.AnalysisPipelinePayload:
+    pipeline = analysis_pb2.AnalysisPipelinePayload(analysis_id=analysis_id)
+    tab = pipeline.tabs.add(id="tab-1")
+    tab.datasource.id = datasource_id
+    tab.output.result_id = "output-1"
+    tab.output.filename = "output.parquet"
+    tab.output.format = enums_pb2.EXPORT_FORMAT_PARQUET
+    return pipeline
+
+
+def _claimed_request(kind: int, command: compute_pb2.ComputeCommand) -> compute_request_runtime.ClaimedComputeRequest:
+    return compute_request_runtime.ClaimedComputeRequest(
+        id="request-1",
+        namespace="default",
+        kind=kind,
+        command_envelope=compute_pb2.ComputeCommandEnvelope(command=command),
+        worker_id="worker-1",
+        claim_token="claim-1",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "field_name", "command_type"),
+    [
+        (enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA, "schema", compute_pb2.StepSchemaCommand),
+        (enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT, "row_count", compute_pb2.StepRowCountCommand),
+        (enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD, "download", compute_pb2.DownloadCommand),
+        (enums_pb2.COMPUTE_REQUEST_KIND_EXPORT, "export", compute_pb2.ExportCommand),
+    ],
+)
+def test_stateless_requests_share_datasource_engine_identity(kind, field_name, command_type) -> None:
+    pipeline = _pipeline("dataset-1", "analysis-1")
+    request = command_type(
+        analysis_id="analysis-1",
+        target_step_id="source",
+        analysis_pipeline=pipeline,
+    )
+    command = compute_pb2.ComputeCommand()
+    getattr(command, field_name).CopyFrom(request)
+
+    identity = compute_request_runtime._engine_identity_for_claimed(_claimed_request(kind, command))
+
+    assert identity == compute_service.default_stateless_engine_identity(
+        {
+            "analysis_id": "analysis-1",
+            "tabs": [{"id": "tab-1", "datasource": {"id": "dataset-1"}, "steps": []}],
+        },
+        "source",
+    )
+    assert identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
+    assert identity.datasource_id == "dataset-1"
 
 
 @pytest.mark.parametrize(

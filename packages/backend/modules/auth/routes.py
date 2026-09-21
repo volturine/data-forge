@@ -1,5 +1,7 @@
 import asyncio
 import secrets
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -38,6 +40,20 @@ from modules.auth.service import (
 )
 
 router = APIRouter(prefix='/auth', tags=['auth'])
+
+# Authentication is a control-plane dependency of every browser session. Run
+# its short settings-database operations on a dedicated executor so a burst of
+# tenant previews cannot leave login/session/verification requests waiting on
+# the default executor used by compute and object-store work.
+_AUTH_SETTINGS_EXECUTOR = ThreadPoolExecutor(max_workers=16, thread_name_prefix='auth-settings')
+
+
+async def _run_auth_db(function, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _AUTH_SETTINGS_EXECUTOR,
+        partial(run_settings_db, function, *args, **kwargs),
+    )
 
 
 async def send_verification_email(user_email: str, token: str) -> bool:
@@ -172,8 +188,7 @@ async def register(
     response: Response,
 ) -> UserPublic:
     needs_verification = auth_settings.verify_email_address
-    user_public, session_token, verification_token = await asyncio.to_thread(
-        run_settings_db,
+    user_public, session_token, verification_token = await _run_auth_db(
         _register_user,
         email=body.email,
         password=body.password,
@@ -231,8 +246,8 @@ def delete_account_route(
 
 @router.post('/verify-email', response_model=MessageResponse)
 @handle_errors(operation='verify email')
-def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    commands.verify_email(session, body.token)
+async def verify_email(body: VerifyEmailRequest) -> MessageResponse:
+    await _run_auth_db(commands.verify_email, body.token)
     return MessageResponse(message='Email verified successfully')
 
 
@@ -241,7 +256,7 @@ def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_settin
 async def resend_verification_route(
     current_user: User = Depends(get_current_user),
 ) -> MessageResponse:
-    delivery = await asyncio.to_thread(run_settings_db, commands.prepare_resend_verification, current_user.id)
+    delivery = await _run_auth_db(commands.prepare_resend_verification, current_user.id)
     if delivery is not None:
         email, token = delivery
         await send_verification_email(email, token)
@@ -251,7 +266,7 @@ async def resend_verification_route(
 @router.post('/forgot-password', response_model=MessageResponse)
 @handle_errors(operation='forgot password')
 async def forgot_password(body: ForgotPasswordRequest) -> MessageResponse:
-    token = await asyncio.to_thread(run_settings_db, commands.create_password_reset_token, body.email)
+    token = await _run_auth_db(commands.create_password_reset_token, body.email)
     if token:
         await send_password_reset_email(body.email.strip().lower(), token)
     return MessageResponse(message='If the email exists, a password reset link has been sent')
@@ -259,8 +274,8 @@ async def forgot_password(body: ForgotPasswordRequest) -> MessageResponse:
 
 @router.post('/reset-password', response_model=MessageResponse)
 @handle_errors(operation='reset password')
-def reset_password_route(body: ResetPasswordRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    commands.reset_password(session, body.token, body.new_password)
+async def reset_password_route(body: ResetPasswordRequest) -> MessageResponse:
+    await _run_auth_db(commands.reset_password, body.token, body.new_password)
     return MessageResponse(message='Password reset successful')
 
 
@@ -280,7 +295,7 @@ def _resolve_me(session: Session, token: str | None) -> UserPublic:
 @handle_errors(operation='get current user')
 async def me(request: Request) -> UserPublic:
     token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
-    return await asyncio.to_thread(run_settings_db, _resolve_me, token)
+    return await _run_auth_db(_resolve_me, token)
 
 
 @router.put('/profile', response_model=UserPublic)
@@ -389,8 +404,7 @@ async def google_oauth_callback(
     email = info.get('email')
     if not isinstance(subject, str) or not isinstance(email, str):
         raise OAuthError('Google user info missing id or email')
-    result = await asyncio.to_thread(
-        run_settings_db,
+    result = await _run_auth_db(
         _authenticate_oauth_user,
         provider=AuthProviderName.GOOGLE,
         provider_subject=subject,

@@ -122,6 +122,40 @@ describe('openLockSession', () => {
 		session.close();
 	});
 
+	test('does not classify a stale same-owner token as another owner after reconnect', () => {
+		vi.useFakeTimers();
+		const onStatus = vi.fn();
+		const onError = vi.fn();
+		const session: LockSession = openLockSession({
+			resourceType: 'analysis',
+			resourceId: 'analysis-1',
+			onStatus,
+			onError
+		});
+		const first = sockets[0];
+		session.acquire();
+		first.emit('open');
+		first.emit('message', { data: statusMessage(lock('first-token')) });
+
+		first.emit('close');
+		vi.advanceTimersByTime(1_000);
+		const second = sockets[1];
+		second.emit('open');
+		second.emit('message', { data: statusMessage(lock('first-token')) });
+		second.emit('message', { data: statusMessage(lock('second-token')) });
+
+		expect(sentMessages(second)).toEqual([
+			{ action: 'watch', resource_type: 'analysis', resource_id: 'analysis-1' },
+			{ action: 'acquire' }
+		]);
+		expect(onError).not.toHaveBeenCalled();
+		expect(onStatus).toHaveBeenLastCalledWith(
+			expect.objectContaining({ lock_token: 'second-token' }),
+			true
+		);
+		session.close();
+	});
+
 	test('does not spam acquire on repeated existing-lock statuses after a 409 conflict', () => {
 		const onStatus = vi.fn();
 		const onError = vi.fn();

@@ -1,7 +1,7 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { onMount } from 'svelte';
 	import { css, button, spinner } from '$lib/styles/panda';
 	import { verifyEmail, resendVerification } from '$lib/api/auth';
 
@@ -10,13 +10,17 @@
 	let resending = $state(false);
 	let resent = $state(false);
 
-	const token = $derived(page.url.searchParams.get('token'));
+	// The static auth entry point is prerendered. Query parameters only exist in
+	// the browser, where the page store remains reactive for client navigation.
+	const token = $derived(browser ? page.url.searchParams.get('token') : null);
 
-	onMount(() => {
-		if (!token) return;
+	$effect(() => {
+		const currentToken = token;
+		if (!currentToken) return;
+
 		let aborted = false;
 		status = 'loading';
-		void verifyEmail(token).then((result) => {
+		void verifyEmail(currentToken).then((result) => {
 			if (aborted) return;
 			result.match(
 				(data) => {

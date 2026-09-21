@@ -54,14 +54,14 @@
 		exportCopied = false;
 	}
 
-	async function loadExportCode(format: CodeExportFormat) {
+	async function loadExportCode(format: CodeExportFormat, tabId = exportScopeTabId) {
 		if (!validAnalysisId) return;
 		if (exportLoadingByFormat[format]) return;
 		exportLoadingByFormat = { ...exportLoadingByFormat, [format]: true };
 		exportError = null;
 		const result = await exportAnalysisCode(validAnalysisId, {
 			format,
-			tab_id: exportScopeTabId
+			tab_id: tabId
 		});
 		if (result.isErr()) {
 			exportError = result.error.message;
@@ -113,7 +113,7 @@
 		exportScopeTabId = scopeTabId;
 		exportFormat = 'polars';
 		resetExportState();
-		void loadExportCode('polars');
+		void loadExportCode('polars', scopeTabId);
 	});
 
 	onDestroy(() => {
@@ -253,11 +253,7 @@
 			</div>
 		{/if}
 
-		{#if exportLoading}
-			<div class={css({ display: 'flex', justifyContent: 'center', paddingY: '8' })}>
-				<div class={spinner()}></div>
-			</div>
-		{:else}
+		<div class={css({ position: 'relative' })}>
 			<pre
 				class={css({
 					fontFamily: 'mono',
@@ -267,11 +263,34 @@
 					borderWidth: '1',
 					padding: '3',
 					overflowX: 'auto',
-					whiteSpace: 'pre'
+					whiteSpace: 'pre',
+					minHeight: '12'
 				})}
 				data-testid="analysis-export-code"
-				data-language={exportFormat}><code>{exportCode}</code></pre>
-		{/if}
+				data-language={exportFormat}
+				aria-busy={exportLoading}><code>{exportCode}</code></pre>
+			{#if exportLoading}
+				<div
+					class={css({
+						position: 'absolute',
+						top: '2',
+						right: '2',
+						display: 'flex',
+						alignItems: 'center',
+						gap: '2',
+						fontSize: 'xs',
+						color: 'fg.muted',
+						backgroundColor: 'bg.primary',
+						paddingX: '2',
+						paddingY: '1'
+					})}
+					aria-live="polite"
+				>
+					<div class={spinner()}></div>
+					Loading {exportFormat} code…
+				</div>
+			{/if}
+		</div>
 	</div>
 	<div
 		class={css({

@@ -1,4 +1,5 @@
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -102,6 +103,7 @@ def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.Monke
     monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda name: created.append(name))
     monkeypatch.setattr(namespace_routes, 'register_namespace', lambda session, name: registered.append(name))
     monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', lambda name: provisioned.append(name))
+    monkeypatch.setattr(namespace_routes, 'initialize_namespace_db', lambda name: None)
 
     from main import app
 
@@ -117,6 +119,63 @@ def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.Monke
     assert created == ['test']
     assert registered == ['test']
     assert provisioned == ['test']
+
+
+def test_create_namespace_provisions_bucket_and_credentials_in_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started: list[str] = []
+    both_started = Barrier(2)
+
+    monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda name: None)
+
+    def provision_bucket(name: str) -> None:
+        started.append('bucket')
+        both_started.wait(timeout=2)
+
+    def run_settings_db(function, name: str) -> bool | None:
+        if function is namespace_routes.runtime_namespace_exists:
+            return False
+        if function is namespace_routes.provision_namespace_engine_credentials:
+            started.append('credentials')
+            both_started.wait(timeout=2)
+            return None
+        assert function is namespace_routes.register_namespace
+        started.append('register')
+        return None
+
+    monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', provision_bucket)
+    monkeypatch.setattr(namespace_routes, 'run_settings_db', run_settings_db)
+    monkeypatch.setattr(namespace_routes, 'initialize_namespace_db', lambda name: None)
+
+    response = namespace_routes._create_namespace('parallel')
+
+    assert response.name == 'parallel'
+    assert set(started[:2]) == {'bucket', 'credentials'}
+    assert started[-1] == 'register'
+
+
+def test_create_namespace_reuses_published_namespace_without_reprovisioning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(namespace_routes, 'runtime_namespace_exists', lambda session, name: True)
+
+    def run_settings_db(function, name: str) -> bool:
+        del function
+        calls.append(name)
+        return True
+
+    monkeypatch.setattr(namespace_routes, 'run_settings_db', run_settings_db)
+    monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda name: calls.append(f'paths:{name}'))
+    monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', lambda name: calls.append(f'bucket:{name}'))
+
+    response = namespace_routes._create_namespace('published')
+
+    assert response.created_bucket is False
+    assert response.name == 'published'
+    assert calls == ['published']
 
 
 def test_provision_namespace_bucket_uses_explicit_data_plane_operation(monkeypatch: pytest.MonkeyPatch) -> None:

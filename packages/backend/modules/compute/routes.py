@@ -30,7 +30,6 @@ from backend_core.dependencies import (
 from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
 from backend_core.domain.compute import schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
-from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.engine_live import load_engine_snapshot, registry as engine_registry
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import engine_not_found
@@ -360,16 +359,7 @@ async def preview_step(
     """
     analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
     normalized = request.model_copy(update={'analysis_id': analysis_id})
-    engine_identity = (
-        normalized.engine_identity
-        if normalized.engine_identity is not None
-        else compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-            analysis_id=analysis_id,
-            resource_id=analysis_id,
-        )
-    )
+    engine_identity = schemas.default_preview_engine_identity(normalized)
     manager = _override_manager(http_request)
     if manager is not None:
         executor = _override_compute_executor(http_request)
@@ -507,8 +497,10 @@ async def start_build(
     user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    if not await run_in_threadpool(runtime_probe.available, kind=RuntimeWorkerKind.BUILD_MANAGER):
-        raise HTTPException(status_code=503, detail='Compute runtime unavailable')
+    # Build jobs are durable queue entries too. Do not turn a momentarily stale
+    # worker heartbeat into a lost build; dispatch below will wake the manager
+    # when it is available.
+    del runtime_probe
 
     pipeline = normalize_pipeline_step_configs_for_protocol(request.pipeline_payload())
     analysis_id = str(pipeline.get('analysis_id') or '')
@@ -772,11 +764,12 @@ async def _shutdown_engine_identity(
     session: Session,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
-    """Shut down an engine after cancelling any active job.
+    """Queue engine shutdown after cancelling any active job.
 
-    Idle engines are stopped immediately. Busy engines cancel the in-flight job
-    first (clearing job state / killing the container), then shut down. Callers
-    must not leave warm containers behind because of an active job.
+    The in-process test manager still shuts down synchronously. The production
+    worker path uses the durable request queue and returns after the shutdown
+    command is committed; waiting for Docker/container teardown here lets
+    cleanup requests block unrelated uploads and lock updates.
     """
     manager = _override_manager(http_request)
     if manager is not None:
@@ -795,8 +788,12 @@ async def _shutdown_engine_identity(
                 engine.current_job_id = None
         manager.shutdown_engine(identity)
         return
-    # Worker path: engine.shutdown() stops the container and any running job.
-    await executor_client.shutdown_engine(session, identity=identity, runtime_probe=runtime_probe)
+    await run_in_threadpool(
+        executor_client.request_engine_shutdown,
+        session,
+        identity=identity,
+        runtime_probe=runtime_probe,
+    )
 
 
 @router.post('/engine/spawn/analysis/{analysis_id}', response_model=schemas.EngineStatusSchema, mcp=True)

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures.js';
-import { createLongRunningAnalysis, createLargeDatasource } from './utils/api.js';
+import { createLongRunningAnalysis } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
 import {
 	gotoAuthedRoute,
@@ -13,7 +13,7 @@ import {
 	waitForLayoutReady
 } from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
-import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { dialogByTextbox } from './utils/locators.js';
 import { waitForBuildPreview, waitForBuildPreviewId } from './utils/builds.js';
@@ -132,7 +132,10 @@ test.describe('Navigation – profile access', () => {
 		await gotoAuthedRoute(page, '/');
 		await page.getByRole('link', { name: 'Profile' }).click();
 
-		await page.waitForURL(/\/profile/, { timeout: 5_000 });
+		// The SPA can update the URL before Playwright attaches a navigation
+		// event waiter. Assert the current URL instead of waiting for a missed
+		// event; this also ensures the page content is checked below.
+		await expect(page).toHaveURL(/\/profile/, { timeout: 5_000 });
 		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
 			'aria-selected',
@@ -241,11 +244,17 @@ async function waitForBuildRowEventually(
 }
 
 test.describe('Navigation – engines live monitor', () => {
-	test('engines popup lists running engines on demand', async ({ page, request }) => {
-		const dsName = `e2e-engines-ds-${uid()}`;
+	test('engines popup lists running engines on demand', async ({
+		page,
+		request,
+		sharedCancellationDatasource
+	}) => {
 		const analysisName = `E2E Engines ${uid()}`;
-		const datasourceId = await createLargeDatasource(request, dsName, 200);
-		const analysisId = await createLongRunningAnalysis(request, analysisName, datasourceId);
+		const analysisId = await createLongRunningAnalysis(
+			request,
+			analysisName,
+			sharedCancellationDatasource.id
+		);
 
 		try {
 			await gotoAnalysisEditor(page, analysisId);
@@ -303,7 +312,6 @@ test.describe('Navigation – engines live monitor', () => {
 			}
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });
@@ -389,7 +397,11 @@ test.describe('Navigation – namespace persistence', () => {
 		await search.fill(ns);
 
 		await dialog.locator(`[data-namespace-create="${ns}"]`).click();
-		await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+		// Creation provisions storage credentials and a tenant schema before the
+		// picker closes. Under the real 12-browser matrix that transaction can
+		// legitimately take longer than a five-second DOM assertion; the modal
+		// remains visible with its progress state until the namespace is committed.
+		await expect(dialog).not.toBeVisible({ timeout: readyTimeoutMs() });
 
 		const sidebar = page.locator('aside[aria-label="Main navigation"]');
 		await expect(sidebar.getByRole('button', { name: 'Select namespace' })).toContainText(ns, {

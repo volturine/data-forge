@@ -8,7 +8,7 @@ import threading
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,6 +32,30 @@ _TOKEN_METADATA_KEY = "x-engine-token"
 _MAX_RETAINED_COMPLETED_JOBS = 8
 _MAX_TOTAL_JOBS = 100
 _MAX_PROGRESS_EVENTS = 256
+_MIN_ENGINE_RPC_WORKERS = 64
+
+
+def _engine_rpc_worker_count(engine_job_concurrency: int) -> int:
+    """Keep control RPCs available while one client stream waits per job.
+
+    ``WatchJob`` is a synchronous server-streaming RPC. Its handler occupies a
+    gRPC worker for the lifetime of the stream, including while it waits for a
+    Polars job to finish. A shared engine can therefore have more watch
+    streams than actively running Polars jobs. The old fixed pool of eight
+    workers let queued watches starve Health and GetJobResult, which made the
+    worker declare healthy engines dead under browser bursts.
+
+    The minimum is sized for the supported 50-browser concurrency probe. The
+    concurrency-based floor keeps the relationship safe if the per-engine job
+    setting is raised later.
+    """
+    if engine_job_concurrency < 1:
+        raise ValueError(f"engine_job_concurrency must be positive, got {engine_job_concurrency}")
+    return max(_MIN_ENGINE_RPC_WORKERS, engine_job_concurrency * 4 + 8)
+
+
+class _EngineJobCancelled(Exception):
+    """Internal control flow for a job cancelled by its request owner."""
 
 
 @dataclass(slots=True)
@@ -41,6 +65,8 @@ class _JobState:
     next_sequence: int = 1
     result: EngineResult | None = None
     done: bool = False
+    cancel_requested: threading.Event = field(default_factory=threading.Event)
+    future: Future[None] | None = None
     condition: threading.Condition = field(default_factory=threading.Condition)
 
     def emit_progress(self, event: dict[str, object]) -> None:
@@ -49,18 +75,27 @@ class _JobState:
             self.next_sequence += 1
             self.condition.notify_all()
 
-    def complete(self, result: EngineResult) -> None:
+    def raise_if_cancelled(self) -> None:
+        if self.cancel_requested.is_set():
+            raise _EngineJobCancelled(f"Engine job {self.job_id} was cancelled")
+
+    def complete(self, result: EngineResult) -> bool:
         with self.condition:
+            if self.done:
+                return False
             self.result = result
             self.done = True
             self.condition.notify_all()
+            return True
 
 
 class _EngineJobs:
-    def __init__(self) -> None:
+    def __init__(self, *, max_workers: int = 1) -> None:
+        if max_workers < 1:
+            raise ValueError(f"max_workers must be positive, got {max_workers}")
         self._jobs: OrderedDict[str, _JobState] = OrderedDict()
         self._lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polars-engine-job")
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="polars-engine-job")
         self._accepting = True
 
     def submit(self, *, job_id: str, kind: str, payload: dict[str, object]) -> _JobState:
@@ -74,7 +109,7 @@ class _EngineJobs:
                 raise RuntimeError("Engine job queue limit reached")
             state = _JobState(job_id=job_id)
             self._jobs[job_id] = state
-            self._executor.submit(self._run, state, kind, payload)
+            state.future = self._executor.submit(self._run, state, kind, payload)
             return state
 
     def _evict_completed_locked(self) -> None:
@@ -93,6 +128,34 @@ class _EngineJobs:
                 return state
             return self._jobs.pop(job_id)
 
+    def cancel(self, job_id: str) -> bool:
+        """Cancel one queued/running job without stopping the engine.
+
+        Queued work can be removed immediately. Running work receives the same
+        cancellation signal at progress boundaries and publishes a terminal
+        result as soon as the engine operation cooperates.
+        """
+        with self._lock:
+            state = self._jobs.get(job_id)
+            if state is None or state.done:
+                return False
+            state.cancel_requested.set()
+            future = state.future
+            if future is not None and future.cancel():
+                state.complete(
+                    EngineResult(
+                        job_id=job_id,
+                        data=None,
+                        error=f"Engine job {job_id} was cancelled",
+                        error_kind="job_cancelled",
+                        error_details={},
+                    )
+                )
+            else:
+                with state.condition:
+                    state.condition.notify_all()
+            return True
+
     def shutdown(self) -> None:
         with self._lock:
             self._accepting = False
@@ -100,7 +163,22 @@ class _EngineJobs:
 
     def _run(self, state: _JobState, kind: str, payload: dict[str, object]) -> None:
         try:
-            result = _execute_job(job_id=state.job_id, kind=kind, payload=payload, progress_callback=state.emit_progress)
+            state.raise_if_cancelled()
+
+            def emit_progress(event: dict[str, object]) -> None:
+                state.raise_if_cancelled()
+                state.emit_progress(event)
+
+            result = _execute_job(job_id=state.job_id, kind=kind, payload=payload, progress_callback=emit_progress)
+            state.raise_if_cancelled()
+        except _EngineJobCancelled as exc:
+            result = EngineResult(
+                job_id=state.job_id,
+                data=None,
+                error=str(exc),
+                error_kind="job_cancelled",
+                error_details={},
+            )
         except Exception as exc:
             error_kind, error_details = PolarsComputeEngine._classify_engine_error(exc)
             logger.exception("Engine job %s failed", state.job_id)
@@ -244,12 +322,13 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
         on_shutdown: Callable[[], None],
         heartbeat_timeout_seconds: int = 15,
         init_timeout_seconds: int = 0,
+        engine_job_concurrency: int = 1,
     ) -> None:
         self._engine_identity = engine_identity
         self._application_version = application_version
         self._token = token
         self._on_shutdown = on_shutdown
-        self._jobs = _EngineJobs()
+        self._jobs = _EngineJobs(max_workers=engine_job_concurrency)
         self._shutdown = threading.Event()
         self._lock = threading.Lock()
         self._initialized = bool(token and engine_identity and engine_identity != "unknown")
@@ -454,6 +533,17 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
                 context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Engine job has not completed")
             return _result_message(state.result)
 
+    def CancelJob(
+        self,
+        request: engine_runtime_pb2.EngineCancelJobRequest,
+        context: grpc.ServicerContext,
+    ) -> engine_runtime_pb2.EngineCancelJobResponse:
+        self._require_token(context)
+        with self._lock:
+            if not self._initialized:
+                context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Engine is not initialized")
+        return engine_runtime_pb2.EngineCancelJobResponse(accepted=self._jobs.cancel(request.job_id))
+
     def Shutdown(self, request: engine_runtime_pb2.EngineShutdownRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineShutdownResponse:
         self._require_token(context)
         self._shutdown.set()
@@ -471,9 +561,11 @@ def run_engine_server(
     token: str = "",
     heartbeat_timeout_seconds: int = 15,
     init_timeout_seconds: int = 0,
+    engine_job_concurrency: int = 1,
 ) -> None:
     server = grpc.server(
-        ThreadPoolExecutor(max_workers=8), options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024))
+        ThreadPoolExecutor(max_workers=_engine_rpc_worker_count(engine_job_concurrency)),
+        options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024)),
     )
 
     def stop_server() -> None:
@@ -487,6 +579,7 @@ def run_engine_server(
             on_shutdown=stop_server,
             heartbeat_timeout_seconds=heartbeat_timeout_seconds,
             init_timeout_seconds=init_timeout_seconds,
+            engine_job_concurrency=engine_job_concurrency,
         ),
         server,
     )
@@ -508,6 +601,7 @@ def main() -> None:
         token=os.environ.get("ENGINE_RPC_TOKEN", ""),
         heartbeat_timeout_seconds=int(os.environ.get("ENGINE_HEARTBEAT_TIMEOUT_SECONDS", "15")),
         init_timeout_seconds=int(os.environ.get("ENGINE_INIT_TIMEOUT_SECONDS", "0")),
+        engine_job_concurrency=int(os.environ.get("ENGINE_JOB_CONCURRENCY", "1")),
     )
 
 

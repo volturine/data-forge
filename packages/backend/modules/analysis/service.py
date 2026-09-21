@@ -13,6 +13,7 @@ from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session
 
+from backend_core import datasource_delete_service
 from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, require_ai_provider
 from backend_core.analysis_cycles import assert_no_analysis_cycle
 from backend_core.domain.analysis.models import AnalysisStatus
@@ -685,6 +686,7 @@ def list_analyses(
                 'thumbnail': analysis.thumbnail,
                 'created_at': analysis.created_at,
                 'updated_at': analysis.updated_at,
+                'revision': analysis.revision,
                 'is_favorite': False,
             }
         )
@@ -719,6 +721,7 @@ def list_favorite_analyses(
                 'thumbnail': analysis.thumbnail,
                 'created_at': analysis.created_at,
                 'updated_at': analysis.updated_at,
+                'revision': analysis.revision,
                 'is_favorite': True,
             }
         )
@@ -1073,8 +1076,6 @@ def delete_analysis(
     session: Session,
     analysis_id: str,
 ) -> None:
-    from modules.datasource.service import cleanup_datasource_storage
-
     analysis = session.get(Analysis, analysis_id)
 
     if not analysis:
@@ -1090,8 +1091,11 @@ def delete_analysis(
 
     for ds in created_datasources:
         if ds.is_hidden:
-            cleanup_datasource_storage(ds)
-            session.delete(ds)
+            # Keep owned outputs visible to the datasource-delete worker until
+            # all preview/schema/stats requests drain. Direct row deletion here
+            # let an in-flight schema request reach the worker after its source
+            # disappeared, producing a durable "datasource not found" error.
+            datasource_delete_service.stage_delete(session, ds.id)
 
     session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))
 

@@ -385,6 +385,14 @@
 		if (!data) return null;
 		return data.find((ds) => ds.id === datasourceId) ?? null;
 	});
+	const missingDatasource = $derived.by(() => {
+		if (!datasourcesQuery.data) return null;
+		const tab = activeTab;
+		if (!tab || tab.datasource.analysis_tab_id || !tab.datasource.id) return null;
+		if (datasourcesQuery.data.some((datasource) => datasource.id === tab.datasource.id))
+			return null;
+		return tab.datasource.id;
+	});
 	const analysisTabName = $derived.by(() => {
 		const tab = activeTab;
 		if (!tab || !validAnalysisId) return null;
@@ -407,7 +415,7 @@
 			isSaving = false;
 			return;
 		}
-		analysisStore.save().match(
+		await analysisStore.save().match(
 			() => {
 				selectedStepId = null;
 				isSaving = false;
@@ -508,9 +516,22 @@
 			...currentAnalysis,
 			is_favorite: result.value.is_favorite
 		};
-		void queryClient.invalidateQueries({ queryKey: ['analyses'] });
-		void queryClient.invalidateQueries({ queryKey: ['favorite-analyses'] });
-		void queryClient.invalidateQueries({ queryKey: analysisQueryKey(validAnalysisId) });
+		const isFavorite = result.value.is_favorite;
+		queryClient.setQueriesData<Analysis[]>({ queryKey: ['analyses'] }, (current) =>
+			current?.map((analysis) =>
+				analysis.id === validAnalysisId ? { ...analysis, is_favorite: isFavorite } : analysis
+			)
+		);
+		queryClient.setQueriesData<Analysis[]>({ queryKey: ['favorite-analyses'] }, (current) => {
+			if (!current) return current;
+			const withoutCurrent = current.filter((analysis) => analysis.id !== validAnalysisId);
+			return isFavorite
+				? [...withoutCurrent, { ...currentAnalysis, is_favorite: true }]
+				: withoutCurrent;
+		});
+		queryClient.setQueryData<AnalysisDetail>(analysisQueryKey(validAnalysisId), (current) =>
+			current ? { ...current, analysis: { ...current.analysis, is_favorite: isFavorite } } : current
+		);
 	}
 
 	function openDescriptionModal() {
@@ -608,6 +629,13 @@
 		{#if saveError}
 			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="save-error">
 				<Callout tone="error">{saveError}</Callout>
+			</div>
+		{/if}
+		{#if missingDatasource}
+			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="analysis-datasource-error">
+				<Callout tone="error">
+					Datasource not found: {missingDatasource}. Select another datasource for this tab.
+				</Callout>
 			</div>
 		{/if}
 

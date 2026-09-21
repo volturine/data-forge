@@ -746,6 +746,40 @@ describe('BuildStreamStore', () => {
 		expect(mockReleaseActivity).toHaveBeenCalledTimes(1);
 	});
 
+	test('ignores replayed progress after a terminal event', () => {
+		const store = new BuildStreamStore();
+		store.start(MINIMAL_BUILD_REQUEST);
+
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+		msg(socket, {
+			sequence: 10,
+			type: 'complete',
+			progress: 1,
+			elapsed_ms: 1200,
+			total_steps: 1,
+			tabs_built: 1,
+			results: [],
+			duration_ms: 1100
+		});
+
+		msg(socket, {
+			sequence: 11,
+			type: 'progress',
+			progress: 0.4,
+			elapsed_ms: 400,
+			estimated_remaining_ms: 800,
+			current_step: 'Replayed old event',
+			current_step_index: 0,
+			total_steps: 1
+		});
+
+		expect(store.status).toBe('completed');
+		expect(store.progress).toBe(1);
+		expect(store.elapsed).toBe(1200);
+		expect(store.currentStep).not.toBe('Replayed old event');
+	});
+
 	test('running snapshot with a step error does not mark the build failed', () => {
 		mockStartSuccess(makeDetail({ status: 'running', error: 'step failed before terminal event' }));
 		const store = new BuildStreamStore();

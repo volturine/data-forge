@@ -16,6 +16,9 @@ _S3_CLIENT = None
 _S3_CLIENT_LOCK = Lock()
 _BUCKETS_READY: set[str] = set()
 _BUCKETS_READY_LOCK = Lock()
+_BUCKET_LOCKS: dict[str, Lock] = {}
+_BUCKET_LOCKS_LOCK = Lock()
+_OBJECT_STORE_MAX_POOL_CONNECTIONS = max(16, settings.compute_request_concurrency * 2)
 
 # Namespace name == bucket name. No rewriting.
 # Lowercase letters, digits, hyphens, underscores; start/end alphanumeric.
@@ -144,7 +147,10 @@ def _client():
                 aws_access_key_id=settings.object_store_access_key,
                 aws_secret_access_key=settings.object_store_secret_key,
                 aws_session_token=settings.object_store_session_token or None,
-                config=BotoConfig(s3={"addressing_style": "path"}),
+                config=BotoConfig(
+                    max_pool_connections=_OBJECT_STORE_MAX_POOL_CONNECTIONS,
+                    s3={"addressing_style": "path"},
+                ),
             )
         return _S3_CLIENT
 
@@ -158,6 +164,21 @@ def reset_object_store_client() -> None:
         _BUCKETS_READY.clear()
 
 
+def _bucket_is_ready(bucket: str) -> bool:
+    with _BUCKETS_READY_LOCK:
+        return bucket in _BUCKETS_READY
+
+
+def _bucket_lock(bucket: str) -> Lock:
+    """Return the lock for one bucket without serializing other buckets."""
+    with _BUCKET_LOCKS_LOCK:
+        lock = _BUCKET_LOCKS.get(bucket)
+        if lock is None:
+            lock = Lock()
+            _BUCKET_LOCKS[bucket] = lock
+        return lock
+
+
 def ensure_bucket_exists(bucket: str | None = None) -> str:
     """Ensure a namespace bucket exists. Defaults to the current namespace bucket."""
     if bucket is None:
@@ -166,10 +187,10 @@ def ensure_bucket_exists(bucket: str | None = None) -> str:
         resolved = namespace_bucket(get_namespace())
     else:
         resolved = namespace_bucket(bucket.strip())
-    if resolved in _BUCKETS_READY:
+    if _bucket_is_ready(resolved):
         return resolved
-    with _BUCKETS_READY_LOCK:
-        if resolved in _BUCKETS_READY:
+    with _bucket_lock(resolved):
+        if _bucket_is_ready(resolved):
             return resolved
         client = _client()
         try:
@@ -180,7 +201,8 @@ def ensure_bucket_exists(bucket: str | None = None) -> str:
             if code not in {"404", "NoSuchBucket", "NotFound"}:
                 raise
             client.create_bucket(Bucket=resolved)
-        _BUCKETS_READY.add(resolved)
+        with _BUCKETS_READY_LOCK:
+            _BUCKETS_READY.add(resolved)
     return resolved
 
 

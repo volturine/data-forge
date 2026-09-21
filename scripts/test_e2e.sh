@@ -18,7 +18,16 @@ unset VIRTUAL_ENV
 
 ROOT_DIR="$(pwd)"
 PLAYWRIGHT_ARTIFACTS_DIR="${ROOT_DIR}/packages/frontend/tests/.artifacts/playwright"
+PLAYWRIGHT_SHARD_ARTIFACTS_DIR="${ROOT_DIR}/packages/frontend/tests/.artifacts/playwright-shards"
 LOG_DIR="${E2E_LOG_DIR:-}"
+
+# Shared fixture datasets are created once for the whole run. Each shard still
+# receives its own E2E_RUN_STAMP for user identities and mutable test names,
+# while E2E_GLOBAL_RUN_STAMP is the rendezvous key for immutable datasets.
+if [ -z "${E2E_GLOBAL_RUN_STAMP:-}" ]; then
+    E2E_GLOBAL_RUN_STAMP="${E2E_RUN_STAMP:-e2e-$(date +%s)-$$}"
+    export E2E_GLOBAL_RUN_STAMP
+fi
 
 # Fixed names: leftover stacks from aborted runs can be removed with stack-down.
 E2E_DOCKER_NETWORK="dataforge-e2e-net"
@@ -50,6 +59,10 @@ resolve_docker_socket_gid() {
 }
 
 stack_up() {
+    # E2E runs own the fixed compose project, network, and named volumes. A
+    # retained stack (or a stopped runtime-worker row in its Postgres volume)
+    # must never satisfy the next run's readiness checks.
+    stack_down
     build_images
     resolve_docker_socket_gid
     echo "Starting e2e stack (postgres, rustfs, api, scheduler, worker)"
@@ -144,16 +157,19 @@ wait_for_runtime_drain() {
 run_playwright_shard() {
     local shard_index="$1"
     local shard_total="$2"
+    local run_stamp="${E2E_GLOBAL_RUN_STAMP}-shard-${shard_index}-of-${shard_total}"
     cd "${ROOT_DIR}/packages/frontend"
-    # Playwright wipes its output directory on start, so shards that share one
-    # directory delete each other's artifacts mid-run.
-    local output_dir="$PWD/tests/.artifacts/playwright/test-results/shard${shard_index}"
-    local report_dir="$PWD/tests/.artifacts/playwright/playwright-report/shard${shard_index}"
+    # Playwright wipes its output directory on start. Give every shard a
+    # completely independent root so no runner can remove another runner's
+    # output path during parallel startup.
+    local artifacts_dir="$PWD/tests/.artifacts/playwright-shards/shard${shard_index}"
+    local output_dir="/work/packages/frontend/tests/.artifacts/playwright-shards/shard${shard_index}/test-results"
+    local report_dir="/work/packages/frontend/tests/.artifacts/playwright-shards/shard${shard_index}/playwright-report"
     local timeout_seconds="${E2E_TIMEOUT_SECONDS:-0}"
     if [ "$timeout_seconds" -eq 0 ]; then
         timeout_seconds=3600
     fi
-    mkdir -p "$output_dir" "$report_dir"
+    mkdir -p "${artifacts_dir}/test-results" "${artifacts_dir}/playwright-report"
     # Optional profiling subset, e.g. PLAYWRIGHT_TEST_FILES="tests/profile.test.ts".
     local test_files=()
     if [ -n "${PLAYWRIGHT_TEST_FILES:-}" ]; then
@@ -179,11 +195,16 @@ run_playwright_shard() {
             -v "${ROOT_DIR}:/work" \
             -w /work/packages/frontend \
             -e PW_E2E_WORKERS \
+            -e E2E_CONCURRENCY_BROWSERS \
+            -e PLAYWRIGHT_TEST_TIMEOUT_MS \
             -e DEFAULT_NAMESPACE \
+            -e E2E_GLOBAL_RUN_STAMP \
+            -e E2E_SHARED_FIXTURES_READ_ONLY=1 \
+            -e "E2E_RUN_STAMP=${run_stamp}" \
             -e PLAYWRIGHT_BASE_URL=http://api:8000 \
             ${trace_args[@]+"${trace_args[@]}"} \
-            -e PLAYWRIGHT_OUTPUT_DIR=/work/packages/frontend/tests/.artifacts/playwright/test-results/shard${shard_index} \
-            -e PLAYWRIGHT_HTML_OUTPUT_DIR=/work/packages/frontend/tests/.artifacts/playwright/playwright-report/shard${shard_index} \
+            -e "PLAYWRIGHT_OUTPUT_DIR=${output_dir}" \
+            -e "PLAYWRIGHT_HTML_OUTPUT_DIR=${report_dir}" \
             -e CI \
             -e PLAYWRIGHT_JSON_REPORT \
             "${PLAYWRIGHT_IMAGE}" \
@@ -192,6 +213,34 @@ run_playwright_shard() {
             ${test_files[@]+"${test_files[@]}"} \
             ${grep_args[@]+"${grep_args[@]}"}
 }
+
+bootstrap_shared_fixtures() (
+    cd "${ROOT_DIR}/packages/frontend"
+    local artifacts_dir="$PWD/tests/.artifacts/shared-fixture-bootstrap"
+    local output_dir="/work/packages/frontend/tests/.artifacts/shared-fixture-bootstrap/test-results"
+    local report_dir="/work/packages/frontend/tests/.artifacts/shared-fixture-bootstrap/playwright-report"
+    local timeout_seconds="${E2E_FIXTURE_BOOTSTRAP_TIMEOUT_SECONDS:-600}"
+    mkdir -p "${artifacts_dir}/test-results" "${artifacts_dir}/playwright-report"
+    echo "Bootstrapping immutable shared E2E datasets once before browser shards"
+    python3 "${ROOT_DIR}/scripts/run_with_timeout.py" \
+        --timeout-seconds "$timeout_seconds" \
+        --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
+        -- docker run --rm --init \
+            --name dataforge-e2e-shared-fixture-bootstrap \
+            --network "${E2E_DOCKER_NETWORK}" \
+            -v "${ROOT_DIR}:/work" \
+            -w /work/packages/frontend \
+            -e CI \
+            -e E2E_GLOBAL_RUN_STAMP \
+            -e "E2E_RUN_STAMP=${E2E_GLOBAL_RUN_STAMP}-bootstrap" \
+            -e "E2E_BOOTSTRAP_SHARED_FIXTURES=1" \
+            -e "PW_E2E_WORKERS=1" \
+            -e PLAYWRIGHT_BASE_URL=http://api:8000 \
+            -e "PLAYWRIGHT_OUTPUT_DIR=${output_dir}" \
+            -e "PLAYWRIGHT_HTML_OUTPUT_DIR=${report_dir}" \
+            "${PLAYWRIGHT_IMAGE}" \
+            ./node_modules/.bin/playwright test --config=playwright.config.ts
+)
 
 action="${1:-all}"
 case "$action" in
@@ -217,10 +266,12 @@ case "$action" in
         # as root); hand them back before wiping, then recreate clean.
         docker run --rm --network none -v "${ROOT_DIR}:/work" --entrypoint sh \
             "${PLAYWRIGHT_IMAGE}" -c "chown -R $(id -u):$(id -g) /work/packages/frontend/tests/.artifacts" >/dev/null 2>&1 || true
-        rm -rf "${PLAYWRIGHT_ARTIFACTS_DIR}"
+        rm -rf "${PLAYWRIGHT_ARTIFACTS_DIR}" "${PLAYWRIGHT_SHARD_ARTIFACTS_DIR}"
+        mkdir -p "${PLAYWRIGHT_SHARD_ARTIFACTS_DIR}"
         for shard in $(seq 1 "${E2E_SHARDS:-2}"); do
-            mkdir -p "${PLAYWRIGHT_ARTIFACTS_DIR}/test-results/shard${shard}" "${PLAYWRIGHT_ARTIFACTS_DIR}/playwright-report/shard${shard}"
+            mkdir -p "${PLAYWRIGHT_SHARD_ARTIFACTS_DIR}/shard${shard}/test-results" "${PLAYWRIGHT_SHARD_ARTIFACTS_DIR}/shard${shard}/playwright-report"
         done
+        bootstrap_shared_fixtures
         echo "Running ${shards} Playwright shard container(s), ${PW_E2E_WORKERS} browser workers each"
         pids=()
         set +e

@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { listUdfs, deleteUdf, exportUdfs, importUdfs, cloneUdf } from '$lib/api/udf';
-	import type { UdfExport } from '$lib/types/udf';
+	import type { Udf, UdfExport } from '$lib/types/udf';
 	import { Plus, Upload, Download, Copy, Trash2, Pencil, X } from '@lucide/svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
@@ -33,8 +33,8 @@
 
 	const query = createQuery(() => ({
 		queryKey: ['udfs', search],
-		queryFn: async () => {
-			const result = await listUdfs(search ? { q: search } : undefined);
+		queryFn: async ({ signal }) => {
+			const result = await listUdfs(search ? { q: search } : undefined, { signal });
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
@@ -45,8 +45,10 @@
 			const result = await deleteUdf(id);
 			if (result.isErr()) throw new Error(result.error.message);
 		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ['udfs'] });
+		onSuccess: (_data, deletedId) => {
+			queryClient.setQueriesData<Udf[]>({ queryKey: ['udfs'] }, (current) =>
+				current?.filter((udf) => udf.id !== deletedId)
+			);
 		}
 	}));
 
@@ -111,9 +113,14 @@
 		deletingId = id;
 	}
 
-	function confirmDelete(id: string) {
-		deleteMutation.mutate(id);
-		deletingId = null;
+	async function confirmDelete(id: string) {
+		try {
+			await deleteMutation.mutateAsync(id);
+			deletingId = null;
+		} catch {
+			// The mutation error is rendered by the existing query/error state; keep
+			// the inline confirmation open so a failed delete is actionable.
+		}
 	}
 
 	function cancelDelete() {
@@ -126,11 +133,11 @@
 	}
 
 	function openNew() {
-		goto(resolve('/udfs/new'), { invalidateAll: true });
+		void goto(resolve('/udfs/new'));
 	}
 
 	function editUdf(id: string) {
-		goto(resolve(`/udfs/${id}`), { invalidateAll: true });
+		void goto(resolve(`/udfs/${id}`));
 	}
 </script>
 

@@ -161,7 +161,7 @@ just dev
 | `DF_ENGINE_DOCKER_HOST`     | `unix:///var/run/docker.sock`                                                              | Docker API endpoint available only to the worker service.                                                                                                       |
 | `DF_ENGINE_DOCKER_NETWORK`  | `dataforge-prod-engine-runtime`                                                            | Dedicated network joining the worker, RustFS, and dynamic engine containers.                                                                                    |
 | `DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5` | Engine liveness lease heartbeat interval. |
-| `DF_ENGINE_WARM_POOL_SIZE` | `2` | Global number of idle engines kept pre-spawned by the worker runtime across all namespaces and worker processes; occupation of one triggers a replacement spawn. |
+| `DF_ENGINE_WARM_POOL_SIZE` | `2` | Global number of idle engines kept pre-spawned by the single worker-runtime manager across all namespaces; occupation of one triggers a replacement spawn. |
 | `DF_DOCKER_SOCKET_PATH`     | `/var/run/docker.sock`                                                                     | Host Docker socket bind-mounted into the worker. Docker daemon access is administrative host access.                                                             |
 | `DF_DOCKER_GID`             | `0`                                                                                        | Group ID permitted to access the mounted Docker socket; set this to the socket's host group ID.                                                                  |
 | `DISTRIBUTED_RUNTIME_ENABLED`| `false`                                                                                   | Enables supported distributed runtime behavior when `DATABASE_URL` is Postgres.                                                                                |
@@ -198,7 +198,8 @@ rejected; nothing is rewritten.
 | `OBJECT_STORE_SECRET_KEY` | `rustfsadmin` | Secret key paired with `OBJECT_STORE_ACCESS_KEY`. Replace the development default in production. |
 | `ENGINE_OBJECT_STORE_ENDPOINT` | empty | Optional engine-container endpoint for the same object store. Set this when the worker uses a host-published URL but engines should use private Docker DNS. |
 | `ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5` | Worker-to-engine heartbeat interval. Engines stop themselves after three missed intervals. |
-| `ENGINE_WARM_POOL_SIZE` | `0` | Global number of idle engines pre-spawned by the worker runtime across all namespaces and worker processes, ready for work; when one is occupied a replacement is spawned so the idle count returns to this value. `0` disables pre-spawning (engines start on demand). |
+| `ENGINE_JOB_CONCURRENCY` | `4` | Maximum independent compute jobs served concurrently by each engine container. The global engine count is still capped by `MAX_CONCURRENT_ENGINES`. |
+| `ENGINE_WARM_POOL_SIZE` | `0` | Global number of idle engines pre-spawned by the single worker-runtime manager across all namespaces, ready for work; when one is occupied a replacement is spawned so the idle count returns to this value. `0` disables pre-spawning (engines start on demand). |
 
 All object-store settings are process-start configuration. Change them for the
 API, scheduler, and worker together, then restart the complete runtime.
@@ -324,7 +325,7 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 
 | Variable         | Default | Notes                                |
 | ---------------- | ------- | ------------------------------------ |
-| `PW_E2E_WORKERS` | `2`     | Playwright workers per e2e shard. CI may lower this for smaller runners. |
+| `PW_E2E_WORKERS` | `4`     | Playwright workers per e2e shard. The checked-in E2E topology uses three shards (up to twelve browser workers) against one API process. |
 
 ## Recommended additions to consider later
 

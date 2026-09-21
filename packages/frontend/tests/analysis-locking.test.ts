@@ -19,12 +19,14 @@ test.describe('Analyses – multi-user locking', () => {
 		const viewerContext = await browser.newContext({ baseURL });
 		const ownerPage = await ownerContext.newPage();
 		const viewerPage = await viewerContext.newPage();
+		let datasourceId: string | undefined;
+		let analysisId: string | undefined;
 		await registerViaUi(ownerPage, userOneEmail, 'Owner User');
 		await registerViaUi(viewerPage, userTwoEmail, 'Viewer User');
 
 		try {
-			await uploadDatasourceViaUi(ownerPage, datasourceName);
-			const analysisId = await createAnalysisViaUi(ownerPage, analysisName, datasourceName);
+			datasourceId = (await uploadDatasourceViaUi(ownerPage, datasourceName)).id;
+			analysisId = await createAnalysisViaUi(ownerPage, analysisName, datasourceName);
 
 			await gotoAnalysisEditor(ownerPage, analysisId);
 			const ownerFilter = ownerPage.locator('button[data-step="filter"]');
@@ -72,8 +74,17 @@ test.describe('Analyses – multi-user locking', () => {
 		} finally {
 			await viewerPage.close().catch(() => {});
 			await viewerContext.close().catch(() => {});
-			await deleteAnalysisViaUI(ownerPage, analysisName).catch(() => {});
-			await deleteDatasourceViaUI(ownerPage, datasourceName).catch(() => {});
+			// This test creates unique resources. Delete those exact identities so
+			// another shard's same-named data or a stale gallery row can never be
+			// selected during teardown.
+			if (analysisId) {
+				await deleteAnalysisViaUI(ownerPage, analysisName, { id: analysisId }).catch(() => {});
+			}
+			if (datasourceId) {
+				await deleteDatasourceViaUI(ownerPage, datasourceName, { id: datasourceId }).catch(
+					() => {}
+				);
+			}
 			await ownerPage.close().catch(() => {});
 			await ownerContext.close().catch(() => {});
 		}

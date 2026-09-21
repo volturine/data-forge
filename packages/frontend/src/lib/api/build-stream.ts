@@ -11,11 +11,18 @@ import type {
 	BuildDetailSnapshot,
 	BuildWebsocketErrorMessage
 } from '$lib/types/build-stream';
-import type { BuildRunDetail } from '$lib/types/build-stream';
+import type { BuildRunDetail, BuildRunSummary } from '$lib/types/build-stream';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
 export type BuildStreamMessage = BuildDetailSnapshot | BuildWebsocketErrorMessage | BuildEventJson;
+
+export type BuildListSnapshotMessage = {
+	type: 'snapshot';
+	builds: BuildRunSummary[];
+};
+
+export type BuildListStreamMessage = BuildListSnapshotMessage | BuildWebsocketErrorMessage;
 
 export interface BuildStreamCallbacks {
 	onSnapshot: (snapshot: BuildDetailSnapshot) => void;
@@ -107,4 +114,38 @@ export function connectBuildDetailStream(
 
 export function getRuntimeBuild(buildId: string): ResultAsync<BuildRunDetail, ApiError> {
 	return apiRequest<BuildRunDetail>(`/v1/compute/builds/${buildId}`);
+}
+
+function parseBuildListMessage(data: string): BuildListStreamMessage | null {
+	try {
+		const parsed: unknown = JSON.parse(data);
+		if (!isObject(parsed)) return null;
+		if (parsed.type === 'snapshot' && Array.isArray(parsed.builds)) {
+			return parsed as unknown as BuildListSnapshotMessage;
+		}
+		if (isErrorMessage(parsed)) return parsed;
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+export interface BuildListStreamCallbacks {
+	onSnapshot: (builds: BuildRunSummary[]) => void;
+	onError: (error: string) => void;
+	onClose: () => void;
+}
+
+/**
+ * Subscribe to namespace build changes. The server sends active build
+ * snapshots; the history store follows each notification with the current
+ * filtered REST query so terminal and historical rows are rendered too.
+ */
+export function connectBuildListStream(callbacks: BuildListStreamCallbacks): StreamHandle {
+	return createStream<BuildRunSummary[], never, BuildListStreamMessage>('/v1/compute/ws/builds', {
+		parse: parseBuildListMessage,
+		isSnapshot: (msg) => msg.type === 'snapshot',
+		extractSnapshot: (msg) => (msg as BuildListSnapshotMessage).builds,
+		callbacks
+	});
 }

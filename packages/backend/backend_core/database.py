@@ -1,5 +1,6 @@
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from hashlib import sha256
 from threading import Lock
 from typing import Concatenate, ParamSpec
 
@@ -20,6 +21,8 @@ P = ParamSpec('P')
 
 _PUBLIC_SCHEMA = 'public'
 _POSTGRES_INIT_LOCK_KEY = 4815162342
+_NAMESPACE_INIT_LOCK_PREFIX = 'dataforge-namespace-init:'
+_ALEMBIC_MIGRATION_LOCK = Lock()
 
 
 def _engine_kwargs() -> dict[str, object]:
@@ -260,7 +263,12 @@ def _ensure_postgres_schema(connection: Connection, schema: str) -> None:
 def _init_postgres_namespace(namespace: str) -> None:
     from backend_core.migrations import migrate_runtime
 
-    migrate_runtime([namespace])
+    # Alembic's EnvironmentContext uses process-global proxy state and cannot
+    # run two upgrades concurrently in one API process, even for different
+    # tenant schemas. The PostgreSQL advisory lock below provides
+    # cross-process namespace ownership; this lock protects Alembic itself.
+    with _ALEMBIC_MIGRATION_LOCK:
+        migrate_runtime([namespace])
 
 
 def _seed_shared_state() -> None:
@@ -294,6 +302,28 @@ def _run_postgres_init_locked(func) -> None:
     run_settings_connection_locked(lambda _connection: func())
 
 
+def _namespace_init_lock_key(namespace: str) -> int:
+    raw = f'{_NAMESPACE_INIT_LOCK_PREFIX}{normalize_namespace(namespace)}'.encode()
+    return int.from_bytes(sha256(raw).digest()[:8], 'big', signed=True)
+
+
+def _run_namespace_init_locked(namespace: str, func: Callable[[], None]) -> None:
+    """Serialize migrations for one namespace without blocking other tenants."""
+    from backend_core.migrations import ensure_database_exists
+
+    ensure_database_exists(settings.database_url)
+    engine = get_settings_engine()
+    with engine.begin() as connection:
+        if connection.dialect.name != 'postgresql':
+            func()
+            return
+        connection.execute(
+            text('SELECT pg_advisory_xact_lock(:key)'),
+            {'key': _namespace_init_lock_key(namespace)},
+        )
+        func()
+
+
 def _namespace_init_key(namespace: str) -> tuple[str, str]:
     return settings.database_url, normalize_namespace(namespace)
 
@@ -319,12 +349,19 @@ def _init_namespace_db(namespace: str) -> None:
 
 
 def _init_namespace_db_unlocked(namespace: str) -> None:
+    normalized = normalize_namespace(namespace)
+    key = _namespace_init_key(normalized)
     with _initialized_namespaces_lock:
-        key = _namespace_init_key(namespace)
         if key in _initialized_namespaces:
             return
-        _run_postgres_init_locked(lambda: _init_postgres_namespace(namespace))
+    _run_namespace_init_locked(normalized, lambda: _init_postgres_namespace(normalized))
+    with _initialized_namespaces_lock:
         _initialized_namespaces.add(key)
+
+
+def initialize_namespace_db(namespace: str) -> None:
+    """Create and migrate a namespace schema before exposing it to clients."""
+    _init_namespace_db_unlocked(normalize_namespace(namespace))
 
 
 def _bootstrap_postgres() -> None:
@@ -334,7 +371,8 @@ def _bootstrap_postgres() -> None:
     if settings.default_namespace not in namespaces:
         namespaces = [*namespaces, settings.default_namespace]
     normalized = [normalize_namespace(namespace) for namespace in namespaces]
-    migrate_runtime(normalized)
+    with _ALEMBIC_MIGRATION_LOCK:
+        migrate_runtime(normalized)
     for namespace in normalized:
         namespace_paths(namespace)
         _mark_namespace_initialized(namespace)

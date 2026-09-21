@@ -211,5 +211,8 @@ class ComputeEngine(Protocol):
     def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> EngineProgressEvent | None:
         raise NotImplementedError
 
+    def cancel_job(self, job_id: str | None = None) -> bool:
+        raise NotImplementedError
+
     def shutdown(self) -> None:
         raise NotImplementedError

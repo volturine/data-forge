@@ -1,28 +1,10 @@
 import { test, expect } from './fixtures.js';
-import { createCsvDatasource, createImportedAnalysis } from './utils/api.js';
+import { createImportedAnalysis } from './utils/api.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
-import {
-	createCleanupPage,
-	deleteAnalysisViaUI,
-	deleteDatasourceViaUI
-} from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { readyTimeoutMs, waitForChartPreviewReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
-
-const CHART_CSV = [
-	'city,month,category,value,score',
-	'London,2024-01-01T00:00:00,alpha,12,1.2',
-	'London,2024-02-01T00:00:00,beta,18,2.4',
-	'London,2024-03-01T00:00:00,alpha,9,0.7',
-	'Paris,2024-01-01T00:00:00,beta,14,1.9',
-	'Paris,2024-02-01T00:00:00,alpha,22,3.1',
-	'Paris,2024-03-01T00:00:00,beta,6,0.4',
-	'Berlin,2024-01-01T00:00:00,alpha,30,2.2',
-	'Berlin,2024-02-01T00:00:00,alpha,11,1.1',
-	'Berlin,2024-03-01T00:00:00,beta,17,2.8',
-	''
-].join('\n');
 
 interface ChartStepConfig {
 	chart_type: string;
@@ -109,23 +91,12 @@ function chartSpecs(): Array<{ chart_type: string; config: ChartStepConfig }> {
 }
 
 test.describe('Charts – chart types render', () => {
-	let dsId: string;
-	let dsName: string;
-
-	test.beforeEach(async ({ request }) => {
-		dsName = `e2e-chart-types-test-ds-${uid()}`;
-		dsId = await createCsvDatasource(request, dsName, CHART_CSV);
-	});
-
-	test.afterEach(async ({ browser, workerAuth }) => {
-		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-		await deleteDatasourceViaUI(page, dsName);
-		await page.close();
-		await context.close();
-	});
-
 	for (const spec of chartSpecs()) {
-		test(`chart_type "${spec.chart_type}" renders an svg`, async ({ page, request }) => {
+		test(`chart_type "${spec.chart_type}" renders an svg`, async ({
+			page,
+			request,
+			sharedChartDatasource
+		}) => {
 			const analysisName = `E2E Chart ${spec.chart_type} ${uid()}`;
 			const stepId = crypto.randomUUID();
 			const tabId = crypto.randomUUID();
@@ -169,7 +140,7 @@ test.describe('Charts – chart types render', () => {
 						}
 					]
 				},
-				{ [datasourceRef]: dsId }
+				{ [datasourceRef]: sharedChartDatasource.id }
 			);
 			try {
 				await gotoAnalysisEditor(page, aId);

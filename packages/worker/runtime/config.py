@@ -43,6 +43,7 @@ class WorkerSettings:
     engine_start_timeout_seconds: int
     engine_shutdown_grace_seconds: int
     engine_heartbeat_interval_seconds: int
+    engine_job_concurrency: int
     engine_warm_pool_size: int
     deployment_id: str
 
@@ -108,6 +109,13 @@ settings = WorkerSettings(
     engine_start_timeout_seconds=_read_int("ENGINE_START_TIMEOUT_SECONDS", 30, min_value=1),
     engine_shutdown_grace_seconds=_read_int("ENGINE_SHUTDOWN_GRACE_SECONDS", 10, min_value=1),
     engine_heartbeat_interval_seconds=_read_int("ENGINE_HEARTBEAT_INTERVAL_SECONDS", 5, min_value=1),
-    engine_warm_pool_size=_read_int("ENGINE_WARM_POOL_SIZE", 0, min_value=0, max_value=10),
+    # A shared engine must be able to serve independent browser requests at
+    # the same time. This is per-engine job concurrency; the global engine
+    # count remains governed by MAX_CONCURRENT_ENGINES.
+    engine_job_concurrency=_read_int("ENGINE_JOB_CONCURRENCY", 4, min_value=1, max_value=32),
+    # The warm pool is owned by the single build-manager process and shares
+    # the application-wide engine cap. Keep it intentionally smaller than
+    # the cap so most capacity remains available for active work.
+    engine_warm_pool_size=_read_int("ENGINE_WARM_POOL_SIZE", 0, min_value=0, max_value=100),
     deployment_id=os.environ.get("DATAFORGE_DEPLOYMENT_ID", "dataforge").strip() or "dataforge",
 )

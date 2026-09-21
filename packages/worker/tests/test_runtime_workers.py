@@ -501,15 +501,23 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
     )
 
     async def fake_compute_request_loop(*args, **kwargs) -> None:
-        calls.append(("compute_request_loop", kwargs["allowed_kinds"]))
+        calls.append(("compute_request_loop", kwargs))
 
     monkeypatch.setattr(runtime_process, "compute_request_loop", fake_compute_request_loop)
     monkeypatch.setattr(runtime_process, "compute_request_worker_count", lambda: 4)
+    monkeypatch.setattr(runtime_process, "compute_request_lane_count", lambda: 2)
     monkeypatch.setattr(runtime_process, "datasource_delete_loop", lambda *args, **kwargs: asyncio.sleep(0))
     monkeypatch.setattr(
         runtime_process,
         "ProcessManager",
-        lambda **kwargs: manager_kwargs.update(kwargs) or SimpleNamespace(shutdown_all=lambda: calls.append(("shutdown_all", None))),
+        lambda **kwargs: (
+            manager_kwargs.update(kwargs)
+            or SimpleNamespace(
+                wait_for_warm_pool_ready=lambda **_kwargs: True,
+                _warm_pool=[],
+                shutdown_all=lambda: calls.append(("shutdown_all", None)),
+            )
+        ),
     )
     monkeypatch.setattr(runtime_process.settings, "build_worker_min_processes", 0, raising=False)
     monkeypatch.setattr(runtime_process.settings, "build_worker_max_processes", 2, raising=False)
@@ -529,21 +537,16 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(
     assert register_payload["kind"] == "build_manager"
     assert register_payload["capacity"] == 2
     assert manager_kwargs["warm_pool_size"] == runtime_process.settings.engine_warm_pool_size
-    request_lanes = [payload for name, payload in calls if name == "compute_request_loop"]
-    assert request_lanes == [
-        runtime_process.NON_ENGINE_REQUEST_KINDS,
-        runtime_process.NON_ENGINE_REQUEST_KINDS,
+    request_lane_kwargs = [payload for name, payload in calls if name == "compute_request_loop"]
+    assert [payload["allowed_kinds"] for payload in request_lane_kwargs] == [
         runtime_process.NON_ENGINE_REQUEST_KINDS,
         runtime_process.NON_ENGINE_REQUEST_KINDS,
         runtime_process.INTERACTIVE_ENGINE_REQUEST_KINDS,
         runtime_process.INTERACTIVE_ENGINE_REQUEST_KINDS,
-        runtime_process.INTERACTIVE_ENGINE_REQUEST_KINDS,
-        runtime_process.INTERACTIVE_ENGINE_REQUEST_KINDS,
-        runtime_process.ENGINE_LIFECYCLE_REQUEST_KINDS,
-        runtime_process.ENGINE_LIFECYCLE_REQUEST_KINDS,
         runtime_process.ENGINE_LIFECYCLE_REQUEST_KINDS,
         runtime_process.ENGINE_LIFECYCLE_REQUEST_KINDS,
     ]
+    assert [payload["poll_for_work"] for payload in request_lane_kwargs] == [True, False, True, False, True, False]
     assert ("stop_worker", {"worker_id": "manager-1"}) in client.calls
 
 

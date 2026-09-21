@@ -1,16 +1,7 @@
 import { test, expect } from './fixtures.js';
-import {
-	createDatasource,
-	createDatasourceWithDates,
-	createAnalysis,
-	type E2ERequest
-} from './utils/api.js';
+import { createAnalysis, type E2ERequest } from './utils/api.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor } from './utils/analysis.js';
-import {
-	createCleanupPage,
-	deleteAnalysisViaUI,
-	deleteDatasourceViaUI
-} from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
 import {
@@ -21,10 +12,6 @@ import {
 
 let sharedBaseDatasourceName = '';
 let sharedBaseDatasourceId = '';
-let sharedAuxDatasourceName = '';
-let sharedAuxDatasourceId = '';
-let sharedDateDatasourceName = '';
-let sharedDateDatasourceId = '';
 
 async function createTrackedAnalysis(
 	request: E2ERequest,
@@ -34,30 +21,9 @@ async function createTrackedAnalysis(
 	return createAnalysis(request, analysisName, datasourceId);
 }
 
-test.beforeEach(async ({ request }) => {
-	const id = uid();
-	sharedBaseDatasourceName = `e2e-ops-test-base-${id}`;
-	sharedAuxDatasourceName = `e2e-ops-test-aux-${id}`;
-	sharedDateDatasourceName = `e2e-ops-test-date-${id}`;
-	sharedBaseDatasourceId = await createDatasource(request, sharedBaseDatasourceName);
-	sharedAuxDatasourceId = await createDatasource(request, sharedAuxDatasourceName);
-	sharedDateDatasourceId = await createDatasourceWithDates(request, sharedDateDatasourceName);
-});
-
-test.afterEach(async ({ browser, workerAuth }) => {
-	const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-	// Per-test freeWarm already shut engines. Teardown removes only this test's DS.
-	for (const resource of [
-		{ name: sharedBaseDatasourceName, id: sharedBaseDatasourceId },
-		{ name: sharedAuxDatasourceName, id: sharedAuxDatasourceId },
-		{ name: sharedDateDatasourceName, id: sharedDateDatasourceId }
-	]) {
-		if (resource.name && resource.id) {
-			await deleteDatasourceViaUI(page, resource.name, { id: resource.id });
-		}
-	}
-	await page.close();
-	await context.close();
+test.beforeEach(async ({ sharedDatasource }) => {
+	sharedBaseDatasourceName = sharedDatasource.name;
+	sharedBaseDatasourceId = sharedDatasource.id;
 });
 
 // ── Download format switching ───────────────────────────────────────────────
@@ -900,9 +866,13 @@ test.describe('Analyses – AI config editing', () => {
 // ── Multi-source operations ─────────────────────────────────────────────────
 
 test.describe('Analyses – join config editing', () => {
-	test('Join: select right datasource, add join column pair, Apply', async ({ page, request }) => {
+	test('Join: select right datasource, add join column pair, Apply', async ({
+		page,
+		request,
+		sharedAuxDatasource
+	}) => {
 		const id = uid();
-		const dsRight = sharedAuxDatasourceName;
+		const dsRight = sharedAuxDatasource.name;
 		const analysis = `E2E Join Config ${id}`;
 		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
@@ -972,10 +942,14 @@ test.describe('Analyses – timeseries config editing', () => {
 		}
 	});
 
-	test('TimeSeries: extract month with date CSV', async ({ page, request }) => {
+	test('TimeSeries: extract month with date CSV', async ({
+		page,
+		request,
+		sharedDateDatasource
+	}) => {
 		const id = uid();
 		const analysis = `E2E TS Extract ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedDateDatasourceId);
+		const aId = await createTrackedAnalysis(request, analysis, sharedDateDatasource.id);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'timeseries');
 
@@ -1084,11 +1058,12 @@ test.describe('Analyses – explode config warning', () => {
 test.describe('Analyses – union_by_name config editing', () => {
 	test('UnionByName: select source datasource, toggle allow-missing, Apply', async ({
 		page,
-		request
+		request,
+		sharedAuxDatasource
 	}) => {
 		const id = uid();
 		const dsBase = sharedBaseDatasourceName;
-		const dsSource = sharedAuxDatasourceName;
+		const dsSource = sharedAuxDatasource.name;
 		const analysis = `E2E Union Config ${id}`;
 		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {

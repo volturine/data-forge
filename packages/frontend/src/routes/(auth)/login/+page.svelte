@@ -7,11 +7,18 @@
 
 	let email = $state('');
 	let password = $state('');
+	let submitting = $state(false);
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
-		const success = await authStore.login(email, password);
-		if (success) void goto(resolve('/'));
+		if (submitting) return;
+		submitting = true;
+		try {
+			const success = await authStore.login(email, password);
+			if (success) void goto(resolve('/'));
+		} finally {
+			submitting = false;
+		}
 	}
 </script>
 
@@ -89,8 +96,8 @@
 			</a>
 		</div>
 
-		<button type="submit" class={button({ variant: 'primary' })} disabled={authStore.loading}>
-			{#if authStore.loading}
+		<button type="submit" class={button({ variant: 'primary' })} disabled={submitting}>
+			{#if submitting}
 				<div class={spinner({ size: 'sm' })}></div>
 			{/if}
 			Sign in

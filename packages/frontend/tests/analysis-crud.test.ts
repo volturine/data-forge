@@ -1,19 +1,16 @@
 import { test, expect } from './fixtures.js';
-import { createDatasource, createAnalysis } from './utils/api.js';
-import {
-	createCleanupPage,
-	deleteAnalysisViaUI,
-	deleteDatasourceViaUI
-} from './utils/ui-cleanup.js';
+import { createAnalysis } from './utils/api.js';
+import { createCleanupPage, deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import {
 	gotoAnalysesGallery,
 	gotoNewAnalysis,
 	waitForAnalysisLoadError,
-	waitForLayoutReady
+	waitForLayoutReady,
+	readyTimeoutMs
 } from './utils/readiness.js';
-import { gotoAnalysisEditor } from './utils/analysis.js';
+import { gotoAnalysisEditor, waitForCurrentAnalysisEditor } from './utils/analysis.js';
 import { dialogByHeading } from './utils/locators.js';
 
 async function expandSidebar(page: Parameters<typeof gotoAnalysesGallery>[0]) {
@@ -24,6 +21,12 @@ async function expandSidebar(page: Parameters<typeof gotoAnalysesGallery>[0]) {
 }
 
 test.describe('Analyses – list & gallery', () => {
+	let sharedDatasourceId = '';
+
+	test.beforeEach(async ({ sharedDatasource }) => {
+		sharedDatasourceId = sharedDatasource.id;
+	});
+
 	test('home page renders main content area', async ({ page }) => {
 		await gotoAnalysesGallery(page);
 		await expect(page.getByRole('heading', { name: 'Analyses', level: 1 })).toBeVisible();
@@ -32,25 +35,20 @@ test.describe('Analyses – list & gallery', () => {
 	});
 
 	test('lists existing analysis after API create', async ({ page, request }) => {
-		const dsName = `e2e-list-ds-${uid()}`;
 		const aName = `E2E List ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		await createAnalysis(request, aName, dsId);
+		await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysesGallery(page);
 			await expect(page.locator(`[data-analysis-card="${aName}"]`)).toBeVisible();
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
 	test('search filters out non-matching analyses', async ({ page, request }) => {
 		const suffix = uid();
-		const dsName = `e2e-search-ds-${suffix}`;
 		const analysisName = `E2E Search Alpha ${suffix}`;
-		const dsId = await createDatasource(request, dsName);
-		await createAnalysis(request, analysisName, dsId);
+		await createAnalysis(request, analysisName, sharedDatasourceId);
 		try {
 			await gotoAnalysesGallery(page);
 			const card = page.locator(`[data-analysis-card="${analysisName}"]`);
@@ -60,7 +58,6 @@ test.describe('Analyses – list & gallery', () => {
 			await expect(page.getByText(/No analyses match your search/i)).toBeVisible();
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
@@ -69,10 +66,8 @@ test.describe('Analyses – list & gallery', () => {
 		request
 	}) => {
 		const suffix = uid();
-		const dsName = `e2e-favorite-ds-${suffix}`;
 		const analysisName = `E2E Favorite ${suffix}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, analysisName, dsId);
+		const aId = await createAnalysis(request, analysisName, sharedDatasourceId);
 		try {
 			await gotoAnalysesGallery(page);
 			await expandSidebar(page);
@@ -96,15 +91,12 @@ test.describe('Analyses – list & gallery', () => {
 			await expect(page).toHaveURL(`/analysis/${aId}`);
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
 	test('delete analysis via confirm dialog removes it from list', async ({ page, request }) => {
-		const dsName = `e2e-del-ds-${uid()}`;
 		const aName = `E2E Delete ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		await createAnalysis(request, aName, dsId);
+		await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysesGallery(page);
 			const card = page.locator(`[data-analysis-card="${aName}"]`);
@@ -120,20 +112,18 @@ test.describe('Analyses – list & gallery', () => {
 
 			await expect(card).toHaveCount(countBefore - 1, { timeout: 5_000 });
 		} finally {
-			await deleteDatasourceViaUI(page, dsName);
+			await deleteAnalysisViaUI(page, aName).catch(() => undefined);
 		}
 	});
 });
 
 test.describe('Analyses – gallery interactions', () => {
-	test('sort dropdown A-Z reorders analysis cards', async ({ page, request }) => {
+	test('sort dropdown A-Z reorders analysis cards', async ({ page, request, sharedDatasource }) => {
 		const suffix = uid();
-		const dsName = `e2e-sort-ds-${suffix}`;
 		const alphaName = `Alpha Sort ${suffix}`;
 		const zebraName = `Zebra Sort ${suffix}`;
-		const dsId = await createDatasource(request, dsName);
-		await createAnalysis(request, zebraName, dsId);
-		await createAnalysis(request, alphaName, dsId);
+		await createAnalysis(request, zebraName, sharedDatasource.id);
+		await createAnalysis(request, alphaName, sharedDatasource.id);
 		try {
 			await gotoAnalysesGallery(page);
 			await expect(page.locator(`[data-analysis-card="${zebraName}"]`)).toBeVisible();
@@ -157,16 +147,17 @@ test.describe('Analyses – gallery interactions', () => {
 		} finally {
 			await deleteAnalysisViaUI(page, alphaName);
 			await deleteAnalysisViaUI(page, zebraName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
-	test('duplicate analysis creates a copy via modal', async ({ page, request }) => {
+	test('duplicate analysis creates a copy via modal', async ({
+		page,
+		request,
+		sharedDatasource
+	}) => {
 		const suffix = uid();
-		const dsName = `e2e-dup-ds-${suffix}`;
 		const aName = `E2E Duplicate ${suffix}`;
-		const dsId = await createDatasource(request, dsName);
-		await createAnalysis(request, aName, dsId);
+		await createAnalysis(request, aName, sharedDatasource.id);
 		try {
 			await gotoAnalysesGallery(page);
 			const card = page.locator(`[data-analysis-card="${aName}"]`);
@@ -192,18 +183,19 @@ test.describe('Analyses – gallery interactions', () => {
 		} finally {
 			await deleteAnalysisViaUI(page, `Copy of ${aName}`);
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
-	test('bulk select and delete removes multiple analyses', async ({ page, request }) => {
+	test('bulk select and delete removes multiple analyses', async ({
+		page,
+		request,
+		sharedDatasource
+	}) => {
 		const suffix = uid();
-		const dsName = `e2e-bulk-ds-${suffix}`;
 		const a1 = `Bulk One ${suffix}`;
 		const a2 = `Bulk Two ${suffix}`;
-		const dsId = await createDatasource(request, dsName);
-		const id1 = await createAnalysis(request, a1, dsId);
-		const id2 = await createAnalysis(request, a2, dsId);
+		const id1 = await createAnalysis(request, a1, sharedDatasource.id);
+		const id2 = await createAnalysis(request, a2, sharedDatasource.id);
 		try {
 			await gotoAnalysesGallery(page);
 			await expect(page.locator(`[data-analysis-card="${a1}"]`)).toBeVisible();
@@ -230,7 +222,8 @@ test.describe('Analyses – gallery interactions', () => {
 			await expect(page.locator(`[data-analysis-card="${a1}"]`)).toBeHidden({ timeout: 10_000 });
 			await expect(page.locator(`[data-analysis-card="${a2}"]`)).toBeHidden({ timeout: 10_000 });
 		} finally {
-			await deleteDatasourceViaUI(page, dsName);
+			await deleteAnalysisViaUI(page, a1).catch(() => undefined);
+			await deleteAnalysisViaUI(page, a2).catch(() => undefined);
 		}
 	});
 });
@@ -269,10 +262,8 @@ test.describe('Analyses – create wizard', () => {
 		await expect(page).toHaveURL('/', { timeout: 5_000 });
 	});
 
-	test('full create flow: wizard → analysis detail page', async ({ page, request }) => {
-		const dsName = `e2e-create-ds-${uid()}`;
+	test('full create flow: wizard → analysis detail page', async ({ page, sharedDatasource }) => {
 		const aName = `E2E Created ${uid()}`;
-		await createDatasource(request, dsName);
 		try {
 			await gotoNewAnalysis(page);
 
@@ -283,7 +274,7 @@ test.describe('Analyses – create wizard', () => {
 			// Step 2 – pick datasource
 			await expect(page.getByRole('heading', { name: /Select Data Sources/i })).toBeVisible();
 			await page.getByPlaceholder('Search datasources...').click();
-			await page.locator(`[data-picker-option="${dsName}"]`).click();
+			await page.locator(`[data-picker-option="${sharedDatasource.name}"]`).click();
 			// Close the dropdown by clicking outside
 			await page.getByRole('heading', { name: /Select Data Sources/i }).click();
 			await expect(page.getByRole('button', { name: /Next/i })).toBeEnabled();
@@ -305,24 +296,21 @@ test.describe('Analyses – create wizard', () => {
 			// Redirects to an actual analysis editor, not back to /analysis/new
 			await expect(page).toHaveURL(
 				(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-				{ timeout: 5_000 }
+				{ timeout: readyTimeoutMs() }
 			);
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
 	test('template wizard configures ordered sources, outputs, and validated review', async ({
 		page,
-		request
+		sharedDatasource,
+		sharedAuxDatasource
 	}) => {
-		const suffix = uid();
-		const firstDsName = `e2e-template-first-${suffix}`;
-		const secondDsName = `e2e-template-second-${suffix}`;
+		const firstDsName = sharedDatasource.name;
+		const secondDsName = sharedAuxDatasource.name;
 		const aName = `E2E Template ${uid()}`;
-		await createDatasource(request, firstDsName);
-		await createDatasource(request, secondDsName);
 		try {
 			await gotoNewAnalysis(page);
 			await page.locator('#name').fill(aName);
@@ -385,32 +373,28 @@ test.describe('Analyses – create wizard', () => {
 
 			await expect(page).toHaveURL(
 				(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-				{ timeout: 5_000 }
+				{ timeout: readyTimeoutMs() }
 			);
 			const match = page.url().match(/\/analysis\/([^/?#]+)/);
 			if (!match || match[1] === 'new') {
 				throw new Error(`Could not extract analysis id from URL: ${page.url()}`);
 			}
-			await gotoAnalysisEditor(page, match[1]);
+			await waitForCurrentAnalysisEditor(page, readyTimeoutMs());
 			await expect(page.locator('[role="application"]')).toHaveAttribute(
 				'data-editor-access-state',
 				'editable'
 			);
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, firstDsName);
-			await deleteDatasourceViaUI(page, secondDsName);
 		}
 	});
 
 	test('JSON import remaps a missing datasource and reaches the editor', async ({
 		page,
-		request
+		sharedDatasource
 	}) => {
-		const suffix = uid();
-		const dsName = `e2e-import-ds-${suffix}`;
-		const analysisName = `E2E Import ${suffix}`;
-		await createDatasource(request, dsName);
+		const dsName = sharedDatasource.name;
+		const analysisName = `E2E Import ${uid()}`;
 		try {
 			await gotoNewAnalysis(page);
 			await page.getByRole('button', { name: 'Import JSON' }).click();
@@ -460,11 +444,11 @@ test.describe('Analyses – create wizard', () => {
 			await page.getByRole('button', { name: /Create Analysis/i }).click();
 			await expect(page).toHaveURL(
 				(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-				{ timeout: 5_000 }
+				{ timeout: readyTimeoutMs() }
 			);
+			await waitForCurrentAnalysisEditor(page, readyTimeoutMs());
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
@@ -487,20 +471,17 @@ test.describe('Analyses – create wizard', () => {
 test.describe('Analyses – detail page', () => {
 	let dsId = '';
 	let aId = '';
-	let dsName: string;
 	let aName: string;
 
-	test.beforeEach(async ({ request }) => {
-		dsName = `e2e-detail-ds-${uid()}`;
+	test.beforeEach(async ({ request, sharedDatasource }) => {
 		aName = `E2E Detail ${uid()}`;
-		dsId = await createDatasource(request, dsName);
+		dsId = sharedDatasource.id;
 		aId = await createAnalysis(request, aName, dsId);
 	});
 
 	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteAnalysisViaUI(page, aName);
-		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
 		await context.close();
 	});

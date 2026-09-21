@@ -457,7 +457,12 @@ class RequestLoggingMiddleware:
             content_length = int(request.headers.get('content-length', 0))
         except ValueError:
             content_length = 0
-        should_log_body = self.max_body_size == 0 or content_length <= self.max_body_size
+        # Frontend chunks are served through this process in the containerized
+        # deployment. Never copy their response bodies into the request log: doing
+        # so turns diagnostics into a competing workload for the same file/thread
+        # I/O path that serves the application.
+        is_frontend_asset = request.url.path.startswith('/_app/')
+        should_log_body = not is_frontend_asset and (self.max_body_size == 0 or content_length <= self.max_body_size)
         body_for_log: bytes | None = None
         replay_body_sent = False
         request_complete = False
@@ -502,7 +507,7 @@ class RequestLoggingMiddleware:
             elif message['type'] == 'http.response.body':
                 chunk = message.get('body', b'')
                 raw = chunk.encode('utf-8') if isinstance(chunk, str) else bytes(chunk)
-                if response_body is None and raw and (self.max_body_size == 0 or len(raw) <= self.max_body_size):
+                if response_body is None and raw and not is_frontend_asset and (self.max_body_size == 0 or len(raw) <= self.max_body_size):
                     response_body = raw
                 if not message.get('more_body', False) and not response_logged:
                     duration_ms = (self.get_time() - start) * 1000

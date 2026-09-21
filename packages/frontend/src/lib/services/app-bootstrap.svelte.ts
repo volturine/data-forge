@@ -87,9 +87,10 @@ export class AppBootstrap {
 	 */
 	phase(onAuthPage: boolean): ShellPhase {
 		if (onAuthPage) {
-			if (configStore.config !== null) return 'auth';
-			if (configStore.error || (this.settled && configStore.config === null)) return 'error';
-			return 'loading';
+			// Public auth routes are useful before the optional app bootstrap
+			// probes settle. Login, reset-password, and verify-email must not
+			// render a blank page while config or session discovery is slow.
+			return 'auth';
 		}
 
 		if (this.appReady) return 'app';
@@ -100,10 +101,6 @@ export class AppBootstrap {
 	/** Error message for the current phase (auth or app). */
 	errorFor(onAuthPage: boolean): string | null {
 		if (onAuthPage) {
-			if (configStore.error) return configStore.error;
-			if (this.settled && configStore.config === null) {
-				return 'Failed to load application configuration';
-			}
 			return null;
 		}
 		return this.error;

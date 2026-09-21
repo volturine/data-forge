@@ -19,16 +19,9 @@ async function latestNode(page: Parameters<typeof gotoAnalysisEditor>[0], stepTy
 let sharedDatasourceId = '';
 let sharedDatasourceName = '';
 
-test.beforeEach(async ({ request }) => {
-	sharedDatasourceName = `e2e-editor-test-ds-${uid()}`;
-	sharedDatasourceId = await createDatasource(request, sharedDatasourceName);
-});
-
-test.afterEach(async ({ browser, workerAuth }) => {
-	const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-	await deleteDatasourceViaUI(page, sharedDatasourceName);
-	await page.close();
-	await context.close();
+test.beforeEach(async ({ sharedDatasource }) => {
+	sharedDatasourceName = sharedDatasource.name;
+	sharedDatasourceId = sharedDatasource.id;
 });
 
 // ── Save/discard dirty tracking ─────────────────────────────────────────────

@@ -13,6 +13,8 @@ from backend_core.exceptions import (
     FileSizeExceededError,
     JobError,
     PipelineError,
+    PipelineExecutionCancelledError,
+    PipelineExecutionError,
     analysis_not_found,
     datasource_not_found,
     job_not_found,
@@ -81,6 +83,12 @@ class TestExceptions:
         exc = PipelineError(message='Pipeline failed', error_code='PIPELINE_EXECUTION_ERROR')
 
         assert str(exc) == 'Pipeline failed'
+        assert exc.error_code == 'PIPELINE_EXECUTION_ERROR'
+
+    def test_pipeline_execution_cancelled_error_is_pipeline_execution_error(self):
+        exc = PipelineExecutionCancelledError('Compute request cancelled because its engine was shut down')
+
+        assert isinstance(exc, PipelineExecutionError)
         assert exc.error_code == 'PIPELINE_EXECUTION_ERROR'
 
     def test_job_not_found_error(self):

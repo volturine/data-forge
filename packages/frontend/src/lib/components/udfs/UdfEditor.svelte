@@ -97,13 +97,15 @@
 			if (update.isErr()) throw new Error(update.error.message);
 			return update.value;
 		},
-		onSuccess: (data: Udf) => {
-			queryClient.invalidateQueries({ queryKey: ['udfs'] });
+		onSuccess: async (data: Udf) => {
 			dirty = false;
-			if (mode === 'create') {
-				goto(resolve(`/udfs/${data.id}`), { invalidateAll: true });
-			}
 			saving = false;
+			if (mode === 'create') {
+				// This is a client-side route transition. Await it so the save
+				// action cannot report success while the editor is still on /new.
+				await goto(resolve(`/udfs/${data.id}`));
+			}
+			void queryClient.invalidateQueries({ queryKey: ['udfs'] });
 		},
 		onError: (err: unknown) => {
 			saving = false;

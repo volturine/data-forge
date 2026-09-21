@@ -15,6 +15,7 @@ service PolarsEngineService {
   rpc SubmitJob(EngineSubmitJobRequest) returns (EngineJobReference);
   rpc WatchJob(EngineWatchJobRequest) returns (stream EngineJobEvent);
   rpc GetJobResult(EngineGetJobResultRequest) returns (EngineJobResult);
+  rpc CancelJob(EngineCancelJobRequest) returns (EngineCancelJobResponse);
   rpc Shutdown(EngineShutdownRequest) returns (EngineShutdownResponse);
 }
 
@@ -71,6 +72,14 @@ message EngineWatchJobRequest {
 
 message EngineGetJobResultRequest {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message EngineCancelJobRequest {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message EngineCancelJobResponse {
+  bool accepted = 1;
 }
 
 message EngineJobEvent {

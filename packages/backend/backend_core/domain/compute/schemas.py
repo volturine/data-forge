@@ -335,6 +335,34 @@ class StepPreviewRequest(BaseModel):
     resource_config: EngineResourceConfig | None = None
 
 
+def default_preview_engine_identity(request: StepPreviewRequest) -> compute_pb2.EngineIdentity:
+    """Use the source datasource as the shared identity for stateless previews."""
+    if request.engine_identity is not None:
+        return request.engine_identity
+
+    selected = None
+    tabs = request.analysis_pipeline.tabs
+    if request.tab_id:
+        selected = next((tab for tab in tabs if tab.id == request.tab_id), None)
+    if selected is not None and request.target_step_id != 'source' and not any(step.get('id') == request.target_step_id for step in selected.steps):
+        selected = None
+    if selected is None and request.target_step_id != 'source':
+        selected = next(
+            (tab for tab in tabs if any(step.get('id') == request.target_step_id for step in tab.steps)),
+            None,
+        )
+    if selected is None:
+        selected = next((tab for tab in tabs if tab.steps), tabs[0])
+
+    datasource_id = selected.datasource.id
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        datasource_id=datasource_id,
+        resource_id=datasource_id,
+    )
+
+
 class StepPreviewResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -19,6 +19,7 @@ class MockWebSocket {
 	url: string;
 	readyState = MockWebSocket.OPEN;
 	sent: string[] = [];
+	closeCalls = 0;
 	private listeners = new Map<string, Listener[]>();
 
 	constructor(url: string) {
@@ -35,6 +36,7 @@ class MockWebSocket {
 	}
 
 	close() {
+		this.closeCalls += 1;
 		this.emit('close', { code: 1000, reason: '' });
 	}
 
@@ -226,6 +228,17 @@ describe('openLockSession', () => {
 		session.close();
 
 		expect(JSON.parse(socket.sent[2])).toEqual({ action: 'release', lock_token: 'tok-release' });
+		expect(socket.closeCalls).toBe(0);
+
+		socket.emit('message', {
+			data: JSON.stringify({
+				type: 'status',
+				resource_type: 'analysis',
+				resource_id: 'a-5-release',
+				lock: null
+			})
+		});
+		expect(socket.closeCalls).toBe(1);
 	});
 
 	test('reconnects and re-watches after a transient close', () => {

@@ -148,6 +148,27 @@ def test_cancel_queued_request_does_not_take_over_running_work(test_db_session) 
     assert active.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
 
 
+def test_cancel_disconnected_request_retires_running_engine_work(test_db_session) -> None:
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+    compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test')
+
+    cancelled = compute_requests_service.cancel_disconnected_request(
+        test_db_session,
+        request.id,
+        reason='client disconnected',
+    )
+
+    assert cancelled is not None
+    assert cancelled.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+    assert compute_requests_service.response_payload(cancelled) == {'error': 'client disconnected'}
+    assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test') is None
+
+
 def test_cancel_active_requests_for_engine_retires_only_matching_work(test_db_session) -> None:
     matching_payload = _preview_payload()
     other_payload = deepcopy(matching_payload)

@@ -20,14 +20,22 @@ def get_datasource(session: Session, datasource_id: str) -> DataSource | None:
     return session.get(DataSource, datasource_id)
 
 
-def get_active_datasource(session: Session, datasource_id: str) -> DataSource:
-    datasource = session.get(DataSource, datasource_id)
+def get_active_datasource(session: Session, datasource_id: str, *, for_update: bool = False) -> DataSource:
+    """Load an active datasource, optionally reserving it for a transaction.
+
+    Compute routes use the row lock while they validate a datasource and stage
+    the corresponding durable request.  That makes the validation and enqueue
+    one transaction boundary from the delete worker's perspective: deletion
+    waits for the request commit, then its finalizer sees the active request.
+    """
+    datasource = session.get(DataSource, datasource_id, with_for_update=for_update)
     if datasource is None or datasource.is_pending_delete:
         raise datasource_not_found(datasource_id)
     return datasource
 
 
-def request_delete(session: Session, datasource_id: str, *, now: datetime | None = None) -> DataSource:
+def stage_delete(session: Session, datasource_id: str, *, now: datetime | None = None) -> DataSource:
+    """Mark a datasource pending deletion without committing the transaction."""
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
         raise datasource_not_found(datasource_id)
@@ -38,6 +46,11 @@ def request_delete(session: Session, datasource_id: str, *, now: datetime | None
     datasource.is_hidden = True
     datasource.delete_requested_at = stamp
     session.add(datasource)
+    return datasource
+
+
+def request_delete(session: Session, datasource_id: str, *, now: datetime | None = None) -> DataSource:
+    datasource = stage_delete(session, datasource_id, now=now)
     session.commit()
     session.refresh(datasource)
     return datasource

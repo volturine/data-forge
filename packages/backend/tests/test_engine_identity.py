@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from backend_core.domain.compute.schemas import StepPreviewRequest
+from backend_core.domain.compute.schemas import StepPreviewRequest, default_preview_engine_identity
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.compute import executor_client
 
@@ -118,6 +118,26 @@ def test_step_preview_request_uses_generated_engine_identity() -> None:
         'resource_id': 'datasource-1',
         'datasource_id': 'datasource-1',
     }
+
+
+def test_default_preview_identity_uses_the_selected_datasource() -> None:
+    payload = _preview_payload(
+        {
+            'scope': 'datasource_preview',
+            'reuse_policy': 'shared',
+            'resource_id': 'datasource-1',
+            'datasource_id': 'datasource-1',
+        }
+    )
+    payload.pop('engine_identity')
+    request = StepPreviewRequest.model_validate(payload)
+
+    identity = default_preview_engine_identity(request)
+
+    assert identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
+    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert identity.datasource_id == 'datasource-1'
+    assert identity.resource_id == 'datasource-1'
 
 
 def test_step_preview_request_rejects_invalid_engine_identity_payload() -> None:

@@ -2,7 +2,12 @@ import { test, expect } from './fixtures.js';
 import { createDatasource } from './utils/api.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
-import { gotoMonitoringTab, waitForAppShell, waitForDatasourceList } from './utils/readiness.js';
+import {
+	gotoMonitoringTab,
+	waitForAppShell,
+	waitForDatasourceList,
+	waitForLayoutReady
+} from './utils/readiness.js';
 import { switchNamespace, expectNamespace, restoreDefaultNamespace } from './utils/namespace.js';
 
 /**
@@ -105,6 +110,7 @@ test.describe('Namespace – data isolation', () => {
 
 		// Navigate to /udfs and switch again
 		await page.goto('/udfs');
+		await waitForLayoutReady(page);
 		await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible({
 			timeout: 5_000
 		});

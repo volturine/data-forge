@@ -10,7 +10,7 @@ from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from backend_core.exceptions import AppError
+from backend_core.exceptions import AppError, PipelineExecutionCancelledError
 from dataforge_protocol import errors_pb2
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,12 @@ def _error_body(message: str, error_code: str | None = None, details: dict | Non
 def _log_app_error(exc: AppError, status: int) -> None:
     msg = f'{type(exc).__name__}: {exc.message}'
     extra = {'error_code': exc.error_code, 'details': exc.details}
-    if status >= 500:
+    if isinstance(exc, PipelineExecutionCancelledError):
+        # Engine shutdown retires in-flight requests as part of normal
+        # lifecycle cleanup. It is not an application failure and should not
+        # produce a traceback or trip the E2E error scanner.
+        logger.info(msg, extra=extra)
+    elif status >= 500:
         logger.error(msg, extra=extra, exc_info=True)
     elif status in (401, 403):
         # Authentication and authorization failures stay visible: repeated

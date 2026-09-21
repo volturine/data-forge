@@ -1387,12 +1387,7 @@ def _resolve_step_source_config(
     return {"source_type": metadata.source_type, **metadata.config}
 
 
-def _resolve_pipeline_request(
-    pipeline: dict,
-    session: object | None,
-    tab_id: str | None,
-    target_step_id: str,
-) -> dict:
+def _select_pipeline_tab(pipeline: dict, tab_id: str | None, target_step_id: str) -> dict:
     tabs = pipeline.get("tabs", [])
     if not isinstance(tabs, list) or not tabs:
         raise ValueError("analysis_pipeline missing tabs")
@@ -1413,6 +1408,46 @@ def _resolve_pipeline_request(
         selected = next((tab for tab in tabs if tab.get("steps")), None)
     if not selected:
         selected = tabs[0]
+    if not isinstance(selected, dict):
+        raise ValueError("analysis_pipeline tab must be a dict")
+    return selected
+
+
+def default_stateless_engine_identity(
+    analysis_pipeline: dict,
+    target_step_id: str,
+    tab_id: str | None = None,
+) -> compute_pb2.EngineIdentity:
+    """Return the shared engine identity for a stateless pipeline operation.
+
+    Schema, row-count, download, export, and preview requests all execute the
+    current pipeline against its source datasource. They must therefore share
+    one datasource-scoped engine instead of creating one engine per analysis.
+    Keep this selection identical to the backend preview identity so admission
+    and execution refer to the same engine key.
+    """
+    selected = _select_pipeline_tab(analysis_pipeline, tab_id, target_step_id)
+    datasource = selected.get("datasource")
+    if not isinstance(datasource, dict):
+        raise ValueError("analysis_pipeline tab datasource must be a dict")
+    datasource_id = datasource.get("id")
+    if not isinstance(datasource_id, str) or not datasource_id:
+        raise ValueError("analysis_pipeline tab missing datasource.id")
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        datasource_id=datasource_id,
+        resource_id=datasource_id,
+    )
+
+
+def _resolve_pipeline_request(
+    pipeline: dict,
+    session: object | None,
+    tab_id: str | None,
+    target_step_id: str,
+) -> dict:
+    selected = _select_pipeline_tab(pipeline, tab_id, target_step_id)
 
     datasource = selected.get("datasource")
     if not isinstance(datasource, dict):
@@ -1451,7 +1486,13 @@ def _acquire_engine(manager: ProcessManager, identity: compute_pb2.EngineIdentit
 
 
 def _resolve_export_engine_identity(
-    *, engine_identity: compute_pb2.EngineIdentity | None, analysis_id: str | None, build_id: str | None
+    *,
+    engine_identity: compute_pb2.EngineIdentity | None,
+    analysis_id: str | None,
+    build_id: str | None,
+    analysis_pipeline: dict,
+    target_step_id: str,
+    tab_id: str | None,
 ) -> compute_pb2.EngineIdentity:
     if engine_identity is not None:
         return engine_identity
@@ -1463,12 +1504,7 @@ def _resolve_export_engine_identity(
             resource_id=build_id,
         )
     if analysis_id:
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-            analysis_id=analysis_id,
-            resource_id=analysis_id,
-        )
+        return default_stateless_engine_identity(analysis_pipeline, target_step_id, tab_id)
     raise ValueError("Export requires analysis_id or engine identity")
 
 
@@ -1489,6 +1525,7 @@ def preview_step(
     """Preview the result of executing pipeline up to a specific step with pagination."""
     from runtime.domain.compute.schemas import StepPreviewResponse
 
+    requested_target_step_id = target_step_id
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
     resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
@@ -1528,11 +1565,10 @@ def preview_step(
         preview_steps = steps[: step_index + 1]
         preview_steps = _hydrate_udfs(session, preview_steps)
 
-    resolved_engine_identity = engine_identity or compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-        analysis_id=analysis_id_value,
-        resource_id=analysis_id_value,
+    resolved_engine_identity = engine_identity or default_stateless_engine_identity(
+        analysis_pipeline,
+        requested_target_step_id,
+        tab_id,
     )
     persist_preview_runs = settings.persist_preview_runs
     run_response = None
@@ -1686,6 +1722,7 @@ def get_step_schema(
     """Get the output schema of a pipeline step without returning data."""
     from runtime.domain.compute.schemas import StepSchemaResponse
 
+    requested_target_step_id = target_step_id
     resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
     steps = resolved["steps"]
@@ -1716,12 +1753,7 @@ def get_step_schema(
 
     with _acquire_engine(
         manager,
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-            analysis_id=analysis_id_value,
-            resource_id=analysis_id_value,
-        ),
+        default_stateless_engine_identity(analysis_pipeline, requested_target_step_id, tab_id),
     ) as engine:
         additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
 
@@ -1762,6 +1794,7 @@ def get_step_row_count(
     """Get the row count of a pipeline step without collecting full data."""
     from runtime.domain.compute.schemas import StepRowCountResponse
 
+    requested_target_step_id = target_step_id
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
 
@@ -1801,12 +1834,7 @@ def get_step_row_count(
 
     with _acquire_engine(
         manager,
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-            analysis_id=analysis_id_value,
-            resource_id=analysis_id_value,
-        ),
+        default_stateless_engine_identity(analysis_pipeline, requested_target_step_id, tab_id),
     ) as engine:
         additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
 
@@ -1960,6 +1988,7 @@ def export_data(
 
     started_perf = time.perf_counter()
 
+    requested_target_step_id = target_step_id
     resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
     steps = resolved["steps"]
@@ -1990,7 +2019,14 @@ def export_data(
         export_steps = steps[: step_index + 1]
     export_steps = _hydrate_udfs(session, export_steps)
 
-    resolved_engine_identity = _resolve_export_engine_identity(engine_identity=engine_identity, analysis_id=analysis_id_value, build_id=build_id)
+    resolved_engine_identity = _resolve_export_engine_identity(
+        engine_identity=engine_identity,
+        analysis_id=analysis_id_value,
+        build_id=build_id,
+        analysis_pipeline=analysis_pipeline,
+        target_step_id=requested_target_step_id,
+        tab_id=tab_id,
+    )
 
     additional_datasources = _get_additional_datasources(session, export_steps, analysis_pipeline)
     source_datasource_name = _datasource_name(session, datasource_id)
@@ -2422,6 +2458,7 @@ def download_step(
     """Download the result of a pipeline step in a specific format."""
     from runtime.export_formats import get_export_format
 
+    requested_target_step_id = target_step_id
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
 
@@ -2464,11 +2501,10 @@ def download_step(
         download_steps = steps[: step_index + 1]
         download_steps = _hydrate_udfs(session, download_steps)
 
-    resolved_engine_identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-        analysis_id=analysis_id_value,
-        resource_id=analysis_id_value,
+    resolved_engine_identity = default_stateless_engine_identity(
+        analysis_pipeline,
+        requested_target_step_id,
+        tab_id,
     )
     branch = _resolve_branch_value(datasource_config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
@@ -2983,7 +3019,7 @@ async def _prewarm_build_engine(manager: ProcessManager, *, build_id: str) -> No
     )
     try:
         while True:
-            owns_admission = await manager.await_spawn_admission(identity)
+            owns_admission = await manager.await_spawn_admission(identity, namespace=get_namespace())
             request_reserved = False
             try:
                 reserve_request = getattr(manager, "reserve_engine_request", None)
@@ -2999,7 +3035,7 @@ async def _prewarm_build_engine(manager: ProcessManager, *, build_id: str) -> No
                     release_request = getattr(manager, "release_engine_request", None)
                     if callable(release_request):
                         release_request(identity)
-                manager.release_spawn_admission(identity, owned=owns_admission)
+                manager.release_spawn_admission(identity, namespace=get_namespace(), owned=owns_admission)
         await asyncio.to_thread(manager.set_engine_runtime_context, identity, current_build_id=build_id, current_engine_run_id=None)
     except Exception:
         logger.debug("Build engine prewarm failed for %s", build_id, exc_info=True)

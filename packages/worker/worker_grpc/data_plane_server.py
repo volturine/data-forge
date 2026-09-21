@@ -4,7 +4,9 @@ import asyncio
 import logging
 import threading
 from collections.abc import Awaitable, Callable
+from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any, cast
 
 import grpc
@@ -22,6 +24,19 @@ from runtime.json_values import dict_to_struct
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"
 _MAX_DATA_PLANE_MESSAGE_BYTES = 128 * 1024 * 1024
+_OBJECT_STORE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=max(16, settings.compute_request_concurrency * 2),
+    thread_name_prefix="data-plane-object-store",
+)
+_ICEBERG_EXECUTOR = ThreadPoolExecutor(
+    max_workers=max(8, settings.compute_request_concurrency),
+    thread_name_prefix="data-plane-iceberg",
+)
+
+
+async def _run_blocking[**P, T](executor: Executor, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(executor, partial(function, *args, **kwargs))
 
 
 class _WorkerRequestValidationInterceptor(grpc.aio.ServerInterceptor):
@@ -142,30 +157,30 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
 
     async def EnsureBucket(self, request: object_store_pb2.ObjectStoreBucket, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
         await _require_internal_token(context)
-        await asyncio.to_thread(object_store.ensure_bucket_exists, request.name)
+        await _run_blocking(_OBJECT_STORE_EXECUTOR, object_store.ensure_bucket_exists, request.name)
         return common_pb2.EmptyRequest()
 
     async def UploadBytes(self, request: object_store_pb2.ObjectStoreBytes, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreUrl:
         await _require_internal_token(context)
         content_type = request.content_type if request.HasField("content_type") else None
-        url = await asyncio.to_thread(object_store.upload_bytes, request.data, request.target.url, content_type=content_type)
+        url = await _run_blocking(_OBJECT_STORE_EXECUTOR, object_store.upload_bytes, request.data, request.target.url, content_type=content_type)
         return object_store_pb2.ObjectStoreUrl(url=url)
 
     async def DownloadBytes(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreBytes:
         await _require_internal_token(context)
-        data = await asyncio.to_thread(object_store.download_bytes, request.url)
+        data = await _run_blocking(_OBJECT_STORE_EXECUTOR, object_store.download_bytes, request.url)
         return object_store_pb2.ObjectStoreBytes(target=request, data=data)
 
     async def DeleteObject(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
         await _require_internal_token(context)
         if not object_store.is_managed_object_store_url(request.url):
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Object is outside the worker-managed storage prefix")
-        await asyncio.to_thread(object_store.delete_object, request.url)
+        await _run_blocking(_OBJECT_STORE_EXECUTOR, object_store.delete_object, request.url)
         return common_pb2.EmptyRequest()
 
     async def Exists(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreExistsResponse:
         await _require_internal_token(context)
-        exists = await asyncio.to_thread(object_store.object_exists, request.url)
+        exists = await _run_blocking(_OBJECT_STORE_EXECUTOR, object_store.object_exists, request.url)
         return object_store_pb2.ObjectStoreExistsResponse(exists=exists)
 
     async def ListPrefixes(
@@ -174,7 +189,7 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
         context: grpc.aio.ServicerContext,
     ) -> object_store_pb2.ObjectStorePrefixesResponse:
         await _require_internal_token(context)
-        prefixes = await asyncio.to_thread(object_store.list_prefixes, request.url)
+        prefixes = await _run_blocking(_OBJECT_STORE_EXECUTOR, object_store.list_prefixes, request.url)
         return object_store_pb2.ObjectStorePrefixesResponse(prefixes=prefixes)
 
     async def ListMetadataFiles(
@@ -183,14 +198,14 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
         context: grpc.aio.ServicerContext,
     ) -> object_store_pb2.ObjectStoreMetadataFilesResponse:
         await _require_internal_token(context)
-        files = await asyncio.to_thread(object_store.list_metadata_files, request.url)
+        files = await _run_blocking(_OBJECT_STORE_EXECUTOR, object_store.list_metadata_files, request.url)
         return object_store_pb2.ObjectStoreMetadataFilesResponse(files=[object_store_pb2.ObjectStoreUrl(url=file) for file in files])
 
     async def DeletePrefix(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
         await _require_internal_token(context)
         if not object_store.is_managed_object_store_url(request.url):
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Prefix is outside the worker-managed storage prefix")
-        await asyncio.to_thread(object_store.delete_prefix, request.url)
+        await _run_blocking(_OBJECT_STORE_EXECUTOR, object_store.delete_prefix, request.url)
         return common_pb2.EmptyRequest()
 
 
@@ -203,7 +218,8 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         await _require_internal_token(context)
         if not request.HasField("metadata_path"):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "metadata_path is required")
-        path = await asyncio.to_thread(
+        path = await _run_blocking(
+            _ICEBERG_EXECUTOR,
             iceberg_metadata.resolve_iceberg_metadata_path,
             request.metadata_path,
             namespace_name=request.namespace,
@@ -219,7 +235,8 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         if not request.HasField("metadata_path"):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "metadata_path is required")
         branch = request.branch if request.HasField("branch") else None
-        path = await asyncio.to_thread(
+        path = await _run_blocking(
+            _ICEBERG_EXECUTOR,
             iceberg_metadata.resolve_iceberg_branch_metadata_path,
             request.metadata_path,
             branch,
@@ -233,12 +250,13 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
             schema = _arrow_schema_from_proto(request.arrow_schema)
         except (TypeError, ValueError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        table = await asyncio.to_thread(
+        table = await _run_blocking(
+            _ICEBERG_EXECUTOR,
             StaticTable.from_metadata,
             request.metadata_path,
             properties=object_store.object_store_storage_options(),
         )
-        await asyncio.to_thread(iceberg_metadata.sync_iceberg_schema, table, schema)
+        await _run_blocking(_ICEBERG_EXECUTOR, iceberg_metadata.sync_iceberg_schema, table, schema)
         return common_pb2.EmptyRequest()
 
     async def ListSnapshots(
@@ -250,7 +268,7 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         if not request.HasField("datasource_id"):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "datasource_id is required")
         branch = request.branch if request.HasField("branch") else None
-        response = await asyncio.to_thread(compute_service.list_iceberg_snapshots, None, request.datasource_id, branch)
+        response = await _run_blocking(_ICEBERG_EXECUTOR, compute_service.list_iceberg_snapshots, None, request.datasource_id, branch)
         return iceberg_pb2.IcebergSnapshotsResponse(
             datasource_id=response.datasource_id,
             table_path=response.table_path,
@@ -277,8 +295,11 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         except ValueError:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "snapshot_id must be an integer")
         limit = request.limit if request.HasField("limit") else None
-        frame = await asyncio.to_thread(iceberg_snapshot_reader.scan_iceberg_snapshot, request.metadata_path, snapshot_id, None)
-        rows = await asyncio.to_thread(lambda: frame.limit(limit).collect().to_dicts() if limit is not None else frame.collect().to_dicts())
+        frame = await _run_blocking(_ICEBERG_EXECUTOR, iceberg_snapshot_reader.scan_iceberg_snapshot, request.metadata_path, snapshot_id, None)
+        rows = await _run_blocking(
+            _ICEBERG_EXECUTOR,
+            lambda: frame.limit(limit).collect().to_dicts() if limit is not None else frame.collect().to_dicts(),
+        )
         return iceberg_pb2.IcebergSnapshotScanResponse(rows=dict_to_struct({"rows": rows}))
 
     async def DeleteSnapshot(
@@ -287,7 +308,13 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         context: grpc.aio.ServicerContext,
     ) -> iceberg_pb2.IcebergSnapshotDeleteResponse:
         await _require_internal_token(context)
-        response = await asyncio.to_thread(compute_service.delete_iceberg_snapshot, None, request.datasource_id, request.snapshot_id)
+        response = await _run_blocking(
+            _ICEBERG_EXECUTOR,
+            compute_service.delete_iceberg_snapshot,
+            None,
+            request.datasource_id,
+            request.snapshot_id,
+        )
         return iceberg_pb2.IcebergSnapshotDeleteResponse(datasource_id=response.datasource_id, snapshot_id=response.snapshot_id)
 
 

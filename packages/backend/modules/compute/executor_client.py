@@ -15,8 +15,7 @@ from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_requests.live import response_hub
 from backend_core.domain.compute_requests.models import command_from_payload
-from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
-from backend_core.exceptions import PipelineExecutionError
+from backend_core.exceptions import PipelineExecutionCancelledError, PipelineExecutionError
 from backend_core.namespace import get_namespace
 from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2
 from modules.analysis.step_schemas import normalize_step_config_for_protocol
@@ -24,6 +23,7 @@ from modules.datasource import schemas as datasource_schemas
 from modules.datasource.schema_protocol import schema_info_proto
 
 EngineIdentity = compute_pb2.EngineIdentity
+_ENGINE_SHUTDOWN_CANCELLATION = 'Compute request cancelled because its engine was shut down'
 
 
 def _require_active_pipeline_datasources(session: Session, pipeline: compute_schemas.AnalysisPipelinePayload) -> None:
@@ -47,7 +47,10 @@ def _require_active_pipeline_datasources(session: Session, pipeline: compute_sch
             if isinstance(sources, list):
                 external_ids.update(source for source in sources if isinstance(source, str) and source not in local_ids)
     for datasource_id in sorted(external_ids):
-        datasource_delete_service.get_active_datasource(session, datasource_id)
+        # Keep the datasource row locked until _submit commits the request.
+        # Without this, deletion can finalize between this validation and the
+        # durable queue insert, leaving a request that references no datasource.
+        datasource_delete_service.get_active_datasource(session, datasource_id, for_update=True)
 
 
 def _protocol_request_payload(request: BaseModel) -> dict[str, object]:
@@ -82,9 +85,12 @@ _RESPONSE_SAFETY_POLL_SECONDS = 1.0
 
 
 def _ensure_runtime_available(runtime_probe: RuntimeAvailabilityProbe) -> None:
-    if runtime_probe.available(kind=RuntimeWorkerKind.BUILD_MANAGER):
-        return
-    raise HTTPException(status_code=503, detail='Compute runtime unavailable')
+    # Compute requests are durable queue entries. A heartbeat is only a
+    # liveness observation and can become stale between this check and the
+    # enqueue, so rejecting here turns a transient observation into a lost
+    # user operation. The worker claims the request when it is available and
+    # the response wait already covers that queueing period.
+    del runtime_probe
 
 
 def _submit(
@@ -114,17 +120,53 @@ def _submit(
     return request
 
 
+def _stage_validated_request(
+    session: Session,
+    *,
+    pipeline: compute_schemas.AnalysisPipelinePayload | None,
+    datasource_ids: tuple[str, ...],
+    kind: enums_pb2.ComputeRequestKind,
+    command: compute_pb2.ComputeCommand,
+    runtime_probe: RuntimeAvailabilityProbe,
+):
+    """Validate referenced datasources and enqueue in one short DB task.
+
+    The validation takes row locks so a concurrent datasource deletion cannot
+    pass validation before the request is durable. Keep it in the same worker
+    task as ``_submit``: dispatching validation and enqueue as separate
+    thread-pool jobs lets a burst fill every thread with blocked row-lock
+    reads, leaving the first request's enqueue behind the blocked reads and
+    deadlocking the whole burst.
+    """
+    if pipeline is not None:
+        _require_active_pipeline_datasources(session, pipeline)
+    for datasource_id in sorted(set(datasource_ids)):
+        # Direct datasource requests do not carry an analysis pipeline, but
+        # still need the same deletion-to-enqueue fence as previews.
+        datasource_delete_service.get_active_datasource(session, datasource_id, for_update=True)
+    return _submit(
+        session,
+        kind=kind,
+        command=command,
+        runtime_probe=runtime_probe,
+    )
+
+
 async def _submit_and_wait(
     session: Session,
     *,
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
     runtime_probe: RuntimeAvailabilityProbe,
+    pipeline: compute_schemas.AnalysisPipelinePayload | None = None,
+    datasource_ids: tuple[str, ...] = (),
     http_request: Request | None = None,
 ):
     request = await asyncio.to_thread(
-        _submit,
+        _stage_validated_request,
         session,
+        pipeline=pipeline,
+        datasource_ids=datasource_ids,
         kind=kind,
         command=command,
         runtime_probe=runtime_probe,
@@ -141,6 +183,14 @@ async def _submit_and_wait(
             if completed is None:
                 raise PipelineExecutionError(f'Compute request {request.id} disappeared')
             if completed.status in {enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED, enums_pb2.COMPUTE_REQUEST_STATUS_FAILED}:
+                # The endpoint session is also the queue-polling session. A
+                # terminal read has all response columns loaded, so detach it
+                # and roll back immediately instead of keeping a tenant
+                # connection checked out until FastAPI finishes serializing
+                # the response. Under a browser burst those long-lived
+                # sessions otherwise consume the whole DB pool while the
+                # worker is doing the actual compute.
+                await asyncio.to_thread(_detach_and_release_request, session, completed)
                 break
             await asyncio.to_thread(session.rollback)
             with contextlib.suppress(asyncio.TimeoutError):
@@ -151,7 +201,7 @@ async def _submit_and_wait(
     except asyncio.CancelledError:
         with contextlib.suppress(Exception):
             await asyncio.to_thread(
-                compute_requests_service.cancel_queued_request,
+                compute_requests_service.cancel_disconnected_request,
                 session,
                 request.id,
                 reason='Compute request cancelled because the HTTP client disconnected',
@@ -159,6 +209,8 @@ async def _submit_and_wait(
         raise
     finally:
         wait_task.cancel()
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(session.rollback)
     if completed.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED:
         return completed
     payload = compute_requests_service.response_payload(completed)
@@ -166,7 +218,14 @@ async def _submit_and_wait(
     status_code = payload.get('status_code')
     if isinstance(status_code, int):
         raise HTTPException(status_code=status_code, detail=message)
+    if message == _ENGINE_SHUTDOWN_CANCELLATION:
+        raise PipelineExecutionCancelledError(message)
     raise PipelineExecutionError(message)
+
+
+def _detach_and_release_request(session: Session, request) -> None:
+    session.expunge(request)
+    session.rollback()
 
 
 def _read_request(session: Session, request_id: str):
@@ -200,12 +259,13 @@ async def preview_step(
     runtime_probe: RuntimeAvailabilityProbe,
     http_request: Request | None = None,
 ) -> compute_schemas.StepPreviewResponse:
-    await asyncio.to_thread(_require_active_pipeline_datasources, session, request.analysis_pipeline)
+    normalized = request.model_copy(update={'engine_identity': compute_schemas.default_preview_engine_identity(request)})
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, _protocol_request_payload(request)),
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, _protocol_request_payload(normalized)),
         runtime_probe=runtime_probe,
+        pipeline=normalized.analysis_pipeline,
         http_request=http_request,
     )
     return compute_schemas.StepPreviewResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -218,12 +278,12 @@ async def get_step_schema(
     runtime_probe: RuntimeAvailabilityProbe,
     http_request: Request | None = None,
 ) -> compute_schemas.StepSchemaResponse:
-    await asyncio.to_thread(_require_active_pipeline_datasources, session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
         command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
+        pipeline=request.analysis_pipeline,
         http_request=http_request,
     )
     return compute_schemas.StepSchemaResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -236,12 +296,12 @@ async def get_step_row_count(
     runtime_probe: RuntimeAvailabilityProbe,
     http_request: Request | None = None,
 ) -> compute_schemas.StepRowCountResponse:
-    await asyncio.to_thread(_require_active_pipeline_datasources, session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
         command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
+        pipeline=request.analysis_pipeline,
         http_request=http_request,
     )
     return compute_schemas.StepRowCountResponse.model_validate(compute_requests_service.response_payload(completed))
@@ -253,12 +313,12 @@ async def download_step(
     *,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> tuple[bytes, str, str]:
-    await asyncio.to_thread(_require_active_pipeline_datasources, session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
         command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
+        pipeline=request.analysis_pipeline,
     )
     if not completed.artifact_path or not completed.artifact_name or not completed.artifact_content_type:
         raise PipelineExecutionError('Download artifact missing from compute response')
@@ -280,12 +340,12 @@ async def export_data(
     *,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> compute_schemas.ExportResponse:
-    await asyncio.to_thread(_require_active_pipeline_datasources, session, request.analysis_pipeline)
     completed = await _submit_and_wait(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
         command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_EXPORT, _protocol_request_payload(request)),
         runtime_probe=runtime_probe,
+        pipeline=request.analysis_pipeline,
     )
     return compute_schemas.ExportResponse.model_validate(compute_requests_service.response_payload(completed))
 
@@ -409,6 +469,7 @@ async def ingest_datasource(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
         command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE, {'datasource_id': datasource_id}),
         runtime_probe=runtime_probe,
+        datasource_ids=(datasource_id,),
     )
     return datasource_schemas.DataSourceResponse.model_validate(compute_requests_service.response_payload(completed))
 
@@ -433,6 +494,7 @@ async def get_datasource_schema(
             },
         ),
         runtime_probe=runtime_probe,
+        datasource_ids=(datasource_id,),
     )
     return schema_info_proto(compute_requests_service.response_payload(completed))
 
@@ -461,6 +523,7 @@ async def get_column_stats(
             },
         ),
         runtime_probe=runtime_probe,
+        datasource_ids=(datasource_id,),
     )
     return datasource_schemas.ColumnStatsResponse.model_validate(compute_requests_service.response_payload(completed))
 
@@ -487,6 +550,7 @@ async def compare_iceberg_snapshots(
             },
         ),
         runtime_probe=runtime_probe,
+        datasource_ids=(datasource_id,),
     )
     return datasource_schemas.SnapshotCompareResponse.model_validate(compute_requests_service.response_payload(completed))
 
@@ -534,7 +598,7 @@ async def shutdown_engine(
         session,
         namespace=get_namespace(),
         identity=identity,
-        reason='Compute request cancelled because its engine was shut down',
+        reason=_ENGINE_SHUTDOWN_CANCELLATION,
     )
     await _submit_and_wait(
         session,
@@ -555,7 +619,7 @@ def request_engine_shutdown(
         session,
         namespace=get_namespace(),
         identity=identity,
-        reason='Compute request cancelled because its engine was shut down',
+        reason=_ENGINE_SHUTDOWN_CANCELLATION,
     )
     _submit(
         session,

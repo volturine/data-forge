@@ -14,11 +14,13 @@ import {
 	E2E_PASSWORD
 } from './user-flows.js';
 import { deleteDatasourceViaUI } from './ui-cleanup.js';
-import { waitForLayoutReady } from './readiness.js';
+import { readyTimeoutMs, waitForLayoutReady } from './readiness.js';
 import { switchNamespace } from './namespace.js';
 
 export const E2E_RUN_STAMP =
 	process.env.E2E_RUN_STAMP || `${Date.now().toString(36)}-${process.pid}`;
+export const E2E_GLOBAL_RUN_STAMP =
+	process.env.E2E_GLOBAL_RUN_STAMP || E2E_RUN_STAMP.replace(/-shard-\d+-of-\d+$/, '');
 
 export { E2E_PASSWORD };
 
@@ -70,6 +72,11 @@ const udfRegistry = new Map<string, { name: string }>();
  */
 const helperDefaultNamespace = process.env.DEFAULT_NAMESPACE?.trim() || 'default';
 
+// Setup helpers run serially within a Playwright worker. Reusing their one
+// authenticated page avoids hard-loading the SPA before every API-created
+// analysis/datasource while keeping the actual test page fresh per test.
+const helperPages = new WeakMap<BrowserContext, Page>();
+
 async function resolveHelperDefaultNamespace(_page: Page): Promise<string> {
 	return helperDefaultNamespace;
 }
@@ -82,12 +89,12 @@ async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promis
 	if (!request.helperContext) {
 		throw new Error(`withAuthedPage requires helperContext (worker ${request.workerIndex})`);
 	}
-	const page = await request.helperContext.newPage();
-	try {
-		return await fn(page);
-	} finally {
-		await page.close();
+	let page = helperPages.get(request.helperContext);
+	if (!page || page.isClosed()) {
+		page = await request.helperContext.newPage();
+		helperPages.set(request.helperContext, page);
 	}
+	return fn(page);
 }
 
 /**
@@ -98,9 +105,16 @@ async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promis
  */
 async function prepareHelperNamespace(page: Page, namespace?: string): Promise<void> {
 	const target = namespace ?? (await resolveHelperDefaultNamespace(page));
-	await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
-	await waitForLayoutReady(page);
+	// The worker-scoped helper page remains on the last setup route. Only the
+	// first call needs a document navigation; later setup calls can use the
+	// already-hydrated shell and avoid a second bootstrap/API burst.
+	const shell = page.locator('[data-shell-interactive="true"]');
+	if (!(await shell.isVisible().catch(() => false))) {
+		await page.goto('/', { waitUntil: 'domcontentloaded', timeout: readyTimeoutMs() });
+		await waitForLayoutReady(page);
+	}
 	const sidebar = page.locator('aside[aria-label="Main navigation"]');
+	await sidebar.waitFor({ state: 'visible', timeout: readyTimeoutMs() });
 	const active = sidebar.getByText(target, { exact: true });
 	if (await active.isVisible().catch(() => false)) return;
 	await switchNamespace(page, target);

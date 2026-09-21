@@ -32,6 +32,7 @@ if (!baseURL) {
 }
 const ciArgs = process.env.CI ? ['--disable-dev-shm-usage', '--disable-gpu'] : [];
 const artifactsRoot = path.resolve(process.cwd(), 'tests', '.artifacts');
+const testDir = process.env.E2E_BOOTSTRAP_SHARED_FIXTURES === '1' ? './e2e' : './tests';
 const shardSuffix = shardSuffixFromArgs();
 const jsonReport = process.env.PLAYWRIGHT_JSON_REPORT;
 const reporter: ReporterDescription[] = [['line']];
@@ -39,10 +40,19 @@ if (jsonReport) {
 	reporter.push(['json', { outputFile: jsonReport }]);
 }
 const workers = resolveE2eWorkers();
+const testTimeoutMs = (() => {
+	const raw = process.env.PLAYWRIGHT_TEST_TIMEOUT_MS;
+	if (!raw) return 120_000;
+	const timeout = Number.parseInt(raw, 10);
+	if (!Number.isInteger(timeout) || timeout < 1_000 || timeout.toString() !== raw) {
+		throw new Error(`PLAYWRIGHT_TEST_TIMEOUT_MS must be an integer >= 1000, got "${raw}"`);
+	}
+	return timeout;
+})();
 
 export default defineConfig({
-	testDir: './tests',
-	timeout: 120_000,
+	testDir,
+	timeout: testTimeoutMs,
 	expect: { timeout: process.env.CI ? 10_000 : 5_000 },
 	fullyParallel: false,
 	globalSetup: './tests/global-setup.ts',

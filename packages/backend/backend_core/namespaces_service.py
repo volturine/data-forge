@@ -28,6 +28,11 @@ def register_namespace(session: Session, namespace: str | None) -> RuntimeNamesp
     return record
 
 
+def runtime_namespace_exists(session: Session, namespace: str | None) -> bool:
+    """Return whether a namespace has crossed the runtime publication fence."""
+    return session.get(RuntimeNamespace, normalize_namespace(namespace)) is not None
+
+
 def list_runtime_namespaces(session: Session) -> list[str]:
     rows = session.exec(select(RuntimeNamespace.name).order_by(RuntimeNamespace.name)).all()
     names = {normalize_namespace(row) for row in rows}
