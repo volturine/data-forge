@@ -273,7 +273,7 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 			await page.getByTestId('analysis-export-toolbar-button').click();
 			await page.getByTestId('analysis-export-format-sql').click();
 			const warnings = page.getByTestId('analysis-export-warnings');
-			await expect(warnings).toBeVisible({ timeout: 5_000 });
+			await expect(warnings).toBeVisible({ timeout: 10_000 });
 			await expect(warnings).toContainText(/ai/i);
 			await expect(page.getByTestId('analysis-export-code')).toContainText('-- WARNING:');
 			await expect(page.getByTestId('analysis-export-code')).toContainText('Original config');

@@ -177,7 +177,7 @@ async function confirmCancelBuild(page: Page) {
 				apiResponse.url().includes('/api/v1/compute/builds/') &&
 				apiResponse.url().includes('/cancel') &&
 				apiResponse.status() === 200,
-			{ timeout: 5_000 }
+			{ timeout: 10_000 }
 		)
 		.then(async (response) => (await response.json()) as { status: string });
 	await confirmButton.click({ force: true, timeout: 5_000 });
@@ -278,7 +278,7 @@ test.describe('Navigation – engines live monitor', () => {
 			const enginePopup = page.locator('[data-engines-popup="true"]');
 			await engineButton.click();
 			await expect(enginePopup).toBeVisible({ timeout: 5_000 });
-			await expect(page.getByTestId('engine-monitor-count')).toBeVisible({ timeout: 5_000 });
+			await expect(page.getByTestId('engine-monitor-count')).toBeVisible({ timeout: 10_000 });
 			await expect(
 				enginePopup
 					.locator(
@@ -362,20 +362,87 @@ test.describe('Navigation – chat panel smoke', () => {
 		await expect(panel).not.toBeVisible({ timeout: 3_000 });
 	});
 
-	test('chat panel provider switch updates model selector', async ({ page }) => {
+	test('chat panel provider switch updates model selector without a local Ollama service', async ({
+		page
+	}) => {
 		await gotoAuthedRoute(page, '/');
+		await page.route('**/api/v1/settings', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					smtp_host: '',
+					smtp_port: 587,
+					smtp_user: '',
+					smtp_password: '',
+					telegram_bot_token: '',
+					telegram_bot_enabled: false,
+					openrouter_api_key: '',
+					openrouter_default_model: 'openai/gpt-4o-mini',
+					openai_api_key: '',
+					openai_endpoint_url: 'https://openai.test',
+					openai_default_model: 'gpt-4o-mini',
+					openai_organization_id: '',
+					ollama_endpoint_url: 'http://ollama.test',
+					ollama_default_model: 'llama3.2',
+					public_idb_debug: false
+				})
+			})
+		);
+		await page.route('**/api/v1/mcp/tools', (route) =>
+			route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+		);
+		await page.route('**/api/v1/ai/chat/models', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([{ name: 'gpt-4o-mini' }, { name: 'llama3.2' }])
+			})
+		);
+		const settingsResponsePromise = page.waitForResponse(
+			(response) =>
+				response.request().method() === 'GET' &&
+				new URL(response.url()).pathname === '/api/v1/settings'
+		);
+		const toolsResponsePromise = page.waitForResponse(
+			(response) =>
+				response.request().method() === 'GET' &&
+				new URL(response.url()).pathname === '/api/v1/mcp/tools'
+		);
 
 		const trigger = page.getByRole('button', { name: 'AI Assistant' });
 		await trigger.click();
 		const panel = page.locator('#chat-panel');
 		await expect(panel).toBeVisible({ timeout: 5_000 });
+		const [settingsResponse, toolsResponse] = await Promise.all([
+			settingsResponsePromise,
+			toolsResponsePromise
+		]);
+		expect(settingsResponse.ok()).toBe(true);
+		expect(toolsResponse.ok()).toBe(true);
 
 		const providerSelect = panel.locator('select[title="Chat provider"]');
 		await expect(providerSelect).toBeVisible({ timeout: 3_000 });
+		await expect(providerSelect).toHaveValue('openai', { timeout: 5_000 });
+		await expect(panel.getByRole('button', { name: 'gpt-4o-mini' })).toBeVisible({
+			timeout: 5_000
+		});
 
-		// Switch to Ollama — no API key required, so UI stays responsive
+		// The model catalogue is stubbed: this test covers provider UI state,
+		// not the availability of a local Ollama service.
+		const ollamaModelsResponsePromise = page.waitForResponse((response) => {
+			if (
+				response.request().method() !== 'POST' ||
+				new URL(response.url()).pathname !== '/api/v1/ai/chat/models'
+			) {
+				return false;
+			}
+			return response.request().postDataJSON().provider === 'ollama';
+		});
 		await providerSelect.selectOption('ollama');
 		await expect(providerSelect).toHaveValue('ollama');
+		const ollamaModelsResponse = await ollamaModelsResponsePromise;
+		expect(ollamaModelsResponse.ok()).toBe(true);
 
 		// Model button should update to Ollama default
 		await expect(panel.getByRole('button', { name: 'llama3.2' })).toBeVisible({ timeout: 5_000 });

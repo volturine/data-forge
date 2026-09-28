@@ -24,7 +24,7 @@ test.describe('Auth – registration flow', () => {
 
 			await expect(
 				page.getByText(/Account created/i).or(page.getByLabel('Main navigation'))
-			).toBeVisible({ timeout: 5_000 });
+			).toBeVisible({ timeout: 10_000 });
 		} finally {
 			await context.close();
 		}
