@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 from sqlmodel import Session
 
+from backend_core import runtime_work_service
 from backend_core.config import settings
 from backend_core.database import run_settings_db
 from backend_core.persistence.build_jobs.models import BuildJob
@@ -68,6 +69,19 @@ async def test_internal_scheduler_grpc_registers_and_stops_worker(monkeypatch: p
 
 
 @pytest.mark.asyncio
+async def test_internal_scheduler_lists_only_due_schedule_namespaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    token = _set_internal_token(monkeypatch)
+    monkeypatch.setattr(runtime_work_service, 'list_due_schedule_namespaces', lambda _session: [('alpha', 3)])
+
+    response = await SchedulerRuntimeServicer().ListDueScheduleNamespaces(
+        common_pb2.EmptyRequest(),
+        FakeGrpcContext(token),
+    )
+
+    assert [(item.namespace, item.generation) for item in response.namespaces] == [('alpha', 3)]
+
+
+@pytest.mark.asyncio
 async def test_internal_scheduler_grpc_run_due_enqueues_build_job(
     sample_datasource: DataSource,
     test_db_session: Session,
@@ -88,7 +102,7 @@ async def test_internal_scheduler_grpc_run_due_enqueues_build_job(
     test_db_session.commit()
 
     response = await SchedulerRuntimeServicer().RunDueSchedules(
-        common_pb2.RuntimeWorkerRequest(worker_id=worker_id),
+        scheduler_runtime_pb2.SchedulerRunDueRequest(worker_id=worker_id, target_namespace='default', generation=1),
         FakeGrpcContext(token),
     )
 

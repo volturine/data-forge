@@ -1,14 +1,16 @@
+import asyncio
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import event, update
 from sqlmodel import Session, select
 
 from backend_core import build_jobs_service, build_runs_service as build_run_service
 from backend_core.domain.build_jobs.models import BuildJobStatus
+from backend_core.domain.build_runs.live import BuildNotification, BuildNotificationHub
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
@@ -105,11 +107,79 @@ def test_append_build_event_sequences_and_updates_snapshot(test_db_session) -> N
     assert stored.next_event_sequence == 3
 
 
-def test_concurrent_build_event_producers_receive_one_total_order_and_consistent_projection(test_engine, test_db_session) -> None:
+def test_append_nonterminal_build_event_notifies_after_lock_without_outbox(test_engine, test_db_session, monkeypatch) -> None:
+    run = _create_run(test_db_session)
+    statements: list[str] = []
+    notifications: list[dict[str, object]] = []
+
+    def notify_on_commit(session, payload: dict[str, object]) -> None:
+        assert session.in_transaction()
+        statements.append('notify')
+        notifications.append(payload)
+
+    monkeypatch.setattr('backend_core.build_runs_service.runtime_ipc.notify_runtime_payload_on_commit', notify_on_commit)
+
+    def record_statement(_conn, _cursor, statement, _parameters, _context, _executemany) -> None:
+        normalized = statement.upper().lstrip()
+        if normalized.startswith('INSERT') and 'RUNTIME_OUTBOX_EVENTS' in normalized:
+            statements.append('outbox')
+        elif normalized.startswith('SELECT') and 'FROM BUILD_RUNS' in normalized:
+            statements.append('build_run')
+
+    event.listen(test_engine, 'before_cursor_execute', record_statement)
+    try:
+        result = build_run_service.append_build_event(
+            test_db_session,
+            build_id=run.id,
+            event=compute_schemas.BuildLogEvent(
+                build_id=run.id,
+                analysis_id=run.analysis_id,
+                emitted_at=datetime.now(UTC),
+                current_kind=EngineRunKind.BUILD,
+                level=compute_schemas.BuildLogLevel.INFO,
+                message='ordered notification',
+            ),
+        )
+    finally:
+        event.remove(test_engine, 'before_cursor_execute', record_statement)
+
+    assert result is not None
+    assert 'outbox' not in statements
+    assert statements.index('build_run') < statements.index('notify')
+    assert notifications == [
+        {
+            'kind': 'build',
+            'namespace': run.namespace,
+            'build_id': run.id,
+            'latest_sequence': 1,
+        }
+    ]
+
+
+async def test_build_notification_hub_keeps_the_highest_sequence_when_delivery_is_reordered() -> None:
+    hub = BuildNotificationHub()
+    await hub.publish(BuildNotification(namespace='default', build_id='build-1', latest_sequence=5))
+    await hub.publish(BuildNotification(namespace='default', build_id='build-1', latest_sequence=3))
+
+    latest = await asyncio.wait_for(hub.wait_for_build('build-1', last_sequence=4), timeout=0.1)
+
+    assert latest.latest_sequence == 5
+
+
+def test_concurrent_build_event_producers_receive_one_total_order_and_consistent_projection(test_engine, test_db_session, monkeypatch) -> None:
     run = _create_run(test_db_session)
     producer_count = 8
     barrier = threading.Barrier(producer_count)
     emitted_at = datetime.now(UTC)
+    notifications: list[dict[str, object]] = []
+    notifications_lock = threading.Lock()
+
+    def notify_on_commit(session, payload: dict[str, object]) -> None:
+        assert session.in_transaction()
+        with notifications_lock:
+            notifications.append(payload)
+
+    monkeypatch.setattr('backend_core.build_runs_service.runtime_ipc.notify_runtime_payload_on_commit', notify_on_commit)
 
     def append_progress(index: int) -> tuple[int, str]:
         current_step = f'producer-{index}'
@@ -146,10 +216,12 @@ def test_concurrent_build_event_producers_receive_one_total_order_and_consistent
     assert stored.version == producer_count + 1
     assert stored.current_step == events[-1].payload_json['current_step']
     assert stored.current_step_index == events[-1].payload_json['current_step_index']
-    assert sorted(event.payload_json['latest_sequence'] for event in outbox_events) == list(range(1, producer_count + 1))
+    assert outbox_events == []
+    notification_sequences = [payload.get('latest_sequence') for payload in notifications]
+    assert sorted(sequence for sequence in notification_sequences if isinstance(sequence, int)) == list(range(1, producer_count + 1))
 
 
-def test_build_event_projection_counter_and_outbox_roll_back_together(test_db_session) -> None:
+def test_build_event_projection_counter_and_event_row_roll_back_together(test_db_session) -> None:
     run = _create_run(test_db_session)
     event = compute_schemas.BuildLogEvent(
         build_id=run.id,
@@ -177,7 +249,7 @@ def test_build_event_projection_counter_and_outbox_roll_back_together(test_db_se
     assert outbox_events == []
 
 
-def test_build_event_rejects_stale_execution_generation_without_writes(test_db_session) -> None:
+def test_build_event_rejects_stale_execution_generation_without_writes(test_db_session, monkeypatch) -> None:
     run = build_run_service.create_build_run(
         test_db_session,
         build_id=str(uuid.uuid4()),
@@ -198,6 +270,12 @@ def test_build_event_rejects_stale_execution_generation_without_writes(test_db_s
         message='stale',
     )
 
+    notifications: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        'backend_core.build_runs_service.runtime_ipc.notify_runtime_payload_on_commit',
+        lambda _session, payload: notifications.append(payload),
+    )
+
     row = build_run_service.append_build_event(
         test_db_session,
         build_id=run.id,
@@ -213,6 +291,7 @@ def test_build_event_rejects_stale_execution_generation_without_writes(test_db_s
     assert stored.next_event_sequence == 1
     assert build_run_service.list_build_events_after(test_db_session, run.id) == []
     assert list(test_db_session.execute(select(RuntimeOutboxEvent)).scalars().all()) == []
+    assert notifications == []
 
 
 def test_cancellation_and_worker_completion_race_preserves_one_terminal_outcome(test_engine, test_db_session) -> None:
@@ -694,6 +773,41 @@ def test_mark_running_build_advances_execution_generation_for_reclaimed_job(test
     assert stale is None
 
 
+def test_mark_build_running_publishes_durable_api_notification(test_db_session) -> None:
+    run = _create_run(test_db_session)
+    run.status = BuildRunStatus.QUEUED
+    test_db_session.add(run)
+    test_db_session.commit()
+
+    writes: list[str] = []
+
+    def capture_writes(_conn, _cursor, statement, _parameters, _context, _executemany) -> None:
+        normalized = statement.upper().lstrip()
+        if normalized.startswith('INSERT') and 'RUNTIME_OUTBOX_EVENTS' in normalized:
+            writes.append('outbox')
+        elif normalized.startswith('UPDATE') and 'BUILD_RUNS' in normalized:
+            writes.append('build_run')
+
+    engine = test_db_session.get_bind()
+    event.listen(engine, 'before_cursor_execute', capture_writes)
+    try:
+        updated = build_run_service.mark_build_running(test_db_session, run.id, execution_generation=1)
+    finally:
+        event.remove(engine, 'before_cursor_execute', capture_writes)
+    outbox_event = test_db_session.exec(select(RuntimeOutboxEvent)).one()
+
+    assert updated is not None
+    assert writes.index('outbox') < writes.index('build_run')
+    assert updated.status == BuildRunStatus.RUNNING
+    assert outbox_event.kind == 'build'
+    assert outbox_event.payload_json == {
+        'kind': 'build',
+        'namespace': run.namespace,
+        'build_id': run.id,
+        'latest_sequence': 0,
+    }
+
+
 def test_append_build_event_persists_matching_terminal_event_without_mutating_terminal_run(test_db_session) -> None:
     run = _create_run(test_db_session)
     cancelled_at = datetime.now(UTC)
@@ -736,6 +850,9 @@ def test_append_build_event_persists_matching_terminal_event_without_mutating_te
     )
     second = build_run_service.append_build_event(test_db_session, build_id=run.id, event=replay)
     stored = build_run_service.get_build_run(test_db_session, run.id)
+    outbox_events = list(test_db_session.exec(select(RuntimeOutboxEvent)).all())
+    terminal_sequences = [event.payload_json.get('latest_sequence') for event in outbox_events]
+    outbox_events = list(test_db_session.exec(select(RuntimeOutboxEvent)).all())
 
     assert first is not None
     assert second is not None
@@ -750,6 +867,8 @@ def test_append_build_event_persists_matching_terminal_event_without_mutating_te
     assert stored.completed_at.replace(tzinfo=UTC) == cancelled.emitted_at
     assert stored.cancelled_at.replace(tzinfo=UTC) == cancelled.cancelled_at
     assert stored.cancelled_by == 'user@example.com'
+    assert sorted(sequence for sequence in terminal_sequences if isinstance(sequence, int)) == [1, 2]
+    assert sorted(int(event.payload_json['latest_sequence']) for event in outbox_events) == [1, 2]
 
 
 def test_append_build_event_rejects_conflicting_terminal_event_for_terminal_run(test_db_session) -> None:

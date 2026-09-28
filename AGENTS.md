@@ -66,3 +66,14 @@ PRDs go by delivery status, not topic.
 - Fix the cause where the responsibility belongs. Prefer clear ownership and isolation boundaries over patches at the point where symptoms appear.
 - When one fix reveals another failure, investigate it independently instead of forcing it into the previous explanation.
 - Before finishing, be able to explain the root cause, why the symptoms were misleading, what now prevents recurrence, and what evidence proves the fix.
+
+## Concurrency and runtime lessons
+
+- Runtime claim RPCs must receive one target namespace. Durable lease expiry is the recovery boundary; scanning every namespace or stale worker registry on each claim multiplies control-plane work during a browser burst.
+- Namespace wake rows are updated transactionally with durable work and advance a generation. Refresh reads the generation and queue state in one snapshot, scans without holding the marker lock, and may clear the wake only if the generation is unchanged.
+- `COMPUTE_WORKERS` is the single runtime capacity budget for concurrent jobs and assigned compute workers. A worker is bound to one exact analysis/datasource identity; queue fairness and its cross-process lease are internal details, not separate public limits.
+- Warm workers are the same worker type in the ready-but-unassigned state. `COMPUTE_WARM_WORKERS` controls the extra prestarted reserve; assigning one binds it to an identity and starts its replacement.
+- Active worker starts are bounded by `COMPUTE_WORKERS`; unassigned warm starts are bounded by `COMPUTE_WARM_WORKERS`. Do not add a separate host-CPU-derived startup cap; tune capacity from measured load results.
+- Shared previews have two identities: the exact analysis RID or datasource RID owns the shared engine, while the deterministic serialized preview command distinguishes transforms, pagination, and resource settings. Coalesce exact commands before engine admission and let a disconnected leader finish when followers still exist.
+- API workers are stateless HTTP frontends. The dedicated `runtime_coordinator.py` process owns runtime gRPC, the durable outbox dispatcher, and the coordinator heartbeat; the single worker manager owns active engine identities and the ready, unassigned compute-worker reserve. `WORKERS > 1` is valid only when `RUNTIME_COORDINATOR_TARGET` is configured.
+- The permanent E2E 50-tab probe is a readiness regression test, not proof of unlimited throughput. Capacity claims still require queue/p95 measurements and logs showing no event-loop, lease, database, or engine-slot starvation.

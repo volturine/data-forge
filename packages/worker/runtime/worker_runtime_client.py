@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import logging
 import os
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
@@ -28,9 +32,140 @@ from runtime.protocol_mapping import (
 )
 
 _TOKEN_METADATA_KEY = "x-internal-token"
+_COORDINATOR_GENERATION_METADATA_KEY = "x-runtime-coordinator-generation"
+logger = logging.getLogger(__name__)
+_HEARTBEAT_RPC_TIMEOUT_SECONDS = 5.0
+_CONTROL_RPC_TIMEOUT_SECONDS = 15.0
+_BUILD_LIFECYCLE_RETRY_SECONDS = 30.0
+_TRANSIENT_RECONNECT_CODES = frozenset({"UNAVAILABLE", "DEADLINE_EXCEEDED"})
 
 _channel_lock = threading.Lock()
 _channels: dict[str, grpc.Channel] = {}
+_COMPUTE_LEASE_BATCH_WINDOW_SECONDS = 0.025
+_COMPUTE_LEASE_BATCH_MAX_ITEMS = 256
+
+
+@dataclass
+class _ComputeLeaseRenewalCall:
+    client: WorkerRuntimeClient
+    namespace: str
+    worker_id: str
+    request_id: str
+    claim_token: str
+    lease_generation: int
+    timeout_seconds: float
+    group_key: tuple[object, ...]
+    result: Future[int | None]
+
+
+class _ComputeLeaseRenewalBatcher:
+    """Coalesce concurrent lease heartbeats into one transaction per namespace."""
+
+    def __init__(self, *, batch_window_seconds: float = _COMPUTE_LEASE_BATCH_WINDOW_SECONDS) -> None:
+        self._condition = threading.Condition()
+        self._pending: deque[_ComputeLeaseRenewalCall] = deque()
+        self._batch_window_seconds = max(float(batch_window_seconds), 0.0)
+        self._closed = False
+        self._thread = threading.Thread(target=self._run, name="compute-request-lease-batcher", daemon=True)
+        self._thread.start()
+
+    def renew(
+        self,
+        client: WorkerRuntimeClient,
+        *,
+        request_id: str,
+        namespace: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
+        timeout_seconds: float,
+    ) -> int | None:
+        call = _ComputeLeaseRenewalCall(
+            client=client,
+            namespace=namespace,
+            worker_id=worker_id,
+            request_id=request_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+            timeout_seconds=max(float(timeout_seconds), 0.1),
+            group_key=(client._target, client._metadata(), namespace, worker_id),
+            result=Future(),
+        )
+        with self._condition:
+            if self._closed:
+                raise RuntimeError("Compute request lease batcher is shut down")
+            self._pending.append(call)
+            self._condition.notify()
+        return call.result.result()
+
+    def close(self) -> None:
+        with self._condition:
+            self._closed = True
+            self._condition.notify_all()
+        self._thread.join()
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while not self._pending and not self._closed:
+                    self._condition.wait()
+                if not self._pending and self._closed:
+                    return
+                flush_at = time.monotonic() + self._batch_window_seconds
+                while not self._closed and len(self._pending) < _COMPUTE_LEASE_BATCH_MAX_ITEMS:
+                    remaining = flush_at - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self._condition.wait(remaining)
+                first = self._pending[0]
+                calls: list[_ComputeLeaseRenewalCall] = []
+                pending: deque[_ComputeLeaseRenewalCall] = deque()
+                while self._pending:
+                    call = self._pending.popleft()
+                    if call.group_key == first.group_key and len(calls) < _COMPUTE_LEASE_BATCH_MAX_ITEMS:
+                        calls.append(call)
+                    else:
+                        pending.append(call)
+                self._pending = pending
+            self._renew_group(calls)
+
+    @staticmethod
+    def _renew_group(calls: list[_ComputeLeaseRenewalCall]) -> None:
+        first = calls[0]
+        try:
+            renewed = first.client._renew_compute_request_leases_batch(
+                namespace=first.namespace,
+                worker_id=first.worker_id,
+                renewals=[(call.request_id, call.claim_token, call.lease_generation) for call in calls],
+                timeout_seconds=min(call.timeout_seconds for call in calls),
+            )
+        except Exception as exc:
+            for call in calls:
+                call.result.set_exception(exc)
+            return
+        for call in calls:
+            call.result.set_result(renewed.get(call.request_id))
+
+
+_compute_lease_batcher_lock = threading.Lock()
+_compute_lease_batcher: _ComputeLeaseRenewalBatcher | None = None
+
+
+def _get_compute_lease_batcher() -> _ComputeLeaseRenewalBatcher:
+    global _compute_lease_batcher
+    with _compute_lease_batcher_lock:
+        if _compute_lease_batcher is None:
+            _compute_lease_batcher = _ComputeLeaseRenewalBatcher()
+        return _compute_lease_batcher
+
+
+def shutdown_compute_request_lease_batcher() -> None:
+    global _compute_lease_batcher
+    with _compute_lease_batcher_lock:
+        batcher = _compute_lease_batcher
+        _compute_lease_batcher = None
+    if batcher is not None:
+        batcher.close()
 
 
 def _shared_channel(target: str) -> grpc.Channel:
@@ -49,6 +184,22 @@ def _shared_channel(target: str) -> grpc.Channel:
         return channel
 
 
+def _claim_lease_timing(
+    lease_expires_at: datetime,
+    lease_ttl_seconds: int,
+    *,
+    wall_now: datetime | None = None,
+    monotonic_now: float | None = None,
+) -> tuple[float, float]:
+    """Convert the absolute DB expiry into a conservative local deadline."""
+    current_monotonic_time = time.monotonic() if monotonic_now is None else monotonic_now
+    current_wall_time = wall_now or datetime.now(UTC)
+    remaining = min(float(lease_ttl_seconds), (lease_expires_at - current_wall_time).total_seconds())
+    if remaining <= 0:
+        raise ValueError("Claim lease expired before it reached the worker")
+    return remaining, current_monotonic_time + remaining
+
+
 _T = TypeVar("_T")
 
 
@@ -61,7 +212,8 @@ class ClaimedBuildJob:
     lease_generation: int
     lease_expires_at: datetime
     attempt: int
-    lease_ttl_seconds: int
+    lease_ttl_seconds: float
+    lease_deadline_monotonic: float | None = None
 
 
 @dataclass(frozen=True)
@@ -131,7 +283,16 @@ class ClaimedComputeRequest:
     lease_generation: int
     lease_expires_at: datetime
     attempt: int
-    lease_ttl_seconds: int
+    lease_ttl_seconds: float
+    lease_deadline_monotonic: float | None = None
+    command_hash: str | None = None
+
+
+@dataclass(frozen=True)
+class EngineRunFinalization:
+    run_id: str
+    fields: Mapping[str, object]
+    merge_result_json: bool = False
 
 
 class BackendWorkerRpcError(RuntimeError):
@@ -163,7 +324,17 @@ class WorkerRuntimeClient:
         self._channel = _shared_channel(target)
         self._stub = worker_runtime_pb2_grpc.WorkerRuntimeServiceStub(self._channel)
 
-    def register_worker(self, *, worker_id: str, kind: str, hostname: str, pid: int, capacity: int, active_jobs: int = 0) -> None:
+    def register_worker(
+        self,
+        *,
+        worker_id: str,
+        kind: str,
+        hostname: str,
+        pid: int,
+        capacity: int,
+        active_jobs: int = 0,
+        retry_seconds: float | None = None,
+    ) -> None:
         request = worker_runtime_pb2.RuntimeWorkerRegisterRequest(
             worker_id=worker_id,
             kind=enum_to_proto_value("RUNTIME_WORKER_KIND", kind),
@@ -172,22 +343,31 @@ class WorkerRuntimeClient:
             capacity=capacity,
             active_jobs=active_jobs,
         )
-        self._call_registration(lambda: self._stub.RegisterWorker(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        registration_timeout = min(
+            self._timeout_seconds,
+            _CONTROL_RPC_TIMEOUT_SECONDS if retry_seconds is None else min(max(float(retry_seconds), 0.25), _CONTROL_RPC_TIMEOUT_SECONDS),
+        )
+        self._call_registration(
+            lambda: self._stub.RegisterWorker(request, timeout=registration_timeout, metadata=self._metadata()),
+            retry_seconds=retry_seconds,
+        )
 
-    def heartbeat_worker(self, *, worker_id: str, active_jobs: int | None = None) -> None:
+    def heartbeat_worker(self, *, worker_id: str, active_jobs: int | None = None, timeout_seconds: float | None = None) -> None:
         request = worker_runtime_pb2.RuntimeWorkerHeartbeatRequest(worker_id=worker_id)
         if active_jobs is not None:
             request.active_jobs = active_jobs
-        self._call(lambda: self._stub.HeartbeatWorker(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        timeout = self._control_timeout(timeout_seconds)
+        self._call(lambda: self._stub.HeartbeatWorker(request, timeout=timeout, metadata=self._metadata()))
 
-    def stop_worker(self, *, worker_id: str) -> None:
-        self._call(lambda: self._stub.StopWorker(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
+    def stop_worker(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+        timeout = self._control_timeout(timeout_seconds)
+        self._call(lambda: self._stub.StopWorker(_worker(worker_id), timeout=timeout, metadata=self._metadata()))
 
-    def claim_build_job(self, *, worker_id: str) -> ClaimedBuildJob | None:
+    def claim_build_job(self, *, worker_id: str, namespace: str) -> ClaimedBuildJob | None:
         response = self._call(
             lambda: self._stub.ClaimBuildJob(
-                common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2),
-                timeout=self._timeout_seconds,
+                common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace=namespace),
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
@@ -198,6 +378,7 @@ class WorkerRuntimeClient:
             raise ValueError(f"Claimed build job {response.job.job_id} has no lease expiry")
         if lease_expires_at.tzinfo is None:
             lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+        lease_ttl_seconds, lease_deadline = _claim_lease_timing(lease_expires_at, response.job.lease_ttl_seconds)
         return ClaimedBuildJob(
             job_id=response.job.job_id,
             build_id=response.job.build_id,
@@ -206,7 +387,8 @@ class WorkerRuntimeClient:
             lease_generation=response.job.lease_generation,
             lease_expires_at=lease_expires_at,
             attempt=response.job.attempt,
-            lease_ttl_seconds=response.job.lease_ttl_seconds,
+            lease_ttl_seconds=lease_ttl_seconds,
+            lease_deadline_monotonic=lease_deadline,
         )
 
     def renew_build_job_lease(
@@ -228,7 +410,7 @@ class WorkerRuntimeClient:
                     lease_generation=lease_generation,
                     worker_id=worker_id,
                 ),
-                timeout=min(self._timeout_seconds, timeout_seconds),
+                timeout=min(self._control_timeout(), max(float(timeout_seconds), 0.1)),
                 metadata=self._metadata(),
             )
         )
@@ -243,7 +425,7 @@ class WorkerRuntimeClient:
         *,
         worker_id: str,
         allowed_kinds: frozenset[enums_pb2.ComputeRequestKind],
-        compute_namespace_offset: int = 0,
+        namespace: str,
     ) -> ClaimedComputeRequest | None:
         response = self._call(
             lambda: self._stub.ClaimComputeRequest(
@@ -251,9 +433,9 @@ class WorkerRuntimeClient:
                     worker_id=worker_id,
                     protocol_version=2,
                     allowed_compute_request_kinds=sorted(allowed_kinds),
-                    compute_namespace_offset=compute_namespace_offset,
+                    target_namespace=namespace,
                 ),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
@@ -265,6 +447,7 @@ class WorkerRuntimeClient:
             raise ValueError(f"Claimed compute request {response.request.id} has no lease expiry")
         if lease_expires_at.tzinfo is None:
             lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+        lease_ttl_seconds, lease_deadline = _claim_lease_timing(lease_expires_at, response.request.lease_ttl_seconds)
         return ClaimedComputeRequest(
             id=response.request.id,
             namespace=response.request.namespace,
@@ -275,7 +458,9 @@ class WorkerRuntimeClient:
             lease_generation=response.request.lease_generation,
             lease_expires_at=lease_expires_at,
             attempt=response.request.attempt,
-            lease_ttl_seconds=response.request.lease_ttl_seconds,
+            lease_ttl_seconds=lease_ttl_seconds,
+            lease_deadline_monotonic=lease_deadline,
+            command_hash=hashlib.sha256(command.command.SerializeToString(deterministic=True)).hexdigest(),
         )
 
     def renew_compute_request_lease(
@@ -288,24 +473,53 @@ class WorkerRuntimeClient:
         lease_generation: int,
         timeout_seconds: float,
     ) -> int | None:
-        response = self._call(
-            lambda: self._stub.RenewComputeRequestLease(
-                worker_runtime_pb2.WorkerComputeRequestClaimRequest(
+        return _get_compute_lease_batcher().renew(
+            self,
+            request_id=request_id,
+            namespace=namespace,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def _renew_compute_request_leases_batch(
+        self,
+        *,
+        namespace: str,
+        worker_id: str,
+        renewals: Sequence[tuple[str, str, int]],
+        timeout_seconds: float,
+    ) -> dict[str, int | None]:
+        request = worker_runtime_pb2.WorkerRenewComputeRequestLeasesRequest(
+            namespace=namespace,
+            worker_id=worker_id,
+            renewals=[
+                worker_runtime_pb2.WorkerComputeRequestLeaseRenewal(
                     request_id=request_id,
-                    namespace=namespace,
-                    worker_id=worker_id,
                     claim_token=claim_token,
                     lease_generation=lease_generation,
-                ),
-                timeout=min(self._timeout_seconds, timeout_seconds),
+                )
+                for request_id, claim_token, lease_generation in renewals
+            ],
+        )
+        response = self._call(
+            lambda: self._stub.RenewComputeRequestLeases(
+                request,
+                timeout=self._control_timeout(timeout_seconds),
                 metadata=self._metadata(),
             )
         )
-        if not response.renewed:
-            return None
-        if not response.HasField("lease_ttl_seconds"):
-            raise ValueError(f"Renewed compute request {request_id} has no lease TTL")
-        return int(response.lease_ttl_seconds)
+        results: dict[str, int | None] = {request_id: None for request_id, _, _ in renewals}
+        for result in response.renewals:
+            if result.request_id not in results:
+                continue
+            if not result.renewed:
+                continue
+            if not result.HasField("lease_ttl_seconds"):
+                raise ValueError(f"Renewed compute request {result.request_id} has no lease TTL")
+            results[result.request_id] = int(result.lease_ttl_seconds)
+        return results
 
     def complete_compute_request(
         self,
@@ -320,6 +534,8 @@ class WorkerRuntimeClient:
         artifact_path: str | None = None,
         artifact_name: str | None = None,
         artifact_content_type: str | None = None,
+        engine_run_finalization: EngineRunFinalization | None = None,
+        timeout_seconds: float | None = None,
     ) -> None:
         request = worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
             namespace=namespace,
@@ -340,7 +556,10 @@ class WorkerRuntimeClient:
             request.artifact_name = artifact_name
         if artifact_content_type is not None:
             request.artifact_content_type = artifact_content_type
-        self._call(lambda: self._stub.CompleteComputeRequest(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        if engine_run_finalization is not None:
+            request.engine_run_finalization.CopyFrom(_engine_run_finalization_proto(engine_run_finalization))
+        timeout = self._control_timeout(timeout_seconds)
+        self._call(lambda: self._stub.CompleteComputeRequest(request, timeout=timeout, metadata=self._metadata()))
 
     def fail_compute_request(
         self,
@@ -353,25 +572,31 @@ class WorkerRuntimeClient:
         lease_generation: int,
         error_message: str,
         error: compute_pb2.ComputeErrorResult,
+        engine_run_finalization: EngineRunFinalization | None = None,
+        timeout_seconds: float | None = None,
     ) -> None:
+        timeout = self._control_timeout(timeout_seconds)
+        request = worker_runtime_pb2.WorkerFailComputeRequestRequest(
+            namespace=namespace,
+            request_id=request_id,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+            error_message=error_message,
+            response_envelope=_compute_response_envelope(
+                kind=kind,
+                request_id=request_id,
+                status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
+                response=compute_pb2.ComputeResponse(error=error),
+                error_message=error_message,
+            ),
+        )
+        if engine_run_finalization is not None:
+            request.engine_run_finalization.CopyFrom(_engine_run_finalization_proto(engine_run_finalization))
         self._call(
             lambda: self._stub.FailComputeRequest(
-                worker_runtime_pb2.WorkerFailComputeRequestRequest(
-                    namespace=namespace,
-                    request_id=request_id,
-                    worker_id=worker_id,
-                    claim_token=claim_token,
-                    lease_generation=lease_generation,
-                    error_message=error_message,
-                    response_envelope=_compute_response_envelope(
-                        kind=kind,
-                        request_id=request_id,
-                        status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
-                        response=compute_pb2.ComputeResponse(error=error),
-                        error_message=error_message,
-                    ),
-                ),
-                timeout=self._timeout_seconds,
+                request,
+                timeout=timeout,
                 metadata=self._metadata(),
             )
         )
@@ -462,7 +687,7 @@ class WorkerRuntimeClient:
         response = self._call(
             lambda: self._stub.GetDatasourceMetadata(
                 worker_runtime_pb2.WorkerDatasourceMetadataRequest(namespace=namespace, datasource_id=datasource_id),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
@@ -484,7 +709,7 @@ class WorkerRuntimeClient:
         response = self._call(
             lambda: self._stub.GetUdfCodes(
                 worker_runtime_pb2.WorkerUdfCodesRequest(namespace=namespace, udf_ids=udf_ids),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
@@ -494,7 +719,7 @@ class WorkerRuntimeClient:
         return self._call(
             lambda: self._stub.GetEngineCredentials(
                 worker_runtime_pb2.WorkerEngineCredentialsRequest(namespace=namespace, role=role),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
@@ -503,7 +728,7 @@ class WorkerRuntimeClient:
         response = self._call(
             lambda: self._stub.GetAnalysisMetadata(
                 worker_runtime_pb2.WorkerAnalysisMetadataRequest(namespace=namespace, analysis_id=analysis_id),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
@@ -515,7 +740,7 @@ class WorkerRuntimeClient:
         response = self._call(
             lambda: self._stub.GetBuildCancelStatus(
                 worker_runtime_pb2.WorkerBuildCancelStatusRequest(namespace=namespace, build_id=build_id),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
@@ -668,6 +893,7 @@ class WorkerRuntimeClient:
         progress: float = 0.0,
         current_step: str | None = None,
         triggered_by: str | None = None,
+        idempotency_key: str | None = None,
     ) -> str:
         request = worker_runtime_pb2.WorkerCreateEngineRunRequest(
             namespace=namespace,
@@ -698,7 +924,15 @@ class WorkerRuntimeClient:
             request.current_step = current_step
         if triggered_by is not None:
             request.triggered_by = triggered_by
-        return self._call(lambda: self._stub.CreateEngineRun(request, timeout=self._timeout_seconds, metadata=self._metadata())).id
+        if idempotency_key is not None:
+            request.idempotency_key = idempotency_key
+
+        def create():
+            return self._stub.CreateEngineRun(request, timeout=self._control_timeout(), metadata=self._metadata())
+
+        if idempotency_key is not None:
+            return self._call_with_reconnect(create, operation="CreateEngineRun").id
+        return self._call(create).id
 
     def update_engine_run(
         self,
@@ -716,7 +950,7 @@ class WorkerRuntimeClient:
                     merge_result=merge_result_json,
                     update=_engine_run_update_proto(fields),
                 ),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
@@ -726,7 +960,7 @@ class WorkerRuntimeClient:
         response = self._call(
             lambda: self._stub.GetEngineRunState(
                 worker_runtime_pb2.WorkerEngineRunStateRequest(namespace=namespace, run_id=run_id),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
@@ -740,7 +974,7 @@ class WorkerRuntimeClient:
         }
 
     def fail_build_job(self, *, job_id: str, build_id: str, namespace: str, worker_id: str, claim_token: str, lease_generation: int, error: str) -> bool:
-        response = self._call(
+        response = self._call_with_reconnect(
             lambda: self._stub.FailBuildJob(
                 worker_runtime_pb2.WorkerFailBuildJobRequest(
                     job_id=job_id,
@@ -751,14 +985,15 @@ class WorkerRuntimeClient:
                     worker_id=worker_id,
                     build_id=build_id,
                 ),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
-            )
+            ),
+            operation="FailBuildJob",
         )
         return bool(response.value)
 
     def finalize_build_job(self, *, job_id: str, build_id: str, namespace: str, worker_id: str, claim_token: str, lease_generation: int) -> bool:
-        response = self._call(
+        response = self._call_with_reconnect(
             lambda: self._stub.FinalizeBuildJob(
                 worker_runtime_pb2.WorkerFinalizeBuildJobRequest(
                     job_id=job_id,
@@ -768,31 +1003,62 @@ class WorkerRuntimeClient:
                     lease_generation=lease_generation,
                     worker_id=worker_id,
                 ),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
-            )
+            ),
+            operation="FinalizeBuildJob",
         )
         return bool(response.value)
 
-    def release_build_worker_jobs(self, *, worker_id: str) -> int:
-        return int(self._call(lambda: self._stub.ReleaseBuildWorkerJobs(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata())).count)
+    def release_build_worker_jobs(self, *, worker_id: str, namespace: str) -> int:
+        request = common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace=namespace)
+        return int(self._call(lambda: self._stub.ReleaseBuildWorkerJobs(request, timeout=self._control_timeout(), metadata=self._metadata())).count)
 
-    def queued_build_job_count(self) -> int:
+    def queued_build_job_count(self, *, namespace: str) -> int:
         return int(
-            self._call(lambda: self._stub.GetQueuedBuildJobCount(common_pb2.EmptyRequest(), timeout=self._timeout_seconds, metadata=self._metadata())).count
+            self._call(
+                lambda: self._stub.GetQueuedBuildJobCount(
+                    common_pb2.EmptyRequest(namespace=namespace),
+                    timeout=self._control_timeout(),
+                    metadata=self._metadata(),
+                )
+            ).count
         )
 
-    def dispatch_runtime_outbox(self) -> int:
+    def reconcile_expired_build_jobs(self, *, namespace: str) -> int:
         return int(
-            self._call(lambda: self._stub.DispatchRuntimeOutbox(common_pb2.EmptyRequest(), timeout=self._timeout_seconds, metadata=self._metadata())).count
+            self._call(
+                lambda: self._stub.ReconcileExpiredBuildJobs(
+                    common_pb2.EmptyRequest(namespace=namespace),
+                    timeout=self._control_timeout(),
+                    metadata=self._metadata(),
+                )
+            ).count
+        )
+
+    def reconcile_expired_compute_requests(self, *, namespace: str) -> int:
+        return int(
+            self._call(
+                lambda: self._stub.ReconcileExpiredComputeRequests(
+                    common_pb2.EmptyRequest(namespace=namespace),
+                    timeout=self._control_timeout(),
+                    metadata=self._metadata(),
+                )
+            ).count
         )
 
     def idle_build_worker_pids(self) -> set[int]:
-        response = self._call(lambda: self._stub.GetIdleBuildWorkerPids(common_pb2.EmptyRequest(), timeout=self._timeout_seconds, metadata=self._metadata()))
+        response = self._call(lambda: self._stub.GetIdleBuildWorkerPids(common_pb2.EmptyRequest(), timeout=self._control_timeout(), metadata=self._metadata()))
         return set(response.pids)
 
-    def runtime_namespaces(self) -> list[str]:
-        response = self._call(lambda: self._stub.ListRuntimeNamespaces(common_pb2.EmptyRequest(), timeout=self._timeout_seconds, metadata=self._metadata()))
+    def pending_runtime_work_namespaces(self, *, work_kinds: tuple[str, ...] = ()) -> list[str]:
+        response = self._call(
+            lambda: self._stub.ListPendingRuntimeWorkNamespaces(
+                worker_runtime_pb2.WorkerPendingRuntimeWorkNamespacesRequest(kinds=work_kinds),
+                timeout=self._control_timeout(),
+                metadata=self._metadata(),
+            )
+        )
         return list(response.namespaces)
 
     def persist_build_event(
@@ -818,11 +1084,15 @@ class WorkerRuntimeClient:
         )
         if resource_config_json is not None:
             request.build_resource_config.CopyFrom(_build_resource_config_proto(resource_config_json))
-        response = self._call(lambda: self._stub.PersistBuildEvent(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        # Event publication is intentionally not retried here: a successful
+        # transaction followed by a lost response must not append the same
+        # event twice. The surrounding build path turns an unavailable event
+        # publication into an explicit durable failure instead.
+        response = self._call(lambda: self._stub.PersistBuildEvent(request, timeout=self._control_timeout(), metadata=self._metadata()))
         return int(response.sequence) if response.HasField("sequence") else None
 
     def start_build_run(self, *, namespace: str, build_id: str, job_id: str, worker_id: str, claim_token: str, lease_generation: int) -> StartedBuildRun | None:
-        response = self._call(
+        response = self._call_with_reconnect(
             lambda: self._stub.StartBuildRun(
                 worker_runtime_pb2.WorkerStartBuildRunRequest(
                     namespace=namespace,
@@ -832,9 +1102,10 @@ class WorkerRuntimeClient:
                     claim_token=claim_token,
                     lease_generation=lease_generation,
                 ),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
-            )
+            ),
+            operation="StartBuildRun",
         )
         if not response.HasField("run"):
             return None
@@ -866,15 +1137,19 @@ class WorkerRuntimeClient:
                     namespace=namespace,
                     engine_status=[_engine_status_result_proto(status) for status in statuses],
                 ),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
         return int(response.count)
 
-    def pending_datasource_deletes(self) -> list[PendingDatasourceDelete]:
+    def pending_datasource_deletes(self, *, namespace: str) -> list[PendingDatasourceDelete]:
         response = self._call(
-            lambda: self._stub.ListPendingDatasourceDeletes(common_pb2.EmptyRequest(), timeout=self._timeout_seconds, metadata=self._metadata())
+            lambda: self._stub.ListPendingDatasourceDeletes(
+                common_pb2.EmptyRequest(namespace=namespace),
+                timeout=self._control_timeout(),
+                metadata=self._metadata(),
+            )
         )
         return [PendingDatasourceDelete(namespace=delete.namespace, datasource_id=delete.datasource_id) for delete in response.deletes]
 
@@ -882,7 +1157,7 @@ class WorkerRuntimeClient:
         response = self._call(
             lambda: self._stub.FinalizeDatasourceDelete(
                 worker_runtime_pb2.WorkerFinalizeDatasourceDeleteRequest(namespace=namespace, datasource_id=datasource_id),
-                timeout=self._timeout_seconds,
+                timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
         )
@@ -976,7 +1251,20 @@ class WorkerRuntimeClient:
         self.close()
 
     def _metadata(self) -> tuple[tuple[str, str], ...]:
-        return ((_TOKEN_METADATA_KEY, self._token),)
+        metadata = [(_TOKEN_METADATA_KEY, self._token)]
+        raw_generation = os.environ.get("RUNTIME_COORDINATOR_GENERATION", "").strip()
+        try:
+            generation = int(raw_generation)
+        except ValueError as exc:
+            raise RuntimeError("Worker runtime RPCs require an active RUNTIME_COORDINATOR_GENERATION") from exc
+        if generation < 1:
+            raise RuntimeError("RUNTIME_COORDINATOR_GENERATION must be a positive integer")
+        metadata.append((_COORDINATOR_GENERATION_METADATA_KEY, str(generation)))
+        return tuple(metadata)
+
+    def _control_timeout(self, timeout_seconds: float | None = None) -> float:
+        requested = self._timeout_seconds if timeout_seconds is None else float(timeout_seconds)
+        return min(max(requested, 0.1), _CONTROL_RPC_TIMEOUT_SECONDS)
 
     def _call(self, fn: Callable[[], _T]) -> _T:
         try:
@@ -984,15 +1272,119 @@ class WorkerRuntimeClient:
         except grpc.RpcError as exc:
             raise _rpc_error_from_grpc_error(exc, target=self._target) from exc
 
-    def _call_registration(self, fn: Callable[[], _T]) -> _T:
-        deadline = time.monotonic() + self._registration_retry_seconds
+    def _call_with_reconnect(self, fn: Callable[[], _T], *, operation: str) -> _T:
+        """Retry idempotent runtime RPCs while the API reconnects.
+
+        Callers must guarantee that repeated execution has the same durable
+        effect, either through a lease generation or an explicit idempotency
+        key. Non-idempotent operations use :meth:`_call` instead.
+        """
+        deadline = time.monotonic() + _BUILD_LIFECYCLE_RETRY_SECONDS
+        delay = 0.25
+        while True:
+            try:
+                return self._call(fn)
+            except BackendWorkerRpcError as exc:
+                if exc.error_code not in _TRANSIENT_RECONNECT_CODES or time.monotonic() >= deadline:
+                    raise
+                remaining = max(deadline - time.monotonic(), 0.05)
+                logger.warning(
+                    "%s unavailable; retrying runtime lifecycle RPC in %.2fs: %s",
+                    operation,
+                    min(delay, remaining),
+                    exc.error,
+                )
+                time.sleep(min(delay, remaining))
+                delay = min(delay * 2, 2.0)
+
+    def _call_registration(self, fn: Callable[[], _T], *, retry_seconds: float | None = None) -> _T:
+        deadline = time.monotonic() + (self._registration_retry_seconds if retry_seconds is None else max(retry_seconds, 0.0))
         while True:
             try:
                 return self._call(fn)
             except BackendWorkerRpcError as exc:
                 if time.monotonic() >= deadline or exc.error_code not in {"UNAVAILABLE", "DEADLINE_EXCEEDED"}:
                     raise
-                time.sleep(1.0)
+                time.sleep(min(1.0, max(deadline - time.monotonic(), 0.05)))
+
+
+def run_worker_heartbeat_loop(
+    *,
+    client: WorkerRuntimeClient,
+    stop_signal: threading.Event,
+    worker_id: str,
+    kind: str,
+    hostname: str,
+    pid: int,
+    capacity: int,
+    heartbeat_seconds: float = 5.0,
+    active_jobs: Callable[[], int] | None = None,
+    on_reconnected: Callable[[], None] | None = None,
+) -> None:
+    """Heartbeat a runtime worker and re-register it after API reconnects.
+
+    The registration row is durable, but a lost API process can leave it
+    stale while the worker and its engines are still alive. Re-registering
+    before the next heartbeat clears that stale lease. The optional callback
+    lets the owning manager publish its current engine projection again; a
+    projection failure never stops the heartbeat loop.
+    """
+    needs_registration = False
+    interval = max(float(heartbeat_seconds), 0.05)
+    resync_lock = threading.Lock()
+    resync_in_progress = False
+
+    def schedule_resynchronization() -> None:
+        nonlocal resync_in_progress
+        if on_reconnected is None:
+            return
+        with resync_lock:
+            if resync_in_progress:
+                return
+            resync_in_progress = True
+
+        def _resynchronize() -> None:
+            nonlocal resync_in_progress
+            try:
+                on_reconnected()
+            except Exception:
+                logger.warning("Runtime worker state resynchronization failed worker_id=%s", worker_id, exc_info=True)
+            finally:
+                with resync_lock:
+                    resync_in_progress = False
+
+        threading.Thread(
+            target=_resynchronize,
+            name=f"runtime-resync-{worker_id[-12:]}",
+            daemon=True,
+        ).start()
+
+    while not stop_signal.wait(interval):
+        if needs_registration:
+            try:
+                client.register_worker(
+                    worker_id=worker_id,
+                    kind=kind,
+                    hostname=hostname,
+                    pid=pid,
+                    capacity=capacity,
+                    active_jobs=active_jobs() if active_jobs is not None else 0,
+                    retry_seconds=min(interval, 2.0),
+                )
+            except Exception as exc:
+                logger.warning("Runtime worker re-registration failed worker_id=%s: %s", worker_id, exc)
+            else:
+                needs_registration = False
+                schedule_resynchronization()
+        try:
+            client.heartbeat_worker(
+                worker_id=worker_id,
+                active_jobs=active_jobs() if active_jobs is not None else None,
+                timeout_seconds=_HEARTBEAT_RPC_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            needs_registration = True
+            logger.warning("Runtime worker heartbeat failed worker_id=%s: %s", worker_id, exc)
 
 
 def _rpc_error_from_grpc_error(exc: grpc.RpcError, *, target: str) -> BackendWorkerRpcError:
@@ -1322,6 +1714,14 @@ def _engine_run_update_proto(fields: Mapping[str, object]) -> worker_runtime_pb2
     if "triggered_by" in fields:
         update.triggered_by = _required_mapping_str(fields, "triggered_by")
     return update
+
+
+def _engine_run_finalization_proto(finalization: EngineRunFinalization) -> worker_runtime_pb2.WorkerEngineRunFinalization:
+    return worker_runtime_pb2.WorkerEngineRunFinalization(
+        run_id=finalization.run_id,
+        merge_result=finalization.merge_result_json,
+        update=_engine_run_update_proto(finalization.fields),
+    )
 
 
 def _required_mapping_dict(payload: Mapping[str, object], key: str) -> dict[str, object]:

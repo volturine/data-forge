@@ -18,7 +18,10 @@ _BUCKETS_READY: set[str] = set()
 _BUCKETS_READY_LOCK = Lock()
 _BUCKET_LOCKS: dict[str, Lock] = {}
 _BUCKET_LOCKS_LOCK = Lock()
-_OBJECT_STORE_MAX_POOL_CONNECTIONS = max(16, settings.compute_request_concurrency * 2)
+# Object-store calls are also issued by durable request runners. Do not let a
+# generous request setting silently create a second oversized pool; the queue
+# and the bounded worker executors already provide burst absorption.
+_OBJECT_STORE_MAX_POOL_CONNECTIONS = max(4, min(8, settings.compute_workers))
 
 # Namespace name == bucket name. No rewriting.
 # Lowercase letters, digits, hyphens, underscores; start/end alphanumeric.

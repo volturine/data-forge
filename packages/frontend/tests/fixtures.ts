@@ -16,6 +16,7 @@ import {
 import { installE2eContextGuards } from './utils/page-guards.js';
 import { e2eBaseURL } from './utils/base-url.js';
 import { createRequestTrace } from './utils/request-trace.js';
+import { rememberCleanupSessionState } from './utils/page-session-state.js';
 import { waitForLayoutReady } from './utils/readiness.js';
 
 export { expect } from '@playwright/test';
@@ -24,6 +25,10 @@ const baseURL = e2eBaseURL();
 const authRequired = process.env.AUTH_REQUIRED !== 'false';
 const SHARED_DATASOURCE_DESCRIPTION =
 	'Primary customer dataset for retention analysis and reporting.';
+
+export const E2E_SHARED_NAMESPACE_A = `e2e-shared-ns-a-${E2E_GLOBAL_RUN_STAMP}`;
+export const E2E_SHARED_NAMESPACE_B = `e2e-shared-ns-b-${E2E_GLOBAL_RUN_STAMP}`;
+export const E2E_SHARED_NAMESPACE_DATASOURCE = `e2e-shared-namespace-dataset-${E2E_GLOBAL_RUN_STAMP}`;
 
 async function expectSignedIn(page: Page): Promise<void> {
 	const timeout = process.env.CI ? 45_000 : 15_000;
@@ -89,6 +94,8 @@ type WorkerFixtures = {
 	sharedDatasource: SharedDatasource;
 	/** A second immutable baseline dataset per Playwright shard. */
 	sharedAuxDatasource: SharedDatasource;
+	/** A datasource reserved for the UI health-check creation test. */
+	sharedHealthCheckDatasource: SharedDatasource;
 	/** One shard-scoped dataset with the date column required by timeseries tests. */
 	sharedDateDatasource: SharedDatasource;
 	/** Alias of the base dataset for chart tests. */
@@ -147,10 +154,11 @@ async function provideSharedDatasource(
 	// context still owns its own mutable page/session state. These fixtures are
 	// read-only by contract; tests that delete or mutate a datasource create a
 	// uniquely named datasource for themselves.
+	const artifactsRoot = process.env.E2E_ARTIFACTS_DIR
+		? path.resolve(process.env.E2E_ARTIFACTS_DIR)
+		: path.join(process.cwd(), 'tests', '.artifacts');
 	const fixtureRoot = path.join(
-		process.cwd(),
-		'tests',
-		'.artifacts',
+		artifactsRoot,
 		'shared-fixtures',
 		E2E_GLOBAL_RUN_STAMP.replace(/[^a-zA-Z0-9_-]/g, '_')
 	);
@@ -239,6 +247,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 				baseURL,
 				storageState: structuredClone(workerAuth.sessionState)
 			});
+			rememberCleanupSessionState(context, workerAuth.sessionState);
 			installE2eContextGuards(context);
 			await use(context);
 			await context.close();
@@ -270,6 +279,15 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 		async ({ browser, workerAuth, helperContext }, use) => {
 			const request = workerRequest(browser, workerAuth, helperContext);
 			const name = `e2e-shared-aux-dataset-${E2E_GLOBAL_RUN_STAMP}`;
+			await provideSharedDatasource(request, name, createDatasource, use);
+		},
+		{ scope: 'worker' }
+	],
+
+	sharedHealthCheckDatasource: [
+		async ({ browser, workerAuth, helperContext }, use) => {
+			const request = workerRequest(browser, workerAuth, helperContext);
+			const name = `e2e-shared-healthcheck-dataset-${E2E_GLOBAL_RUN_STAMP}`;
 			await provideSharedDatasource(request, name, createDatasource, use);
 		},
 		{ scope: 'worker' }
@@ -332,6 +350,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 			baseURL,
 			storageState: structuredClone(workerAuth.sessionState)
 		});
+		rememberCleanupSessionState(context, workerAuth.sessionState);
 		installE2eContextGuards(context);
 		const page = await context.newPage();
 		try {
@@ -355,7 +374,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 		async ({ page }, use, testInfo) => {
 			const trace = createRequestTrace(page, testInfo.workerIndex, testInfo.title, testInfo.testId);
 			await use(trace);
-			trace?.attach();
+			await trace?.attach();
 		},
 		{ scope: 'test', auto: true }
 	]

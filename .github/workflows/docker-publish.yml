@@ -39,8 +39,8 @@ jobs:
             image: data-forge-api
           - target: scheduler
             image: data-forge-scheduler
-          - target: worker
-            image: data-forge-worker
+          - target: runtime
+            image: data-forge-runtime
           - target: engine
             image: data-forge-polars-engine
     steps:
@@ -93,8 +93,8 @@ jobs:
             image: data-forge-api
           - target: scheduler
             image: data-forge-scheduler
-          - target: worker
-            image: data-forge-worker
+          - target: runtime
+            image: data-forge-runtime
           - target: engine
             image: data-forge-polars-engine
     steps:
@@ -160,7 +160,7 @@ jobs:
           OWNER_LC="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
           API_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-api"
           SCHEDULER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-scheduler"
-          WORKER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-worker"
+          RUNTIME_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-runtime"
           ENGINE_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-polars-engine"
           COMPOSE_URL="https://github.com/${REPO}/blob/${TAG}/docker/compose.yaml"
           PROD_ENV_URL="https://github.com/${REPO}/blob/${TAG}/docker/env/prod.env"
@@ -176,7 +176,7 @@ jobs:
             echo "| --- | --- |"
             echo "| API | \`${API_IMAGE}:${VERSION}\` |"
             echo "| Scheduler | \`${SCHEDULER_IMAGE}:${VERSION}\` |"
-            echo "| Worker | \`${WORKER_IMAGE}:${VERSION}\` |"
+            echo "| Runtime coordinator | \`${RUNTIME_IMAGE}:${VERSION}\` |"
             echo "| Polars engine | \`${ENGINE_IMAGE}:${VERSION}\` |"
             echo
             echo "Also tagged as \`${TAG}\`, \`latest\`, and major/minor aliases."
@@ -186,7 +186,7 @@ jobs:
             echo '```bash'
             echo "docker pull ${API_IMAGE}:${VERSION}"
             echo "docker pull ${SCHEDULER_IMAGE}:${VERSION}"
-            echo "docker pull ${WORKER_IMAGE}:${VERSION}"
+            echo "docker pull ${RUNTIME_IMAGE}:${VERSION}"
             echo "docker pull ${ENGINE_IMAGE}:${VERSION}"
             echo '```'
             echo
@@ -204,7 +204,7 @@ jobs:
             echo '```env'
             echo "DF_API_IMAGE=${API_IMAGE}:${VERSION}"
             echo "DF_SCHEDULER_IMAGE=${SCHEDULER_IMAGE}:${VERSION}"
-            echo "DF_WORKER_IMAGE=${WORKER_IMAGE}:${VERSION}"
+            echo "DF_RUNTIME_IMAGE=${RUNTIME_IMAGE}:${VERSION}"
             echo "DF_ENGINE_IMAGE=${ENGINE_IMAGE}:${VERSION}"
             echo '```'
             echo
@@ -221,7 +221,7 @@ jobs:
             echo "  up -d"
             echo '```'
             echo
-            echo "Keep API, scheduler, and worker on the same release tag."
+            echo "Keep API, runtime coordinator, scheduler, and engine on the same release tag."
             echo
           } > "$NOTES_FILE"
 

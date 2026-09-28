@@ -1,13 +1,16 @@
 import datetime as dt
 
 import croniter  # type: ignore[import-untyped]
-from sqlalchemy import BigInteger, Column, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
 class Schedule(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     __tablename__ = 'schedules'  # type: ignore[assignment]
-    __table_args__ = (UniqueConstraint('claim_token', name='uq_schedules_claim_token'),)
+    __table_args__ = (
+        UniqueConstraint('claim_token', name='uq_schedules_claim_token'),
+        Index('ix_schedules_enabled_next_run', 'enabled', 'next_run'),
+    )
 
     @staticmethod
     def compute_next_run(cron_expression: str, *, now: dt.datetime | None = None) -> dt.datetime | None:

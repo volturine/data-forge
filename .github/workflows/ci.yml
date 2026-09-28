@@ -209,8 +209,8 @@ jobs:
             target: api
           - image_name: data-forge-scheduler
             target: scheduler
-          - image_name: data-forge-worker
-            target: worker
+          - image_name: data-forge-runtime
+            target: runtime
           - image_name: data-forge-polars-engine
             target: engine
     steps:
@@ -264,8 +264,8 @@ jobs:
             target: api
           - image_name: data-forge-scheduler
             target: scheduler
-          - image_name: data-forge-worker
-            target: worker
+          - image_name: data-forge-runtime
+            target: runtime
     steps:
       - uses: actions/checkout@v7
 

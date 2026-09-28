@@ -2,6 +2,7 @@ from sqlmodel import Session
 
 from backend_core import build_jobs_service as build_job_service, runtime_ipc
 from backend_core.domain.scheduler.schemas import ScheduleCreate, ScheduleResponse, ScheduleUpdate
+from backend_core.namespace import get_namespace
 from backend_core.transactions import transaction
 from modules.scheduler import service
 
@@ -11,7 +12,7 @@ def create_schedule(session: Session, payload: ScheduleCreate) -> ScheduleRespon
         schedule = service.stage_create_schedule(session, payload)
     session.refresh(schedule)
     response = service.enrich_schedule_response(session, schedule)
-    runtime_ipc.notify_build_job()
+    runtime_ipc.notify_build_job(get_namespace())
     return response
 
 
@@ -20,7 +21,7 @@ def update_schedule(session: Session, schedule_id: str, payload: ScheduleUpdate)
         schedule = service.stage_update_schedule(session, schedule_id, payload)
     session.refresh(schedule)
     response = service.enrich_schedule_response(session, schedule)
-    runtime_ipc.notify_build_job()
+    runtime_ipc.notify_build_job(get_namespace())
     return response
 
 

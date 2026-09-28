@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from typing import cast
 
 import pytest
@@ -26,10 +27,38 @@ class FakeSchedulerClient:
     def stop(self, *, worker_id: str) -> None:
         self.calls.append(("stop", worker_id))
 
-    def run_due(self, *, worker_id: str) -> scheduler_main.SchedulerRunDueResult:
+    def due_schedule_namespaces(self) -> list[scheduler_main.DueScheduleNamespace]:
+        self.calls.append(("due_schedule_namespaces", "default"))
+        return [scheduler_main.DueScheduleNamespace(namespace="default", generation=1)]
+
+    def run_due(self, *, worker_id: str, namespace: str, generation: int) -> scheduler_main.SchedulerRunDueResult:
+        assert generation == 1
         self.run_due_calls += 1
-        self.calls.append(("run_due", worker_id))
+        self.calls.append(("run_due", f"{worker_id}:{namespace}"))
         return scheduler_main.SchedulerRunDueResult(handled=False, enqueued=[], failures=[])
+
+
+def test_scheduler_heartbeat_retries_transient_deadline_without_error_traceback(caplog: pytest.LogCaptureFixture) -> None:
+    stop = threading.Event()
+    timeouts: list[float | None] = []
+
+    class _Client:
+        def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+            assert worker_id == "scheduler:test"
+            timeouts.append(timeout_seconds)
+            if len(timeouts) == 1:
+                raise RuntimeError("Backend scheduler gRPC failed with DEADLINE_EXCEEDED: Deadline Exceeded")
+            stop.set()
+
+    scheduler_main._heartbeat_loop_sync(
+        client=cast(scheduler_main.SchedulerApiClient, _Client()),
+        stop_signal=stop,
+        worker_id="scheduler:test",
+        heartbeat_seconds=0.001,
+    )
+
+    assert timeouts == [5.0, 5.0]
+    assert [record.levelname for record in caplog.records if "Scheduler heartbeat" in record.message] == ["WARNING"]
 
 
 def test_scheduler_settings_require_internal_rpc_contract(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,7 +105,8 @@ async def test_scheduler_loop_registers_runs_due_work_and_stops() -> None:
 
     assert client.calls == [
         ("register", "scheduler-1"),
-        ("run_due", "scheduler-1"),
+        ("due_schedule_namespaces", "default"),
+        ("run_due", "scheduler-1:default"),
         ("stop", "scheduler-1"),
     ]
 
@@ -84,11 +114,12 @@ async def test_scheduler_loop_registers_runs_due_work_and_stops() -> None:
 @pytest.mark.asyncio
 async def test_scheduler_loop_retries_after_backend_restart() -> None:
     class FlakySchedulerClient(FakeSchedulerClient):
-        def run_due(self, *, worker_id: str) -> scheduler_main.SchedulerRunDueResult:
+        def run_due(self, *, worker_id: str, namespace: str, generation: int) -> scheduler_main.SchedulerRunDueResult:
+            assert generation == 1
             if self.run_due_calls == 0:
                 self.run_due_calls += 1
                 raise RuntimeError("backend unavailable")
-            return super().run_due(worker_id=worker_id)
+            return super().run_due(worker_id=worker_id, namespace=namespace, generation=generation)
 
     client = FlakySchedulerClient()
     stop_event = asyncio.Event()

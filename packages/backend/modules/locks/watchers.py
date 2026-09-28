@@ -2,8 +2,9 @@ import asyncio
 from collections import defaultdict
 
 from fastapi import WebSocket
+from pydantic import BaseModel
 
-from backend_core.websocket import safe_send_json
+from backend_core.websocket import safe_send_serialized_json, serialize_json
 
 LockKey = tuple[str, str, str]
 
@@ -46,16 +47,31 @@ async def notify_watchers(
     namespace: str,
     resource_type: str,
     resource_id: str,
-    payload: dict[str, object],
+    payload: dict[str, object] | BaseModel,
 ) -> None:
-    stale: list[WebSocket] = []
-    for websocket in await registry.sockets(namespace, resource_type, resource_id):
+    sockets = await registry.sockets(namespace, resource_type, resource_id)
+    if not sockets:
+        return
+    try:
+        serialized = await serialize_json(payload)
+    except Exception:
+        for websocket in sockets:
+            await registry.discard(websocket, namespace, resource_type, resource_id)
+        return
+
+    async def _notify(websocket: WebSocket) -> tuple[WebSocket, bool]:
         try:
-            sent = await safe_send_json(websocket, payload)
+            # A disconnected or backpressured browser must not make the lock
+            # mutation request wait behind every other watcher. The next
+            # connection reads the durable lock state on subscribe.
+            sent = await asyncio.wait_for(safe_send_serialized_json(websocket, serialized), timeout=1.0)
         except Exception:
-            stale.append(websocket)
-            continue
-        if not sent:
-            stale.append(websocket)
+            return websocket, False
+        return websocket, sent
+
+    results = await asyncio.gather(
+        *(_notify(websocket) for websocket in sockets),
+    )
+    stale = [websocket for websocket, sent in results if not sent]
     for websocket in stale:
         await registry.discard(websocket, namespace, resource_type, resource_id)

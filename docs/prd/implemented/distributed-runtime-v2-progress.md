@@ -1,6 +1,6 @@
 # Distributed Runtime v2 Progress
 
-> **Status (audited 2026-08-02): Implemented — archived runtime progress record.**
+> **Status (audited 2026-09-22): Implemented — archived runtime progress record.**
 > **Portfolio:** [PRD index](../README.md)
 
 ## Status Summary
@@ -31,9 +31,15 @@ Current claim:
 
 - Postgres is the supported distributed runtime backend.
 - Local dev/test uses the same Postgres-backed runtime model.
-- One supervised app runtime runs API, scheduler, and a worker manager; build workers spawn dynamically from zero.
+- API workers are stateless HTTP frontends. A dedicated runtime coordinator owns
+  runtime gRPC, the durable outbox dispatcher, and coordinator fencing; one
+  worker manager owns engine lifecycle, Docker reconciliation, and the ready
+  compute-worker reserve. Concurrent Docker startups are separately bounded
+  from host CPU availability, without another public capacity setting.
+  Build workers spawn dynamically from zero.
 - Durable build state, renewable fenced leasing, DB-backed websocket replay, and scheduler leasing are implemented.
-- `WORKERS > 1` is supported only when distributed runtime is enabled on Postgres.
+- `WORKERS > 1` is supported when distributed runtime is enabled on Postgres and
+  `RUNTIME_COORDINATOR_TARGET` points at the dedicated coordinator service.
 
 Residual audit note:
 
@@ -69,19 +75,19 @@ Correctness fixes included in this green run:
 
 ## Phase Details
 
-### Phase 0: Freeze Unsupported Scaling
+### Phase 0: Fence Unsupported Scaling
 
 Status: complete
 
 Evidence:
 
-- `backend/main.py` rejects unsupported multi-worker startup unless distributed runtime is enabled on Postgres
+- `backend/main.py` rejects multi-worker startup unless the dedicated coordinator contract is configured
 - `backend/tests/test_main.py` asserts both the rejection path and the explicit allow path
 
 Notes:
 
-- `WORKERS > 1` is still guarded outside Postgres distributed runtime mode
-- accidental split-brain outside the supported Postgres runtime remains blocked
+- API children do not register as runtime workers and cannot bind the runtime gRPC port
+- the coordinator holds a PostgreSQL session advisory lease and re-registers its heartbeat
 
 ### Phase 1: Schema-Enforced Events
 
@@ -200,15 +206,18 @@ Notes:
 - production topology is now migration-first, Postgres-backed, Docker-native, and split into fixed runtime roles
 - examples target `postgres:18-alpine` per the PRD decision
 
-### Phase 8: Enable Multi-Worker API
+### Phase 8: Enable Stateless Multi-Worker API
 
 Status: complete
 
 Evidence:
 
-- `backend/main.py` allows `WORKERS > 1` when distributed runtime is enabled on Postgres
+- `backend/main.py` allows `WORKERS > 1` only with `RUNTIME_COORDINATOR_TARGET`
+- `backend/runtime_coordinator.py` owns the singleton runtime gRPC server, job listener, outbox dispatcher, and fenced coordinator lease
+- API workers retain only HTTP, websocket projection, and durable response-recovery state
+- exact analysis preview/schema/row-count commands and datasource schema/statistics/snapshot-read commands use a PostgreSQL-advisory-locked durable flight shared across API workers
 - `backend/tests/test_main.py` covers the new guard behavior
-- `backend/tests/test_postgres_runtime_integration.py` validates two API workers plus independent scheduler/worker runtime processes and cross-worker build detail, cancellation, and websocket replay
+- `backend/tests/test_postgres_runtime_integration.py` validates multiple API workers plus the dedicated coordinator, scheduler, and worker runtime processes and cross-worker build detail, cancellation, and websocket replay
 - `backend/tests/test_docker_bootstrap.py` validates Docker startup with fixed API, scheduler, and worker roles, multiple API workers, dynamic build-worker execution, and scheduler-triggered build execution
 - `Justfile` includes `just docker-test` to exercise the distributed topology end to end
 
@@ -217,7 +226,7 @@ Evidence:
 The repository currently supports:
 
 - supported Postgres distributed runtime deployment
-- fixed API, scheduler, and worker runtime roles from one codebase release
+- fixed API, runtime coordinator, scheduler, and worker runtime roles from one codebase release
 - durable build state and event replay
 - DB-backed websocket snapshots and replay
 - lease-based build job execution
@@ -231,6 +240,7 @@ The repository currently supports:
 The repository still should not claim:
 
 - any non-Postgres distributed runtime claim
+- sustained p95/throughput capacity beyond the permanent 50-tab regression probe
 
 ## Optional Operational Follow-up
 

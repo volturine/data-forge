@@ -76,6 +76,13 @@ PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
     'worker': {'api', 'backend_contracts', 'backend_core', 'modules', 'scheduler_service', 'shared', 'sqlmodel', 'worker_models'},
 }
 
+# The coordinator entrypoint is the composition root for the backend gRPC
+# control plane and the worker runtime manager. Keep this cross-package bridge
+# limited to that single deployment entrypoint.
+PACKAGE_IMPORT_BOUNDARY_EXCEPTIONS = {
+    Path('packages/backend/runtime_coordinator.py'): {'runtime'},
+}
+
 LEGACY_IMPORT_ROOTS = {'backend_contracts', 'worker_models'}
 FORBIDDEN_SOURCE_TOKENS = {
     'backend_contracts': 'deleted legacy backend contract package',
@@ -615,6 +622,8 @@ def main() -> int:
         for path in iter_python_files(package):
             roots = imported_roots(path)
             violations = sorted(roots & forbidden_roots)
+            allowed = PACKAGE_IMPORT_BOUNDARY_EXCEPTIONS.get(path.relative_to(ROOT), set())
+            violations = [root for root in violations if root not in allowed]
             if violations:
                 rel = path.relative_to(ROOT)
                 errors.append(f'{rel} imports cross-owner private modules: {", ".join(violations)}')

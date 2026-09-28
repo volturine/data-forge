@@ -22,6 +22,10 @@ class BuildJobStatus(ApiEnumValue):
     def is_reclaimable(self) -> bool:
         return self.is_active
 
+    @property
+    def is_terminal(self) -> bool:
+        return self in {BuildJobStatus.COMPLETED, BuildJobStatus.FAILED, BuildJobStatus.CANCELLED}
+
 
 BuildJobStatus.QUEUED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_QUEUED, api_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_QUEUED))
 BuildJobStatus.LEASED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_LEASED, api_token('BuildJobStatus', enums_pb2.BUILD_JOB_STATUS_LEASED))

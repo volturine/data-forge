@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures.js';
 import { createUdf } from './utils/api.js';
 import {
+	readyTimeoutMs,
 	gotoNewUdfPage,
 	gotoUdfEditor,
 	gotoUdfLibrary,
@@ -134,7 +135,7 @@ test.describe('UDFs – list & management', () => {
 			// Clone gets the name "${udf} (copy)"
 			const cloneName = `${udf} (copy)`;
 			await expect(page.locator(`[data-udf-card="${cloneName}"]`)).toBeVisible({
-				timeout: 5_000
+				timeout: readyTimeoutMs()
 			});
 		} finally {
 			// Delete clone first (has " (copy)" suffix), then original
@@ -150,7 +151,7 @@ test.describe('UDFs – list & management', () => {
 			await page.goto('/udfs');
 			await waitForUdfList(page);
 			const row = page.locator(`[data-udf-card="${udf}"]`);
-			await row.getByRole('button', { name: /Edit/i }).click();
+			await row.getByRole('link', { name: /Edit/i }).click();
 			await expect(page).toHaveURL(new RegExp(`/udfs/${udfId}`), { timeout: 5_000 });
 		} finally {
 			await deleteUdfViaUI(page, udf);
@@ -320,10 +321,20 @@ test.describe('UDFs – editor functional flows', () => {
 
 			const saveBtn = page.locator('[data-testid="udf-save-button"]');
 			await expect(saveBtn).toBeEnabled();
+			const createResponse = page.waitForResponse(
+				(response) =>
+					response.url().endsWith('/api/v1/udf') && response.request().method() === 'POST'
+			);
 			await saveBtn.click();
+			const response = await createResponse;
+			expect(response.ok()).toBeTruthy();
+			const created = (await response.json()) as { id: string };
 
 			// After create, editor redirects to /udfs/<id>
-			await expect(page).toHaveURL(/\/udfs\/[0-9a-f-]+$/, { timeout: 5_000 });
+			await expect(page).toHaveURL(new RegExp(`/udfs/${created.id}$`), {
+				timeout: readyTimeoutMs()
+			});
+			await expect(page.locator('#udf-name')).toHaveValue(udf, { timeout: readyTimeoutMs() });
 			await screenshot(page, 'udfs', 'editor-after-create');
 
 			// Navigate to list and verify the UDF appears
@@ -347,17 +358,28 @@ test.describe('UDFs – editor functional flows', () => {
 			await page.locator('#udf-description').fill('Updated description from E2E');
 
 			const saveBtn = page.locator('[data-testid="udf-save-button"]');
+			const updateResponse = page.waitForResponse(
+				(response) =>
+					response.url().endsWith(`/api/v1/udf/${udfId}`) && response.request().method() === 'PUT'
+			);
 			await saveBtn.click();
+			expect((await updateResponse).ok()).toBeTruthy();
 
-			// Verify description is correct immediately after save (before reload)
+			// The local input value is already edited before saving; wait for the
+			// successful PUT above before treating it as persisted.
 			await expect(page.locator('#udf-description')).toHaveValue('Updated description from E2E', {
 				timeout: 5_000
 			});
 
 			// Reload and verify the changes persisted
+			const reloadResponse = page.waitForResponse(
+				(response) =>
+					response.url().endsWith(`/api/v1/udf/${udfId}`) && response.request().method() === 'GET'
+			);
 			await page.reload();
+			expect((await reloadResponse).ok()).toBeTruthy();
 			await expect(page.locator('#udf-description')).toHaveValue('Updated description from E2E', {
-				timeout: 5_000
+				timeout: readyTimeoutMs()
 			});
 			await screenshot(page, 'udfs', 'editor-after-edit');
 		} finally {
@@ -404,7 +426,12 @@ test.describe('UDFs – code editor functional', () => {
 
 			// Save
 			const saveBtn = page.locator('[data-testid="udf-save-button"]');
+			const saveResponse = page.waitForResponse(
+				(response) =>
+					response.url().endsWith(`/api/v1/udf/${udfId}`) && response.request().method() === 'PUT'
+			);
 			await saveBtn.click();
+			expect((await saveResponse).ok()).toBeTruthy();
 
 			// Wait for save to complete
 			await expect(saveBtn).toBeEnabled({ timeout: 5_000 });
@@ -415,7 +442,12 @@ test.describe('UDFs – code editor functional', () => {
 			});
 
 			// Reload and verify code persisted
+			const reloadResponse = page.waitForResponse(
+				(response) =>
+					response.url().endsWith(`/api/v1/udf/${udfId}`) && response.request().method() === 'GET'
+			);
 			await page.reload();
+			expect((await reloadResponse).ok()).toBeTruthy();
 			await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 5_000 });
 
 			// CodeMirror content should contain the new code

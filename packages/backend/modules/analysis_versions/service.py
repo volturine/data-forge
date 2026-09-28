@@ -8,7 +8,6 @@ from sqlmodel import Session
 
 from backend_core.analysis_cycles import assert_no_analysis_cycle
 from backend_core.exceptions import (
-    AnalysisValidationError,
     analysis_not_found,
     analysis_version_not_found,
     datasource_not_found,
@@ -25,21 +24,20 @@ def create_version(session: Session, analysis: Analysis) -> AnalysisVersion:
     version_id = str(uuid.uuid4())
     now = datetime.now(UTC).replace(tzinfo=None)
     next_version = select(func.coalesce(func.max(AnalysisVersion.version), 0) + 1).where(col(AnalysisVersion.analysis_id) == analysis.id).scalar_subquery()
-    stmt = insert(AnalysisVersion).values(
-        id=version_id,
-        analysis_id=analysis.id,
-        version=next_version,
-        name=analysis.name,
-        description=analysis.description,
-        pipeline_definition=analysis.pipeline_definition,
-        created_at=now,
+    stmt = (
+        insert(AnalysisVersion)
+        .values(
+            id=version_id,
+            analysis_id=analysis.id,
+            version=next_version,
+            name=analysis.name,
+            description=analysis.description,
+            pipeline_definition=analysis.pipeline_definition,
+            created_at=now,
+        )
+        .returning(AnalysisVersion)
     )
-    session.execute(stmt)
-    session.flush()
-    version = session.get(AnalysisVersion, version_id)
-    if not version:
-        raise AnalysisValidationError('Failed to create analysis version')
-    return version
+    return session.execute(stmt).scalar_one()
 
 
 def list_versions(session: Session, analysis_id: str) -> list[AnalysisVersion]:

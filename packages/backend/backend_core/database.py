@@ -1,5 +1,11 @@
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+import asyncio
+import contextvars
+import os
+import sys
+import threading
+import time
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from hashlib import sha256
 from threading import Lock
 from typing import Concatenate, ParamSpec
@@ -22,7 +28,165 @@ P = ParamSpec('P')
 _PUBLIC_SCHEMA = 'public'
 _POSTGRES_INIT_LOCK_KEY = 4815162342
 _NAMESPACE_INIT_LOCK_PREFIX = 'dataforge-namespace-init:'
+_NAMESPACE_PROVISION_LOCK_PREFIX = 'dataforge-namespace-provision:'
 _ALEMBIC_MIGRATION_LOCK = Lock()
+_POOL_CHECKOUTS_LOCK = Lock()
+_POOL_CHECKOUTS: dict[tuple[int, int], tuple[float, int, str]] = {}
+_ACTIVE_RUNTIME_COORDINATOR_GENERATION: int | None = None
+_DATABASE_STATEMENT_TIMING: contextvars.ContextVar[dict[str, object] | None] = contextvars.ContextVar(
+    'database_statement_timing',
+    default=None,
+)
+
+
+class RuntimeCoordinatorFenced(RuntimeError):
+    """Raised when work is attempted by a coordinator from an old epoch."""
+
+
+@contextmanager
+def database_statement_timing(metrics: dict[str, object]) -> Iterator[None]:
+    """Collect bounded per-RPC SQL and transaction timings in this context."""
+    token = _DATABASE_STATEMENT_TIMING.set(metrics)
+    try:
+        yield
+    finally:
+        _DATABASE_STATEMENT_TIMING.reset(token)
+
+
+def _record_database_duration(metrics: dict[str, object], field: str, duration: float) -> None:
+    recorded = metrics.get(field, 0.0)
+    if not isinstance(recorded, (int, float)):
+        recorded = 0.0
+    metrics[field] = float(recorded) + max(duration, 0.0)
+
+
+def _before_cursor_execute(_connection, _cursor, _statement, _parameters, context, _executemany) -> None:
+    metrics = _DATABASE_STATEMENT_TIMING.get()
+    if metrics is None:
+        return
+    starts = metrics.setdefault('_statement_starts', {})
+    if isinstance(starts, dict):
+        starts[id(context)] = time.perf_counter()
+
+
+def _finish_cursor_execute(context) -> None:
+    metrics = _DATABASE_STATEMENT_TIMING.get()
+    if metrics is None:
+        return
+    starts = metrics.get('_statement_starts')
+    if not isinstance(starts, dict):
+        return
+    started = starts.pop(id(context), None)
+    if isinstance(started, (int, float)):
+        _record_database_duration(metrics, 'sql_ms', (time.perf_counter() - started) * 1000)
+        sql_count = metrics.get('sql_count', 0)
+        metrics['sql_count'] = (sql_count if isinstance(sql_count, int) else 0) + 1
+
+
+def _handle_cursor_error(exception_context) -> None:
+    if exception_context.execution_context is not None:
+        _finish_cursor_execute(exception_context.execution_context)
+
+
+event.listen(Engine, 'before_cursor_execute', _before_cursor_execute)
+event.listen(Engine, 'after_cursor_execute', lambda _conn, _cursor, _statement, _params, context, _many: _finish_cursor_execute(context))
+event.listen(Engine, 'handle_error', _handle_cursor_error)
+
+
+def _start_session_commit(session: Session) -> None:
+    metrics = _DATABASE_STATEMENT_TIMING.get()
+    if metrics is not None:
+        session.info['_database_commit_started'] = time.perf_counter()
+
+
+def _finish_session_commit(session: Session) -> None:
+    metrics = _DATABASE_STATEMENT_TIMING.get()
+    started = session.info.pop('_database_commit_started', None)
+    if metrics is not None and isinstance(started, (int, float)):
+        _record_database_duration(metrics, 'commit_ms', (time.perf_counter() - started) * 1000)
+
+
+event.listen(Session, 'before_commit', _start_session_commit)
+event.listen(Session, 'after_commit', _finish_session_commit)
+event.listen(Session, 'after_rollback', _finish_session_commit)
+
+
+def set_active_runtime_coordinator_generation(generation: int | None) -> None:
+    global _ACTIVE_RUNTIME_COORDINATOR_GENERATION
+    if generation is not None and generation < 1:
+        raise ValueError('Runtime coordinator generation must be positive')
+    _ACTIVE_RUNTIME_COORDINATOR_GENERATION = generation
+
+
+def active_runtime_coordinator_generation() -> int | None:
+    return _ACTIVE_RUNTIME_COORDINATOR_GENERATION
+
+
+def _fence_runtime_transaction(session: Session, _transaction, connection: Connection) -> None:
+    del session
+    generation = _ACTIVE_RUNTIME_COORDINATOR_GENERATION
+    if generation is None or connection.dialect.name != 'postgresql':
+        return
+    current_generation = connection.execute(
+        text('SELECT generation FROM public.runtime_coordinator_state WHERE singleton_id = 1 FOR SHARE')
+    ).scalar_one_or_none()
+    if current_generation != generation:
+        raise RuntimeCoordinatorFenced(f'Runtime coordinator generation {generation} is fenced by generation {current_generation}')
+
+
+event.listen(Session, 'after_begin', _fence_runtime_transaction)
+
+
+def _track_pool_checkouts(engine: Engine, pool_name: str) -> None:
+    engine_id = id(engine)
+
+    def checkout(_dbapi_connection, record, _connection_proxy) -> None:
+        owner = (time.monotonic(), threading.get_ident(), threading.current_thread().name)
+        with _POOL_CHECKOUTS_LOCK:
+            _POOL_CHECKOUTS[(engine_id, id(record))] = owner
+
+    def checkin(_dbapi_connection, record) -> None:
+        with _POOL_CHECKOUTS_LOCK:
+            _POOL_CHECKOUTS.pop((engine_id, id(record)), None)
+
+    event.listen(engine, 'checkout', checkout)
+    event.listen(engine, 'checkin', checkin)
+
+
+def _pool_checkout_snapshot(engine: Engine, pool_name: str) -> dict[str, int | str]:
+    now = time.monotonic()
+    with _POOL_CHECKOUTS_LOCK:
+        checkouts = [
+            (started_at, thread_id, thread_name)
+            for (engine_id, _record_id), (started_at, thread_id, thread_name) in _POOL_CHECKOUTS.items()
+            if engine_id == id(engine)
+        ]
+    if not checkouts:
+        return {}
+
+    checkouts.sort(key=lambda checkout: checkout[0])
+    frames = sys._current_frames()
+    owners: list[str] = []
+    for started_at, thread_id, thread_name in checkouts[:3]:
+        frame = frames.get(thread_id)
+        location = 'thread-not-running'
+        while frame is not None:
+            filename = frame.f_code.co_filename.replace('\\', '/')
+            is_application_frame = (
+                '/packages/backend/' in filename
+                and '/.venv/' not in filename
+                and '/site-packages/' not in filename
+                and not filename.endswith('/backend_core/database.py')
+            )
+            if is_application_frame:
+                location = f'{filename.rsplit("/", 1)[-1]}:{frame.f_lineno}:{frame.f_code.co_name}'
+                break
+            frame = frame.f_back
+        owners.append(f'{thread_name}:{location}:{max(0, int((now - started_at) * 1000))}ms')
+    return {
+        f'{pool_name}_checkout_oldest_ms': max(0, int((now - checkouts[0][0]) * 1000)),
+        f'{pool_name}_checkout_owners': '|'.join(owners),
+    }
 
 
 def _engine_kwargs() -> dict[str, object]:
@@ -34,19 +198,19 @@ def _engine_kwargs() -> dict[str, object]:
     }
 
 
-def _create_engine(url: str, *, connect_args: dict[str, object] | None = None) -> Engine:
+def _create_engine(url: str, *, pool_name: str, connect_args: dict[str, object] | None = None) -> Engine:
     kwargs = _engine_kwargs()
     if connect_args is not None:
         kwargs['connect_args'] = connect_args
-    return create_engine(url, echo=settings.sql_echo, **kwargs)
+    engine = create_engine(url, echo=settings.sql_echo, **kwargs)
+    _track_pool_checkouts(engine, pool_name)
+    return engine
 
 
 settings_engine: Engine | None = None
 tenant_engine: Engine | None = None
 _settings_engine_lock = Lock()
 _tenant_engine_lock = Lock()
-_initialized_namespaces: set[tuple[str, str]] = set()
-_initialized_namespaces_lock = Lock()
 
 _engine_override: Engine | None = None
 _settings_engine_override: Engine | None = None
@@ -111,7 +275,11 @@ def _apply_postgres_search_path(connection: Connection, namespace: str) -> None:
 
 
 def _create_public_engine() -> Engine:
-    engine = _create_engine(settings.database_url, connect_args={'options': f'-c search_path={_PUBLIC_SCHEMA}'})
+    engine = _create_engine(
+        settings.database_url,
+        pool_name='settings',
+        connect_args={'options': f'-c search_path={_PUBLIC_SCHEMA}'},
+    )
 
     @event.listens_for(engine, 'checkout')
     def _set_public_search_path(dbapi_connection, _connection_record, _connection_proxy) -> None:
@@ -144,7 +312,7 @@ def _get_tenant_engine() -> Engine:
 
     with _tenant_engine_lock:
         if tenant_engine is None:
-            tenant_engine = _create_engine(settings.database_url)
+            tenant_engine = _create_engine(settings.database_url, pool_name='tenant')
 
             @event.listens_for(tenant_engine, 'checkout')
             def _set_namespace_search_path(dbapi_connection, _connection_record, _connection_proxy) -> None:
@@ -162,8 +330,6 @@ def namespace_connection(namespace: str) -> Generator[Connection]:
 
 
 def get_db():
-    namespace = get_namespace()
-    _init_namespace_db(namespace)
     engine_to_use = _get_tenant_engine()
     with Session(engine_to_use) as session:
         yield session
@@ -175,9 +341,33 @@ def get_settings_db():
         yield session
 
 
+@asynccontextmanager
+async def _async_session_scope(engine_factory: Callable[[], Engine]) -> AsyncIterator[Session]:
+    # Engine initialization is completed during API startup; constructing a
+    # Session is local and does not check out a connection.
+    session = Session(engine_factory())
+    try:
+        yield session
+    finally:
+        if session.in_transaction():
+            await asyncio.to_thread(session.close)
+        else:
+            session.close()
+
+
+async def get_db_async() -> AsyncGenerator[Session]:
+    """FastAPI dependency that closes sync DB sessions on its bounded executor."""
+    async with _async_session_scope(_get_tenant_engine) as session:
+        yield session
+
+
+async def get_settings_db_async() -> AsyncGenerator[Session]:
+    """FastAPI dependency for settings sessions without AnyIO's sync-exit worker."""
+    async with _async_session_scope(get_settings_engine) as session:
+        yield session
+
+
 def run_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
-    namespace = get_namespace()
-    _init_namespace_db(namespace)
     engine_to_use = _get_tenant_engine()
     with Session(engine_to_use) as session:
         return func(session, *args, **kwargs)
@@ -189,17 +379,52 @@ def run_settings_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P
         return func(session, *args, **kwargs)
 
 
+def database_pool_snapshot() -> dict[str, object]:
+    """Return non-blocking pool counters for slow-request diagnostics."""
+    snapshots: dict[str, object] = {}
+    engines: list[tuple[str, Engine | None]] = [
+        ('settings', _settings_engine_override or settings_engine),
+        ('tenant', _engine_override or tenant_engine),
+    ]
+    seen: set[int] = set()
+    for name, engine in engines:
+        if engine is None or id(engine) in seen:
+            continue
+        seen.add(id(engine))
+        pool = getattr(engine, 'pool', None)
+        if pool is None:
+            continue
+        for field in ('size', 'checkedin', 'checkedout', 'overflow'):
+            value = getattr(pool, field, None)
+            if not callable(value):
+                continue
+            try:
+                snapshots[f'{name}_{field}'] = int(value())
+            except Exception:
+                continue
+        checkout_snapshot = _pool_checkout_snapshot(engine, name)
+        if checkout_snapshot:
+            snapshots.setdefault('process_id', os.getpid())
+            snapshots.update(checkout_snapshot)
+    return snapshots
+
+
 def _shared_tables():
     from backend_core.persistence.engine_instances.models import EngineInstance
+    from backend_core.persistence.mcp_pending.models import McpPendingAction
     from backend_core.persistence.namespaces.models import NamespaceEngineCredential, RuntimeNamespace
+    from backend_core.persistence.runtime_events.models import RuntimeCoordinatorState, RuntimeNamespaceWork
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
     from backend_core.persistence.settings.models import AppSettings
 
     table_names = {
         AppSettings.__tablename__,
         EngineInstance.__tablename__,
+        McpPendingAction.__tablename__,
         NamespaceEngineCredential.__tablename__,
         RuntimeNamespace.__tablename__,
+        RuntimeCoordinatorState.__tablename__,
+        RuntimeNamespaceWork.__tablename__,
         RuntimeWorker.__tablename__,
     }
     return [table for table in AppSettings.metadata.sorted_tables if table.name in table_names]
@@ -210,7 +435,7 @@ def _tenant_tables():
     from backend_core.persistence.analysis_versions.models import AnalysisVersion
     from backend_core.persistence.build_jobs.models import BuildJob
     from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
-    from backend_core.persistence.compute_requests.models import ComputeRequest
+    from backend_core.persistence.compute_requests.models import ComputeRequest, ComputeRequestDatasource, ComputeRequestFlight
     from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
     from backend_core.persistence.engine_runs.models import EngineRun
     from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
@@ -229,6 +454,8 @@ def _tenant_tables():
         BuildJob.__tablename__,
         BuildRun.__tablename__,
         ComputeRequest.__tablename__,
+        ComputeRequestDatasource.__tablename__,
+        ComputeRequestFlight.__tablename__,
         DataSource.__tablename__,
         DataSourceColumnMetadata.__tablename__,
         EngineRun.__tablename__,
@@ -307,61 +534,53 @@ def _namespace_init_lock_key(namespace: str) -> int:
     return int.from_bytes(sha256(raw).digest()[:8], 'big', signed=True)
 
 
+def _namespace_provision_lock_key(namespace: str) -> int:
+    raw = f'{_NAMESPACE_PROVISION_LOCK_PREFIX}{normalize_namespace(namespace)}'.encode()
+    return int.from_bytes(sha256(raw).digest()[:8], 'big', signed=True)
+
+
+@contextmanager
+def _postgres_advisory_lock(lock_key: int) -> Iterator[None]:
+    """Hold a PostgreSQL advisory lock without checking out an ORM pool connection."""
+    import psycopg
+
+    database_url = settings.database_url.replace('postgresql+psycopg://', 'postgresql://', 1)
+    with psycopg.connect(database_url, autocommit=True) as connection:
+        connection.execute('SELECT pg_advisory_lock(%s)', (lock_key,))
+        try:
+            yield
+        finally:
+            connection.execute('SELECT pg_advisory_unlock(%s)', (lock_key,))
+
+
+@contextmanager
+def namespace_provision_lock(namespace: str) -> Generator[None]:
+    """Fence namespace provisioning across API processes without using the DB pool."""
+    if get_settings_engine().dialect.name != 'postgresql':
+        yield
+        return
+    with _postgres_advisory_lock(_namespace_provision_lock_key(namespace)):
+        yield
+
+
 def _run_namespace_init_locked(namespace: str, func: Callable[[], None]) -> None:
     """Serialize migrations for one namespace without blocking other tenants."""
     from backend_core.migrations import ensure_database_exists
 
     ensure_database_exists(settings.database_url)
-    engine = get_settings_engine()
-    with engine.begin() as connection:
-        if connection.dialect.name != 'postgresql':
-            func()
-            return
-        connection.execute(
-            text('SELECT pg_advisory_xact_lock(:key)'),
-            {'key': _namespace_init_lock_key(namespace)},
-        )
+    if get_settings_engine().dialect.name != 'postgresql':
         func()
-
-
-def _namespace_init_key(namespace: str) -> tuple[str, str]:
-    return settings.database_url, normalize_namespace(namespace)
-
-
-def _mark_namespace_initialized(namespace: str) -> None:
-    with _initialized_namespaces_lock:
-        _initialized_namespaces.add(_namespace_init_key(namespace))
-
-
-def clear_namespace_init_cache() -> None:
-    with _initialized_namespaces_lock:
-        _initialized_namespaces.clear()
-
-
-def _init_namespace_db(namespace: str) -> None:
-    if _engine_override is not None:
         return
-    key = _namespace_init_key(namespace)
-    with _initialized_namespaces_lock:
-        if key in _initialized_namespaces:
-            return
-    _init_namespace_db_unlocked(namespace)
-
-
-def _init_namespace_db_unlocked(namespace: str) -> None:
-    normalized = normalize_namespace(namespace)
-    key = _namespace_init_key(normalized)
-    with _initialized_namespaces_lock:
-        if key in _initialized_namespaces:
-            return
-    _run_namespace_init_locked(normalized, lambda: _init_postgres_namespace(normalized))
-    with _initialized_namespaces_lock:
-        _initialized_namespaces.add(key)
+    with _postgres_advisory_lock(_namespace_init_lock_key(namespace)):
+        func()
 
 
 def initialize_namespace_db(namespace: str) -> None:
     """Create and migrate a namespace schema before exposing it to clients."""
-    _init_namespace_db_unlocked(normalize_namespace(namespace))
+    if _engine_override is not None:
+        return
+    normalized = normalize_namespace(namespace)
+    _run_namespace_init_locked(normalized, lambda: _init_postgres_namespace(normalized))
 
 
 def _bootstrap_postgres() -> None:
@@ -375,17 +594,15 @@ def _bootstrap_postgres() -> None:
         migrate_runtime(normalized)
     for namespace in normalized:
         namespace_paths(namespace)
-        _mark_namespace_initialized(namespace)
     _invalidate_settings_cache()
 
 
 async def init_db() -> None:
-
     def _init_postgres() -> None:
         _bootstrap_postgres()
         _seed_shared_state()
 
-    _run_postgres_init_locked(_init_postgres)
+    await asyncio.to_thread(_run_postgres_init_locked, _init_postgres)
 
 
 def supports_distributed_runtime() -> bool:

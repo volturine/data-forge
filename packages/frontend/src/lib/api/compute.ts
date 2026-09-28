@@ -1,6 +1,5 @@
 import type {
 	EngineDefaults,
-	EngineIdentityPayload,
 	EngineResourceConfig,
 	EngineScope,
 	EngineStatusResponse
@@ -35,7 +34,7 @@ type Int64HttpNumber<T, K extends keyof T> = Field<T, K> extends string ? number
 
 export interface StepPreviewRequest {
 	analysis_id?: OptionalStringField<ProtocolStepPreviewCommandJson, 'analysisId'>;
-	engine_identity?: EngineIdentityPayload | null;
+	datasource_id?: string | null;
 	target_step_id: StringField<ProtocolStepPreviewCommandJson, 'targetStepId'>;
 	analysis_pipeline: AnalysisPipelinePayload;
 	tab_id?: OptionalStringField<ProtocolStepPreviewCommandJson, 'tabId'>;

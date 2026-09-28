@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException
 from sqlmodel import Session
 
 from backend_core import engine_runs_service as service
-from backend_core.database import get_db
+from backend_core.database import get_db_async
 from backend_core.domain.engine_runs import schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.error_handlers import handle_errors
@@ -23,7 +23,7 @@ def compare_runs(
     run_a: str,
     run_b: str,
     datasource_id: str | None = None,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Compare two engine runs side-by-side: row counts, schema changes, and step timing deltas.
 
@@ -45,7 +45,7 @@ def duration_stats(
     datasource_id: str | None = None,
     kind: EngineRunKind | None = None,
     limit: int = 20,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Duration aggregates for the last N terminal runs (avg, p50, p95, trend).
 
@@ -69,7 +69,7 @@ def list_runs(
     status: EngineRunStatus | None = None,
     limit: int = 100,
     offset: int = 0,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """List engine runs with optional filters.
 
@@ -89,7 +89,7 @@ def list_runs(
 
 @router.get('/{run_id}', response_model=schemas.EngineRunResponseSchema, mcp=True)
 @handle_errors(operation='get engine run')
-def get_run(run_id: EngineRunId, session: Session = Depends(get_db)):
+def get_run(run_id: EngineRunId, session: Session = Depends(get_db_async)):
     """Get a single engine run by ID with full request/result JSON and step timings."""
     run = service.get_engine_run(session, parse_engine_run_id(run_id))
     if not run:

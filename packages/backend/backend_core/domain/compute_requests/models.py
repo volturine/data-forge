@@ -650,6 +650,7 @@ def response_payload(envelope: compute_pb2.ComputeResponseEnvelope) -> dict[str,
         rows = payload.pop('rows', [])
         payload['data'] = rows
         payload.setdefault('total_rows', 0)
+        payload.setdefault('page_size', 0)
         _restore_int64(payload, 'total_rows')
     if selected == 'row_count':
         payload.setdefault('row_count', 0)

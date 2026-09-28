@@ -30,17 +30,25 @@
 		e.preventDefault();
 		saving = true;
 		message = null;
-		const result = await updateProfile({ display_name: name });
-		result.match(
-			(user) => {
-				authStore.user = user;
-				message = { text: 'Profile updated', kind: 'success' };
-			},
-			(err) => {
-				message = { text: err.message, kind: 'error' };
-			}
-		);
-		saving = false;
+		try {
+			const result = await updateProfile({ display_name: name });
+			result.match(
+				(user) => {
+					authStore.user = user;
+					message = { text: 'Profile updated', kind: 'success' };
+				},
+				(err) => {
+					message = { text: err.message, kind: 'error' };
+				}
+			);
+		} catch (error) {
+			message = {
+				text: error instanceof Error ? error.message : 'Profile update failed',
+				kind: 'error'
+			};
+		} finally {
+			saving = false;
+		}
 	}
 
 	async function savePassword(e: SubmitEvent) {

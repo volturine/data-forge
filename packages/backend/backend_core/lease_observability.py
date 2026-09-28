@@ -26,7 +26,9 @@ def record_lease_transition(
 ) -> None:
     with _lock:
         _counts[(kind, transition, outcome.value)] += 1
-    logger.info(
+    level = logging.DEBUG if transition == 'renew' and outcome is TransitionOutcome.APPLIED else logging.INFO
+    logger.log(
+        level,
         'runtime lease transition kind=%s transition=%s outcome=%s entity_id=%s owner_id=%s generation=%s attempt=%s token=%s',
         kind,
         transition,

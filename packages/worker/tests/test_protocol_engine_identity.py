@@ -67,7 +67,7 @@ def _claimed_request(kind: int, command: compute_pb2.ComputeCommand) -> compute_
         (enums_pb2.COMPUTE_REQUEST_KIND_EXPORT, "export", compute_pb2.ExportCommand),
     ],
 )
-def test_stateless_requests_share_datasource_engine_identity(kind, field_name, command_type) -> None:
+def test_analysis_requests_share_analysis_engine_identity(kind, field_name, command_type) -> None:
     pipeline = _pipeline("dataset-1", "analysis-1")
     request = command_type(
         analysis_id="analysis-1",
@@ -86,8 +86,28 @@ def test_stateless_requests_share_datasource_engine_identity(kind, field_name, c
         },
         "source",
     )
-    assert identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
-    assert identity.datasource_id == "dataset-1"
+    assert identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
+    assert identity.analysis_id == "analysis-1"
+
+
+def test_distinct_transforms_share_only_the_exact_analysis_engine() -> None:
+    identities = []
+    for analysis_id, target_step_id in [
+        ("analysis-1", "step-a"),
+        ("analysis-1", "step-b"),
+        ("analysis-2", "step-a"),
+    ]:
+        request = compute_pb2.StepPreviewCommand(
+            analysis_id=analysis_id,
+            target_step_id=target_step_id,
+            analysis_pipeline=_pipeline("dataset-1", analysis_id),
+        )
+        command = compute_pb2.ComputeCommand(preview=request)
+        identities.append(compute_request_runtime._engine_identity_for_claimed(_claimed_request(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, command)))
+
+    assert identities[0] == identities[1]
+    assert identities[0].resource_id == "analysis-1"
+    assert identities[0] != identities[2]
 
 
 @pytest.mark.parametrize(

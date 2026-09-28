@@ -442,12 +442,19 @@
 	async function discardChanges() {
 		if (!analysisId) return;
 		if (isSaving || editorReadOnly) return;
+		saveError = '';
 		if (storageKey) {
-			void idbDelete(storageKey);
+			draft.flush();
+			await idbDelete(storageKey);
+		}
+		const currentTabId = analysisStore.activeTabId;
+		if (analysisStore.current?.id === analysisId && analysisStore.restoreSavedSnapshot()) {
+			selectedStepId = null;
+			return;
 		}
 		if (analysisQuery.data) {
-			const currentTabId = analysisStore.activeTabId;
 			await analysisStore.loadAnalysis(analysisId);
+			selectedStepId = null;
 			// Restore the tab that was active before discarding changes
 			if (currentTabId && analysisStore.tabs.some((t) => t.id === currentTabId)) {
 				analysisStore.activeTabId = currentTabId;

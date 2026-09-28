@@ -259,6 +259,20 @@ describe('BuildStreamStore', () => {
 		expect(store.status).toBe('connecting');
 	});
 
+	test('uses durable detail polling as a bounded fallback', async () => {
+		const store = new BuildStreamStore();
+		store.watch('build-2');
+		await flushAsyncWork();
+
+		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(4_999);
+		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(2);
+
+		store.close();
+	});
+
 	test('watch replaces the previous connection', () => {
 		const store = new BuildStreamStore();
 		store.watch('build-1');
@@ -1017,7 +1031,7 @@ describe('BuildStreamStore', () => {
 			})
 		);
 
-		await vi.advanceTimersByTimeAsync(250);
+		await vi.advanceTimersByTimeAsync(5_000);
 		await flushAsyncWork();
 
 		expect(mockGetRuntimeBuild).toHaveBeenCalledWith('build-1');

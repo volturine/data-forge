@@ -82,6 +82,7 @@ def _register_backend_sqlmodel_metadata() -> None:
     from backend_core.persistence.engine_runs.models import EngineRun
     from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
     from backend_core.persistence.locks.models import ResourceLock
+    from backend_core.persistence.mcp_pending.models import McpPendingAction
     from backend_core.persistence.namespaces.models import RuntimeNamespace
     from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
@@ -109,6 +110,7 @@ def _register_backend_sqlmodel_metadata() -> None:
     del HealthCheck
     del HealthCheckResult
     del ResourceLock
+    del McpPendingAction
     del RuntimeNamespace
     del RuntimeOutboxEvent
     del RuntimeWorker
@@ -123,6 +125,7 @@ def _register_backend_sqlmodel_metadata() -> None:
 
 def _backend_settings_tables() -> list[Any]:
     from backend_core.persistence.engine_instances.models import EngineInstance
+    from backend_core.persistence.mcp_pending.models import McpPendingAction
     from backend_core.persistence.namespaces.models import NamespaceEngineCredential, RuntimeNamespace
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
     from backend_core.persistence.settings.models import AppSettings
@@ -133,6 +136,7 @@ def _backend_settings_tables() -> list[Any]:
         AppSettings.__tablename__,
         ChatSession.__tablename__,
         EngineInstance.__tablename__,
+        McpPendingAction.__tablename__,
         User.__tablename__,
         AuthProvider.__tablename__,
         RuntimeWorker.__tablename__,
@@ -220,7 +224,7 @@ def test_user() -> User:
 
 @pytest.fixture(scope='function')
 def client(test_db_session, test_user, monkeypatch):
-    from backend_core.database import get_db
+    from backend_core.database import get_db_async
     from main import app
     from modules.auth.dependencies import get_current_user, get_current_user_id, get_optional_user_id
 
@@ -236,7 +240,7 @@ def client(test_db_session, test_user, monkeypatch):
 
     app.state.manager = _BackendTestManager()
     app.state.runtime_availability_probe = _UnavailableRuntimeAvailabilityProbe()
-    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_db_async] = override_get_db
     app.dependency_overrides[get_current_user] = lambda: test_user
     app.dependency_overrides[get_current_user_id] = lambda: test_user.id
     app.dependency_overrides[get_optional_user_id] = lambda: test_user.id
@@ -281,11 +285,11 @@ def clear_build_job_hub():
 
 @pytest.fixture(autouse=True, scope='function')
 def clear_compute_request_hubs():
-    from backend_core.domain.compute_requests.live import response_hub
+    from backend_core.compute_response_recovery import response_recovery
 
-    asyncio.run(response_hub.clear())
+    asyncio.run(response_recovery.clear())
     yield
-    asyncio.run(response_hub.clear())
+    asyncio.run(response_recovery.clear())
 
 
 @pytest.fixture(autouse=True, scope='function')

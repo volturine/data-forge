@@ -1,11 +1,13 @@
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from fastapi.routing import APIWebSocketRoute, iter_route_contexts
 
 from modules.ai import router as ai_router
 from modules.analysis.routes import router as analysis_router
 from modules.analysis_versions.routes import router as analysis_versions_router
 from modules.auth import router as auth_router
+from modules.auth.dependencies import get_current_user
 from modules.chat import router as chat_router
 from modules.compute.routes import router as compute_router
 from modules.config import router as config_router
@@ -25,11 +27,18 @@ from modules.udf import router as udf_router
 _AUTH_DEPENDENCY_NAMES = frozenset(
     {
         'get_current_user',
-        'get_optional_user',
         'get_current_user_id',
-        'get_optional_user_id',
+        'get_lock_owner_id',
         'require_analysis_revision',
         '_require_websocket_user',
+    }
+)
+_PUBLIC_V1_ENDPOINTS = frozenset(
+    {
+        ('GET', '/v1/config'),
+        ('GET', '/v1/config/uuid'),
+        ('GET', '/v1/namespaces'),
+        ('GET', '/v1/namespaces/storage-plan'),
     }
 )
 
@@ -51,6 +60,12 @@ def _source_mentions_auth(call: Any) -> bool:
 
 
 def _route_has_auth(route: Any) -> bool:
+    original_route = getattr(route, 'original_route', route)
+    if isinstance(original_route, APIWebSocketRoute):
+        effective_route = getattr(route, '_effective_route', None)
+        websocket_route = getattr(effective_route, 'starlette_route', None) or original_route
+        return _source_mentions_auth(original_route.endpoint) or _dependant_requires_websocket_auth(getattr(websocket_route, 'dependant', None))
+
     # Router-level auth lives on route.dependencies, not in the dependant tree.
     for dependency in getattr(route, 'dependencies', []):
         call = getattr(dependency, 'call', None) or getattr(dependency, 'dependency', None)
@@ -58,11 +73,26 @@ def _route_has_auth(route: Any) -> bool:
             return True
     dependant = getattr(route, 'dependant', None)
     if dependant is None:
-        return True
+        return False
     if _dependant_has_auth(dependant):
         return True
-    # Websocket handlers enforce auth inside the handler body.
     return _source_mentions_auth(dependant.call)
+
+
+def _dependant_requires_websocket_auth(dependant: Any) -> bool:
+    if dependant is None:
+        return False
+    if getattr(dependant.call, '__name__', '') == '_require_websocket_user':
+        return True
+    return any(_dependant_requires_websocket_auth(sub) for sub in dependant.dependencies)
+
+
+def _route_path(route: Any) -> str | None:
+    path = route.path
+    if path:
+        return path
+    effective_route = getattr(route, '_effective_route', None)
+    return getattr(getattr(effective_route, 'starlette_route', None), 'path', None)
 
 
 def verify_v1_auth_coverage() -> None:
@@ -71,42 +101,58 @@ def verify_v1_auth_coverage() -> None:
     Module routers are individually responsible for their auth semantics (some
     routes are intentionally public). This sweep exists so a future router
     added without any auth dependency fails application startup instead of
-    silently serving unauthenticated requests.
+    silently serving unauthenticated requests. FastAPI keeps included routers
+    as a live route tree, so inspect effective route contexts rather than
+    assuming ``router.routes`` is a flattened list.
     """
     unguarded: list[str] = []
-    for route in router.routes:
-        route_path = getattr(route, 'path', None)
-        if route_path is None or '/auth/' in route_path:
+    for route in iter_route_contexts(router.routes):
+        route_path = _route_path(route)
+        if route_path is None:
+            raise RuntimeError('API auth audit cannot resolve a path for route ' + str(route.name))
+        if route_path == '/v1/auth' or route_path.startswith('/v1/auth/'):
             continue
-        if not getattr(route, 'dependant', None):
+        methods = frozenset(route.methods or {'WS'})
+        if all((method, route_path) in _PUBLIC_V1_ENDPOINTS for method in methods):
             continue
         if _route_has_auth(route):
             continue
-            methods = ','.join(sorted(getattr(route, 'methods', []) or ['WS']))
-            unguarded.append(f'{methods} {route_path}')
+        unguarded.append(f'{",".join(sorted(methods))} {route_path}')
     if unguarded:
         raise RuntimeError('API routes without authentication dependencies (fail-closed startup): ' + '; '.join(unguarded))
 
 
 router = APIRouter(prefix='/v1')
 
+_V1_ROUTER_DEFINITIONS: tuple[tuple[APIRouter, bool], ...] = (
+    (ai_router, True),
+    (analysis_router, False),
+    (analysis_versions_router, False),
+    (auth_router, False),
+    (chat_router, False),
+    (compute_router, False),
+    (config_router, False),
+    (datasource_router, True),
+    (engine_runs_router, True),
+    (healthcheck_router, False),
+    (logs_router, True),
+    (locks_router, False),
+    (mcp_router, False),
+    (namespaces_router, False),
+    (runtime_overview_router, True),
+    (settings_router, False),
+    (telegram_router, True),
+    (udf_router, True),
+    (scheduler_router, False),
+)
 
-router.include_router(ai_router)
-router.include_router(analysis_router)
-router.include_router(analysis_versions_router)
-router.include_router(auth_router)
-router.include_router(chat_router)
-router.include_router(compute_router)
-router.include_router(config_router)
-router.include_router(datasource_router)
-router.include_router(engine_runs_router)
-router.include_router(healthcheck_router)
-router.include_router(logs_router)
-router.include_router(locks_router)
-router.include_router(mcp_router)
-router.include_router(namespaces_router)
-router.include_router(runtime_overview_router)
-router.include_router(settings_router)
-router.include_router(telegram_router)
-router.include_router(udf_router)
-router.include_router(scheduler_router)
+
+def _include_v1_routers(parent: APIRouter) -> None:
+    for module_router, authenticated in _V1_ROUTER_DEFINITIONS:
+        if authenticated:
+            parent.include_router(module_router, dependencies=[Depends(get_current_user)])
+        else:
+            parent.include_router(module_router)
+
+
+_include_v1_routers(router)

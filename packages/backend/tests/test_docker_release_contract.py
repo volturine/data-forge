@@ -17,16 +17,16 @@ PUBLISH_WORKFLOW = ROOT / '.github' / 'workflows' / 'docker-publish.yml'
 def test_single_production_compose_has_no_build_directive() -> None:
     text = COMPOSE.read_text()
     assert 'build:' not in text
-    for service in ('postgres', 'api', 'scheduler', 'worker'):
+    for service in ('postgres', 'api', 'runtime', 'scheduler'):
         assert f'{service}:' in text
     assert 'image: ${DF_API_IMAGE}' in text
     assert 'image: ${DF_SCHEDULER_IMAGE}' in text
-    assert 'image: ${DF_WORKER_IMAGE}' in text
+    assert 'image: ${DF_RUNTIME_IMAGE}' in text
 
 
 def test_compose_wires_worker_data_plane_across_containers() -> None:
     text = COMPOSE.read_text()
-    assert 'WORKER_DATA_PLANE_GRPC_TARGET: worker:50052' in text
+    assert 'WORKER_DATA_PLANE_GRPC_TARGET: runtime:50052' in text
     assert 'WORKER_DATA_PLANE_GRPC_HOST: 0.0.0.0' in text
     assert 'WORKER_DATA_PLANE_GRPC_PORT: "50052"' in text
 
@@ -35,7 +35,7 @@ def test_prod_env_uses_published_images_and_placeholder_secrets() -> None:
     text = PROD_ENV.read_text()
     assert 'DF_API_IMAGE=ghcr.io/volturine/data-forge-api:' in text
     assert 'DF_SCHEDULER_IMAGE=ghcr.io/volturine/data-forge-scheduler:' in text
-    assert 'DF_WORKER_IMAGE=ghcr.io/volturine/data-forge-worker:' in text
+    assert 'DF_RUNTIME_IMAGE=ghcr.io/volturine/data-forge-runtime:' in text
     assert 'replace-with-strong-password' in text
     assert 'replace-with-long-random-secret' in text
     assert 'replace-with-long-random-internal-runtime-token' in text
@@ -63,7 +63,7 @@ def test_prod_and_dev_stacks_do_not_collide() -> None:
 
 def test_dockerfile_has_fixed_role_targets() -> None:
     text = DOCKERFILE.read_text()
-    for target in ('AS api', 'AS scheduler', 'AS worker'):
+    for target in ('AS api', 'AS scheduler', 'AS runtime'):
         assert target in text
     assert 'HEALTHCHECK' in text
     assert 'org.opencontainers.image' in text
@@ -76,10 +76,10 @@ def test_just_docker_prod_overrides_only_image_tags() -> None:
     assert 'docker/env/prod.env' in text
     assert 'DF_API_IMAGE=' in text
     assert 'DF_SCHEDULER_IMAGE=' in text
-    assert 'DF_WORKER_IMAGE=' in text
+    assert 'DF_RUNTIME_IMAGE=' in text
     assert 'data-forge-api:' in text
     assert 'data-forge-scheduler:' in text
-    assert 'data-forge-worker:' in text
+    assert 'data-forge-runtime:' in text
 
 
 def test_publish_workflow_is_multi_arch_and_tag_triggered() -> None:
@@ -88,7 +88,7 @@ def test_publish_workflow_is_multi_arch_and_tag_triggered() -> None:
     assert 'linux/amd64,linux/arm64' in text
     assert 'data-forge-api' in text
     assert 'data-forge-scheduler' in text
-    assert 'data-forge-worker' in text
+    assert 'data-forge-runtime' in text
     assert 'ghcr.io' in text
 
 

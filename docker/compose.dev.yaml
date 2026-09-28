@@ -17,23 +17,21 @@ services:
       - data:/app/data
       - ../packages/:/app/packages/
 
+  runtime:
+    environment:
+      DEBUG: "true"
+      PROD_MODE_ENABLED: "false"
+      WORKERS: "1"
+    volumes:
+      - data:/app/data
+      - ../packages/:/app/packages/
+
   scheduler:
     environment:
       DEBUG: "true"
       PROD_MODE_ENABLED: "false"
       WORKERS: "1"
       SCHEDULER_CHECK_INTERVAL: ${DF_SCHEDULER_CHECK_INTERVAL}
-    volumes:
-      - data:/app/data
-      - ../packages/:/app/packages/
-
-  worker:
-    environment:
-      DEBUG: "true"
-      PROD_MODE_ENABLED: "false"
-      WORKERS: "1"
-      BUILD_WORKER_MAX_PROCESSES: ${DF_BUILD_WORKER_MAX_PROCESSES}
-      BUILD_WORKER_IDLE_EXIT_SECONDS: ${DF_BUILD_WORKER_IDLE_EXIT_SECONDS}
     volumes:
       - data:/app/data
       - ../packages/:/app/packages/

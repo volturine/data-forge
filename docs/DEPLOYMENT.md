@@ -1,7 +1,8 @@
 # Deployment
 
 Data-Forge has one production architecture: PostgreSQL and S3-compatible object
-storage support three fixed application roles—API, scheduler, and worker. Docker
+ storage support four fixed application roles—API, runtime coordinator, scheduler,
+ and worker. Docker
 Compose is the recommended deployment method. Running the same roles from source
 is supported when the infrastructure is managed separately.
 
@@ -20,25 +21,29 @@ Production requires:
   encryption secrets;
 - a reverse proxy with TLS for any host exposed outside a trusted network.
 
-Keep the API, scheduler, and worker on the same release. They share database and
+Keep the API, runtime coordinator, scheduler, and worker on the same release. They share database and
 gRPC contracts and must be upgraded together.
 
 ## Docker Compose (recommended)
 
-The checked-in stack runs five services:
+The checked-in stack runs six services:
 
 ```text
 PostgreSQL ─┐
-RustFS ─────┼── API (HTTP + internal gRPC) ◄── Scheduler
-            │         │                    ◄── Worker
+RustFS ─────┼── API (HTTP) ◄── Runtime coordinator (internal gRPC)
+            │       │                         ▲
+            │       └── worker data-plane     ├── Scheduler
+            │                                 └── Worker (engine owner)
             │         └── worker data-plane gRPC
 Browser ────┘
 ```
 
-The API serves the built frontend and HTTP API on port 8000. The scheduler and
-worker reach the API gRPC endpoint only through the Compose network. The API
-reaches the worker data-plane gRPC the same way for object-store operations
-such as file upload.
+The API workers serve the built frontend and HTTP API on port 8000. They do not
+own runtime gRPC, engine lifecycle, or durable outbox dispatch. The dedicated
+runtime coordinator is the singleton internal gRPC/control-plane owner; the
+worker manager owns Docker compute workers and maintains a reserve of ready,
+unassigned workers; a claimed worker is bound to one resource identity. The API
+reaches the worker data-plane gRPC for object-store operations such as file upload.
 
 ### Image channels
 
@@ -160,7 +165,8 @@ just prod
 ```
 
 The recipe generates protocol bindings, builds the static frontend, loads
-`docker/env/prod.env`, and runs the API, scheduler, and worker in the foreground.
+`docker/env/prod.env`, and runs the API, runtime coordinator, scheduler, and
+worker in the foreground.
 If one role exits, the recipe stops the others and exits unsuccessfully. Run it
 under a process supervisor that restarts the whole group and forwards `SIGTERM`;
 do not start only the API.
@@ -242,7 +248,7 @@ A recoverable deployment needs a point-in-time-consistent set containing:
 2. the entire configured object-store bucket/prefix;
 3. the local `DATA_DIR` volume, which contains local runtime files and logs.
 
-Pause writes or stop API, scheduler, and worker while taking coordinated backups.
+Pause writes or stop API, runtime coordinator, scheduler, and worker while taking coordinated backups.
 Use provider-native snapshots/versioning for managed PostgreSQL and S3 whenever
 available, and test restores regularly.
 

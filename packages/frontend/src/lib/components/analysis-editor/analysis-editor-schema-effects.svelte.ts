@@ -150,8 +150,7 @@ export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps): {
 		const datasourceIdValue = deps.datasourceId();
 		const schemaId = deps.schemaKey();
 		if (!schemaId) return;
-		const activeTabId = analysisStore.activeTab?.id ?? null;
-		const requestKey = `${schemaId}:${activeTabId ?? ''}`;
+		const requestKey = schemaId;
 
 		const existingSchema = analysisStore.sourceSchemas.get(schemaId);
 		if (existingSchema || pendingSourceSchemaKeys.has(requestKey)) return;
@@ -179,12 +178,11 @@ export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps): {
 			};
 			pendingSourceSchemaKeys.add(requestKey);
 			isLoadingSchema = true;
-			const targetTabId = analysisTabId ?? activeTab?.id ?? null;
 			getStepSchema(
 				{
 					analysis_id: validAnalysisId ?? undefined,
 					analysis_pipeline: analysisPayload,
-					tab_id: targetTabId,
+					tab_id: analysisTabId,
 					target_step_id: 'source'
 				},
 				{ signal: controller.signal }
@@ -192,7 +190,7 @@ export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps): {
 				(payload) => {
 					releasePendingSchema();
 					if (controller.signal.aborted) return;
-					if (deps.schemaKey() !== schemaId || analysisStore.activeTab?.id !== activeTabId) return;
+					if (deps.schemaKey() !== schemaId) return;
 					const columns = payload.columns.map((name) => ({
 						name,
 						dtype: payload.column_types[name] ?? 'unknown',
@@ -206,7 +204,7 @@ export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps): {
 				(error) => {
 					releasePendingSchema();
 					if (controller.signal.aborted) return;
-					if (deps.schemaKey() !== schemaId || analysisStore.activeTab?.id !== activeTabId) return;
+					if (deps.schemaKey() !== schemaId) return;
 					track({
 						event: 'schema_error',
 						action: 'analysis_source_schema',
@@ -237,13 +235,13 @@ export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps): {
 			(schema) => {
 				releasePendingSchema();
 				if (controller.signal.aborted) return;
-				if (deps.schemaKey() !== schemaId || analysisStore.activeTab?.id !== activeTabId) return;
+				if (deps.schemaKey() !== schemaId) return;
 				analysisStore.setSourceSchema(schemaId, schema);
 			},
 			(err) => {
 				releasePendingSchema();
 				if (controller.signal.aborted) return;
-				if (deps.schemaKey() !== schemaId || analysisStore.activeTab?.id !== activeTabId) return;
+				if (deps.schemaKey() !== schemaId) return;
 				track({
 					event: 'schema_error',
 					action: 'load',

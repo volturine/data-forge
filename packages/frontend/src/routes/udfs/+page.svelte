@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { listUdfs, deleteUdf, exportUdfs, importUdfs, cloneUdf } from '$lib/api/udf';
 	import type { Udf, UdfExport } from '$lib/types/udf';
@@ -102,8 +101,16 @@
 				importError = result.error.message;
 				return;
 			}
+			if (!search) {
+				const importedIds = new Set(result.value.map((udf) => udf.id));
+				queryClient.setQueryData<Udf[]>(['udfs', search], (current) =>
+					current
+						? [...current.filter((udf) => !importedIds.has(udf.id)), ...result.value]
+						: current
+				);
+			}
 			closeImport();
-			queryClient.invalidateQueries({ queryKey: ['udfs'] });
+			void queryClient.invalidateQueries({ queryKey: ['udfs'] });
 		} finally {
 			importing = false;
 		}
@@ -130,14 +137,6 @@
 	function handleClone(id: string) {
 		cloningId = id;
 		cloneMutation.mutate(id);
-	}
-
-	function openNew() {
-		void goto(resolve('/udfs/new'));
-	}
-
-	function editUdf(id: string) {
-		void goto(resolve(`/udfs/${id}`));
 	}
 </script>
 
@@ -173,10 +172,10 @@
 					<Download size={16} />
 					Export
 				</button>
-				<button class={button({ variant: 'primary' })} onclick={openNew}>
+				<a class={button({ variant: 'primary' })} href={resolve('/udfs/new')}>
 					<Plus size={16} />
 					New UDF
-				</button>
+				</a>
 			</div>
 			{#if exportError}
 				<Callout tone="error">
@@ -240,8 +239,8 @@
 				})}
 			>
 				<p>No UDFs yet.</p>
-				<button class={button({ variant: 'primary' })} onclick={openNew}
-					>Create your first UDF</button
+				<a class={button({ variant: 'primary' })} href={resolve('/udfs/new')}
+					>Create your first UDF</a
 				>
 			</div>
 		{:else}
@@ -303,13 +302,10 @@
 							{/if}
 						</div>
 						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-							<button
-								class={button({ variant: 'ghost', size: 'sm' })}
-								onclick={() => editUdf(udf.id)}
-							>
+							<a class={button({ variant: 'ghost', size: 'sm' })} href={resolve(`/udfs/${udf.id}`)}>
 								<Pencil size={14} />
 								Edit
-							</button>
+							</a>
 							<button
 								class={button({ variant: 'ghost', size: 'sm' })}
 								onclick={() => handleClone(udf.id)}

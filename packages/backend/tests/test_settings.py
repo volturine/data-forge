@@ -1,5 +1,7 @@
 """Tests for the settings module — GET/PUT settings, test SMTP/Telegram."""
 
+import asyncio
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
@@ -11,6 +13,26 @@ from sqlmodel import Session, create_engine
 
 from backend_core.secrets import MASKED_SECRET, decrypt_secret, encrypt_secret
 from tests.http_client import TestClient
+
+
+def _frontend_config():
+    from modules.config.routes import FrontendConfig
+
+    return FrontendConfig(
+        timezone='UTC',
+        normalize_tz=False,
+        log_client_batch_size=1,
+        log_client_flush_interval_ms=1,
+        log_client_dedupe_window_ms=1,
+        log_client_flush_cooldown_ms=1,
+        log_queue_max_size=1,
+        public_idb_debug=False,
+        smtp_enabled=False,
+        telegram_enabled=False,
+        default_namespace='public',
+        auth_required=False,
+        verify_email_address=False,
+    )
 
 
 def _make_postgres_engine(prefix: str = 'settings'):
@@ -79,39 +101,81 @@ class TestGetSettings:
 
 
 class TestConfigRoute:
-    def test_frontend_config_cache_expires_and_invalidates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.asyncio
+    async def test_frontend_config_cache_expires_and_invalidates(self) -> None:
         from modules.config.routes import FrontendConfig, FrontendConfigCache
 
         clock = iter((100.0, 100.0, 111.0, 111.0, 112.0))
-        monkeypatch.setattr('modules.config.routes.time.monotonic', lambda: next(clock))
-        cache = FrontendConfigCache(ttl=10.0)
+        cache = FrontendConfigCache(ttl=10.0, clock=lambda: next(clock))
         calls = 0
 
         def create() -> FrontendConfig:
             nonlocal calls
             calls += 1
-            return FrontendConfig(
-                timezone='UTC',
-                normalize_tz=False,
-                log_client_batch_size=1,
-                log_client_flush_interval_ms=1,
-                log_client_dedupe_window_ms=1,
-                log_client_flush_cooldown_ms=1,
-                log_queue_max_size=1,
-                public_idb_debug=False,
-                smtp_enabled=False,
-                telegram_enabled=False,
-                default_namespace='public',
-                auth_required=False,
-                verify_email_address=False,
-            )
+            return _frontend_config()
 
-        first = cache.get_or_create(create)
-        assert cache.get_or_create(create) is first
-        assert cache.get_or_create(create) is not first
+        first = await cache.get_or_create(create)
+        assert await cache.get_or_create(create) is first
+        assert await cache.get_or_create(create) is not first
         cache.invalidate()
-        assert cache.get_or_create(create) is not first
+        assert await cache.get_or_create(create) is not first
         assert calls == 3
+
+    @pytest.mark.asyncio
+    async def test_frontend_config_cache_coalesces_misses_and_survives_leader_cancel(self) -> None:
+        from modules.config.routes import FrontendConfigCache
+
+        cache = FrontendConfigCache(ttl=10.0)
+        started = threading.Event()
+        release = threading.Event()
+        config = _frontend_config()
+        calls = 0
+
+        def create():
+            nonlocal calls
+            calls += 1
+            started.set()
+            assert release.wait(timeout=5)
+            return config
+
+        leader = asyncio.create_task(cache.get_or_create(create))
+        assert await asyncio.to_thread(started.wait, 5)
+        leader.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await leader
+
+        followers = [asyncio.create_task(cache.get_or_create(create)) for _ in range(20)]
+        release.set()
+        assert all(result is config for result in await asyncio.gather(*followers))
+        assert calls == 1
+
+    @pytest.mark.asyncio
+    async def test_frontend_config_cache_discards_refresh_invalidated_in_flight(self) -> None:
+        from modules.config.routes import FrontendConfigCache
+
+        cache = FrontendConfigCache(ttl=10.0)
+        started = threading.Event()
+        release = threading.Event()
+        first_config = _frontend_config()
+        current_config = _frontend_config()
+        calls = 0
+
+        def create():
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                started.set()
+                assert release.wait(timeout=5)
+                return first_config
+            return current_config
+
+        refresh = asyncio.create_task(cache.get_or_create(create))
+        assert await asyncio.to_thread(started.wait, 5)
+        cache.invalidate()
+        release.set()
+
+        assert await refresh is current_config
+        assert calls == 2
 
     def test_config_endpoint_returns_cached_frontend_config(self, client: TestClient) -> None:
         resp = client.get('/api/v1/config')
@@ -122,6 +186,31 @@ class TestConfigRoute:
 
 
 class TestNamespaceDatabaseConcurrency:
+    def test_pool_snapshot_identifies_checked_out_connection_owner(self, monkeypatch, tmp_path) -> None:
+        from backend_core import database
+
+        engine = database._create_engine(f'sqlite:///{tmp_path / "pool.db"}', pool_name='tenant')
+        monkeypatch.setattr(database, 'tenant_engine', engine)
+        monkeypatch.setattr(database, 'settings_engine', None)
+        monkeypatch.setattr(database, '_engine_override', None)
+        monkeypatch.setattr(database, '_settings_engine_override', None)
+        try:
+            with engine.connect():
+                snapshot = database.database_pool_snapshot()
+                assert snapshot['tenant_checkedout'] == 1
+                oldest_ms = snapshot['tenant_checkout_oldest_ms']
+                owners = snapshot['tenant_checkout_owners']
+                assert isinstance(oldest_ms, int) and oldest_ms >= 0
+                assert isinstance(owners, str)
+                assert 'MainThread' in owners
+                assert 'test_settings.py' in owners
+                assert 'connection.py' not in owners
+
+            snapshot = database.database_pool_snapshot()
+            assert 'tenant_checkout_owners' not in snapshot
+        finally:
+            engine.dispose()
+
     def test_run_db_is_safe_across_concurrent_threads(self) -> None:
         from backend_core.database import run_db
         from backend_core.namespace import reset_namespace, set_namespace_context
@@ -143,6 +232,23 @@ class TestNamespaceDatabaseConcurrency:
 
 class TestUpdateSettings:
     """PUT /v1/settings — upserts the singleton row."""
+
+    def test_ai_provider_update_does_not_reconfigure_telegram_runtime(self, client: TestClient, monkeypatch) -> None:
+        from backend_core import settings_store
+
+        def unexpected_telegram_lookup():
+            raise AssertionError('AI-only settings updates must not load Telegram settings')
+
+        def unexpected_telegram_runtime(*_args) -> None:
+            raise AssertionError('AI-only settings updates must not reconfigure Telegram')
+
+        monkeypatch.setattr(settings_store, 'get_resolved_telegram_settings', unexpected_telegram_lookup)
+        monkeypatch.setattr('modules.settings.routes._apply_telegram_bot_runtime', unexpected_telegram_runtime)
+
+        response = client.put('/api/v1/settings', json={'openai_default_model': 'e2e-model'})
+
+        assert response.status_code == 200
+        assert response.json()['openai_default_model'] == 'e2e-model'
 
     def test_update_smtp(self, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')

@@ -10,9 +10,23 @@ from backend_core.namespace import namespace_database_schema
 def test_runtime_schema_has_only_public_and_tenant_creation_revisions() -> None:
     versions_dir = Path(__file__).parents[1] / 'database' / 'alembic' / 'versions'
 
+    assert len(_TENANT_REVISION) <= 32  # alembic_version.version_num is VARCHAR(32)
     assert sorted(path.name for path in versions_dir.glob('*.py')) == [
         '0001_runtime_public.py',
         '0002_runtime_tenant.py',
+        '0003_engine_request_identity.py',
+        '0004_compute_request_datasources.py',
+        '0005_durable_preview_flights.py',
+        '0006_runtime_namespace_work.py',
+        '0007_schedule_due_index.py',
+        '0008_schedule_trigger_index.py',
+        '0008_schedule_wake_due.py',
+        '0009_runtime_lease_wake_due.py',
+        '0010_mcp_pending_actions.py',
+        '0011_namespace_scoped_preview_flights.py',
+        '0012_compute_request_flights.py',
+        '0013_runtime_work_wakes.py',
+        '0014_runtime_coordinator_fencing.py',
     ]
 
 
@@ -31,17 +45,63 @@ def test_migrate_runtime_runs_public_then_each_tenant(monkeypatch) -> None:
     calls: list[tuple[str, str]] = []
 
     def fake_current_revision(schema: str) -> str | None:
-        revisions = {'public': None, 'alpha': None, 'beta': _TENANT_REVISION}
+        revisions = {'public': None, 'alpha': None, 'beta': _TENANT_REVISION, 'gamma': '0007_schedule_due_index'}
         return revisions[schema]
 
     monkeypatch.setattr('backend_core.migrations._current_revision', fake_current_revision)
+    monkeypatch.setattr(
+        'backend_core.migrations._schema_is_empty',
+        lambda schema: schema == namespace_database_schema('alpha'),
+    )
     monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: calls.append(('ensure_database', 'db')))
+    monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
+    monkeypatch.setattr('backend_core.migrations._bootstrap_empty_tenant_schema', lambda schema: calls.append(('tenant-bootstrap', schema)))
+    monkeypatch.setattr('backend_core.migrations.settings.database_url', 'postgresql+psycopg://user:pass@host:5432/db')
+
+    migrate_runtime(['alpha', 'beta', 'gamma'])
+
+    assert calls == [
+        ('ensure_database', 'db'),
+        ('public', f'public:{_PUBLIC_REVISION}'),
+        ('tenant-bootstrap', namespace_database_schema('alpha')),
+        ('tenant', f'gamma:{_TENANT_REVISION}'),
+    ]
+
+
+def test_migrate_runtime_upgrades_existing_public_work_index(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: '0006_runtime_namespace_work' if schema == 'public' else _TENANT_REVISION)
+    monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: None)
     monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
     monkeypatch.setattr('backend_core.migrations.settings.database_url', 'postgresql+psycopg://user:pass@host:5432/db')
 
-    migrate_runtime(['alpha', 'beta'])
+    migrate_runtime(['default'])
 
-    assert calls == [('ensure_database', 'db'), ('public', f'public:{_PUBLIC_REVISION}'), ('tenant', f'alpha:{_TENANT_REVISION}')]
+    assert calls == [('public', f'public:{_PUBLIC_REVISION}')]
+
+
+def test_migrate_runtime_upgrades_existing_schedule_wake_index(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: '0008_schedule_wake_due' if schema == 'public' else _TENANT_REVISION)
+    monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: None)
+    monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
+    monkeypatch.setattr('backend_core.migrations.settings.database_url', 'postgresql+psycopg://user:pass@host:5432/db')
+
+    migrate_runtime(['default'])
+
+    assert calls == [('public', f'public:{_PUBLIC_REVISION}')]
+
+
+def test_migrate_runtime_upgrades_existing_public_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: '0010_mcp_pending_actions' if schema == 'public' else _TENANT_REVISION)
+    monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: None)
+    monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
+    monkeypatch.setattr('backend_core.migrations.settings.database_url', 'postgresql+psycopg://user:pass@host:5432/db')
+
+    migrate_runtime(['default'])
+
+    assert calls == [('public', f'public:{_PUBLIC_REVISION}')]
 
 
 def test_ensure_database_exists_creates_missing_database(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,6 +167,7 @@ def test_migrate_runtime_rejects_existing_tenant_revision(monkeypatch, tmp_path:
 
 def test_migrate_runtime_maps_public_namespace_to_tenant_schema(monkeypatch) -> None:
     calls: list[tuple[str, str]] = []
+    tenant_schema = namespace_database_schema('public')
 
     def fake_current_revision(schema: str) -> str | None:
         revisions = {'public': _PUBLIC_REVISION, namespace_database_schema('public'): None}
@@ -114,11 +175,12 @@ def test_migrate_runtime_maps_public_namespace_to_tenant_schema(monkeypatch) -> 
 
     monkeypatch.setattr('backend_core.migrations._current_revision', fake_current_revision)
     monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: calls.append(('ensure_database', 'db')))
-    monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
+    monkeypatch.setattr('backend_core.migrations._schema_is_empty', lambda schema: schema == tenant_schema)
+    monkeypatch.setattr('backend_core.migrations._bootstrap_empty_tenant_schema', lambda schema: calls.append(('tenant-bootstrap', schema)))
 
     migrate_runtime(['public'])
 
     assert calls == [
         ('ensure_database', 'db'),
-        ('tenant', f'{namespace_database_schema("public")}:{_TENANT_REVISION}'),
+        ('tenant-bootstrap', tenant_schema),
     ]

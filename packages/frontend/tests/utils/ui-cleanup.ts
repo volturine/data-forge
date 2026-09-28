@@ -1,5 +1,5 @@
-import type { Browser, BrowserContext, Locator, Page } from '@playwright/test';
-import { expect } from '@playwright/test';
+import type { APIRequestContext, Browser, BrowserContext, Locator, Page } from '@playwright/test';
+import { expect, request as playwrightRequest } from '@playwright/test';
 import {
 	findAnalysisIdByName,
 	findDatasourceIdsByName,
@@ -8,6 +8,7 @@ import {
 	type E2EStorageState
 } from './api.js';
 import { installE2eContextGuards } from './page-guards.js';
+import { getCleanupSessionState, rememberCleanupSessionState } from './page-session-state.js';
 import { e2eBaseURL } from './base-url.js';
 import { DEFAULT_NAMESPACE } from './namespace.js';
 import {
@@ -197,6 +198,7 @@ export async function createCleanupPage(browser: Browser, sessionState: E2EStora
 		baseURL: e2eBaseURL(),
 		storageState: structuredClone(sessionState)
 	});
+	rememberCleanupSessionState(context, sessionState);
 	installE2eContextGuards(context);
 	const page = await context.newPage();
 	return { page, context };
@@ -234,11 +236,15 @@ async function deleteDatasourceById(page: Page, name: string, datasourceId: stri
 	unregisterDatasource(datasourceId);
 }
 
-async function deleteAnalysisById(page: Page, name: string, analysisId: string): Promise<void> {
+async function deleteAnalysisByRequest(
+	request: APIRequestContext,
+	name: string,
+	analysisId: string
+): Promise<void> {
 	const headers = cleanupHeaders();
-	const current = await page
-		.context()
-		.request.get(`/api/v1/analysis/${encodeURIComponent(analysisId)}`, { headers });
+	const current = await request.get(`/api/v1/analysis/${encodeURIComponent(analysisId)}`, {
+		headers
+	});
 	if (current.status() === 404) {
 		unregisterAnalysis(analysisId);
 		return;
@@ -256,17 +262,19 @@ async function deleteAnalysisById(page: Page, name: string, analysisId: string):
 	// queues the exact shutdown after the row is deleted; issuing a second
 	// shutdown here races the request worker and can cancel an unrelated
 	// request that reused the same engine identity.
-	const response = await page
-		.context()
-		.request.delete(`/api/v1/analysis/${encodeURIComponent(analysisId)}`, {
-			headers: { ...headers, 'If-Match': version }
-		});
+	const response = await request.delete(`/api/v1/analysis/${encodeURIComponent(analysisId)}`, {
+		headers: { ...headers, 'If-Match': version }
+	});
 	if (!response.ok() && response.status() !== 404) {
 		throw new Error(
 			`Failed to delete analysis ${name} (${analysisId}): ${(await responseFailure(response)).message}`
 		);
 	}
 	unregisterAnalysis(analysisId);
+}
+
+async function deleteAnalysisById(page: Page, name: string, analysisId: string): Promise<void> {
+	await deleteAnalysisByRequest(page.context().request, name, analysisId);
 }
 
 const cleanupSessions = new WeakMap<BrowserContext, Promise<CleanupSession>>();
@@ -278,9 +286,19 @@ async function createIsolatedCleanupSession(
 	if (!browser) {
 		throw new Error('Cleanup isolation requires an attached browser');
 	}
-	// storageState() throws if the context was already closed by test teardown.
-	const storageState = await sourceContext.storageState();
+	let storageState: E2EStorageState;
+	try {
+		storageState = (await sourceContext.storageState()) as E2EStorageState;
+	} catch (error) {
+		// Playwright closes a timed-out test's context before afterEach cleanup
+		// runs. Keep immutable worker auth state outside the context so cleanup
+		// can still release the test's owned resources.
+		const savedState = getCleanupSessionState(sourceContext);
+		if (!savedState) throw error;
+		storageState = savedState;
+	}
 	const context = await browser.newContext({ baseURL: e2eBaseURL(), storageState });
+	rememberCleanupSessionState(context, storageState);
 	installE2eContextGuards(context);
 	const page = await context.newPage();
 	const cleanup = async () => {
@@ -486,9 +504,32 @@ export async function deleteAnalysisViaUI(
 	name: string,
 	options?: { id?: string; skipNavigation?: boolean }
 ): Promise<void> {
-	await runCleanupWithFallback(page, 'deleteAnalysisViaUI', name, async (cleanupPage) => {
-		await deleteAnalysisViaUIOnPage(cleanupPage, name, options);
-	});
+	try {
+		await runCleanupWithFallback(page, 'deleteAnalysisViaUI', name, async (cleanupPage) => {
+			await deleteAnalysisViaUIOnPage(cleanupPage, name, options);
+		});
+	} catch (cleanupError) {
+		const sourceContext = page.context();
+		const sessionState = getCleanupSessionState(sourceContext);
+		const analysisId = options?.id ?? findAnalysisIdByName(name);
+		if (!sessionState || !analysisId) throw cleanupError;
+		let cleanupRequest: APIRequestContext | undefined;
+		try {
+			cleanupRequest = await playwrightRequest.newContext({
+				baseURL: e2eBaseURL(),
+				storageState: structuredClone(sessionState)
+			});
+			await deleteAnalysisByRequest(cleanupRequest, name, analysisId);
+		} catch (requestError) {
+			throw new AggregateError(
+				[cleanupError, requestError],
+				`[ui-cleanup] ${name} cleanup failed in the UI and authenticated API fallback`,
+				{ cause: requestError }
+			);
+		} finally {
+			await cleanupRequest?.dispose().catch(() => undefined);
+		}
+	}
 }
 
 async function deleteUdfViaUIOnPage(page: Page, name: string): Promise<void> {

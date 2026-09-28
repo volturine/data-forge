@@ -2,7 +2,7 @@
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { goto } from '$app/navigation';
 	import { idbGet, idbSet } from '$lib/utils/indexeddb';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { resolve } from '$app/paths';
 	import {
 		deleteAnalysis,
@@ -70,6 +70,7 @@
 	let duplicateDescription = $state('');
 	let duplicateError = $state('');
 	let duplicating = $state(false);
+	const favoriteMutationVersions = new SvelteMap<string, number>();
 
 	const filteredAndSortedAnalyses = $derived.by(() => {
 		if (!query.data) return [];
@@ -161,15 +162,46 @@
 	async function toggleFavorite(id: string) {
 		const analysesKey = ['analyses', ns.value] as const;
 		const favoritesKey = ['favorite-analyses', ns.value] as const;
-		// Stop an older in-flight response from restoring the pre-mutation
-		// favorite list after the mutation has committed.
-		await queryClient.cancelQueries({ queryKey: favoritesKey, exact: true });
+		const version = (favoriteMutationVersions.get(id) ?? 0) + 1;
+		favoriteMutationVersions.set(id, version);
 		const next = !favoriteStore.isFavorite(id);
-		const result = next ? await favoriteAnalysis(id) : await unfavoriteAnalysis(id);
+		const previousFavorite = !next;
+		const previousAnalyses = queryClient.getQueryData<AnalysisGalleryItem[]>(analysesKey);
+		const previousFavorites = queryClient.getQueryData<AnalysisGalleryItem[]>(favoritesKey);
+		const analysis =
+			previousAnalyses?.find((item) => item.id === id) ??
+			query.data?.find((item) => item.id === id);
+
+		// Publish the interaction immediately. The API is still authoritative,
+		// but the gallery and sidebar must not wait for a slow control-plane
+		// round-trip before reflecting a click.
+		favoriteStore.apply(id, next);
+		queryClient.setQueryData<AnalysisGalleryItem[]>(analysesKey, (current) =>
+			current?.map((item) => (item.id === id ? { ...item, is_favorite: next } : item))
+		);
+		queryClient.setQueryData<AnalysisGalleryItem[]>(favoritesKey, (current) => {
+			if (!current && !analysis) return current;
+			const existing = current ?? [];
+			const withoutCurrent = existing.filter((item) => item.id !== id);
+			if (!next) return withoutCurrent;
+			return analysis ? [...withoutCurrent, { ...analysis, is_favorite: true }] : existing;
+		});
+
+		// Stop an older in-flight response from restoring the pre-mutation
+		// favorite list after the optimistic state has been published.
+		const mutation = next ? favoriteAnalysis(id) : unfavoriteAnalysis(id);
+		await queryClient.cancelQueries({ queryKey: favoritesKey, exact: true }, { revert: false });
+		const result = await mutation;
 		if (result.isErr()) {
-			deleteError = result.error.message;
+			if (favoriteMutationVersions.get(id) === version) {
+				favoriteStore.apply(id, previousFavorite);
+				queryClient.setQueryData(analysesKey, previousAnalyses);
+				queryClient.setQueryData(favoritesKey, previousFavorites);
+				deleteError = result.error.message;
+			}
 			return;
 		}
+		if (favoriteMutationVersions.get(id) !== version) return;
 		const isFavorite = result.value.is_favorite;
 		favoriteStore.apply(id, isFavorite);
 		// The mutation response is authoritative. Update both visible caches
@@ -179,15 +211,17 @@
 				analysis.id === id ? { ...analysis, is_favorite: isFavorite } : analysis
 			)
 		);
-		const analysis = queryClient
+		const currentAnalysis = queryClient
 			.getQueryData<AnalysisGalleryItem[]>(analysesKey)
 			?.find((item) => item.id === id);
 		queryClient.setQueryData<AnalysisGalleryItem[]>(favoritesKey, (current) => {
-			if (!current && !analysis) return current;
+			if (!current && !currentAnalysis) return current;
 			const existing = current ?? [];
 			const withoutCurrent = existing.filter((item) => item.id !== id);
 			if (!isFavorite) return withoutCurrent;
-			return analysis ? [...withoutCurrent, { ...analysis, is_favorite: true }] : existing;
+			return currentAnalysis
+				? [...withoutCurrent, { ...currentAnalysis, is_favorite: true }]
+				: existing;
 		});
 	}
 

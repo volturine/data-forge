@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections import OrderedDict, deque
 
 DEFAULT_MAX_WAITERS = 1024
+_MAX_KEYED_VERSIONS = 4096
 
 _Waiter = tuple[asyncio.AbstractEventLoop, asyncio.Future[int]]
 
@@ -21,14 +23,16 @@ def _cancel_waiter(entry: _Waiter) -> None:
 class VersionHub:
     def __init__(self, *, max_waiters: int = DEFAULT_MAX_WAITERS) -> None:
         self._version = 0
+        self._history: deque[tuple[int, str | None]] = deque(maxlen=2048)
         self._waiters: list[_Waiter] = []
         self._lock = threading.Lock()
         self._max_waiters = max_waiters
 
-    def publish(self) -> None:
+    def publish(self, payload: str | None = None) -> None:
         with self._lock:
             self._version += 1
             version = self._version
+            self._history.append((version, payload))
             waiters = self._waiters
             self._waiters = []
         for loop, future in waiters:
@@ -40,6 +44,25 @@ class VersionHub:
         with self._lock:
             return self._version
 
+    def payloads_since(self, last_seen: int) -> list[str | None]:
+        """Return distinct payloads published after ``last_seen``.
+
+        The history is only an admission hint. Durable outbox recovery uses
+        the indexed pending-work table when a listener outage overruns this
+        bounded buffer.
+        """
+        with self._lock:
+            if last_seen >= self._version:
+                return []
+            if not self._history or self._history[0][0] > last_seen + 1:
+                return [self._history[-1][1]] if self._history else []
+            payloads: list[str | None] = []
+            for version, payload in self._history:
+                if version <= last_seen or payload in payloads:
+                    continue
+                payloads.append(payload)
+            return payloads
+
     async def wait(self, last_seen: int | None = None) -> int:
         with self._lock:
             version = self._version
@@ -47,7 +70,6 @@ class VersionHub:
                 return version
         loop = asyncio.get_running_loop()
         future: asyncio.Future[int] = loop.create_future()
-        evicted: list[_Waiter] = []
         with self._lock:
             version = self._version
             if last_seen is not None and version != last_seen:
@@ -68,6 +90,7 @@ class VersionHub:
             waiters = self._waiters
             self._waiters = []
             self._version = 0
+            self._history.clear()
         for loop, future in waiters:
             if future.done():
                 continue
@@ -92,16 +115,20 @@ class VersionHub:
 
 
 class KeyedVersionHub:
-    def __init__(self, *, max_waiters: int = DEFAULT_MAX_WAITERS) -> None:
-        self._versions: dict[str, int] = {}
+    def __init__(self) -> None:
+        self._versions: OrderedDict[str, int] = OrderedDict()
         self._waiters: dict[str, list[_Waiter]] = {}
         self._lock = threading.Lock()
-        self._max_waiters = max_waiters
 
     def publish(self, key: str) -> None:
         with self._lock:
             version = self._versions.get(key, 0) + 1
             self._versions[key] = version
+            self._versions.move_to_end(key)
+            # This hub is only a wakeup optimization; durable request state
+            # and the bounded recovery poller remain authoritative.
+            while len(self._versions) > _MAX_KEYED_VERSIONS:
+                self._versions.popitem(last=False)
             waiters = self._waiters.pop(key, [])
         for loop, future in waiters:
             if future.done():
@@ -119,7 +146,6 @@ class KeyedVersionHub:
                 return version
         loop = asyncio.get_running_loop()
         future: asyncio.Future[int] = loop.create_future()
-        evicted: list[_Waiter] = []
         with self._lock:
             version = self._versions.get(key, 0)
             if last_seen is not None and version != last_seen:
@@ -130,10 +156,6 @@ class KeyedVersionHub:
             else:
                 self._waiters.pop(key, None)
             self._waiters.setdefault(key, []).append((loop, future))
-            evicted = self._evict_overflow_locked()
-        for entry in evicted:
-            if entry[1] is not future:
-                _cancel_waiter(entry)
         try:
             return await future
         finally:
@@ -143,30 +165,12 @@ class KeyedVersionHub:
         with self._lock:
             waiters = self._waiters
             self._waiters = {}
-            self._versions = {}
+            self._versions = OrderedDict()
         for items in waiters.values():
             for loop, future in items:
                 if future.done():
                     continue
                 loop.call_soon_threadsafe(future.cancel)
-
-    def _evict_overflow_locked(self) -> list[_Waiter]:
-        total = sum(len(entries) for entries in self._waiters.values())
-        if total <= self._max_waiters:
-            return []
-        evicted: list[_Waiter] = []
-        for key in list(self._waiters):
-            entries = self._waiters.get(key)
-            while entries and total > self._max_waiters:
-                evicted.append(entries.pop(0))
-                total -= 1
-            if entries:
-                self._waiters[key] = entries
-            else:
-                self._waiters.pop(key, None)
-            if total <= self._max_waiters:
-                break
-        return evicted
 
     async def _discard_waiter(self, key: str, future: asyncio.Future[int]) -> None:
         with self._lock:

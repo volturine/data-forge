@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures.js';
+import { E2E_SHARED_NAMESPACE_B, test, expect } from './fixtures.js';
 import { createLongRunningAnalysis } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
 import {
@@ -95,11 +95,11 @@ test.describe('Navigation – page load smoke tests', () => {
 		await expect(page).toHaveURL(/datasources\/new/, { timeout: 5_000 });
 	});
 
-	test('UDFs "New UDF" button navigates to /udfs/new', async ({ page }) => {
+	test('UDFs "New UDF" link navigates to /udfs/new', async ({ page }) => {
 		await gotoUdfLibrary(page);
-		const newUdfBtn = page.getByRole('button', { name: 'New UDF' });
-		await expect(newUdfBtn).toBeVisible();
-		await newUdfBtn.click();
+		const newUdfLink = page.getByRole('link', { name: 'New UDF' });
+		await expect(newUdfLink).toBeVisible();
+		await newUdfLink.click();
 		await expect(page).toHaveURL(/udfs\/new/, { timeout: 5_000 });
 	});
 });
@@ -384,7 +384,7 @@ test.describe('Navigation – chat panel smoke', () => {
 
 test.describe('Navigation – namespace persistence', () => {
 	test('selected namespace persists across page refresh', async ({ page }) => {
-		const ns = `e2e-ns-${uid()}`;
+		const ns = E2E_SHARED_NAMESPACE_B;
 
 		await page.goto('/');
 		await waitForAppShell(page);
@@ -396,11 +396,7 @@ test.describe('Navigation – namespace persistence', () => {
 		const search = dialog.getByRole('textbox', { name: 'Search namespaces' });
 		await search.fill(ns);
 
-		await dialog.locator(`[data-namespace-create="${ns}"]`).click();
-		// Creation provisions storage credentials and a tenant schema before the
-		// picker closes. Under the real 12-browser matrix that transaction can
-		// legitimately take longer than a five-second DOM assertion; the modal
-		// remains visible with its progress state until the namespace is committed.
+		await dialog.locator(`[data-namespace-option="${ns}"]`).click();
 		await expect(dialog).not.toBeVisible({ timeout: readyTimeoutMs() });
 
 		const sidebar = page.locator('aside[aria-label="Main navigation"]');
@@ -428,7 +424,13 @@ test.describe('Navigation – namespace persistence', () => {
 		await page.goto('/');
 		await waitForAppShell(page);
 
+		const namespacesResponse = page.waitForResponse(
+			(response) =>
+				new URL(response.url()).pathname === '/api/v1/namespaces' &&
+				response.request().method() === 'GET'
+		);
 		await page.getByRole('button', { name: 'Select namespace' }).click();
+		expect((await namespacesResponse).ok()).toBeTruthy();
 		const dialog = page.locator('[role="dialog"]');
 		await expect(dialog).toBeVisible({ timeout: 5_000 });
 

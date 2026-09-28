@@ -19,7 +19,7 @@ service WorkerRuntimeService {
   rpc ClaimBuildJob(RuntimeWorkerRequest) returns (WorkerClaimBuildJobResponse);
   rpc RenewBuildJobLease(WorkerBuildJobClaimRequest) returns (WorkerRenewBuildJobLeaseResponse);
   rpc ClaimComputeRequest(RuntimeWorkerRequest) returns (WorkerClaimComputeRequestResponse);
-  rpc RenewComputeRequestLease(WorkerComputeRequestClaimRequest) returns (WorkerRenewComputeRequestLeaseResponse);
+  rpc RenewComputeRequestLeases(WorkerRenewComputeRequestLeasesRequest) returns (WorkerRenewComputeRequestLeasesResponse);
   rpc CompleteComputeRequest(WorkerCompleteComputeRequestRequest) returns (RuntimeWorkerResponse);
   rpc FailComputeRequest(WorkerFailComputeRequestRequest) returns (RuntimeWorkerResponse);
 
@@ -45,9 +45,10 @@ service WorkerRuntimeService {
   rpc FinalizeBuildJob(WorkerFinalizeBuildJobRequest) returns (BoolResponse);
   rpc ReleaseBuildWorkerJobs(RuntimeWorkerRequest) returns (CountResponse);
   rpc GetQueuedBuildJobCount(EmptyRequest) returns (CountResponse);
-  rpc DispatchRuntimeOutbox(EmptyRequest) returns (CountResponse);
+  rpc ReconcileExpiredBuildJobs(EmptyRequest) returns (CountResponse);
+  rpc ReconcileExpiredComputeRequests(EmptyRequest) returns (CountResponse);
   rpc GetIdleBuildWorkerPids(EmptyRequest) returns (WorkerIdlePidsResponse);
-  rpc ListRuntimeNamespaces(EmptyRequest) returns (WorkerNamespacesResponse);
+  rpc ListPendingRuntimeWorkNamespaces(WorkerPendingRuntimeWorkNamespacesRequest) returns (WorkerNamespacesResponse);
   rpc PersistBuildEvent(WorkerPersistBuildEventRequest) returns (WorkerPersistBuildEventResponse);
   rpc StartBuildRun(WorkerStartBuildRunRequest) returns (WorkerStartBuildRunResponse);
   rpc PersistEngineSnapshot(WorkerPersistEngineSnapshotRequest) returns (CountResponse);
@@ -93,6 +94,10 @@ message WorkerClaimBuildJobResponse {
   optional WorkerClaimedBuildJob job = 1;
 }
 
+message WorkerPendingRuntimeWorkNamespacesRequest {
+  repeated string kinds = 1;
+}
+
 message WorkerBuildJobClaimRequest {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
@@ -129,18 +134,29 @@ message WorkerClaimComputeRequestResponse {
   optional WorkerClaimedComputeRequest request = 1;
 }
 
-message WorkerComputeRequestClaimRequest {
+message WorkerComputeRequestLeaseRenewal {
   string request_id = 1 [(buf.validate.field).string.min_len = 1];
-  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  string claim_token = 3 [(buf.validate.field).string.min_len = 1];
-  int64 lease_generation = 4 [(buf.validate.field).int64.gte = 1];
-  string worker_id = 5 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 2 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 3 [(buf.validate.field).int64.gte = 1];
 }
 
-message WorkerRenewComputeRequestLeaseResponse {
-  bool renewed = 1;
-  optional google.protobuf.Timestamp lease_expires_at = 2;
+message WorkerRenewComputeRequestLeasesRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string worker_id = 2 [(buf.validate.field).string.min_len = 1];
+  repeated WorkerComputeRequestLeaseRenewal renewals = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 256
+  }];
+}
+
+message WorkerComputeRequestLeaseRenewalResult {
+  string request_id = 1 [(buf.validate.field).string.min_len = 1];
+  bool renewed = 2;
   optional int32 lease_ttl_seconds = 3 [(buf.validate.field).int32.gte = 1];
+}
+
+message WorkerRenewComputeRequestLeasesResponse {
+  repeated WorkerComputeRequestLeaseRenewalResult renewals = 1;
 }
 
 message WorkerCompleteComputeRequestRequest {
@@ -156,6 +172,7 @@ message WorkerCompleteComputeRequestRequest {
   string worker_id = 8 [(buf.validate.field).string.min_len = 1];
   string claim_token = 9 [(buf.validate.field).string.min_len = 1];
   int64 lease_generation = 10 [(buf.validate.field).int64.gte = 1];
+  optional WorkerEngineRunFinalization engine_run_finalization = 11;
 }
 
 message WorkerFailComputeRequestRequest {
@@ -169,6 +186,7 @@ message WorkerFailComputeRequestRequest {
   string worker_id = 6 [(buf.validate.field).string.min_len = 1];
   string claim_token = 7 [(buf.validate.field).string.min_len = 1];
   int64 lease_generation = 8 [(buf.validate.field).int64.gte = 1];
+  optional WorkerEngineRunFinalization engine_run_finalization = 9;
 }
 
 message WorkerPublishDatasourceCreateRequest {
@@ -410,6 +428,7 @@ message WorkerCreateEngineRunRequest {
   optional string triggered_by = 17 [(buf.validate.field).string.min_len = 1];
   map<string, double> timing_by_key = 18;
   repeated EngineRunExecutionEntry execution_entry = 19;
+  optional string idempotency_key = 20 [(buf.validate.field).string.min_len = 1];
 }
 
 message EngineRunStepTimings {
@@ -446,6 +465,12 @@ message WorkerEngineRunUpdateFields {
   optional string current_step = 14 [(buf.validate.field).string.min_len = 1];
   optional string triggered_by = 15 [(buf.validate.field).string.min_len = 1];
   bool clear_current_step = 16;
+}
+
+message WorkerEngineRunFinalization {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  bool merge_result = 2;
+  WorkerEngineRunUpdateFields update = 3 [(buf.validate.field).required = true];
 }
 
 message WorkerUpdateEngineRunRequest {

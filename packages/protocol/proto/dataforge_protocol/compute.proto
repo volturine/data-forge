@@ -140,7 +140,7 @@ message StepPreviewResult {
   repeated google.protobuf.Struct rows = 4;
   int32 total_rows = 5 [(buf.validate.field).int32.gte = 0];
   int32 page = 6 [(buf.validate.field).int32.gte = 1];
-  int32 page_size = 7 [(buf.validate.field).int32.gte = 1];
+  int32 page_size = 7 [(buf.validate.field).int32.gte = 0];
   optional google.protobuf.Struct metadata = 8;
 }
 

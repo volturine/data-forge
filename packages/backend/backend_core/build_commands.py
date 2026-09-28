@@ -42,6 +42,17 @@ def _terminal_outcome(run_status: BuildRunStatus | str, error_message: str | Non
 
 @committed
 def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) -> FailedBuildResult | None:
+    existing = session.get(BuildJob, claim.job_id)
+    if (
+        existing is not None
+        and existing.build_id == claim.build_id
+        and existing.lease_generation == claim.lease_generation
+        and existing.status_kind().is_terminal
+    ):
+        run = build_runs_service.get_build_run(session, claim.build_id)
+        if run is None:
+            return None
+        return FailedBuildResult(job=existing, namespace=run.namespace, latest_sequence=None)
     active_claim = build_jobs_service.lock_active_job_claim(
         session,
         claim.job_id,
@@ -106,6 +117,14 @@ def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) ->
 
 @committed
 def finalize_build_job(session: Session, claim: BuildClaimCommand) -> BuildJob | None:
+    existing = session.get(BuildJob, claim.job_id)
+    if (
+        existing is not None
+        and existing.build_id == claim.build_id
+        and existing.lease_generation == claim.lease_generation
+        and existing.status_kind().is_terminal
+    ):
+        return existing
     active_claim = build_jobs_service.lock_active_job_claim(
         session,
         claim.job_id,

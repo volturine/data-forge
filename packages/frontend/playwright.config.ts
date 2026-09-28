@@ -30,8 +30,13 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL;
 if (!baseURL) {
 	throw new Error('PLAYWRIGHT_BASE_URL must be set before running Playwright e2e tests');
 }
-const ciArgs = process.env.CI ? ['--disable-dev-shm-usage', '--disable-gpu'] : [];
-const artifactsRoot = path.resolve(process.cwd(), 'tests', '.artifacts');
+const ciArgs = process.env.CI ? ['--disable-gpu'] : [];
+// Keep concurrent shard output outside testDir. Every shard bind-mounts the
+// same repository, and Playwright's test discovery can race another runner's
+// output cleanup when generated files live below ./tests.
+const artifactsRoot = process.env.E2E_ARTIFACTS_DIR
+	? path.resolve(process.env.E2E_ARTIFACTS_DIR)
+	: path.resolve(process.cwd(), 'tests', '.artifacts');
 const testDir = process.env.E2E_BOOTSTRAP_SHARED_FIXTURES === '1' ? './e2e' : './tests';
 const shardSuffix = shardSuffixFromArgs();
 const jsonReport = process.env.PLAYWRIGHT_JSON_REPORT;
@@ -54,7 +59,7 @@ export default defineConfig({
 	testDir,
 	timeout: testTimeoutMs,
 	expect: { timeout: process.env.CI ? 10_000 : 5_000 },
-	fullyParallel: false,
+	fullyParallel: true,
 	globalSetup: './tests/global-setup.ts',
 	workers,
 	retries: 0,

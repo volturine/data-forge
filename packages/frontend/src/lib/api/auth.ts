@@ -66,7 +66,8 @@ export function getMe(): ResultAsync<UserPublic, ApiError> {
 export function updateProfile(payload: UpdateProfilePayload): ResultAsync<UserPublic, ApiError> {
 	return apiRequest<UserPublic>('/v1/auth/profile', {
 		method: 'PUT',
-		body: JSON.stringify(payload)
+		body: JSON.stringify(payload),
+		signal: AbortSignal.timeout(BOOTSTRAP_API_TIMEOUT_MS)
 	});
 }
 

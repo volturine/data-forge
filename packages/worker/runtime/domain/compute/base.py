@@ -6,6 +6,8 @@ from typing import Any, Literal, Protocol, runtime_checkable
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
+from runtime.domain.compute.result import EngineResult
+
 
 class OperationParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -80,20 +82,6 @@ EngineCommand = ShutdownCommand | PreviewCommand | ExportCommand | SchemaCommand
 # ---------------------------------------------------------------------------
 # Engine result — sent from compute subprocess back to main process
 # ---------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class EngineResult:
-    job_id: str | None
-    data: dict[str, Any] | None
-    error: str | None
-    error_kind: str | None = None
-    error_details: dict[str, Any] | None = None
-    step_timings: dict[str, float] = field(default_factory=dict)
-    query_plan: str | None = None
-    read_duration_ms: float | None = None
-    write_duration_ms: float | None = None
-    collect_duration_ms: float | None = None
 
 
 @dataclass(slots=True)

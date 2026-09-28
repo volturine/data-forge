@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import atexit
 import contextlib
+import copy
 import json
 import logging
 import logging.handlers
@@ -11,6 +13,7 @@ import time
 import urllib.parse
 import uuid
 from collections.abc import Awaitable, Callable
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from typing import Any, Protocol
@@ -18,16 +21,23 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 from fastapi import Request
+from starlette.requests import ClientDisconnect
 
 from backend_core.config import settings
+from backend_core.database import database_statement_timing
 from backend_core.domain.enums import DataForgeStrEnum
 from backend_core.proxy import client_ip
 
 _writer: DatabaseLogWriter | None = None
 _listener: logging.handlers.QueueListener | None = None
+_queue_handler: logging.handlers.QueueHandler | None = None
+_console_handler: logging.Handler | None = None
 _configured = False
+_atexit_registered = False
+_logging_lifecycle_lock = threading.RLock()
 _LOG_RECORD_KEYS = set(logging.LogRecord('', 0, '', 0, '', (), None).__dict__.keys())
 _DEFAULT_FLUSH_INTERVAL = 5.0
+_LOG_SCHEMA_LOCK_KEY = int.from_bytes(b'DFLOGSCH', 'big', signed=True)
 _logger = logging.getLogger('backend_core.logging')
 _SENSITIVE_FIELDS = {
     'password',
@@ -45,6 +55,40 @@ _SENSITIVE_FIELDS = {
 }
 _SENSITIVE_PATHS = ('/api/v1/auth', '/api/v1/settings', '/api/v1/ai/chat', '/api/v1/ai/models', '/api/v1/ai/test')
 _REDACTED = '[REDACTED]'
+
+# Request bodies and preview responses can be large enough for JSON parsing and
+# redaction to become visible event-loop work. Keep diagnostics bounded and
+# isolated from the default executor used by application handlers.
+_REQUEST_LOG_WORKERS = 2
+_REQUEST_LOG_EXECUTOR = ThreadPoolExecutor(max_workers=_REQUEST_LOG_WORKERS, thread_name_prefix='request-log')
+_REQUEST_LOG_MAX_PENDING = 64
+_REQUEST_LOG_PENDING_SLOTS = threading.BoundedSemaphore(_REQUEST_LOG_MAX_PENDING)
+_REQUEST_LOG_DROP_LOCK = threading.Lock()
+_REQUEST_LOG_DROPPED = 0
+_REQUEST_LOG_FUTURES_LOCK = threading.Lock()
+_REQUEST_LOG_FUTURES: set[Future[Any]] = set()
+
+
+def _finish_request_log(future: Future[Any]) -> None:
+    try:
+        future.result()
+    except Exception:
+        _logger.exception('Request log preparation failed')
+    finally:
+        with _REQUEST_LOG_FUTURES_LOCK:
+            _REQUEST_LOG_FUTURES.discard(future)
+        _REQUEST_LOG_PENDING_SLOTS.release()
+
+
+def flush_request_logs() -> None:
+    """Wait for accepted request-log preparations before closing their writer."""
+    while True:
+        with _REQUEST_LOG_FUTURES_LOCK:
+            pending = tuple(_REQUEST_LOG_FUTURES)
+        if not pending:
+            return
+        wait(pending)
+
 
 type AsgiMessage = dict[str, Any]
 type AsgiReceive = Callable[[], Awaitable[AsgiMessage]]
@@ -179,64 +223,68 @@ class DatabaseLogWriter:
 
     def _init_db(self) -> None:
         self._conn = psycopg.connect(self._database_url, autocommit=True)
-        with self._conn.cursor() as cursor:
+        with self._conn.transaction(), self._conn.cursor() as cursor:
+            # Every API process and the coordinator has a log writer. A
+            # transaction-scoped lock makes their create-if-missing DDL
+            # safe when the deployment starts against an empty database.
+            cursor.execute('SELECT pg_advisory_xact_lock(%s)', (_LOG_SCHEMA_LOCK_KEY,))
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS request_logs (
-                    id BIGSERIAL PRIMARY KEY,
-                    ts TIMESTAMPTZ NOT NULL,
-                    method TEXT,
-                    path TEXT,
-                    status INTEGER,
-                    duration_ms DOUBLE PRECISION,
-                    request_id TEXT,
-                    client_id TEXT,
-                    user_agent TEXT,
-                    ip TEXT,
-                    referer TEXT,
-                    error TEXT,
-                    request_json TEXT,
-                    response_json TEXT,
-                    chunk_index INTEGER,
-                    day DATE NOT NULL
-                )
-                """
+                    CREATE TABLE IF NOT EXISTS request_logs (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts TIMESTAMPTZ NOT NULL,
+                        method TEXT,
+                        path TEXT,
+                        status INTEGER,
+                        duration_ms DOUBLE PRECISION,
+                        request_id TEXT,
+                        client_id TEXT,
+                        user_agent TEXT,
+                        ip TEXT,
+                        referer TEXT,
+                        error TEXT,
+                        request_json TEXT,
+                        response_json TEXT,
+                        chunk_index INTEGER,
+                        day DATE NOT NULL
+                    )
+                    """
             )
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_request_day ON request_logs(day)')
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS app_logs (
-                    id BIGSERIAL PRIMARY KEY,
-                    ts TIMESTAMPTZ NOT NULL,
-                    level TEXT,
-                    logger TEXT,
-                    message TEXT,
-                    module TEXT,
-                    func TEXT,
-                    line INTEGER,
-                    extra_json TEXT,
-                    day DATE NOT NULL
-                )
-                """
+                    CREATE TABLE IF NOT EXISTS app_logs (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts TIMESTAMPTZ NOT NULL,
+                        level TEXT,
+                        logger TEXT,
+                        message TEXT,
+                        module TEXT,
+                        func TEXT,
+                        line INTEGER,
+                        extra_json TEXT,
+                        day DATE NOT NULL
+                    )
+                    """
             )
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_app_day ON app_logs(day)')
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS client_logs (
-                    id BIGSERIAL PRIMARY KEY,
-                    ts TIMESTAMPTZ NOT NULL,
-                    event TEXT,
-                    action TEXT,
-                    page TEXT,
-                    target TEXT,
-                    form_id TEXT,
-                    fields_json TEXT,
-                    client_id TEXT,
-                    session_id TEXT,
-                    meta_json TEXT,
-                    day DATE NOT NULL
-                )
-                """
+                    CREATE TABLE IF NOT EXISTS client_logs (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts TIMESTAMPTZ NOT NULL,
+                        event TEXT,
+                        action TEXT,
+                        page TEXT,
+                        target TEXT,
+                        form_id TEXT,
+                        fields_json TEXT,
+                        client_id TEXT,
+                        session_id TEXT,
+                        meta_json TEXT,
+                        day DATE NOT NULL
+                    )
+                    """
             )
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_client_day ON client_logs(day)')
 
@@ -257,7 +305,10 @@ class DatabaseLogWriter:
             'response_json': payload.get('response_json'),
             'chunk_index': payload.get('chunk_index'),
         }
-        self._enqueue_rows(DatabaseLogKind.REQUEST, [row])
+        # Never block request processing behind a full diagnostics queue;
+        # losing a low-value request log is preferable to making the API
+        # unavailable.
+        self._enqueue_rows(DatabaseLogKind.REQUEST, [row], allow_block=False)
 
     def write_app_log(self, payload: dict[str, Any]) -> None:
         row = {
@@ -290,7 +341,8 @@ class DatabaseLogWriter:
             }
             for item in payloads
         ]
-        self._enqueue_rows(DatabaseLogKind.CLIENT, rows)
+        # Client telemetry can also arrive directly from an HTTP handler.
+        self._enqueue_rows(DatabaseLogKind.CLIENT, rows, allow_block=False)
 
     def flush(self) -> None:
         with self._lock:
@@ -314,10 +366,10 @@ class DatabaseLogWriter:
         if self._conn:
             self._conn.close()
 
-    def _enqueue_rows(self, kind: DatabaseLogKind, rows: list[dict[str, Any]]) -> None:
+    def _enqueue_rows(self, kind: DatabaseLogKind, rows: list[dict[str, Any]], *, allow_block: bool = True) -> None:
         if not rows:
             return
-        if self._overflow_policy == 'drop':
+        if self._overflow_policy == 'drop' or not allow_block:
             try:
                 self._queue.put_nowait((kind, rows))
             except queue.Full:
@@ -434,12 +486,164 @@ class DatabaseLogHandler(logging.Handler):
             self.handleError(record)
 
 
+class _DeferredFormattingQueueHandler(logging.handlers.QueueHandler):
+    """Queue records without formatting messages or tracebacks on request loops.
+
+    This queue is process-local and consumed by ``QueueListener`` in a thread,
+    so records do not need the eager stringification that multiprocessing
+    queues require.
+    """
+
+    def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
+        return copy.copy(record)
+
+
+class RequestTimingMiddleware:
+    """Report API requests that can threaten the Uvicorn worker heartbeat.
+
+    ``http.response.start`` is emitted after FastAPI has run the endpoint and
+    serialized its response. Keeping that timestamp separate from the final
+    body send makes a slow route/Pydantic response distinguishable from a slow
+    client or response stream. The middleware never writes diagnostics to the
+    database synchronously.
+    """
+
+    def __init__(
+        self,
+        app: AsgiApp,
+        *,
+        slow_request_seconds: float = 5.0,
+        pool_snapshot: Callable[[], Awaitable[dict[str, object]]] | None = None,
+        get_time: Callable[[], float] | None = None,
+    ) -> None:
+        self.app = app
+        self.slow_request_seconds = max(float(slow_request_seconds), 0.1)
+        self.pool_snapshot = pool_snapshot
+        self.get_time = get_time or time.perf_counter
+
+    async def __call__(self, scope: dict[str, Any], receive: AsgiReceive, send: AsgiSend) -> None:
+        if scope.get('type') != 'http':
+            await self.app(scope, receive, send)
+            return
+
+        path = str(scope.get('path') or '')
+        if not (path == '/api' or path.startswith('/api/') or path == '/health' or path.startswith('/health/')):
+            await self.app(scope, receive, send)
+            return
+
+        start = self.get_time()
+        response_started_at: float | None = None
+        response_status: int | None = None
+        state = scope.setdefault('state', {})
+        request_id = state.get('request_id')
+        for key, value in scope.get('headers') or ():
+            if key.lower() == b'x-request-id':
+                request_id = request_id or value.decode('latin-1')
+                break
+        request_id = request_id or uuid.uuid4().hex
+        state['request_id'] = request_id
+        database_metrics: dict[str, object] = {'sql_count': 0, 'sql_ms': 0.0, 'commit_ms': 0.0}
+
+        async def report_slow_request() -> None:
+            await asyncio.sleep(self.slow_request_seconds)
+            observed_at = self.get_time()
+            response_start_ms = None if response_started_at is None else (response_started_at - start) * 1000
+            response_stream_ms = None if response_started_at is None else max(0.0, observed_at - response_started_at) * 1000
+            await self._log_slow_request(
+                scope,
+                request_id=request_id,
+                response_status=response_status,
+                total_ms=(observed_at - start) * 1000,
+                response_start_ms=response_start_ms,
+                response_stream_ms=response_stream_ms,
+                database_metrics=database_metrics,
+                phase='in_flight',
+            )
+
+        slow_task = asyncio.create_task(report_slow_request())
+
+        async def send_wrapper(message: AsgiMessage) -> None:
+            nonlocal response_started_at, response_status
+            if message['type'] == 'http.response.start':
+                response_started_at = self.get_time()
+                response_status = int(message['status'])
+                headers = [(name, value) for name, value in message.get('headers', []) if name.lower() not in {b'x-request-id', b'server-timing'}]
+                headers.append((b'x-request-id', request_id.encode('latin-1')))
+                server_duration_ms = max(0.0, (response_started_at - start) * 1000)
+                headers.append((b'server-timing', f'app;dur={server_duration_ms:.1f}'.encode('ascii')))
+                message = {**message, 'headers': headers}
+            await send(message)
+
+        try:
+            with database_statement_timing(database_metrics):
+                await self.app(scope, receive, send_wrapper)
+        finally:
+            slow_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await slow_task
+            total_ms = (self.get_time() - start) * 1000
+            if total_ms >= self.slow_request_seconds * 1000:
+                response_start_ms = None if response_started_at is None else (response_started_at - start) * 1000
+                response_stream_ms = None if response_start_ms is None else max(0.0, total_ms - response_start_ms)
+                await self._log_slow_request(
+                    scope,
+                    request_id=request_id,
+                    response_status=response_status,
+                    total_ms=total_ms,
+                    response_start_ms=response_start_ms,
+                    response_stream_ms=response_stream_ms,
+                    database_metrics=database_metrics,
+                    phase='completed',
+                )
+
+    async def _log_slow_request(
+        self,
+        scope: dict[str, Any],
+        *,
+        request_id: str,
+        response_status: int | None,
+        total_ms: float,
+        response_start_ms: float | None,
+        response_stream_ms: float | None,
+        database_metrics: dict[str, object],
+        phase: str,
+    ) -> None:
+        pool = {}
+        if self.pool_snapshot is not None:
+            with contextlib.suppress(Exception):
+                pool = await self.pool_snapshot()
+        sql_ms = database_metrics.get('sql_ms')
+        commit_ms = database_metrics.get('commit_ms')
+        _logger.warning(
+            'Slow API request phase=%s method=%s path=%s status=%s total_ms=%.1f response_start_ms=%s '
+            'response_stream_ms=%s request_id=%s db_sql_count=%s db_sql_ms=%.1f db_commit_ms=%.1f db_pool=%s',
+            phase,
+            scope.get('method', '-'),
+            scope.get('path', '-'),
+            response_status,
+            total_ms,
+            '-' if response_start_ms is None else f'{response_start_ms:.1f}',
+            '-' if response_stream_ms is None else f'{response_stream_ms:.1f}',
+            request_id,
+            database_metrics.get('sql_count', 0),
+            sql_ms if isinstance(sql_ms, (int, float)) else 0.0,
+            commit_ms if isinstance(commit_ms, (int, float)) else 0.0,
+            pool,
+        )
+
+
 class RequestLoggingMiddleware:
-    def __init__(self, app: AsgiApp, writer: RequestLogWriter | None = None, get_time: Callable[[], float] | None = None, max_body_size: int = 0):
+    def __init__(
+        self,
+        app: AsgiApp,
+        writer: RequestLogWriter | None = None,
+        get_time: Callable[[], float] | None = None,
+        max_body_size: int | None = None,
+    ):
         self.app = app
         self.writer = writer
         self.get_time = get_time or time.perf_counter
-        self.max_body_size = max_body_size or settings.log_max_body_size
+        self.max_body_size = settings.log_max_body_size if max_body_size is None else max(0, max_body_size)
 
     async def __call__(self, scope: dict[str, Any], receive: AsgiReceive, send: AsgiSend) -> None:
         if scope.get('type') != 'http':
@@ -447,27 +651,37 @@ class RequestLoggingMiddleware:
             return
 
         if not self.writer:
-            self.writer = get_log_writer()
+            self.writer = await asyncio.to_thread(get_log_writer)
         start = self.get_time()
         request = Request(scope, receive)
-        request_id = request.headers.get('x-request-id') or uuid.uuid4().hex
-        scope.setdefault('state', {})['request_id'] = request_id
+        state = scope.setdefault('state', {})
+        request_id = state.get('request_id') or request.headers.get('x-request-id') or uuid.uuid4().hex
+        state['request_id'] = request_id
 
         try:
-            content_length = int(request.headers.get('content-length', 0))
+            content_length_header = request.headers.get('content-length')
+            content_length = int(content_length_header) if content_length_header is not None else None
         except ValueError:
-            content_length = 0
+            content_length = None
         # Frontend chunks are served through this process in the containerized
         # deployment. Never copy their response bodies into the request log: doing
         # so turns diagnostics into a competing workload for the same file/thread
         # I/O path that serves the application.
         is_frontend_asset = request.url.path.startswith('/_app/')
-        should_log_body = not is_frontend_asset and (self.max_body_size == 0 or content_length <= self.max_body_size)
+        should_log_body = (
+            not is_frontend_asset and self.max_body_size > 0 and content_length is not None and content_length >= 0 and content_length <= self.max_body_size
+        )
         body_for_log: bytes | None = None
         replay_body_sent = False
         request_complete = False
         if should_log_body:
-            body = await request.body()
+            try:
+                body = await request.body()
+            except ClientDisconnect:
+                # The client can disappear while the middleware buffers a
+                # body for optional logging, before routing's exception
+                # handlers are in scope.
+                return
             body_for_log = body
             request_complete = True
 
@@ -507,31 +721,35 @@ class RequestLoggingMiddleware:
             elif message['type'] == 'http.response.body':
                 chunk = message.get('body', b'')
                 raw = chunk.encode('utf-8') if isinstance(chunk, str) else bytes(chunk)
-                if response_body is None and raw and not is_frontend_asset and (self.max_body_size == 0 or len(raw) <= self.max_body_size):
+                if response_body is None and raw and not is_frontend_asset and self.max_body_size > 0 and len(raw) <= self.max_body_size:
                     response_body = raw
-                if not message.get('more_body', False) and not response_logged:
-                    duration_ms = (self.get_time() - start) * 1000
-                    self._log_request(
-                        request,
-                        response_status,
-                        self._header_value(response_headers, b'content-type'),
-                        duration_ms,
-                        request_id,
-                        body_for_log,
-                        response_body,
-                    )
-                    response_logged = True
             await send(message)
+            if message['type'] == 'http.response.body' and not message.get('more_body', False) and not response_logged:
+                duration_ms = (self.get_time() - start) * 1000
+                self._submit_request_log(
+                    request,
+                    response_status,
+                    self._header_value(response_headers, b'content-type'),
+                    duration_ms,
+                    request_id,
+                    body_for_log,
+                    response_body,
+                )
+                response_logged = True
 
         try:
             await self.app(scope, receive_for_app, send_wrapper)
+        except ClientDisconnect:
+            # Request-body disconnects are expected cancellation, not an
+            # application error worth persisting to the request log.
+            return
         except Exception as exc:
             duration_ms = (self.get_time() - start) * 1000
-            self._log_request(request, None, None, duration_ms, request_id, body_for_log, None, error=str(exc))
+            self._submit_request_log(request, None, None, duration_ms, request_id, body_for_log, None, error=str(exc))
             raise
         if not response_logged:
             duration_ms = (self.get_time() - start) * 1000
-            self._log_request(
+            self._submit_request_log(
                 request,
                 response_status,
                 self._header_value(response_headers, b'content-type'),
@@ -540,6 +758,32 @@ class RequestLoggingMiddleware:
                 body_for_log,
                 response_body,
             )
+
+    def _submit_request_log(self, *args: Any, **kwargs: Any) -> None:
+        """Prepare one best-effort request log without delaying its response.
+
+        Request-body decoding and secret redaction run on a bounded pool. When
+        that pool is saturated, drop diagnostics instead of retaining an
+        unbounded number of response bodies or holding API tasks open behind
+        log formatting.
+        """
+        global _REQUEST_LOG_DROPPED
+        if not _REQUEST_LOG_PENDING_SLOTS.acquire(blocking=False):
+            with _REQUEST_LOG_DROP_LOCK:
+                _REQUEST_LOG_DROPPED += 1
+                dropped = _REQUEST_LOG_DROPPED
+            if dropped % 100 == 1:
+                _logger.warning('Request log preparation saturated; dropped %s request logs', dropped)
+            return
+        try:
+            future = _REQUEST_LOG_EXECUTOR.submit(self._log_request, *args, **kwargs)
+        except Exception:
+            _REQUEST_LOG_PENDING_SLOTS.release()
+            _logger.debug('Request log preparation could not be queued; dropping one request log', exc_info=True)
+            return
+        with _REQUEST_LOG_FUTURES_LOCK:
+            _REQUEST_LOG_FUTURES.add(future)
+        future.add_done_callback(_finish_request_log)
 
     def _log_request(
         self,
@@ -632,31 +876,69 @@ def _redact_form_body(body: str) -> str:
 
 
 def configure_logging() -> DatabaseLogWriter:
-    global _configured, _listener, _writer
-    if _configured and _writer:
+    global _atexit_registered, _configured, _console_handler, _listener, _queue_handler, _writer
+    with _logging_lifecycle_lock:
+        if _configured and _writer:
+            return _writer
+
+        level = getattr(logging, settings.log_level.upper(), logging.INFO)
+        logging.basicConfig(level=level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        logging.getLogger('httpx').setLevel(logging.WARNING)
+        # The application intentionally uses the existing Iceberg SQL catalog
+        # schema. PyIceberg emits this migration notice on every catalog instance;
+        # keep real catalog errors visible without flooding service diagnostics.
+        logging.getLogger('pyiceberg.catalog.sql').setLevel(logging.ERROR)
+
+        _writer = DatabaseLogWriter(
+            database_url=settings.database_url, flush_interval=float(settings.log_flush_interval_seconds), overflow_policy=settings.log_queue_overflow
+        )
+        root_logger = logging.getLogger()
+        console_handler = next((handler for handler in root_logger.handlers if type(handler) is logging.StreamHandler), None)
+        if console_handler is not None:
+            root_logger.removeHandler(console_handler)
+        else:
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        _console_handler = console_handler
+
+        _queue_handler = _DeferredFormattingQueueHandler(queue.Queue())
+        _listener = logging.handlers.QueueListener(_queue_handler.queue, console_handler, DatabaseLogHandler(_writer))
+        _listener.start()
+        if not _atexit_registered:
+            atexit.register(shutdown_logging)
+            _atexit_registered = True
+
+        root_logger.addHandler(_queue_handler)
+        _configured = True
         return _writer
 
-    level = getattr(logging, settings.log_level.upper(), logging.INFO)
-    logging.basicConfig(level=level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    logging.getLogger('httpx').setLevel(logging.WARNING)
-    # The application intentionally uses the existing Iceberg SQL catalog
-    # schema. PyIceberg emits this migration notice on every catalog instance;
-    # keep real catalog errors visible without flooding service diagnostics.
-    logging.getLogger('pyiceberg.catalog.sql').setLevel(logging.ERROR)
 
-    _writer = DatabaseLogWriter(
-        database_url=settings.database_url, flush_interval=float(settings.log_flush_interval_seconds), overflow_policy=settings.log_queue_overflow
-    )
-    queue_handler = logging.handlers.QueueHandler(queue.Queue())
-    _listener = logging.handlers.QueueListener(queue_handler.queue, DatabaseLogHandler(_writer))
-    _listener.start()
-    atexit.register(_listener.stop)
-    atexit.register(_writer.stop)
+async def configure_logging_off_loop() -> DatabaseLogWriter:
+    """Initialize the database-backed logger without blocking an async service loop."""
+    return await asyncio.to_thread(configure_logging)
 
-    root_logger = logging.getLogger()
-    root_logger.addHandler(queue_handler)
-    _configured = True
-    return _writer
+
+def shutdown_logging() -> None:
+    """Drain the log queue before closing its database writer."""
+    global _configured, _console_handler, _listener, _queue_handler, _writer
+    with _logging_lifecycle_lock:
+        listener, writer, queue_handler, console_handler = _listener, _writer, _queue_handler, _console_handler
+        root_logger = logging.getLogger()
+        if queue_handler is not None:
+            root_logger.removeHandler(queue_handler)
+        try:
+            if listener is not None:
+                listener.stop()
+        finally:
+            if console_handler is not None and console_handler not in root_logger.handlers:
+                root_logger.addHandler(console_handler)
+            if writer is not None:
+                writer.stop()
+            _listener = None
+            _writer = None
+            _queue_handler = None
+            _console_handler = None
+            _configured = False
 
 
 def get_log_writer() -> DatabaseLogWriter:

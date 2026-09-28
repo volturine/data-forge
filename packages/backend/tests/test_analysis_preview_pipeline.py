@@ -2,6 +2,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend_core.persistence.datasource.models import DataSource
+from dataforge_protocol import enums_pb2
 
 
 def _filter_config(column: str, operator: str, value: object) -> dict[str, object]:
@@ -19,7 +20,6 @@ def _filter_config(column: str, operator: str, value: object) -> dict[str, objec
 
 def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataSource):
     pipeline = {
-        'analysis_id': 'analysis-payload',
         'tabs': [
             {
                 'id': 'tab-1',
@@ -60,7 +60,7 @@ def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataS
         analysis_id = str(uuid.uuid4())
         response = client.post(
             f'/api/v1/analysis/{analysis_id}/preview',
-            json={'pipeline': {**pipeline, 'analysis_id': analysis_id}},
+            json={'pipeline': pipeline},
         )
 
         assert response.status_code == 200
@@ -72,4 +72,7 @@ def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataS
         args, _kwargs = mock_preview.call_args
         request = args[1]
         assert request.analysis_pipeline.analysis_id == analysis_id
+        assert request.engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
+        assert request.engine_identity.analysis_id == analysis_id
+        assert request.engine_identity.resource_id == analysis_id
         assert request.analysis_pipeline.tabs[0].datasource.config.model_extra['snapshot_id'] == '123'

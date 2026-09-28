@@ -28,7 +28,10 @@ const MAX_LOGS = 500;
 const MAX_RESOURCE_HISTORY = 120;
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
-const BUILD_REFRESH_MS = 250;
+// WebSocket events are the immediate update path. This REST poll is only a
+// durable-state reconciliation fallback and must not turn every open build
+// preview into four full-detail requests per second.
+const BUILD_REFRESH_MS = 5_000;
 
 export class BuildStreamStore {
 	status = $state<BuildStatus>('disconnected');

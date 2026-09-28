@@ -1,5 +1,6 @@
 """MCP API routes — list tools, call tools, confirm pending actions."""
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -21,11 +22,11 @@ def _coerce_tool(item: MCPToolDefinition | dict[str, Any]) -> MCPToolDefinition:
     return MCPToolDefinition.coerce(item)
 
 
-def _request_tool_context(request: Request) -> dict[str, dict[str, str]]:
+def _request_tool_context(request: Request, *, namespace: str | None = None) -> dict[str, dict[str, str]]:
     return build_tool_context(
         {
             'X-Session-Token': request.headers.get('X-Session-Token') or request.cookies.get('session_token') or '',
-            'X-Namespace': request.headers.get('X-Namespace') or get_namespace(),
+            'X-Namespace': namespace or request.headers.get('X-Namespace') or get_namespace(),
         },
     )
 
@@ -37,10 +38,11 @@ def get_registry(app: FastAPI) -> list[MCPToolDefinition]:
     registry = app.state.mcp_registry
     if not isinstance(registry, list):
         app.state.mcp_registry = []
-        return []
-    normalized = [_coerce_tool(item) for item in registry]
-    app.state.mcp_registry = normalized
-    return normalized
+        registry = app.state.mcp_registry
+    elif any(not isinstance(item, MCPToolDefinition) for item in registry):
+        registry = [_coerce_tool(item) for item in registry]
+        app.state.mcp_registry = registry
+    return registry
 
 
 def _resolve_tool(app: FastAPI, tool_id: str, args: dict) -> tuple[MCPToolDefinition, bool, list[dict], dict]:
@@ -102,7 +104,15 @@ async def call(request: Request, body: ToolRequest, user: User = Depends(get_cur
     context = _request_tool_context(request)
 
     if tool.method.is_mutating:
-        token = pending_store.create(tool.id, tool.method, tool.path, normalized, context, owner_id=user.id)
+        token = await asyncio.to_thread(
+            pending_store.create,
+            tool.id,
+            tool.method,
+            tool.path,
+            normalized,
+            namespace=context['headers']['X-Namespace'],
+            owner_id=user.id,
+        )
         return tool.pending_response(token, normalized)
 
     try:
@@ -116,7 +126,7 @@ async def call(request: Request, body: ToolRequest, user: User = Depends(get_cur
 @handle_errors('confirm MCP tool')
 async def confirm(request: Request, body: ConfirmRequest, user: User = Depends(get_current_user)) -> dict:
     """Execute a previously previewed mutating tool call by token."""
-    entry = pending_store.pop(body.token, owner_id=user.id)
+    entry = await asyncio.to_thread(pending_store.pop, body.token, owner_id=user.id)
     if entry is None:
         raise HTTPException(status_code=404, detail='Token not found or expired')
 
@@ -125,7 +135,8 @@ async def confirm(request: Request, body: ConfirmRequest, user: User = Depends(g
         raise HTTPException(status_code=404, detail=f'Tool {entry.tool_id!r} not found')
 
     try:
-        result = await call_tool(request.app, entry.method, entry.path, entry.args, entry.context)
+        context = _request_tool_context(request, namespace=entry.namespace)
+        result = await call_tool(request.app, entry.method, entry.path, entry.args, context)
     except ValueError as exc:
         return tool.path_param_error_response(str(exc), entry.args)
     response = tool.executed_response(result)

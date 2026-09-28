@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import hmac
 import logging
 import threading
+import time
 import uuid
-from collections.abc import Awaitable, Callable
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Awaitable, Callable, Iterator
+from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -16,6 +18,7 @@ from google.protobuf import json_format, struct_pb2, timestamp_pb2
 from google.protobuf.message import Message
 from protovalidate import ValidationError, Validator
 from sqlalchemy import select
+from sqlmodel import Session
 
 from backend_core import (
     build_commands,
@@ -29,11 +32,21 @@ from backend_core import (
     engine_runs_service as engine_run_service,
     runtime_ipc,
     runtime_outbox_service,
+    runtime_work_service,
     runtime_workers_service as runtime_worker_service,
 )
 from backend_core.ai_clients import get_ai_client
+from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS
 from backend_core.config import settings
-from backend_core.database import get_db, run_db, run_settings_db
+from backend_core.database import (
+    RuntimeCoordinatorFenced,
+    active_runtime_coordinator_generation,
+    database_pool_snapshot,
+    database_statement_timing,
+    get_db,
+    run_db,
+    run_settings_db,
+)
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute.base import EngineStatusInfo
@@ -46,7 +59,6 @@ from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
 from backend_core.json_utils import copy_json_object
 from backend_core.namespace import reset_namespace, set_namespace_context
-from backend_core.namespaces_service import list_runtime_namespaces
 from backend_core.notification_delivery import EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
@@ -71,6 +83,8 @@ from modules.scheduler import commands as scheduler_commands, service as schedul
 
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = 'x-internal-token'
+_RUNTIME_GENERATION_METADATA_KEY = 'x-runtime-coordinator-generation'
+_WORKER_RUNTIME_SERVICE_PREFIX = '/dataforge_protocol.WorkerRuntimeService/'
 _BUILD_JOB_PROTOCOL_VERSION = 2
 
 
@@ -134,17 +148,70 @@ class _BackendRequestValidationInterceptor(grpc.aio.ServerInterceptor):
         unary_unary = cast(Callable[[Message, grpc.aio.ServicerContext], Awaitable[Any]], handler.unary_unary)
 
         async def validate_request(request: Message, context: grpc.aio.ServicerContext) -> Any:
+            timing = {'request_started': time.monotonic()}
+            timing_token = _RPC_TIMING.set(timing)
             try:
-                self._validator.validate(request)
-            except ValidationError as exc:
-                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-            return await unary_unary(request, context)
+                if handler_call_details.method.startswith(_WORKER_RUNTIME_SERVICE_PREFIX):
+                    active_generation = active_runtime_coordinator_generation()
+                    request_metadata = dict(cast(Any, context.invocation_metadata() or ()))
+                    supplied_generation = request_metadata.get(_RUNTIME_GENERATION_METADATA_KEY)
+                    rejection = _runtime_generation_rejection(active_generation, supplied_generation)
+                    if rejection is not None:
+                        status, details = rejection
+                        await context.abort(status, details)
+                try:
+                    loop = asyncio.get_running_loop()
+                    validation_submitted = time.monotonic()
+
+                    def validate() -> None:
+                        timing['validation_started'] = time.monotonic()
+                        try:
+                            self._validator.validate(request)
+                        finally:
+                            timing['validation_finished'] = time.monotonic()
+
+                    await loop.run_in_executor(_validation_executor(handler_call_details.method), validate)
+                    timing['validation_queue_ms'] = (timing['validation_started'] - validation_submitted) * 1000
+                    timing['validation_ms'] = (timing['validation_finished'] - timing['validation_started']) * 1000
+                except ValidationError as exc:
+                    logger.warning(
+                        'Rejected invalid internal RPC request %s (%s): %s',
+                        handler_call_details.method,
+                        request.DESCRIPTOR.full_name,
+                        ', '.join(repr(violation) for violation in exc.violations),
+                    )
+                    await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+                return await unary_unary(request, context)
+            finally:
+                _RPC_TIMING.reset(timing_token)
 
         return grpc.unary_unary_rpc_method_handler(
             validate_request,
             request_deserializer=handler.request_deserializer,
             response_serializer=handler.response_serializer,
         )
+
+
+def _runtime_generation_rejection(
+    active_generation: int | None,
+    supplied_generation: object,
+) -> tuple[grpc.StatusCode, str] | None:
+    if active_generation is None:
+        return grpc.StatusCode.UNAVAILABLE, 'Runtime coordinator generation is not active'
+    if supplied_generation is None:
+        return grpc.StatusCode.UNAUTHENTICATED, 'Runtime coordinator generation metadata is required'
+    try:
+        generation = int(str(supplied_generation))
+    except TypeError, ValueError:
+        return grpc.StatusCode.INVALID_ARGUMENT, 'Invalid runtime coordinator generation metadata'
+    if generation < 1:
+        return grpc.StatusCode.INVALID_ARGUMENT, 'Invalid runtime coordinator generation metadata'
+    if generation != active_generation:
+        return (
+            grpc.StatusCode.FAILED_PRECONDITION,
+            f'Runtime coordinator generation {generation} is fenced by {active_generation}',
+        )
+    return None
 
 
 async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
@@ -156,16 +223,129 @@ async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
 
 
 _THREAD_LOCAL = threading.local()
+_RPC_TIMING: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar('runtime_rpc_timing', default=None)
+_SCHEDULER_HEARTBEAT_METHODS = frozenset({'HeartbeatScheduler'})
+_LEASE_VALIDATION_METHODS = frozenset(
+    {
+        'HeartbeatWorker',
+        'RenewBuildJobLease',
+        'RenewComputeRequestLeases',
+    }
+)
 
-# Runtime workers use several independent claim/lease lanes.  Running their
-# synchronous database handlers through asyncio's default executor lets claim
-# traffic consume the same threads used by API background work and heartbeats.
-# Keep internal RPC work on its own pool, sized to the configured database
-# connection budget plus headroom for heartbeat/control calls.
+
+def _validation_executor(method: str) -> Executor:
+    method_name = method.rsplit('/', 1)[-1]
+    if method_name in _SCHEDULER_HEARTBEAT_METHODS and _INTERNAL_SCHEDULER_VALIDATION_EXECUTOR is not None:
+        return _INTERNAL_SCHEDULER_VALIDATION_EXECUTOR
+    if method_name in _SCHEDULER_HEARTBEAT_METHODS | _LEASE_VALIDATION_METHODS:
+        return _INTERNAL_LEASE_VALIDATION_EXECUTOR
+    return _INTERNAL_VALIDATION_EXECUTOR
+
+
+# Keep completion/claim RPC capacity aligned with the compute budget, while
+# reserving a smaller independent lane for batched lease renewals and one
+# scheduler heartbeat. One pooled connection stays available to outbox recovery.
+def _runtime_rpc_executor_sizes(
+    database_pool_size: int,
+    database_max_overflow: int,
+) -> tuple[int, int, int]:
+    """Return (lease, general, scheduler-heartbeat) RPC counts for one coordinator."""
+    database_capacity = max(database_pool_size + database_max_overflow, 1)
+    if database_capacity < 3:
+        raise ValueError('Runtime coordinator requires at least three pooled database connections for lease RPCs, general RPCs, and outbox recovery')
+    rpc_capacity = database_capacity - 1
+    scheduler_heartbeat_workers = min(1, max(rpc_capacity - 2, 0))
+    remaining_capacity = rpc_capacity - scheduler_heartbeat_workers
+    # The runtime coordinator's pool size is configured from COMPUTE_WORKERS.
+    # Match that concurrency for claims/completions, instead of capping the
+    # control-plane lane at 12 while 32 admitted jobs finish together.
+    general_target = min(32, max(database_pool_size, 4))
+    lease_target = min(max(database_pool_size // 4, 4), max(database_pool_size, 1))
+    general_workers = min(general_target, max(remaining_capacity - lease_target, 1))
+    lease_workers = min(lease_target, max(remaining_capacity - general_workers, 1))
+    return lease_workers, general_workers, scheduler_heartbeat_workers
+
+
+(
+    _INTERNAL_LEASE_RPC_WORKERS,
+    _INTERNAL_GENERAL_RPC_WORKERS,
+    _INTERNAL_SCHEDULER_RPC_WORKERS,
+) = _runtime_rpc_executor_sizes(settings.database_pool_size, settings.database_max_overflow)
+_INTERNAL_RPC_WORKERS = _INTERNAL_LEASE_RPC_WORKERS + _INTERNAL_GENERAL_RPC_WORKERS + _INTERNAL_SCHEDULER_RPC_WORKERS
+_INTERNAL_VALIDATION_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix='internal-rpc-validation')
+# Large compute payload validation must not delay liveness or lease messages.
+_INTERNAL_LEASE_VALIDATION_WORKERS = min(2, _INTERNAL_LEASE_RPC_WORKERS)
+_INTERNAL_LEASE_VALIDATION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_INTERNAL_LEASE_VALIDATION_WORKERS,
+    thread_name_prefix='internal-lease-validation',
+)
+_INTERNAL_SCHEDULER_VALIDATION_WORKERS = min(1, _INTERNAL_SCHEDULER_RPC_WORKERS)
+_INTERNAL_SCHEDULER_VALIDATION_EXECUTOR = (
+    ThreadPoolExecutor(
+        max_workers=_INTERNAL_SCHEDULER_VALIDATION_WORKERS,
+        thread_name_prefix='internal-scheduler-validation',
+    )
+    if _INTERNAL_SCHEDULER_VALIDATION_WORKERS
+    else None
+)
+_INTERNAL_EXTERNAL_IO_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix='internal-runtime-external-io')
 _INTERNAL_RPC_EXECUTOR = ThreadPoolExecutor(
-    max_workers=max(64, settings.database_pool_size + settings.database_max_overflow),
+    max_workers=_INTERNAL_GENERAL_RPC_WORKERS,
     thread_name_prefix='internal-runtime-rpc',
 )
+_INTERNAL_LEASE_RPC_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_INTERNAL_LEASE_RPC_WORKERS,
+    thread_name_prefix='internal-runtime-lease',
+)
+_INTERNAL_SCHEDULER_RPC_EXECUTOR = (
+    ThreadPoolExecutor(
+        max_workers=_INTERNAL_SCHEDULER_RPC_WORKERS,
+        thread_name_prefix='internal-scheduler-heartbeat',
+    )
+    if _INTERNAL_SCHEDULER_RPC_WORKERS
+    else None
+)
+_RUNTIME_WORK_CACHE_TTL_SECONDS = 5.0
+_RUNTIME_WORK_CACHE_LOCK = threading.Lock()
+_RUNTIME_PENDING_NAMESPACE_CACHE: dict[tuple[str, ...], tuple[float, tuple[str, ...]]] = {}
+_RUNTIME_WORK_CACHE_MISS_LOCKS: dict[tuple[str, ...], threading.Lock] = {}
+
+
+def _cached_pending_runtime_work_namespaces(
+    kinds: tuple[runtime_work_service.RuntimeWorkKind, ...] = runtime_work_service.WORKER_RECOVERY_KINDS,
+) -> list[str]:
+    """Share indexed pending-work queries without blocking unrelated queue types."""
+    cache_key = tuple(sorted({kind.value for kind in kinds}))
+    now = time.monotonic()
+    with _RUNTIME_WORK_CACHE_LOCK:
+        cached = _RUNTIME_PENDING_NAMESPACE_CACHE.get(cache_key)
+        if cached is not None and cached[0] > now:
+            return list(cached[1])
+        miss_lock = _RUNTIME_WORK_CACHE_MISS_LOCKS.setdefault(cache_key, threading.Lock())
+
+    # Keep one refresh per kind, but never hold the global cache lock while
+    # querying Postgres. A slow compute recovery query must not queue build or
+    # datasource-delete recovery behind it.
+    with miss_lock:
+        now = time.monotonic()
+        with _RUNTIME_WORK_CACHE_LOCK:
+            cached = _RUNTIME_PENDING_NAMESPACE_CACHE.get(cache_key)
+            if cached is not None and cached[0] > now:
+                return list(cached[1])
+        namespaces = tuple(
+            dict.fromkeys(
+                run_settings_db(
+                    lambda session: runtime_work_service.list_pending_namespaces(
+                        session,
+                        kinds=kinds,
+                    )
+                )
+            )
+        )
+        with _RUNTIME_WORK_CACHE_LOCK:
+            _RUNTIME_PENDING_NAMESPACE_CACHE[cache_key] = (time.monotonic() + _RUNTIME_WORK_CACHE_TTL_SECONDS, namespaces)
+        return list(namespaces)
 
 
 def _thread_event_loop() -> asyncio.AbstractEventLoop:
@@ -185,20 +365,106 @@ def close_rpc_session(session_gen) -> None:
     session_gen.close()
 
 
+def _threaded_rpc(executor: Executor):
+    def decorator(func):
+        async def wrapper(self, request, context):
+            await _require_internal_token(context)
+            started = time.monotonic()
+            rpc_timing = _RPC_TIMING.get()
+            timing: dict[str, float] = {}
+            database_timing: dict[str, object] = {'sql_count': 0, 'sql_ms': 0.0, 'commit_ms': 0.0}
+
+            def _run():
+                timing['worker_started'] = time.monotonic()
+                try:
+                    loop = _thread_event_loop()
+                    timing['handler_started'] = time.monotonic()
+                    with database_statement_timing(database_timing):
+                        return loop.run_until_complete(func(self, request, context))
+                finally:
+                    timing['worker_finished'] = time.monotonic()
+
+            try:
+                loop = asyncio.get_running_loop()
+                contextvars_context = contextvars.copy_context()
+                return await loop.run_in_executor(executor, contextvars_context.run, _run)
+            except _ThreadedRpcAbort as exc:
+                await context.abort(exc.status, exc.details)
+            except RuntimeCoordinatorFenced as exc:
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
+            finally:
+                finished = time.monotonic()
+                duration_ms = (finished - started) * 1000
+                request_ms = (finished - rpc_timing['request_started']) * 1000 if rpc_timing is not None else duration_ms
+                validation_queue_ms = rpc_timing.get('validation_queue_ms', 0.0) if rpc_timing is not None else 0.0
+                validation_ms = rpc_timing.get('validation_ms', 0.0) if rpc_timing is not None else 0.0
+                if request_ms >= 1000:
+                    worker_started = timing.get('worker_started', finished)
+                    handler_started = timing.get('handler_started', worker_started)
+                    worker_finished = timing.get('worker_finished', finished)
+                    request_id = getattr(request, 'request_id', None) or getattr(request, 'idempotency_key', None) or getattr(request, 'job_id', None) or '-'
+                    namespace = getattr(request, 'target_namespace', None) or getattr(request, 'namespace', None) or '-'
+                    identity = getattr(request, 'engine_identity', None)
+                    resource_id = getattr(identity, 'resource_id', None) or getattr(request, 'datasource_id', None) or '-'
+                    pool_snapshot: dict[str, object] = {}
+                    with contextlib.suppress(Exception):
+                        pool_snapshot = database_pool_snapshot()
+                    logger.warning(
+                        'Slow internal runtime RPC method=%s request_id=%s request_ms=%.1f validation_queue_ms=%.1f '
+                        'validation_ms=%.1f executor_queue_ms=%.1f handler_ms=%.1f sql_count=%s sql_ms=%.1f commit_ms=%.1f '
+                        'namespace=%s resource_id=%s coordinator_generation=%s db_pool=%s',
+                        func.__name__,
+                        request_id,
+                        request_ms,
+                        validation_queue_ms,
+                        validation_ms,
+                        max(0.0, worker_started - started) * 1000,
+                        max(0.0, worker_finished - handler_started) * 1000,
+                        database_timing['sql_count'],
+                        float(database_timing['sql_ms']),
+                        float(database_timing['commit_ms']),
+                        namespace,
+                        resource_id,
+                        active_runtime_coordinator_generation() or '-',
+                        pool_snapshot,
+                    )
+
+        return wrapper
+
+    return decorator
+
+
 def _run_async_handler_in_thread(func):
-    async def wrapper(self, request, context):
-        await _require_internal_token(context)
+    return _threaded_rpc(_INTERNAL_RPC_EXECUTOR)(func)
 
-        def _run():
-            return _thread_event_loop().run_until_complete(func(self, request, context))
 
-        try:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(_INTERNAL_RPC_EXECUTOR, _run)
-        except _ThreadedRpcAbort as exc:
-            await context.abort(exc.status, exc.details)
+def _run_claim_handler_in_thread(func):
+    return _threaded_rpc(_INTERNAL_RPC_EXECUTOR)(func)
 
-    return wrapper
+
+def _run_critical_runtime_handler_in_thread(func):
+    """Keep worker heartbeat and lease-renewal RPCs on their bounded lane."""
+    return _threaded_rpc(_INTERNAL_LEASE_RPC_EXECUTOR)(func)
+
+
+def _run_scheduler_heartbeat_handler_in_thread(func):
+    """Protect the singleton scheduler heartbeat from worker lease bursts."""
+    executor = _INTERNAL_SCHEDULER_RPC_EXECUTOR or _INTERNAL_LEASE_RPC_EXECUTOR
+    return _threaded_rpc(executor)(func)
+
+
+def _run_control_handler_in_thread(func):
+    return _threaded_rpc(_INTERNAL_RPC_EXECUTOR)(func)
+
+
+def _run_maintenance_handler_in_thread(func):
+    """Run maintenance on the bounded general control-plane lane."""
+    return _threaded_rpc(_INTERNAL_RPC_EXECUTOR)(func)
+
+
+def _run_external_io_handler_in_thread(func):
+    """Isolate potentially slow provider calls from durable coordinator RPCs."""
+    return _threaded_rpc(_INTERNAL_EXTERNAL_IO_EXECUTOR)(func)
 
 
 class _ThreadedRpcAbort(Exception):
@@ -516,6 +782,22 @@ def _engine_run_update_kwargs(update: worker_runtime_pb2.WorkerEngineRunUpdateFi
     return kwargs
 
 
+def _compute_request_engine_run_finalization(
+    finalization: worker_runtime_pb2.WorkerEngineRunFinalization | None,
+) -> compute_requests_service.EngineRunFinalization | None:
+    if finalization is None:
+        return None
+    if not finalization.HasField('update'):
+        raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Engine-run finalization update is required')
+    fields = _engine_run_update_kwargs(finalization.update, merge_result=finalization.merge_result)
+    merge_result_json = bool(fields.pop('merge_result_json'))
+    return compute_requests_service.EngineRunFinalization(
+        run_id=finalization.run_id,
+        fields=fields,
+        merge_result_json=merge_result_json,
+    )
+
+
 def _build_starter_proto(payload: dict[str, object]) -> compute_pb2.BuildStarter:
     message = compute_pb2.BuildStarter()
     for field in ('user_id', 'display_name', 'email', 'triggered_by'):
@@ -551,7 +833,7 @@ def _id(value: str) -> worker_runtime_pb2.IdResponse:
 
 
 class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer):
-    @_run_async_handler_in_thread
+    @_run_control_handler_in_thread
     async def RegisterWorker(
         self, request: worker_runtime_pb2.RuntimeWorkerRegisterRequest, context: grpc.aio.ServicerContext
     ) -> common_pb2.RuntimeWorkerResponse:
@@ -570,7 +852,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         run_settings_db(_register)
         return _response(request.worker_id)
 
-    @_run_async_handler_in_thread
+    @_run_critical_runtime_handler_in_thread
     async def HeartbeatWorker(
         self, request: worker_runtime_pb2.RuntimeWorkerHeartbeatRequest, context: grpc.aio.ServicerContext
     ) -> common_pb2.RuntimeWorkerResponse:
@@ -582,7 +864,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         run_settings_db(_heartbeat)
         return _response(request.worker_id)
 
-    @_run_async_handler_in_thread
+    @_run_control_handler_in_thread
     async def StopWorker(self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext) -> common_pb2.RuntimeWorkerResponse:
         await _require_internal_token(context)
 
@@ -592,38 +874,43 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         run_settings_db(_stop)
         return _response(request.worker_id)
 
-    @_run_async_handler_in_thread
+    @_run_claim_handler_in_thread
     async def ClaimBuildJob(
         self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerClaimBuildJobResponse:
         if request.protocol_version != _BUILD_JOB_PROTOCOL_VERSION:
             raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Build worker protocol version is incompatible')
-        reclaimable_owner_ids = run_settings_db(runtime_worker_service.reclaimable_worker_ids, kind=RuntimeWorkerKind.BUILD_WORKER)
-        for namespace in run_settings_db(list_runtime_namespaces):
-            token = set_namespace_context(namespace)
-            try:
-                run_db(scheduler_commands.reconcile_expired_build_jobs)
-                job = run_db(build_job_service.claim_next_job, worker_id=request.worker_id, reclaimable_owner_ids=reclaimable_owner_ids)
-            finally:
-                reset_namespace(token)
-            if job is not None:
-                if job.claim_token is None or job.lease_expires_at is None:
-                    raise RuntimeError(f'Claimed build job {job.id} is missing lease identity')
-                return worker_runtime_pb2.WorkerClaimBuildJobResponse(
-                    job=worker_runtime_pb2.WorkerClaimedBuildJob(
-                        job_id=job.id,
-                        build_id=job.build_id,
-                        namespace=job.namespace,
-                        claim_token=job.claim_token,
-                        lease_generation=job.lease_generation,
-                        lease_expires_at=datetime_to_timestamp(job.lease_expires_at),
-                        attempt=job.attempts,
-                        lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds,
-                    )
+        if not request.target_namespace:
+            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build worker claim must target a namespace')
+        token = set_namespace_context(request.target_namespace)
+        try:
+            # Reconciliation is performed by the bounded recovery/count path.
+            # A claim must only inspect the directed namespace's next job; the
+            # old full exhausted-job scan here ran once per worker poll and
+            # multiplied database work during a browser burst. A stopped or
+            # disconnected owner is recovered by its durable lease expiry; a
+            # cooperative child releases its own claim before stopping.
+            job = run_db(build_job_service.claim_next_job, worker_id=request.worker_id)
+        finally:
+            reset_namespace(token)
+        if job is not None:
+            if job.claim_token is None or job.lease_expires_at is None:
+                raise RuntimeError(f'Claimed build job {job.id} is missing lease identity')
+            return worker_runtime_pb2.WorkerClaimBuildJobResponse(
+                job=worker_runtime_pb2.WorkerClaimedBuildJob(
+                    job_id=job.id,
+                    build_id=job.build_id,
+                    namespace=job.namespace,
+                    claim_token=job.claim_token,
+                    lease_generation=job.lease_generation,
+                    lease_expires_at=datetime_to_timestamp(job.lease_expires_at),
+                    attempt=job.attempts,
+                    lease_ttl_seconds=CLAIM_DELIVERY_LEASE_SECONDS,
                 )
+            )
         return worker_runtime_pb2.WorkerClaimBuildJobResponse()
 
-    @_run_async_handler_in_thread
+    @_run_critical_runtime_handler_in_thread
     async def RenewBuildJobLease(
         self, request: worker_runtime_pb2.WorkerBuildJobClaimRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerRenewBuildJobLeaseResponse:
@@ -646,76 +933,78 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             response.lease_expires_at.CopyFrom(datetime_to_timestamp(renewal.value.lease_expires_at))
         return response
 
-    @_run_async_handler_in_thread
+    @_run_claim_handler_in_thread
     async def ClaimComputeRequest(
         self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerClaimComputeRequestResponse:
         if request.protocol_version != _BUILD_JOB_PROTOCOL_VERSION:
             raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute worker protocol version is incompatible')
-        reclaimable_owner_ids = run_settings_db(runtime_worker_service.reclaimable_worker_ids, kind=RuntimeWorkerKind.BUILD_MANAGER)
-        # A worker must never reclaim its own leases merely because its
-        # heartbeat record is temporarily stale.  The manager is still alive
-        # if it can issue this claim, and self-reclamation races every active
-        # request with a new attempt and invalidates its lease identity.
-        reclaimable_owner_ids.discard(request.worker_id)
-        namespaces = run_settings_db(list_runtime_namespaces)
-        if namespaces:
-            offset = request.compute_namespace_offset % len(namespaces)
-            namespaces = namespaces[offset:] + namespaces[:offset]
-        for namespace in namespaces:
-            token = set_namespace_context(namespace)
-            try:
-                compute_request = run_db(
-                    compute_requests_service.claim_next_request,
-                    worker_id=request.worker_id,
-                    reclaimable_owner_ids=reclaimable_owner_ids,
-                    allowed_kinds=request.allowed_compute_request_kinds,
-                )
-                if compute_request is None:
-                    continue
-                if compute_request.claim_token is None or compute_request.lease_expires_at is None:
-                    raise RuntimeError(f'Claimed compute request {compute_request.id} is missing lease identity')
-                return worker_runtime_pb2.WorkerClaimComputeRequestResponse(
-                    request=worker_runtime_pb2.WorkerClaimedComputeRequest(
-                        id=compute_request.id,
-                        namespace=compute_request.namespace,
-                        kind=kind_from_proto(compute_request.kind),
-                        command=compute_requests_service.command_envelope_for_request(compute_request),
-                        claim_token=compute_request.claim_token,
-                        lease_generation=compute_request.lease_generation,
-                        lease_expires_at=datetime_to_timestamp(compute_request.lease_expires_at),
-                        attempt=compute_request.attempts,
-                        lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds,
-                    )
-                )
-            finally:
-                reset_namespace(token)
-        return worker_runtime_pb2.WorkerClaimComputeRequestResponse()
-
-    @_run_async_handler_in_thread
-    async def RenewComputeRequestLease(
-        self, request: worker_runtime_pb2.WorkerComputeRequestClaimRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.WorkerRenewComputeRequestLeaseResponse:
-        token = set_namespace_context(request.namespace)
+        if not request.target_namespace:
+            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Compute request claim must target a namespace')
+        token = set_namespace_context(request.target_namespace)
         try:
-            renewal = run_db(
-                compute_requests_service.renew_request_lease,
-                request.request_id,
+            # The claim is directed and lease expiry is the durable recovery
+            # boundary. Do not query the settings database for a registry of
+            # stale workers on every request claim: a heartbeat race must not
+            # invalidate the lease of a manager that is still executing work.
+            compute_request = run_db(
+                compute_requests_service.claim_next_request,
                 worker_id=request.worker_id,
-                claim_token=request.claim_token,
-                lease_generation=request.lease_generation,
+                allowed_kinds=request.allowed_compute_request_kinds,
+            )
+            if compute_request is None:
+                return worker_runtime_pb2.WorkerClaimComputeRequestResponse()
+            if compute_request.claim_token is None or compute_request.lease_expires_at is None:
+                raise RuntimeError(f'Claimed compute request {compute_request.id} is missing lease identity')
+            return worker_runtime_pb2.WorkerClaimComputeRequestResponse(
+                request=worker_runtime_pb2.WorkerClaimedComputeRequest(
+                    id=compute_request.id,
+                    namespace=compute_request.namespace,
+                    kind=kind_from_proto(compute_request.kind),
+                    command=compute_requests_service.command_envelope_for_request(compute_request),
+                    claim_token=compute_request.claim_token,
+                    lease_generation=compute_request.lease_generation,
+                    lease_expires_at=datetime_to_timestamp(compute_request.lease_expires_at),
+                    attempt=compute_request.attempts,
+                    lease_ttl_seconds=CLAIM_DELIVERY_LEASE_SECONDS,
+                )
             )
         finally:
             reset_namespace(token)
-        response = worker_runtime_pb2.WorkerRenewComputeRequestLeaseResponse(
-            renewed=renewal.applied,
-            lease_ttl_seconds=settings.runtime_work_lease_ttl_seconds if renewal.applied else None,
-        )
-        if renewal.value is not None and renewal.value.lease_expires_at is not None:
-            response.lease_expires_at.CopyFrom(datetime_to_timestamp(renewal.value.lease_expires_at))
+
+    @_run_critical_runtime_handler_in_thread
+    async def RenewComputeRequestLeases(
+        self, request: worker_runtime_pb2.WorkerRenewComputeRequestLeasesRequest, context: grpc.aio.ServicerContext
+    ) -> worker_runtime_pb2.WorkerRenewComputeRequestLeasesResponse:
+        claims = [
+            compute_requests_service.ComputeRequestLeaseClaim(
+                request_id=claim.request_id,
+                claim_token=claim.claim_token,
+                lease_generation=claim.lease_generation,
+            )
+            for claim in request.renewals
+        ]
+        request_ids = [claim.request_id for claim in claims]
+        if len(request_ids) != len(set(request_ids)):
+            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Compute lease renewal batch contains duplicate request IDs')
+        token = set_namespace_context(request.namespace)
+        try:
+            renewed_ids = run_db(
+                compute_requests_service.renew_request_leases,
+                claims,
+                worker_id=request.worker_id,
+            )
+        finally:
+            reset_namespace(token)
+        response = worker_runtime_pb2.WorkerRenewComputeRequestLeasesResponse()
+        for claim in claims:
+            renewed = claim.request_id in renewed_ids
+            result = response.renewals.add(request_id=claim.request_id, renewed=renewed)
+            if renewed:
+                result.lease_ttl_seconds = settings.runtime_work_lease_ttl_seconds
         return response
 
-    @_run_async_handler_in_thread
+    @_run_control_handler_in_thread
     async def CompleteComputeRequest(
         self, request: worker_runtime_pb2.WorkerCompleteComputeRequestRequest, context: grpc.aio.ServicerContext
     ) -> common_pb2.RuntimeWorkerResponse:
@@ -731,6 +1020,9 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 artifact_path=_optional_str(request, 'artifact_path'),
                 artifact_name=_optional_str(request, 'artifact_name'),
                 artifact_content_type=_optional_str(request, 'artifact_content_type'),
+                engine_run_finalization=_compute_request_engine_run_finalization(
+                    request.engine_run_finalization if request.HasField('engine_run_finalization') else None
+                ),
             )
             if completed is None:
                 raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute request lease is no longer active')
@@ -738,7 +1030,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         finally:
             reset_namespace(token)
 
-    @_run_async_handler_in_thread
+    @_run_control_handler_in_thread
     async def FailComputeRequest(
         self, request: worker_runtime_pb2.WorkerFailComputeRequestRequest, context: grpc.aio.ServicerContext
     ) -> common_pb2.RuntimeWorkerResponse:
@@ -752,6 +1044,9 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 worker_id=request.worker_id,
                 claim_token=request.claim_token,
                 lease_generation=request.lease_generation,
+                engine_run_finalization=_compute_request_engine_run_finalization(
+                    request.engine_run_finalization if request.HasField('engine_run_finalization') else None
+                ),
             )
             if failed is None:
                 raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute request lease is no longer active')
@@ -939,15 +1234,14 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     ) -> worker_runtime_pb2.WorkerEngineCredentialsResponse:
         from backend_core.namespace_credentials_service import NamespaceCredentialError, resolve_namespace_engine_credentials
 
-        session_gen = get_db()
-        session = next(session_gen)
         try:
-            access_key, secret_key = resolve_namespace_engine_credentials(session, request.namespace, request.role)
+            access_key, secret_key = run_settings_db(
+                resolve_namespace_engine_credentials,
+                request.namespace,
+                request.role,
+            )
         except NamespaceCredentialError as exc:
-            await context.abort(grpc.StatusCode.NOT_FOUND, str(exc))
-            raise
-        finally:
-            close_rpc_session(session_gen)
+            raise _ThreadedRpcAbort(grpc.StatusCode.NOT_FOUND, str(exc)) from exc
         return worker_runtime_pb2.WorkerEngineCredentialsResponse(access_key=access_key, secret_key=secret_key)
 
     @_run_async_handler_in_thread
@@ -1161,6 +1455,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     progress=request.progress,
                     current_step=_optional_str(request, 'current_step'),
                     triggered_by=_optional_str(request, 'triggered_by'),
+                    idempotency_key=_optional_str(request, 'idempotency_key'),
                 ),
             )
             return _id(run.id)
@@ -1203,7 +1498,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         finally:
             reset_namespace(token)
 
-    @_run_async_handler_in_thread
+    @_run_control_handler_in_thread
     async def FailBuildJob(self, request: worker_runtime_pb2.WorkerFailBuildJobRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.BoolResponse:
         token = set_namespace_context(request.namespace)
         try:
@@ -1220,11 +1515,9 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             )
         finally:
             reset_namespace(token)
-        if result is not None and result.latest_sequence is not None:
-            await build_event_service.publish_build_notification(result.namespace, request.build_id, latest_sequence=result.latest_sequence)
         return _bool(result is not None)
 
-    @_run_async_handler_in_thread
+    @_run_control_handler_in_thread
     async def FinalizeBuildJob(
         self, request: worker_runtime_pb2.WorkerFinalizeBuildJobRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.BoolResponse:
@@ -1245,59 +1538,88 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
         return _bool(result is not None)
 
-    @_run_async_handler_in_thread
+    @_run_control_handler_in_thread
     async def ReleaseBuildWorkerJobs(self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
-        released = 0
-        for namespace in run_settings_db(list_runtime_namespaces):
-            token = set_namespace_context(namespace)
-            try:
-                released += len(run_db(build_job_service.release_worker_jobs, worker_id=request.worker_id))
-            finally:
-                reset_namespace(token)
+        if not request.target_namespace:
+            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build worker release must target a namespace')
+        token = set_namespace_context(request.target_namespace)
+        try:
+            released = len(run_db(build_job_service.release_worker_jobs, worker_id=request.worker_id))
+        finally:
+            reset_namespace(token)
         return _count(released)
 
-    @_run_async_handler_in_thread
+    @_run_maintenance_handler_in_thread
     async def GetQueuedBuildJobCount(self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
-        count = 0
-        for namespace in run_settings_db(list_runtime_namespaces):
-            token = set_namespace_context(namespace)
-            try:
-                run_db(scheduler_commands.reconcile_expired_build_jobs)
-                count += run_db(build_job_service.queued_job_count)
-            finally:
-                reset_namespace(token)
+        if not request.namespace:
+            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Queued build count must target a namespace')
+        token = set_namespace_context(request.namespace)
+        try:
+            count = run_db(build_job_service.queued_job_count)
+        finally:
+            reset_namespace(token)
         return _count(count)
 
-    @_run_async_handler_in_thread
-    async def DispatchRuntimeOutbox(self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
-        dispatched = 0
-        for namespace in run_settings_db(list_runtime_namespaces):
-            token = set_namespace_context(namespace)
-            try:
-                dispatched += run_db(runtime_outbox_service.dispatch_pending_events)
-            finally:
-                reset_namespace(token)
-        return _count(dispatched)
+    @_run_maintenance_handler_in_thread
+    async def ReconcileExpiredBuildJobs(self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
+        if not request.namespace:
+            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build job reconciliation must target a namespace')
+        token = set_namespace_context(request.namespace)
+        try:
+            reconciled = run_db(scheduler_commands.reconcile_expired_build_jobs)
+        finally:
+            reset_namespace(token)
+        return _count(reconciled)
 
-    @_run_async_handler_in_thread
+    @_run_maintenance_handler_in_thread
+    async def ReconcileExpiredComputeRequests(self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
+        if not request.namespace:
+            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Compute request reconciliation must target a namespace')
+        token = set_namespace_context(request.namespace)
+        try:
+            reconciled = run_db(compute_requests_service.reconcile_expired_requests)
+        finally:
+            reset_namespace(token)
+        return _count(reconciled)
+
+    @_run_maintenance_handler_in_thread
     async def GetIdleBuildWorkerPids(self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.WorkerIdlePidsResponse:
         workers = run_settings_db(runtime_worker_service.list_workers, kind=RuntimeWorkerKind.BUILD_WORKER)
         return worker_runtime_pb2.WorkerIdlePidsResponse(pids=[worker.pid for worker in workers if worker.stopped_at is None and worker.active_jobs == 0])
 
-    @_run_async_handler_in_thread
-    async def ListRuntimeNamespaces(self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.WorkerNamespacesResponse:
-        return worker_runtime_pb2.WorkerNamespacesResponse(namespaces=run_settings_db(list_runtime_namespaces))
+    @_run_maintenance_handler_in_thread
+    async def ListPendingRuntimeWorkNamespaces(
+        self, request: worker_runtime_pb2.WorkerPendingRuntimeWorkNamespacesRequest, context: grpc.aio.ServicerContext
+    ) -> worker_runtime_pb2.WorkerNamespacesResponse:
+        try:
+            kinds = tuple(sorted({runtime_work_service.RuntimeWorkKind(kind) for kind in request.kinds})) or runtime_work_service.WORKER_RECOVERY_KINDS
+        except ValueError as exc:
+            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, f'Unknown runtime work kind: {exc}') from exc
+        return worker_runtime_pb2.WorkerNamespacesResponse(namespaces=_cached_pending_runtime_work_namespaces(kinds))
 
     @_run_async_handler_in_thread
     async def PersistBuildEvent(
         self, request: worker_runtime_pb2.WorkerPersistBuildEventRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerPersistBuildEventResponse:
-        event = compute_schemas.BuildEventAdapter.validate_python(_build_event_payload(request.build_event))
+        started = time.perf_counter()
+        timings: dict[str, float] = {}
         token = set_namespace_context(request.namespace)
-        session_gen = get_db()
-        session = next(session_gen)
+        session_gen: Iterator[Session] | None = None
+        event_type = 'invalid'
+        result: tuple[object, int] | None = None
         try:
-            claim = build_job_service.lock_active_job_claim(
+            phase_started = time.perf_counter()
+            event = compute_schemas.BuildEventAdapter.validate_python(_build_event_payload(request.build_event))
+            event_type = str(event.type)
+            timings['validation_ms'] = (time.perf_counter() - phase_started) * 1000
+
+            phase_started = time.perf_counter()
+            session_gen = get_db()
+            session = next(session_gen)
+            timings['session_open_ms'] = (time.perf_counter() - phase_started) * 1000
+
+            phase_started = time.perf_counter()
+            claim = build_job_service.get_active_job_claim(
                 session,
                 request.job_id,
                 build_id=request.build_id,
@@ -1305,19 +1627,43 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 claim_token=request.claim_token,
                 lease_generation=request.lease_generation,
             )
+            timings['claim_lock_ms'] = (time.perf_counter() - phase_started) * 1000
             if claim is None:
                 return worker_runtime_pb2.WorkerPersistBuildEventResponse()
-            result: tuple[object, int] | None = await build_event_service.persist_build_event(
+
+            phase_started = time.perf_counter()
+            result = build_event_service.persist_build_event(
                 session,
-                namespace=request.namespace,
                 build_id=request.build_id,
                 execution_generation=request.lease_generation,
                 event=event,
                 resource_config_json=_build_resource_config_payload(request.build_resource_config) if request.HasField('build_resource_config') else None,
             )
+            timings['persist_ms'] = (time.perf_counter() - phase_started) * 1000
         finally:
-            close_rpc_session(session_gen)
-            reset_namespace(token)
+            phase_started = time.perf_counter()
+            try:
+                if session_gen is not None:
+                    close_rpc_session(session_gen)
+            finally:
+                reset_namespace(token)
+                timings['session_close_ms'] = (time.perf_counter() - phase_started) * 1000
+                total_ms = (time.perf_counter() - started) * 1000
+                if total_ms >= 1000:
+                    logger.warning(
+                        'Slow build event RPC build_id=%s job_id=%s worker_id=%s event_type=%s total_ms=%.1f '
+                        'validation_ms=%.1f session_open_ms=%.1f claim_lock_ms=%.1f persist_ms=%.1f session_close_ms=%.1f',
+                        request.build_id,
+                        request.job_id,
+                        request.worker_id,
+                        event_type,
+                        total_ms,
+                        timings.get('validation_ms', 0.0),
+                        timings.get('session_open_ms', 0.0),
+                        timings.get('claim_lock_ms', 0.0),
+                        timings.get('persist_ms', 0.0),
+                        timings.get('session_close_ms', 0.0),
+                    )
         if result is None:
             return worker_runtime_pb2.WorkerPersistBuildEventResponse()
         return worker_runtime_pb2.WorkerPersistBuildEventResponse(sequence=int(result[1]))
@@ -1343,7 +1689,6 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             run = build_run_service.mark_build_running(session, request.build_id, execution_generation=request.lease_generation)
             if run is None or run.status != BuildRunStatus.RUNNING:
                 return worker_runtime_pb2.WorkerStartBuildRunResponse()
-            await build_event_service.publish_build_notification(run.namespace, run.id, latest_sequence=0)
             payload = worker_runtime_pb2.WorkerBuildRunPayload(
                 id=run.id,
                 namespace=run.namespace,
@@ -1389,23 +1734,23 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         runtime_ipc.notify_api_engine(request.namespace)
         return _count(len(statuses))
 
-    @_run_async_handler_in_thread
+    @_run_maintenance_handler_in_thread
     async def ListPendingDatasourceDeletes(
         self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerPendingDatasourceDeletesResponse:
-        deletes: list[worker_runtime_pb2.WorkerPendingDatasourceDelete] = []
-        for namespace in run_settings_db(list_runtime_namespaces):
-            token = set_namespace_context(namespace)
-            try:
-                datasource_ids = run_db(lambda session: [datasource.id for datasource in datasource_delete_service.list_pending_deletes(session)])
-            finally:
-                reset_namespace(token)
-            deletes.extend(
-                worker_runtime_pb2.WorkerPendingDatasourceDelete(namespace=namespace, datasource_id=datasource_id) for datasource_id in datasource_ids
-            )
+        if not request.namespace:
+            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Datasource delete listing must target a namespace')
+        token = set_namespace_context(request.namespace)
+        try:
+            datasource_ids = run_db(lambda session: [datasource.id for datasource in datasource_delete_service.list_pending_deletes(session)])
+        finally:
+            reset_namespace(token)
+        deletes = [
+            worker_runtime_pb2.WorkerPendingDatasourceDelete(namespace=request.namespace, datasource_id=datasource_id) for datasource_id in datasource_ids
+        ]
         return worker_runtime_pb2.WorkerPendingDatasourceDeletesResponse(deletes=deletes)
 
-    @_run_async_handler_in_thread
+    @_run_maintenance_handler_in_thread
     async def FinalizeDatasourceDelete(
         self, request: worker_runtime_pb2.WorkerFinalizeDatasourceDeleteRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerFinalizeDatasourceDeleteResponse:
@@ -1471,7 +1816,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
         return _bool(True)
 
-    @_run_async_handler_in_thread
+    @_run_external_io_handler_in_thread
     async def GenerateAI(
         self, request: worker_runtime_pb2.WorkerGenerateAIRequest, context: grpc.aio.ServicerContext
     ) -> worker_runtime_pb2.WorkerGenerateAIResponse:
@@ -1525,7 +1870,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
 
 
 class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServiceServicer):
-    @_run_async_handler_in_thread
+    @_run_control_handler_in_thread
     async def RegisterScheduler(
         self, request: scheduler_runtime_pb2.SchedulerRegisterRequest, context: grpc.aio.ServicerContext
     ) -> common_pb2.RuntimeWorkerResponse:
@@ -1543,7 +1888,7 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
         run_settings_db(_register)
         return _response(request.worker_id)
 
-    @_run_async_handler_in_thread
+    @_run_scheduler_heartbeat_handler_in_thread
     async def HeartbeatScheduler(self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext) -> common_pb2.RuntimeWorkerResponse:
 
         def _heartbeat(session: Any) -> None:
@@ -1552,7 +1897,7 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
         run_settings_db(_heartbeat)
         return _response(request.worker_id)
 
-    @_run_async_handler_in_thread
+    @_run_control_handler_in_thread
     async def StopScheduler(self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext) -> common_pb2.RuntimeWorkerResponse:
 
         def _stop(session: Any) -> None:
@@ -1561,90 +1906,228 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
         run_settings_db(_stop)
         return _response(request.worker_id)
 
-    @_run_async_handler_in_thread
+    @_run_maintenance_handler_in_thread
+    async def ListDueScheduleNamespaces(
+        self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext
+    ) -> scheduler_runtime_pb2.SchedulerDueNamespacesResponse:
+        due = run_settings_db(runtime_work_service.list_due_schedule_namespaces)
+        return scheduler_runtime_pb2.SchedulerDueNamespacesResponse(
+            namespaces=[scheduler_runtime_pb2.SchedulerDueNamespace(namespace=namespace, generation=generation) for namespace, generation in due]
+        )
+
+    @_run_maintenance_handler_in_thread
     async def RunDueSchedules(
-        self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext
+        self, request: scheduler_runtime_pb2.SchedulerRunDueRequest, context: grpc.aio.ServicerContext
     ) -> scheduler_runtime_pb2.SchedulerRunDueResponse:
-        reclaimable_owner_ids = run_settings_db(runtime_worker_service.reclaimable_worker_ids, kind=RuntimeWorkerKind.SCHEDULER)
+        if not request.target_namespace:
+            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Scheduler run must target a namespace')
         enqueued: list[scheduler_runtime_pb2.SchedulerEnqueuedRun] = []
         failures: list[scheduler_runtime_pb2.SchedulerRunFailure] = []
-        for namespace in run_settings_db(list_runtime_namespaces):
-            token = set_namespace_context(namespace)
-            try:
-                claimed = run_db(
-                    lambda session: [
-                        (schedule.id, schedule.datasource_id, schedule.claim_token, schedule.lease_generation)
-                        for schedule in scheduler_service.claim_due_schedules(
+        namespace = request.target_namespace
+        token = set_namespace_context(namespace)
+        try:
+            claimed = run_db(
+                lambda session: [
+                    (schedule.id, schedule.datasource_id, schedule.claim_token, schedule.lease_generation)
+                    for schedule in scheduler_service.claim_due_schedules(
+                        session,
+                        worker_id=request.worker_id,
+                    )
+                ]
+            )
+            for schedule_id, datasource_id, claim_token, lease_generation in claimed:
+                if claim_token is None:
+                    raise RuntimeError(f'Schedule {schedule_id} claim token missing')
+                try:
+
+                    def _enqueue(
+                        session: Any,
+                        target_id: str = schedule_id,
+                        target_token: str = claim_token,
+                        target_generation: int = lease_generation,
+                    ) -> str:
+                        return scheduler_service.enqueue_schedule_run(
                             session,
+                            target_id,
                             worker_id=request.worker_id,
-                            reclaimable_owner_ids=reclaimable_owner_ids,
+                            claim_token=target_token,
+                            lease_generation=target_generation,
                         )
-                    ]
+
+                    build_id = run_db(_enqueue)
+                    enqueued.append(
+                        scheduler_runtime_pb2.SchedulerEnqueuedRun(
+                            namespace=namespace,
+                            schedule_id=schedule_id,
+                            datasource_id=datasource_id,
+                            build_id=build_id,
+                        )
+                    )
+                except Exception as exc:
+
+                    def _mark_failed(
+                        session: Any,
+                        target_id: str = schedule_id,
+                        error: str = str(exc),
+                        target_token: str = claim_token,
+                        target_generation: int = lease_generation,
+                    ) -> None:
+                        scheduler_service.mark_schedule_enqueue_failed(
+                            session,
+                            target_id,
+                            error=error,
+                            claim_token=target_token,
+                            lease_generation=target_generation,
+                        )
+
+                    run_db(_mark_failed)
+                    failures.append(
+                        scheduler_runtime_pb2.SchedulerRunFailure(
+                            namespace=namespace,
+                            schedule_id=schedule_id,
+                            datasource_id=datasource_id,
+                            error=str(exc),
+                        )
+                    )
+            run_db(
+                lambda session: scheduler_service.finish_schedule_work_scan(
+                    session,
+                    namespace=namespace,
+                    generation=request.generation,
                 )
-                for schedule_id, datasource_id, claim_token, lease_generation in claimed:
-                    if claim_token is None:
-                        raise RuntimeError(f'Schedule {schedule_id} claim token missing')
-                    try:
-
-                        def _enqueue(
-                            session: Any,
-                            target_id: str = schedule_id,
-                            target_token: str = claim_token,
-                            target_generation: int = lease_generation,
-                        ) -> str:
-                            return scheduler_service.enqueue_schedule_run(
-                                session,
-                                target_id,
-                                worker_id=request.worker_id,
-                                claim_token=target_token,
-                                lease_generation=target_generation,
-                            )
-
-                        build_id = run_db(_enqueue)
-                        enqueued.append(
-                            scheduler_runtime_pb2.SchedulerEnqueuedRun(
-                                namespace=namespace,
-                                schedule_id=schedule_id,
-                                datasource_id=datasource_id,
-                                build_id=build_id,
-                            )
-                        )
-                    except Exception as exc:
-
-                        def _mark_failed(
-                            session: Any,
-                            target_id: str = schedule_id,
-                            error: str = str(exc),
-                            target_token: str = claim_token,
-                            target_generation: int = lease_generation,
-                        ) -> None:
-                            scheduler_service.mark_schedule_enqueue_failed(
-                                session,
-                                target_id,
-                                error=error,
-                                claim_token=target_token,
-                                lease_generation=target_generation,
-                            )
-
-                        run_db(_mark_failed)
-                        failures.append(
-                            scheduler_runtime_pb2.SchedulerRunFailure(
-                                namespace=namespace,
-                                schedule_id=schedule_id,
-                                datasource_id=datasource_id,
-                                error=str(exc),
-                            )
-                        )
-            finally:
-                reset_namespace(token)
+            )
+        finally:
+            reset_namespace(token)
         return scheduler_runtime_pb2.SchedulerRunDueResponse(handled=bool(enqueued or failures), enqueued=enqueued, failures=failures)
 
 
-async def start_runtime_grpc_server() -> grpc.aio.Server:
+async def _prewarm_executor(executor: Executor, size: int) -> None:
+    if size <= 0:
+        return
+
+    # Hold each newly created thread at the barrier until all configured lanes
+    # have started. Releasing immediately after submit only primes whichever
+    # thread wins the race and leaves the rest to start on live RPC traffic.
+    barrier = threading.Barrier(size + 1, timeout=30)
+    futures = []
+    try:
+        for _ in range(size):
+            futures.append(executor.submit(barrier.wait))
+        await asyncio.to_thread(barrier.wait)
+        await asyncio.gather(*(asyncio.wrap_future(future) for future in futures))
+    except BaseException:
+        barrier.abort()
+        await asyncio.gather(*(asyncio.wrap_future(future) for future in futures), return_exceptions=True)
+        raise
+
+
+async def _prewarm_internal_rpc_executors() -> None:
+    logger.info(
+        'Preparing internal runtime RPC executors total=%s lease=%s general=%s scheduler_heartbeat=%s '
+        'lease_validation=%s scheduler_validation=%s general_validation=2 database_budget=%s',
+        _INTERNAL_RPC_WORKERS,
+        _INTERNAL_LEASE_RPC_WORKERS,
+        _INTERNAL_GENERAL_RPC_WORKERS,
+        _INTERNAL_SCHEDULER_RPC_WORKERS,
+        _INTERNAL_LEASE_VALIDATION_WORKERS,
+        _INTERNAL_SCHEDULER_VALIDATION_WORKERS,
+        settings.database_pool_size + settings.database_max_overflow,
+    )
+    executors: dict[Executor, int] = {}
+    for executor, size in (
+        (_INTERNAL_VALIDATION_EXECUTOR, 2),
+        (_INTERNAL_LEASE_VALIDATION_EXECUTOR, _INTERNAL_LEASE_VALIDATION_WORKERS),
+        (_INTERNAL_EXTERNAL_IO_EXECUTOR, 2),
+        (_INTERNAL_LEASE_RPC_EXECUTOR, _INTERNAL_LEASE_RPC_WORKERS),
+        (_INTERNAL_RPC_EXECUTOR, _INTERNAL_GENERAL_RPC_WORKERS),
+    ):
+        executors[executor] = max(executors.get(executor, 0), size)
+    if _INTERNAL_SCHEDULER_VALIDATION_EXECUTOR is not None:
+        executors[_INTERNAL_SCHEDULER_VALIDATION_EXECUTOR] = _INTERNAL_SCHEDULER_VALIDATION_WORKERS
+    if _INTERNAL_SCHEDULER_RPC_EXECUTOR is not None:
+        executors[_INTERNAL_SCHEDULER_RPC_EXECUTOR] = _INTERNAL_SCHEDULER_RPC_WORKERS
+
+    async def prewarm(executor: Executor, size: int) -> None:
+        await _prewarm_executor(executor, size)
+
+    await asyncio.gather(*(prewarm(executor, size) for executor, size in executors.items()))
+
+
+async def _start_runtime_grpc_server_on_loop() -> grpc.aio.Server:
+    await _prewarm_internal_rpc_executors()
     server = grpc.aio.server(interceptors=(_BackendRequestValidationInterceptor(),))
     worker_runtime_pb2_grpc.add_WorkerRuntimeServiceServicer_to_server(WorkerRuntimeServicer(), server)
     scheduler_runtime_pb2_grpc.add_SchedulerRuntimeServiceServicer_to_server(SchedulerRuntimeServicer(), server)
-    server.add_insecure_port(f'{settings.internal_grpc_host}:{settings.internal_grpc_port}')
+    address = f'{settings.internal_grpc_host}:{settings.internal_grpc_port}'
+    bound_port = server.add_insecure_port(address)
+    if bound_port != settings.internal_grpc_port:
+        await server.stop(grace=0)
+        raise RuntimeError(f'Runtime coordinator could not bind internal gRPC address {address!r}')
     await server.start()
-    logger.info('Internal runtime gRPC server listening on %s:%s', settings.internal_grpc_host, settings.internal_grpc_port)
+    logger.info('Internal runtime gRPC server listening on %s', address)
     return server
+
+
+class ThreadedRuntimeGrpcServer:
+    """Own the runtime coordinator's internal gRPC loop separately from HTTP.
+
+    Runtime RPC handlers already move their blocking database work to fixed
+    executors, but grpc.aio still schedules authentication, validation,
+    request dispatch, and response callbacks on its event loop. Keeping that
+    callback stream off the HTTP loop prevents a burst of lease/claim traffic
+    from delaying HTTP routing, WebSocket heartbeats, or health probes.
+    """
+
+    def __init__(self, *, loop: asyncio.AbstractEventLoop, server: grpc.aio.Server, thread: threading.Thread) -> None:
+        self._loop = loop
+        self._server = server
+        self._thread = thread
+
+    async def stop(self, *, grace: float = 5.0) -> None:
+        if not self._thread.is_alive():
+            return
+        future = asyncio.run_coroutine_threadsafe(self._server.stop(grace=grace), self._loop)
+        await asyncio.to_thread(future.result)
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        await asyncio.to_thread(self._thread.join)
+
+
+def start_runtime_grpc_server_in_thread() -> ThreadedRuntimeGrpcServer:
+    ready: threading.Event = threading.Event()
+    holder: dict[str, object] = {}
+
+    def _run() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            server = loop.run_until_complete(_start_runtime_grpc_server_on_loop())
+        except Exception as exc:
+            holder['error'] = exc
+            ready.set()
+            loop.close()
+            return
+        holder['loop'] = loop
+        holder['server'] = server
+        ready.set()
+        try:
+            loop.run_forever()
+        finally:
+            loop.close()
+
+    thread = threading.Thread(target=_run, name='runtime-coordinator-grpc', daemon=True)
+    thread.start()
+    if not ready.wait(timeout=30):
+        raise RuntimeError('Timed out starting runtime coordinator gRPC server')
+    error = holder.get('error')
+    if isinstance(error, Exception):
+        raise error
+    return ThreadedRuntimeGrpcServer(
+        loop=cast(asyncio.AbstractEventLoop, holder['loop']),
+        server=cast(grpc.aio.Server, holder['server']),
+        thread=thread,
+    )
+
+
+async def start_runtime_grpc_server() -> ThreadedRuntimeGrpcServer:
+    """Start runtime gRPC without sharing Uvicorn's event loop."""
+    return await asyncio.to_thread(start_runtime_grpc_server_in_thread)

@@ -1,5 +1,9 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+function previewReadinessTimeoutMs(): number {
+	return 120_000;
+}
+
 export function readyTimeoutMs(): number {
 	// Docker engine cold start + shell hydrate. Fail faster than 60s, but allow
 	// one full container health cycle under host load.
@@ -13,6 +17,10 @@ export function buildTimeoutMs(): number {
 
 function mainNavigation(page: Page): Locator {
 	return page.locator('[aria-label="Main navigation"]').first();
+}
+
+function appRoute(page: Page): string {
+	return new URL(page.url()).pathname;
 }
 
 async function waitForAnyVisible(locator: Locator, timeout: number): Promise<void> {
@@ -30,11 +38,17 @@ async function waitForPreviewReady(
 	while (true) {
 		const remaining = deadline - Date.now();
 		if (remaining <= 0) {
-			const state = await preview
-				.getAttribute('data-preview-state', { timeout: 100 })
+			const details = await preview
+				.evaluate((element) => ({
+					state: element.getAttribute('data-preview-state'),
+					queryStatus: element.getAttribute('data-preview-query-status'),
+					fetchStatus: element.getAttribute('data-preview-fetch-status'),
+					hasData: element.getAttribute('data-preview-has-data'),
+					error: element.getAttribute('data-preview-error')
+				}))
 				.catch(() => null);
 			throw new Error(
-				`${label} did not become ready within ${timeout}ms (state=${state ?? 'missing'})`
+				`${label} did not become ready within ${timeout}ms (state=${JSON.stringify(details)})`
 			);
 		}
 
@@ -61,7 +75,7 @@ async function waitForPreviewReady(
 			return;
 		}
 
-		const sleepMs = Math.min(100, deadline - Date.now());
+		const sleepMs = Math.floor(Math.min(100, deadline - Date.now()));
 		if (sleepMs > 0) {
 			await page.waitForTimeout(sleepMs);
 		}
@@ -82,6 +96,11 @@ type MonitoringTabKey = 'builds' | 'schedules' | 'health';
 export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	await expect(mainNavigation(page)).toBeVisible({ timeout });
 	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
+	await expect(page.locator('main[data-app-route]').first()).toHaveAttribute(
+		'data-app-route',
+		appRoute(page),
+		{ timeout }
+	);
 }
 
 /**
@@ -99,27 +118,28 @@ export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): P
 export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	const bootstrapError = page.locator('[data-shell-bootstrap="error"]');
 	const nav = mainNavigation(page);
-	await Promise.race([
-		nav.waitFor({ state: 'visible', timeout }).then(() => 'ready' as const),
-		bootstrapError.waitFor({ state: 'visible', timeout }).then(() => 'error' as const)
-	]).then(async (outcome) => {
-		if (outcome === 'error') {
-			const message =
-				(await bootstrapError.innerText().catch(() => null)) ?? 'App shell bootstrap failed';
-			throw new Error(`App shell failed to bootstrap:\n${message}`);
-		}
-	});
+	const shellState = nav.or(bootstrapError).filter({ visible: true }).first();
+	await expect(shellState).toBeVisible({ timeout });
+	if (await bootstrapError.isVisible()) {
+		const message =
+			(await bootstrapError.innerText().catch(() => null)) ?? 'App shell bootstrap failed';
+		throw new Error(`App shell failed to bootstrap:\n${message}`);
+	}
 	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
 	await waitForAnyVisible(page.locator('main'), timeout);
+	await expect(page.locator('main[data-app-route]').first()).toHaveAttribute(
+		'data-app-route',
+		appRoute(page),
+		{ timeout }
+	);
 }
 
 async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {
-	// Wait only for the navigation commit. Under parallel CI load the SPA can
-	// already have a usable shell while DOMContentLoaded is still delayed by
-	// unrelated browser work; waitForLayoutReady is the actual app readiness
-	// gate and still owns the full timeout.
-	const navigationTimeout = Math.min(timeout, 15_000);
-	await page.goto(path, { waitUntil: 'commit', timeout: navigationTimeout });
+	// Wait only for the navigation commit. Under parallel CI load Playwright can
+	// queue the document request behind other pages before the browser receives
+	// its headers. Use the same bounded readiness deadline for that first
+	// response; this is a single navigation wait, never a retry or reload.
+	await page.goto(path, { waitUntil: 'commit', timeout });
 	await waitForLayoutReady(page, timeout);
 }
 
@@ -149,8 +169,11 @@ export async function waitForLineageToolbar(page: Page, timeout = readyTimeoutMs
  */
 export async function waitForDatasourceList(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	await waitForLayoutReady(page, timeout);
+	await expect(page.getByRole('heading', { name: 'Data Sources', exact: true })).toBeVisible({
+		timeout
+	});
 	const terminal = page.locator(
-		'[data-ds-row], :text("No data sources yet"), :text("No datasources match"), [aria-live="polite"]'
+		'[data-ds-row], :text("No data sources yet"), :text("No datasources match"), main[data-app-route="/datasources"] [aria-live="polite"]'
 	);
 	await waitForAnyVisible(terminal, timeout);
 }
@@ -172,7 +195,7 @@ export async function gotoDatasourcesPage(page: Page, timeout = readyTimeoutMs()
  */
 export async function waitForDatasourcePreviewReady(
 	page: Page,
-	timeout = readyTimeoutMs()
+	timeout = previewReadinessTimeoutMs()
 ): Promise<void> {
 	await waitForLayoutReady(page, timeout);
 	await expect(page.locator('[data-ds-config]')).toBeVisible({ timeout });
@@ -193,7 +216,7 @@ export async function waitForDatasourcePreviewReady(
  */
 export async function waitForInlinePreviewReady(
 	page: Page,
-	timeout = readyTimeoutMs()
+	timeout = previewReadinessTimeoutMs()
 ): Promise<void> {
 	await waitForLayoutReady(page, timeout);
 	const table = page.locator('[data-testid="inline-data-table"]').filter({ visible: true }).first();
@@ -203,7 +226,7 @@ export async function waitForInlinePreviewReady(
 
 export async function waitForChartPreviewReady(
 	page: Page,
-	timeout = readyTimeoutMs()
+	timeout = previewReadinessTimeoutMs()
 ): Promise<void> {
 	await waitForLayoutReady(page, timeout);
 	const preview = page
@@ -338,7 +361,9 @@ export async function waitForUdfList(page: Page, timeout = readyTimeoutMs()): Pr
 	await waitForLayoutReady(page, timeout);
 	await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible({ timeout });
 
-	const terminal = page.locator('[data-udf-card], :text("No UDFs yet"), [aria-live="polite"]');
+	const terminal = page.locator(
+		'[data-udf-card], :text("No UDFs yet"), main[data-app-route="/udfs"] [aria-live="polite"]'
+	);
 	await waitForAnyVisible(terminal, timeout);
 }
 

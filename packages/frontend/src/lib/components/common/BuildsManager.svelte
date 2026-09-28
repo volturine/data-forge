@@ -530,7 +530,9 @@
 			(cancelled) => {
 				updateCancelledRun(target.id, cancelled);
 				cancelTarget = null;
-				buildsStore.refresh();
+				// Keep the terminal row on screen while history refreshes; a foreground
+				// refresh marks the list as connecting and temporarily hides the table.
+				buildsStore.silentRefresh();
 			},
 			(err) => {
 				cancelError = err.message;

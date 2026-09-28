@@ -1,6 +1,7 @@
 from datetime import datetime
+from hashlib import sha256
 
-from sqlalchemy import func
+from sqlalchemy import func, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -18,34 +19,60 @@ def _required_identity_value(value: str | None, field_name: str) -> str:
     return value
 
 
+def _lock_engine_snapshot(session: Session, *, worker_id: str, namespace: str) -> None:
+    bind = session.get_bind()
+    if getattr(getattr(bind, 'dialect', None), 'name', None) != 'postgresql':
+        return
+    digest = sha256(f'dataforge:engine-snapshot:{worker_id}:{namespace}'.encode()).digest()
+    key = int.from_bytes(digest[:8], byteorder='big', signed=True)
+    session.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': key})
+
+
 def _apply_engine_status(row: EngineInstance, *, status: EngineStatusInfo, stamp: datetime) -> None:
-    row.container_id = status.container_id
-    row.image_digest = status.image_digest
-    row.termination_reason = status.termination_reason
-    row.exit_code = status.exit_code
-    row.oom_killed = status.oom_killed
-    row.supervisor_id = status.supervisor_id
-    row.owner_id = status.owner_id
-    row.status = (
-        EngineInstanceStatus.require(status.lifecycle_status)
-        if status.lifecycle_status
-        else EngineInstanceStatus.from_engine_status(status.status, status.current_job_id)
-    )
-    row.engine_scope = _required_identity_value(status.scope, 'scope')
-    row.engine_reuse_policy = _required_identity_value(status.reuse_policy, 'reuse_policy')
-    row.datasource_id = status.datasource_id
-    row.build_id = status.build_id
-    row.current_job_id = status.current_job_id
-    row.current_build_id = status.current_build_id
-    row.current_engine_run_id = status.current_engine_run_id
-    row.resource_config_json = copy_json_object(status.resource_config)
-    row.effective_resources_json = copy_json_object(status.effective_resources)
-    row.last_activity_at = _read_dt(status.last_activity) or row.last_activity_at or stamp
+    projection = {
+        'container_id': status.container_id,
+        'image_digest': status.image_digest,
+        'termination_reason': status.termination_reason,
+        'exit_code': status.exit_code,
+        'oom_killed': status.oom_killed,
+        'supervisor_id': status.supervisor_id,
+        'owner_id': status.owner_id,
+        'status': (
+            EngineInstanceStatus.require(status.lifecycle_status)
+            if status.lifecycle_status
+            else EngineInstanceStatus.from_engine_status(status.status, status.current_job_id)
+        ),
+        'engine_scope': _required_identity_value(status.scope, 'scope'),
+        'engine_reuse_policy': _required_identity_value(status.reuse_policy, 'reuse_policy'),
+        'datasource_id': status.datasource_id,
+        'build_id': status.build_id,
+        'current_job_id': status.current_job_id,
+        'current_build_id': status.current_build_id,
+        'current_engine_run_id': status.current_engine_run_id,
+        'resource_config_json': copy_json_object(status.resource_config),
+        'effective_resources_json': copy_json_object(status.effective_resources),
+        'last_activity_at': _read_dt(status.last_activity) or row.last_activity_at or stamp,
+    }
+    changed = {field: value for field, value in projection.items() if getattr(row, field, None) != value}
+    if not changed:
+        return
+    for field, value in changed.items():
+        setattr(row, field, value)
     row.last_seen_at = stamp
     row.updated_at = stamp
 
 
-def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, status: EngineStatusInfo, now: datetime | None = None) -> EngineInstance:
+def _upsert_engine_status(
+    session: Session,
+    *,
+    worker_id: str,
+    namespace: str,
+    status: EngineStatusInfo,
+    now: datetime | None = None,
+    commit: bool,
+) -> EngineInstance:
+    if commit:
+        _lock_engine_snapshot(session, worker_id=worker_id, namespace=namespace)
     stamp = now or _utcnow()
     scope = _required_identity_value(status.scope, 'scope')
     instance_id = f'{worker_id}:{namespace}:{scope}:{status.resource_id}'
@@ -82,6 +109,8 @@ def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, st
     else:
         _apply_engine_status(row, status=status, stamp=stamp)
     session.add(row)
+    if not commit:
+        return row
     try:
         session.commit()
     except IntegrityError:
@@ -96,14 +125,106 @@ def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, st
     return row
 
 
+def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, status: EngineStatusInfo, now: datetime | None = None) -> EngineInstance:
+    """Persist one engine projection for callers that own a single update."""
+    return _upsert_engine_status(session, worker_id=worker_id, namespace=namespace, status=status, now=now, commit=True)
+
+
 def persist_engine_snapshot(session: Session, *, worker_id: str, namespace: str, statuses: list[EngineStatusInfo], now: datetime | None = None) -> None:
-    active = {_engine_identity_key(status) for status in statuses}
+    """Persist one namespace snapshot in one transaction.
+
+    Engine lifecycle changes can include several identities at once. Committing
+    each row independently turns one projection update into a serial database
+    round trip per engine and lets snapshot traffic starve lease/control RPCs.
+    The coordinator is the fenced owner, so the whole namespace projection can
+    be written atomically and observed as one state transition.
+    """
+    for attempt in range(2):
+        _lock_engine_snapshot(session, worker_id=worker_id, namespace=namespace)
+        try:
+            _persist_engine_snapshot_locked(
+                session,
+                worker_id=worker_id,
+                namespace=namespace,
+                statuses=statuses,
+                now=now,
+            )
+            return
+        except IntegrityError:
+            # PostgreSQL snapshots are fenced by the advisory lock. Retrying
+            # once also handles concurrent inserts on SQLite, where that lock
+            # is intentionally unavailable.
+            session.rollback()
+            if attempt:
+                raise
+
+
+def _persist_engine_snapshot_locked(
+    session: Session,
+    *,
+    worker_id: str,
+    namespace: str,
+    statuses: list[EngineStatusInfo],
+    now: datetime | None,
+) -> None:
+    stamp = now or _utcnow()
+    active_by_id: dict[str, EngineStatusInfo] = {}
     for status in statuses:
-        upsert_engine_status(session, worker_id=worker_id, namespace=namespace, status=status, now=now)
-    _ = mark_namespace_engines_stopped(session, worker_id=worker_id, namespace=namespace, active_engine_identities=active, now=now)
+        scope = _required_identity_value(status.scope, 'scope')
+        resource_id = _required_identity_value(status.resource_id, 'resource_id')
+        active_by_id[f'{worker_id}:{namespace}:{scope}:{resource_id}'] = status
+
+    existing = {}
+    if active_by_id:
+        existing = {row.id: row for row in session.exec(select(EngineInstance).where(col(EngineInstance.id).in_(active_by_id)))}
+
+    for instance_id, status in active_by_id.items():
+        row = existing.get(instance_id)
+        if row is None:
+            scope = _required_identity_value(status.scope, 'scope')
+            row = EngineInstance(
+                id=instance_id,
+                worker_id=worker_id,
+                namespace=namespace,
+                analysis_id=status.analysis_id,
+                engine_scope=scope,
+                engine_reuse_policy=_required_identity_value(status.reuse_policy, 'reuse_policy'),
+                last_seen_at=stamp,
+                updated_at=stamp,
+            )
+        _apply_engine_status(row, status=status, stamp=stamp)
+        session.add(row)
+
+    stop_engines = (
+        update(EngineInstance)
+        .where(col(EngineInstance.worker_id) == worker_id)
+        .where(col(EngineInstance.namespace) == namespace)
+        .where(col(EngineInstance.status) != EngineInstanceStatus.STOPPED.value)
+    )
+    if active_by_id:
+        stop_engines = stop_engines.where(col(EngineInstance.id).not_in(active_by_id))
+    session.execute(
+        stop_engines.values(
+            status=EngineInstanceStatus.STOPPED.value,
+            current_job_id=None,
+            current_build_id=None,
+            current_engine_run_id=None,
+            last_seen_at=stamp,
+            updated_at=stamp,
+        ).execution_options(synchronize_session=False)
+    )
+    session.commit()
 
 
-def mark_namespace_engines_stopped(session: Session, *, worker_id: str, namespace: str, active_engine_identities: set[str], now: datetime | None = None) -> int:
+def mark_namespace_engines_stopped(
+    session: Session,
+    *,
+    worker_id: str,
+    namespace: str,
+    active_engine_identities: set[str],
+    now: datetime | None = None,
+    commit: bool = True,
+) -> int:
     stamp = now or _utcnow()
     stmt = select(EngineInstance).where(sa(EngineInstance.worker_id == worker_id)).where(sa(EngineInstance.namespace == namespace))
     rows = list(session.execute(stmt).scalars().all())
@@ -121,7 +242,7 @@ def mark_namespace_engines_stopped(session: Session, *, worker_id: str, namespac
         row.updated_at = stamp
         session.add(row)
         updated += 1
-    if updated:
+    if updated and commit:
         session.commit()
     return updated
 
@@ -196,10 +317,6 @@ def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object
         'current_build_id': row.current_build_id or row.build_id,
         'current_engine_run_id': row.current_engine_run_id,
     }
-
-
-def _engine_identity_key(status: EngineStatusInfo) -> str:
-    return f'{_required_identity_value(status.scope, "scope")}:{status.resource_id}'
 
 
 def _row_identity_key(row: EngineInstance) -> str:

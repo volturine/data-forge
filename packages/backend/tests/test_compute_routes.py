@@ -1,7 +1,6 @@
 import asyncio
 import threading
-from typing import Any
-from unittest.mock import Mock, call
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import select
@@ -14,27 +13,56 @@ from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
-from backend_core.namespace import reset_namespace, set_namespace_context
+from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
 from backend_core.sqlmodel_typing import sa
-from dataforge_protocol import compute_pb2
+from dataforge_protocol import compute_pb2, enums_pb2
 from main import app
 from modules.compute import executor_client, routes as compute_routes
 
 
-def test_terminal_compute_request_releases_session_connection() -> None:
-    session = Mock()
-    request = object()
+@pytest.mark.asyncio
+async def test_websocket_auth_uses_the_bounded_api_executor(monkeypatch) -> None:
+    loop_thread = threading.get_ident()
+    auth_threads: list[int] = []
+    user = cast(Any, object())
 
-    executor_client._detach_and_release_request(session, request)
+    def resolve_user(_websocket):
+        auth_threads.append(threading.get_ident())
+        return user
 
-    assert session.method_calls == [
-        call.expunge(request),
-        call.rollback(),
-    ]
+    monkeypatch.setattr(compute_routes, '_resolve_websocket_user', resolve_user)
+
+    resolved = await compute_routes._require_websocket_user(cast(Any, object()))
+
+    assert resolved is user
+    assert len(auth_threads) == 1
+    assert auth_threads[0] != loop_thread
+
+
+def test_compute_response_read_scopes_namespace_for_database_session(monkeypatch) -> None:
+    read_ids: list[str] = []
+    result = object()
+
+    def run_db(function, request_id: str):
+        assert function is executor_client._read_request
+        assert get_namespace() == 'tenant-a'
+        read_ids.append(request_id)
+        return result
+
+    monkeypatch.setattr(executor_client, 'run_db', run_db)
+    caller_namespace = set_namespace_context('caller')
+    try:
+        response = executor_client._read_request_in_new_session('request-1', 'tenant-a')
+        assert get_namespace() == 'caller'
+    finally:
+        reset_namespace(caller_namespace)
+
+    assert response is result
+    assert read_ids == ['request-1']
 
 
 def test_validated_compute_request_stages_on_one_thread(monkeypatch) -> None:
@@ -46,7 +74,8 @@ def test_validated_compute_request_stages_on_one_thread(monkeypatch) -> None:
         calls.append(('validate', threading.get_ident()))
 
     def submit(session, **kwargs):
-        del session, kwargs
+        del session
+        kwargs['validate']()
         calls.append(('submit', threading.get_ident()))
         return sentinel
 
@@ -79,7 +108,8 @@ def test_validated_direct_datasource_request_checks_deletion_fence(monkeypatch) 
         calls.append(f'{datasource_id}:{for_update}')
 
     def submit(session, **kwargs):
-        del session, kwargs
+        del session
+        kwargs['validate']()
         calls.append('submit')
         return object()
 
@@ -139,6 +169,60 @@ class _StubManager:
 
     def shutdown_engine(self, identity) -> None:
         self.shutdown_calls.append(self._identity_key(identity))
+
+
+@pytest.mark.asyncio
+async def test_override_engine_lifecycle_runs_outside_event_loop(monkeypatch) -> None:
+    loop_thread = threading.get_ident()
+    operation_threads: list[int] = []
+
+    class Manager:
+        def spawn_engine(self, *_args, **_kwargs) -> None:
+            operation_threads.append(threading.get_ident())
+
+        def get_engine_status(self, _identity):
+            operation_threads.append(threading.get_ident())
+            return 'status'
+
+        def restart_engine_with_config(self, *_args, **_kwargs) -> None:
+            operation_threads.append(threading.get_ident())
+
+        def get_engine(self, _identity):
+            operation_threads.append(threading.get_ident())
+            return _StubEngine()
+
+        def shutdown_engine(self, _identity) -> None:
+            operation_threads.append(threading.get_ident())
+
+    manager = Manager()
+    monkeypatch.setattr(compute_routes, '_override_manager', lambda _request: manager)
+    identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id='analysis-1',
+        resource_id='analysis-1',
+    )
+
+    status = await compute_routes._spawn_engine_identity(
+        identity,
+        cast(Any, None),
+        None,
+        cast(Any, None),
+        cast(Any, None),
+    )
+    assert status == 'status'
+
+    await compute_routes._configure_engine_identity(
+        identity,
+        compute_schemas.EngineResourceConfig(max_threads=4),
+        cast(Any, None),
+        cast(Any, None),
+        cast(Any, None),
+    )
+    await compute_routes._shutdown_engine_identity(identity, cast(Any, None), cast(Any, None), cast(Any, None))
+
+    assert operation_threads
+    assert all(thread_id != loop_thread for thread_id in operation_threads)
 
 
 class _AvailableRuntimeProbe:
@@ -322,7 +406,22 @@ def test_get_engine_defaults_resolves_auto_values(client, monkeypatch) -> None:
     }
 
 
-def test_start_build_recreates_deleted_output_placeholder(client, test_db_session) -> None:
+def test_start_build_recreates_deleted_output_placeholder(client, test_db_session, monkeypatch) -> None:
+    api_loop_threads: list[int] = []
+    notification_threads: list[int] = []
+    notify_calls: list[str] = []
+    run_in_threadpool = compute_routes.run_in_threadpool
+
+    def notify_build_job(namespace: str) -> None:
+        notify_calls.append(namespace)
+        notification_threads.append(threading.get_ident())
+
+    async def track_threadpool(function, *args, **kwargs):
+        api_loop_threads.append(threading.get_ident())
+        return await run_in_threadpool(function, *args, **kwargs)
+
+    monkeypatch.setattr(compute_routes.runtime_ipc, 'notify_build_job', notify_build_job)
+    monkeypatch.setattr(compute_routes, 'run_in_threadpool', track_threadpool)
     app.dependency_overrides[get_runtime_availability_probe] = _AvailableRuntimeProbe
     try:
         response = client.post(
@@ -379,7 +478,9 @@ def test_start_build_recreates_deleted_output_placeholder(client, test_db_sessio
     assert test_db_session.execute(select(BuildJob).where(sa(BuildJob.build_id == build_id))).scalars().first() is not None
     outbox_table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
     outbox_rows = test_db_session.execute(select(RuntimeOutboxEvent).order_by(outbox_table.c.created_at)).scalars().all()
-    assert [row.status for row in outbox_rows] == [RuntimeOutboxStatus.DISPATCHED, RuntimeOutboxStatus.DISPATCHED]
+    assert [row.status for row in outbox_rows] == [RuntimeOutboxStatus.PENDING, RuntimeOutboxStatus.PENDING]
+    assert notify_calls == ['default']
+    assert notification_threads[0] != api_loop_threads[0]
 
 
 def test_list_builds_includes_preview_engine_runs(client, test_db_session) -> None:

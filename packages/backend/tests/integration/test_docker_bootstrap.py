@@ -66,29 +66,12 @@ def _wait_for_build_detail(client: httpx.Client, build_id: str, *, timeout: floa
 def _wait_for_runtime_workers() -> tuple[int, int]:
     deadline = time.time() + 120
     while time.time() < deadline:
-        worker_count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'build_manager' AND stopped_at IS NULL"))
+        worker_count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'coordinator' AND stopped_at IS NULL"))
         scheduler_count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'scheduler' AND stopped_at IS NULL"))
         if worker_count >= 1 and scheduler_count >= 1:
             return worker_count, scheduler_count
         time.sleep(1)
-    raise AssertionError('Timed out waiting for runtime worker and scheduler registration')
-
-
-def _api_worker_count() -> int:
-    value = os.environ.get('WORKERS')
-    if value is None:
-        return 1
-    return max(1, int(value))
-
-
-def _wait_for_api_workers(min_count: int) -> int:
-    deadline = time.time() + 120
-    while time.time() < deadline:
-        count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'api' AND stopped_at IS NULL"))
-        if count >= min_count:
-            return count
-        time.sleep(1)
-    raise AssertionError(f'Timed out waiting for {min_count} api workers to register')
+    raise AssertionError('Timed out waiting for runtime coordinator and scheduler registration')
 
 
 def _wait_for_scheduled_build(schedule_id: str) -> tuple[str, str]:
@@ -127,7 +110,7 @@ def _wait_for_scheduled_build(schedule_id: str) -> tuple[str, str]:
     worker_state = _psql_value(
         "SELECT string_agg(concat(kind, ':', id, ':', active_jobs, ':', COALESCE(stopped_at::text, '')), ',') "
         'FROM public.runtime_workers '
-        "WHERE kind IN ('build_manager', 'build_worker')"
+        "WHERE kind = 'coordinator'"
     )
     raise AssertionError(
         f'Timed out waiting for scheduled build for {schedule_id}; schedule={schedule_state}; '
@@ -241,11 +224,8 @@ def test_postgres_runtime_bootstraps_public_and_tenant_schemas() -> None:
 
 
 @pytest.mark.timeout(300)
-def test_postgres_runtime_coordinates_api_worker_and_scheduler() -> None:
+def test_postgres_runtime_coordinates_api_runtime_and_scheduler() -> None:
     _wait_for_runtime_workers()
-    expected_api_workers = _api_worker_count()
-    api_workers = _wait_for_api_workers(expected_api_workers)
-    assert api_workers >= expected_api_workers
 
     with httpx.Client(base_url=_base_url(), timeout=30) as client:
         _login_default_user(client)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -12,10 +11,10 @@ import uuid
 from urllib.parse import urlparse
 
 import aiohttp
-from sqlalchemy import text
 from sqlmodel import Session, select
 
 from backend_core.config import settings
+from backend_core.database import namespace_provision_lock
 from backend_core.persistence.namespaces.models import NamespaceEngineCredential
 from backend_core.secrets import decrypt_secret, encrypt_secret
 
@@ -107,32 +106,32 @@ async def _create_role_identity(admin, namespace: str, role: str) -> tuple[str, 
     return access_key, secret_key
 
 
-def _lock_namespace_credentials(session: Session, namespace: str) -> None:
-    """Serialize provisioning for one namespace across API processes.
-
-    Every API process runs the same startup provisioning against the same
-    database, and namespace creation can be retried concurrently. The lock is
-    held until the transaction ends, so the check and the insert below decide
-    one winner; the unique (namespace, role) constraint is the backstop.
-    """
-    bind = session.get_bind()
-    if bind.dialect.name != 'postgresql':
-        return
-    key = int.from_bytes(hashlib.sha256(f'engine-credentials:{namespace}'.encode()).digest()[:8], 'big', signed=True)
-    session.connection().execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': key})
-
-
-def provision_namespace_engine_credentials(session: Session, namespace: str) -> None:
+def provision_namespace_engine_credentials(
+    session: Session,
+    namespace: str,
+    *,
+    namespace_lock_held: bool = False,
+) -> None:
     """Create object-store identities for the namespace's engine roles.
 
-    Idempotent: roles that already have records are left untouched.
+    Idempotent: roles that already have records are left untouched. The
+    namespace advisory lock serializes provisioning, while the DB session is
+    released before object-store RPCs so slow network calls do not occupy a
+    pooled connection or hold a transaction open.
     """
-    _lock_namespace_credentials(session, namespace)
+    if not namespace_lock_held and session.get_bind().dialect.name == 'postgresql':
+        with namespace_provision_lock(namespace):
+            _provision_namespace_engine_credentials(session, namespace)
+        return
+    _provision_namespace_engine_credentials(session, namespace)
+
+
+def _provision_namespace_engine_credentials(session: Session, namespace: str) -> None:
     existing = session.exec(select(NamespaceEngineCredential).where(NamespaceEngineCredential.namespace == namespace)).all()
     existing_roles = {row.role for row in existing}
     missing_roles = [role for role in _ENGINE_CREDENTIAL_ROLES if role not in existing_roles]
+    session.rollback()
     if not missing_roles:
-        session.rollback()
         return
 
     try:

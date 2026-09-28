@@ -79,6 +79,51 @@ async function openBuildPreview(page: import('@playwright/test').Page) {
 	return waitForBuildPreview(page);
 }
 
+async function waitForBuildCompletionOrExplainFailure(
+	page: import('@playwright/test').Page,
+	buildId: string,
+	timeout: number
+): Promise<void> {
+	const preview = await waitForBuildPreview(page, timeout);
+	await expect(preview.locator('[data-testid="build-preview-id"]')).toHaveText(buildId);
+	let terminalStatus: 'completed' | 'failed' | null = null;
+	await expect
+		.poll(
+			async () => {
+				if (
+					await preview
+						.getByText('Build failed', { exact: true })
+						.isVisible()
+						.catch(() => false)
+				) {
+					terminalStatus = 'failed';
+					return true;
+				}
+				if (
+					await preview
+						.getByText(/Finished in/)
+						.isVisible()
+						.catch(() => false)
+				) {
+					terminalStatus = 'completed';
+					return true;
+				}
+				return false;
+			},
+			{ timeout, intervals: [250, 500, 1_000] }
+		)
+		.toBe(true);
+
+	if (terminalStatus === 'failed') {
+		await preview.getByRole('tab', { name: /Logs/ }).click();
+		const logs = await preview
+			.locator('[data-testid="build-logs-panel"]')
+			.innerText()
+			.catch(() => 'Build logs unavailable');
+		throw new Error(`Build ${buildId} failed:\n${logs}`);
+	}
+}
+
 async function previewBuildId(page: import('@playwright/test').Page): Promise<string> {
 	await openBuildPreview(page);
 	return waitForBuildPreviewId(page);
@@ -167,9 +212,10 @@ async function waitForBuildRowEventually(
 	_page: import('@playwright/test').Page,
 	panel: ReturnType<import('@playwright/test').Page['locator']>,
 	buildId: string,
-	statuses: Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>
+	statuses: Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>,
+	timeout = buildTimeoutMs()
 ) {
-	return waitForBuildRowById(_page, panel, buildId, statuses, buildTimeoutMs());
+	return waitForBuildRowById(_page, panel, buildId, statuses, timeout);
 }
 
 /**
@@ -512,11 +558,11 @@ test.describe('Monitoring – Health Checks tab', () => {
 	test('health checks search filters by check name', async ({
 		page,
 		request,
-		sharedDatasource
+		sharedAuxDatasource
 	}) => {
 		const id = uid();
 		const hc = `e2e Searchable HC ${id}`;
-		const healthCheckId = await createHealthCheck(request, sharedDatasource.id, hc);
+		const healthCheckId = await createHealthCheck(request, sharedAuxDatasource.id, hc);
 		try {
 			await gotoMonitoringTab(page, 'health');
 			const row = await waitForHealthCheckRow(page, hc);
@@ -539,11 +585,11 @@ test.describe('Monitoring – Health Checks tab', () => {
 	test('health check delete button removes it from list', async ({
 		page,
 		request,
-		sharedDatasource
+		sharedDateDatasource
 	}) => {
 		const id = uid();
 		const hc = `e2e Delete HC ${id}`;
-		const healthCheckId = await createHealthCheck(request, sharedDatasource.id, hc);
+		const healthCheckId = await createHealthCheck(request, sharedDateDatasource.id, hc);
 
 		try {
 			await gotoMonitoringTab(page, 'health');
@@ -561,10 +607,14 @@ test.describe('Monitoring – Health Checks tab', () => {
 		}
 	});
 
-	test('health check enable/disable toggle works', async ({ page, request, sharedDatasource }) => {
+	test('health check enable/disable toggle works', async ({
+		page,
+		request,
+		sharedBulkDatasource
+	}) => {
 		const id = uid();
 		const hc = `e2e Toggle HC ${id}`;
-		const healthCheckId = await createHealthCheck(request, sharedDatasource.id, hc);
+		const healthCheckId = await createHealthCheck(request, sharedBulkDatasource.id, hc);
 		try {
 			await gotoMonitoringTab(page, 'health');
 			const row = await waitForHealthCheckRow(page, hc);
@@ -584,10 +634,10 @@ test.describe('Monitoring – Health Checks tab', () => {
 });
 
 test.describe('Monitoring – Health Check create flow', () => {
-	test('create health check via UI form', async ({ page, sharedDatasource }) => {
+	test('create health check via UI form', async ({ page, sharedHealthCheckDatasource }) => {
 		const id = uid();
 		const hc = `e2e UI Check ${id}`;
-		const dsId = sharedDatasource.id;
+		const dsId = sharedHealthCheckDatasource.id;
 		let healthCheckId: string | undefined;
 		try {
 			await gotoMonitoringTab(page, 'health');
@@ -853,7 +903,12 @@ test.describe('Monitoring – Builds tab', () => {
 		page,
 		request,
 		sharedDatasource
-	}) => {
+	}, testInfo) => {
+		// This test runs two cold builds, then opens the datasource preview to
+		// verify that its row remains Preview-kind. The last 3×4 run reached the
+		// global deadline just after the second build became Complete and before
+		// that final preview check; each build still has its own 120s bound below.
+		testInfo.setTimeout(300_000);
 		const ds = sharedDatasource.name;
 		const analysisName = `E2E Build Determinism ${uid()}`;
 		const dsId = sharedDatasource.id;
@@ -871,7 +926,14 @@ test.describe('Monitoring – Builds tab', () => {
 				const buildId = await startBuildFromAnalysisPage(page, analysisId, previousBuildId);
 				previousBuildId = buildId;
 				startedBuildIds.push(buildId);
-				const row = await waitForBuildRowEventually(monitorPage, panel, buildId, ['completed']);
+				await waitForBuildCompletionOrExplainFailure(page, buildId, 120_000);
+				const row = await waitForBuildRowEventually(
+					monitorPage,
+					panel,
+					buildId,
+					['completed'],
+					15_000
+				);
 				await expect(row).toHaveAttribute('data-build-kind', 'build');
 				await expect(row).toHaveAttribute('data-build-status', 'completed');
 				await expect(row).toContainText('Build');

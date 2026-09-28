@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import asyncio
 import re
 from typing import Any
 from urllib.parse import quote
@@ -10,6 +10,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import FastAPI
 
+from backend_core.websocket import serialize_json
 from modules.mcp.models import MCPHttpMethod
 from modules.mcp.tool_output import redact_secrets
 
@@ -72,7 +73,7 @@ async def call_tool(
             resp = await client.request(
                 method_name,
                 url,
-                content=json.dumps(payload) if payload is not None else b'',
+                content=await serialize_json(payload) if payload is not None else b'',
                 headers=headers,
                 params=query_params,
             )
@@ -81,12 +82,14 @@ async def call_tool(
         else:
             resp = await client.request(method_name, url, params=query_params, headers=headers)
 
-    status = resp.status_code
-    body: Any = None
-    content_type = resp.headers.get('content-type', '')
-    if 'application/json' in content_type:
-        body = resp.json()
-    elif resp.content:
-        body = resp.text
+    def decode_response() -> dict[str, Any]:
+        status = resp.status_code
+        body: Any = None
+        content_type = resp.headers.get('content-type', '')
+        if 'application/json' in content_type:
+            body = resp.json()
+        elif resp.content:
+            body = resp.text
+        return {'status': status, 'body': redact_secrets(body), 'ok': 200 <= status < 300}
 
-    return {'status': status, 'body': redact_secrets(body), 'ok': 200 <= status < 300}
+    return await asyncio.to_thread(decode_response)

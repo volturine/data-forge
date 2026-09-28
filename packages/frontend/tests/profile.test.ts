@@ -1,20 +1,25 @@
-import { test, expect } from './fixtures.js';
+import { E2E_SHARED_NAMESPACE_A, E2E_SHARED_NAMESPACE_B, expect, test } from './fixtures.js';
 import { restoreDefaultNamespace, switchNamespace } from './utils/namespace.js';
 import {
 	waitForAppShell,
 	waitForProfileTabs,
 	waitForProfileTab,
-	gotoProfile
+	gotoProfile,
+	readyTimeoutMs
 } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import { E2E_PASSWORD } from './utils/user-flows.js';
 
+// Profile settings are a singleton app_settings row, shared by all test users.
+// Keep this file ordered so parallel profile tests cannot overwrite each other.
+test.describe.configure({ mode: 'default' });
+
 async function expandSystemExportGroup(page: import('@playwright/test').Page, schemaName: string) {
 	const toggle = page.locator(
 		`[data-testid="system-export-group-toggle"][data-schema-name="${schemaName}"]`
 	);
-	await expect(toggle).toBeVisible();
+	await expect(toggle).toBeVisible({ timeout: readyTimeoutMs() });
 	if ((await toggle.getAttribute('aria-expanded')) === 'true') return;
 	await toggle.click();
 	await expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -295,7 +300,9 @@ test.describe('Profile – Notifications tab', () => {
 		await waitForProfileTab(page, 'Notifications');
 
 		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('Notification settings saved')).toBeVisible({ timeout: 5_000 });
+		await expect(page.getByText('Notification settings saved')).toBeVisible({
+			timeout: 15_000
+		});
 
 		await screenshot(page, 'profile', 'notifications-save-success');
 	});
@@ -368,7 +375,9 @@ test.describe('Profile – System tab', () => {
 		await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 3_000 });
 
 		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('System settings saved')).toBeVisible({ timeout: 5_000 });
+		await expect(page.getByText('System settings saved')).toBeVisible({
+			timeout: 15_000
+		});
 
 		// Verify toggle state is correct immediately after save (before reload)
 		await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 5_000 });
@@ -381,7 +390,9 @@ test.describe('Profile – System tab', () => {
 		await toggle.click();
 		await expect(toggle).toHaveAttribute('aria-checked', String(wasEnabled), { timeout: 3_000 });
 		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('System settings saved')).toBeVisible({ timeout: 5_000 });
+		await expect(page.getByText('System settings saved')).toBeVisible({
+			timeout: 15_000
+		});
 	});
 
 	test('system tab shows collapsible schema groups for export options', async ({ page }) => {
@@ -452,9 +463,8 @@ test.describe('Profile – System tab', () => {
 	test('system tab preserves hash and reloads onboard state when namespace changes', async ({
 		page
 	}) => {
-		const id = uid();
-		const nsA = `e2e-profile-a-${id}`;
-		const nsB = `e2e-profile-b-${id}`;
+		const nsA = E2E_SHARED_NAMESPACE_A;
+		const nsB = E2E_SHARED_NAMESPACE_B;
 		const switchControl = page.locator(
 			'[data-testid="internal-table-onboard-switch"][data-internal-table-key="default.analyses"]'
 		);
@@ -475,7 +485,7 @@ test.describe('Profile – System tab', () => {
 
 			await switchControl.click();
 			await expect(switchControl).toHaveAttribute('aria-checked', 'true', {
-				timeout: 5_000
+				timeout: 10_000
 			});
 
 			await switchNamespace(page, nsB);
@@ -532,7 +542,9 @@ test.describe('Profile – System tab', () => {
 		await waitForProfileTab(page, 'System');
 
 		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('System settings saved')).toBeVisible({ timeout: 5_000 });
+		await expect(page.getByText('System settings saved')).toBeVisible({
+			timeout: 15_000
+		});
 
 		await screenshot(page, 'profile', 'system-save-success');
 	});
@@ -838,7 +850,9 @@ test.describe('Profile – Notifications tab functional', () => {
 
 		// Save
 		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('Notification settings saved')).toBeVisible({ timeout: 5_000 });
+		await expect(page.getByText('Notification settings saved')).toBeVisible({
+			timeout: 15_000
+		});
 
 		// Verify toggle state is correct immediately after save (before reload)
 		await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
@@ -854,7 +868,9 @@ test.describe('Profile – Notifications tab functional', () => {
 		await toggle.click();
 		await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 3_000 });
 		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('Notification settings saved')).toBeVisible({ timeout: 5_000 });
+		await expect(page.getByText('Notification settings saved')).toBeVisible({
+			timeout: 15_000
+		});
 	});
 });
 

@@ -1,15 +1,20 @@
+import json
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlmodel import Session
 
-from backend_core import notification_delivery, runtime_ipc
+from backend_core import notification_delivery, runtime_ipc, runtime_work_service
 from backend_core.claiming import with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
+from backend_core.namespace import get_namespace
 from backend_core.notification_delivery import redact_secrets_in_text
 from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxEvent, RuntimeOutboxStatus
+from backend_core.runtime_work_service import RuntimeWorkKind
 from backend_core.sqlmodel_typing import sa
 from backend_core.transactions import committed
 
@@ -27,6 +32,41 @@ _SENSITIVE_ERROR_FIELDS = frozenset(
         'token',
     }
 )
+_OUTBOX_PENDING_QUERY = """
+    SELECT 1
+    FROM runtime_outbox_events
+    WHERE (status IN ('pending', 'failed') AND available_at <= statement_timestamp())
+       OR (
+            status = 'dispatching'
+            AND lease_expires_at <= statement_timestamp()
+            AND available_at <= statement_timestamp()
+       )
+"""
+_OUTBOX_DUE_QUERY = """
+    SELECT min(next_attempt_at)
+    FROM (
+        SELECT available_at AS next_attempt_at
+        FROM runtime_outbox_events
+        WHERE status IN ('pending', 'failed')
+        UNION ALL
+        SELECT greatest(available_at, lease_expires_at) AS next_attempt_at
+        FROM runtime_outbox_events
+        WHERE status = 'dispatching' AND lease_expires_at IS NOT NULL
+    ) AS scheduled_events
+    WHERE next_attempt_at > statement_timestamp()
+"""
+OUTBOX_WAKE_KIND = 'runtime_outbox_wakeup'
+_RUNTIME_EVENTS_CHANNEL = 'runtime_events'
+_EXTERNAL_DELIVERY_KINDS = frozenset({notification_delivery.EMAIL_DELIVERY_KIND, notification_delivery.TELEGRAM_DELIVERY_KIND})
+
+
+@dataclass(frozen=True, slots=True)
+class _OutboxClaim:
+    event_id: str
+    claim_token: str
+    lease_generation: int
+    event_kind: str
+    payload: dict[str, object]
 
 
 def _redact_payload_secrets(message: str, payload: dict[str, object]) -> str:
@@ -60,6 +100,10 @@ def enqueue_runtime_event(session: Session, payload: dict[str, object]) -> Runti
     )
     session.add(event)
     session.flush()
+    payload_namespace = payload.get('namespace')
+    namespace = payload_namespace if isinstance(payload_namespace, str) and payload_namespace else get_namespace()
+    _mark_namespace_pending(session, namespace=namespace)
+    _notify_dispatcher(session, namespace=namespace)
     return event
 
 
@@ -80,7 +124,40 @@ def enqueue_notification_delivery(session: Session, payload: dict[str, object]) 
     )
     session.add(event)
     session.flush()
+    namespace = get_namespace()
+    _mark_namespace_pending(session, namespace=namespace)
+    _notify_dispatcher(session, namespace=namespace)
     return event
+
+
+def _notify_dispatcher(session: Session, *, namespace: str) -> None:
+    """Wake API outbox dispatchers after this transaction commits.
+
+    PostgreSQL delivers NOTIFY only after the surrounding transaction commits,
+    so a rolled-back event cannot wake a dispatcher for work that does not
+    exist. The five-second dispatcher poll remains the durable recovery path
+    for a lost listener connection or an event committed during startup.
+    SQLite-backed unit tests do not have PostgreSQL NOTIFY and simply use the
+    direct request-path dispatchers.
+    """
+    bind = session.get_bind()
+    if getattr(getattr(bind, 'dialect', None), 'name', None) != 'postgresql':
+        return
+    payload = json.dumps({'kind': OUTBOX_WAKE_KIND, 'namespace': namespace})
+    session.execute(
+        text('SELECT pg_notify(:channel, :payload)'),
+        {'channel': _RUNTIME_EVENTS_CHANNEL, 'payload': payload},
+    )
+
+
+def _mark_namespace_pending(session: Session, *, namespace: str) -> None:
+    """Persist a recovery hint in the same transaction as the outbox event."""
+    runtime_work_service.append_wake(session, namespace=namespace, kind=RuntimeWorkKind.OUTBOX)
+
+
+def list_pending_outbox_namespaces(session: Session) -> list[str]:
+    """Read only namespaces with durable outbox work, using the public index."""
+    return runtime_work_service.list_pending_namespaces(session, kinds=(RuntimeWorkKind.OUTBOX,))
 
 
 enqueue_notification_delivery_command = committed(enqueue_notification_delivery, refresh=True)
@@ -99,33 +176,44 @@ def enqueue_api_build_notification(session: Session, *, namespace: str, build_id
 
 
 def enqueue_build_job_notification(session: Session) -> RuntimeOutboxEvent:
-    return enqueue_runtime_event(session, {'kind': RuntimePayloadKind.JOB.value})
+    return enqueue_runtime_event(session, {'kind': RuntimePayloadKind.JOB.value, 'namespace': get_namespace()})
 
 
-def enqueue_compute_request_notification(session: Session, *, request_id: str) -> RuntimeOutboxEvent:
+def enqueue_datasource_delete_notification(session: Session, *, datasource_id: str) -> RuntimeOutboxEvent:
     return enqueue_runtime_event(
         session,
-        {'kind': RuntimePayloadKind.COMPUTE_REQUEST.value, 'request_id': request_id},
+        {
+            'kind': RuntimePayloadKind.DATASOURCE_DELETE.value,
+            'namespace': get_namespace(),
+            'datasource_id': datasource_id,
+        },
     )
 
 
-def enqueue_compute_response_notification(session: Session, *, request_id: str) -> RuntimeOutboxEvent:
-    return enqueue_runtime_event(
-        session,
-        {'kind': RuntimePayloadKind.COMPUTE_RESPONSE.value, 'request_id': request_id},
-    )
+def dispatch_pending_events(session: Session, *, limit: int = 1) -> int:
+    """Dispatch a bounded number of durable notifications.
 
+    Dispatching is called from request paths and runtime recovery.  Draining a
+    large batch from each caller turns one notification into a multiplying
+    database/gRPC workload under a browser burst.  Recovery invokes this
+    function again, and callers that intentionally need a larger batch pass an
+    explicit limit. External email and chat delivery is at-least-once: the
+    provider send and database receipt cannot share one transaction, so a
+    process crash between them can cause a retry to deliver twice.
+    """
+    bind = session.get_bind()
+    if settings.distributed_runtime_enabled and getattr(getattr(bind, 'dialect', None), 'name', None) == 'postgresql':
+        return _dispatch_postgres_events(session, limit=max(int(limit), 0))
 
-def dispatch_pending_events(session: Session, *, limit: int = 100) -> int:
     dispatched = 0
-    for _ in range(limit):
+    for _ in range(max(int(limit), 0)):
         claim = _claim_next_event(session)
         if claim is None:
             break
         event_id, claim_token, lease_generation, event_kind, payload = claim
         delivery_payload = {**payload, 'event_id': event_id}
         try:
-            if event_kind in {notification_delivery.EMAIL_DELIVERY_KIND, notification_delivery.TELEGRAM_DELIVERY_KIND}:
+            if event_kind in _EXTERNAL_DELIVERY_KINDS:
                 if not _notification_was_delivered(session, event_id):
                     notification_delivery.deliver(delivery_payload, event_id=event_id)
                     _record_notification_delivery(session, event_id=event_id, kind=event_kind)
@@ -142,7 +230,60 @@ def dispatch_pending_events(session: Session, *, limit: int = 100) -> int:
             continue
         if _finalize_claim(session, event_id, claim_token=claim_token, lease_generation=lease_generation, error=None):
             dispatched += 1
+    _clear_namespace_pending_if_idle(session)
+    session.commit()
     return dispatched
+
+
+def _dispatch_postgres_events(session: Session, *, limit: int) -> int:
+    """Claim runtime wakes in batches and commit each batch with its NOTIFYs."""
+    dispatched = 0
+    processed = 0
+    while processed < limit:
+        claims = _claim_next_events(session, limit=limit - processed)
+        if not claims:
+            break
+        processed += len(claims)
+
+        if claims[0].event_kind in _EXTERNAL_DELIVERY_KINDS:
+            claim = claims[0]
+            error: str | None = None
+            try:
+                if not _notification_was_delivered(session, claim.event_id):
+                    notification_delivery.deliver(
+                        {**claim.payload, 'event_id': claim.event_id},
+                        event_id=claim.event_id,
+                    )
+                    _record_notification_delivery(session, event_id=claim.event_id, kind=claim.event_kind)
+            except Exception as exc:  # noqa: BLE001 - preserve retry state for transport failures.
+                error = _redact_payload_secrets(str(exc), claim.payload)
+            _finalized, delivered = _finalize_claims(session, [(claim, error)])
+            dispatched += delivered
+            continue
+
+        outcomes = [(claim, None) for claim in claims]
+        try:
+            _finalized, delivered = _finalize_claims(session, outcomes)
+        except Exception as exc:  # noqa: BLE001 - roll back notify+finalize, then persist retry state.
+            session.rollback()
+            failures = [(claim, _redact_payload_secrets(str(exc), claim.payload)) for claim in claims]
+            _finalized, delivered = _finalize_claims(session, failures)
+        dispatched += delivered
+
+    _clear_namespace_pending_if_idle(session)
+    session.commit()
+    return dispatched
+
+
+def _clear_namespace_pending_if_idle(session: Session) -> None:
+    """Clear a marker only after every active event in this tenant is gone."""
+    runtime_work_service.refresh_pending_work(
+        session,
+        namespace=get_namespace(),
+        kind=RuntimeWorkKind.OUTBOX,
+        pending_query=_OUTBOX_PENDING_QUERY,
+        due_query=_OUTBOX_DUE_QUERY,
+    )
 
 
 def _notification_was_delivered(session: Session, event_id: str) -> bool:
@@ -156,7 +297,9 @@ def _record_notification_delivery(session: Session, *, event_id: str, kind: str)
     session.commit()
 
 
-def _claim_next_event(session: Session) -> tuple[str, str, int, str, dict[str, object]] | None:
+def _claim_next_events(session: Session, *, limit: int) -> list[_OutboxClaim]:
+    if limit < 1:
+        return []
     now = _database_now(session)
     table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
     base = (
@@ -169,23 +312,51 @@ def _claim_next_event(session: Session) -> tuple[str, str, int, str, dict[str, o
         )
         .where(sa(RuntimeOutboxEvent.available_at <= now))
         .order_by(sa(RuntimeOutboxEvent.available_at), sa(RuntimeOutboxEvent.created_at), sa(RuntimeOutboxEvent.id))
-        .limit(1)
+        .limit(limit)
     )
     stmt = with_for_update_skip_locked(session, base)
-    event = session.execute(stmt).scalars().first()
-    if event is None:
+    events = list(session.execute(stmt).scalars().all())
+    if not events:
         session.rollback()
-        return None
-    claim_token = str(uuid.uuid4())
-    event.status = RuntimeOutboxStatus.DISPATCHING
-    event.claim_token = claim_token
-    event.lease_generation += 1
-    event.lease_expires_at = now + timedelta(seconds=settings.runtime_outbox_claim_ttl_seconds)
-    event.attempts += 1
-    event.updated_at = now
-    session.add(event)
+        return []
+
+    selected: list[RuntimeOutboxEvent] = []
+    for event in events:
+        if event.kind in _EXTERNAL_DELIVERY_KINDS:
+            if not selected:
+                selected.append(event)
+            break
+        selected.append(event)
+
+    claims: list[_OutboxClaim] = []
+    for event in selected:
+        claim_token = str(uuid.uuid4())
+        event.status = RuntimeOutboxStatus.DISPATCHING
+        event.claim_token = claim_token
+        event.lease_generation += 1
+        event.lease_expires_at = now + timedelta(seconds=settings.runtime_outbox_claim_ttl_seconds)
+        event.attempts += 1
+        event.updated_at = now
+        claims.append(
+            _OutboxClaim(
+                event_id=event.id,
+                claim_token=claim_token,
+                lease_generation=event.lease_generation,
+                event_kind=event.kind,
+                payload=dict(event.payload_json),
+            )
+        )
+        session.add(event)
     session.commit()
-    return event.id, claim_token, event.lease_generation, event.kind, dict(event.payload_json)
+    return claims
+
+
+def _claim_next_event(session: Session) -> tuple[str, str, int, str, dict[str, object]] | None:
+    claims = _claim_next_events(session, limit=1)
+    if not claims:
+        return None
+    claim = claims[0]
+    return claim.event_id, claim.claim_token, claim.lease_generation, claim.event_kind, claim.payload
 
 
 def pending_event_count(session: Session) -> int:
@@ -206,28 +377,48 @@ def _finalize_claim(
     lease_generation: int,
     error: str | None,
 ) -> bool:
+    claim = _OutboxClaim(
+        event_id=event_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+        event_kind='',
+        payload={},
+    )
+    finalized, _dispatched = _finalize_claims(session, [(claim, error)])
+    return finalized == 1
+
+
+def _finalize_claims(session: Session, outcomes: Sequence[tuple[_OutboxClaim, str | None]]) -> tuple[int, int]:
+    if not outcomes:
+        return 0, 0
+
     now = _database_now(session)
     table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
-    statement = (
-        select(RuntimeOutboxEvent)
-        .where(table.c.id == event_id)
-        .where(table.c.status == RuntimeOutboxStatus.DISPATCHING)
-        .where(table.c.claim_token == claim_token)
-        .where(table.c.lease_generation == lease_generation)
-        .with_for_update()
-    )
-    event = session.execute(statement).scalars().first()
-    if event is None:
+    claims_by_id = {claim.event_id: (claim, error) for claim, error in outcomes}
+    statement = select(RuntimeOutboxEvent).where(table.c.id.in_(claims_by_id)).where(table.c.status == RuntimeOutboxStatus.DISPATCHING).with_for_update()
+    events = list(session.execute(statement).scalars().all())
+    finalized = 0
+    dispatched = 0
+    for event in events:
+        claim, error = claims_by_id[event.id]
+        if event.claim_token != claim.claim_token or event.lease_generation != claim.lease_generation:
+            continue
+        if error is None and event.kind not in _EXTERNAL_DELIVERY_KINDS:
+            runtime_ipc.notify_runtime_payload_on_commit(session, {**event.payload_json, 'event_id': event.id})
+        poisoned = error is not None and event.attempts >= settings.runtime_outbox_max_attempts
+        event.status = RuntimeOutboxStatus.DISPATCHED if error is None else RuntimeOutboxStatus.POISONED if poisoned else RuntimeOutboxStatus.FAILED
+        event.claim_token = None
+        event.lease_expires_at = None
+        event.last_error = error[:1000] if error is not None else None
+        event.available_at = now + timedelta(seconds=settings.runtime_outbox_retry_seconds) if error is not None and not poisoned else now
+        event.dispatched_at = now if error is None else None
+        event.updated_at = now
+        session.add(event)
+        finalized += 1
+        if error is None:
+            dispatched += 1
+    if finalized == 0:
         session.rollback()
-        return False
-    poisoned = error is not None and event.attempts >= settings.runtime_outbox_max_attempts
-    event.status = RuntimeOutboxStatus.DISPATCHED if error is None else RuntimeOutboxStatus.POISONED if poisoned else RuntimeOutboxStatus.FAILED
-    event.claim_token = None
-    event.lease_expires_at = None
-    event.last_error = error[:1000] if error is not None else None
-    event.available_at = now + timedelta(seconds=settings.runtime_outbox_retry_seconds) if error is not None and not poisoned else now
-    event.dispatched_at = now if error is None else None
-    event.updated_at = now
-    session.add(event)
+        return 0, 0
     session.commit()
-    return True
+    return finalized, dispatched

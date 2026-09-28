@@ -19,6 +19,7 @@ _MODEL_MODULES = (
     'backend_core.persistence.engine_runs.models',
     'backend_core.persistence.healthchecks.models',
     'backend_core.persistence.locks.models',
+    'backend_core.persistence.mcp_pending.models',
     'backend_core.persistence.namespaces.models',
     'backend_core.persistence.runtime_events.models',
     'backend_core.persistence.runtime_workers.models',
@@ -42,7 +43,16 @@ def _should_configure_logging() -> bool:
 if config.config_file_name is not None and _should_configure_logging():
     fileConfig(config.config_file_name)
 
-_SHARED_TABLES = {'app_settings', 'engine_instances', 'runtime_namespaces', 'runtime_workers'}
+_SHARED_TABLES = {
+    'app_settings',
+    'engine_instances',
+    'mcp_pending_actions',
+    'runtime_namespaces',
+    'runtime_namespace_work',
+    'runtime_namespace_work_wakes',
+    'runtime_coordinator_state',
+    'runtime_workers',
+}
 _TENANT_TABLES = {
     'analyses',
     'analysis_datasources',
@@ -52,6 +62,7 @@ _TENANT_TABLES = {
     'build_jobs',
     'build_runs',
     'compute_requests',
+    'compute_request_flights',
     'datasources',
     'datasource_column_metadata',
     'engine_runs',

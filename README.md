@@ -88,7 +88,7 @@ Data-Forge is a **local-first**, **no-code** data transformation tool. Build mul
 Docker has one production topology:
 
 ```text
-postgres + RustFS + api + scheduler + worker
+postgres + RustFS + api + runtime coordinator + scheduler + worker
 ```
 
 The API container serves both the backend API and the built frontend on port 8000.
@@ -120,7 +120,7 @@ just install
 just prod
 ```
 
-`just prod` builds the frontend and runs API, scheduler, and worker as one
+`just prod` builds the frontend and runs API, runtime coordinator, scheduler, and worker as one
 foreground process group. Standalone binaries from the old single-process
 runtime are not supported by the current architecture.
 
@@ -159,9 +159,15 @@ docker compose --env-file docker/env/prod.env \
 ```
 
 The repository defaults are tuned for concurrent clients:
-- Docker production defaults to `4` API workers in the `api` service
-- build throughput scales in the `worker` service up to `DF_BUILD_WORKER_MAX_PROCESSES`
-- zero warm build workers are kept by default; worker subprocesses spawn on demand and exit when idle
+
+- Docker production defaults to `4` stateless API workers in the `api` service;
+  the dedicated `runtime` service owns the runtime control plane
+- `COMPUTE_WORKERS` is one shared cap for previews, datasource jobs, and builds;
+  the same value bounds assigned workers, and queued work stays durable
+- `COMPUTE_WARM_WORKERS` keeps ready, unassigned workers in reserve. These are
+  the same worker containers as assigned workers, just not yet bound to a
+  resource identity; claiming one binds it to that exact identity and starts
+  its replacement. This reserve is additional to active `COMPUTE_WORKERS`.
 
 ### Development (local runtime)
 

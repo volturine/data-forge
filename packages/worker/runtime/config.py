@@ -10,14 +10,11 @@ from pathlib import Path
 class WorkerSettings:
     data_dir: Path
     default_namespace: str
-    compute_request_concurrency: int
+    # Global job budget; also caps active engine identities.
+    compute_workers: int
     runtime_reconciliation_poll_interval_seconds: int
-    build_worker_min_processes: int
-    build_worker_max_processes: int
-    build_worker_idle_exit_seconds: int
     engine_idle_ttl_seconds: int
     engine_idle_reap_interval_seconds: int
-    max_concurrent_engines: int
     polars_cores_available: int
     polars_max_memory_mb: int
     polars_streaming_chunk_size: int
@@ -43,8 +40,7 @@ class WorkerSettings:
     engine_start_timeout_seconds: int
     engine_shutdown_grace_seconds: int
     engine_heartbeat_interval_seconds: int
-    engine_job_concurrency: int
-    engine_warm_pool_size: int
+    compute_warm_workers: int
     deployment_id: str
 
 
@@ -70,17 +66,16 @@ def _read_bool(name: str, default: bool) -> bool:
     raise RuntimeError(f"{name} must be a boolean value")
 
 
+_COMPUTE_WORKERS = _read_int("COMPUTE_WORKERS", 14, min_value=1, max_value=100)
+
+
 settings = WorkerSettings(
     data_dir=Path(os.environ.get("DATA_DIR", str(Path(tempfile.gettempdir()) / "data-forge"))),
     default_namespace=os.environ.get("DEFAULT_NAMESPACE", "default").strip() or "default",
-    compute_request_concurrency=_read_int("COMPUTE_REQUEST_CONCURRENCY", 4, min_value=1, max_value=100),
+    compute_workers=_COMPUTE_WORKERS,
     runtime_reconciliation_poll_interval_seconds=_read_int("RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS", 1, min_value=1),
-    build_worker_min_processes=_read_int("BUILD_WORKER_MIN_PROCESSES", 0, min_value=0, max_value=100),
-    build_worker_max_processes=_read_int("BUILD_WORKER_MAX_PROCESSES", 10, min_value=0, max_value=100),
-    build_worker_idle_exit_seconds=_read_int("BUILD_WORKER_IDLE_EXIT_SECONDS", 30, min_value=1),
     engine_idle_ttl_seconds=_read_int("ENGINE_IDLE_TTL_SECONDS", 300, min_value=1),
     engine_idle_reap_interval_seconds=_read_int("ENGINE_IDLE_REAP_INTERVAL_SECONDS", 30, min_value=1),
-    max_concurrent_engines=_read_int("MAX_CONCURRENT_ENGINES", 10, min_value=1, max_value=100),
     # Total cores available for engines (0 = all logical CPUs). Not Polars' native env.
     polars_cores_available=_read_int("POLARS_CORES_AVAILABLE", 0, min_value=0),
     polars_max_memory_mb=_read_int("POLARS_MAX_MEMORY_MB", 0, min_value=0),
@@ -109,13 +104,8 @@ settings = WorkerSettings(
     engine_start_timeout_seconds=_read_int("ENGINE_START_TIMEOUT_SECONDS", 30, min_value=1),
     engine_shutdown_grace_seconds=_read_int("ENGINE_SHUTDOWN_GRACE_SECONDS", 10, min_value=1),
     engine_heartbeat_interval_seconds=_read_int("ENGINE_HEARTBEAT_INTERVAL_SECONDS", 5, min_value=1),
-    # A shared engine must be able to serve independent browser requests at
-    # the same time. This is per-engine job concurrency; the global engine
-    # count remains governed by MAX_CONCURRENT_ENGINES.
-    engine_job_concurrency=_read_int("ENGINE_JOB_CONCURRENCY", 4, min_value=1, max_value=32),
-    # The warm pool is owned by the single build-manager process and shares
-    # the application-wide engine cap. Keep it intentionally smaller than
-    # the cap so most capacity remains available for active work.
-    engine_warm_pool_size=_read_int("ENGINE_WARM_POOL_SIZE", 0, min_value=0, max_value=100),
+    # Ready, unassigned compute workers kept as a latency reserve. A worker
+    # receives an application-wide lease only when bound to an engine identity.
+    compute_warm_workers=_read_int("COMPUTE_WARM_WORKERS", 0, min_value=0, max_value=100),
     deployment_id=os.environ.get("DATAFORGE_DEPLOYMENT_ID", "dataforge").strip() or "dataforge",
 )

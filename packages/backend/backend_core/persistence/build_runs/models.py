@@ -1,7 +1,7 @@
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Column, DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Float, Index, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.build_runs.models import BuildRunStatus
@@ -10,6 +10,10 @@ from backend_core.domain.compute import schemas as compute_schemas
 
 class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     __tablename__ = 'build_runs'  # type: ignore[assignment]
+    __table_args__ = (
+        Index('ix_build_runs_datasource_completion', 'current_datasource_id', 'status', 'completed_at'),
+        Index('ix_build_runs_output_completion', 'current_output_id', 'status', 'completed_at'),
+    )
 
     def apply_event_context(self, event: compute_schemas.BuildEvent) -> None:
         if event.current_datasource_id is not None:

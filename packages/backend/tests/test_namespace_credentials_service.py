@@ -98,6 +98,30 @@ def test_provision_roles_runs_independent_object_store_operations_concurrently(s
     assert admin.max_active_user_adds == 2
 
 
+def test_provision_releases_database_transaction_during_object_store_calls(session, monkeypatch):
+    class TransactionCheckingAdmin(FakeAdmin):
+        async def user_add(self, access_key: str, secret_key: str) -> str:
+            assert not session.in_transaction()
+            return await super().user_add(access_key, secret_key)
+
+        async def policy_add(self, policy_name: str, policy_path: str) -> str:
+            assert not session.in_transaction()
+            return await super().policy_add(policy_name, policy_path)
+
+        async def policy_set(self, policy_name: str, *, user: str, group: str | None = None) -> str:
+            assert not session.in_transaction()
+            return await super().policy_set(policy_name, user=user, group=group)
+
+    monkeypatch.setattr(
+        'backend_core.namespace_credentials_service._admin_client',
+        lambda _client_session: TransactionCheckingAdmin(),
+    )
+
+    provision_namespace_engine_credentials(session, 'tenant-a')
+
+    assert len(session.exec(select(NamespaceEngineCredential)).all()) == 2
+
+
 def test_provision_is_idempotent(session, fake_admin):
     provision_namespace_engine_credentials(session, 'tenant-a')
     calls_after_first = list(fake_admin.calls)

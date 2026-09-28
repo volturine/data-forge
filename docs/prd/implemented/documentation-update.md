@@ -29,16 +29,16 @@ records remain organized in `docs/prd/implemented`, `docs/prd/active`, and
 
 ## Deployment decision
 
-The supported production architecture has five logical services:
+The supported production architecture has six runtime services:
 
 ```text
-PostgreSQL + S3-compatible object storage + API + Scheduler + Worker
+PostgreSQL + S3-compatible object storage + API + Runtime coordinator + Scheduler + Worker
 ```
 
 Docker Compose is recommended and includes RustFS as the S3-compatible store.
-Source deployment runs the same three fixed application roles against separately
+Source deployment runs the same four fixed application roles against separately
 managed PostgreSQL and object storage. `just prod` builds protocol/frontend
-artifacts, loads `config/env/prod.env`, runs all three roles in the foreground,
+artifacts, loads `docker/env/prod.env`, runs all four roles in the foreground,
 and shuts down the group when any role exits.
 
 The binary-release requirement in the original proposal was retired. v0.2-era
@@ -70,7 +70,7 @@ single-process packaging path.
 - [x] Environment variables and deployment topologies are documented.
 - [x] Contribution and frontend package workflows are project-specific.
 - [x] Deployment covers Docker Compose and source production paths.
-- [x] The supported PostgreSQL, object-store, API, scheduler, and worker topology is consistent across guides and env templates.
+- [x] The supported PostgreSQL, object-store, API, runtime coordinator, scheduler, and worker topology is consistent across guides and env templates.
 - [x] `just prod` builds artifacts and supervises all fixed application roles.
 - [x] Reverse proxy, TLS, health, backup/restore, update, and secret-rotation responsibilities are documented.
 - [x] Legacy standalone binaries are explicitly unsupported.

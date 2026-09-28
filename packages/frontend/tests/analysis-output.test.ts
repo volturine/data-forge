@@ -593,7 +593,8 @@ test.describe('Analyses – row count action', () => {
 });
 
 test.describe('Analyses – row count on non-view steps', () => {
-	test('count-rows works on a filter step', async ({ page, request }) => {
+	test('count-rows works on a filter step', async ({ page, request }, testInfo) => {
+		testInfo.setTimeout(180_000);
 		const aName = `E2E Row Count Filter ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
@@ -613,6 +614,9 @@ test.describe('Analyses – row count on non-view steps', () => {
 			await expect(configPanel.getByRole('button', { name: 'Apply' })).toBeDisabled({
 				timeout: 5_000
 			});
+			// The row-count command shares this analysis's serial worker. Wait for
+			// the updated preview instead of queuing a cold-start count behind it.
+			await waitForInlinePreviewReady(page, 150_000);
 
 			// Click count-rows on the filter node
 			const countBtn = filterNode.locator('[data-testid="step-row-count-button"]');
@@ -628,7 +632,8 @@ test.describe('Analyses – row count on non-view steps', () => {
 		}
 	});
 
-	test('count-rows works on a limit step', async ({ page, request }) => {
+	test('count-rows works on a limit step', async ({ page, request }, testInfo) => {
+		testInfo.setTimeout(180_000);
 		const aName = `E2E Row Count Limit ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
@@ -644,6 +649,7 @@ test.describe('Analyses – row count on non-view steps', () => {
 			await expect(configPanel.getByRole('button', { name: 'Apply' })).toBeDisabled({
 				timeout: 5_000
 			});
+			await waitForInlinePreviewReady(page, 150_000);
 
 			// Click count-rows on the limit node
 			const countBtn = limitNode.locator('[data-testid="step-row-count-button"]');

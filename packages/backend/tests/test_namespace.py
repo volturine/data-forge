@@ -1,5 +1,7 @@
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event
 
 import pytest
 
@@ -104,6 +106,7 @@ def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.Monke
     monkeypatch.setattr(namespace_routes, 'register_namespace', lambda session, name: registered.append(name))
     monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', lambda name: provisioned.append(name))
     monkeypatch.setattr(namespace_routes, 'initialize_namespace_db', lambda name: None)
+    monkeypatch.setattr(namespace_routes, 'namespace_provision_lock', lambda _name: nullcontext())
 
     from main import app
 
@@ -133,10 +136,11 @@ def test_create_namespace_provisions_bucket_and_credentials_in_parallel(
         started.append('bucket')
         both_started.wait(timeout=2)
 
-    def run_settings_db(function, name: str) -> bool | None:
+    def run_settings_db(function, name: str, **kwargs) -> bool | None:
         if function is namespace_routes.runtime_namespace_exists:
             return False
         if function is namespace_routes.provision_namespace_engine_credentials:
+            assert kwargs == {'namespace_lock_held': True}
             started.append('credentials')
             both_started.wait(timeout=2)
             return None
@@ -147,6 +151,7 @@ def test_create_namespace_provisions_bucket_and_credentials_in_parallel(
     monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', provision_bucket)
     monkeypatch.setattr(namespace_routes, 'run_settings_db', run_settings_db)
     monkeypatch.setattr(namespace_routes, 'initialize_namespace_db', lambda name: None)
+    monkeypatch.setattr(namespace_routes, 'namespace_provision_lock', lambda _name: nullcontext())
 
     response = namespace_routes._create_namespace('parallel')
 
@@ -170,12 +175,64 @@ def test_create_namespace_reuses_published_namespace_without_reprovisioning(
     monkeypatch.setattr(namespace_routes, 'run_settings_db', run_settings_db)
     monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda name: calls.append(f'paths:{name}'))
     monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', lambda name: calls.append(f'bucket:{name}'))
+    monkeypatch.setattr(namespace_routes, 'namespace_provision_lock', lambda _name: nullcontext())
 
     response = namespace_routes._create_namespace('published')
 
     assert response.created_bucket is False
     assert response.name == 'published'
     assert calls == ['published']
+
+
+def test_namespace_provisioning_failure_waits_for_sibling_work_before_unlocking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bucket_started = Event()
+    migration_started = Event()
+    release_bucket = Event()
+    release_migration = Event()
+    lock_released = Event()
+
+    @contextmanager
+    def provisioning_lock(_name: str):
+        try:
+            yield
+        finally:
+            lock_released.set()
+
+    def provision_bucket(_name: str) -> None:
+        bucket_started.set()
+        assert release_bucket.wait(timeout=2)
+
+    def initialize_database(_name: str) -> None:
+        migration_started.set()
+        assert release_migration.wait(timeout=2)
+
+    def run_settings_db(function, name: str, **kwargs):
+        if function is namespace_routes.runtime_namespace_exists:
+            return False
+        assert function is namespace_routes.provision_namespace_engine_credentials
+        assert kwargs == {'namespace_lock_held': True}
+        raise RuntimeError(f'credentials failed for {name}')
+
+    monkeypatch.setattr(namespace_routes, 'namespace_provision_lock', provisioning_lock)
+    monkeypatch.setattr(namespace_routes, 'run_settings_db', run_settings_db)
+    monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda _name: None)
+    monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', provision_bucket)
+    monkeypatch.setattr(namespace_routes, 'initialize_namespace_db', initialize_database)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(namespace_routes._create_namespace, 'drain')
+        assert bucket_started.wait(timeout=2)
+        assert migration_started.wait(timeout=2)
+        assert not future.done()
+        assert not lock_released.is_set()
+        release_bucket.set()
+        release_migration.set()
+        with pytest.raises(RuntimeError, match='credentials failed'):
+            future.result(timeout=2)
+
+    assert lock_released.is_set()
 
 
 def test_provision_namespace_bucket_uses_explicit_data_plane_operation(monkeypatch: pytest.MonkeyPatch) -> None:

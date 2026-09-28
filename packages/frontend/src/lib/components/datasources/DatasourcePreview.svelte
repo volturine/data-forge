@@ -11,10 +11,7 @@
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
 	import { datasourceHasMaterializedSnapshot, type DataSource } from '$lib/types/datasource';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import {
-		buildDatasourcePreviewPipelinePayload,
-		normalizeSnapshotConfig
-	} from '$lib/utils/analysis-pipeline';
+	import { buildDatasourcePreviewPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import { toComputeError } from '$lib/utils/compute-error';
 	import { css } from '$lib/styles/panda';
 
@@ -72,33 +69,32 @@
 		});
 	});
 
-	const configKey = $derived(JSON.stringify(normalizeSnapshotConfig(datasourceConfig)));
-	const pipelineKey = $derived(JSON.stringify(analysisPipeline));
-
-	const query = createQuery(() => ({
-		queryKey: [
-			'datasource-preview',
-			ns.value,
-			datasourceId,
-			page,
-			rowLimit,
-			configKey,
-			pipelineKey
-		],
-		queryFn: async (): Promise<StepPreviewResponse> => {
-			const pipeline = analysisPipeline!;
-			const request = {
+	const previewRequestState = $derived.by(() => {
+		if (!analysisPipeline) return null;
+		return {
+			request: {
 				target_step_id: 'source',
-				engine_identity: {
-					scope: 'datasource_preview',
-					reuse_policy: 'shared',
-					resource_id: datasourceId,
-					datasource_id: datasourceId
-				},
-				analysis_pipeline: pipeline,
+				datasource_id: datasourceId,
+				analysis_pipeline: analysisPipeline,
 				row_limit: rowLimit,
 				page
-			} satisfies StepPreviewRequest;
+			} satisfies StepPreviewRequest
+		};
+	});
+
+	const query = createQuery(() => ({
+		// Keep execution tied to the same datasource RID and complete command
+		// represented by the cache key, even if page/config state changes mid-fetch.
+		queryKey: [
+			'datasource-preview',
+			ns.ready ? ns.value : null,
+			datasourceId,
+			previewRequestState
+		] as const,
+		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
+			const state = queryKey[3];
+			if (!state) throw new Error('Datasource preview command is not ready');
+			const { request } = state;
 			const signal = previewSignal(request);
 			const result = await previewStepData(request, { signal });
 			throwIfAborted(signal);
@@ -110,7 +106,8 @@
 		staleTime: 30000,
 		refetchOnMount: false,
 		retry: false,
-		enabled: !!datasourceId && !!analysisPipeline && !ns.switching && canPreviewDatasource
+		enabled:
+			ns.ready && !!datasourceId && !!previewRequestState && !ns.switching && canPreviewDatasource
 	}));
 
 	const data = $derived(query.data);
@@ -123,8 +120,8 @@
 	const previewState = $derived.by(() => {
 		if (!canPreviewDatasource) return 'inactive';
 		if (!analysisPipeline) return 'waiting-for-payload';
-		if (isLoading) return 'loading';
 		if (error) return 'error';
+		if (isLoading) return 'loading';
 		if (data) return 'ready';
 		return 'idle';
 	});
@@ -154,6 +151,9 @@
 	data-testid="datasource-preview"
 	data-preview-ready={data && !isLoading && !error ? 'true' : undefined}
 	data-preview-state={previewState}
+	data-preview-query-status={query.status}
+	data-preview-fetch-status={query.fetchStatus}
+	data-preview-has-data={query.data ? 'true' : 'false'}
 	data-preview-error={errorMessage || undefined}
 >
 	{#if !canPreviewDatasource}

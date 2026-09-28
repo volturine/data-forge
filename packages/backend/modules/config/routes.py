@@ -6,8 +6,6 @@ import asyncio
 import time
 import uuid
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from threading import Lock
 
 from fastapi import Query
@@ -50,30 +48,66 @@ _CONFIG_CACHE_TTL: float = 10.0
 
 
 class FrontendConfigCache:
-    def __init__(self, ttl: float) -> None:
+    def __init__(self, ttl: float, clock: Callable[[], float] = time.monotonic) -> None:
         self._ttl = ttl
+        self._clock = clock
         self._config: FrontendConfig | None = None
         self._expires_at = 0.0
-        self._lock = Lock()
+        self._state_lock = Lock()
+        self._generation = 0
+        self._refresh_task: asyncio.Task[FrontendConfig] | None = None
 
-    def get_or_create(self, create: Callable[[], FrontendConfig]) -> FrontendConfig:
-        with self._lock:
-            if self._config is not None and time.monotonic() < self._expires_at:
+    async def get_or_create(self, create: Callable[[], FrontendConfig]) -> FrontendConfig:
+        with self._state_lock:
+            if self._config is not None and self._clock() < self._expires_at:
                 return self._config
 
-            config = create()
-            self._config = config
-            self._expires_at = time.monotonic() + self._ttl
-            return config
+            task = self._refresh_task
+            if task is None:
+                task = asyncio.create_task(self._refresh(create))
+                task.add_done_callback(self._consume_refresh_exception)
+                self._refresh_task = task
+
+        # A cancelled request must not cancel a config refresh shared by other
+        # browser tabs. Followers await the same task without occupying threads.
+        return await asyncio.shield(task)
+
+    async def _refresh(self, create: Callable[[], FrontendConfig]) -> FrontendConfig:
+        task = asyncio.current_task()
+        try:
+            while True:
+                with self._state_lock:
+                    generation = self._generation
+
+                config = await asyncio.to_thread(create)
+
+                with self._state_lock:
+                    if generation != self._generation:
+                        continue
+                    self._config = config
+                    self._expires_at = self._clock() + self._ttl
+                    if self._refresh_task is task:
+                        self._refresh_task = None
+                    return config
+        except BaseException:
+            with self._state_lock:
+                if self._refresh_task is task:
+                    self._refresh_task = None
+            raise
+
+    @staticmethod
+    def _consume_refresh_exception(task: asyncio.Task[FrontendConfig]) -> None:
+        if not task.cancelled():
+            task.exception()
 
     def invalidate(self) -> None:
-        with self._lock:
+        with self._state_lock:
+            self._generation += 1
             self._config = None
             self._expires_at = 0.0
 
 
 _frontend_config_cache = FrontendConfigCache(_CONFIG_CACHE_TTL)
-_CONFIG_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix='frontend-config')
 
 
 def invalidate_config_cache() -> None:
@@ -95,11 +129,7 @@ def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
 @handle_errors(operation='get config')
 async def get_config() -> FrontendConfig:
     """Get application configuration: runtime settings, logging settings, feature flags, and default namespace."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _CONFIG_EXECUTOR,
-        partial(_frontend_config_cache.get_or_create, _build_frontend_config),
-    )
+    return await _frontend_config_cache.get_or_create(_build_frontend_config)
 
 
 def _build_frontend_config() -> FrontendConfig:

@@ -12,24 +12,22 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('port', 1, 65535),
     ('internal_grpc_port', 1, 65535),
     ('worker_data_plane_grpc_port', 1, 65535),
+    ('database_pool_size', 1, 100),
+    ('database_max_overflow', 0, 32),
+    ('database_pool_timeout', 1, None),
     ('scheduler_check_interval', 1, None),
     ('lock_ttl_seconds', 1, None),
     ('lock_heartbeat_interval_seconds', 1, None),
     ('polars_cores_available', 0, None),
     ('polars_max_memory_mb', 0, None),
     ('polars_streaming_chunk_size', 0, None),
-    ('max_concurrent_engines', 1, 100),
     ('workers', 0, 32),
-    ('compute_request_concurrency', 1, 100),
     ('runtime_reconciliation_poll_interval_seconds', 1, None),
     ('runtime_outbox_retry_seconds', 1, None),
     ('runtime_outbox_claim_ttl_seconds', 1, None),
     ('runtime_outbox_max_attempts', 1, None),
     ('runtime_compute_max_attempts', 1, None),
     ('runtime_work_lease_ttl_seconds', 1, None),
-    ('build_worker_min_processes', 0, 100),
-    ('build_worker_max_processes', 0, 100),
-    ('build_worker_idle_exit_seconds', 1, None),
     ('engine_idle_ttl_seconds', 1, None),
     ('engine_idle_reap_interval_seconds', 1, None),
     ('log_queue_max_size', 1, None),
@@ -99,10 +97,14 @@ class Settings(BaseSettings):
     internal_api_token: str = Field(default='', alias='INTERNAL_API_TOKEN')
     internal_grpc_host: str = Field(default='127.0.0.1', alias='INTERNAL_GRPC_HOST')
     internal_grpc_port: int = Field(default=50051, alias='INTERNAL_GRPC_PORT')
+    runtime_coordinator_target: str = Field(default='', alias='RUNTIME_COORDINATOR_TARGET')
     worker_data_plane_grpc_target: str = Field(default='127.0.0.1:50052', alias='WORKER_DATA_PLANE_GRPC_TARGET')
     worker_data_plane_grpc_port: int = Field(default=50052, alias='WORKER_DATA_PLANE_GRPC_PORT')
-    database_pool_size: int = Field(default=10, alias='DATABASE_POOL_SIZE')
-    database_max_overflow: int = Field(default=20, alias='DATABASE_MAX_OVERFLOW')
+    # These limits apply to one process and one SQLAlchemy engine. Deployments
+    # with multiple API children must budget them per child; the compose
+    # runtime coordinator uses a smaller explicit override.
+    database_pool_size: int = Field(default=8, alias='DATABASE_POOL_SIZE')
+    database_max_overflow: int = Field(default=4, alias='DATABASE_MAX_OVERFLOW')
     database_pool_timeout: int = Field(default=30, alias='DATABASE_POOL_TIMEOUT')
     default_namespace: str = Field(default='default', alias='DEFAULT_NAMESPACE')
 
@@ -128,13 +130,9 @@ class Settings(BaseSettings):
     # Streaming chunk size for large datasets (0 = auto)
     polars_streaming_chunk_size: int = Field(default=0, alias='POLARS_STREAMING_CHUNK_SIZE')
 
-    # Maximum number of concurrent engines allowed
-    max_concurrent_engines: int = Field(default=10, alias='MAX_CONCURRENT_ENGINES')
-
     # Worker Configuration
     # Number of Gunicorn/Uvicorn workers (0 = auto: 2 * cores + 1)
     workers: int = Field(default=1, alias='WORKERS')
-    compute_request_concurrency: int = Field(default=4, alias='COMPUTE_REQUEST_CONCURRENCY')
     runtime_reconciliation_poll_interval_seconds: int = Field(default=1, alias='RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS')
     runtime_outbox_retry_seconds: int = Field(default=5, alias='RUNTIME_OUTBOX_RETRY_SECONDS')
     runtime_outbox_claim_ttl_seconds: int = Field(default=30, alias='RUNTIME_OUTBOX_CLAIM_TTL_SECONDS')
@@ -144,11 +142,6 @@ class Settings(BaseSettings):
 
     # Maximum connections per worker
     worker_connections: int = Field(default=1000, alias='WORKER_CONNECTIONS')
-
-    # Dynamic build worker pool
-    build_worker_min_processes: int = Field(default=0, alias='BUILD_WORKER_MIN_PROCESSES')
-    build_worker_max_processes: int = Field(default=10, alias='BUILD_WORKER_MAX_PROCESSES')
-    build_worker_idle_exit_seconds: int = Field(default=30, alias='BUILD_WORKER_IDLE_EXIT_SECONDS')
 
     engine_idle_ttl_seconds: int = Field(default=300, alias='ENGINE_IDLE_TTL_SECONDS')
     engine_idle_reap_interval_seconds: int = Field(default=30, alias='ENGINE_IDLE_REAP_INTERVAL_SECONDS')
@@ -192,7 +185,7 @@ class Settings(BaseSettings):
     # Queue overflow behavior: 'block' or 'drop' (default)
     log_queue_overflow: str = Field(default='drop', alias='LOG_QUEUE_OVERFLOW')
 
-    # Max body size to log in bytes (default 64KB, 0 = unlimited)
+    # Max known-size request/response body to log in bytes (0 disables body logging)
     log_max_body_size: int = Field(default=64 * 1024, alias='LOG_MAX_BODY_SIZE')
 
     # Frontend debug panels
@@ -315,10 +308,6 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def _validate_runtime_mode(self) -> Settings:
-        if self.build_worker_min_processes > self.build_worker_max_processes:
-            raise ValueError('BUILD_WORKER_MIN_PROCESSES must be <= BUILD_WORKER_MAX_PROCESSES')
-        if self.build_worker_max_processes > self.max_concurrent_engines:
-            raise ValueError('BUILD_WORKER_MAX_PROCESSES must be <= MAX_CONCURRENT_ENGINES')
         if self.engine_idle_reap_interval_seconds >= self.engine_idle_ttl_seconds:
             raise ValueError('ENGINE_IDLE_REAP_INTERVAL_SECONDS must be < ENGINE_IDLE_TTL_SECONDS')
         if not self.object_store_endpoint.strip():

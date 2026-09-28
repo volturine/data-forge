@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import logging
 import os
 
+from backend_core.compute_response_recovery import response_recovery
 from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
-from backend_core.domain.compute_requests.live import response_hub
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.engine_live import registry as engine_registry
+from backend_core.runtime_outbox_dispatcher import OUTBOX_WAKE_HUB
+from backend_core.runtime_outbox_service import OUTBOX_WAKE_KIND
 from modules.locks import watchers as lock_watchers
+
+logger = logging.getLogger(__name__)
 
 
 async def _handle_lock_payload(payload: dict[str, object]) -> None:
@@ -24,6 +29,10 @@ async def _handle_lock_payload(payload: dict[str, object]) -> None:
 
 
 async def handle_runtime_payload(payload: dict[str, object]) -> None:
+    if payload.get('kind') == OUTBOX_WAKE_KIND:
+        namespace = payload.get('namespace')
+        OUTBOX_WAKE_HUB.publish(namespace if isinstance(namespace, str) and namespace else None)
+        return
     if payload.get('kind') == 'lock':
         await _handle_lock_payload(payload)
         return
@@ -49,4 +58,5 @@ async def handle_runtime_payload(payload: dict[str, object]) -> None:
     if kind == RuntimePayloadKind.COMPUTE_RESPONSE:
         request_id = payload.get('request_id')
         if isinstance(request_id, str):
-            response_hub.publish(request_id)
+            logger.debug('Received compute response wake request_id=%s', request_id)
+            await response_recovery.notify(request_id)

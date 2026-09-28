@@ -8,10 +8,8 @@
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
-	import {
-		buildAnalysisPipelinePayload,
-		buildDatasourceConfig
-	} from '$lib/utils/analysis-pipeline';
+	import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
+	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import DataTable from '$lib/components/common/DataTable.svelte';
 	import { css } from '$lib/styles/panda';
 
@@ -51,33 +49,7 @@
 	const activePipeline = $derived(applySteps(pipeline));
 	const isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
 	const pipelineKey = $derived(hashPipeline(activePipeline));
-	const datasourceConfig = $derived.by(() => {
-		const config = buildDatasourceConfig({
-			analysisId,
-			tab: analysisStore.activeTab ?? null,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
-		});
-		if (config) return config;
-		const active = analysisStore.activeTab;
-		if (!active) return {};
-		return active.datasource.config;
-	});
-	const datasourceKey = $derived.by(() => {
-		const config = datasourceConfig as Record<string, unknown>;
-		const {
-			time_travel_ui: _ui,
-			output: _output,
-			time_travel_snapshot_id,
-			time_travel_snapshot_timestamp_ms,
-			...rest
-		} = config;
-		return JSON.stringify({
-			...rest,
-			snapshot_id: time_travel_snapshot_id ?? null,
-			snapshot_timestamp_ms: time_travel_snapshot_timestamp_ms ?? null
-		});
-	});
+	const namespace = $derived(isNamespaceReady() ? requireNamespace() : null);
 	const analysisPipeline = $derived.by(() => {
 		if (!analysisId) return null;
 		return buildAnalysisPipelinePayload(
@@ -86,41 +58,44 @@
 			datasourceStore.datasources
 		);
 	});
-
-	const query = createQuery(() => ({
-		queryKey: [
-			'step-preview',
-			analysisId,
-			datasourceId,
-			stepId,
-			currentPage,
-			rowLimit,
-			pipelineKey,
-			datasourceKey
-		],
-		queryFn: async (): Promise<StepPreviewResponse> => {
-			const request = {
-				analysis_pipeline: analysisPipeline!,
+	const previewRequestState = $derived.by(() => {
+		if (!analysisPipeline) return null;
+		return {
+			request: {
+				analysis_id: analysisId,
+				analysis_pipeline: analysisPipeline,
 				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: stepId,
 				row_limit: rowLimit,
 				page: currentPage,
 				resource_config: analysisStore.resourceConfig
-			};
+			},
+			pipelineKey
+		};
+	});
+
+	const query = createQuery(() => ({
+		// Cache and execute from the exact command in the key. A pipeline-only
+		// hash omits tab, resource settings, and other result-changing inputs.
+		queryKey: ['step-preview', namespace, analysisId, datasourceId, previewRequestState] as const,
+		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
+			const state = queryKey[4];
+			if (!state) throw new Error('Preview command is not ready');
+			const { request } = state;
 			const signal = previewSignal(request);
 			const result = await previewStepData(request, { signal });
 			throwIfAborted(signal);
 			if (result.isErr()) {
 				throw toComputeError(result.error);
 			}
-			schemaStore.syncPreviewSchema(stepId, result.value, pipelineKey);
+			schemaStore.syncPreviewSchema(stepId, result.value, state.pipelineKey);
 			return result.value;
 		},
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
 		retry: false,
-		enabled: isActiveStep && !!analysisPipeline && !analysisStore.previews.paused
+		enabled: isActiveStep && !!namespace && !!previewRequestState && !analysisStore.previews.paused
 	}));
 
 	const data = $derived(isActiveStep ? query.data : null);
@@ -161,6 +136,9 @@
 	data-testid="inline-data-table"
 	data-preview-ready={data && !isLoading && !error ? 'true' : undefined}
 	data-preview-state={previewState}
+	data-preview-query-status={query.status}
+	data-preview-fetch-status={query.fetchStatus}
+	data-preview-has-data={query.data ? 'true' : 'false'}
 	data-preview-columns={data?.columns.length ?? 0}
 	data-preview-error={errorMessage || undefined}
 >

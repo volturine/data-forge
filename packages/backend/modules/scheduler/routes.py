@@ -1,7 +1,7 @@
 from fastapi import Depends
 from sqlmodel import Session
 
-from backend_core.database import get_db
+from backend_core.database import get_db_async
 from backend_core.domain.scheduler import schemas
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import (
@@ -23,7 +23,7 @@ def list_schedules(
     search: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """List all schedules. Optionally filter by datasource_id to see schedules for a specific output.
 
@@ -41,7 +41,7 @@ def list_schedules(
 
 @router.post('', response_model=schemas.ScheduleResponse, mcp=True)
 @handle_errors(operation='create schedule')
-def create_schedule(payload: schemas.ScheduleCreate, session: Session = Depends(get_db)):
+def create_schedule(payload: schemas.ScheduleCreate, session: Session = Depends(get_db_async)):
     """Create a build schedule for an analysis output datasource.
 
     Requires datasource_id (must be an analysis-output datasource from GET /datasource)
@@ -57,7 +57,7 @@ def create_schedule(payload: schemas.ScheduleCreate, session: Session = Depends(
 def update_schedule(
     schedule_id: ScheduleId,
     payload: schemas.ScheduleUpdate,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Update a schedule's cron expression, enabled state, or dependencies. Use GET /schedules to find schedule IDs."""
     return commands.update_schedule(session, parse_schedule_id(schedule_id), payload)
@@ -65,6 +65,6 @@ def update_schedule(
 
 @router.delete('/{schedule_id}', status_code=204, mcp=True)
 @handle_errors(operation='delete schedule')
-def delete_schedule(schedule_id: ScheduleId, session: Session = Depends(get_db)):
+def delete_schedule(schedule_id: ScheduleId, session: Session = Depends(get_db_async)):
     """Delete a schedule by ID. Use GET /schedules to find schedule IDs."""
     commands.delete_schedule(session, parse_schedule_id(schedule_id))

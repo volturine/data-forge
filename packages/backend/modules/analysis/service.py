@@ -656,11 +656,11 @@ def get_analysis(
 
 
 def get_analysis_etag(session: Session, analysis_id: str) -> str:
-    """Return the revision-based ETag without building the full response payload."""
-    analysis = session.get(Analysis, analysis_id)
-    if not analysis:
+    """Return the revision-based ETag without loading the pipeline JSON."""
+    revision = session.execute(select(col(Analysis.revision)).where(col(Analysis.id) == analysis_id)).scalar_one_or_none()
+    if revision is None:
         raise analysis_not_found(analysis_id)
-    return revisions.etag(analysis)
+    return revisions.etag_for(analysis_id, revision)
 
 
 def list_analyses(
@@ -1039,9 +1039,9 @@ def update_analysis(
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
     analysis.revision += 1
 
+    response = _to_response(analysis)
     session.commit()
-    session.refresh(analysis)
-    return _to_response(analysis)
+    return response
 
 
 def set_favorite(

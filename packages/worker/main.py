@@ -3,69 +3,59 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import multiprocessing
-import multiprocessing.process
 import os
 import signal
 import threading
-import time
 import uuid
-from multiprocessing.synchronize import Event as ProcessEvent
+from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from runtime.compute_manager import ProcessManager
 from runtime.compute_request_runtime import (
-    ENGINE_LIFECYCLE_REQUEST_KINDS,
-    INTERACTIVE_ENGINE_REQUEST_KINDS,
-    NON_ENGINE_REQUEST_KINDS,
-    compute_request_lane_count,
+    ACTIVE_REQUEST_KINDS,
+    ENGINE_SHUTDOWN_REQUEST_KINDS,
+    compute_request_claim_worker_count,
     compute_request_loop,
     compute_request_worker_count,
 )
 from runtime.config import settings
 from runtime.datasource_delete_runtime import datasource_delete_loop
 from runtime.docker_engine import reconcile_deployment_containers, validate_engine_runtime_readiness
-from runtime.domain.build_jobs.live import hub as build_job_hub
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
 from runtime.engine_notifications import create_snapshot_notifier
+from runtime.executors import run_control_in_thread
 from runtime.logging import configure_logging
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
 from runtime.runtime_ipc import serve_runtime_notifications, start_runtime_listener, stop_runtime_listener
 from runtime.runtime_notifications import handle_runtime_payload
 from runtime.worker_runtime import (
+    NamespaceRecovery,
+    RuntimeNamespaceDirectory,
     build_worker_loop,
-    worker_id as build_worker_id,
 )
-from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient, client_from_env
-from worker_grpc.data_plane_server import start_data_plane_grpc_server_in_thread
+from runtime.worker_runtime_client import (
+    ClaimedBuildJob,
+    WorkerRuntimeClient,
+    client_from_env,
+    run_worker_heartbeat_loop,
+    shutdown_compute_request_lease_batcher,
+)
+from worker_grpc.data_plane_server import ThreadedDataPlaneServer, start_data_plane_grpc_server_in_thread
 
 logger = logging.getLogger(__name__)
-_SPAWN = multiprocessing.get_context("spawn")
-_CHILD_COOPERATIVE_STOP_SECONDS = 5.0
-_CHILD_TERMINATE_SECONDS = 2.0
-_CHILD_KILL_SECONDS = 1.0
 _MIN_RUNTIME_RECOVERY_SECONDS = 5.0
+# Hot-path work uses explicit compute/control pools. Keep asyncio's fallback
+# executor small for startup, shutdown, and occasional lifecycle glue.
+_DEFAULT_EXECUTOR_WORKERS = 4
+_SHUTDOWN_CONTROL_CONCURRENCY = 4
 
 
 def worker_runtime_client() -> WorkerRuntimeClient:
     return client_from_env()
 
 
-class ManagedWorkerProcess:
-    def __init__(
-        self,
-        process: multiprocessing.process.BaseProcess,
-        stop_signal: ProcessEvent,
-        stopped_signal: ProcessEvent,
-        worker_id: str = "",
-    ) -> None:
-        self.process = process
-        self.stop_signal = stop_signal
-        self.stopped_signal = stopped_signal
-        self.worker_id = worker_id
-
-
-def manager_id() -> str:
-    return f"build-manager:{uuid.uuid4()}"
+def coordinator_id() -> str:
+    return f"runtime-coordinator:{uuid.uuid4()}"
 
 
 def _manager_heartbeat_loop(
@@ -73,227 +63,166 @@ def _manager_heartbeat_loop(
     worker_id: str,
     *,
     client: WorkerRuntimeClient,
+    on_reconnected: Callable[[], None] | None = None,
     heartbeat_seconds: float = 5.0,
 ) -> None:
-    while not stop_signal.wait(heartbeat_seconds):
+    run_worker_heartbeat_loop(
+        client=client,
+        stop_signal=stop_signal,
+        worker_id=worker_id,
+        kind=RuntimeWorkerKind.COORDINATOR.value,
+        hostname=os.uname().nodename,
+        pid=os.getpid(),
+        capacity=settings.compute_workers,
+        heartbeat_seconds=heartbeat_seconds,
+        on_reconnected=on_reconnected,
+    )
+
+
+def _configure_blocking_executor(*, max_workers: int, thread_name_prefix: str) -> None:
+    """Bound fallback ``asyncio.to_thread`` work outside the hot path."""
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=thread_name_prefix))
+
+
+async def _supervise_runtime_loop(
+    stop_event: asyncio.Event,
+    name: str,
+    run: Callable[[], Awaitable[None]],
+) -> None:
+    delay = 0.25
+    while not stop_event.is_set():
         try:
-            client.heartbeat_worker(worker_id=worker_id, active_jobs=0)
-        except Exception as error:
-            # A backend restart or transient outage must not kill the heartbeat
-            # thread; the next tick retries against the current backend.
-            logger.warning("Runtime worker heartbeat failed: %s", error)
+            await run()
+            if stop_event.is_set():
+                return
+            raise RuntimeError(f"Runtime loop {name} exited unexpectedly")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Runtime loop %s failed; restarting in %.2fs", name, delay)
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=delay)
+                return
+            except TimeoutError:
+                delay = min(delay * 2, 5.0)
 
 
-async def _watch_process_stop_signal(stop_signal: ProcessEvent, stop_event: asyncio.Event) -> None:
-    await asyncio.to_thread(stop_signal.wait)
-    stop_event.set()
-
-
-def _worker_main(stop_signal: ProcessEvent, stopped_signal: ProcessEvent, worker_id: str) -> None:
-    async def _run() -> None:
-        stop_event = asyncio.Event()
-        install_stop_handlers(stop_event)
-        stop_task = asyncio.create_task(_watch_process_stop_signal(stop_signal, stop_event))
-        try:
-            await run_build_worker_process(stop_event=stop_event, worker_id=worker_id)
-        finally:
-            stop_event.set()
-            stop_task.cancel()
-            await asyncio.gather(stop_task, return_exceptions=True)
-            stopped_signal.set()
-
-    asyncio.run(_run())
-
-
-async def run_build_worker_process(
+async def run_runtime_coordinator(
     *,
     stop_event: asyncio.Event | None = None,
-    idle_exit_seconds: float | None = None,
-    max_jobs: int | None = None,
-    worker_id: str | None = None,
+    coordinator_generation: int | None = None,
+    coordinator_guard: Callable[[], None] | None = None,
 ) -> None:
     configure_logging()
-    logger.info("Starting build worker process...")
-    local_stop = stop_event or asyncio.Event()
-    worker_id = worker_id or build_worker_id()
-    manager = ProcessManager(
-        on_snapshot=create_snapshot_notifier(
-            asyncio.get_running_loop(),
-            namespace_provider=get_namespace,
-            worker_id=worker_id,
-        ),
-        supervisor_id=worker_id,
-        # The manager process owns the interactive request warm pool. Build
-        # children share the Docker daemon and must not each create another
-        # copy of the configured warm pool. They also cannot consume the
-        # globally reserved warm slots, so interactive requests retain two
-        # admission slots after the warm engines are claimed.
-        warm_pool_size=0,
-        global_reserved_slots=settings.engine_warm_pool_size,
+    _configure_blocking_executor(max_workers=_DEFAULT_EXECUTOR_WORKERS, thread_name_prefix="runtime-default")
+    logger.info("Starting runtime coordinator...")
+    await run_control_in_thread(validate_engine_runtime_readiness)
+    if coordinator_generation is not None:
+        os.environ["RUNTIME_COORDINATOR_GENERATION"] = str(coordinator_generation)
+    removed = await run_control_in_thread(
+        reconcile_deployment_containers,
+        coordinator_generation=coordinator_generation,
+        coordinator_guard=coordinator_guard,
     )
-
-    from builds.build_execution import run_queued_build_job
-
-    client = worker_runtime_client()
-
-    async def run_job(job: ClaimedBuildJob) -> None:
-        token = set_namespace_context(job.namespace)
-        try:
-            await run_queued_build_job(manager=manager, worker_id=worker_id, claim=job)
-        finally:
-            reset_namespace(token)
-
-    task = asyncio.create_task(
-        build_worker_loop(
-            local_stop,
-            worker_id,
-            run_job,
-            client=client,
-            idle_exit_seconds=idle_exit_seconds,
-            max_jobs=max_jobs,
-            poll_interval_seconds=settings.runtime_reconciliation_poll_interval_seconds,
-        )
-    )
-    try:
-        return await task
-    finally:
-        local_stop.set()
-        if not task.done():
-            await asyncio.gather(task)
-        manager.shutdown_all()
-        logger.info("Build worker process shutdown complete")
-
-
-def _spawn_worker_process() -> ManagedWorkerProcess:
-    stop_signal = _SPAWN.Event()
-    stopped_signal = _SPAWN.Event()
-    worker_id = build_worker_id()
-    process = _SPAWN.Process(target=_worker_main, args=(stop_signal, stopped_signal, worker_id))
-    process.start()
-    return ManagedWorkerProcess(process=process, stop_signal=stop_signal, stopped_signal=stopped_signal, worker_id=worker_id)
-
-
-def _wait_for_child_stop(child: ManagedWorkerProcess, *, timeout_seconds: float, require_ack: bool) -> bool:
-    deadline = time.monotonic() + timeout_seconds
-    acknowledged = not require_ack
-    if require_ack and child.process.is_alive():
-        acknowledged = child.stopped_signal.wait(max(0.0, deadline - time.monotonic()))
-        if not acknowledged and child.process.is_alive():
-            return False
-    remaining = max(0.0, deadline - time.monotonic())
-    child.process.join(timeout=remaining)
-    if child.process.is_alive():
-        return False
-    child.process.join()
-    if require_ack and not acknowledged:
-        logger.error(
-            "Build worker process %s exited without sending a stop acknowledgement",
-            child.process.pid,
-        )
-    return True
-
-
-def _stop_worker_process(child: ManagedWorkerProcess) -> None:
-    child.stop_signal.set()
-    if _wait_for_child_stop(child, timeout_seconds=_CHILD_COOPERATIVE_STOP_SECONDS, require_ack=True):
-        if child.worker_id:
-            reconcile_deployment_containers(supervisor_id=child.worker_id)
-        return
-    logger.error(
-        "Build worker process %s did not stop cooperatively; escalating shutdown",
-        child.process.pid,
-    )
-    child.process.terminate()
-    if _wait_for_child_stop(child, timeout_seconds=_CHILD_TERMINATE_SECONDS, require_ack=False):
-        if child.worker_id:
-            reconcile_deployment_containers(supervisor_id=child.worker_id)
-        return
-    logger.error("Build worker process %s ignored terminate(); killing", child.process.pid)
-    child.process.kill()
-    if _wait_for_child_stop(child, timeout_seconds=_CHILD_KILL_SECONDS, require_ack=False):
-        if child.worker_id:
-            reconcile_deployment_containers(supervisor_id=child.worker_id)
-        return
-    raise RuntimeError(f"Build worker process {child.process.pid} could not be stopped")
-
-
-def _reap_dead_children(children: dict[int, ManagedWorkerProcess]) -> None:
-    stale = [pid for pid, child in children.items() if not child.process.is_alive()]
-    for pid in stale:
-        child = children.pop(pid)
-        child.process.join()
-        if child.worker_id:
-            reconcile_deployment_containers(supervisor_id=child.worker_id)
-
-
-def _next_idle_child_pid(children: dict[int, ManagedWorkerProcess], *, client: WorkerRuntimeClient) -> int | None:
-    idle_pids = client.idle_build_worker_pids()
-    for pid, child in children.items():
-        process_pid = child.process.pid
-        if process_pid is None:
-            continue
-        if process_pid in idle_pids:
-            return pid
-    return None
-
-
-async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) -> None:
-    configure_logging()
-    logger.info("Starting build worker manager process...")
+    if removed:
+        logger.warning("Removed %s orphaned engine container(s) during startup", removed)
     local_stop = stop_event or asyncio.Event()
     client = worker_runtime_client()
-    worker_id = manager_id()
+    worker_id = coordinator_id()
+    recovery_poll_seconds = max(
+        _MIN_RUNTIME_RECOVERY_SECONDS,
+        float(settings.runtime_reconciliation_poll_interval_seconds),
+    )
+    # Each queue only recovers namespaces with work of its own kind. Without
+    # this filter, every idle build lane probes the build queue whenever any
+    # preview is pending, multiplying control-plane claims by compute capacity.
+    compute_namespace_directory = RuntimeNamespaceDirectory(
+        client,
+        refresh_seconds=recovery_poll_seconds,
+        work_kinds=("compute",),
+    )
+    build_namespace_directory = RuntimeNamespaceDirectory(
+        client,
+        refresh_seconds=recovery_poll_seconds,
+        work_kinds=("build",),
+    )
+    datasource_delete_namespace_directory = RuntimeNamespaceDirectory(
+        client,
+        refresh_seconds=recovery_poll_seconds,
+        work_kinds=("datasource_delete",),
+    )
+    compute_request_recovery = NamespaceRecovery(
+        client.reconcile_expired_compute_requests,
+        work_name="exhausted compute requests",
+        interval_seconds=recovery_poll_seconds,
+    )
+    build_job_recovery = NamespaceRecovery(
+        client.reconcile_expired_build_jobs,
+        work_name="expired build jobs",
+        interval_seconds=recovery_poll_seconds,
+    )
+    snapshot_notifier = create_snapshot_notifier(
+        namespace_provider=get_namespace,
+        worker_id=worker_id,
+    )
     manager = ProcessManager(
-        on_snapshot=create_snapshot_notifier(
-            asyncio.get_running_loop(),
-            namespace_provider=get_namespace,
-            worker_id=worker_id,
-        ),
+        on_snapshot=snapshot_notifier,
         supervisor_id=worker_id,
-        # This is the only manager for the application-wide interactive pool.
-        # Build children deliberately pass warm_pool_size=0 below.
-        warm_pool_size=settings.engine_warm_pool_size,
+        # This is the only manager for the application-wide runtime. Parked
+        # warm workers are a bounded unassigned reserve; assigned workers still
+        # acquire from the same advisory-lock slot set.
+        warm_worker_target=settings.compute_warm_workers,
+        coordinator_generation=coordinator_generation,
+        coordinator_guard=coordinator_guard,
     )
     runtime_listener = None
     runtime_listener_task: asyncio.Task[None] | None = None
+    data_plane_server: ThreadedDataPlaneServer | None = None
     try:
-        warm_pool_timeout = max(float(settings.engine_start_timeout_seconds) * 4, 120.0)
-        warm_pool_ready = await asyncio.to_thread(
-            manager.wait_for_warm_pool_ready,
-            timeout_seconds=warm_pool_timeout,
+        warm_worker_timeout = max(float(settings.engine_start_timeout_seconds) * 4, 120.0)
+        warm_workers_ready = await run_control_in_thread(
+            manager.wait_for_warm_workers_ready,
+            timeout_seconds=warm_worker_timeout,
         )
-        if not warm_pool_ready:
+        if not warm_workers_ready:
             logger.warning(
-                "Initial engine warm pool was not ready after %.1fs; starting manager with %s warm engine(s)",
-                warm_pool_timeout,
-                manager.warm_pool_count,
+                "Warm compute worker reserve was not ready after %.1fs; starting manager with %s worker(s)",
+                warm_worker_timeout,
+                manager.warm_worker_count,
             )
         if local_stop.is_set():
-            manager.shutdown_all()
+            await run_control_in_thread(manager.shutdown_all)
+            await run_control_in_thread(snapshot_notifier.close)
             return
         data_plane_server = start_data_plane_grpc_server_in_thread()
         try:
-            runtime_listener = await asyncio.to_thread(start_runtime_listener)
+            runtime_listener = await start_runtime_listener()
             runtime_listener_task = asyncio.create_task(serve_runtime_notifications(runtime_listener, local_stop, handle_runtime_payload))
         except Exception as exc:
             # Polling remains a recovery path if Postgres LISTEN is unavailable
             # during startup. Normal operation should be notification-driven.
             logger.warning("Worker runtime notifications unavailable; using recovery polling: %s", exc)
+        await run_control_in_thread(
+            client.register_worker,
+            worker_id=worker_id,
+            kind=RuntimeWorkerKind.COORDINATOR.value,
+            hostname=os.uname().nodename,
+            pid=os.getpid(),
+            capacity=settings.compute_workers,
+        )
     except BaseException:
         if runtime_listener_task is not None:
             runtime_listener_task.cancel()
             await asyncio.gather(runtime_listener_task, return_exceptions=True)
-        await asyncio.to_thread(stop_runtime_listener, runtime_listener)
-        manager.shutdown_all()
+        await stop_runtime_listener(runtime_listener)
+        if data_plane_server is not None:
+            with contextlib.suppress(Exception):
+                await data_plane_server.stop(grace=1.0)
+        await run_control_in_thread(manager.shutdown_all)
+        await run_control_in_thread(snapshot_notifier.close)
         raise
 
-    client.register_worker(
-        worker_id=worker_id,
-        kind=RuntimeWorkerKind.BUILD_MANAGER.value,
-        hostname=os.uname().nodename,
-        pid=os.getpid(),
-        capacity=max(settings.build_worker_max_processes, 0),
-    )
+    assert data_plane_server is not None
     heartbeat_stop = threading.Event()
     heartbeat_thread = threading.Thread(
         target=_manager_heartbeat_loop,
@@ -301,122 +230,127 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
             "client": client,
             "stop_signal": heartbeat_stop,
             "worker_id": worker_id,
+            "on_reconnected": getattr(manager, "resynchronize_snapshots", None),
         },
         daemon=True,
     )
     heartbeat_thread.start()
     request_worker_count = compute_request_worker_count()
-    request_lane_count = compute_request_lane_count()
-    # Keep request lanes plentiful enough to absorb a browser burst, while
-    # serializing the expensive claim transactions to a small shared control
-    # plane.  Without this gate every lane in all three request groups wakes
-    # on the same notification and competes for the database pool.
-    claim_semaphore = asyncio.Semaphore(min(request_worker_count, 8))
-    # Claim each work class independently at the configured concurrency. The
-    # runtime gives datasource and engine work separate bounded executors, so
-    # parked engine admissions cannot prevent datasource work from executing
-    # and datasource bursts cannot serialize engine requests.
-    # Keep capacity-waiting lifecycle/prewarm requests from occupying every
-    # lane that can claim interactive previews. Shutdown stays in the
-    # non-engine lane because it frees capacity and never waits for a slot.
-    # Each lane advances the namespace cursor independently so a busy default
-    # namespace cannot starve work submitted to another namespace.
-    # Only the first lane in each class performs periodic recovery polling.
-    # Notifications wake all lanes for normal work, while three recovery polls
-    # per interval are enough to find requests staged while the worker was
-    # disconnected without creating a database claim storm.
+    # Keep claim transactions below one shared control-plane budget. A browser
+    # burst is durable queue work, not a reason to create one claim per tab.
+    # Reserve one bounded claim lane for cleanup. Preview/build claim bursts
+    # must not prevent shutdown requests from freeing engine capacity.
+    active_claim_semaphore = asyncio.Semaphore(compute_request_claim_worker_count())
+    shutdown_claim_semaphore = asyncio.Semaphore(1)
+    # One application-wide work budget covers previews, datasource jobs,
+    # lifecycle work, and builds. Every lane can use the full budget when
+    # needed; the shared gate prevents idle queue reservations and overcommit.
+    compute_work_semaphore = asyncio.Semaphore(request_worker_count)
     request_lanes = [
-        *((NON_ENGINE_REQUEST_KINDS, offset, offset == 0) for offset in range(request_lane_count)),
-        *((INTERACTIVE_ENGINE_REQUEST_KINDS, request_lane_count + offset, offset == 0) for offset in range(request_lane_count)),
-        *((ENGINE_LIFECYCLE_REQUEST_KINDS, (2 * request_lane_count) + offset, offset == 0) for offset in range(request_lane_count)),
+        (ACTIVE_REQUEST_KINDS, request_worker_count, active_claim_semaphore, compute_work_semaphore),
+        (
+            ENGINE_SHUTDOWN_REQUEST_KINDS,
+            min(request_worker_count, _SHUTDOWN_CONTROL_CONCURRENCY),
+            shutdown_claim_semaphore,
+            None,
+        ),
     ]
-    request_tasks = [
-        asyncio.create_task(
-            compute_request_loop(
+    request_tasks = []
+    for lane, (allowed_kinds, max_concurrency, claim_semaphore, work_semaphore) in enumerate(request_lanes):
+
+        async def run_request_lane(
+            allowed_kinds=allowed_kinds,
+            max_concurrency=max_concurrency,
+            claim_semaphore=claim_semaphore,
+            work_semaphore=work_semaphore,
+        ) -> None:
+            await compute_request_loop(
                 local_stop,
                 worker_id=worker_id,
                 manager=manager,
                 allowed_kinds=allowed_kinds,
-                compute_namespace_offset=namespace_offset,
                 claim_semaphore=claim_semaphore,
-                poll_for_work=poll_for_work,
+                poll_for_work=True,
+                max_concurrency=max_concurrency,
+                work_semaphore=work_semaphore,
+                namespace_directory=compute_namespace_directory,
+                recovery=compute_request_recovery,
+            )
+
+        request_tasks.append(
+            asyncio.create_task(
+                _supervise_runtime_loop(local_stop, f"compute-request-{lane}", run_request_lane),
+                name=f"compute-request-supervisor-{lane}",
             )
         )
-        for allowed_kinds, namespace_offset, poll_for_work in request_lanes
-    ]
-    datasource_delete_task = asyncio.create_task(datasource_delete_loop(local_stop, manager=manager))
-    children: dict[int, ManagedWorkerProcess] = {}
-    last_build_job_version = build_job_hub.version()
-    recovery_poll_seconds = max(
-        _MIN_RUNTIME_RECOVERY_SECONDS,
-        float(settings.runtime_reconciliation_poll_interval_seconds),
+    datasource_delete_task = asyncio.create_task(
+        _supervise_runtime_loop(
+            local_stop,
+            "datasource-delete",
+            lambda: datasource_delete_loop(
+                local_stop,
+                manager=manager,
+                namespace_directory=datasource_delete_namespace_directory,
+            ),
+        )
     )
-    try:
-        while not local_stop.is_set():
-            _reap_dead_children(children)
-            try:
-                await asyncio.to_thread(client.dispatch_runtime_outbox)
-                queued = await asyncio.to_thread(client.queued_build_job_count)
-            except Exception as exc:
-                logger.info("Backend temporarily unavailable to build manager; retrying: %s", exc)
-                await asyncio.sleep(min(settings.runtime_reconciliation_poll_interval_seconds, 1.0))
-                continue
-            desired = min(
-                settings.build_worker_max_processes,
-                max(settings.build_worker_min_processes, queued),
+    from builds.build_execution import run_queued_build_job
+
+    # One dispatcher claims build jobs serially, then runs them concurrently
+    # up to the same application-wide compute budget as preview work.
+    async def run_build(claim: ClaimedBuildJob) -> None:
+        token = set_namespace_context(claim.namespace)
+        try:
+            await run_queued_build_job(
+                manager=manager,
+                worker_id=worker_id,
+                claim=claim,
+                work_semaphore=compute_work_semaphore,
             )
-            while len(children) < desired:
-                child = _spawn_worker_process()
-                children[child.process.pid or id(child.process)] = child
-            while len(children) > desired:
-                idle_pid = _next_idle_child_pid(children, client=client)
-                if idle_pid is None:
-                    break
-                child = children.pop(idle_pid)
-                _stop_worker_process(child)
+        finally:
+            reset_namespace(token)
 
-            if len(children) >= desired and queued == 0:
-                stop_task = asyncio.create_task(local_stop.wait())
-                build_job_task = asyncio.create_task(build_job_hub.wait(last_build_job_version))
-                poll_task = asyncio.create_task(asyncio.sleep(recovery_poll_seconds))
-                done, pending = await asyncio.wait(
-                    {stop_task, build_job_task, poll_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in pending:
-                    task.cancel()
-                if pending:
-                    await asyncio.gather(*pending, return_exceptions=True)
-                if stop_task in done:
-                    continue
-                if build_job_task in done:
-                    with contextlib.suppress(asyncio.CancelledError):
-                        version = build_job_task.result()
-                        if isinstance(version, int):
-                            last_build_job_version = version
-                continue
+    async def run_build_dispatcher() -> None:
+        await build_worker_loop(
+            local_stop,
+            worker_id,
+            run_build,
+            client=client,
+            capacity=request_worker_count,
+            heartbeat_seconds=float(settings.engine_heartbeat_interval_seconds),
+            poll_interval_seconds=recovery_poll_seconds,
+            on_reconnected=getattr(manager, "resynchronize_snapshots", None),
+            namespace_directory=build_namespace_directory,
+            recovery=build_job_recovery,
+            announce_worker=False,
+        )
 
-            # While jobs are queued, reconcile frequently enough to stop idle
-            # children after completion. The steady state is the notification
-            # or five-second recovery path above, not a one-second namespace
-            # scan in every worker lane.
-            await asyncio.sleep(0.25)
+    build_tasks = [
+        asyncio.create_task(
+            _supervise_runtime_loop(local_stop, "build-dispatcher", run_build_dispatcher),
+            name="build-dispatcher",
+        )
+    ]
+
+    try:
+        await local_stop.wait()
     finally:
         local_stop.set()
         heartbeat_stop.set()
-        heartbeat_thread.join()
-        for child in children.values():
-            _stop_worker_process(child)
+        await run_control_in_thread(heartbeat_thread.join)
         # Closing the manager first rejects parked capacity admissions. Waiting
         # for request tasks before this point can deadlock shutdown forever.
-        manager.shutdown_all()
-        await asyncio.gather(*request_tasks, datasource_delete_task, return_exceptions=True)
+        await run_control_in_thread(manager.shutdown_all)
+        await asyncio.gather(*request_tasks, datasource_delete_task, *build_tasks, return_exceptions=True)
+        await run_control_in_thread(shutdown_compute_request_lease_batcher)
         if runtime_listener_task is not None:
             await asyncio.gather(runtime_listener_task, return_exceptions=True)
-        await asyncio.to_thread(stop_runtime_listener, runtime_listener)
+        await stop_runtime_listener(runtime_listener)
         await data_plane_server.stop(grace=1.0)
-        client.stop_worker(worker_id=worker_id)
-        logger.info("Build worker manager shutdown complete")
+        await run_control_in_thread(snapshot_notifier.close)
+        with contextlib.suppress(Exception):
+            await run_control_in_thread(client.stop_worker, worker_id=worker_id, timeout_seconds=2.0)
+    logger.info("Runtime coordinator shutdown complete generation=%s", coordinator_generation)
 
 
 def install_stop_handlers(stop_event: asyncio.Event) -> None:
@@ -431,14 +365,9 @@ def install_stop_handlers(stop_event: asyncio.Event) -> None:
 
 
 async def main() -> None:
-    multiprocessing.freeze_support()
-    await asyncio.to_thread(validate_engine_runtime_readiness)
-    removed = await asyncio.to_thread(reconcile_deployment_containers)
-    if removed:
-        logger.warning("Removed %s orphaned engine container(s) during startup", removed)
     stop_event = asyncio.Event()
     install_stop_handlers(stop_event)
-    await run_build_manager_process(stop_event=stop_event)
+    await run_runtime_coordinator(stop_event=stop_event)
 
 
 if __name__ == "__main__":

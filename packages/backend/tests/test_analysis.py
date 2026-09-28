@@ -1,7 +1,9 @@
 import json
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import select
@@ -13,11 +15,31 @@ from backend_core.persistence.locks.models import ResourceLock
 from backend_core.sqlmodel_typing import sa
 from dataforge_protocol import compute_pb2
 from main import app
-from modules.analysis import service as analysis_service
+from modules.analysis import routes as analysis_routes, service as analysis_service
 from modules.analysis.schemas import AnalysisResponseSchema
 from modules.auth.dependencies import get_optional_user
 from modules.compute import executor_client
 from tests.http_client import TestClient
+
+
+@pytest.mark.asyncio
+async def test_validate_analysis_offloads_database_work(monkeypatch) -> None:
+    event_loop_thread = threading.get_ident()
+    database_thread: list[int] = []
+
+    def run_validation(function, data):
+        assert function is analysis_routes.service.validate_analysis
+        assert data == {}
+        database_thread.append(threading.get_ident())
+        return {'valid': True, 'payload': {'tabs': []}}
+
+    monkeypatch.setattr(analysis_routes, 'run_db', run_validation)
+    response = await analysis_routes.validate_analysis(cast(Any, {}))
+
+    assert response.status_code == 200
+    assert response.body == b'{"valid":true,"payload":{"tabs":[]}}'
+    assert database_thread
+    assert database_thread[0] != event_loop_thread
 
 
 @pytest.fixture(autouse=True)
@@ -561,6 +583,16 @@ class TestAnalysisCreate:
 
 
 class TestAnalysisGet:
+    def test_analysis_etag_selects_only_revision(self, sample_analysis: Analysis) -> None:
+        session = Mock()
+        session.execute.return_value.scalar_one_or_none.return_value = sample_analysis.revision
+
+        etag = analysis_service.get_analysis_etag(session, sample_analysis.id)
+
+        statement = session.execute.call_args.args[0]
+        assert tuple(statement.selected_columns.keys()) == ('revision',)
+        assert etag == f'"analysis-{sample_analysis.id}-{sample_analysis.revision}"'
+
     def test_get_analysis_success(self, client, sample_analysis: Analysis):
         response = client.get(f'/api/v1/analysis/{sample_analysis.id}')
 
@@ -1263,7 +1295,7 @@ class TestAnalysisDelete:
         )
 
         assert len(submitted) == 1
-        assert submitted[0]['dispatch'] is False
+        assert 'dispatch' not in submitted[0]
 
     def test_delete_analysis_queues_engine_shutdown_without_waiting(self, client, sample_analysis: Analysis, monkeypatch):
         shutdown_calls: list[compute_pb2.EngineIdentity] = []

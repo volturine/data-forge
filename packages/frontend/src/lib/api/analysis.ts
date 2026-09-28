@@ -155,10 +155,18 @@ export type AnalysisFavoriteStatus = {
 };
 
 export const favoriteAnalysis = (id: string): ResultAsync<AnalysisFavoriteStatus, ApiError> =>
-	apiRequest<AnalysisFavoriteStatus>(`/v1/analysis/${id}/favorite`, { method: 'POST' });
+	apiRequest<AnalysisFavoriteStatus>(`/v1/analysis/${id}/favorite`, {
+		method: 'POST',
+		// Preserve this small user-intent mutation when navigation starts
+		// immediately after the optimistic UI update.
+		keepalive: true
+	});
 
 export const unfavoriteAnalysis = (id: string): ResultAsync<AnalysisFavoriteStatus, ApiError> =>
-	apiRequest<AnalysisFavoriteStatus>(`/v1/analysis/${id}/favorite`, { method: 'DELETE' });
+	apiRequest<AnalysisFavoriteStatus>(`/v1/analysis/${id}/favorite`, {
+		method: 'DELETE',
+		keepalive: true
+	});
 
 export type AnalysisVersion = {
 	id: string;

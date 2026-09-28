@@ -81,7 +81,9 @@ If you only want the high-value knobs, start with these:
 - `CORS_ORIGINS` — allowed browser origins (only needed in dev or multi-origin setups)
 - `AUTH_REQUIRED` — turn login on/off
 - `SETTINGS_ENCRYPTION_KEY` — strongly recommended when auth is enabled
-- `POLARS_CORES_AVAILABLE`, `POLARS_MAX_MEMORY_MB`, `MAX_CONCURRENT_ENGINES` — performance limits
+- `COMPUTE_WORKERS` — the single runtime capacity budget for compute work and assigned workers
+- `COMPUTE_WARM_WORKERS` — additional ready workers reserved before assignment; they are the same worker type, not a second execution pool
+- `POLARS_CORES_AVAILABLE`, `POLARS_MAX_MEMORY_MB` — per-engine resource limits
 - **Dev-only:** `BACKEND_HOST`, `BACKEND_PORT`, `FRONTEND_PORT` — Vite proxy wiring (Bun/Vite only, not exposed to browser)
 
 ## How configuration is loaded
@@ -116,10 +118,20 @@ docker compose --env-file docker/env/prod.env \
 `docker/env/prod.env` is its production env template. GHCR-published images are
 for production releases only.
 `docker/compose.yaml` uses published fixed-role images and does not build application images during `up`.
-The compose topology uses separate `api`, `scheduler`, and `worker` containers from the same codebase release.
+The compose topology uses separate `api`, `runtime`, `scheduler`, and `worker` containers from the same codebase release.
 The checked-in Docker topology still includes `postgres` because the supported Docker runtime path is Postgres-backed. `DF_DATABASE_URL` in the Docker env files points at that service.
 
-The checked-in Docker production env defaults to `DF_WORKERS=4` for the API process pool in the `api` service, `DF_BUILD_WORKER_MIN_PROCESSES=0`, and dynamic build-worker spawn up to `DF_BUILD_WORKER_MAX_PROCESSES` in the `worker` service.
+The checked-in Docker production env defaults to `DF_WORKERS=4`. API children are
+stateless HTTP frontends; the separate `runtime` service owns the internal gRPC
+control plane, durable dispatch, and Docker engine lifecycle. Its
+`COMPUTE_WORKERS` is the single runtime capacity budget: it caps concurrent
+compute jobs and active engine identities. Work queues remain durable while
+waiting. `COMPUTE_WARM_WORKERS` is the additional count of identical ready
+workers that do not yet have a resource identity. Claiming one binds it to an
+exact analysis/datasource identity and starts its replacement; the reserve
+does not consume active `COMPUTE_WORKERS` capacity. Active and warm worker
+starts are bounded by these configured budgets; there is no hidden CPU-derived
+startup limit.
 
 ### Production — bare-metal (`just prod`)
 
@@ -131,7 +143,8 @@ just prod
 
 `just prod` generates protocol bindings, builds the frontend, and runs the API,
 scheduler, and worker together. The checked-in `docker/env/prod.env` defaults to
-`WORKERS=4` and dynamic build-worker scaling with zero warm workers.
+`WORKERS=4`. API workers are stateless HTTP processes; the separate runtime
+coordinator owns durable compute dispatch and engine lifecycle.
 
 ### Local development
 
@@ -161,7 +174,6 @@ just dev
 | `DF_ENGINE_DOCKER_HOST`     | `unix:///var/run/docker.sock`                                                              | Docker API endpoint available only to the worker service.                                                                                                       |
 | `DF_ENGINE_DOCKER_NETWORK`  | `dataforge-prod-engine-runtime`                                                            | Dedicated network joining the worker, RustFS, and dynamic engine containers.                                                                                    |
 | `DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5` | Engine liveness lease heartbeat interval. |
-| `DF_ENGINE_WARM_POOL_SIZE` | `2` | Global number of idle engines kept pre-spawned by the single worker-runtime manager across all namespaces; occupation of one triggers a replacement spawn. |
 | `DF_DOCKER_SOCKET_PATH`     | `/var/run/docker.sock`                                                                     | Host Docker socket bind-mounted into the worker. Docker daemon access is administrative host access.                                                             |
 | `DF_DOCKER_GID`             | `0`                                                                                        | Group ID permitted to access the mounted Docker socket; set this to the socket's host group ID.                                                                  |
 | `DISTRIBUTED_RUNTIME_ENABLED`| `false`                                                                                   | Enables supported distributed runtime behavior when `DATABASE_URL` is Postgres.                                                                                |
@@ -198,24 +210,24 @@ rejected; nothing is rewritten.
 | `OBJECT_STORE_SECRET_KEY` | `rustfsadmin` | Secret key paired with `OBJECT_STORE_ACCESS_KEY`. Replace the development default in production. |
 | `ENGINE_OBJECT_STORE_ENDPOINT` | empty | Optional engine-container endpoint for the same object store. Set this when the worker uses a host-published URL but engines should use private Docker DNS. |
 | `ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5` | Worker-to-engine heartbeat interval. Engines stop themselves after three missed intervals. |
-| `ENGINE_JOB_CONCURRENCY` | `4` | Maximum independent compute jobs served concurrently by each engine container. The global engine count is still capped by `MAX_CONCURRENT_ENGINES`. |
-| `ENGINE_WARM_POOL_SIZE` | `0` | Global number of idle engines pre-spawned by the single worker-runtime manager across all namespaces, ready for work; when one is occupied a replacement is spawned so the idle count returns to this value. `0` disables pre-spawning (engines start on demand). |
+| `COMPUTE_WARM_WORKERS` | `0` | Additional ready, unassigned compute workers. A claimed worker is bound to one resource identity and immediately replaced. Checked-in dev/prod environments set this to `2`; E2E sets it to `4` for the 30-analysis probe. These workers are outside active compute capacity. |
 
 All object-store settings are process-start configuration. Change them for the
 API, scheduler, and worker together, then restart the complete runtime.
 
 ### Internal runtime (gRPC)
 
-These variables configure the internal gRPC control plane between API, scheduler, and worker. Scheduler and worker clients connect to the API. The API also connects to the worker data-plane for object-store operations such as file upload.
+These variables configure the internal gRPC control plane between the runtime coordinator, scheduler, and worker. Scheduler and worker clients connect to `runtime`. The API also connects to the worker data-plane for object-store operations such as file upload.
 
-Same-host processes can keep the loopback defaults. Split Docker roles must bind the servers on `0.0.0.0` and point clients at Compose DNS (`api:50051`, `worker:50052`).
+Same-host processes can keep the loopback defaults. Split Docker roles must bind the coordinator/data-plane servers on `0.0.0.0` and point clients at Compose DNS (`runtime:50051`, `worker:50052`).
 
 | Variable               | Default                   | Notes                                                                                                 |
 | ---------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `INTERNAL_API_TOKEN`   | empty                     | Shared secret used to authenticate internal gRPC calls between scheduler, worker, and API. Required when distributed runtime is enabled. |
-| `INTERNAL_GRPC_HOST`   | `127.0.0.1`               | Host the API gRPC server binds to.                                                                    |
-| `INTERNAL_GRPC_PORT`   | `50051`                   | Port the API gRPC server listens on.                                                                    |
+| `INTERNAL_GRPC_HOST`   | `127.0.0.1`               | Host the dedicated runtime coordinator gRPC server binds to.                                            |
+| `INTERNAL_GRPC_PORT`   | `50051`                   | Port the dedicated runtime coordinator gRPC server listens on.                                         |
 | `INTERNAL_GRPC_TARGET` | `127.0.0.1:50051`         | Full `host:port` target string that scheduler and worker clients connect to.                          |
+| `RUNTIME_COORDINATOR_TARGET` | empty | Deployment contract for the dedicated coordinator; required when `WORKERS > 1` so API children never own runtime state. The API does not use this as a per-request RPC path; durable requests and outbox events flow through PostgreSQL. |
 | `WORKER_DATA_PLANE_GRPC_HOST` | `127.0.0.1`          | Host the worker data-plane gRPC server binds to.                                                      |
 | `WORKER_DATA_PLANE_GRPC_PORT` | `50052`              | Port the worker data-plane gRPC server listens on.                                                    |
 | `WORKER_DATA_PLANE_GRPC_TARGET` | `127.0.0.1:50052`  | Full `host:port` target string that the API uses to reach the worker data-plane.                      |
@@ -230,14 +242,11 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 | `POLARS_CORES_AVAILABLE`          | `0`     | Total cores for analysis engines; `0` = all host logical CPUs. Not Polars' native `POLARS_MAX_THREADS`. |
 | `POLARS_MAX_MEMORY_MB`            | `0`     | `0` means unlimited.                                            |
 | `POLARS_STREAMING_CHUNK_SIZE`     | `0`     | `0` means automatic chunk sizing.                               |
-| `MAX_CONCURRENT_ENGINES`          | `10`    | Caps live engines (`1`–`100`). Excess spawns FIFO-queue until a slot frees (idle eviction or shutdown); they do not hard-fail. |
-| `WORKERS`                         | `1`     | Valid range: `0` to `32`; `0` means auto in deployment scripts. The checked-in production env templates currently set this to `4`. |
+| `COMPUTE_WORKERS`                  | `14`    | The one global runtime capacity budget (`1`–`100`): concurrent compute jobs and assigned workers. Builds, previews, and datasource operations share it; excess work remains durable and waits. Each assigned worker is bound to one exact analysis/datasource identity. |
+| `WORKERS`                         | `1`     | Valid range: `0` to `32`; `0` means auto in deployment scripts. Values above `1` require the dedicated runtime coordinator service. |
 | `WORKER_CONNECTIONS`              | `1000`  | Maximum connections per worker.                                 |
-| `BUILD_WORKER_MIN_PROCESSES`      | `0`     | Minimum warm build-worker subprocesses to keep alive.           |
-| `BUILD_WORKER_MAX_PROCESSES`      | `10`    | Maximum dynamic build-worker subprocesses. Must be <= `MAX_CONCURRENT_ENGINES`. |
-| `BUILD_WORKER_IDLE_EXIT_SECONDS`  | `30`    | Seconds an idle build worker waits before exiting.              |
-| `DATABASE_POOL_SIZE`              | `10`    | SQLAlchemy pool size for Postgres runtime.                      |
-| `DATABASE_MAX_OVERFLOW`           | `20`    | Extra Postgres connections allowed above pool size.             |
+| `DATABASE_POOL_SIZE`              | `8`     | SQLAlchemy pool size per API process and per engine. The runtime coordinator derives its pool size from `COMPUTE_WORKERS`; its pool plus overflow must allow at least three connections for the dedicated lease lane, general RPC lane, and outbox recovery. |
+| `DATABASE_MAX_OVERFLOW`           | `4`     | Extra Postgres connections allowed above the API process pool size; the runtime coordinator derives a separate fixed overflow of `13` to preserve lease, general RPC, and outbox capacity. |
 | `DATABASE_POOL_TIMEOUT`           | `30`    | Seconds to wait for a Postgres pooled connection.               |
 
 ### Logging and time handling
@@ -255,7 +264,7 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 | `LOG_FLUSH_INTERVAL_SECONDS`        | `5`                | Flush interval for database-backed server logs.                                                                          |
 | `LOG_QUEUE_MAX_SIZE`                | `2000`             | Max queued log batches.                                                                                                  |
 | `LOG_QUEUE_OVERFLOW`                | `drop`             | One of `block` or `drop`.                                                                                                |
-| `LOG_MAX_BODY_SIZE`                 | `65536`            | Max request/response body bytes to log. `0` means unlimited.                                                             |
+| `LOG_MAX_BODY_SIZE`                 | `65536`            | Max explicitly sized request/response body bytes to log. `0` disables body logging; unknown-size request bodies are never buffered for logs. |
 | `PUBLIC_IDB_DEBUG`                  | `false`            | Enables IndexedDB debug panels in the frontend. Seeded via the backend config API endpoint — not a Vite/browser env var. |
 
 ### AI and provider settings
@@ -325,7 +334,7 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 
 | Variable         | Default | Notes                                |
 | ---------------- | ------- | ------------------------------------ |
-| `PW_E2E_WORKERS` | `4`     | Playwright workers per e2e shard. The checked-in E2E topology uses three shards (up to twelve browser workers) against one API process. |
+| `PW_E2E_WORKERS` | `4`     | Playwright workers per E2E shard. The checked-in E2E topology uses three shards (up to twelve browser workers) against four stateless API workers, one runtime coordinator, a 32-worker compute budget, and four prewarmed workers. |
 
 ## Recommended additions to consider later
 

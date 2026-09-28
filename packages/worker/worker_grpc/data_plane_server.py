@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -24,12 +25,20 @@ from runtime.json_values import dict_to_struct
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"
 _MAX_DATA_PLANE_MESSAGE_BYTES = 128 * 1024 * 1024
+_VALIDATION_WORKERS = 2
+_SLOW_VALIDATION_SECONDS = 0.25
+_VALIDATION_QUEUE_WARNING_SECONDS = 0.1
+_VALIDATION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_VALIDATION_WORKERS,
+    thread_name_prefix="data-plane-validation",
+)
+_VALIDATOR_LOCAL = threading.local()
 _OBJECT_STORE_EXECUTOR = ThreadPoolExecutor(
-    max_workers=max(16, settings.compute_request_concurrency * 2),
+    max_workers=max(4, min(8, settings.compute_workers)),
     thread_name_prefix="data-plane-object-store",
 )
 _ICEBERG_EXECUTOR = ThreadPoolExecutor(
-    max_workers=max(8, settings.compute_request_concurrency),
+    max_workers=max(2, min(4, settings.compute_workers // 2 or 1)),
     thread_name_prefix="data-plane-iceberg",
 )
 
@@ -39,9 +48,31 @@ async def _run_blocking[**P, T](executor: Executor, function: Callable[P, T], *a
     return await loop.run_in_executor(executor, partial(function, *args, **kwargs))
 
 
+def _validate_proto(request: Message, method: str) -> None:
+    started = time.perf_counter()
+    try:
+        validator = getattr(_VALIDATOR_LOCAL, "validator", None)
+        if validator is None:
+            validator = Validator()
+            _VALIDATOR_LOCAL.validator = validator
+        validator.validate(request)
+    finally:
+        elapsed = time.perf_counter() - started
+        slow = elapsed >= _SLOW_VALIDATION_SECONDS
+        log_validation = logger.warning if slow else logger.debug
+        log_validation(
+            "Slow worker request validation method=%s request_type=%s validation_ms=%.1f"
+            if slow
+            else "Worker request validation method=%s request_type=%s validation_ms=%.1f",
+            method,
+            type(request).__name__,
+            elapsed * 1000,
+        )
+
+
 class _WorkerRequestValidationInterceptor(grpc.aio.ServerInterceptor):
     def __init__(self) -> None:
-        self._validator = Validator()
+        self._validation_slots = asyncio.Semaphore(_VALIDATION_WORKERS)
 
     async def intercept_service(
         self,
@@ -52,10 +83,27 @@ class _WorkerRequestValidationInterceptor(grpc.aio.ServerInterceptor):
         if handler is None or handler.unary_unary is None:
             return handler
         unary_unary = cast(Callable[[Message, grpc.aio.ServicerContext], Awaitable[Any]], handler.unary_unary)
+        method = getattr(handler_call_details, "method", None) or "-"
 
         async def validate_request(request: Message, context: grpc.aio.ServicerContext) -> Any:
+            queued_at = time.perf_counter()
+            await self._validation_slots.acquire()
+            queue_ms = (time.perf_counter() - queued_at) * 1000
+            if queue_ms >= _VALIDATION_QUEUE_WARNING_SECONDS * 1000:
+                logger.warning(
+                    "Worker request validation queued method=%s request_type=%s queue_ms=%.1f",
+                    method,
+                    type(request).__name__,
+                    queue_ms,
+                )
             try:
-                self._validator.validate(request)
+                future = asyncio.get_running_loop().run_in_executor(_VALIDATION_EXECUTOR, _validate_proto, request, method)
+            except BaseException:
+                self._validation_slots.release()
+                raise
+            future.add_done_callback(lambda _future: self._validation_slots.release())
+            try:
+                await asyncio.shield(future)
             except ValidationError as exc:
                 await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
             return await unary_unary(request, context)
@@ -100,9 +148,16 @@ class ThreadedDataPlaneServer:
 
     async def stop(self, *, grace: float = 1.0) -> None:
         future = asyncio.run_coroutine_threadsafe(self._server.stop(grace=grace), self._loop)
-        await asyncio.to_thread(future.result)
-        self._loop.call_soon_threadsafe(self._loop.stop)
-        await asyncio.to_thread(self._thread.join)
+        try:
+            await asyncio.wait_for(asyncio.wrap_future(future), timeout=grace + 5.0)
+        except TimeoutError:
+            logger.error("Worker data-plane gRPC server did not stop within %.1f seconds", grace + 5.0)
+            future.cancel()
+        finally:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            await asyncio.to_thread(self._thread.join, 5.0)
+            if self._thread.is_alive():
+                logger.error("Worker data-plane gRPC thread did not stop within 5 seconds")
 
 
 async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
@@ -295,12 +350,13 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         except ValueError:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "snapshot_id must be an integer")
         limit = request.limit if request.HasField("limit") else None
-        frame = await _run_blocking(_ICEBERG_EXECUTOR, iceberg_snapshot_reader.scan_iceberg_snapshot, request.metadata_path, snapshot_id, None)
-        rows = await _run_blocking(
-            _ICEBERG_EXECUTOR,
-            lambda: frame.limit(limit).collect().to_dicts() if limit is not None else frame.collect().to_dicts(),
-        )
-        return iceberg_pb2.IcebergSnapshotScanResponse(rows=dict_to_struct({"rows": rows}))
+
+        def scan_and_serialize() -> iceberg_pb2.IcebergSnapshotScanResponse:
+            frame = iceberg_snapshot_reader.scan_iceberg_snapshot(request.metadata_path, snapshot_id, None)
+            rows = frame.limit(limit).collect().to_dicts() if limit is not None else frame.collect().to_dicts()
+            return iceberg_pb2.IcebergSnapshotScanResponse(rows=dict_to_struct({"rows": rows}))
+
+        return await _run_blocking(_ICEBERG_EXECUTOR, scan_and_serialize)
 
     async def DeleteSnapshot(
         self,
@@ -337,6 +393,12 @@ def _arrow_schema_from_proto(payload: iceberg_pb2.ArrowSchemaIpc) -> pa.Schema:
 
 
 async def start_data_plane_grpc_server() -> grpc.aio.Server:
+    # Starting ThreadPoolExecutor workers is synchronous in the submitting
+    # event loop. Do it before serving RPCs, not on the first burst of large
+    # protobuf requests.
+    barrier = threading.Barrier(_VALIDATION_WORKERS)
+    loop = asyncio.get_running_loop()
+    await asyncio.gather(*(loop.run_in_executor(_VALIDATION_EXECUTOR, barrier.wait, 10.0) for _ in range(_VALIDATION_WORKERS)))
     server = grpc.aio.server(
         interceptors=(_WorkerRequestValidationInterceptor(),),
         options=(

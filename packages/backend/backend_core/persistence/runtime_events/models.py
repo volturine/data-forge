@@ -1,6 +1,6 @@
 import datetime as dt
 
-from sqlalchemy import JSON, Column, DateTime, Enum as SAEnum, ForeignKey, Integer, String
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, String, text
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.enums import DataForgeStrEnum
@@ -40,3 +40,56 @@ class NotificationDeliveryReceipt(SQLModel, table=True):  # type: ignore[call-ar
     event_id: str = Field(sa_column=Column(String, ForeignKey('runtime_outbox_events.id', ondelete='CASCADE'), primary_key=True))
     kind: str = Field(sa_column=Column(String, nullable=False))
     delivered_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+
+
+class RuntimeNamespaceWork(SQLModel, table=True):  # type: ignore[call-arg, assignment]
+    """Durable cross-schema wake state for runtime recovery queues."""
+
+    __tablename__ = 'runtime_namespace_work'  # type: ignore[assignment]
+    __table_args__ = (
+        Index('ix_runtime_namespace_work_pending', 'kind', 'pending', 'updated_at', 'namespace'),
+        Index(
+            'ix_runtime_namespace_work_due_at',
+            'kind',
+            'due_at',
+            'namespace',
+            postgresql_where=text('due_at IS NOT NULL'),
+        ),
+    )
+
+    namespace: str = Field(sa_column=Column(String, primary_key=True))
+    kind: str = Field(sa_column=Column(String, primary_key=True))
+    pending: bool = Field(default=False, sa_column=Column(Boolean, nullable=False))
+    generation: int = Field(default=0, sa_column=Column(BigInteger, nullable=False, server_default='0'))
+    processed_generation: int = Field(default=0, sa_column=Column(BigInteger, nullable=False, server_default='0'))
+    due_at: dt.datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
+    updated_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+
+
+class RuntimeNamespaceWorkWake(SQLModel, table=True):  # type: ignore[call-arg, assignment]
+    """Append-only durable signals; producers never contend on a namespace row."""
+
+    __tablename__ = 'runtime_namespace_work_wakes'  # type: ignore[assignment]
+    __table_args__ = (
+        Index('ix_runtime_namespace_work_wakes_kind_created', 'kind', 'created_at', 'namespace'),
+        Index('ix_runtime_namespace_work_wakes_namespace_kind_id', 'namespace', 'kind', 'id'),
+    )
+
+    id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger().with_variant(Integer, 'sqlite'), primary_key=True, autoincrement=True),
+    )
+    namespace: str = Field(sa_column=Column(String, nullable=False))
+    kind: str = Field(sa_column=Column(String, nullable=False))
+    created_at: dt.datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP')),
+    )
+
+
+class RuntimeCoordinatorState(SQLModel, table=True):  # type: ignore[call-arg, assignment]
+    """Monotonic fencing epoch for the single active runtime coordinator."""
+
+    __tablename__ = 'runtime_coordinator_state'  # type: ignore[assignment]
+
+    singleton_id: int = Field(default=1, primary_key=True)
+    generation: int = Field(default=0, sa_column=Column(BigInteger, nullable=False, server_default='0'))

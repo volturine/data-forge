@@ -514,6 +514,81 @@ describe('AnalysisStore.isDirty', () => {
 	});
 });
 
+describe('AnalysisStore.restoreSavedSnapshot', () => {
+	test('restores an independent saved copy, metadata, and active tab without clearing engine settings', () => {
+		const store = new AnalysisStore();
+		const savedTabs = [
+			makeTab({
+				id: 'tab-a',
+				steps: [makeStep({ id: 'step-a', config: { filter: { column: 'saved' } } })]
+			}),
+			makeTab({ id: 'tab-b' })
+		];
+		store.applyAnalysis({
+			id: 'analysis-a',
+			name: 'Saved name',
+			description: 'Saved description',
+			pipeline_definition: { tabs: savedTabs },
+			created_at: '',
+			updated_at: '',
+			revision: 1,
+			result_path: null,
+			thumbnail: null
+		});
+		const resourceConfig = { max_threads: 3 };
+		const engineDefaults = { max_threads: 4, max_memory_mb: 1024, streaming_chunk_size: 512 };
+		store.setResourceConfig(resourceConfig);
+		store.setEngineDefaults(engineDefaults);
+		const existingResourceConfig = store.resourceConfig;
+		const existingEngineDefaults = store.engineDefaults;
+		store.update({ name: 'Unsaved name', description: 'Unsaved description' });
+		store.setActiveTab('tab-a');
+		store.updateStepConfig('step-a', { filter: { column: 'unsaved' } });
+		store.addTab(makeTab({ id: 'tab-unsaved' }));
+		store.setActiveTab('tab-b');
+
+		expect(store.restoreSavedSnapshot()).toBe(true);
+
+		expect(store.current?.name).toBe('Saved name');
+		expect(store.current?.description).toBe('Saved description');
+		expect(store.tabs.map((tab) => tab.id)).toEqual(['tab-a', 'tab-b']);
+		expect(store.tabs[0]?.steps[0]?.config).toEqual({ filter: { column: 'saved' } });
+		expect(store.activeTabId).toBe('tab-b');
+		expect(store.isDirty()).toBe(false);
+		expect(store.tabs).not.toBe(store.savedTabs);
+		expect(store.tabs[0]?.steps[0]?.config).not.toBe(store.savedTabs[0]?.steps[0]?.config);
+		expect(store.resourceConfig).toBe(existingResourceConfig);
+		expect(store.engineDefaults).toBe(existingEngineDefaults);
+	});
+
+	test('restores an empty saved tab list as a valid snapshot', () => {
+		const store = new AnalysisStore();
+		store.applyAnalysis({
+			id: 'analysis-empty',
+			name: 'Empty saved analysis',
+			description: null,
+			pipeline_definition: { tabs: [] },
+			created_at: '',
+			updated_at: '',
+			revision: 1,
+			result_path: null,
+			thumbnail: null
+		});
+		store.setTabs([makeTab({ id: 'unsaved-tab' })]);
+		store.update({ name: 'Unsaved name' });
+
+		expect(store.restoreSavedSnapshot()).toBe(true);
+		expect(store.tabs).toEqual([]);
+		expect(store.activeTabId).toBeNull();
+		expect(store.current?.name).toBe('Empty saved analysis');
+		expect(store.isDirty()).toBe(false);
+	});
+
+	test('returns false when no saved analysis snapshot exists', () => {
+		expect(new AnalysisStore().restoreSavedSnapshot()).toBe(false);
+	});
+});
+
 describe('AnalysisStore.reset', () => {
 	test('clears all state', () => {
 		const store = new AnalysisStore();

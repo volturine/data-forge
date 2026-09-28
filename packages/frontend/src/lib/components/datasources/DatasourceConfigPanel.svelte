@@ -121,10 +121,12 @@
 	}));
 
 	const buildRunsStore = new BuildsStore();
+	const onboardingBuildRunsStore = new BuildsStore();
 	let runsRequested = false;
 
 	onDestroy(() => {
 		buildRunsStore.close();
+		onboardingBuildRunsStore.close();
 	});
 
 	function selectTab(
@@ -134,10 +136,15 @@
 		if (tab !== 'runs' || !datasource.id) return;
 		if (!runsRequested) {
 			buildRunsStore.load({ datasource_id: datasource.id, limit: 50 });
+			// The mixed run list is intentionally bounded, but previews can be
+			// numerous enough to hide the datasource's initial ingest. Fetch that
+			// semantic Build row independently without scanning the full history.
+			onboardingBuildRunsStore.load({ datasource_id: datasource.id, kind: 'build', limit: 1 });
 			runsRequested = true;
 			return;
 		}
 		buildRunsStore.silentRefresh();
+		onboardingBuildRunsStore.silentRefresh();
 	}
 
 	const updateMutation = createMutation(() => ({
@@ -627,6 +634,7 @@
 			<DatasourceRunsTab
 				datasourceId={datasource.id}
 				builds={buildRunsStore.builds}
+				onboardingBuilds={onboardingBuildRunsStore.builds}
 				status={buildRunsStore.status}
 				error={buildRunsStore.error}
 				{showPreviews}

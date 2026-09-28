@@ -34,8 +34,15 @@ logger = logging.getLogger(__name__)
 
 _ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
 _ENGINE_APPLICATION_VERSION = "engine"
+_COORDINATOR_GENERATION_LABEL = "io.dataforge.coordinator-generation"
 _MIB = 1024 * 1024
 _IMAGE_DIGEST_RE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+_ENGINE_CHANNEL_OPTIONS = (
+    ("grpc.max_send_message_length", 128 * 1024 * 1024),
+    ("grpc.max_receive_message_length", 128 * 1024 * 1024),
+    ("grpc.initial_reconnect_backoff_ms", 100),
+    ("grpc.max_reconnect_backoff_ms", 1000),
+)
 _docker_runtime_lock = threading.Lock()
 _cached_daemon_cpu_count: int | None = None
 _validated_image_ref: str | None = None
@@ -100,6 +107,8 @@ def validate_engine_runtime_readiness() -> None:
 def reconcile_deployment_containers(
     *,
     supervisor_id: str | None = None,
+    coordinator_generation: int | None = None,
+    coordinator_guard: Callable[[], None] | None = None,
     remove_running: bool = True,
     keep_container_ids: Collection[str] = (),
     running_grace_seconds: float = 0,
@@ -115,19 +124,39 @@ def reconcile_deployment_containers(
     client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
     removed = 0
     try:
+        if coordinator_guard is not None:
+            coordinator_guard()
         labels = ["io.dataforge.managed=true", f"io.dataforge.deployment={settings.deployment_id}"]
-        if supervisor_id is not None:
+        if supervisor_id is not None and coordinator_generation is None:
             labels.append(f"io.dataforge.supervisor={supervisor_id}")
         containers = client.api.containers(all=True, filters={"label": labels})
         for container in containers:
             container_id = str(container["Id"])
             if container_id in keep_container_ids:
                 continue
+            container_labels = container.get("Labels") or {}
+            container_generation = container_labels.get(_COORDINATOR_GENERATION_LABEL) if isinstance(container_labels, dict) else None
+            if coordinator_generation is not None and container_generation != str(coordinator_generation):
+                if not remove_running and container.get("State") not in {"dead", "exited"}:
+                    continue
+                if coordinator_guard is not None:
+                    coordinator_guard()
+                try:
+                    client.api.remove_container(container_id, force=True)
+                    removed += 1
+                except Exception:
+                    logger.warning(
+                        "Failed to remove stale-generation engine container %s (generation=%s current=%s)",
+                        container_id[:12],
+                        container_generation or "missing",
+                        coordinator_generation,
+                        exc_info=True,
+                    )
+                continue
             state = container.get("State")
             if not remove_running and state not in {"dead", "exited"}:
                 continue
             if remove_running and state not in {"dead", "exited"} and running_grace_seconds > 0:
-                container_labels = container.get("Labels") or {}
                 created_at_raw = container_labels.get("io.dataforge.created-at") if isinstance(container_labels, dict) else None
                 try:
                     created_at = datetime.fromisoformat(str(created_at_raw)) if created_at_raw else None
@@ -135,6 +164,8 @@ def reconcile_deployment_containers(
                     created_at = None
                 if created_at is None or (datetime.now(UTC) - created_at).total_seconds() < running_grace_seconds:
                     continue
+            if coordinator_guard is not None:
+                coordinator_guard()
             try:
                 client.api.remove_container(container_id, force=True)
                 removed += 1
@@ -212,29 +243,14 @@ def _engine_object_store_endpoint() -> str:
 
 
 def _container_rpc_target(container: Any) -> str:
-    """Return a stable RPC address for a running private-network container."""
-    # Docker can return from ``start`` before the network attachment is
-    # visible through ``reload``. Treat that as startup progress, not as a
-    # failed engine: an immediate failure would tear down a healthy container
-    # and let the next same-identity launch race its removal.
-    deadline = time.monotonic() + min(max(settings.engine_start_timeout_seconds, 1.0), 5.0)
-    last_status = "unknown"
-    while time.monotonic() < deadline:
-        container.reload()
-        last_status = str(container.status)
-        if last_status == "running":
-            # Do not pin the gRPC channel to a Docker IP. Docker reuses those
-            # addresses as soon as a container is removed, so an existing
-            # channel can reconnect to a different engine and make an
-            # Initialize RPC look like an identity collision. Container names
-            # are unique per launch and are resolved by Docker's embedded DNS.
-            name = str(getattr(container, "name", "")).lstrip("/")
-            if name:
-                return f"{name}:{settings.engine_rpc_port}"
-        if last_status in {"exited", "dead"}:
-            raise RuntimeError(f"Docker engine container stopped before it received an IP address on {settings.engine_docker_network} (status={last_status})")
-        time.sleep(0.05)
-    raise RuntimeError(f"Docker did not start the engine container on {settings.engine_docker_network} within the startup window (status={last_status})")
+    """Return the unique Docker-DNS address; gRPC readiness handles startup."""
+    # Container names are unique per launch and Docker DNS resolves them. Do
+    # not poll Docker's API here: channel readiness below already waits for the
+    # listener, while repeated reloads multiply daemon traffic during bursts.
+    name = str(getattr(container, "name", "")).lstrip("/")
+    if not name:
+        raise RuntimeError("Docker did not return a name for the engine container")
+    return f"{name}:{settings.engine_rpc_port}"
 
 
 # Credential bootstrap is passed in-memory via gRPC Initialize RPC, eliminating exec_run.
@@ -248,6 +264,8 @@ class DockerComputeEngine(ComputeEngine):
         *,
         namespace: str | None = None,
         supervisor_id: str = "worker",
+        coordinator_generation: int | None = None,
+        coordinator_guard: Callable[[], None] | None = None,
     ) -> None:
         self.identity = identity if identity is not None else compute_pb2.EngineIdentity(resource_id="")
         self.analysis_id = self.identity.resource_id
@@ -256,6 +274,8 @@ class DockerComputeEngine(ComputeEngine):
         self.current_job_id: str | None = None
         self._namespace = namespace or get_namespace()
         self._supervisor_id = supervisor_id
+        self._coordinator_generation = coordinator_generation
+        self._coordinator_guard = coordinator_guard
         self._client: Any | None = None  # docker-py does not publish Python 3.14 type stubs.
         self._container: Any | None = None
         self._container_id: str | None = None
@@ -265,7 +285,7 @@ class DockerComputeEngine(ComputeEngine):
         self._token = ""
         self._alive = False
         self._shutdown_requested = False
-        self._is_warm = identity is None
+        self._is_warm_worker = identity is None
         self.image_digest: str | None = None
         self.exit_code: int | None = None
         self.oom_killed: bool | None = None
@@ -288,6 +308,58 @@ class DockerComputeEngine(ComputeEngine):
         """ProcessManager wakes capacity waiters when this engine becomes idle."""
         self._capacity_notifier = notifier
 
+    def _assert_coordinator_current(self) -> None:
+        if self._coordinator_guard is not None:
+            self._coordinator_guard()
+
+    def _coordinator_can_mutate(self, operation: str) -> bool:
+        try:
+            self._assert_coordinator_current()
+        except Exception:
+            logger.warning(
+                "Coordinator ownership lost; skipping engine mutation operation=%s generation=%s container_id=%s",
+                operation,
+                self._coordinator_generation,
+                self._container_id,
+                exc_info=True,
+            )
+            return False
+        return True
+
+    def _detach_local_handles(self) -> None:
+        """Forget local handles without changing the externally owned container."""
+        if self._channel is not None:
+            with contextlib.suppress(Exception):
+                self._channel.close()
+        if self._client is not None:
+            with contextlib.suppress(Exception):
+                self._client.close()
+        self._channel = None
+        self._client = None
+        self._container = None
+        self._container_id = None
+        self._stub = None
+        self._rpc_target = None
+        self._alive = False
+        self._active_job_ids.clear()
+        self._artifact_transfers.clear()
+        self._publish_current_job_id(None)
+
+    def _cleanup_failed_start(self, container: Any, client: Any) -> None:
+        """Remove a partially started container only while this generation owns it."""
+        if self._coordinator_can_mutate("failed-start-container-remove"):
+            with contextlib.suppress(Exception):
+                container.remove(force=True)
+        else:
+            logger.warning(
+                "Leaving failed-start container for active coordinator reconciliation container_id=%s generation=%s",
+                self._container_id,
+                self._coordinator_generation,
+            )
+        self._detach_local_handles()
+        with contextlib.suppress(Exception):
+            client.close()
+
     def _publish_current_job_id(self, job_id: str | None) -> None:
         """Update current_job_id and notify capacity waiters when work drains."""
         with self._lock:
@@ -307,9 +379,9 @@ class DockerComputeEngine(ComputeEngine):
         return self._container_id
 
     @property
-    def is_warm(self) -> bool:
+    def is_warm_worker(self) -> bool:
         with self._lock:
-            return self._is_warm and self._alive
+            return self._is_warm_worker and self._alive
 
     @property
     def lifecycle_status(self) -> str:
@@ -333,15 +405,38 @@ class DockerComputeEngine(ComputeEngine):
             self.termination_reason = "container_exit"
         else:
             self.termination_reason = "container_stopped"
+        if self.termination_reason == "shutdown":
+            logger.info(
+                "Engine container stopped resource_id=%s container_id=%s reason=%s exit_code=%s oom_killed=%s",
+                self.identity.resource_id,
+                self._container_id,
+                self.termination_reason,
+                self.exit_code,
+                self.oom_killed,
+            )
+        else:
+            logger.error(
+                "Engine container terminated resource_id=%s container_id=%s reason=%s exit_code=%s oom_killed=%s status=%s",
+                self.identity.resource_id,
+                self._container_id,
+                self.termination_reason,
+                self.exit_code,
+                self.oom_killed,
+                getattr(container, "status", "unknown"),
+            )
 
     def start(self) -> None:
-        if self._is_warm:
-            self.start_warm()
+        if self._is_warm_worker:
+            self.start_warm_worker()
             return
+        self._assert_coordinator_current()
+        start_started = time.perf_counter()
+        startup_phases: dict[str, float] = {}
         with self._lock:
             if self._alive:
                 return
             self._shutdown_requested = False
+            phase_started = time.perf_counter()
             credentials = resolve_engine_credentials(self._namespace, self.identity)
             client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
             try:
@@ -350,6 +445,7 @@ class DockerComputeEngine(ComputeEngine):
             except Exception:
                 client.close()
                 raise
+            startup_phases["credentials_and_docker_context_ms"] = (time.perf_counter() - phase_started) * 1000
             self.effective_resources = cast(dict[str, object], resources)
             self.image_digest = settings.engine_image.split("@", 1)[1] if "@" in settings.engine_image else image_id
 
@@ -367,6 +463,8 @@ class DockerComputeEngine(ComputeEngine):
                 "io.dataforge.image-digest": self.image_digest,
                 "io.dataforge.created-at": datetime.now(UTC).isoformat(),
             }
+            if self._coordinator_generation is not None:
+                labels[_COORDINATOR_GENERATION_LABEL] = str(self._coordinator_generation)
             create_kwargs: dict[str, object] = {
                 "image": settings.engine_image,
                 "name": _container_name(identity=self.identity, namespace=self._namespace),
@@ -378,7 +476,6 @@ class DockerComputeEngine(ComputeEngine):
                     # Orphan guard: if the worker dies between container start and
                     # initialization, the engine stops itself instead of leaking.
                     "ENGINE_INIT_TIMEOUT_SECONDS": str(max(120, settings.engine_start_timeout_seconds * 2)),
-                    "ENGINE_JOB_CONCURRENCY": str(settings.engine_job_concurrency),
                     "APP_VERSION": _ENGINE_APPLICATION_VERSION,
                 },
                 "labels": labels,
@@ -398,12 +495,23 @@ class DockerComputeEngine(ComputeEngine):
             if settings.engine_connect_host:
                 create_kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
                 create_kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}
-            container = client.containers.create(**create_kwargs)
+            phase_started = time.perf_counter()
+            try:
+                self._assert_coordinator_current()
+                container = client.containers.create(**create_kwargs)
+            except Exception:
+                client.close()
+                raise
+            startup_phases["container_create_ms"] = (time.perf_counter() - phase_started) * 1000
             self._container_id = str(container.id)
             try:
+                phase_started = time.perf_counter()
+                self._assert_coordinator_current()
                 container.start()
+                startup_phases["container_start_ms"] = (time.perf_counter() - phase_started) * 1000
                 self._client = client
                 self._container = container
+                phase_started = time.perf_counter()
                 if settings.engine_connect_host:
                     container.reload()
                     bindings = container.attrs["NetworkSettings"]["Ports"].get(f"{settings.engine_rpc_port}/tcp") or []
@@ -412,13 +520,19 @@ class DockerComputeEngine(ComputeEngine):
                     target = f"{settings.engine_connect_host}:{bindings[0]['HostPort']}"
                 else:
                     target = _container_rpc_target(container)
+                startup_phases["rpc_target_ms"] = (time.perf_counter() - phase_started) * 1000
                 self._rpc_target = target
                 self._channel = grpc.insecure_channel(
                     target,
-                    options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024)),
+                    options=_ENGINE_CHANNEL_OPTIONS,
                 )
                 self._stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(self._channel)
+                phase_started = time.perf_counter()
+                self._await_listening()
+                startup_phases["listener_ready_ms"] = (time.perf_counter() - phase_started) * 1000
+                phase_started = time.perf_counter()
                 self._initialize(resources=resources, credentials=credentials)
+                startup_phases["initialize_ms"] = (time.perf_counter() - phase_started) * 1000
                 self._alive = True
                 self._heartbeat_stop.clear()
                 self._heartbeat_thread = threading.Thread(
@@ -427,10 +541,17 @@ class DockerComputeEngine(ComputeEngine):
                     daemon=True,
                 )
                 self._heartbeat_thread.start()
+                startup_duration_ms = (time.perf_counter() - start_started) * 1000
+                if startup_duration_ms >= 5000:
+                    phase_timings = " ".join(f"{name}={duration:.1f}" for name, duration in startup_phases.items())
+                    logger.warning(
+                        "Slow engine startup resource_id=%s duration_ms=%.1f %s",
+                        self.identity.resource_id,
+                        startup_duration_ms,
+                        phase_timings,
+                    )
             except Exception:
-                with contextlib.suppress(Exception):
-                    container.remove(force=True)
-                client.close()
+                self._cleanup_failed_start(container, client)
                 raise
 
     def _metadata(self) -> tuple[tuple[str, str], ...]:
@@ -438,7 +559,6 @@ class DockerComputeEngine(ComputeEngine):
 
     def _initialize(self, *, resources: dict[str, int], credentials: ObjectStoreCredentials) -> None:
         assert self._stub is not None
-        deadline = time.monotonic() + settings.engine_start_timeout_seconds
         req = engine_runtime_pb2.EngineInitializeRequest(
             protocol_version=ENGINE_PROTOCOL_VERSION,
             engine_identity=self.identity.resource_id,
@@ -451,36 +571,62 @@ class DockerComputeEngine(ComputeEngine):
             polars_max_threads=resources["max_threads"],
             polars_streaming_chunk_size=resources["streaming_chunk_size"],
         )
-        last_error: Exception | None = None
-        while time.monotonic() < deadline:
-            try:
-                resp = self._stub.Initialize(req, timeout=2.0)
-                if resp.ready and resp.engine_identity == self.identity.resource_id:
-                    return
-                last_error = RuntimeError("Engine initialization did not return ready status")
-            except grpc.RpcError as exc:
-                if exc.code() == grpc.StatusCode.FAILED_PRECONDITION and str(exc.details()).startswith("Engine already initialized"):
-                    raise RuntimeError(
-                        f"Engine identity collision for {self.identity.resource_id} at {self._rpc_target} (container {self._container_id}): {exc.details()}"
-                    ) from exc
-                last_error = exc
-            time.sleep(0.05)
-        raise RuntimeError(f"Timed out waiting for engine initialization: {last_error}")
+        try:
+            resp = self._stub.Initialize(req, timeout=2.0)
+        except grpc.RpcError as exc:
+            if exc.code() == grpc.StatusCode.FAILED_PRECONDITION and str(exc.details()).startswith("Engine already initialized"):
+                raise RuntimeError(
+                    f"Engine identity collision for {self.identity.resource_id} at {self._rpc_target} (container {self._container_id}): {exc.details()}"
+                ) from exc
+            raise RuntimeError(f"Engine initialization failed for {self.identity.resource_id}: {exc}") from exc
+        if not resp.ready or resp.engine_identity != self.identity.resource_id:
+            raise RuntimeError("Engine initialization did not return the expected ready identity")
 
     def _await_listening(self) -> None:
+        assert self._channel is not None
         assert self._stub is not None
         deadline = time.monotonic() + settings.engine_start_timeout_seconds
-        last_error: Exception | None = None
-        while time.monotonic() < deadline:
+        try:
+            grpc.channel_ready_future(self._channel).result(timeout=max(0.0, deadline - time.monotonic()))
+        except grpc.FutureTimeoutError as exc:
+            status = self._container_status_after_start_failure()
+            raise RuntimeError(f"Timed out waiting for engine listener; container status={status}") from exc
+
+        retry_delay = 0.1
+        last_error: grpc.RpcError | None = None
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                status = self._container_status_after_start_failure()
+                raise RuntimeError(f"Timed out waiting for engine health check; container status={status}: {last_error}") from last_error
             try:
-                self._stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=1.0)
+                self._stub.Health(
+                    engine_runtime_pb2.EngineHealthRequest(),
+                    timeout=min(2.0, remaining),
+                )
                 return
             except grpc.RpcError as exc:
+                if exc.code() not in {grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED}:
+                    status = self._container_status_after_start_failure()
+                    raise RuntimeError(f"Engine listener failed its health check (container status={status}): {exc}") from exc
                 last_error = exc
-            time.sleep(0.05)
-        raise RuntimeError(f"Timed out waiting for warm engine container to start listening: {last_error}")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    continue
+                time.sleep(min(retry_delay, remaining))
+                retry_delay = min(retry_delay * 2, 1.0)
 
-    def start_warm(self) -> None:
+    def _container_status_after_start_failure(self) -> str:
+        """Inspect Docker once, only when readiness has already failed."""
+        container = self._container
+        if container is None:
+            return "unknown"
+        with contextlib.suppress(Exception):
+            container.reload()
+        return str(getattr(container, "status", "unknown"))
+
+    def start_warm_worker(self) -> None:
+        self._assert_coordinator_current()
         with self._lock:
             if self._alive:
                 return
@@ -495,28 +641,29 @@ class DockerComputeEngine(ComputeEngine):
             self.effective_resources = cast(dict[str, object], resources)
             self.image_digest = settings.engine_image.split("@", 1)[1] if "@" in settings.engine_image else image_id
 
-            warm_id = uuid.uuid4().hex[:12]
+            worker_id = uuid.uuid4().hex[:12]
             labels = {
                 "io.dataforge.managed": "true",
                 "io.dataforge.deployment": settings.deployment_id,
-                "io.dataforge.scope": "warm",
+                "io.dataforge.scope": "warm-worker",
                 "io.dataforge.supervisor": self._supervisor_id,
                 "io.dataforge.owner": self._supervisor_id,
                 "io.dataforge.protocol-version": str(ENGINE_PROTOCOL_VERSION),
                 "io.dataforge.image-digest": self.image_digest,
                 "io.dataforge.created-at": datetime.now(UTC).isoformat(),
             }
+            if self._coordinator_generation is not None:
+                labels[_COORDINATOR_GENERATION_LABEL] = str(self._coordinator_generation)
             create_kwargs: dict[str, object] = {
                 "image": settings.engine_image,
-                "name": f"dataforge-engine-warm-{warm_id}",
+                "name": f"dataforge-compute-worker-warm-{worker_id}",
                 "command": ["python3", "engine_main.py"],
                 "environment": {
                     "ENGINE_RPC_HOST": "0.0.0.0",
                     "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
                     "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
-                    # Warm engines stay uninitialized until claimed; no deadline.
+                    # Warm workers stay uninitialized until assigned; no deadline.
                     "ENGINE_INIT_TIMEOUT_SECONDS": "0",
-                    "ENGINE_JOB_CONCURRENCY": str(settings.engine_job_concurrency),
                     "APP_VERSION": _ENGINE_APPLICATION_VERSION,
                 },
                 "labels": labels,
@@ -536,9 +683,11 @@ class DockerComputeEngine(ComputeEngine):
             if settings.engine_connect_host:
                 create_kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
                 create_kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}
+            self._assert_coordinator_current()
             container = client.containers.create(**create_kwargs)
             self._container_id = str(container.id)
             try:
+                self._assert_coordinator_current()
                 container.start()
                 self._client = client
                 self._container = container
@@ -553,15 +702,13 @@ class DockerComputeEngine(ComputeEngine):
                 self._rpc_target = target
                 self._channel = grpc.insecure_channel(
                     target,
-                    options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024)),
+                    options=_ENGINE_CHANNEL_OPTIONS,
                 )
                 self._stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(self._channel)
                 self._await_listening()
                 self._alive = True
             except Exception:
-                with contextlib.suppress(Exception):
-                    container.remove(force=True)
-                client.close()
+                self._cleanup_failed_start(container, client)
                 raise
 
     def bind_identity(
@@ -571,6 +718,7 @@ class DockerComputeEngine(ComputeEngine):
         resource_config: dict[str, object] | None = None,
         namespace: str | None = None,
     ) -> None:
+        self._assert_coordinator_current()
         with self._lock:
             if not self._alive or self._stub is None:
                 raise RuntimeError("Cannot bind identity to an unstarted engine")
@@ -583,8 +731,9 @@ class DockerComputeEngine(ComputeEngine):
             resources = _effective_resources(self.resource_config)
             self.effective_resources = cast(dict[str, object], resources)
             self._token = uuid.uuid4().hex
+            self._assert_coordinator_current()
             self._initialize(resources=resources, credentials=credentials)
-            self._is_warm = False
+            self._is_warm_worker = False
             self._heartbeat_stop.clear()
             self._heartbeat_thread = threading.Thread(
                 target=self._heartbeat_loop,
@@ -610,14 +759,25 @@ class DockerComputeEngine(ComputeEngine):
                     consecutive_failures,
                     exc,
                 )
-                # Transient gRPC blips under CI load must not stop heartbeats;
-                # the engine watchdog only tolerates a few missed intervals.
-                if consecutive_failures >= 3 or not self.is_process_alive():
+                # A missed gRPC health RPC is not proof that the container
+                # exited: the engine can be busy initializing its compute
+                # runtime or briefly starved while many identities start.
+                # Docker liveness is authoritative for manager eviction.
+                if not self.is_process_alive():
                     self._alive = False
                     if self._capacity_notifier is not None:
                         with contextlib.suppress(Exception):
                             self._capacity_notifier()
                     return
+                if consecutive_failures >= 3:
+                    logger.warning(
+                        "Engine gRPC health is unavailable but its container is still running; "
+                        "continuing heartbeats resource_id=%s container_id=%s failures=%s",
+                        self.identity.resource_id,
+                        self._container_id,
+                        consecutive_failures,
+                    )
+                    consecutive_failures = 0
 
     @property
     def last_known_alive(self) -> bool:
@@ -660,16 +820,17 @@ class DockerComputeEngine(ComputeEngine):
             if self._stub is None:
                 return False
             stub = self._stub
-            is_warm = self._is_warm
-            metadata = () if is_warm else self._metadata()
+            is_warm_worker = self._is_warm_worker
+            metadata = () if is_warm_worker else self._metadata()
         try:
             health = stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=1, metadata=metadata)
-            return True if is_warm else bool(health.ready)
+            return True if is_warm_worker else bool(health.ready)
         except grpc.RpcError:
             return False
 
     def _submit(self, kind: str, payload: dict[str, object], *, job_id: str | None = None) -> str:
         with self._lock:
+            self._assert_coordinator_current()
             # Check, restart and job registration stay atomic: an engine that is
             # shut down (idle reaping, a crash) between the check and the
             # registration has to be restarted, not reported as broken.
@@ -685,6 +846,7 @@ class DockerComputeEngine(ComputeEngine):
         # job, and holding the lifecycle lock across it blocks shutdown, status
         # and every other caller of this engine for the full submit timeout.
         try:
+            self._assert_coordinator_current()
             stub.SubmitJob(
                 engine_runtime_pb2.EngineSubmitJobRequest(
                     protocol_version=ENGINE_PROTOCOL_VERSION,
@@ -900,21 +1062,26 @@ class DockerComputeEngine(ComputeEngine):
             with self._lock:
                 if expected and expected in self._pending_results:
                     return self._pending_results.pop(expected)
-                if expected and not self.is_process_alive():
-                    intentional_shutdown = self._shutdown_requested
-                    error_kind = "engine_shutdown" if intentional_shutdown else "engine_oom_killed" if self.oom_killed else "engine_container_exited"
-                    return EngineResult(
-                        job_id=expected,
-                        data=None,
-                        error="Engine shutdown requested" if intentional_shutdown else "Engine container died unexpectedly",
-                        error_kind=error_kind,
-                        error_details={
-                            "container_id": self.container_id,
-                            "exit_code": self.exit_code,
-                            "oom_killed": self.oom_killed,
-                            "termination_reason": self.termination_reason,
-                        },
-                    )
+            if expected and not self.is_process_alive():
+                intentional_shutdown = self._shutdown_requested
+                error_kind = "engine_shutdown" if intentional_shutdown else "engine_oom_killed" if self.oom_killed else "engine_container_exited"
+                reason = self.termination_reason or "unknown"
+                return EngineResult(
+                    job_id=expected,
+                    data=None,
+                    error=(
+                        "Engine shutdown requested"
+                        if intentional_shutdown
+                        else f"Engine container terminated (reason={reason}, exit_code={self.exit_code}, oom_killed={self.oom_killed})"
+                    ),
+                    error_kind=error_kind,
+                    error_details={
+                        "container_id": self.container_id,
+                        "exit_code": self.exit_code,
+                        "oom_killed": self.oom_killed,
+                        "termination_reason": self.termination_reason,
+                    },
+                )
             if time.monotonic() >= deadline:
                 return None
             time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
@@ -938,17 +1105,20 @@ class DockerComputeEngine(ComputeEngine):
             self._heartbeat_stop.set()
             container = self._container
             stub = self._stub
+            transfers = list(self._artifact_transfers.values()) if container is None else []
             if container is None:
-                transfers = list(self._artifact_transfers.values())
+                if not self._coordinator_can_mutate("artifact-transfer-cleanup"):
+                    self._detach_local_handles()
+                    return
                 self._artifact_transfers.clear()
                 self._active_job_ids.clear()
                 self._publish_current_job_id(None)
-            else:
-                transfers = []
-            if container is None:
                 for _local_path, artifact_url in transfers:
                     with contextlib.suppress(Exception):
                         delete_object(artifact_url)
+                return
+            if not self._coordinator_can_mutate("engine-shutdown-rpc"):
+                self._detach_local_handles()
                 return
             if stub is not None:
                 with contextlib.suppress(Exception):
@@ -963,11 +1133,21 @@ class DockerComputeEngine(ComputeEngine):
             with contextlib.suppress(Exception):
                 container.reload()
                 if container.status == "running":
+                    if not self._coordinator_can_mutate("engine-container-stop"):
+                        self._detach_local_handles()
+                        return
                     container.stop(timeout=settings.engine_shutdown_grace_seconds)
                     container.reload()
                 self._capture_termination(container)
-            with contextlib.suppress(Exception):
+            if not self._coordinator_can_mutate("engine-container-remove"):
+                self._detach_local_handles()
+                return
+            try:
                 container.remove(force=True)
+            except Exception:
+                logger.warning("Failed to remove engine container during shutdown container_id=%s", self._container_id, exc_info=True)
+                self._detach_local_handles()
+                return
             if self._channel is not None:
                 self._channel.close()
             if self._client is not None:

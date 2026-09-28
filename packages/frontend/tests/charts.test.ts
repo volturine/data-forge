@@ -96,7 +96,12 @@ test.describe('Charts – chart types render', () => {
 			page,
 			request,
 			sharedChartDatasource
-		}) => {
+		}, testInfo) => {
+			if (spec.chart_type === 'heatgrid') {
+				// This chart's cold engine preview can exceed the suite-wide 120s
+				// deadline under 3×4 load; readiness still fails explicitly at 150s.
+				testInfo.setTimeout(180_000);
+			}
 			const analysisName = `E2E Chart ${spec.chart_type} ${uid()}`;
 			const stepId = crypto.randomUUID();
 			const tabId = crypto.randomUUID();
@@ -144,7 +149,7 @@ test.describe('Charts – chart types render', () => {
 			);
 			try {
 				await gotoAnalysisEditor(page, aId);
-				await waitForChartPreviewReady(page);
+				await waitForChartPreviewReady(page, spec.chart_type === 'heatgrid' ? 150_000 : undefined);
 				const chart = page.locator('[data-testid="chart-preview"]');
 				await expect(chart.locator('svg').first()).toBeVisible({ timeout: readyTimeoutMs() });
 				if (spec.chart_type === 'bar') {

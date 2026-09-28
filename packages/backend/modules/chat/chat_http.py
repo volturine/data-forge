@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 from collections.abc import Sequence
 from typing import Any
@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from backend_core import http as http_client
+from backend_core.websocket import serialize_json
 from modules.mcp.models import MCPToolDefinition
 from modules.mcp.tool_output import format_output_hint
 
@@ -87,12 +88,12 @@ async def chat_with_tools(
     resp = await client.post(
         f'{_OPENROUTER_BASE}/chat/completions',
         headers=_headers(api_key),
-        content=json.dumps(payload),
+        content=await serialize_json(payload),
         timeout=_TIMEOUT,
     )
     if not resp.is_success:
         raise ChatHttpError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
-    return _response_json_object(resp, operation='chat completion')
+    return await asyncio.to_thread(_response_json_object, resp, operation='chat completion')
 
 
 async def list_models(api_key: str) -> list[dict]:
@@ -102,7 +103,7 @@ async def list_models(api_key: str) -> list[dict]:
     if not resp.is_success:
         logger.error('list_models failed: %d %s', resp.status_code, resp.text[:500])
         raise ChatHttpError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
-    data = resp.json()
+    data = await asyncio.to_thread(resp.json)
     return [
         {
             'id': m.get('id', ''),

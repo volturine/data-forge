@@ -334,6 +334,9 @@ class TestDataSourceValidation:
                 self.worksheets = [Sheet(title)]
                 self.defined_names = [f'{title}_range']
 
+            def close(self) -> None:
+                pass
+
         barrier = threading.Barrier(2, timeout=1)
 
         def fake_load_workbook(path: Path, read_only: bool = False, data_only: bool = True) -> Book:

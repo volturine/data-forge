@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, resolve_ai_provider
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace
+from backend_core.websocket import serialize_json
 from dataforge_protocol import enums_pb2
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
@@ -42,6 +43,15 @@ def _require_owned_session(session_id: str, user: User) -> LiveSession:
     if session is None or session.user_id != user.id:
         raise HTTPException(status_code=404, detail='Session not found')
     return session
+
+
+async def _require_owned_session_async(session_id: str, user: User) -> LiveSession:
+    """Load a chat session without running its synchronous DB fallback on the loop."""
+    return await _run_chat_db(_require_owned_session, session_id, user)
+
+
+async def _run_chat_db(function, *args):
+    return await asyncio.to_thread(function, *args)
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,19 +290,16 @@ def _push_tool_error(
 
 
 def _try_parse_json(text: str) -> list[dict] | None:
-    """Try to parse JSON, progressively trimming trailing garbage on failure."""
-    for end in range(len(text), 0, -1):
-        candidate = text[:end]
-        if not candidate.rstrip().endswith((']', '}')):
-            continue
-        try:
-            data = json.loads(candidate)
-            if isinstance(data, dict):
-                return [data]
-            if isinstance(data, list):
-                return data
-        except json.JSONDecodeError:
-            continue
+    """Parse one leading JSON value, ignoring any trailing model chatter."""
+    start = len(text) - len(text.lstrip())
+    try:
+        data, _end = json.JSONDecoder().raw_decode(text, start)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, dict):
+        return [data]
+    if isinstance(data, list):
+        return data
     return None
 
 
@@ -341,7 +348,7 @@ async def _run_agent_turn(
         session.push_event({'type': 'error', 'content': 'No API key configured'})
         session.push_event({'type': 'done'})
         await session.set_busy(False)
-        session_store.flush(session.id)
+        await _run_chat_db(session_store.flush, session.id)
         return
 
     turn_start = time.monotonic()
@@ -422,7 +429,7 @@ async def _run_agent_turn(
             if tool_calls:
                 use_text_format = False  # model uses native calling; drop text instructions hereafter
             elif assistant_content:
-                cleaned, parsed = _parse_text_tool_calls(assistant_content)
+                cleaned, parsed = await asyncio.to_thread(_parse_text_tool_calls, assistant_content)
                 if parsed:
                     tool_calls = parsed
                     assistant_content = cleaned
@@ -477,7 +484,7 @@ async def _run_agent_turn(
                 path = tool.path
 
                 try:
-                    args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    args = await asyncio.to_thread(json.loads, raw_args) if isinstance(raw_args, str) else raw_args
                 except json.JSONDecodeError as exc:
                     logger.warning(
                         'Malformed tool args session=%s tool=%s: %s',
@@ -507,7 +514,7 @@ async def _run_agent_turn(
                     }
                 )
 
-                valid, errors, normalized = tool.validate_arguments(args)
+                valid, errors, normalized = await asyncio.to_thread(tool.validate_arguments, args)
                 if not valid:
                     session.push_event(
                         {
@@ -579,7 +586,7 @@ async def _run_agent_turn(
                 if patch:
                     session.push_event({'type': 'ui_patch', **patch})
 
-                tool_result_str = json.dumps(result.get('body', ''))
+                tool_result_str = await serialize_json(result.get('body', ''))
                 session.append_message(
                     {
                         'role': 'tool',
@@ -614,7 +621,7 @@ async def _run_agent_turn(
         )
         session.push_event({'type': 'done'})
         await session.set_busy(False)
-        session_store.flush(session.id)
+        await _run_chat_db(session_store.flush, session.id)
 
 
 @router.get('/sessions')
@@ -667,7 +674,7 @@ def update_session(session_id: str, body: UpdateSessionRequest, user: User = Dep
 @handle_errors('send chat message')
 async def send_message(request: Request, body: MessageRequest, user: User = Depends(get_current_user)) -> dict:
     """Send a user message; agent processing is kicked off asynchronously."""
-    session = _require_owned_session(body.session_id, user)
+    session = await _require_owned_session_async(body.session_id, user)
 
     acquired = await session.acquire_turn()
     if not acquired:
@@ -693,7 +700,7 @@ async def send_message(request: Request, body: MessageRequest, user: User = Depe
 @handle_errors('stop chat generation')
 async def stop_generation(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Cancel the running agent turn for a session."""
-    session = _require_owned_session(session_id, user)
+    session = await _require_owned_session_async(session_id, user)
     session.cancel_task()
     await session.set_busy(False)
     return {'status': 'stopped', 'session_id': session_id}
@@ -726,7 +733,7 @@ def get_history(session_id: str, user: User = Depends(get_current_user)) -> dict
 @handle_errors('stream chat events')
 async def stream(session_id: str, user: User = Depends(get_current_user)) -> StreamingResponse:
     """SSE stream of chat events for a session with heartbeat."""
-    session = _require_owned_session(session_id, user)
+    session = await _require_owned_session_async(session_id, user)
 
     session.reopen_stream()
 
@@ -749,7 +756,7 @@ async def stream(session_id: str, user: User = Depends(get_current_user)) -> Str
                 if event.get('_heartbeat'):
                     yield b': heartbeat\n\n'
                     continue
-                yield f'data: {json.dumps(event)}\n\n'.encode()
+                yield f'data: {await serialize_json(event)}\n\n'.encode()
         finally:
             if heartbeat_task is not None:
                 heartbeat_task.cancel()

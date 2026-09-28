@@ -12,7 +12,7 @@ from sqlmodel import Session
 from backend_core import datasource_delete_service
 from backend_core.config import settings
 from backend_core.data_plane_client import client_from_settings
-from backend_core.database import get_db
+from backend_core.database import get_db_async, run_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
     get_runtime_availability_probe,
@@ -28,7 +28,7 @@ from backend_core.validation import (
     parse_datasource_id,
     parse_preflight_id,
 )
-from modules.auth.dependencies import get_optional_user
+from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.compute.executor_client import (
     compare_iceberg_snapshots as compare_remote_iceberg_snapshots,
@@ -38,6 +38,7 @@ from modules.compute.executor_client import (
     get_column_stats as get_remote_column_stats,
     get_datasource_schema as get_remote_datasource_schema,
     ingest_datasource as ingest_remote_datasource,
+    json_response,
 )
 from modules.datasource import schemas, service
 from modules.datasource.preflight import (
@@ -89,10 +90,10 @@ def _temporary_upload_path(suffix: str) -> Path:
 
 
 async def _stage_upload_to_object_store(file: UploadFile, target_name: str) -> str:
-    temp_path = _temporary_upload_path(Path(target_name).suffix.lower())
+    temp_path = await asyncio.to_thread(_temporary_upload_path, Path(target_name).suffix.lower())
     try:
         await _save_upload_file(file, temp_path, settings.upload_max_file_size_bytes)
-        data_plane = client_from_settings()
+        data_plane = await asyncio.to_thread(client_from_settings)
         target_url = await asyncio.to_thread(lambda: data_plane.build_object_url('uploads', target_name, namespace=get_namespace()))
         data = await asyncio.to_thread(temp_path.read_bytes)
         await asyncio.to_thread(data_plane.upload_object_bytes, data, target_url)
@@ -104,10 +105,10 @@ async def _stage_upload_to_object_store(file: UploadFile, target_name: str) -> s
 
 @contextlib.asynccontextmanager
 async def _local_excel_source(source_path: str):
-    data_plane = client_from_settings()
+    data_plane = await asyncio.to_thread(client_from_settings)
     classification = await asyncio.to_thread(data_plane.classify_object_url, source_path)
     if classification.is_object_store:
-        temp_path = _temporary_upload_path(Path(source_path).suffix or '.xlsx')
+        temp_path = await asyncio.to_thread(_temporary_upload_path, Path(source_path).suffix or '.xlsx')
         try:
             await asyncio.to_thread(temp_path.parent.mkdir, parents=True, exist_ok=True)
             source_bytes = await asyncio.to_thread(data_plane.download_object_bytes, source_path)
@@ -121,7 +122,7 @@ async def _local_excel_source(source_path: str):
 
 
 async def _delete_managed_object(source_path: str) -> None:
-    data_plane = client_from_settings()
+    data_plane = await asyncio.to_thread(client_from_settings)
     classification = await asyncio.to_thread(data_plane.classify_object_url, source_path)
     if classification.is_managed:
         await asyncio.to_thread(data_plane.delete_object, source_path)
@@ -177,8 +178,8 @@ async def upload_file(
     has_header: bool = Form(True),
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
-    user: User | None = Depends(get_optional_user),
-    session: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if not file.filename:
@@ -216,7 +217,7 @@ async def upload_file(
 
     try:
         owner_id = user.id if user else None
-        return await create_remote_file_datasource(
+        datasource = await create_remote_file_datasource(
             session,
             runtime_probe=runtime_probe,
             name=name,
@@ -226,6 +227,7 @@ async def upload_file(
             csv_options=csv_options.model_dump() if csv_options else None,
             owner_id=owner_id,
         )
+        return await json_response(datasource)
     except AppError, HTTPException, ValueError:
         await _delete_managed_object(file_path)
         raise
@@ -244,8 +246,8 @@ async def upload_bulk(
     has_header: bool = Form(True),
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
-    user: User | None = Depends(get_optional_user),
-    session: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if not files:
@@ -350,7 +352,7 @@ async def upload_bulk(
     successful = sum(1 for r in results if r.success)
     failed = len(results) - successful
 
-    return schemas.BulkUploadResponse(results=results, total=len(results), successful=successful, failed=failed)
+    return await json_response(schemas.BulkUploadResponse(results=results, total=len(results), successful=successful, failed=failed))
 
 
 @router.post('/preflight', response_model=schemas.ExcelPreflightResponse)
@@ -378,10 +380,10 @@ async def preflight_excel(
         raise HTTPException(status_code=400, detail='File content does not match extension')
 
     unique_filename = f'{uuid.uuid4()}{Path(file.filename).suffix.lower()}'
-    temp_path = _temporary_upload_path(Path(file.filename).suffix.lower())
+    temp_path = await asyncio.to_thread(_temporary_upload_path, Path(file.filename).suffix.lower())
     try:
         await _save_upload_file(file, temp_path, settings.upload_max_file_size_bytes)
-        data_plane = client_from_settings()
+        data_plane = await asyncio.to_thread(client_from_settings)
         source_path = await asyncio.to_thread(lambda: data_plane.build_object_url('uploads', unique_filename, namespace=get_namespace()))
         data = await asyncio.to_thread(temp_path.read_bytes)
         await asyncio.to_thread(data_plane.upload_object_bytes, data, source_path)
@@ -417,7 +419,7 @@ async def preflight_excel(
         )
     finally:
         with contextlib.suppress(FileNotFoundError):
-            temp_path.unlink()
+            await asyncio.to_thread(temp_path.unlink)
 
     return schemas.ExcelPreflightResponse(
         preflight_id=preflight_id,
@@ -436,7 +438,7 @@ async def preflight_excel(
 @router.post('/preflight-path', response_model=schemas.ExcelPreflightResponse)
 @handle_errors(operation='preflight excel path', value_error_status=400)
 async def preflight_excel_path(payload: schemas.ExcelPreflightPathRequest):
-    data_plane = client_from_settings()
+    data_plane = await asyncio.to_thread(client_from_settings)
     if not await asyncio.to_thread(data_plane.object_exists, payload.file_path):
         raise HTTPException(status_code=400, detail='Excel file not found')
 
@@ -536,8 +538,8 @@ async def confirm_excel(
     table_name: str | None = Form(None),
     named_range: str | None = Form(None),
     cell_range: str | None = Form(None),
-    user: User | None = Depends(get_optional_user),
-    session: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     preflight = await get_preflight(parse_preflight_id(preflight_id))
@@ -606,15 +608,15 @@ async def confirm_excel(
         raise HTTPException(status_code=500, detail='Failed to create datasource') from e
 
     await clear_preflight(parse_preflight_id(preflight_id), delete_source=False)
-    return datasource
+    return await json_response(datasource)
 
 
 @router.post('/connect', response_model=schemas.DataSourceResponse, mcp=True)
 @handle_errors(operation='connect datasource', value_error_status=400)
 async def connect_datasource(
     datasource: schemas.DataSourceCreate,
-    session: Session = Depends(get_db),
-    user: User | None = Depends(get_optional_user),
+    session: Session = Depends(get_db_async),
+    user: User | None = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Connect a new datasource (database, Iceberg, or analysis type).
@@ -630,8 +632,8 @@ async def connect_datasource(
 
     owner_id = user.id if user else None
     if source_type == DataSourceType.FILE:
-        file_config = schemas.FileDataSourceConfig.model_validate(datasource.config)
-        return await create_remote_file_datasource(
+        file_config = await asyncio.to_thread(schemas.FileDataSourceConfig.model_validate, datasource.config)
+        result = await create_remote_file_datasource(
             session,
             runtime_probe=runtime_probe,
             name=datasource.name,
@@ -651,9 +653,10 @@ async def connect_datasource(
             cell_range=file_config.cell_range,
             owner_id=owner_id,
         )
+        return await json_response(result)
     if source_type == DataSourceType.DATABASE:
-        db_config = schemas.DatabaseDataSourceConfig.model_validate(datasource.config)
-        return await create_remote_database_datasource(
+        db_config = await asyncio.to_thread(schemas.DatabaseDataSourceConfig.model_validate, datasource.config)
+        result = await create_remote_database_datasource(
             session,
             runtime_probe=runtime_probe,
             name=datasource.name,
@@ -663,9 +666,10 @@ async def connect_datasource(
             branch=db_config.branch,
             owner_id=owner_id,
         )
+        return await json_response(result)
     if source_type == DataSourceType.ICEBERG:
-        iceberg_config = schemas.IcebergDataSourceConfig.model_validate(datasource.config)
-        return await create_remote_iceberg_datasource(
+        iceberg_config = await asyncio.to_thread(schemas.IcebergDataSourceConfig.model_validate, datasource.config)
+        result = await create_remote_iceberg_datasource(
             session,
             runtime_probe=runtime_probe,
             name=datasource.name,
@@ -674,6 +678,7 @@ async def connect_datasource(
             branch=iceberg_config.branch,
             owner_id=owner_id,
         )
+        return await json_response(result)
     raise HTTPException(
         status_code=400,
         detail=(f'Unsupported source type: {datasource.source_type}. Use "file", "database", "iceberg", or "analysis"'),
@@ -682,7 +687,7 @@ async def connect_datasource(
 
 @router.get('/internal-postgres/tables', response_model=list[schemas.InternalPostgresTable])
 @handle_errors(operation='list internal Postgres tables')
-def list_internal_postgres_tables(session: Session = Depends(get_db)):
+def list_internal_postgres_tables(session: Session = Depends(get_db_async)):
     return service.list_internal_postgres_tables(session)
 
 
@@ -690,8 +695,8 @@ def list_internal_postgres_tables(session: Session = Depends(get_db)):
 @handle_errors(operation='toggle internal Postgres table', value_error_status=400)
 def toggle_internal_postgres_table(
     request: schemas.InternalPostgresToggleRequest,
-    session: Session = Depends(get_db),
-    user: User | None = Depends(get_optional_user),
+    session: Session = Depends(get_db_async),
+    user: User | None = Depends(get_current_user),
 ):
     if request.enabled:
         if service.internal_postgres_table_is_onboarded(session, request.schema_name, request.table_name):
@@ -731,13 +736,14 @@ def toggle_internal_postgres_table(
 
 @router.get('', response_model=list[schemas.DataSourceListItem], mcp=True)
 @handle_errors(operation='list datasources')
-def list_datasources(include_hidden: bool = False, session: Session = Depends(get_db)):
+async def list_datasources(include_hidden: bool = False):
     """List all datasources with their type, config, and metadata.
 
     Set include_hidden=true to include auto-generated output datasources created by analyses.
     Each datasource has an id, name, source_type, and config dict.
     """
-    return service.list_datasources(session, include_hidden=include_hidden)
+    datasources = await asyncio.to_thread(run_db, service.list_datasources, include_hidden=include_hidden)
+    return await json_response(datasources)
 
 
 @router.get('/lineage', mcp=True)
@@ -747,7 +753,7 @@ def get_lineage(
     branch: str | None = None,
     include_internals: bool = False,
     mode: str = 'full',
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Get the dependency lineage graph for datasources.
 
@@ -777,12 +783,9 @@ def get_lineage(
 
 @router.get('/{datasource_id}', response_model=schemas.DataSourceResponse, mcp=True)
 @handle_errors(operation='get datasource')
-def get_datasource(
-    datasource_id: DataSourceId,
-    session: Session = Depends(get_db),
-):
+async def get_datasource(datasource_id: DataSourceId):
     """Get a single datasource by ID with full config and metadata. Use GET /datasource to find IDs."""
-    response = service.get_datasource(session, parse_datasource_id(datasource_id))
+    response = await asyncio.to_thread(run_db, service.get_datasource, parse_datasource_id(datasource_id))
     # Branch listing is optional enrichment for analysis outputs (data-plane / object store).
     # Existence of the row is a DB fact — never fail GET when the data-plane is unavailable.
     if response.source_type == DataSourceType.ICEBERG and response.created_by == DataSourceCreatedBy.ANALYSIS.value:
@@ -790,7 +793,7 @@ def get_datasource(
         branch_name = response.config.get('branch') if isinstance(response.config.get('branch'), str) else None
         if isinstance(metadata_path, str):
             try:
-                response.config['branches'] = _list_export_branches(metadata_path, branch_name)
+                response.config['branches'] = await asyncio.to_thread(_list_export_branches, metadata_path, branch_name)
             except Exception:
                 logger.warning(
                     'Failed to list export branches for analysis output %s; returning row without live branches',
@@ -798,7 +801,7 @@ def get_datasource(
                     exc_info=True,
                 )
                 response.config['branches'] = [branch_name] if branch_name else ['master']
-    return response
+    return await json_response(response)
 
 
 @router.get('/{datasource_id}/schema', response_model=schemas.SchemaInfo, mcp=True)
@@ -807,7 +810,7 @@ async def get_datasource_schema(
     datasource_id: DataSourceId,
     sheet_name: str | None = None,
     refresh: bool = False,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get the column schema of a datasource (column names, types, nullability).
@@ -816,9 +819,9 @@ async def get_datasource_schema(
     Set refresh=true to re-read the schema from the source file.
     """
     datasource_id_value = parse_datasource_id(datasource_id)
-    await asyncio.to_thread(_require_active_datasource, session, datasource_id_value)
+    await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
     if refresh:
-        datasource = await asyncio.to_thread(service.get_datasource, session, datasource_id_value)
+        datasource = await asyncio.to_thread(run_db, service.get_datasource, datasource_id_value)
         source = datasource.config.get('source') if isinstance(datasource.config, dict) else None
         source_type = DataSourceType.read(source.get('source_type') if isinstance(source, dict) else None, default=None)
         if datasource.source_type == DataSourceType.ICEBERG and source_type is not None and source_type.supports_external_ingestion:
@@ -829,7 +832,7 @@ async def get_datasource_schema(
             )
     schema = None
     if sheet_name is None:
-        schema = await asyncio.to_thread(service.cached_schema, session, datasource_id_value)
+        schema = await asyncio.to_thread(run_db, service.cached_schema, datasource_id_value)
     if schema is None:
         schema = await get_remote_datasource_schema(
             session,
@@ -838,8 +841,9 @@ async def get_datasource_schema(
             refresh=False,
             runtime_probe=runtime_probe,
         )
-    schema = await asyncio.to_thread(service.attach_column_descriptions, session, datasource_id_value, schema)
-    return schemas.SchemaInfo.model_validate(schema_info_response_payload(schema))
+    schema = await asyncio.to_thread(run_db, service.attach_column_descriptions, datasource_id_value, schema)
+    response = await asyncio.to_thread(schemas.SchemaInfo.model_validate, schema_info_response_payload(schema))
+    return await json_response(response)
 
 
 @router.patch('/{datasource_id}/column-metadata', response_model=schemas.SchemaInfo, mcp=True)
@@ -847,13 +851,13 @@ async def get_datasource_schema(
 async def update_datasource_column_metadata(
     datasource_id: DataSourceId,
     payload: schemas.BatchColumnDescriptionUpdate,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Update one or more datasource column descriptions and return the active schema."""
     datasource_id_value = parse_datasource_id(datasource_id)
-    await asyncio.to_thread(_require_active_datasource, session, datasource_id_value)
-    schema = await asyncio.to_thread(service.cached_schema, session, datasource_id_value)
+    await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
+    schema = await asyncio.to_thread(run_db, service.cached_schema, datasource_id_value)
     if schema is None:
         schema = await get_remote_datasource_schema(
             session,
@@ -862,8 +866,9 @@ async def update_datasource_column_metadata(
             refresh=False,
             runtime_probe=runtime_probe,
         )
-    schema = await asyncio.to_thread(service.update_column_descriptions, session, datasource_id_value, payload, schema)
-    return schemas.SchemaInfo.model_validate(schema_info_response_payload(schema))
+    schema = await asyncio.to_thread(run_db, service.update_column_descriptions, datasource_id_value, payload, schema)
+    response = await asyncio.to_thread(schemas.SchemaInfo.model_validate, schema_info_response_payload(schema))
+    return await json_response(response)
 
 
 @router.post(
@@ -875,7 +880,7 @@ async def update_datasource_column_metadata(
 async def compare_snapshots(
     datasource_id: DataSourceId,
     payload: schemas.SnapshotCompareRequest,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Compare two Iceberg snapshots of a datasource.
@@ -884,8 +889,8 @@ async def compare_snapshots(
     Use GET /compute/iceberg/{id}/snapshots to find snapshot IDs.
     """
     datasource_id_value = parse_datasource_id(datasource_id)
-    await asyncio.to_thread(_require_active_datasource, session, datasource_id_value)
-    return await compare_remote_iceberg_snapshots(
+    await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
+    response = await compare_remote_iceberg_snapshots(
         session,
         datasource_id=datasource_id_value,
         snapshot_a=payload.snapshot_a,
@@ -893,6 +898,7 @@ async def compare_snapshots(
         row_limit=payload.row_limit,
         runtime_probe=runtime_probe,
     )
+    return await json_response(response)
 
 
 async def _handle_column_stats(
@@ -904,7 +910,7 @@ async def _handle_column_stats(
     runtime_probe: RuntimeAvailabilityProbe,
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
-    await asyncio.to_thread(_require_active_datasource, session, datasource_id_value)
+    await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
     datasource = payload.datasource if payload else None
     config = None
     if isinstance(datasource, dict):
@@ -930,14 +936,15 @@ async def get_column_stats(
     datasource_id: DataSourceId,
     column_name: str,
     sample: bool = True,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get statistics for a single column: count, nulls, unique values, min/max, mean, histogram.
 
     Set sample=false for exact stats (slower on large datasets).
     """
-    return await _handle_column_stats(datasource_id, column_name, sample, None, session, runtime_probe)
+    response = await _handle_column_stats(datasource_id, column_name, sample, None, session, runtime_probe)
+    return await json_response(response)
 
 
 @router.post(
@@ -951,11 +958,12 @@ async def get_column_stats_with_config(
     column_name: str,
     payload: schemas.ColumnStatsRequest,
     sample: bool = True,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get column statistics with custom datasource config (e.g., different branch or snapshot)."""
-    return await _handle_column_stats(datasource_id, column_name, sample, payload, session, runtime_probe)
+    response = await _handle_column_stats(datasource_id, column_name, sample, payload, session, runtime_probe)
+    return await json_response(response)
 
 
 @router.put('/{datasource_id}', response_model=schemas.DataSourceResponse, mcp=True)
@@ -963,7 +971,7 @@ async def get_column_stats_with_config(
 def update_datasource(
     datasource_id: DataSourceId,
     update: schemas.DataSourceUpdate,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Update a datasource's name or config. Use GET /datasource/{id} to see current values."""
     return service.update_datasource(session, parse_datasource_id(datasource_id), update)
@@ -973,24 +981,25 @@ def update_datasource(
 @handle_errors(operation='ingest datasource')
 async def ingest_datasource(
     datasource_id: DataSourceId,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Ingest an external datasource again from source. Useful after upstream data changes."""
     datasource_id_value = parse_datasource_id(datasource_id)
-    await asyncio.to_thread(_require_active_datasource, session, datasource_id_value)
-    return await ingest_remote_datasource(
+    await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
+    response = await ingest_remote_datasource(
         session,
         datasource_id=datasource_id_value,
         runtime_probe=runtime_probe,
     )
+    return await json_response(response)
 
 
 @router.delete('/{datasource_id}', status_code=202, mcp=True)
 @handle_errors(operation='delete datasource')
 def delete_datasource(
     datasource_id: DataSourceId,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Queue datasource deletion and finalize it once the preview engine is fully drained."""
     datasource_id_value = parse_datasource_id(datasource_id)

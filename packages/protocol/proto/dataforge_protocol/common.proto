@@ -5,15 +5,22 @@ package dataforge.runtime;
 import "buf/validate/validate.proto";
 import "dataforge_protocol/enums.proto";
 
-message EmptyRequest {}
+message EmptyRequest {
+  // Recovery RPCs use this optional field to direct work to one namespace;
+  // existing empty-request callers remain valid.
+  string namespace = 1;
+}
 
 message RuntimeWorkerRequest {
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
   int32 protocol_version = 2;
   repeated ComputeRequestKind allowed_compute_request_kinds = 3;
-  // The worker advances this cursor between claims so a busy namespace cannot
-  // starve requests in the other registered namespaces.
-  int32 compute_namespace_offset = 4;
+  reserved 4;
+  reserved "compute_namespace_offset";
+  // Claim RPCs are directed to one namespace. The worker gets this value from
+  // the matching runtime notification or from its bounded recovery cursor;
+  // the backend must never scan every tenant to satisfy one claim.
+  string target_namespace = 5;
 }
 
 message RuntimeWorkerResponse {

@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
-from concurrent.futures import Executor, ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from functools import partial
 
 from fastapi import Depends, Query
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from backend_core.data_plane_client import client_from_settings
-from backend_core.database import get_settings_db, initialize_namespace_db, run_settings_db
+from backend_core.database import get_settings_db_async, initialize_namespace_db, namespace_provision_lock, run_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import list_namespaces, namespace_paths, normalize_namespace
 from backend_core.namespace_credentials_service import provision_namespace_engine_credentials
@@ -21,11 +21,14 @@ from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/namespaces', tags=['namespaces'])
 # Namespace creation performs bucket and credential-provider RPCs. Keep those
-# external calls out of the event loop and allow a normal burst of namespace
-# requests without making the fourth request wait behind the first three.
-_NAMESPACE_EXECUTOR = ThreadPoolExecutor(max_workers=16, thread_name_prefix='namespace-runtime')
+# external calls out of the event loop, but do not turn a browser burst into
+# dozens of DB sessions and object-store admin calls.
+_NAMESPACE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix='namespace-runtime',
+)
 _NAMESPACE_PROVISION_EXECUTOR = ThreadPoolExecutor(
-    max_workers=32,
+    max_workers=3,
     thread_name_prefix='namespace-provision',
 )
 logger = logging.getLogger(__name__)
@@ -78,6 +81,27 @@ def _provision_namespace_bucket(name: str) -> None:
 
 
 def _create_namespace(name: str) -> NamespaceResponse:
+    # This session-level PostgreSQL lock covers the publication check and every
+    # provisioning side effect, including calls from other API processes.
+    lock_started = time.perf_counter()
+    with namespace_provision_lock(name):
+        lock_wait_ms = int((time.perf_counter() - lock_started) * 1000)
+        if lock_wait_ms >= 1000:
+            logger.warning('Namespace provisioning lock waited name=%s wait_ms=%s', name, lock_wait_ms)
+        return _create_namespace_locked(name)
+
+
+def _wait_for_namespace_work(futures: list[Future]) -> list[BaseException]:
+    failures: list[BaseException] = []
+    for future in futures:
+        try:
+            future.result()
+        except BaseException as exc:
+            failures.append(exc)
+    return failures
+
+
+def _create_namespace_locked(name: str) -> NamespaceResponse:
     started = time.perf_counter()
     storage = _storage_response(name)
 
@@ -96,33 +120,55 @@ def _create_namespace(name: str) -> NamespaceResponse:
     # is bounded by the slowest provisioning phase rather than the sum of
     # external object-store calls and Alembic startup. Registration remains
     # after all phases so a visible namespace is always usable.
-    bucket_started = time.perf_counter()
-    credentials_started = time.perf_counter()
-    migration_started = time.perf_counter()
-    bucket_future = _NAMESPACE_PROVISION_EXECUTOR.submit(_provision_namespace_bucket, name)
-    credentials_future = _NAMESPACE_PROVISION_EXECUTOR.submit(
-        run_settings_db,
-        provision_namespace_engine_credentials,
-        name,
-    )
-    migration_future = _NAMESPACE_PROVISION_EXECUTOR.submit(initialize_namespace_db, name)
-    bucket_future.result()
-    bucket_duration_ms = int((time.perf_counter() - bucket_started) * 1000)
+    phase_durations: dict[str, int] = {}
+
+    def run_phase(phase: str, function: Callable[..., object], *args: object) -> object:
+        phase_started = time.perf_counter()
+        try:
+            return function(*args)
+        finally:
+            phase_durations[phase] = int((time.perf_counter() - phase_started) * 1000)
+
+    futures: list[Future] = []
+    try:
+        futures.append(_NAMESPACE_PROVISION_EXECUTOR.submit(run_phase, 'bucket', _provision_namespace_bucket, name))
+        futures.append(
+            _NAMESPACE_PROVISION_EXECUTOR.submit(
+                run_phase,
+                'credentials',
+                partial(
+                    run_settings_db,
+                    provision_namespace_engine_credentials,
+                    name,
+                    namespace_lock_held=True,
+                ),
+            )
+        )
+        futures.append(_NAMESPACE_PROVISION_EXECUTOR.submit(run_phase, 'migration', initialize_namespace_db, name))
+    except BaseException:
+        _wait_for_namespace_work(futures)
+        raise
+
+    failures = _wait_for_namespace_work(futures)
+    if failures:
+        raise failures[0]
+
     # Credentials before registration: a namespace that engines cannot open is
     # not usable, so a failure here must not leave one registered.
     # Use short-lived settings sessions for the DB phases. Bucket creation is
     # an external RPC and must not hold a database connection while it runs.
-    credentials_future.result()
-    credentials_duration_ms = int((time.perf_counter() - credentials_started) * 1000)
-    migration_future.result()
-    migration_duration_ms = int((time.perf_counter() - migration_started) * 1000)
+    bucket_duration_ms = phase_durations['bucket']
+    credentials_duration_ms = phase_durations['credentials']
+    migration_duration_ms = phase_durations['migration']
     register_started = time.perf_counter()
     run_settings_db(register_namespace, name)
     register_duration_ms = int((time.perf_counter() - register_started) * 1000)
-    logger.info(
+    total_duration_ms = int((time.perf_counter() - started) * 1000)
+    log_provisioning = logger.warning if total_duration_ms >= 5_000 else logger.info
+    log_provisioning(
         'Namespace provisioning completed name=%s total_ms=%s bucket_ms=%s credentials_ms=%s migration_ms=%s register_ms=%s',
         name,
-        int((time.perf_counter() - started) * 1000),
+        total_duration_ms,
         bucket_duration_ms,
         credentials_duration_ms,
         migration_duration_ms,
@@ -134,7 +180,7 @@ def _create_namespace(name: str) -> NamespaceResponse:
 @router.get('', response_model=NamespaceListResponse, mcp=True)
 @handle_errors(operation='list namespaces')
 def list_namespaces_endpoint(
-    session: Session = Depends(get_settings_db),
+    session: Session = Depends(get_settings_db_async),
 ) -> NamespaceListResponse:
     """List namespaces. Each name is an S3 bucket."""
     names = {*list_namespaces(), *list_runtime_namespaces(session)}

@@ -7,11 +7,14 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from backend_core import compute_requests_service
+from backend_core import compute_requests_service, runtime_outbox_service, runtime_work_service
+from backend_core.datasource_lifecycle import lock_datasource_lifecycle
 from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.exceptions import datasource_not_found
+from backend_core.namespace import get_namespace
 from backend_core.persistence.datasource.models import DataSource
+from backend_core.runtime_work_service import RuntimeWorkKind
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
 
@@ -36,16 +39,25 @@ def get_active_datasource(session: Session, datasource_id: str, *, for_update: b
 
 def stage_delete(session: Session, datasource_id: str, *, now: datetime | None = None) -> DataSource:
     """Mark a datasource pending deletion without committing the transaction."""
+    lock_datasource_lifecycle(session, namespace=get_namespace(), datasource_id=datasource_id)
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
         raise datasource_not_found(datasource_id)
     if datasource.is_pending_delete:
+        # A repeated delete is also a recovery opportunity. Append another
+        # durable wake in case the first signal was consumed before a restart.
+        runtime_work_service.append_wake(session, namespace=get_namespace(), kind=RuntimeWorkKind.DATASOURCE_DELETE)
         return datasource
     stamp = now or _utcnow()
     datasource.is_pending_delete = True
     datasource.is_hidden = True
     datasource.delete_requested_at = stamp
     session.add(datasource)
+    # The worker normally wakes from this durable event instead of polling
+    # every namespace. The event is committed with the tombstone, so a rolled
+    # back delete cannot make a worker tear down a live datasource engine.
+    runtime_outbox_service.enqueue_datasource_delete_notification(session, datasource_id=datasource_id)
+    runtime_work_service.append_wake(session, namespace=get_namespace(), kind=RuntimeWorkKind.DATASOURCE_DELETE)
     return datasource
 
 
@@ -73,8 +85,15 @@ def finalize_delete(session: Session, datasource_id: str) -> bool:
     Deletion commits first (the dataset becomes unreachable atomically); any
     storage failure afterwards only costs orphaned bytes, never correctness.
     """
-    datasource = get_datasource(session, datasource_id)
+    # Publication of a stable analysis output RID can reactivate a row while
+    # deletion is waiting for its preview engine to drain. Lock the row and
+    # re-check the tombstone after the lock so a finalizer cannot delete a row
+    # that was republished in the meantime.
+    lock_datasource_lifecycle(session, namespace=get_namespace(), datasource_id=datasource_id)
+    datasource = session.get(DataSource, datasource_id, with_for_update=True)
     if datasource is None:
+        return False
+    if not datasource.is_pending_delete:
         return False
     if compute_requests_service.has_active_request_for_datasource(session, datasource_id):
         return False
@@ -85,6 +104,17 @@ def finalize_delete(session: Session, datasource_id: str) -> bool:
         'config': deepcopy(datasource.config) if isinstance(datasource.config, dict) else None,
     }
     session.delete(datasource)
+    session.commit()
+    runtime_work_service.refresh_pending_work(
+        session,
+        namespace=get_namespace(),
+        kind=RuntimeWorkKind.DATASOURCE_DELETE,
+        pending_query="""
+            SELECT 1
+            FROM datasources
+            WHERE is_pending_delete IS TRUE
+        """,
+    )
     session.commit()
     reclaim_storage(snapshot)
     return True

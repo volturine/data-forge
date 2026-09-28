@@ -5,13 +5,13 @@ import psycopg
 from alembic import command
 from alembic.config import Config
 from psycopg import sql
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, pool, text
 
 from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
-_PUBLIC_REVISION = '0001_runtime_public'
-_TENANT_REVISION = '0002_runtime_tenant'
+_PUBLIC_REVISION = '0014_runtime_coordinator_fencing'
+_TENANT_REVISION = '0012_compute_request_flights'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 
@@ -103,6 +103,48 @@ def _current_revision(schema: str) -> str | None:
         engine.dispose()
 
 
+def _schema_is_empty(schema: str) -> bool:
+    """Check whether a tenant schema can be bootstrapped from current metadata."""
+    engine = create_engine(settings.database_url, poolclass=pool.NullPool)
+    try:
+        with engine.connect() as connection:
+            has_tables = connection.execute(
+                text('SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = :schema)'),
+                {'schema': schema},
+            ).scalar_one()
+        return not bool(has_tables)
+    finally:
+        engine.dispose()
+
+
+def _bootstrap_empty_tenant_schema(schema: str) -> None:
+    """Create a fresh tenant schema directly at head instead of replaying history.
+
+    Historical data migrations still run for existing schemas. A new namespace
+    has no rows to transform, so create its final table/index definitions from
+    the same SQLModel metadata and stamp the current tenant revision atomically.
+    """
+    from backend_core.database import _tenant_tables
+
+    tables = _tenant_tables()
+    if not tables:
+        raise RuntimeError('Tenant metadata contains no tables')
+    engine = create_engine(settings.database_url, poolclass=pool.NullPool)
+    try:
+        with engine.begin() as connection:
+            quoted_schema = connection.dialect.identifier_preparer.quote(schema)
+            connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS {quoted_schema}'))
+            connection.execute(text(f'SET LOCAL search_path TO {quoted_schema}, public'))
+            tables[0].metadata.create_all(connection, tables=tables, checkfirst=False)
+            connection.execute(text(f'CREATE TABLE {quoted_schema}.alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)'))
+            connection.execute(
+                text(f'INSERT INTO {quoted_schema}.alembic_version (version_num) VALUES (:revision)'),
+                {'revision': _TENANT_REVISION},
+            )
+    finally:
+        engine.dispose()
+
+
 def _upgrade_schema(*, scope: str, schema: str, revision: str) -> None:
     command.upgrade(_alembic_config(scope=scope, schema=schema), revision, tag=scope)
 
@@ -110,14 +152,35 @@ def _upgrade_schema(*, scope: str, schema: str, revision: str) -> None:
 def migrate_runtime(namespaces: list[str]) -> None:
     ensure_database_exists()
     public_revision = _current_revision('public')
-    if public_revision is None:
+    if public_revision in {
+        None,
+        '0001_runtime_public',
+        '0006_runtime_namespace_work',
+        '0008_schedule_wake_due',
+        '0009_runtime_lease_wake_due',
+        '0010_mcp_pending_actions',
+        '0013_runtime_work_wakes',
+    }:
         _upgrade_schema(scope='public', schema='public', revision=_PUBLIC_REVISION)
     elif public_revision != _PUBLIC_REVISION:
         raise RuntimeError(f'Unsupported existing public schema revision: {public_revision}. Expected {_PUBLIC_REVISION}. Recreate the database.')
+    supported_tenant_revisions = (
+        None,
+        '0002_runtime_tenant',
+        '0003_engine_request_identity',
+        '0004_compute_request_datasources',
+        '0007_schedule_due_index',
+        '0008_schedule_trigger_index',
+        '0011_namespace_preview_flights',
+        _TENANT_REVISION,
+    )
     for namespace in namespaces:
         tenant_schema = namespace_database_schema(namespace)
         revision = _current_revision(tenant_schema)
-        if revision not in (None, _TENANT_REVISION):
+        if revision is None and _schema_is_empty(tenant_schema):
+            _bootstrap_empty_tenant_schema(tenant_schema)
+            continue
+        if revision not in supported_tenant_revisions:
             raise RuntimeError(
                 f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected {_TENANT_REVISION}. Recreate the database.'
             )

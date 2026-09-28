@@ -1,10 +1,12 @@
+import asyncio
 import contextlib
+import json
 
 from fastapi import Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session
 
-from backend_core.database import get_db
+from backend_core.database import get_db_async, run_db
 from backend_core.dependencies import RuntimeAvailabilityProbe, get_runtime_availability_probe
 from backend_core.domain.analysis.step_types import is_step_type
 from backend_core.domain.compute import schemas as compute_schemas
@@ -33,19 +35,17 @@ router = MCPRouter(prefix='/analysis', tags=['analysis'], dependencies=[Depends(
 
 @router.post('/validate', mcp=True)
 @handle_errors(operation='validate analysis', value_error_status=400)
-def validate_analysis(
-    data: schemas.AnalysisCreateSchema,
-    session: Session = Depends(get_db),
-):
+async def validate_analysis(data: schemas.AnalysisCreateSchema):
     """Validate analysis payload without persisting."""
-    return service.validate_analysis(session, data)
+    result = await asyncio.to_thread(run_db, service.validate_analysis, data)
+    return await executor_client.json_response(result)
 
 
 @router.post('', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='create analysis', value_error_status=400)
 def create_analysis(
     data: schemas.AnalysisCreateSchema,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     user: User = Depends(get_current_user),
 ):
     """Create a new analysis pipeline.
@@ -62,7 +62,8 @@ def create_analysis(
     Use GET /api/v1/analysis/step-types to discover valid step types and their config schemas.
     """
     owner_id = user.id
-    return service.create_analysis(session, data, owner_id=owner_id)
+    result = service.create_analysis(session, data, owner_id=owner_id)
+    return executor_client.json_response_sync(result)
 
 
 @router.get('/templates', response_model=list[schemas.AnalysisTemplateSummarySchema], mcp=True)
@@ -87,7 +88,7 @@ def get_analysis_template(template_id: str):
 @handle_errors(operation='generate analysis pipeline', value_error_status=400)
 def generate_analysis_pipeline(
     data: schemas.GenerateAnalysisSchema,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Generate an analysis pipeline skeleton from a natural-language description."""
     return service.generate_analysis_pipeline(session, data)
@@ -97,29 +98,29 @@ def generate_analysis_pipeline(
 @handle_errors(operation='import analysis', value_error_status=400)
 def import_analysis(
     data: schemas.ImportAnalysisSchema,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     user: User = Depends(get_current_user),
 ):
     """Import an analysis pipeline definition and persist it as a new analysis."""
     owner_id = user.id
-    return service.import_analysis(session, data, owner_id=owner_id)
+    result = service.import_analysis(session, data, owner_id=owner_id)
+    return executor_client.json_response_sync(result)
 
 
 @router.get('', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
 @handle_errors(operation='list analyses')
-def list_analyses(session: Session = Depends(get_db)):
+async def list_analyses():
     """List all analyses as gallery items with id, name, and thumbnail metadata."""
-    return service.list_analyses(session)
+    analyses = await asyncio.to_thread(run_db, service.list_analyses)
+    return await executor_client.json_response(analyses)
 
 
 @router.get('/favorites', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
 @handle_errors(operation='list favorite analyses')
-def list_favorite_analyses(
-    session: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+async def list_favorite_analyses(user: User = Depends(get_current_user)):
     """List only the current user's favorited analyses."""
-    return service.list_favorite_analyses(session, user.id)
+    analyses = await asyncio.to_thread(run_db, service.list_favorite_analyses, user.id)
+    return await executor_client.json_response(analyses)
 
 
 @router.get('/step-types', mcp=True)
@@ -135,21 +136,38 @@ def list_step_types():
 
 @router.get('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='get analysis', value_error_status=404)
-def get_analysis(
+async def get_analysis(
     analysis_id: AnalysisId,
-    response: Response,
     if_none_match: str | None = Header(default=None),
-    session: Session = Depends(get_db),
 ):
     """Get a single analysis by ID with full pipeline definition including all tabs and steps."""
     parsed_id = parse_analysis_id(analysis_id)
-    current_etag = service.get_analysis_etag(session, parsed_id)
-    if matches_if_none_match(if_none_match, current_etag):
+    current_etag, analysis = await asyncio.to_thread(
+        run_db,
+        _analysis_response_for_get,
+        parsed_id,
+        if_none_match,
+    )
+    if analysis is None:
         return Response(status_code=304, headers={'ETag': current_etag})
-    analysis = service.get_analysis(session, parsed_id)
-    response.headers['ETag'] = current_etag
-    response.headers['X-Analysis-Version'] = analysis_version(analysis)
-    return analysis
+    return await executor_client.json_response(
+        analysis,
+        headers={
+            'ETag': current_etag,
+            'X-Analysis-Version': analysis_version(analysis),
+        },
+    )
+
+
+def _analysis_response_for_get(
+    session: Session,
+    analysis_id: str,
+    if_none_match: str | None,
+) -> tuple[str, schemas.AnalysisResponseSchema | None]:
+    current_etag = service.get_analysis_etag(session, analysis_id)
+    if matches_if_none_match(if_none_match, current_etag):
+        return current_etag, None
+    return current_etag, service.get_analysis(session, analysis_id)
 
 
 @router.post('/{analysis_id}/duplicate', response_model=schemas.AnalysisResponseSchema, mcp=True)
@@ -157,22 +175,22 @@ def get_analysis(
 def duplicate_analysis(
     analysis_id: AnalysisId,
     data: schemas.DuplicateAnalysisSchema,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     user: User = Depends(get_current_user),
 ):
     """Duplicate an analysis while regenerating output identities and derived references."""
     owner_id = user.id
-    return service.duplicate_analysis(session, parse_analysis_id(analysis_id), data, owner_id=owner_id)
+    result = service.duplicate_analysis(session, parse_analysis_id(analysis_id), data, owner_id=owner_id)
+    return executor_client.json_response_sync(result)
 
 
 @router.put('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='update analysis')
 def update_analysis(
     analysis_id: AnalysisId,
-    response: Response,
     data: schemas.AnalysisUpdateSchema,
     _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Update an analysis and replace the full tabs array.
 
@@ -181,9 +199,13 @@ def update_analysis(
     """
     analysis_id_value = parse_analysis_id(analysis_id)
     updated = service.update_analysis(session, analysis_id_value, data)
-    response.headers['ETag'] = analysis_etag(updated)
-    response.headers['X-Analysis-Version'] = analysis_version(updated)
-    return updated
+    return executor_client.json_response_sync(
+        updated,
+        headers={
+            'ETag': analysis_etag(updated),
+            'X-Analysis-Version': analysis_version(updated),
+        },
+    )
 
 
 @router.post(
@@ -195,7 +217,7 @@ def update_analysis(
 def favorite_analysis(
     analysis_id: AnalysisId,
     user_id: str = Depends(get_current_user_id),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Mark an analysis as favorite for the current user."""
     return service.set_favorite(session, parse_analysis_id(analysis_id), user_id, True)
@@ -211,7 +233,7 @@ def favorite_analysis(
 def unfavorite_analysis(
     analysis_id: AnalysisId,
     user_id: str = Depends(get_current_user_id),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Remove an analysis from the current user's favorites."""
     return service.set_favorite(session, parse_analysis_id(analysis_id), user_id, False)
@@ -222,7 +244,7 @@ def unfavorite_analysis(
 def delete_analysis(
     analysis_id: AnalysisId,
     _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Delete an analysis and its associated data."""
@@ -250,14 +272,14 @@ def delete_analysis(
 async def preview_analysis(
     analysis_id: AnalysisId,
     request: Request,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Preview the analysis pipeline and return results with schema, rows, and row count."""
     analysis_payload = None
     body = None
     with contextlib.suppress(ValueError):
-        body = await request.json()
+        body = await asyncio.to_thread(json.loads, await request.body())
     if isinstance(body, dict):
         analysis_payload = body.get('pipeline')
 
@@ -265,6 +287,13 @@ async def preview_analysis(
 
     if not isinstance(analysis_payload, dict):
         raise HTTPException(status_code=400, detail='pipeline payload must be provided')
+    payload_analysis_id = analysis_payload.get('analysis_id')
+    if payload_analysis_id is not None and payload_analysis_id != analysis_id_value:
+        raise HTTPException(status_code=400, detail='pipeline analysis_id must match the URL analysis id')
+    # Stored analysis pipeline definitions do not need to duplicate their
+    # owning RID. The URL is authoritative and must become part of the exact
+    # durable preview command used for identity and single-flight deduplication.
+    analysis_payload = {'analysis_id': analysis_id_value, **analysis_payload}
 
     tabs = analysis_payload.get('tabs', [])
     if not isinstance(tabs, list):
@@ -291,12 +320,22 @@ async def preview_analysis(
     if not isinstance(output_config, dict):
         raise HTTPException(status_code=400, detail='Analysis tab output must be a dict')
 
+    analysis_pipeline = await asyncio.to_thread(
+        compute_schemas.AnalysisPipelinePayload.model_validate,
+        analysis_payload,
+    )
     preview = await executor_client.preview_step(
         session,
         compute_schemas.StepPreviewRequest(
             analysis_id=analysis_id_value,
+            engine_identity=compute_pb2.EngineIdentity(
+                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                analysis_id=analysis_id_value,
+                resource_id=analysis_id_value,
+            ),
             target_step_id=steps[-1]['id'] if steps else 'source',
-            analysis_pipeline=compute_schemas.AnalysisPipelinePayload.model_validate(analysis_payload),
+            analysis_pipeline=analysis_pipeline,
             row_limit=50,
             page=1,
             tab_id=None,
@@ -305,11 +344,13 @@ async def preview_analysis(
         http_request=request,
     )
 
-    return {
-        'schema': preview.column_types,
-        'rows': preview.data,
-        'row_count': preview.total_rows,
-    }
+    return await executor_client.json_response(
+        {
+            'schema': preview.column_types,
+            'rows': preview.data,
+            'row_count': preview.total_rows,
+        }
+    )
 
 
 @router.post(
@@ -321,7 +362,7 @@ async def preview_analysis(
 def export_analysis_code(
     analysis_id: AnalysisId,
     data: schemas.CodeExportRequestSchema,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Export an analysis (or specific tab) as executable Polars Python or SQL."""
     return export_service.export_analysis_code(
@@ -369,7 +410,7 @@ def add_step(
     data: AddStepBody,
     response: Response,
     _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Add a new pipeline step to a tab in an analysis.
 
@@ -406,7 +447,7 @@ def update_step(
     data: UpdateStepBody,
     response: Response,
     _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Update a pipeline step's type and/or config.
 
@@ -463,7 +504,7 @@ def remove_step(
     step_id: str,
     response: Response,
     _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Remove a pipeline step from a tab. Also cleans up depends_on references in other steps that depended on the removed step."""
     service.remove_step(
@@ -487,7 +528,7 @@ def derive_tab(
     data: DeriveTabBody,
     response: Response,
     _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Create a new tab whose datasource is the given tab's output result_id.
 
@@ -511,7 +552,7 @@ def duplicate_tab(
     data: DuplicateTabBody,
     response: Response,
     _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Duplicate a tab inside the same analysis.
 

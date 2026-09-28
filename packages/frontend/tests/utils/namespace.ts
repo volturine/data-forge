@@ -18,7 +18,11 @@ export const DEFAULT_NAMESPACE = process.env.DEFAULT_NAMESPACE?.trim() || 'defau
  * If the namespace doesn't exist yet, creates it inline.
  * Preserves the current route — waits for sidebar to reflect the new namespace.
  */
-export async function switchNamespace(page: Page, name: string): Promise<void> {
+export async function switchNamespace(
+	page: Page,
+	name: string,
+	provisioningTimeoutMs = readyTimeoutMs()
+): Promise<void> {
 	await waitForAppShell(page);
 	const picker = page.getByRole('button', { name: 'Select namespace' });
 	if ((await picker.textContent())?.trim() === name) return;
@@ -52,10 +56,12 @@ export async function switchNamespace(page: Page, name: string): Promise<void> {
 				}
 				return 'provisioning';
 			},
-			{ timeout: readyTimeoutMs(), message: `Namespace ${name} did not finish switching` }
+			{ timeout: provisioningTimeoutMs, message: `Namespace ${name} did not finish switching` }
 		)
 		.toBe('closed');
-	await expect(page.locator(SIDEBAR).getByText(name)).toBeVisible({ timeout: readyTimeoutMs() });
+	await expect(page.locator(SIDEBAR).getByText(name)).toBeVisible({
+		timeout: provisioningTimeoutMs
+	});
 	await waitForAppShell(page);
 }
 

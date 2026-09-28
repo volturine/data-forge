@@ -112,3 +112,22 @@ def test_active_datasource_lock_prevents_delete_before_request_enqueue(test_db_s
     assert stored is not None
     assert stored.is_pending_delete is True
     assert request.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
+
+
+def test_finalize_delete_does_not_delete_reactivated_datasource(test_db_session, monkeypatch) -> None:
+    datasource_id = str(uuid.uuid4())
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='Republished datasource',
+            source_type=DataSourceType.ICEBERG.value,
+            config={'metadata_path': 's3://bucket/republished'},
+            is_pending_delete=False,
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+    monkeypatch.setattr(datasource_delete_service, 'reclaim_storage', lambda _snapshot: None)
+
+    assert datasource_delete_service.finalize_delete(test_db_session, datasource_id) is False
+    assert test_db_session.get(DataSource, datasource_id) is not None

@@ -505,6 +505,22 @@ class TestGetDueSchedules:
         result = get_due_schedules(test_db_session)
         assert len(result) == 0
 
+    def test_future_next_run_is_excluded(self, test_db_session: Session, output_datasource: DataSource):
+        schedule = Schedule(
+            id=str(uuid.uuid4()),
+            datasource_id=output_datasource.id,
+            cron_expression='0 0 * * *',
+            enabled=True,
+            next_run=datetime.now(UTC) + timedelta(days=1),
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(schedule)
+        test_db_session.commit()
+
+        result = get_due_schedules(test_db_session)
+
+        assert result == []
+
     def test_dependency_schedule_uses_last_triggered_at(self, test_db_session: Session, output_datasource: DataSource):
         upstream = create_schedule(
             test_db_session,
@@ -536,6 +552,52 @@ class TestGetDueSchedules:
 
         due = get_due_schedules(test_db_session)
         assert downstream.id not in {schedule.id for schedule in due}
+
+    def test_datasource_trigger_uses_latest_completion_not_latest_creation(
+        self,
+        test_db_session: Session,
+        output_datasource: DataSource,
+    ) -> None:
+        created_old = datetime(2026, 9, 23, 10, 0, tzinfo=UTC)
+        created_new = datetime(2026, 9, 23, 10, 2, tzinfo=UTC)
+        last_triggered = datetime(2026, 9, 23, 10, 3, tzinfo=UTC)
+        build_runs = [
+            (created_old, datetime(2026, 9, 23, 10, 4, tzinfo=UTC)),
+            (created_new, datetime(2026, 9, 23, 10, 2, 30, tzinfo=UTC)),
+        ]
+        for created_at, completed_at in build_runs:
+            run = build_run_service.create_build_run(
+                test_db_session,
+                build_id=str(uuid.uuid4()),
+                namespace='default',
+                analysis_id=str(uuid.uuid4()),
+                analysis_name='Source build',
+                request_json={'analysis_pipeline': {'analysis_id': 'source', 'tabs': []}, 'tab_id': None},
+                starter_json={},
+                status=BuildRunStatus.COMPLETED,
+                current_datasource_id=output_datasource.id,
+                created_at=created_at,
+                started_at=created_at,
+            )
+            run.completed_at = completed_at
+            test_db_session.add(run)
+            test_db_session.commit()
+
+        schedule = Schedule(
+            id=str(uuid.uuid4()),
+            datasource_id=output_datasource.id,
+            cron_expression='0 * * * *',
+            trigger_on_datasource_id=output_datasource.id,
+            last_triggered_at=last_triggered,
+            next_run=datetime(2026, 9, 23, 11, 0, tzinfo=UTC),
+            created_at=created_old,
+        )
+        test_db_session.add(schedule)
+        test_db_session.commit()
+
+        due = get_due_schedules(test_db_session)
+
+        assert schedule.id in {item.id for item in due}
 
 
 # ---------------------------------------------------------------------------

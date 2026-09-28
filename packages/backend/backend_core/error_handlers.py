@@ -8,9 +8,9 @@ from typing import Any, Never
 
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
-from backend_core.exceptions import AppError, PipelineExecutionCancelledError
+from backend_core.exceptions import AppError, ClientDisconnectedError, PipelineExecutionCancelledError
 from dataforge_protocol import errors_pb2
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,10 @@ def handle_errors(operation: str = 'operation', value_error_status: int | None =
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 try:
                     return await func(*args, **kwargs)
+                except ClientDisconnectedError:
+                    # The client is already gone. Keep deliberate durable
+                    # request cancellation out of the ASGI traceback log.
+                    return Response(status_code=499)
                 except Exception as e:
                     _raise_http(e, operation, value_error_status)
 
@@ -161,7 +165,12 @@ async def validation_error_handler(_request: Request, exc: RequestValidationErro
     )
 
 
-async def generic_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+async def client_disconnect_handler(_request: Request, _exc: Exception) -> Response:
+    """Treat an abandoned request body as normal client cancellation."""
+    return Response(status_code=499)
+
+
+async def generic_error_handler(_request: Request, exc: Exception) -> Response:
     """Global fallback handler — never leaks internal details."""
     logger.error('Unhandled exception: %s', type(exc).__name__, exc_info=True)
     return JSONResponse(

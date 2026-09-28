@@ -169,8 +169,13 @@ describe('DatasourceConfigPanel', () => {
 
 		await fireEvent.click(screen.getByRole('tab', { name: 'Runs' }));
 
-		expect(mockBuildLoad).toHaveBeenCalledTimes(1);
-		expect(mockBuildLoad).toHaveBeenCalledWith({ datasource_id: 'ds-1', limit: 50 });
+		expect(mockBuildLoad).toHaveBeenCalledTimes(2);
+		expect(mockBuildLoad).toHaveBeenNthCalledWith(1, { datasource_id: 'ds-1', limit: 50 });
+		expect(mockBuildLoad).toHaveBeenNthCalledWith(2, {
+			datasource_id: 'ds-1',
+			kind: 'build',
+			limit: 1
+		});
 
 		await fireEvent.click(screen.getByRole('tab', { name: 'General' }));
 
@@ -178,7 +183,7 @@ describe('DatasourceConfigPanel', () => {
 
 		view.unmount();
 
-		expect(mockBuildClose).toHaveBeenCalledTimes(1);
+		expect(mockBuildClose).toHaveBeenCalledTimes(2);
 	});
 
 	test('clears a custom freshness threshold back to the default', async () => {

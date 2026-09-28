@@ -100,36 +100,44 @@ def test_step_preview_request_uses_generated_engine_identity() -> None:
     request = StepPreviewRequest.model_validate(
         _preview_payload(
             {
-                'scope': 'datasource_preview',
+                'scope': 'analysis_interactive',
                 'reuse_policy': 'shared',
-                'resource_id': 'datasource-1',
-                'datasource_id': 'datasource-1',
+                'resource_id': 'analysis-1',
+                'analysis_id': 'analysis-1',
             }
         )
     )
 
     assert isinstance(request.engine_identity, compute_pb2.EngineIdentity)
-    assert request.engine_identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
+    assert request.engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
     assert request.engine_identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
-    assert request.engine_identity.datasource_id == 'datasource-1'
+    assert request.engine_identity.analysis_id == 'analysis-1'
     assert request.model_dump(mode='json')['engine_identity'] == {
-        'scope': 'datasource_preview',
+        'scope': 'analysis_interactive',
         'reuse_policy': 'shared',
-        'resource_id': 'datasource-1',
-        'datasource_id': 'datasource-1',
+        'resource_id': 'analysis-1',
+        'analysis_id': 'analysis-1',
     }
 
 
-def test_default_preview_identity_uses_the_selected_datasource() -> None:
-    payload = _preview_payload(
-        {
-            'scope': 'datasource_preview',
-            'reuse_policy': 'shared',
-            'resource_id': 'datasource-1',
-            'datasource_id': 'datasource-1',
-        }
-    )
+def test_default_preview_identity_uses_the_analysis_rid() -> None:
+    payload = _preview_payload({})
     payload.pop('engine_identity')
+    request = StepPreviewRequest.model_validate(payload)
+
+    identity = default_preview_engine_identity(request)
+
+    assert identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
+    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert identity.analysis_id == 'analysis-1'
+    assert identity.resource_id == 'analysis-1'
+
+
+def test_datasource_preview_identity_uses_the_exact_datasource_rid() -> None:
+    payload = _preview_payload({})
+    payload.pop('engine_identity')
+    payload.pop('analysis_id')
+    payload['datasource_id'] = 'datasource-1'
     request = StepPreviewRequest.model_validate(payload)
 
     identity = default_preview_engine_identity(request)
@@ -138,6 +146,31 @@ def test_default_preview_identity_uses_the_selected_datasource() -> None:
     assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
     assert identity.datasource_id == 'datasource-1'
     assert identity.resource_id == 'datasource-1'
+
+
+def test_preview_request_rejects_an_engine_identity_for_a_different_resource() -> None:
+    payload = _preview_payload(
+        {
+            'scope': 'analysis_interactive',
+            'reuse_policy': 'shared',
+            'resource_id': 'other-analysis',
+            'analysis_id': 'other-analysis',
+        }
+    )
+
+    with pytest.raises(ValidationError, match='engine_identity must match'):
+        StepPreviewRequest.model_validate(payload)
+
+
+def test_preview_request_rejects_analysis_id_mismatch() -> None:
+    payload = _preview_payload({})
+    payload.pop('engine_identity')
+    pipeline = payload['analysis_pipeline']
+    assert isinstance(pipeline, dict)
+    pipeline['analysis_id'] = 'other-analysis'
+
+    with pytest.raises(ValidationError, match='analysis_id must match'):
+        StepPreviewRequest.model_validate(payload)
 
 
 def test_step_preview_request_rejects_invalid_engine_identity_payload() -> None:

@@ -9,7 +9,8 @@ service SchedulerRuntimeService {
   rpc RegisterScheduler(SchedulerRegisterRequest) returns (RuntimeWorkerResponse);
   rpc HeartbeatScheduler(RuntimeWorkerRequest) returns (RuntimeWorkerResponse);
   rpc StopScheduler(RuntimeWorkerRequest) returns (RuntimeWorkerResponse);
-  rpc RunDueSchedules(RuntimeWorkerRequest) returns (SchedulerRunDueResponse);
+  rpc ListDueScheduleNamespaces(EmptyRequest) returns (SchedulerDueNamespacesResponse);
+  rpc RunDueSchedules(SchedulerRunDueRequest) returns (SchedulerRunDueResponse);
 }
 
 message SchedulerRegisterRequest {
@@ -24,6 +25,21 @@ message SchedulerEnqueuedRun {
   string schedule_id = 2 [(buf.validate.field).string.min_len = 1];
   string datasource_id = 3 [(buf.validate.field).string.min_len = 1];
   string build_id = 4 [(buf.validate.field).string.min_len = 1];
+}
+
+message SchedulerDueNamespace {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  int64 generation = 2 [(buf.validate.field).int64.gte = 1];
+}
+
+message SchedulerDueNamespacesResponse {
+  repeated SchedulerDueNamespace namespaces = 1;
+}
+
+message SchedulerRunDueRequest {
+  string worker_id = 1 [(buf.validate.field).string.min_len = 1];
+  string target_namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  int64 generation = 3 [(buf.validate.field).int64.gte = 1];
 }
 
 message SchedulerRunFailure {

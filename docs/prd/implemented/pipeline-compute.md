@@ -177,7 +177,7 @@ class ProcessManager:
 
 - **Reuse**: Engines are reused across requests for the same `analysis_id`
 - **Idle cleanup**: Background loop cleans up engines idle for > 30 seconds (configurable)
-- **Max concurrent**: Default limit of 10 concurrent engines (configurable via `MAX_CONCURRENT_ENGINES`)
+- **Runtime capacity**: `COMPUTE_WORKERS` bounds concurrent compute jobs and active engine identities; excess work remains queued durably.
 - **Config changes**: If resource config changes, engine is restarted
 
 ### 2. Polars Compute Engine (`modules/compute/engine.py`)
@@ -487,8 +487,8 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) 
 Key settings in `backend/core/config.py`:
 
 ```python
-# Engine lifecycle
-max_concurrent_engines: int = Field(default=10)
+# Runtime capacity: one budget for active compute jobs and engine identities.
+compute_workers: int = 14
 
 # Resource limits
 polars_cores_available: int = Field(default=0)  # 0 = all host logical CPUs

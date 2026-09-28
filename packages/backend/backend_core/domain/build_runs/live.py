@@ -23,10 +23,13 @@ class BuildNotificationHub:
 
     async def publish(self, notification: BuildNotification) -> None:
         with self._lock:
-            self._latest_by_build[notification.build_id] = notification
+            current = self._latest_by_build.get(notification.build_id)
+            advances_build = current is None or notification.latest_sequence > current.latest_sequence
+            if advances_build:
+                self._latest_by_build[notification.build_id] = notification
             self._latest_by_namespace[notification.namespace] = notification
             self._namespace_version[notification.namespace] = self._namespace_version.get(notification.namespace, 0) + 1
-            build_waiters = self._build_waiters.pop(notification.build_id, [])
+            build_waiters = self._build_waiters.pop(notification.build_id, []) if advances_build else []
             namespace_waiters = self._namespace_waiters.pop(notification.namespace, [])
         for loop, future in [*build_waiters, *namespace_waiters]:
             if future.done():

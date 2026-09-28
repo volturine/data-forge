@@ -1,3 +1,5 @@
+import logging
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -6,20 +8,29 @@ from google.protobuf import json_format, timestamp_pb2
 from sqlalchemy import desc, func, or_, select, update
 from sqlmodel import Session
 
-from backend_core import runtime_outbox_service
+from backend_core import runtime_ipc, runtime_outbox_service
 from backend_core.domain.analysis.step_types import PipelineStepType
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind
+from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.json_utils import copy_json_dict
+from backend_core.namespace import get_namespace
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.datasource.models import DataSource
+from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
-from backend_core.transactions import committed
+from backend_core.transactions import committed, transaction
 from dataforge_protocol import compute_pb2
 
+logger = logging.getLogger(__name__)
 _TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
+_SLOW_BUILD_EVENT_SECONDS = 1.0
+
+
+class _RejectedBuildEvent(Exception):
+    """Roll back a pre-enqueued notification when the build claim is stale."""
 
 
 def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
@@ -315,7 +326,24 @@ def has_inflight_build_for_schedule(session: Session, schedule_id: str) -> bool:
     return session.execute(running_stmt).first() is not None
 
 
-def _cas_update_build_run(session: Session, *, run: BuildRun, values: dict[str, object], expected_status: BuildRunStatus) -> BuildRun | None:
+def _cas_update_build_run(
+    session: Session,
+    *,
+    run: BuildRun,
+    values: dict[str, object],
+    expected_status: BuildRunStatus,
+    notify_api: bool = False,
+) -> BuildRun | None:
+    if notify_api:
+        # Stage the notification before updating the hot projection row. The
+        # transaction still makes both durable together, but its BuildRun row
+        # lock is held only for the short compare-and-swap and commit.
+        runtime_outbox_service.enqueue_api_build_notification(
+            session,
+            namespace=run.namespace,
+            build_id=run.id,
+            latest_sequence=max(run.next_event_sequence - 1, 0),
+        )
     result = session.execute(
         update(BuildRun)
         .where(sa(BuildRun.id == run.id))
@@ -375,6 +403,7 @@ def mark_build_running(session: Session, build_id: str, *, execution_generation:
         session,
         run=run,
         expected_status=run.status,
+        notify_api=run.status == BuildRunStatus.QUEUED,
         values={
             'status': BuildRunStatus.RUNNING,
             'execution_generation': execution_generation,
@@ -407,10 +436,15 @@ def stage_build_event(
     resource_config_json: dict[str, Any] | None = None,
     expected_execution_generation: int | None = None,
     authoritative_execution_generation: int | None = None,
+    _outbox_notification: RuntimeOutboxEvent | None = None,
+    _timings: dict[str, float] | None = None,
 ) -> BuildEvent | None:
     if expected_execution_generation is not None and authoritative_execution_generation is not None:
         raise ValueError('Expected and authoritative execution generations are mutually exclusive')
+    phase_started = time.perf_counter()
     run = session.execute(select(BuildRun).where(sa(BuildRun.id == build_id)).with_for_update().execution_options(populate_existing=True)).scalars().first()
+    if _timings is not None:
+        _timings['run_lock_ms'] = (time.perf_counter() - phase_started) * 1000
     if run is None:
         raise ValueError(f'Build run {build_id} not found')
     if expected_execution_generation is not None and run.execution_generation != expected_execution_generation:
@@ -421,6 +455,10 @@ def stage_build_event(
     if run.status in _TERMINAL_STATUSES and terminal_status != run.status:
         return None
     run_namespace = run.namespace
+    if _outbox_notification is not None and (
+        _outbox_notification.payload_json.get('namespace') != run_namespace or _outbox_notification.payload_json.get('build_id') != build_id
+    ):
+        raise ValueError('Build notification namespace does not match its run')
 
     should_update_run = run.status not in _TERMINAL_STATUSES
     if should_update_run:
@@ -440,7 +478,10 @@ def stage_build_event(
     sequence = run.next_event_sequence
     run.next_event_sequence += 1
     event_id = str(uuid.uuid4())
+    phase_started = time.perf_counter()
     payload_json = event.model_dump(mode='json')
+    if _timings is not None:
+        _timings['event_serialization_ms'] = (time.perf_counter() - phase_started) * 1000
     created_at = _utcnow()
     event_row = BuildEvent(
         id=event_id,
@@ -455,13 +496,42 @@ def stage_build_event(
     )
     session.add(event_row)
     session.add(run)
-    runtime_outbox_service.enqueue_api_build_notification(
-        session,
-        namespace=run_namespace,
-        build_id=build_id,
-        latest_sequence=sequence,
-    )
+    phase_started = time.perf_counter()
+    if _outbox_notification is None:
+        if terminal_status is not None:
+            runtime_outbox_service.enqueue_api_build_notification(
+                session,
+                namespace=run_namespace,
+                build_id=build_id,
+                latest_sequence=sequence,
+            )
+    else:
+        _outbox_notification.payload_json = {
+            **_outbox_notification.payload_json,
+            'latest_sequence': sequence,
+        }
+        session.add(_outbox_notification)
+    if _timings is not None and _outbox_notification is None and terminal_status is not None:
+        _timings['outbox_enqueue_ms'] = (time.perf_counter() - phase_started) * 1000
+    elif _timings is not None and _outbox_notification is not None:
+        _timings['outbox_sequence_update_ms'] = (time.perf_counter() - phase_started) * 1000
+    phase_started = time.perf_counter()
     session.flush()
+    if _timings is not None:
+        _timings['flush_ms'] = (time.perf_counter() - phase_started) * 1000
+    if _outbox_notification is None and terminal_status is None:
+        phase_started = time.perf_counter()
+        runtime_ipc.notify_runtime_payload_on_commit(
+            session,
+            {
+                'kind': RuntimePayloadKind.BUILD.value,
+                'namespace': run_namespace,
+                'build_id': build_id,
+                'latest_sequence': sequence,
+            },
+        )
+        if _timings is not None:
+            _timings['notify_ms'] = (time.perf_counter() - phase_started) * 1000
     return BuildEvent(
         id=event_id,
         build_id=build_id,
@@ -475,7 +545,65 @@ def stage_build_event(
     )
 
 
-append_build_event = committed(stage_build_event)
+def append_build_event(
+    session: Session,
+    *,
+    build_id: str,
+    event: compute_schemas.BuildEvent,
+    resource_config_json: dict[str, Any] | None = None,
+    expected_execution_generation: int | None = None,
+    authoritative_execution_generation: int | None = None,
+) -> BuildEvent | None:
+    """Append and commit one event while keeping the build-row lock short."""
+    timings: dict[str, float] = {}
+    started = time.perf_counter()
+    result: BuildEvent | None = None
+    try:
+        try:
+            with transaction(session):
+                notification: RuntimeOutboxEvent | None = None
+                if BuildRun.terminal_status_for_event(event) is not None:
+                    phase_started = time.perf_counter()
+                    notification = runtime_outbox_service.enqueue_api_build_notification(
+                        session,
+                        namespace=get_namespace(),
+                        build_id=build_id,
+                        latest_sequence=0,
+                    )
+                    timings['outbox_enqueue_ms'] = (time.perf_counter() - phase_started) * 1000
+                result = stage_build_event(
+                    session,
+                    build_id=build_id,
+                    event=event,
+                    resource_config_json=resource_config_json,
+                    expected_execution_generation=expected_execution_generation,
+                    authoritative_execution_generation=authoritative_execution_generation,
+                    _outbox_notification=notification,
+                    _timings=timings,
+                )
+                if result is None:
+                    raise _RejectedBuildEvent
+                commit_started = time.perf_counter()
+            timings['commit_ms'] = (time.perf_counter() - commit_started) * 1000
+        except _RejectedBuildEvent:
+            result = None
+    finally:
+        total_ms = (time.perf_counter() - started) * 1000
+        if total_ms >= _SLOW_BUILD_EVENT_SECONDS * 1000:
+            logger.warning(
+                'Slow build event transaction build_id=%s event_type=%s total_ms=%.1f '
+                'run_lock_ms=%.1f event_serialization_ms=%.1f notify_ms=%.1f outbox_enqueue_ms=%.1f flush_ms=%.1f commit_ms=%.1f',
+                build_id,
+                event.type,
+                total_ms,
+                timings.get('run_lock_ms', 0.0),
+                timings.get('event_serialization_ms', 0.0),
+                timings.get('notify_ms', 0.0),
+                timings.get('outbox_enqueue_ms', 0.0),
+                timings.get('flush_ms', 0.0),
+                timings.get('commit_ms', 0.0),
+            )
+    return result
 
 
 def _list_build_events(session: Session, build_id: str) -> list[BuildEvent]:

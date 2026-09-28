@@ -72,6 +72,10 @@
 
 	async function handleSelect(value: string): Promise<void> {
 		if (selecting) return;
+		if (value === selected) {
+			handleClose();
+			return;
+		}
 		selecting = true;
 		selectionError = null;
 		let selection: void | Promise<void>;

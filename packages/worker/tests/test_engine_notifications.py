@@ -1,27 +1,81 @@
-import asyncio
+from threading import Event
 
 import runtime.engine_notifications as engine_notifications
+from runtime.domain.compute.base import EngineStatusInfo
 
 
-def test_snapshot_projection_failure_does_not_fail_engine_lifecycle(monkeypatch) -> None:
-    loop = asyncio.new_event_loop()
-    try:
-        calls: list[tuple[str, str]] = []
+def _status(resource_id: str) -> EngineStatusInfo:
+    return EngineStatusInfo(
+        analysis_id=resource_id,
+        resource_id=resource_id,
+        status="running",
+        container_id=None,
+        image_digest=None,
+        lifecycle_status=None,
+        termination_reason=None,
+        exit_code=None,
+        oom_killed=None,
+        supervisor_id=None,
+        owner_id=None,
+        last_activity=None,
+        current_job_id=None,
+        resource_config=None,
+        effective_resources=None,
+        defaults={},
+    )
 
-        def fail_to_persist(*, worker_id: str, namespace: str, statuses) -> None:
-            del statuses
-            calls.append((worker_id, namespace))
+
+def test_snapshot_projection_failure_retries_without_failing_engine_lifecycle(monkeypatch) -> None:
+    calls = 0
+    succeeded = Event()
+
+    def fail_once(*, worker_id: str, namespace: str, statuses) -> None:
+        nonlocal calls
+        del worker_id, namespace, statuses
+        calls += 1
+        if calls == 1:
             raise RuntimeError("api worker replaced")
+        succeeded.set()
 
-        monkeypatch.setattr(engine_notifications, "persist_engine_snapshot", fail_to_persist)
-        notify = engine_notifications.create_snapshot_notifier(
-            loop,
-            namespace_provider=lambda: "default",
-            worker_id="build-manager-1",
-        )
-
+    monkeypatch.setattr(engine_notifications, "persist_engine_snapshot", fail_once)
+    notify = engine_notifications.create_snapshot_notifier(
+        namespace_provider=lambda: "default",
+        worker_id="build-manager-1",
+    )
+    try:
         notify([])
-
-        assert calls == [("build-manager-1", "default")]
+        assert succeeded.wait(2)
     finally:
-        loop.close()
+        notify.close()
+
+    assert calls == 2
+
+
+def test_snapshot_publisher_coalesces_to_latest_per_namespace() -> None:
+    first_started = Event()
+    release_first = Event()
+    calls: list[tuple[str, list[str]]] = []
+
+    def persist(namespace: str, statuses: list[EngineStatusInfo]) -> None:
+        resource_ids = [status.resource_id for status in statuses]
+        calls.append((namespace, resource_ids))
+        if resource_ids == ["first"]:
+            first_started.set()
+            assert release_first.wait(2)
+
+    notify = engine_notifications.create_snapshot_notifier(
+        namespace_provider=lambda: "default",
+        persist=persist,
+    )
+    try:
+        notify([_status("first")])
+        assert first_started.wait(2)
+        notify([_status("stale")])
+        notify([_status("latest")])
+        notify.publish("other", [_status("other")])
+        release_first.set()
+    finally:
+        release_first.set()
+        notify.close()
+
+    assert calls == [("default", ["first"]), ("default", ["latest"]), ("other", ["other"])]

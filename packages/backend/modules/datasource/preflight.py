@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -20,21 +19,28 @@ class ExcelPreflight:
     delete_source: bool
 
 
+def _read_workbook_metadata(file_path: Path) -> tuple[list[str], dict[str, list[str]], list[str]]:
+    workbook = load_workbook(file_path, read_only=False, data_only=True)
+    try:
+        sheets = workbook.sheetnames
+        tables: dict[str, list[str]] = {}
+        for sheet in workbook.worksheets:
+            if not hasattr(sheet, 'tables') or not sheet.tables:
+                continue
+            tables[sheet.title] = list(sheet.tables.keys())
+        named_ranges = [name for name in workbook.defined_names]
+        return sheets, tables, named_ranges
+    finally:
+        workbook.close()
+
+
 _PREFLIGHTS: dict[str, ExcelPreflight] = {}
 _PREFLIGHTS_LOCK = asyncio.Lock()
 _PREFLIGHT_TTL = timedelta(minutes=30)
 
 
 async def create_preflight(file_path: Path, *, source_path: str | None = None, delete_source: bool = True) -> tuple[str, ExcelPreflight]:
-    workbook = await asyncio.to_thread(load_workbook, file_path, read_only=False, data_only=True)
-    sheets = workbook.sheetnames
-    tables: dict[str, list[str]] = {}
-    for sheet in workbook.worksheets:
-        if not hasattr(sheet, 'tables') or not sheet.tables:
-            continue
-        tables[sheet.title] = list(sheet.tables.keys())
-
-    named_ranges = [name for name in workbook.defined_names]
+    sheets, tables, named_ranges = await asyncio.to_thread(_read_workbook_metadata, file_path)
     preflight_id = str(uuid.uuid4())
     preflight = ExcelPreflight(
         source_path=source_path or str(file_path),
@@ -78,13 +84,10 @@ async def _cleanup_expired() -> None:
 async def _delete_source(path: str, *, delete_source: bool) -> None:
     if not delete_source:
         return
-    data_plane = client_from_settings()
+    data_plane = await asyncio.to_thread(client_from_settings)
     classification = await asyncio.to_thread(data_plane.classify_object_url, path)
     if classification.is_managed:
         await asyncio.to_thread(data_plane.delete_object, path)
         return
     local_path = Path(path)
-    if not local_path.exists():
-        return
-    with contextlib.suppress(FileNotFoundError):
-        await asyncio.to_thread(local_path.unlink)
+    await asyncio.to_thread(local_path.unlink, missing_ok=True)

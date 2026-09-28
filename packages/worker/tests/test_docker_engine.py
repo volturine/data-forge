@@ -4,6 +4,7 @@ import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -124,24 +125,82 @@ def test_container_rpc_target_uses_unique_container_dns_name(monkeypatch) -> Non
     assert _container_rpc_target(Container()) == "dataforge-engine-analysis-abc123:50053"
 
 
-def test_container_rpc_target_waits_through_transient_startup_states(monkeypatch) -> None:
+def test_container_rpc_target_uses_dns_without_polling_docker(monkeypatch) -> None:
     class Container:
         name = "/dataforge-engine-analysis-starting"
         status = "created"
 
-        def __init__(self) -> None:
-            self.reloads = 0
-
         def reload(self) -> None:
-            self.reloads += 1
-            if self.reloads >= 2:
-                self.status = "running"
+            raise AssertionError("Docker status is observed only if gRPC readiness fails")
 
     monkeypatch.setattr(settings, "engine_rpc_port", 50053)
     container = Container()
 
     assert _container_rpc_target(container) == "dataforge-engine-analysis-starting:50053"
-    assert container.reloads == 2
+    assert container.status == "created"
+
+
+def test_await_listening_waits_for_channel_then_checks_health_once(monkeypatch) -> None:
+    calls: list[object] = []
+
+    class ReadyFuture:
+        def result(self, *, timeout: float) -> None:
+            calls.append(("ready", timeout))
+
+    class Stub:
+        def Health(self, _request, *, timeout: float):  # noqa: N802 - generated gRPC method
+            calls.append(("health", timeout))
+            return engine_runtime_pb2.EngineHealthResponse()
+
+    engine = DockerComputeEngine(_identity())
+    engine._channel = object()  # type: ignore[assignment]
+    engine._stub = Stub()  # type: ignore[assignment]
+    monkeypatch.setattr(settings, "engine_start_timeout_seconds", 30)
+    monkeypatch.setattr(grpc, "channel_ready_future", lambda channel: ReadyFuture())
+
+    engine._await_listening()
+
+    assert calls[0][0] == "ready"
+    assert calls[0][1] == pytest.approx(30, abs=0.001)
+    assert calls[1] == ("health", 2.0)
+
+
+def test_await_listening_retries_transient_health_deadlines_within_start_deadline(monkeypatch) -> None:
+    calls: list[object] = []
+    retry_delays: list[float] = []
+
+    class ReadyFuture:
+        def result(self, *, timeout: float) -> None:
+            calls.append(("ready", timeout))
+
+    class TransientHealthError(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.DEADLINE_EXCEEDED
+
+        def details(self):
+            return "listener is temporarily busy"
+
+    class Stub:
+        attempts = 0
+
+        def Health(self, _request, *, timeout: float):  # noqa: N802 - generated gRPC method
+            calls.append(("health", timeout))
+            self.attempts += 1
+            if self.attempts == 1:
+                raise TransientHealthError()
+            return engine_runtime_pb2.EngineHealthResponse()
+
+    engine = DockerComputeEngine(_identity())
+    engine._channel = object()  # type: ignore[assignment]
+    engine._stub = Stub()  # type: ignore[assignment]
+    monkeypatch.setattr(settings, "engine_start_timeout_seconds", 30)
+    monkeypatch.setattr(grpc, "channel_ready_future", lambda channel: ReadyFuture())
+    monkeypatch.setattr("runtime.docker_engine.time.sleep", retry_delays.append)
+
+    engine._await_listening()
+
+    assert [call[0] for call in calls] == ["ready", "health", "health"]
+    assert retry_delays == [0.1]
 
 
 def test_engine_object_store_endpoint_prefers_private_network_override(monkeypatch) -> None:
@@ -310,6 +369,206 @@ def test_startup_reconciliation_removes_untracked_running_containers(monkeypatch
     assert removed == ["orphan-running", "orphan-created"]
 
 
+def test_coordinator_takeover_removes_stale_generation_and_keeps_current_generation(monkeypatch) -> None:
+    removed: list[str] = []
+
+    class Api:
+        def containers(self, *, all: bool, filters: dict[str, object]):
+            assert all
+            assert filters == {"label": ["io.dataforge.managed=true", "io.dataforge.deployment=test-deployment"]}
+            return [
+                {"Id": "stale-running", "State": "running", "Labels": {"io.dataforge.coordinator-generation": "4"}},
+                {"Id": "unlabeled-running", "State": "running", "Labels": {}},
+                {"Id": "current-running", "State": "running", "Labels": {"io.dataforge.coordinator-generation": "5"}},
+            ]
+
+        def remove_container(self, container_id: str, *, force: bool) -> None:
+            assert force
+            removed.append(container_id)
+
+    class Client:
+        api = Api()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
+    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+
+    assert reconcile_deployment_containers(coordinator_generation=5, keep_container_ids=("current-running",)) == 2
+    assert removed == ["stale-running", "unlabeled-running"]
+
+
+def test_stale_coordinator_is_rejected_before_engine_start_or_submit(monkeypatch) -> None:
+    def fenced() -> None:
+        raise RuntimeError("stale coordinator")
+
+    def docker_client_must_not_be_opened(**_kwargs):
+        raise AssertionError("stale coordinator reached Docker")
+
+    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", docker_client_must_not_be_opened)
+    engine = DockerComputeEngine(_identity(), coordinator_guard=fenced)
+
+    with pytest.raises(RuntimeError, match="stale coordinator"):
+        engine.start()
+    with pytest.raises(RuntimeError, match="stale coordinator"):
+        engine.preview({}, [])
+
+
+def test_stale_coordinator_cannot_remove_containers_during_reconciliation(monkeypatch) -> None:
+    removed: list[str] = []
+
+    class Api:
+        def containers(self, *, all: bool, filters: dict[str, object]):
+            assert all
+            return [{"Id": "stale", "State": "running", "Labels": {"io.dataforge.coordinator-generation": "4"}}]
+
+        def remove_container(self, container_id: str, *, force: bool) -> None:
+            removed.append(container_id)
+
+    class Client:
+        api = Api()
+
+        def close(self) -> None:
+            return None
+
+    guard_calls = 0
+
+    def fenced() -> None:
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls == 2:
+            raise RuntimeError("stale coordinator")
+
+    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
+    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+
+    with pytest.raises(RuntimeError, match="stale coordinator"):
+        reconcile_deployment_containers(coordinator_generation=5, coordinator_guard=fenced)
+
+    assert guard_calls == 2
+    assert removed == []
+
+
+def test_stale_coordinator_shutdown_detaches_without_mutating_container(monkeypatch) -> None:
+    actions: list[str] = []
+
+    class Container:
+        status = "running"
+
+        def reload(self) -> None:
+            actions.append("reload")
+
+        def stop(self, *, timeout: float) -> None:
+            actions.append("stop")
+
+        def remove(self, *, force: bool) -> None:
+            actions.append("remove")
+
+    class Stub:
+        def Shutdown(self, *_args, **_kwargs) -> None:  # noqa: N802 - generated gRPC method
+            actions.append("shutdown")
+
+    class Handle:
+        def close(self) -> None:
+            actions.append("close")
+
+    def fenced() -> None:
+        raise RuntimeError("stale")
+
+    engine = DockerComputeEngine(_identity(), coordinator_generation=4, coordinator_guard=fenced)
+    engine._container = Container()
+    engine._container_id = "engine-container"
+    engine._stub = Stub()  # type: ignore[assignment]
+    engine._channel = Handle()  # type: ignore[assignment]
+    engine._client = Handle()
+    engine._artifact_transfers["job"] = (Path("/tmp/artifact"), "s3://bucket/artifact")
+    monkeypatch.setattr(settings, "engine_shutdown_grace_seconds", 0)
+    monkeypatch.setattr("runtime.docker_engine.delete_object", lambda _url: actions.append("delete-artifact"))
+
+    engine.shutdown()
+
+    assert actions == ["close", "close"]
+    assert engine._container is None
+    assert engine._container_id is None
+    assert engine._stub is None
+    assert engine._channel is None
+    assert engine._client is None
+    assert engine._artifact_transfers == {}
+
+
+def test_failed_start_leaves_container_for_current_generation_reconciliation() -> None:
+    actions: list[str] = []
+
+    class Container:
+        def remove(self, *, force: bool) -> None:
+            actions.append("remove")
+
+    class Client:
+        def close(self) -> None:
+            actions.append("close")
+
+    def fenced() -> None:
+        raise RuntimeError("stale")
+
+    engine = DockerComputeEngine(_identity(), coordinator_generation=4, coordinator_guard=fenced)
+    engine._container_id = "partially-started"
+
+    engine._cleanup_failed_start(Container(), Client())
+
+    assert actions == ["close"]
+    assert engine._container_id is None
+
+
+def test_coordinator_loss_mid_shutdown_prevents_stop_remove_and_artifact_delete(monkeypatch) -> None:
+    actions: list[str] = []
+    guard_calls = 0
+
+    class Container:
+        status = "running"
+
+        def reload(self) -> None:
+            actions.append("reload")
+
+        def stop(self, *, timeout: float) -> None:
+            actions.append("stop")
+
+        def remove(self, *, force: bool) -> None:
+            actions.append("remove")
+
+    class Stub:
+        def Shutdown(self, *_args, **_kwargs) -> None:  # noqa: N802 - generated gRPC method
+            actions.append("shutdown")
+
+    class Handle:
+        def close(self) -> None:
+            actions.append("close")
+
+    def guard() -> None:
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls == 2:
+            raise RuntimeError("stale")
+
+    engine = DockerComputeEngine(_identity(), coordinator_generation=4, coordinator_guard=guard)
+    engine._container = Container()
+    engine._container_id = "engine-container"
+    engine._stub = Stub()  # type: ignore[assignment]
+    engine._channel = Handle()  # type: ignore[assignment]
+    engine._client = Handle()
+    engine._artifact_transfers["job"] = (Path("/tmp/artifact"), "s3://bucket/artifact")
+    monkeypatch.setattr(settings, "engine_shutdown_grace_seconds", 0)
+    monkeypatch.setattr("runtime.docker_engine.delete_object", lambda _url: actions.append("delete-artifact"))
+
+    engine.shutdown()
+
+    assert guard_calls == 2
+    assert actions == ["shutdown", "reload", "close", "close"]
+    assert engine._container is None
+    assert engine._container_id is None
+    assert engine._artifact_transfers == {}
+
+
 def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) -> None:
     engine = DockerComputeEngine(_identity())
     engine._shutdown_requested = True
@@ -352,6 +611,36 @@ def test_initialize_fails_fast_on_identity_collision(monkeypatch) -> None:
     assert calls == 1
 
 
+def test_initialize_does_not_retry_transient_rpc_failures(monkeypatch) -> None:
+    engine = DockerComputeEngine(_identity())
+    calls = 0
+
+    class Unavailable(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.UNAVAILABLE
+
+        def details(self):
+            return "engine temporarily unavailable"
+
+    class Stub:
+        def Initialize(self, request, timeout):  # noqa: N802 - generated gRPC method
+            nonlocal calls
+            del request, timeout
+            calls += 1
+            raise Unavailable()
+
+    engine._stub = Stub()  # type: ignore[assignment]
+    monkeypatch.setattr(settings, "engine_start_timeout_seconds", 120)
+
+    with pytest.raises(RuntimeError, match="Engine initialization failed"):
+        engine._initialize(
+            resources={"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
+            credentials=ObjectStoreCredentials(access_key="access", secret_key="secret"),
+        )
+
+    assert calls == 1
+
+
 def test_oom_exit_is_reported_with_container_details() -> None:
     engine = DockerComputeEngine(_identity())
 
@@ -377,6 +666,48 @@ def test_oom_exit_is_reported_with_container_details() -> None:
         "oom_killed": True,
         "termination_reason": "oom_killed",
     }
+    assert result.error == "Engine container terminated (reason=oom_killed, exit_code=137, oom_killed=True)"
+
+
+def test_repeated_grpc_health_failures_do_not_evict_a_running_container(monkeypatch) -> None:
+    class Container:
+        id = "healthy-container"
+        status = "running"
+        attrs = {"State": {"Status": "running"}}
+        reloads = 0
+
+        def reload(self) -> None:
+            self.reloads += 1
+
+    engine = DockerComputeEngine(_identity())
+    container = Container()
+    notifications: list[bool] = []
+    engine._container = container
+    engine._container_id = container.id
+    engine._alive = True
+    engine.bind_capacity_notifier(lambda: notifications.append(True))
+    engine._heartbeat_stop.clear()
+    monkeypatch.setattr(settings, "engine_heartbeat_interval_seconds", 0)
+    monkeypatch.setattr("runtime.docker_engine._LIVENESS_CACHE_SECONDS", 0.0)
+
+    class Stub:
+        calls = 0
+
+        def Health(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 3:
+                engine._heartbeat_stop.set()
+            raise RuntimeError("transient gRPC health delay")
+
+    stub = Stub()
+    engine._stub = stub  # type: ignore[assignment]
+
+    engine._heartbeat_loop()
+
+    assert stub.calls == 3
+    assert container.reloads == 3
+    assert engine.last_known_alive is True
+    assert notifications == []
 
 
 def test_job_watch_resumes_clean_stream_close_without_leaking_active_job(monkeypatch) -> None:
@@ -537,6 +868,154 @@ def test_engine_credentials_are_cached_per_namespace_and_role(monkeypatch) -> No
 
     assert first == second
     assert requests == [("tenant-a", "reader")]
+
+
+def test_engine_credentials_singleflight_concurrent_cold_starts(monkeypatch) -> None:
+    callers = 8
+    barrier = threading.Barrier(callers)
+    request_started = threading.Event()
+    release_response = threading.Event()
+    requests: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def engine_credentials(self, *, namespace: str, role: str):
+            requests.append((namespace, role))
+            request_started.set()
+            assert release_response.wait(2)
+            return worker_runtime_pb2.WorkerEngineCredentialsResponse(access_key="ns-reader", secret_key="ns-secret")
+
+    monkeypatch.setattr("runtime.engine_credentials.client_from_env", lambda: FakeClient())
+
+    def resolve() -> ObjectStoreCredentials:
+        barrier.wait(timeout=2)
+        return resolve_engine_credentials("tenant-a", _identity())
+
+    with ThreadPoolExecutor(max_workers=callers) as executor:
+        futures = [executor.submit(resolve) for _ in range(callers)]
+        assert request_started.wait(2)
+        release_response.set()
+        credentials = [future.result(timeout=2) for future in futures]
+
+    assert len(set(credentials)) == 1
+    assert requests == [("tenant-a", "reader")]
+
+
+def test_engine_start_closes_docker_client_when_container_creation_fails(monkeypatch) -> None:
+    class Containers:
+        def create(self, **_kwargs):
+            raise RuntimeError("Docker create failed")
+
+    class Client:
+        containers = Containers()
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = Client()
+    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    monkeypatch.setattr("runtime.docker_engine.resolve_engine_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
+    monkeypatch.setattr("runtime.docker_engine._resolve_launch_context", lambda _client: (1, "image-id"))
+    monkeypatch.setattr("runtime.docker_engine._effective_resources", lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256})
+    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: client)
+
+    with pytest.raises(RuntimeError, match="Docker create failed"):
+        engine.start()
+
+    assert client.closed
+
+
+def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch) -> None:
+    calls: list[str] = []
+    created: dict[str, object] = {}
+
+    class Container:
+        id = "engine-container"
+
+        def start(self) -> None:
+            calls.append("container.start")
+
+    class Containers:
+        def create(self, **kwargs):
+            created.update(kwargs)
+            calls.append("container.create")
+            return Container()
+
+    class Client:
+        containers = Containers()
+
+        def close(self) -> None:
+            calls.append("client.close")
+
+    client = Client()
+    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    monkeypatch.setattr("runtime.docker_engine.resolve_engine_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
+    monkeypatch.setattr("runtime.docker_engine._resolve_launch_context", lambda _client: (1, "image-id"))
+    monkeypatch.setattr(
+        "runtime.docker_engine._effective_resources",
+        lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
+    )
+    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: client)
+    monkeypatch.setattr("runtime.docker_engine._container_rpc_target", lambda _container: "engine:50053")
+    monkeypatch.setattr("runtime.docker_engine.grpc.insecure_channel", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr("runtime.docker_engine.engine_runtime_pb2_grpc.PolarsEngineServiceStub", lambda _channel: object())
+    monkeypatch.setattr(engine, "_await_listening", lambda: calls.append("rpc.listener_ready"))
+    monkeypatch.setattr(engine, "_initialize", lambda **_kwargs: calls.append("rpc.initialize"))
+    monkeypatch.setattr(engine, "_heartbeat_loop", lambda: None)
+
+    engine.start()
+
+    assert calls == ["container.create", "container.start", "rpc.listener_ready", "rpc.initialize"]
+    assert "cpu_shares" not in created
+    client.close()
+
+
+def test_warm_worker_uses_the_standard_engine_runtime(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Container:
+        id = "warm-container"
+
+        def start(self) -> None:
+            return None
+
+    class Containers:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return Container()
+
+    class Client:
+        containers = Containers()
+
+        def close(self) -> None:
+            return None
+
+    class Channel:
+        def close(self) -> None:
+            return None
+
+    client = Client()
+    engine = DockerComputeEngine()
+    monkeypatch.setattr(settings, "engine_connect_host", "")
+    monkeypatch.setattr("runtime.docker_engine._resolve_launch_context", lambda _client: (1, "image-id"))
+    monkeypatch.setattr(
+        "runtime.docker_engine._effective_resources",
+        lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
+    )
+    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: client)
+    monkeypatch.setattr("runtime.docker_engine._container_rpc_target", lambda _container: "warm-engine:50053")
+    monkeypatch.setattr("runtime.docker_engine.grpc.insecure_channel", lambda *_args, **_kwargs: Channel())
+    monkeypatch.setattr("runtime.docker_engine.engine_runtime_pb2_grpc.PolarsEngineServiceStub", lambda _channel: object())
+    monkeypatch.setattr(engine, "_await_listening", lambda: None)
+
+    engine.start_warm_worker()
+
+    environment = captured["environment"]
+    assert isinstance(environment, dict)
+    assert environment["ENGINE_INIT_TIMEOUT_SECONDS"] == "0"
+    assert "ENGINE_PRELOAD_COMPUTE" not in environment
+    assert "cpu_shares" not in captured
+    engine._detach_local_handles()
 
 
 class _FakeContainer:

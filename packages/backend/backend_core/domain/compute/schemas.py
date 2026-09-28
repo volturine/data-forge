@@ -1,7 +1,18 @@
 from datetime import UTC, datetime
 from typing import Annotated, ClassVar, Literal, Self
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, StringConstraints, TypeAdapter, WithJsonSchema, field_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    StringConstraints,
+    TypeAdapter,
+    WithJsonSchema,
+    field_validator,
+    model_validator,
+)
 
 from backend_core.domain.analysis.step_types import is_step_type
 from backend_core.domain.api_enums import ApiEnumValue, api_token
@@ -326,6 +337,7 @@ class StepPreviewRequest(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, from_attributes=True)
 
     analysis_id: str | None = None
+    datasource_id: str | None = None
     engine_identity: EngineIdentityField | None = None
     target_step_id: str
     analysis_pipeline: AnalysisPipelinePayload
@@ -334,33 +346,55 @@ class StepPreviewRequest(BaseModel):
     page: int = Field(default=1, ge=1)
     resource_config: EngineResourceConfig | None = None
 
+    @model_validator(mode='after')
+    def validate_engine_identity(self) -> Self:
+        default_preview_engine_identity(self)
+        return self
+
 
 def default_preview_engine_identity(request: StepPreviewRequest) -> compute_pb2.EngineIdentity:
-    """Use the source datasource as the shared identity for stateless previews."""
-    if request.engine_identity is not None:
-        return request.engine_identity
+    """Derive the shared physical engine identity from the requested resource RID."""
+    if request.analysis_id and request.datasource_id:
+        raise ValueError('preview request must identify either an analysis or datasource, not both')
 
-    selected = None
-    tabs = request.analysis_pipeline.tabs
-    if request.tab_id:
-        selected = next((tab for tab in tabs if tab.id == request.tab_id), None)
-    if selected is not None and request.target_step_id != 'source' and not any(step.get('id') == request.target_step_id for step in selected.steps):
+    if request.datasource_id:
         selected = None
-    if selected is None and request.target_step_id != 'source':
-        selected = next(
-            (tab for tab in tabs if any(step.get('id') == request.target_step_id for step in tab.steps)),
-            None,
+        tabs = request.analysis_pipeline.tabs
+        if request.tab_id:
+            selected = next((tab for tab in tabs if tab.id == request.tab_id), None)
+        if selected is not None and request.target_step_id != 'source' and not any(step.get('id') == request.target_step_id for step in selected.steps):
+            selected = None
+        if selected is None and request.target_step_id != 'source':
+            selected = next(
+                (tab for tab in tabs if any(step.get('id') == request.target_step_id for step in tab.steps)),
+                None,
+            )
+        if selected is None:
+            selected = next((tab for tab in tabs if tab.steps), tabs[0])
+        if selected.datasource.id != request.datasource_id:
+            raise ValueError('datasource_id must match the selected pipeline datasource')
+        expected = compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            datasource_id=request.datasource_id,
+            resource_id=request.datasource_id,
         )
-    if selected is None:
-        selected = next((tab for tab in tabs if tab.steps), tabs[0])
+    else:
+        analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
+        if not analysis_id:
+            raise ValueError('analysis_id or datasource_id is required for a preview')
+        if request.analysis_id and request.analysis_pipeline.analysis_id != request.analysis_id:
+            raise ValueError('analysis_id must match analysis_pipeline.analysis_id')
+        expected = compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            analysis_id=analysis_id,
+            resource_id=analysis_id,
+        )
 
-    datasource_id = selected.datasource.id
-    return compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-        datasource_id=datasource_id,
-        resource_id=datasource_id,
-    )
+    if request.engine_identity is not None and request.engine_identity != expected:
+        raise ValueError('engine_identity must match the preview resource identity')
+    return expected
 
 
 class StepPreviewResponse(BaseModel):

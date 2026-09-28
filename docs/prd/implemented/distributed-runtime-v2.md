@@ -69,11 +69,18 @@ Browser / frontend app container
   |
   | HTTP requests and DB-backed websocket replay
   v
-API worker(s) / internal gRPC handlers
-  - parse, authorize, and map representations
+API worker(s)
+  - parse, authorize, serialize, and serve HTTP/websockets
   - invoke application commands that own transactions
   - enqueue work and request cancellation
-  - never execute claimed data workloads
+  - never own runtime lifecycle or execute claimed data workloads
+  |
+  | durable request rows + PostgreSQL NOTIFY
+  v
+Runtime coordinator (one fenced owner)
+  - runtime gRPC server and heartbeat registration
+  - runtime job listener and durable outbox dispatcher
+  - reconnect boundary for scheduler/worker clients
   |
   | SQL transactions + LISTEN/NOTIFY wakeups
   v
@@ -86,9 +93,15 @@ PostgreSQL (authoritative state)
   |
   +---- SKIP LOCKED claims ----> scheduler process(es)
   +---- SKIP LOCKED claims ----> build/compute worker process(es)
-  +---- SKIP LOCKED claims ----> outbox dispatcher process(es)
+  +---- SKIP LOCKED claims ----> worker manager / build workers
+  +---- durable outbox dispatch --> API projection listeners
                                       |
-                                      +---- idempotent external notifications
+                                      +---- idempotent notifications
+
+Worker manager owns Docker compute-worker lifecycle, replenishes ready,
+unassigned workers, and enforces the application-wide active capacity budget.
+API children do not bind the runtime gRPC port, register runtime heartbeats, or
+own preview single-flight state.
 
 Worker-owned execution writes fenced publication commands; object data is
 stored in the configured Iceberg catalog/object store and metadata authority
@@ -775,7 +788,7 @@ Tasks:
 - Reject `WORKERS > 1` unless distributed runtime flag is enabled.
 - Remove auto-worker behavior.
 - Document that current release supports one API process.
-- Keep `MAX_CONCURRENT_ENGINES` as the concurrency control.
+- Use `COMPUTE_WORKERS` as the single runtime capacity budget for jobs and active engine identities.
 
 Exit criteria:
 

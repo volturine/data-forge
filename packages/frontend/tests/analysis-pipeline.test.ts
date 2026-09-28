@@ -123,9 +123,13 @@ async function leaveAnalysisPage(page: Page): Promise<void> {
  * Navigate to the analysis editor using the standard readiness flow,
  * then wait for the inline data table to render.
  */
-async function navigateAndWaitForTable(page: Page, analysisId: string): Promise<void> {
+async function navigateAndWaitForTable(
+	page: Page,
+	analysisId: string,
+	previewTimeout = 120_000
+): Promise<void> {
 	await gotoAnalysisEditor(page, analysisId);
-	await waitForInlinePreviewReady(page);
+	await waitForInlinePreviewReady(page, previewTimeout);
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -235,13 +239,17 @@ test.describe('Pipeline data verification', () => {
 		}
 	});
 
-	test('topk returns rows with largest values', async ({ page, request }) => {
+	test('topk returns rows with largest values', async ({ page, request }, testInfo) => {
+		// The preview requires one cold engine for this exact analysis RID; under
+		// the 3×4 load it measured just over the suite-wide 120s deadline including
+		// editor bootstrap. Keep the readiness assertion bounded below this budget.
+		testInfo.setTimeout(180_000);
 		const aName = `E2E Pipe TopK ${uid()}`;
 		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'topk', config: { column: 'age', k: 2, descending: true } }
 		]);
 		try {
-			await navigateAndWaitForTable(page, info.analysisId);
+			await navigateAndWaitForTable(page, info.analysisId, 150_000);
 			const table = page.locator('[data-testid="inline-data-table"]');
 
 			const rows = table.locator('tbody tr');

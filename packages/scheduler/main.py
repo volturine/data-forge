@@ -20,6 +20,10 @@ from dataforge_protocol import common_pb2, scheduler_runtime_pb2, scheduler_runt
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"
 _T = TypeVar("_T")
+# The coordinator records scheduler staleness after 15 seconds. A 5-second RPC
+# deadline absorbs the measured 1–3-second control-plane tail without allowing
+# a hung heartbeat to suppress liveness detection.
+_HEARTBEAT_RPC_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,12 @@ class SchedulerRunDueResult:
     failures: list[FailedScheduleRun]
 
 
+@dataclass(frozen=True)
+class DueScheduleNamespace:
+    namespace: str
+    generation: int
+
+
 class SchedulerApiClient:
     def __init__(self, *, target: str, token: str, timeout_seconds: float = 30.0, registration_retry_seconds: float = 90.0) -> None:
         self._target = target
@@ -80,19 +90,41 @@ class SchedulerApiClient:
                     pid=pid,
                     capacity=capacity,
                 ),
-                timeout=self._timeout_seconds,
+                timeout=min(self._timeout_seconds, 5.0),
                 metadata=self._metadata(),
             )
         )
 
-    def heartbeat(self, *, worker_id: str) -> None:
-        self._call(lambda: self._stub.HeartbeatScheduler(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
+    def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+        timeout = self._timeout_seconds if timeout_seconds is None else min(self._timeout_seconds, max(float(timeout_seconds), 0.1))
+        self._call(lambda: self._stub.HeartbeatScheduler(_worker(worker_id), timeout=timeout, metadata=self._metadata()))
 
-    def stop(self, *, worker_id: str) -> None:
-        self._call(lambda: self._stub.StopScheduler(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
+    def stop(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+        timeout = self._timeout_seconds if timeout_seconds is None else min(self._timeout_seconds, max(float(timeout_seconds), 0.1))
+        self._call(lambda: self._stub.StopScheduler(_worker(worker_id), timeout=timeout, metadata=self._metadata()))
 
-    def run_due(self, *, worker_id: str) -> SchedulerRunDueResult:
-        response = self._call(lambda: self._stub.RunDueSchedules(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
+    def due_schedule_namespaces(self) -> list[DueScheduleNamespace]:
+        response = self._call(
+            lambda: self._stub.ListDueScheduleNamespaces(
+                common_pb2.EmptyRequest(),
+                timeout=self._timeout_seconds,
+                metadata=self._metadata(),
+            )
+        )
+        return [DueScheduleNamespace(namespace=item.namespace, generation=item.generation) for item in response.namespaces]
+
+    def run_due(self, *, worker_id: str, namespace: str, generation: int) -> SchedulerRunDueResult:
+        response = self._call(
+            lambda: self._stub.RunDueSchedules(
+                scheduler_runtime_pb2.SchedulerRunDueRequest(
+                    worker_id=worker_id,
+                    target_namespace=namespace,
+                    generation=generation,
+                ),
+                timeout=self._timeout_seconds,
+                metadata=self._metadata(),
+            )
+        )
         return SchedulerRunDueResult(
             handled=response.handled,
             enqueued=[
@@ -160,13 +192,19 @@ async def scheduler_loop(
     try:
         while not stop_event.is_set():
             try:
-                result = await asyncio.to_thread(client.run_due, worker_id=worker_id)
+                due_namespaces = await asyncio.to_thread(client.due_schedule_namespaces)
+                for due_namespace in due_namespaces:
+                    result = await asyncio.to_thread(
+                        client.run_due,
+                        worker_id=worker_id,
+                        namespace=due_namespace.namespace,
+                        generation=due_namespace.generation,
+                    )
+                    if result.handled:
+                        _log_run_due_result(result)
             except RuntimeError as exc:
                 logger.info("Backend temporarily unavailable to scheduler; retrying: %s", exc)
                 await _sleep_until_tick_or_stop(stop_event, check_interval_seconds)
-                continue
-            if result.handled:
-                _log_run_due_result(result)
                 continue
             await _sleep_until_tick_or_stop(stop_event, check_interval_seconds)
     finally:
@@ -211,7 +249,12 @@ async def _sleep_until_tick_or_stop(stop_event: asyncio.Event, seconds: int) -> 
 def _heartbeat_loop_sync(*, client: SchedulerApiClient, stop_signal: threading.Event, worker_id: str, heartbeat_seconds: float) -> None:
     while not stop_signal.wait(heartbeat_seconds):
         try:
-            client.heartbeat(worker_id=worker_id)
+            client.heartbeat(worker_id=worker_id, timeout_seconds=_HEARTBEAT_RPC_TIMEOUT_SECONDS)
+        except RuntimeError as exc:
+            if "DEADLINE_EXCEEDED" in str(exc) or "UNAVAILABLE" in str(exc):
+                logger.warning("Scheduler heartbeat delayed; retrying on the next interval: %s", exc)
+            else:
+                logger.exception("Scheduler heartbeat failed")
         except Exception:
             logger.exception("Scheduler heartbeat failed")
 
@@ -267,8 +310,8 @@ def _required_positive_int_env(name: str) -> int:
     return value
 
 
-def _worker(worker_id: str) -> common_pb2.RuntimeWorkerRequest:
-    return common_pb2.RuntimeWorkerRequest(worker_id=worker_id)
+def _worker(worker_id: str, *, namespace: str | None = None) -> common_pb2.RuntimeWorkerRequest:
+    return common_pb2.RuntimeWorkerRequest(worker_id=worker_id, target_namespace=namespace or "")
 
 
 if __name__ == "__main__":

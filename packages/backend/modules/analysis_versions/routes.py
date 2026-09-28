@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException, Response
 from sqlmodel import Session
 
-from backend_core.database import get_db
+from backend_core.database import get_db_async
 from backend_core.error_handlers import handle_errors
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.validation import AnalysisId, parse_analysis_id
@@ -23,7 +23,7 @@ router = MCPRouter(prefix='/analysis', tags=['analysis-versions'], dependencies=
 @handle_errors(operation='list analysis versions')
 def list_versions(
     analysis_id: AnalysisId,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """List all saved versions of an analysis, ordered by version number.
 
@@ -42,7 +42,7 @@ def list_versions(
 def get_version(
     analysis_id: AnalysisId,
     version: int,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Get a specific version of an analysis by version number. Returns the full pipeline_definition snapshot."""
     result = service.get_version(session, parse_analysis_id(analysis_id), version)
@@ -57,7 +57,7 @@ def delete_version(
     analysis_id: AnalysisId,
     version: int,
     _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     user_id: str = Depends(get_current_user_id),
 ):
     """Delete a specific version of an analysis by version number."""
@@ -77,7 +77,7 @@ def rename_version(
     version: int,
     body: schemas.AnalysisVersionUpdate,
     _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
     user_id: str = Depends(get_current_user_id),
 ):
     """Rename a version (set a descriptive label like 'before refactor'). Only the name field can be changed."""
@@ -97,7 +97,7 @@ def restore_version(
     version: int,
     response: Response,
     _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Restore an analysis to a specific version. Creates a new version with the restored pipeline_definition.
 

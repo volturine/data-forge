@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -10,6 +14,7 @@ from sqlmodel import Session, select
 
 import backend_grpc.server as backend_grpc_server
 from backend_core import build_jobs_service, build_runs_service, compute_requests_service, engine_instances_service, engine_runs_service
+from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS
 from backend_core.config import settings
 from backend_core.database import run_settings_db
 from backend_core.domain.build_jobs.models import BuildJobStatus
@@ -18,8 +23,9 @@ from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_requests.models import command_from_payload, response_envelope
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
-from backend_core.domain.engine_runs.schemas import EngineRunKind
+from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.namespace import get_namespace
+from backend_core.namespace_credentials_service import NamespaceCredentialError
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
@@ -32,6 +38,31 @@ from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb
 
 def dict_to_struct(payload: dict[str, object]) -> struct_pb2.Struct:
     return json_format.ParseDict(cast(Any, payload), struct_pb2.Struct())
+
+
+@pytest.mark.parametrize(
+    ('active_generation', 'supplied_generation', 'status'),
+    [
+        (None, '1', backend_grpc_server.grpc.StatusCode.UNAVAILABLE),
+        (1, None, backend_grpc_server.grpc.StatusCode.UNAUTHENTICATED),
+        (1, 'not-a-generation', backend_grpc_server.grpc.StatusCode.INVALID_ARGUMENT),
+        (1, '0', backend_grpc_server.grpc.StatusCode.INVALID_ARGUMENT),
+        (2, '1', backend_grpc_server.grpc.StatusCode.FAILED_PRECONDITION),
+    ],
+)
+def test_worker_runtime_rpc_requires_the_active_coordinator_generation(
+    active_generation: int | None,
+    supplied_generation: object,
+    status,
+) -> None:
+    rejection = backend_grpc_server._runtime_generation_rejection(active_generation, supplied_generation)
+
+    assert rejection is not None
+    assert rejection[0] == status
+
+
+def test_worker_runtime_rpc_accepts_only_the_active_coordinator_generation() -> None:
+    assert backend_grpc_server._runtime_generation_rejection(7, '7') is None
 
 
 def datetime_to_timestamp(value: datetime) -> timestamp_pb2.Timestamp:
@@ -48,18 +79,301 @@ def compute_claim_request(
         worker_id=worker_id,
         protocol_version=2,
         allowed_compute_request_kinds=allowed_kinds,
+        target_namespace='default',
     )
+
+
+def test_runtime_rpc_executor_sizes_stay_within_database_budget() -> None:
+    assert backend_grpc_server._runtime_rpc_executor_sizes(32, 13) == (8, 32, 1)
+    assert backend_grpc_server._runtime_rpc_executor_sizes(16, 13) == (4, 16, 1)
+    assert backend_grpc_server._runtime_rpc_executor_sizes(8, 13) == (4, 8, 1)
+    assert backend_grpc_server._runtime_rpc_executor_sizes(1, 4) == (1, 2, 1)
+    assert backend_grpc_server._runtime_rpc_executor_sizes(100, 13) == (25, 32, 1)
+    with pytest.raises(ValueError, match='at least three pooled database connections'):
+        backend_grpc_server._runtime_rpc_executor_sizes(1, 0)
+
+    for pool_size, overflow in ((100, 13), (32, 13), (16, 13), (8, 13), (1, 4)):
+        sizes = backend_grpc_server._runtime_rpc_executor_sizes(pool_size, overflow)
+        database_capacity = pool_size + overflow
+        assert sum(sizes) <= max(database_capacity - 1, 1)
+        assert sizes[1] >= 1
+        assert sizes[0] <= pool_size
+        assert sizes[2] <= 1
+
+
+@pytest.mark.asyncio
+async def test_prewarm_executor_starts_every_configured_thread() -> None:
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        await backend_grpc_server._prewarm_executor(executor, 3)
+        assert len(cast(Any, executor)._threads) == 3
 
 
 class FakeGrpcContext:
     def __init__(self, token: str) -> None:
         self._metadata = (('x-internal-token', token),)
+        self.abort_loop: asyncio.AbstractEventLoop | None = None
 
     def invocation_metadata(self) -> tuple[tuple[str, str], ...]:
         return self._metadata
 
     async def abort(self, _code, details: str) -> None:
+        self.abort_loop = asyncio.get_running_loop()
         raise RuntimeError(details)
+
+
+@pytest.mark.asyncio
+async def test_get_engine_credentials_aborts_on_grpc_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    import backend_core.namespace_credentials_service as namespace_credentials_service
+
+    async def allow_internal_call(_context) -> None:
+        return None
+
+    def missing_credentials(_session, namespace: str, role: str) -> tuple[str, str]:
+        assert namespace == 'tenant-a'
+        assert role == 'reader'
+        raise NamespaceCredentialError('credentials are missing')
+
+    def settings_db(function, *args, **kwargs):
+        return function(object(), *args, **kwargs)
+
+    monkeypatch.setattr(backend_grpc_server, '_require_internal_token', allow_internal_call)
+    monkeypatch.setattr(backend_grpc_server, 'run_settings_db', settings_db)
+    monkeypatch.setattr(namespace_credentials_service, 'resolve_namespace_engine_credentials', missing_credentials)
+    context = FakeGrpcContext(settings.internal_api_token)
+
+    with pytest.raises(RuntimeError, match='credentials are missing'):
+        await WorkerRuntimeServicer().GetEngineCredentials(
+            worker_runtime_pb2.WorkerEngineCredentialsRequest(namespace='tenant-a', role='reader'),
+            context,
+        )
+
+    assert context.abort_loop is asyncio.get_running_loop()
+
+
+@pytest.mark.asyncio
+async def test_lease_validation_isolated_from_general_rpc_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    general_executor = ThreadPoolExecutor(max_workers=1)
+    lease_executor = ThreadPoolExecutor(max_workers=1)
+    scheduler_executor = ThreadPoolExecutor(max_workers=1)
+    general_release = threading.Event()
+    general_started = threading.Event()
+    validation_ran = threading.Event()
+
+    def block_general_validation() -> None:
+        general_started.set()
+        general_release.wait(timeout=2)
+
+    general_blocker = general_executor.submit(block_general_validation)
+    assert general_started.wait(timeout=1)
+    monkeypatch.setattr(backend_grpc_server, '_INTERNAL_VALIDATION_EXECUTOR', general_executor)
+    monkeypatch.setattr(backend_grpc_server, '_INTERNAL_LEASE_VALIDATION_EXECUTOR', lease_executor)
+    monkeypatch.setattr(backend_grpc_server, '_INTERNAL_SCHEDULER_VALIDATION_EXECUTOR', scheduler_executor)
+    monkeypatch.setattr(backend_grpc_server, 'active_runtime_coordinator_generation', lambda: 7)
+
+    interceptor = backend_grpc_server._BackendRequestValidationInterceptor()
+    interceptor._validator = cast(Any, SimpleNamespace(validate=lambda _request: validation_ran.set()))
+    method = f'{backend_grpc_server._WORKER_RUNTIME_SERVICE_PREFIX}RenewComputeRequestLeases'
+    scheduler_heartbeat = '/dataforge_protocol.SchedulerRuntimeService/HeartbeatScheduler'
+    assert backend_grpc_server._validation_executor(scheduler_heartbeat) is scheduler_executor
+    assert backend_grpc_server._validation_executor(f'{backend_grpc_server._WORKER_RUNTIME_SERVICE_PREFIX}HeartbeatWorker') is lease_executor
+    assert backend_grpc_server._validation_executor(method) is lease_executor
+
+    async def echo(request, _context):
+        return request
+
+    async def continuation(_details):
+        return backend_grpc_server.grpc.unary_unary_rpc_method_handler(echo)
+
+    class Context:
+        def invocation_metadata(self):
+            return ((backend_grpc_server._RUNTIME_GENERATION_METADATA_KEY, '7'),)
+
+        async def abort(self, _status, details):
+            raise AssertionError(f'lease validation unexpectedly aborted: {details}')
+
+    request = worker_runtime_pb2.WorkerRenewComputeRequestLeasesRequest(
+        namespace='tenant-a',
+        worker_id='worker-1',
+        renewals=[
+            worker_runtime_pb2.WorkerComputeRequestLeaseRenewal(
+                request_id='request-1',
+                claim_token='claim-1',
+                lease_generation=1,
+            )
+        ],
+    )
+    try:
+        wrapped = await interceptor.intercept_service(continuation, SimpleNamespace(method=method))
+        assert wrapped is not None and wrapped.unary_unary is not None
+        response = await cast(Any, wrapped.unary_unary)(request, Context())
+        assert response is request
+        assert validation_ran.is_set()
+        assert not general_release.is_set()
+    finally:
+        general_release.set()
+        general_blocker.result(timeout=1)
+        general_executor.shutdown(wait=True)
+        lease_executor.shutdown(wait=True)
+        scheduler_executor.shutdown(wait=True)
+
+
+def test_compute_claim_rpc_executor_runs_a_db_pool_bounded_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def allow_internal_call(_context) -> None:
+        return None
+
+    monkeypatch.setattr(backend_grpc_server, '_require_internal_token', allow_internal_call)
+    capacity = min(4, backend_grpc_server._INTERNAL_GENERAL_RPC_WORKERS)
+    release = threading.Event()
+    capacity_reached = threading.Event()
+    started_count = 0
+    started_lock = threading.Lock()
+
+    async def blocked_handler(_servicer, request, _context):
+        nonlocal started_count
+        with started_lock:
+            started_count += 1
+            if started_count == capacity:
+                capacity_reached.set()
+        await asyncio.get_running_loop().run_in_executor(None, release.wait)
+        return request
+
+    claim_handler = backend_grpc_server._run_claim_handler_in_thread(blocked_handler)
+
+    async def exercise() -> None:
+        calls = [asyncio.create_task(claim_handler(None, index, None)) for index in range(capacity)]
+        assert await asyncio.to_thread(capacity_reached.wait, 2)
+        release.set()
+        assert await asyncio.gather(*calls) == list(range(capacity))
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        release.set()
+
+
+def test_lease_rpcs_do_not_queue_behind_lifecycle_control(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def allow_internal_call(_context) -> None:
+        return None
+
+    monkeypatch.setattr(backend_grpc_server, '_require_internal_token', allow_internal_call)
+    release = threading.Event()
+    lane_filled = threading.Event()
+    control_started = threading.Event()
+    started_count = 0
+    started_lock = threading.Lock()
+
+    async def blocked_handler(_servicer, request, _context):
+        nonlocal started_count
+        with started_lock:
+            started_count += 1
+            if started_count == backend_grpc_server._INTERNAL_LEASE_RPC_WORKERS:
+                lane_filled.set()
+            if request == 'control':
+                control_started.set()
+        await asyncio.get_running_loop().run_in_executor(None, release.wait)
+        return request
+
+    lease_handler = backend_grpc_server._run_critical_runtime_handler_in_thread(blocked_handler)
+    control_handler = backend_grpc_server._run_control_handler_in_thread(blocked_handler)
+
+    async def exercise() -> None:
+        assert backend_grpc_server._INTERNAL_LEASE_RPC_WORKERS > 0
+        lease_calls = [asyncio.create_task(lease_handler(None, f'lease-{index}', None)) for index in range(backend_grpc_server._INTERNAL_LEASE_RPC_WORKERS)]
+        assert await asyncio.to_thread(lane_filled.wait, 2)
+        control_call = asyncio.create_task(control_handler(None, 'control', None))
+        assert await asyncio.to_thread(control_started.wait, 2)
+        release.set()
+        expected = [f'lease-{index}' for index in range(len(lease_calls))] + ['control']
+        assert await asyncio.gather(*lease_calls, control_call) == expected
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        release.set()
+
+
+def test_scheduler_heartbeat_bypasses_saturated_general_rpc_lane(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def allow_internal_call(_context) -> None:
+        return None
+
+    monkeypatch.setattr(backend_grpc_server, '_require_internal_token', allow_internal_call)
+    general_release = threading.Event()
+    general_lane_full = threading.Event()
+    heartbeat_started = threading.Event()
+    started_count = 0
+    started_lock = threading.Lock()
+
+    async def block_general_handler(_servicer, request, _context):
+        nonlocal started_count
+        with started_lock:
+            started_count += 1
+            if started_count == backend_grpc_server._INTERNAL_GENERAL_RPC_WORKERS:
+                general_lane_full.set()
+        await asyncio.get_running_loop().run_in_executor(None, general_release.wait)
+        return request
+
+    async def heartbeat_handler(_servicer, request, _context):
+        heartbeat_started.set()
+        return request
+
+    general_handler = backend_grpc_server._run_control_handler_in_thread(block_general_handler)
+    liveness_handler = backend_grpc_server._run_scheduler_heartbeat_handler_in_thread(heartbeat_handler)
+
+    async def exercise() -> None:
+        general_calls = [
+            asyncio.create_task(general_handler(None, f'general-{index}', None)) for index in range(backend_grpc_server._INTERNAL_GENERAL_RPC_WORKERS)
+        ]
+        assert await asyncio.to_thread(general_lane_full.wait, 2)
+        assert await asyncio.wait_for(liveness_handler(None, 'heartbeat', None), timeout=1) == 'heartbeat'
+        assert heartbeat_started.is_set()
+        general_release.set()
+        assert await asyncio.gather(*general_calls) == [f'general-{index}' for index in range(len(general_calls))]
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        general_release.set()
+
+
+def test_scheduler_heartbeat_does_not_queue_behind_saturated_lease_lane(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def allow_internal_call(_context) -> None:
+        return None
+
+    monkeypatch.setattr(backend_grpc_server, '_require_internal_token', allow_internal_call)
+    lease_executor = ThreadPoolExecutor(max_workers=1)
+    scheduler_executor = ThreadPoolExecutor(max_workers=1)
+    release_lease = threading.Event()
+    lease_started = threading.Event()
+    heartbeat_started = threading.Event()
+    monkeypatch.setattr(backend_grpc_server, '_INTERNAL_LEASE_RPC_EXECUTOR', lease_executor)
+    monkeypatch.setattr(backend_grpc_server, '_INTERNAL_SCHEDULER_RPC_EXECUTOR', scheduler_executor)
+
+    async def blocked_lease(_servicer, request, _context):
+        lease_started.set()
+        await asyncio.get_running_loop().run_in_executor(None, release_lease.wait)
+        return request
+
+    async def heartbeat(_servicer, request, _context):
+        heartbeat_started.set()
+        return request
+
+    lease_handler = backend_grpc_server._run_critical_runtime_handler_in_thread(blocked_lease)
+    liveness_handler = backend_grpc_server._run_scheduler_heartbeat_handler_in_thread(heartbeat)
+
+    async def exercise() -> None:
+        lease_call = asyncio.create_task(lease_handler(None, 'lease', None))
+        assert await asyncio.to_thread(lease_started.wait, 1)
+        assert await asyncio.wait_for(liveness_handler(None, 'heartbeat', None), timeout=1) == 'heartbeat'
+        assert heartbeat_started.is_set()
+        release_lease.set()
+        assert await lease_call == 'lease'
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        release_lease.set()
+        lease_executor.shutdown(wait=True)
+        scheduler_executor.shutdown(wait=True)
 
 
 def _context(monkeypatch: pytest.MonkeyPatch) -> FakeGrpcContext:
@@ -130,6 +444,43 @@ async def test_internal_worker_grpc_registers_heartbeats_and_stops(monkeypatch: 
 
 
 @pytest.mark.asyncio
+async def test_pending_runtime_namespaces_are_filtered_by_work_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    requested_kinds = []
+
+    def cached_namespaces(kinds):
+        requested_kinds.append(kinds)
+        return ['default']
+
+    monkeypatch.setattr(backend_grpc_server, '_cached_pending_runtime_work_namespaces', cached_namespaces)
+    response = await WorkerRuntimeServicer().ListPendingRuntimeWorkNamespaces(
+        worker_runtime_pb2.WorkerPendingRuntimeWorkNamespacesRequest(kinds=['build']),
+        cast(Any, context),
+    )
+
+    assert response.namespaces == ['default']
+    assert [[kind.value for kind in kinds] for kinds in requested_kinds] == [['build']]
+
+
+def test_pending_namespace_cache_refreshes_unrelated_kinds_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backend_grpc_server, '_RUNTIME_PENDING_NAMESPACE_CACHE', {})
+    monkeypatch.setattr(backend_grpc_server, '_RUNTIME_WORK_CACHE_MISS_LOCKS', {})
+    both_queries_started = threading.Barrier(2)
+
+    def run_settings_db(_operation):
+        both_queries_started.wait(timeout=2)
+        return ['default']
+
+    monkeypatch.setattr(backend_grpc_server, 'run_settings_db', run_settings_db)
+    work_kinds = backend_grpc_server.runtime_work_service.RuntimeWorkKind
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        build = executor.submit(backend_grpc_server._cached_pending_runtime_work_namespaces, (work_kinds.BUILD,))
+        compute = executor.submit(backend_grpc_server._cached_pending_runtime_work_namespaces, (work_kinds.COMPUTE,))
+        assert build.result(timeout=3) == ['default']
+        assert compute.result(timeout=3) == ['default']
+
+
+@pytest.mark.asyncio
 async def test_internal_worker_grpc_claims_and_finalizes_build_job(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     worker_id = f'local-worker:{uuid.uuid4()}'
@@ -148,7 +499,10 @@ async def test_internal_worker_grpc_claims_and_finalizes_build_job(test_db_sessi
     job = build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
     servicer = WorkerRuntimeServicer()
 
-    response = await servicer.ClaimBuildJob(common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2), context)
+    response = await servicer.ClaimBuildJob(
+        common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace='default'),
+        context,
+    )
 
     assert response.HasField('job')
     assert response.job.job_id == job.id
@@ -158,7 +512,7 @@ async def test_internal_worker_grpc_claims_and_finalizes_build_job(test_db_sessi
     assert response.job.lease_generation == 1
     assert response.job.HasField('lease_expires_at')
     assert response.job.attempt == 1
-    assert response.job.lease_ttl_seconds == settings.runtime_work_lease_ttl_seconds
+    assert response.job.lease_ttl_seconds == CLAIM_DELIVERY_LEASE_SECONDS
     test_db_session.refresh(job)
     assert job.status == BuildJobStatus.RUNNING
     assert job.lease_owner == worker_id
@@ -205,7 +559,7 @@ async def test_internal_worker_grpc_claims_and_finalizes_build_job(test_db_sessi
         ),
         cast(Any, context),
     )
-    assert replayed.value is False
+    assert replayed.value is True
 
 
 @pytest.mark.asyncio
@@ -299,7 +653,7 @@ async def test_internal_worker_grpc_fails_job_and_build_run_atomically(test_db_s
     assert events[0].payload_json['error'] == request.error
 
     replayed = await WorkerRuntimeServicer().FailBuildJob(request, cast(Any, context))
-    assert replayed.value is False
+    assert replayed.value is True
     assert len(build_runs_service.list_build_events_after(test_db_session, build_id)) == 1
 
 
@@ -311,11 +665,17 @@ async def test_internal_worker_grpc_counts_and_releases_jobs(test_db_session: Se
     job = build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
     servicer = WorkerRuntimeServicer()
 
-    queued = await servicer.GetQueuedBuildJobCount(common_pb2.EmptyRequest(), context)
+    queued = await servicer.GetQueuedBuildJobCount(common_pb2.EmptyRequest(namespace='default'), context)
     assert queued.count >= 1
 
-    await servicer.ClaimBuildJob(common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2), context)
-    released = await servicer.ReleaseBuildWorkerJobs(common_pb2.RuntimeWorkerRequest(worker_id=worker_id), context)
+    await servicer.ClaimBuildJob(
+        common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace='default'),
+        context,
+    )
+    released = await servicer.ReleaseBuildWorkerJobs(
+        common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace='default'),
+        context,
+    )
     assert released.count == 1
     test_db_session.refresh(job)
     assert job.status == BuildJobStatus.QUEUED
@@ -357,7 +717,8 @@ async def test_build_job_count_recovers_exhausted_scheduled_job(test_db_session:
     test_db_session.add(claimed)
     test_db_session.commit()
 
-    count = await WorkerRuntimeServicer().GetQueuedBuildJobCount(common_pb2.EmptyRequest(), context)
+    await WorkerRuntimeServicer().ReconcileExpiredBuildJobs(common_pb2.EmptyRequest(namespace='default'), context)
+    count = await WorkerRuntimeServicer().GetQueuedBuildJobCount(common_pb2.EmptyRequest(namespace='default'), context)
 
     assert count.count == 0
     test_db_session.expire_all()
@@ -424,19 +785,26 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     assert response.request.lease_generation == 1
     assert response.request.attempt == 1
     assert response.request.HasField('lease_expires_at')
+    assert response.request.lease_ttl_seconds == CLAIM_DELIVERY_LEASE_SECONDS
 
-    renewed = await servicer.RenewComputeRequestLease(
-        worker_runtime_pb2.WorkerComputeRequestClaimRequest(
+    renewed = await servicer.RenewComputeRequestLeases(
+        worker_runtime_pb2.WorkerRenewComputeRequestLeasesRequest(
             namespace='default',
-            request_id=request.id,
             worker_id=worker_id,
-            claim_token=response.request.claim_token,
-            lease_generation=response.request.lease_generation,
+            renewals=[
+                worker_runtime_pb2.WorkerComputeRequestLeaseRenewal(
+                    request_id=request.id,
+                    claim_token=response.request.claim_token,
+                    lease_generation=response.request.lease_generation,
+                )
+            ],
         ),
         context,
     )
-    assert renewed.renewed is True
-    assert renewed.HasField('lease_expires_at')
+    assert len(renewed.renewals) == 1
+    assert renewed.renewals[0].request_id == request.id
+    assert renewed.renewals[0].renewed is True
+    assert renewed.renewals[0].lease_ttl_seconds == settings.runtime_work_lease_ttl_seconds
 
     await servicer.CompleteComputeRequest(
         worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
@@ -492,6 +860,72 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
 
 
 @pytest.mark.asyncio
+async def test_preview_completion_finalizes_engine_run_in_the_same_rpc(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    worker_id = f'preview-worker:{uuid.uuid4()}'
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json={**_schema_payload(), 'row_limit': 100, 'page': 1},
+    )
+    engine_run = engine_runs_service.create_engine_run(
+        test_db_session,
+        engine_runs_service.create_engine_run_payload(
+            analysis_id='analysis-2',
+            datasource_id='datasource-1',
+            kind=EngineRunKind.PREVIEW,
+            status=EngineRunStatus.RUNNING,
+            request_json={},
+            result_json={},
+        ),
+    )
+    claimed = await WorkerRuntimeServicer().ClaimComputeRequest(
+        compute_claim_request(worker_id, enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW),
+        context,
+    )
+    assert claimed.HasField('request')
+    completed_at = datetime.now(UTC)
+    update = worker_runtime_pb2.WorkerEngineRunUpdateFields(
+        status=enums_pb2.ENGINE_RUN_STATUS_SUCCESS,
+        progress=1.0,
+    )
+    update.result_json.CopyFrom(dict_to_struct({'results': [{'status': 'success'}]}))
+    update.completed_at.CopyFrom(datetime_to_timestamp(completed_at))
+
+    await WorkerRuntimeServicer().CompleteComputeRequest(
+        worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
+            namespace='default',
+            request_id=request.id,
+            worker_id=worker_id,
+            claim_token=claimed.request.claim_token,
+            lease_generation=claimed.request.lease_generation,
+            response_envelope=response_envelope(
+                kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+                request_id=request.id,
+                status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+                payload={'step_id': 'source', 'columns': [], 'column_types': {}, 'data': [], 'total_rows': 0, 'page': 1, 'page_size': 100},
+            ),
+            engine_run_finalization=worker_runtime_pb2.WorkerEngineRunFinalization(
+                run_id=engine_run.id,
+                update=update,
+            ),
+        ),
+        context,
+    )
+
+    test_db_session.expire_all()
+    stored_request = test_db_session.get(type(request), request.id)
+    stored_run = engine_runs_service.get_engine_run(test_db_session, engine_run.id)
+    assert stored_request is not None
+    assert stored_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
+    assert stored_run is not None
+    assert stored_run.status == EngineRunStatus.SUCCESS
+    assert stored_run.completed_at is not None
+    assert stored_run.result_json == {'results': [{'status': 'success'}]}
+
+
+@pytest.mark.asyncio
 async def test_compute_request_claim_does_not_reclaim_the_calling_worker(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     worker_id = f'build-manager:{uuid.uuid4()}'
@@ -518,8 +952,6 @@ async def test_compute_request_claim_does_not_reclaim_the_calling_worker(test_db
     def fake_run_settings_db(func, *args, **kwargs):
         if func is backend_grpc_server.runtime_worker_service.reclaimable_worker_ids:
             return {worker_id}
-        if func is backend_grpc_server.list_runtime_namespaces:
-            return ['default']
         raise AssertionError(f'Unexpected settings database callback: {func!r}')
 
     def fake_run_db(func, *args, **kwargs):
@@ -545,15 +977,13 @@ async def test_compute_request_claim_does_not_reclaim_the_calling_worker(test_db
 
 
 @pytest.mark.asyncio
-async def test_compute_request_claim_rotates_namespace_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_compute_request_claim_targets_one_namespace_without_scanning(monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     claimed_namespaces: list[str] = []
 
     def fake_run_settings_db(func, *args, **kwargs):
         if func is backend_grpc_server.runtime_worker_service.reclaimable_worker_ids:
             return set()
-        if func is backend_grpc_server.list_runtime_namespaces:
-            return ['default', 'other']
         raise AssertionError(f'Unexpected settings database callback: {func!r}')
 
     def fake_run_db(func, *args, **kwargs):
@@ -566,12 +996,16 @@ async def test_compute_request_claim_rotates_namespace_scan(monkeypatch: pytest.
     monkeypatch.setattr(backend_grpc_server, 'run_db', fake_run_db)
 
     response = await WorkerRuntimeServicer().ClaimComputeRequest(
-        common_pb2.RuntimeWorkerRequest(worker_id='build-manager:fair-claim', protocol_version=2, compute_namespace_offset=1),
+        common_pb2.RuntimeWorkerRequest(
+            worker_id='build-manager:fair-claim',
+            protocol_version=2,
+            target_namespace='other',
+        ),
         context,
     )
 
     assert not response.HasField('request')
-    assert claimed_namespaces == ['other', 'default']
+    assert claimed_namespaces == ['other']
 
 
 @pytest.mark.asyncio
@@ -932,32 +1366,34 @@ async def test_internal_worker_grpc_returns_datasource_telegram_targets(test_db_
 @pytest.mark.asyncio
 async def test_internal_worker_grpc_creates_engine_run_with_typed_execution_entries(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
-
-    response = await WorkerRuntimeServicer().CreateEngineRun(
-        worker_runtime_pb2.WorkerCreateEngineRunRequest(
-            namespace='default',
-            analysis_id='analysis-1',
-            datasource_id='datasource-1',
-            kind=enums_pb2.ENGINE_RUN_KIND_PREVIEW,
-            status=enums_pb2.ENGINE_RUN_STATUS_SUCCESS,
-            request=dict_to_struct({'target_step_id': 'source'}),
-            result=dict_to_struct({'row_count': 1}),
-            timing_by_key={'filter': 12.5},
-            execution_entry=[
-                compute_pb2.EngineRunExecutionEntry(
-                    key='filter',
-                    label='Filter',
-                    category=enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP,
-                    order=0,
-                    duration_ms=12.5,
-                    share_pct=100.0,
-                    step_type=enums_pb2.STEP_TYPE_FILTER,
-                )
-            ],
-            progress=1.0,
-        ),
-        context,
+    request = worker_runtime_pb2.WorkerCreateEngineRunRequest(
+        namespace='default',
+        analysis_id='analysis-1',
+        datasource_id='datasource-1',
+        kind=enums_pb2.ENGINE_RUN_KIND_PREVIEW,
+        status=enums_pb2.ENGINE_RUN_STATUS_SUCCESS,
+        request=dict_to_struct({'target_step_id': 'source'}),
+        result=dict_to_struct({'row_count': 1}),
+        timing_by_key={'filter': 12.5},
+        execution_entry=[
+            compute_pb2.EngineRunExecutionEntry(
+                key='filter',
+                label='Filter',
+                category=enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP,
+                order=0,
+                duration_ms=12.5,
+                share_pct=100.0,
+                step_type=enums_pb2.STEP_TYPE_FILTER,
+            )
+        ],
+        progress=1.0,
+        idempotency_key='preview-request-grpc',
     )
+    servicer = WorkerRuntimeServicer()
+    response = await servicer.CreateEngineRun(request, context)
+    retry = await servicer.CreateEngineRun(request, context)
+
+    assert retry.id == response.id == request.idempotency_key
 
     run = engine_runs_service.get_engine_run(test_db_session, response.id)
     assert run is not None
@@ -1261,7 +1697,7 @@ async def test_internal_worker_grpc_lists_and_finalizes_datasource_delete(test_d
     test_db_session.commit()
     servicer = WorkerRuntimeServicer()
 
-    response = await servicer.ListPendingDatasourceDeletes(common_pb2.EmptyRequest(), context)
+    response = await servicer.ListPendingDatasourceDeletes(common_pb2.EmptyRequest(namespace='default'), context)
     assert (datasource_id, 'default') in {(item.datasource_id, item.namespace) for item in response.deletes}
 
     finalized = await servicer.FinalizeDatasourceDelete(

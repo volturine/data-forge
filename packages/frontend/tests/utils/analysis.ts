@@ -2,6 +2,11 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { gotoAuthedRoute, readyTimeoutMs, waitForLayoutReady } from './readiness.js';
 
 type EditorAccessState = 'editable' | 'locked';
+const MIN_REMAINING_MS = 100;
+
+function remainingTimeout(deadline: number): number {
+	return Math.max(deadline - Date.now(), MIN_REMAINING_MS);
+}
 
 async function findVisibleLocator(locator: Locator): Promise<Locator | null> {
 	const count = await locator.count();
@@ -32,24 +37,23 @@ async function waitForAnalysisEditor(
 	deadline: number,
 	accessState: EditorAccessState
 ): Promise<void> {
-	const remaining = () => Math.max(deadline - Date.now(), 1);
-	const editor = page.locator('[role="application"]');
+	const remaining = () => remainingTimeout(deadline);
+	// Charts also expose their zoom surface with role=application. Scope the
+	// readiness gate to the editor marker so a chart mounting during a parallel
+	// browser burst cannot make this locator strict-mode ambiguous.
+	const editor = page.locator('[role="application"][data-editor-access-state]');
 	const loadError = page.locator('[data-testid="analysis-load-error"]');
 	const kitError = page.getByText('Internal Error');
 	// Fail fast on product/error UI — no soft-reload (app must work first try).
-	await Promise.race([
-		editor.waitFor({ state: 'visible', timeout: remaining() }).then(() => 'ready' as const),
-		loadError.waitFor({ state: 'visible', timeout: remaining() }).then(() => 'load' as const),
-		kitError.waitFor({ state: 'visible', timeout: remaining() }).then(() => 'kit' as const)
-	]).then(async (outcome) => {
-		if (outcome === 'load') {
-			const message = (await loadError.innerText().catch(() => null)) ?? 'Error loading analysis';
-			throw new Error(`Analysis editor load failed:\n${message}`);
-		}
-		if (outcome === 'kit') {
-			throw new Error('Analysis page hit SvelteKit Internal Error (unhandled client exception)');
-		}
-	});
+	const editorState = editor.or(loadError).or(kitError).filter({ visible: true }).first();
+	await expect(editorState).toBeVisible({ timeout: remaining() });
+	if (await loadError.isVisible()) {
+		const message = (await loadError.innerText().catch(() => null)) ?? 'Error loading analysis';
+		throw new Error(`Analysis editor load failed:\n${message}`);
+	}
+	if (await kitError.isVisible()) {
+		throw new Error('Analysis page hit SvelteKit Internal Error (unhandled client exception)');
+	}
 
 	await expect(editor).toHaveAttribute('data-editor-access-state', accessState, {
 		timeout: remaining()
@@ -82,7 +86,7 @@ async function waitForAnalysisEditor(
 
 async function waitForCurrentAnalysisId(page: Page, deadline: number): Promise<string> {
 	await page.waitForURL(/\/analysis\/(?!new(?:\/|$))[^/?#]+/, {
-		timeout: Math.max(deadline - Date.now(), 1)
+		timeout: remainingTimeout(deadline)
 	});
 	const match = page.url().match(/\/analysis\/([^/?#]+)/);
 	return match?.[1] ?? '';
@@ -133,11 +137,11 @@ export async function gotoAnalysisEditor(
 	timeout = readyTimeoutMs()
 ): Promise<void> {
 	const deadline = Date.now() + timeout;
-	await gotoAuthedRoute(page, `/analysis/${analysisId}`, Math.max(deadline - Date.now(), 1));
+	await gotoAuthedRoute(page, `/analysis/${analysisId}`, remainingTimeout(deadline));
 	await expect(page).toHaveURL(`/analysis/${analysisId}`, {
-		timeout: Math.max(deadline - Date.now(), 1)
+		timeout: remainingTimeout(deadline)
 	});
-	await waitForLayoutReady(page, Math.max(deadline - Date.now(), 1));
+	await waitForLayoutReady(page, remainingTimeout(deadline));
 	await waitForAnalysisEditor(page, deadline, 'editable');
 }
 
@@ -147,11 +151,11 @@ export async function gotoReadOnlyAnalysisEditor(
 	timeout = readyTimeoutMs()
 ): Promise<void> {
 	const deadline = Date.now() + timeout;
-	await gotoAuthedRoute(page, `/analysis/${analysisId}`, Math.max(deadline - Date.now(), 1));
+	await gotoAuthedRoute(page, `/analysis/${analysisId}`, remainingTimeout(deadline));
 	await expect(page).toHaveURL(`/analysis/${analysisId}`, {
-		timeout: Math.max(deadline - Date.now(), 1)
+		timeout: remainingTimeout(deadline)
 	});
-	await waitForLayoutReady(page, Math.max(deadline - Date.now(), 1));
+	await waitForLayoutReady(page, remainingTimeout(deadline));
 	await waitForAnalysisEditor(page, deadline, 'locked');
 }
 

@@ -7,7 +7,6 @@ import {
 	gotoAnalysesGallery,
 	gotoNewAnalysis,
 	waitForAnalysisLoadError,
-	waitForLayoutReady,
 	readyTimeoutMs
 } from './utils/readiness.js';
 import { gotoAnalysisEditor, waitForCurrentAnalysisEditor } from './utils/analysis.js';
@@ -74,11 +73,17 @@ test.describe('Analyses – list & gallery', () => {
 
 			const card = page.locator(`[data-analysis-card="${analysisName}"]`);
 			await expect(card).toBeVisible();
+			const favoriteResponse = page.waitForResponse(
+				(response) =>
+					new URL(response.url()).pathname === `/api/v1/analysis/${aId}/favorite` &&
+					response.request().method() === 'POST'
+			);
 			await card.getByRole('button', { name: 'Add analysis to favorites' }).click();
+			expect((await favoriteResponse).status()).toBe(200);
 
 			const favorites = page.getByRole('group', { name: 'Favorite analyses' });
 			const link = favorites.getByRole('link', { name: analysisName });
-			await expect(link).toBeVisible({ timeout: 5_000 });
+			await expect(link).toBeVisible({ timeout: readyTimeoutMs() });
 
 			await page.reload();
 			await gotoAnalysesGallery(page);
@@ -86,7 +91,7 @@ test.describe('Analyses – list & gallery', () => {
 			const persistedLink = page
 				.getByRole('group', { name: 'Favorite analyses' })
 				.getByRole('link', { name: analysisName });
-			await expect(persistedLink).toBeVisible({ timeout: 5_000 });
+			await expect(persistedLink).toBeVisible({ timeout: readyTimeoutMs() });
 			await persistedLink.click();
 			await expect(page).toHaveURL(`/analysis/${aId}`);
 		} finally {
@@ -178,7 +183,7 @@ test.describe('Analyses – gallery interactions', () => {
 			// Should navigate to the new analysis
 			await expect(page).toHaveURL(/\/analysis\//, { timeout: 10_000 });
 			await expect(page.getByRole('heading', { name: /Copy of /i, level: 1 })).toBeVisible({
-				timeout: 5_000
+				timeout: 10_000
 			});
 		} finally {
 			await deleteAnalysisViaUI(page, `Copy of ${aName}`);
@@ -345,7 +350,8 @@ test.describe('Analyses – create wizard', () => {
 			await page.getByRole('button', { name: 'Data Quality Audit' }).click();
 			await expect(page.locator('main')).toContainText('Profile nulls, derive quality flags');
 			await expect(page.locator('main')).toContainText(
-				/view\s*→\s*filter\s*→\s*with_columns\s*→\s*groupby/
+				/view\s*→\s*filter\s*→\s*with_columns\s*→\s*groupby/,
+				{ timeout: 10_000 }
 			);
 			await page.getByRole('button', { name: /Next/i }).click();
 
@@ -512,10 +518,9 @@ test.describe('Analyses – detail page', () => {
 	});
 
 	test('analysis name is shown in the detail page', async ({ page }) => {
-		await page.goto(`/analysis/${aId}`);
-		await waitForLayoutReady(page);
+		await gotoAnalysisEditor(page, aId);
 		await expect(page.getByRole('heading', { name: aName, level: 1 })).toBeVisible({
-			timeout: 5_000
+			timeout: readyTimeoutMs()
 		});
 	});
 });

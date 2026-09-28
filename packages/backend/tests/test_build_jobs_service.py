@@ -6,9 +6,40 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel import Session
 
 from backend_core import build_jobs_service
+from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS
+from backend_core.config import settings
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.transitions import TransitionOutcome
+
+
+def test_build_claims_do_not_refresh_the_namespace_wake_marker(test_db_session: Session, monkeypatch) -> None:
+    refreshes: list[object] = []
+
+    def refresh(*args, **kwargs) -> None:
+        refreshes.append((args, kwargs))
+
+    monkeypatch.setattr(build_jobs_service.runtime_work_service, 'refresh_pending_work', refresh)
+    build_jobs_service.stage_job(test_db_session, build_id=str(uuid.uuid4()), namespace='default')
+
+    assert build_jobs_service.claim_next_job(test_db_session, worker_id='worker:one') is not None
+    assert build_jobs_service.claim_next_job(test_db_session, worker_id='worker:two') is None
+    assert refreshes == []
+
+
+def test_build_recovery_refreshes_the_namespace_wake_marker(monkeypatch, test_db_session: Session) -> None:
+    refreshes: list[tuple[object, dict[str, object]]] = []
+
+    def refresh(_session, **kwargs) -> None:
+        refreshes.append((kwargs['kind'], kwargs))
+
+    monkeypatch.setattr(build_jobs_service.runtime_work_service, 'refresh_pending_work', refresh)
+
+    assert build_jobs_service.stage_exhausted_jobs(test_db_session) == []
+    assert len(refreshes) == 1
+    kind, options = refreshes[0]
+    assert kind == build_jobs_service.RuntimeWorkKind.BUILD
+    assert options['namespace'] == 'default'
 
 
 def test_claim_assigns_unique_fencing_identity(test_db_session: Session) -> None:
@@ -31,6 +62,7 @@ def test_claim_assigns_unique_fencing_identity(test_db_session: Session) -> None
     assert claimed.claimed_at is not None
     assert claimed.last_renewed_at is not None
     assert claimed.lease_expires_at is not None
+    assert abs((claimed.lease_expires_at - claimed.claimed_at).total_seconds() - CLAIM_DELIVERY_LEASE_SECONDS) < 0.01
 
 
 def test_renew_extends_only_the_active_claim(test_db_session: Session) -> None:
@@ -59,7 +91,9 @@ def test_renew_extends_only_the_active_claim(test_db_session: Session) -> None:
     assert renewed.outcome is TransitionOutcome.APPLIED
     assert renewed.value is not None
     assert renewed.value.lease_expires_at is not None
+    assert renewed.value.last_renewed_at is not None
     assert renewed.value.lease_expires_at > previous_expiry
+    assert abs((renewed.value.lease_expires_at - renewed.value.last_renewed_at).total_seconds() - settings.runtime_work_lease_ttl_seconds) < 0.01
     assert renewed.value.claim_token == claimed.claim_token
     assert renewed.value.lease_generation == claimed.lease_generation
     assert renewed.value.attempts == claimed.attempts
@@ -77,6 +111,7 @@ def test_stale_claim_cannot_renew_or_complete_after_reclaim(test_db_session: Ses
     assert first.claim_token is not None
     first_token = first.claim_token
     first_generation = first.lease_generation
+    assert build_jobs_service.claim_next_job(test_db_session, worker_id='worker:two') is None
     first.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     test_db_session.add(first)
     test_db_session.commit()

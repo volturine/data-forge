@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { page } from '$app/state';
+	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { css, button, spinner } from '$lib/styles/panda';
 	import { verifyEmail, resendVerification } from '$lib/api/auth';
@@ -10,9 +10,18 @@
 	let resending = $state(false);
 	let resent = $state(false);
 
-	// The static auth entry point is prerendered. Query parameters only exist in
-	// the browser, where the page store remains reactive for client navigation.
-	const token = $derived(browser ? page.url.searchParams.get('token') : null);
+	let token = $state<string | null>(null);
+
+	// /verify is prerendered, so reading page.url.searchParams during SSR is
+	// invalid. Read the browser URL after hydration and after every client
+	// navigation so a token link updates the UI without a reload workaround.
+	if (browser) {
+		const updateToken = () => {
+			token = new URL(window.location.href).searchParams.get('token');
+		};
+		updateToken();
+		afterNavigate(updateToken);
+	}
 
 	$effect(() => {
 		const currentToken = token;

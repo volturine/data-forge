@@ -371,6 +371,7 @@
 			</div>
 
 			<main
+				data-app-route={currentPath}
 				class={css({
 					position: 'relative',
 					minHeight: '0',

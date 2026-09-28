@@ -422,7 +422,7 @@
 
 	async function toggleHidden() {
 		if (readOnly) return;
-		if (!outputDatasourceId || toggling) return;
+		if (!outputDatasourceId || !outputExists || toggling) return;
 		const currentHidden = hidden;
 		const nextHidden = !currentHidden;
 		hiddenOverride = nextHidden;
@@ -460,26 +460,30 @@
 	}
 
 	async function reconcileBuiltOutput(outputId: string, namespace: string): Promise<void> {
-		// The membership query may have started before the build published its
-		// datasource row. Cancel that older request before installing the fresh
-		// result, otherwise its late response can erase the newly visible output.
-		await queryClient.cancelQueries({
-			queryKey: ['datasources', namespace, true],
-			exact: true
-		});
-		const result = await listDatasources(true, { cache: 'no-store' });
+		// Build completion already identifies the exact output resource. Refresh
+		// that row directly instead of rescanning every datasource in the
+		// namespace; the membership cache is updated from the same response.
+		const result = await getDatasource(outputId);
 		if (result.isErr() || ns.value !== namespace) return;
 
-		const allDatasources = result.value;
-		const output = allDatasources.find((datasource) => datasource.id === outputId);
-		queryClient.setQueryData(['datasources', namespace, true], allDatasources);
-		queryClient.setQueryData(
-			['datasources', namespace, false],
-			allDatasources.filter((datasource) => !datasource.is_hidden)
-		);
-		if (output) {
-			queryClient.setQueryData(['datasource', namespace, outputId], output);
+		const output = result.value;
+		const hiddenDatasources = queryClient.getQueryData<DataSource[]>([
+			'datasources',
+			namespace,
+			true
+		]);
+		if (hiddenDatasources) {
+			const nextDatasources = [
+				...hiddenDatasources.filter((datasource) => datasource.id !== outputId),
+				output
+			];
+			queryClient.setQueryData(['datasources', namespace, true], nextDatasources);
+			queryClient.setQueryData(
+				['datasources', namespace, false],
+				nextDatasources.filter((datasource) => !datasource.is_hidden)
+			);
 		}
+		queryClient.setQueryData(['datasource', namespace, outputId], output);
 	}
 
 	async function handleManualBuild() {
@@ -880,7 +884,7 @@
 								_hover: { color: 'fg.primary' }
 							})}
 							onclick={toggleHidden}
-							disabled={readOnly || toggling || !outputDatasourceId}
+							disabled={readOnly || toggling || !outputDatasourceId || !outputExists}
 							data-testid="output-visibility-toggle"
 							data-output-datasource-id={outputDatasourceId}
 							title={hidden

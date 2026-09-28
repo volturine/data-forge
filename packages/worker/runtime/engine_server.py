@@ -12,46 +12,36 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import grpc
 import requests
 from google.protobuf.timestamp_pb2 import Timestamp
 
 from dataforge_protocol import engine_runtime_pb2, engine_runtime_pb2_grpc
-from runtime.compute_engine import PolarsComputeEngine
 from runtime.config import settings
-from runtime.domain.compute.base import EngineResult
-from runtime.export_formats import get_export_format
+from runtime.domain.compute.result import EngineResult
 from runtime.json_values import dict_to_struct, encode_json_bytes
 from runtime.object_store import reset_object_store_client
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from runtime.compute_engine import PolarsComputeEngine
 
 ENGINE_PROTOCOL_VERSION = 2
 _TOKEN_METADATA_KEY = "x-engine-token"
 _MAX_RETAINED_COMPLETED_JOBS = 8
 _MAX_TOTAL_JOBS = 100
 _MAX_PROGRESS_EVENTS = 256
-_MIN_ENGINE_RPC_WORKERS = 64
+_ENGINE_RPC_WORKERS = 2
 
 
-def _engine_rpc_worker_count(engine_job_concurrency: int) -> int:
-    """Keep control RPCs available while one client stream waits per job.
+def _load_compute_engine() -> type[PolarsComputeEngine]:
+    """Load Polars only when a cold worker receives its first compute job."""
+    from runtime.compute_engine import PolarsComputeEngine
 
-    ``WatchJob`` is a synchronous server-streaming RPC. Its handler occupies a
-    gRPC worker for the lifetime of the stream, including while it waits for a
-    Polars job to finish. A shared engine can therefore have more watch
-    streams than actively running Polars jobs. The old fixed pool of eight
-    workers let queued watches starve Health and GetJobResult, which made the
-    worker declare healthy engines dead under browser bursts.
-
-    The minimum is sized for the supported 50-browser concurrency probe. The
-    concurrency-based floor keeps the relationship safe if the per-engine job
-    setting is raised later.
-    """
-    if engine_job_concurrency < 1:
-        raise ValueError(f"engine_job_concurrency must be positive, got {engine_job_concurrency}")
-    return max(_MIN_ENGINE_RPC_WORKERS, engine_job_concurrency * 4 + 8)
+    return PolarsComputeEngine
 
 
 class _EngineJobCancelled(Exception):
@@ -90,12 +80,13 @@ class _JobState:
 
 
 class _EngineJobs:
-    def __init__(self, *, max_workers: int = 1) -> None:
-        if max_workers < 1:
-            raise ValueError(f"max_workers must be positive, got {max_workers}")
+    def __init__(self) -> None:
         self._jobs: OrderedDict[str, _JobState] = OrderedDict()
         self._lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="polars-engine-job")
+        # A physical engine belongs to one exact analysis/datasource RID.
+        # Multiple viewers share its result; distinct commands for that RID
+        # queue here instead of running competing transforms in parallel.
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polars-engine-job")
         self._accepting = True
 
     def submit(self, *, job_id: str, kind: str, payload: dict[str, object]) -> _JobState:
@@ -139,27 +130,37 @@ class _EngineJobs:
             state = self._jobs.get(job_id)
             if state is None or state.done:
                 return False
-            state.cancel_requested.set()
-            future = state.future
-            if future is not None and future.cancel():
-                state.complete(
-                    EngineResult(
-                        job_id=job_id,
-                        data=None,
-                        error=f"Engine job {job_id} was cancelled",
-                        error_kind="job_cancelled",
-                        error_details={},
-                    )
-                )
-            else:
-                with state.condition:
-                    state.condition.notify_all()
+            self._cancel_state_locked(state)
             return True
 
     def shutdown(self) -> None:
         with self._lock:
             self._accepting = False
-        self._executor.shutdown(wait=False, cancel_futures=False)
+            for state in self._jobs.values():
+                if not state.done:
+                    self._cancel_state_locked(state)
+        # Queued jobs have already been completed as cancelled above. This
+        # second guard also prevents a race with an executor submission that
+        # was already accepted when shutdown began.
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
+    @staticmethod
+    def _cancel_state_locked(state: _JobState) -> None:
+        state.cancel_requested.set()
+        future = state.future
+        if future is not None and future.cancel():
+            state.complete(
+                EngineResult(
+                    job_id=state.job_id,
+                    data=None,
+                    error=f"Engine job {state.job_id} was cancelled",
+                    error_kind="job_cancelled",
+                    error_details={},
+                )
+            )
+        else:
+            with state.condition:
+                state.condition.notify_all()
 
     def _run(self, state: _JobState, kind: str, payload: dict[str, object]) -> None:
         try:
@@ -180,7 +181,10 @@ class _EngineJobs:
                 error_details={},
             )
         except Exception as exc:
-            error_kind, error_details = PolarsComputeEngine._classify_engine_error(exc)
+            try:
+                error_kind, error_details = _load_compute_engine()._classify_engine_error(exc)
+            except Exception:
+                error_kind, error_details = "execution_error", {}
             logger.exception("Engine job %s failed", state.job_id)
             result = EngineResult(
                 job_id=state.job_id,
@@ -226,13 +230,14 @@ def _execute_job(
     steps = _required_steps(payload)
     additional_datasources = _optional_mapping(payload, "additional_datasources")
     result_data: dict[str, object]
+    compute_engine = _load_compute_engine()
 
     if kind == "preview":
         row_limit = payload.get("row_limit", 1000)
         offset = payload.get("offset", 0)
         if not isinstance(row_limit, int) or not isinstance(offset, int):
             raise ValueError("row_limit and offset must be integers")
-        result_data = PolarsComputeEngine.execute_preview(datasource_config, steps, row_limit, offset, job_id, additional_datasources, progress_callback)
+        result_data = compute_engine.execute_preview(datasource_config, steps, row_limit, offset, job_id, additional_datasources, progress_callback)
     elif kind == "export":
         artifact_url = payload.get("artifact_url")
         artifact_upload_url = payload.get("artifact_upload_url")
@@ -243,13 +248,13 @@ def _execute_job(
             raise ValueError("artifact_upload_url must be an HTTP(S) URL")
         if not isinstance(export_format, str) or not export_format:
             raise ValueError("export_format is required")
+        from runtime.export_formats import get_export_format
+
         export = get_export_format(export_format)
         descriptor, output_path = tempfile.mkstemp(suffix=export.extension)
         os.close(descriptor)
         try:
-            result_data = PolarsComputeEngine.execute_export(
-                datasource_config, steps, output_path, export_format, job_id, additional_datasources, progress_callback
-            )
+            result_data = compute_engine.execute_export(datasource_config, steps, output_path, export_format, job_id, additional_datasources, progress_callback)
             with Path(output_path).open("rb") as artifact:
                 response = requests.put(
                     artifact_upload_url,
@@ -262,9 +267,9 @@ def _execute_job(
         finally:
             Path(output_path).unlink(missing_ok=True)
     elif kind == "schema":
-        result_data = PolarsComputeEngine.execute_schema(datasource_config, steps, job_id, additional_datasources, progress_callback)
+        result_data = compute_engine.execute_schema(datasource_config, steps, job_id, additional_datasources, progress_callback)
     elif kind == "row_count":
-        result_data = PolarsComputeEngine.execute_row_count(datasource_config, steps, job_id, additional_datasources, progress_callback)
+        result_data = compute_engine.execute_row_count(datasource_config, steps, job_id, additional_datasources, progress_callback)
     else:
         raise ValueError(f"Unsupported engine job kind: {kind}")
 
@@ -322,22 +327,19 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
         on_shutdown: Callable[[], None],
         heartbeat_timeout_seconds: int = 15,
         init_timeout_seconds: int = 0,
-        engine_job_concurrency: int = 1,
     ) -> None:
         self._engine_identity = engine_identity
         self._application_version = application_version
         self._token = token
         self._on_shutdown = on_shutdown
-        self._jobs = _EngineJobs(max_workers=engine_job_concurrency)
+        self._jobs = _EngineJobs()
         self._shutdown = threading.Event()
         self._lock = threading.Lock()
         self._initialized = bool(token and engine_identity and engine_identity != "unknown")
         self._last_heartbeat = time.monotonic()
         self._heartbeat_timeout_seconds = heartbeat_timeout_seconds
-        # Deadline for the first Initialize: an engine whose worker died between
-        # container start and initialization would otherwise run forever. The
-        # spawner sets this for identity-scoped engines; warm pool engines are
-        # created uninitialized on purpose and pass 0 (no deadline).
+        # Deadline for the first Initialize prevents orphaned assigned workers.
+        # Warm workers have no identity yet, so they pass 0 and wait for assignment.
         self._created_at = time.monotonic()
         self._init_timeout_seconds = init_timeout_seconds
         threading.Thread(target=self._watch_heartbeat, name="engine-heartbeat-watchdog", daemon=True).start()
@@ -561,10 +563,12 @@ def run_engine_server(
     token: str = "",
     heartbeat_timeout_seconds: int = 15,
     init_timeout_seconds: int = 0,
-    engine_job_concurrency: int = 1,
 ) -> None:
     server = grpc.server(
-        ThreadPoolExecutor(max_workers=_engine_rpc_worker_count(engine_job_concurrency)),
+        # One active WatchJob stream per exact engine identity plus one control
+        # RPC (health/cancel/shutdown). This is per container, not multiplied
+        # by the application's global compute budget.
+        ThreadPoolExecutor(max_workers=_ENGINE_RPC_WORKERS),
         options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024)),
     )
 
@@ -579,7 +583,6 @@ def run_engine_server(
             on_shutdown=stop_server,
             heartbeat_timeout_seconds=heartbeat_timeout_seconds,
             init_timeout_seconds=init_timeout_seconds,
-            engine_job_concurrency=engine_job_concurrency,
         ),
         server,
     )
@@ -593,6 +596,10 @@ def run_engine_server(
 
 
 def main() -> None:
+    # Polars imports can hold the GIL while native modules initialize. Finish
+    # them before gRPC accepts health/control RPCs so a cold engine cannot be
+    # mistaken for a dead one while its first job imports the compute stack.
+    _load_compute_engine()
     run_engine_server(
         host=os.environ.get("ENGINE_RPC_HOST", "0.0.0.0"),
         port=int(os.environ.get("ENGINE_RPC_PORT", "50053")),
@@ -601,7 +608,6 @@ def main() -> None:
         token=os.environ.get("ENGINE_RPC_TOKEN", ""),
         heartbeat_timeout_seconds=int(os.environ.get("ENGINE_HEARTBEAT_TIMEOUT_SECONDS", "15")),
         init_timeout_seconds=int(os.environ.get("ENGINE_INIT_TIMEOUT_SECONDS", "0")),
-        engine_job_concurrency=int(os.environ.get("ENGINE_JOB_CONCURRENCY", "1")),
     )
 
 

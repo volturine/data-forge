@@ -151,14 +151,14 @@ class TestSettings:
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('DATABASE_URL', 'postgresql+psycopg://user:pass@host:5432/db')
         monkeypatch.setenv('DISTRIBUTED_RUNTIME_ENABLED', 'true')
-        monkeypatch.setenv('DATABASE_POOL_SIZE', '15')
+        monkeypatch.setenv('DATABASE_POOL_SIZE', '100')
         monkeypatch.setenv('DATABASE_MAX_OVERFLOW', '7')
         monkeypatch.setenv('DATABASE_POOL_TIMEOUT', '12')
 
         settings = Settings()
 
         assert settings.distributed_runtime_enabled is True
-        assert settings.database_pool_size == 15
+        assert settings.database_pool_size == 100
         assert settings.database_max_overflow == 7
         assert settings.database_pool_timeout == 12
 
@@ -167,22 +167,6 @@ class TestSettings:
         monkeypatch.setenv('DATABASE_URL', 'mysql://user:pass@host/db')
 
         with pytest.raises(ValidationError, match='DATABASE_URL must be a PostgreSQL connection string'):
-            Settings()
-
-    def test_build_worker_process_range_rejects_min_above_max(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('BUILD_WORKER_MIN_PROCESSES', '2')
-        monkeypatch.setenv('BUILD_WORKER_MAX_PROCESSES', '1')
-
-        with pytest.raises(ValidationError, match='BUILD_WORKER_MIN_PROCESSES must be <= BUILD_WORKER_MAX_PROCESSES'):
-            Settings()
-
-    def test_build_worker_process_range_rejects_max_above_engine_limit(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('MAX_CONCURRENT_ENGINES', '2')
-        monkeypatch.setenv('BUILD_WORKER_MAX_PROCESSES', '3')
-
-        with pytest.raises(ValidationError, match='BUILD_WORKER_MAX_PROCESSES must be <= MAX_CONCURRENT_ENGINES'):
             Settings()
 
     def test_negative_scheduler_interval_rejected(self, monkeypatch, tmp_path):

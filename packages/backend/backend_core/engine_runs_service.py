@@ -1,10 +1,11 @@
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Final
 
-from sqlalchemy import desc, or_, select
+from sqlalchemy import desc, or_, select, text
 from sqlmodel import Session
 
 from backend_core.domain.analysis.step_types import get_step_timing_key
@@ -58,6 +59,7 @@ class EngineRunPayload:
     triggered_by: str | None = None
     execution_entries: list[dict[str, Any]] = field(default_factory=list)
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    idempotency_key: str | None = None
 
 
 class _UnsetType:
@@ -242,6 +244,27 @@ def get_engine_run(session: Session, run_id: str) -> EngineRunResponseSchema | N
 
 
 def stage_create_engine_run(session: Session, payload: EngineRunPayload) -> EngineRunResponseSchema:
+    if payload.idempotency_key is not None and getattr(session.get_bind().dialect, 'name', None) == 'postgresql':
+        lock_key = int.from_bytes(
+            hashlib.sha256(f'dataforge:engine-run:{get_namespace()}:{payload.idempotency_key}'.encode()).digest()[:8],
+            byteorder='big',
+            signed=True,
+        )
+        session.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': lock_key})
+    if payload.idempotency_key is not None:
+        existing = session.get(EngineRun, payload.id)
+        if existing is not None:
+            same_request = (
+                existing.namespace == get_namespace()
+                and existing.analysis_id == payload.analysis_id
+                and existing.datasource_id == payload.datasource_id
+                and existing.kind == payload.kind.value
+                and existing.request_json == payload.request_json
+            )
+            if not same_request:
+                raise ValueError('Engine-run idempotency key was reused for a different request')
+            return _serialize_run(existing)
+
     result_json = payload.result_json.copy() if isinstance(payload.result_json, dict) else None
     if payload.execution_entries:
         result_json = result_json or {}
@@ -378,7 +401,10 @@ def create_engine_run_payload(
     progress: float = 0.0,
     current_step: str | None = None,
     triggered_by: str | None = None,
+    idempotency_key: str | None = None,
 ) -> EngineRunPayload:
+    if idempotency_key is not None and not idempotency_key:
+        raise ValueError('Engine-run idempotency key cannot be empty')
     return EngineRunPayload(
         analysis_id=analysis_id,
         datasource_id=datasource_id,
@@ -396,6 +422,8 @@ def create_engine_run_payload(
         progress=progress,
         current_step=current_step,
         triggered_by=triggered_by,
+        id=idempotency_key or str(uuid.uuid4()),
+        idempotency_key=idempotency_key,
     )
 
 

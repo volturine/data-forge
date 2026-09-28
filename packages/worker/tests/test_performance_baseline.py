@@ -83,7 +83,7 @@ def test_performance_baseline(sample_datasource):
 
     file_bytes, _name, _content_type = export_result
 
-    assert preview_result.total_rows == 5
+    assert preview_result.response.total_rows == 5
     assert schema_result.columns
     assert file_bytes is not None
 
@@ -93,7 +93,7 @@ def test_performance_baseline(sample_datasource):
                 "preview_duration_ms": preview_ms,
                 "schema_duration_ms": schema_ms,
                 "export_duration_ms": export_ms,
-                "preview_rows": preview_result.total_rows,
+                "preview_rows": preview_result.response.total_rows,
             },
         ),
     )

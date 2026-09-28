@@ -9,7 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session
 
 from backend_core import http as http_client, settings_store
-from backend_core.database import get_settings_db
+from backend_core.database import get_settings_db_async
 from backend_core.error_handlers import handle_errors
 from backend_core.settings_schemas import (
     DetectCustomBotRequest,
@@ -68,7 +68,7 @@ def _extract_telegram_chat(update: dict[str, object]) -> dict[str, object] | Non
 @router.get('', response_model=SettingsResponse, mcp=True)
 @handle_errors(operation='get settings')
 def read_settings(
-    session: Session = Depends(get_settings_db),
+    session: Session = Depends(get_settings_db_async),
     user: User = Depends(get_current_user),
 ) -> SettingsResponse:
     """Get application settings including SMTP config, Telegram token, OpenRouter API key, and feature flags."""
@@ -79,12 +79,12 @@ def read_settings(
 @handle_errors(operation='update settings')
 def write_settings(
     data: SettingsUpdate,
-    session: Session = Depends(get_settings_db),
+    session: Session = Depends(get_settings_db_async),
     user: User = Depends(get_current_user),
 ) -> SettingsResponse:
     """Update application settings. Only provided fields are changed; omitted fields keep current values."""
-    from modules.telegram.bot import telegram_bot
-
+    telegram_fields = {'telegram_bot_token', 'telegram_bot_enabled'}
+    update_telegram_runtime = bool(data.model_fields_set & telegram_fields)
     result = settings_store.update_settings(
         session,
         CoreSettingsUpdate.model_validate(data.model_dump(exclude_unset=True)),
@@ -92,13 +92,15 @@ def write_settings(
     typed_result = SettingsResponse.model_validate(result)
     invalidate_config_cache()
 
-    token = settings_store.get_resolved_telegram_settings().get('token', '')
+    if update_telegram_runtime:
+        from modules.telegram.bot import telegram_bot
 
-    try:
-        _apply_telegram_bot_runtime(typed_result.telegram_bot_enabled, str(token), telegram_bot)
-    except Exception as exc:
-        logger.error('Failed to apply Telegram bot runtime after settings save', exc_info=True)
-        raise HTTPException(status_code=502, detail=f'Telegram bot runtime update failed: {exc}') from exc
+        token = settings_store.get_resolved_telegram_settings().get('token', '')
+        try:
+            _apply_telegram_bot_runtime(typed_result.telegram_bot_enabled, str(token), telegram_bot)
+        except Exception as exc:
+            logger.error('Failed to apply Telegram bot runtime after settings save', exc_info=True)
+            raise HTTPException(status_code=502, detail=f'Telegram bot runtime update failed: {exc}') from exc
 
     return typed_result
 

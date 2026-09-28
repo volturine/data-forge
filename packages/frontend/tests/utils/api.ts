@@ -120,6 +120,10 @@ async function prepareHelperNamespace(page: Page, namespace?: string): Promise<v
 	await switchNamespace(page, target);
 }
 
+export async function ensureNamespace(request: E2ERequest, namespace: string): Promise<void> {
+	await withAuthedPage(request, (page) => prepareHelperNamespace(page, namespace));
+}
+
 function buildOutput(filename: string) {
 	return {
 		result_id: crypto.randomUUID(),

@@ -12,6 +12,7 @@ class RuntimePayloadKind(DomainEnumValue):
     JOB: ClassVar[Self]
     COMPUTE_REQUEST: ClassVar[Self]
     COMPUTE_RESPONSE: ClassVar[Self]
+    DATASOURCE_DELETE: ClassVar[Self]
 
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> RuntimePayloadKind | None:
@@ -32,4 +33,8 @@ RuntimePayloadKind.COMPUTE_REQUEST = RuntimePayloadKind(
 )
 RuntimePayloadKind.COMPUTE_RESPONSE = RuntimePayloadKind(
     enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_RESPONSE, domain_token("RuntimePayloadKind", enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_RESPONSE)
+)
+RuntimePayloadKind.DATASOURCE_DELETE = RuntimePayloadKind(
+    enums_pb2.RUNTIME_PAYLOAD_KIND_DATASOURCE_DELETE,
+    domain_token("RuntimePayloadKind", enums_pb2.RUNTIME_PAYLOAD_KIND_DATASOURCE_DELETE),
 )

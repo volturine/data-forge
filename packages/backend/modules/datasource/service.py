@@ -379,8 +379,17 @@ def create_placeholder_output_datasource(
         if config is not None:
             next_config = {**config, **next_config}
         next_config['analysis_tab_id'] = analysis_tab_id
+        next_source_type = DataSourceType.require(source_type).value
+        changed = (
+            next_config != existing.config
+            or existing.source_type != next_source_type
+            or existing.created_by_analysis_id != analysis_id
+            or existing.created_by != DataSourceCreatedBy.ANALYSIS.value
+        )
+        if changed:
+            existing.revision += 1
         existing.config = next_config
-        existing.source_type = DataSourceType.require(source_type).value
+        existing.source_type = next_source_type
         existing.created_by_analysis_id = analysis_id
         existing.created_by = DataSourceCreatedBy.ANALYSIS.value
         session.add(existing)
@@ -982,21 +991,28 @@ def update_datasource(
     update: DataSourceUpdate,
 ) -> DataSourceResponse:
     datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
+    changed = False
 
     # Update name if provided
-    if update.name is not None:
+    if update.name is not None and update.name != datasource.name:
         datasource.name = update.name
+        changed = True
 
     if 'description' in update.model_fields_set:
-        datasource.description = DataSourceDescriptionModel.normalize_description(update.description)
+        description = DataSourceDescriptionModel.normalize_description(update.description)
+        if description != datasource.description:
+            datasource.description = description
+            changed = True
 
     # Update is_hidden if provided
-    if update.is_hidden is not None:
+    if update.is_hidden is not None and update.is_hidden != datasource.is_hidden:
         datasource.is_hidden = update.is_hidden
+        changed = True
 
     # Update freshness threshold if provided
-    if 'freshness_threshold_minutes' in update.model_fields_set:
+    if 'freshness_threshold_minutes' in update.model_fields_set and update.freshness_threshold_minutes != datasource.freshness_threshold_minutes:
         datasource.freshness_threshold_minutes = update.freshness_threshold_minutes
+        changed = True
 
     # Update config if provided
     if update.config is not None:
@@ -1120,10 +1136,16 @@ def update_datasource(
             }
 
         # Merge new config with existing config
-        datasource.config = next_config
-        if parsing_changed:
+        config_changed = next_config != datasource.config
+        if config_changed:
+            datasource.config = next_config
+            changed = True
+        if parsing_changed and config_changed:
             datasource.schema_cache = None
 
+    if changed:
+        datasource.revision += 1
+        session.add(datasource)
     session.commit()
     session.refresh(datasource)
 

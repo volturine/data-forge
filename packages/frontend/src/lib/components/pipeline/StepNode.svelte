@@ -18,6 +18,7 @@
 	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from '@lucide/svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
 	import { getStepTypeConfig, isChartStep } from '$lib/components/pipeline/utils';
 	import {
 		buildAnalysisPipelinePayload,
@@ -53,6 +54,7 @@
 	}: Props = $props();
 
 	const isChart = $derived(isChartStep(step.type));
+	const namespace = $derived(isNamespaceReady() ? requireNamespace() : null);
 
 	const chartHeight = $derived(
 		isChart ? (step.config?.chart_height as string | undefined) : undefined
@@ -77,21 +79,6 @@
 	const isApplied = $derived(step.is_applied !== false);
 
 	// Chart preview query (only for chart/plot steps) — run after apply
-	const chartPipeline = $derived(applySteps(allSteps));
-	const chartPipelineKey = $derived(hashPipeline(chartPipeline));
-	const chartDatasourceConfig = $derived.by(() => {
-		if (!isChart) return {};
-		const config = buildDatasourceConfig({
-			analysisId: analysisId ?? null,
-			tab: analysisStore.activeTab ?? null,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
-		});
-		if (config) return config;
-		const active = analysisStore.activeTab;
-		if (!active) return {};
-		return active.datasource.config;
-	});
 	const analysisPipeline = $derived.by(() => {
 		if (!analysisId) return null;
 		return buildAnalysisPipelinePayload(
@@ -101,25 +88,25 @@
 		);
 	});
 	const chartConfigured = $derived(((step.config?.x_column as string | undefined) ?? '') !== '');
-
+	const chartPreviewRequest = $derived.by(() => {
+		if (!analysisPipeline || !analysisId) return null;
+		return {
+			analysis_id: analysisId,
+			analysis_pipeline: analysisPipeline,
+			tab_id: analysisStore.activeTab?.id ?? null,
+			target_step_id: step.id,
+			row_limit: 5000,
+			page: 1,
+			resource_config: analysisStore.resourceConfig
+		};
+	});
 	const chartQuery = createQuery(() => ({
-		queryKey: [
-			'chart-preview',
-			analysisId,
-			datasourceId,
-			step.id,
-			chartPipelineKey,
-			JSON.stringify(chartDatasourceConfig)
-		],
-		queryFn: async (): Promise<StepPreviewResponse> => {
-			const request = {
-				analysis_pipeline: analysisPipeline!,
-				tab_id: analysisStore.activeTab?.id ?? null,
-				target_step_id: step.id,
-				row_limit: 5000,
-				page: 1,
-				resource_config: analysisStore.resourceConfig
-			};
+		// The request captured in the cache key is also the request executed;
+		// a reactive component update cannot make an older query run a newer command.
+		queryKey: ['chart-preview', namespace, chartPreviewRequest] as const,
+		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
+			const request = queryKey[2];
+			if (!request) throw new Error('Chart preview command is not ready');
 			const signal = previewSignal(request);
 			const result = await previewStepData(request, { signal });
 			throwIfAborted(signal);
@@ -135,7 +122,8 @@
 			isApplied &&
 			!!datasourceId &&
 			!!analysisId &&
-			!!analysisPipeline &&
+			namespace !== null &&
+			!!chartPreviewRequest &&
 			!analysisStore.previews.paused &&
 			chartConfigured
 	}));
@@ -638,6 +626,9 @@
 				data-testid="chart-preview-container"
 				data-preview-ready={chartPreviewState === 'ready' ? 'true' : undefined}
 				data-preview-state={chartPreviewState}
+				data-preview-query-status={chartQuery.status}
+				data-preview-fetch-status={chartQuery.fetchStatus}
+				data-preview-has-data={chartQuery.data ? 'true' : 'false'}
 				data-preview-error={chartPreviewError || undefined}
 			>
 				{#if !isApplied}

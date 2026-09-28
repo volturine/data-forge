@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from concurrent.futures import Future
 from dataclasses import dataclass
 
 from dataforge_protocol import compute_pb2, enums_pb2
@@ -18,6 +19,7 @@ class ObjectStoreCredentials:
 # credential. The backend provisions each namespace role once and never
 # rewrites it, so the resolved identity is cached for the worker's lifetime.
 _cache: dict[tuple[str, str], ObjectStoreCredentials] = {}
+_inflight: dict[tuple[str, str], Future[ObjectStoreCredentials]] = {}
 _cache_lock = threading.Lock()
 
 
@@ -33,12 +35,33 @@ def resolve_engine_credentials(namespace: str, identity: compute_pb2.EngineIdent
     fails the launch; there is no broader-credential fallback.
     """
     role = _credential_role(identity)
+    key = (namespace, role)
     with _cache_lock:
-        cached = _cache.get((namespace, role))
-    if cached is not None:
-        return cached
-    response = client_from_env().engine_credentials(namespace=namespace, role=role)
-    credentials = ObjectStoreCredentials(access_key=response.access_key, secret_key=response.secret_key)
+        cached = _cache.get(key)
+        if cached is not None:
+            return cached
+        flight = _inflight.get(key)
+        if flight is None:
+            flight = Future()
+            _inflight[key] = flight
+            owns_flight = True
+        else:
+            owns_flight = False
+
+    if not owns_flight:
+        return flight.result()
+
+    try:
+        response = client_from_env().engine_credentials(namespace=namespace, role=role)
+        credentials = ObjectStoreCredentials(access_key=response.access_key, secret_key=response.secret_key)
+    except BaseException as exc:
+        with _cache_lock:
+            _inflight.pop(key, None)
+        flight.set_exception(exc)
+        raise
+
     with _cache_lock:
-        _cache[(namespace, role)] = credentials
+        _cache[key] = credentials
+        _inflight.pop(key, None)
+    flight.set_result(credentials)
     return credentials

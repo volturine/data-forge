@@ -9,6 +9,8 @@
 # Test artifacts (package-local)
 packages/*/tests/.artifacts/
 .artifacts/
+/.e2e-artifacts*/
+/.e2e-logs*/
 
 # Protocol code generated from packages/protocol.
 packages/backend/buf/

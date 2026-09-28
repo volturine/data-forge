@@ -3,7 +3,7 @@ import uuid
 from fastapi import Depends
 from sqlmodel import Session
 
-from backend_core.database import get_db
+from backend_core.database import get_db_async
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import InvalidIdError
 from backend_core.validation import (
@@ -25,7 +25,7 @@ def list_healthchecks(
     search: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """List healthchecks for a datasource. Supports text search and pagination."""
     return [
@@ -40,7 +40,7 @@ def list_all_healthchecks(
     search: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """List healthchecks across all datasources. Supports text search and pagination."""
     return [schemas.HealthCheckResponse.model_validate(item) for item in service.list_all_healthchecks(session, search=search, limit=limit, offset=offset)]
@@ -48,7 +48,7 @@ def list_all_healthchecks(
 
 @router.get('/results', response_model=list[schemas.HealthCheckResultResponse], mcp=True)
 @handle_errors(operation='list healthcheck results')
-def list_results(datasource_id: str, limit: int = 10, session: Session = Depends(get_db)):
+def list_results(datasource_id: str, limit: int = 10, session: Session = Depends(get_db_async)):
     """List recent healthcheck results for a datasource."""
     parsed_id = parse_datasource_id(datasource_id)
     try:
@@ -60,14 +60,14 @@ def list_results(datasource_id: str, limit: int = 10, session: Session = Depends
 
 @router.get('/results/all', response_model=list[schemas.HealthCheckResultResponse], mcp=True)
 @handle_errors(operation='list all healthcheck results')
-def list_all_results(limit: int = 10, session: Session = Depends(get_db)):
+def list_all_results(limit: int = 10, session: Session = Depends(get_db_async)):
     """List recent healthcheck results across all datasources."""
     return [schemas.HealthCheckResultResponse.model_validate(item) for item in service.list_all_results(session, limit)]
 
 
 @router.post('', response_model=schemas.HealthCheckResponse, mcp=True)
 @handle_errors(operation='create healthcheck')
-def create_healthcheck(payload: schemas.HealthCheckCreate, session: Session = Depends(get_db)):
+def create_healthcheck(payload: schemas.HealthCheckCreate, session: Session = Depends(get_db_async)):
     """Create a healthcheck for a datasource.
 
     Requires: datasource_id, name, check_type (one of: row_count, column_null, column_unique,
@@ -86,7 +86,7 @@ def create_healthcheck(payload: schemas.HealthCheckCreate, session: Session = De
 def update_healthcheck(
     healthcheck_id: HealthcheckId,
     payload: schemas.HealthCheckUpdate,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_db_async),
 ):
     """Update a healthcheck's name, config, enabled state, or critical flag. Use GET /healthchecks?datasource_id=... to find IDs."""
     updated = service.update_healthcheck(
@@ -99,6 +99,6 @@ def update_healthcheck(
 
 @router.delete('/{healthcheck_id}', status_code=204, mcp=True)
 @handle_errors(operation='delete healthcheck')
-def delete_healthcheck(healthcheck_id: HealthcheckId, session: Session = Depends(get_db)):
+def delete_healthcheck(healthcheck_id: HealthcheckId, session: Session = Depends(get_db_async)):
     """Delete a healthcheck by ID. Use GET /healthchecks?datasource_id=... to find healthcheck IDs."""
     service.delete_healthcheck(session, parse_healthcheck_id(healthcheck_id))

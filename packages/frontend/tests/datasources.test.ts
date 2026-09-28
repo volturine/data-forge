@@ -531,53 +531,82 @@ test.describe('Datasources – CSV config tab functional', () => {
 });
 
 test.describe('Datasources – schema refresh', () => {
+	async function holdSharedDatasourceIngest(
+		page: import('@playwright/test').Page,
+		datasourceId: string
+	) {
+		let release!: () => void;
+		const released = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const routePattern = `**/api/v1/datasource/${datasourceId}/ingest`;
+		await page.route(routePattern, async (route) => {
+			await released;
+			await route.fulfill({ status: 200, contentType: 'application/json', json: {} });
+		});
+		return { release, routePattern };
+	}
+
 	test('clicking refresh schema shows loading state', async ({ page, sharedDatasource }) => {
-		await gotoDatasourcesPage(page);
-		await page.locator(`[data-ds-row="${sharedDatasource.name}"]`).click();
+		const ingest = await holdSharedDatasourceIngest(page, sharedDatasource.id);
+		try {
+			await gotoDatasourcesPage(page);
+			await page.locator(`[data-ds-row="${sharedDatasource.name}"]`).click();
 
-		const config = page.locator('[data-ds-config]');
-		await expect(config).toBeVisible({ timeout: 5_000 });
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 5_000 });
 
-		// The refresh button is in the General tab
-		const refreshBtn = config.getByRole('button', {
-			name: /Refresh schema|Re-ingest from source/i
-		});
-		await expect(refreshBtn).toBeVisible({ timeout: 5_000 });
+			// The refresh button is in the General tab
+			const refreshBtn = config.getByRole('button', {
+				name: /Refresh schema|Re-ingest from source/i
+			});
+			await expect(refreshBtn).toBeVisible({ timeout: 5_000 });
 
-		await refreshBtn.click();
+			await refreshBtn.click();
 
-		// After clicking, button should show loading text
-		await expect(config.getByRole('button', { name: /Refreshing|Re-ingesting/i })).toBeVisible({
-			timeout: 3_000
-		});
+			// After clicking, button should show loading text
+			await expect(config.getByRole('button', { name: /Refreshing|Re-ingesting/i })).toBeVisible({
+				timeout: 3_000
+			});
 
-		// Do not leave an ingest running when this test's page is closed. The
-		// worker-scoped fixture is intentionally reused by the following tests,
-		// so completing the operation here is part of the test isolation boundary.
-		await expect(refreshBtn).toBeVisible({ timeout: readyTimeoutMs() });
+			// This is a UI loading-state test. Hold the mutating request so the
+			// immutable shared fixture is never re-ingested by an unrelated test.
+			ingest.release();
+			await expect(refreshBtn).toBeVisible({ timeout: readyTimeoutMs() });
+		} finally {
+			ingest.release();
+			await page.unroute(ingest.routePattern);
+		}
 	});
 
 	test('refresh schema button returns to idle after loading', async ({
 		page,
 		sharedDatasource
 	}) => {
-		await gotoDatasourcesPage(page);
-		await selectDatasourceAndWaitForConfig(page, sharedDatasource.name);
+		const ingest = await holdSharedDatasourceIngest(page, sharedDatasource.id);
+		try {
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, sharedDatasource.name);
 
-		const config = page.locator('[data-ds-config]');
-		const refreshBtn = config.getByRole('button', {
-			name: /Refresh schema|Re-ingest from source/i
-		});
-		await expect(refreshBtn).toBeVisible({ timeout: 5_000 });
-		await refreshBtn.click();
+			const config = page.locator('[data-ds-config]');
+			const refreshBtn = config.getByRole('button', {
+				name: /Refresh schema|Re-ingest from source/i
+			});
+			await expect(refreshBtn).toBeVisible({ timeout: 5_000 });
+			await refreshBtn.click();
 
-		// Loading state appears
-		await expect(config.getByRole('button', { name: /Refreshing|Re-ingesting/i })).toBeVisible({
-			timeout: 5_000
-		});
+			// Loading state appears
+			await expect(config.getByRole('button', { name: /Refreshing|Re-ingesting/i })).toBeVisible({
+				timeout: 5_000
+			});
 
-		// Button returns to idle after API completes
-		await expect(refreshBtn).toBeVisible({ timeout: readyTimeoutMs() });
+			// Complete the intercepted request only after the busy state was observed.
+			ingest.release();
+			await expect(refreshBtn).toBeVisible({ timeout: readyTimeoutMs() });
+		} finally {
+			ingest.release();
+			await page.unroute(ingest.routePattern);
+		}
 	});
 });
 

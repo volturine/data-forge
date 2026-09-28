@@ -160,6 +160,10 @@ class PipelineExecutionError(PipelineError):
         super().__init__(message=message, error_code='PIPELINE_EXECUTION_ERROR', details=details)
 
 
+class ClientDisconnectedError(Exception):
+    """The HTTP client left while a durable compute request was pending."""
+
+
 class PipelineExecutionCancelledError(PipelineExecutionError):
     """A compute request ended because its engine was intentionally stopped."""
 

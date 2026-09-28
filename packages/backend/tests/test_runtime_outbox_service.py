@@ -22,7 +22,7 @@ def test_dispatch_pending_events_marks_event_dispatched(test_db_session, monkeyp
     assert event.claim_token is None
     assert event.lease_expires_at is None
     assert event.lease_generation == 1
-    assert payloads == [{'kind': RuntimePayloadKind.JOB.value, 'event_id': event.id}]
+    assert payloads == [{'kind': RuntimePayloadKind.JOB.value, 'namespace': 'default', 'event_id': event.id}]
 
 
 def test_dispatch_pending_events_keeps_failed_event_retryable(test_db_session, monkeypatch) -> None:

@@ -1,7 +1,5 @@
 import asyncio
 import secrets
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -11,7 +9,7 @@ from sqlmodel import Session
 from backend_core import http as http_client
 from backend_core.auth_config import settings as auth_settings
 from backend_core.auth_exceptions import OAuthError
-from backend_core.database import get_settings_db, run_settings_db
+from backend_core.database import get_settings_db_async, run_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.proxy import client_ip, request_scheme
 from modules.auth import commands, service as auth_service
@@ -41,19 +39,9 @@ from modules.auth.service import (
 
 router = APIRouter(prefix='/auth', tags=['auth'])
 
-# Authentication is a control-plane dependency of every browser session. Run
-# its short settings-database operations on a dedicated executor so a burst of
-# tenant previews cannot leave login/session/verification requests waiting on
-# the default executor used by compute and object-store work.
-_AUTH_SETTINGS_EXECUTOR = ThreadPoolExecutor(max_workers=16, thread_name_prefix='auth-settings')
-
 
 async def _run_auth_db(function, *args, **kwargs):
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _AUTH_SETTINGS_EXECUTOR,
-        partial(run_settings_db, function, *args, **kwargs),
-    )
+    return await asyncio.to_thread(run_settings_db, function, *args, **kwargs)
 
 
 async def send_verification_email(user_email: str, token: str) -> bool:
@@ -209,7 +197,7 @@ def login(
     body: LoginRequest,
     request: Request,
     response: Response,
-    session: Session = Depends(get_settings_db),
+    session: Session = Depends(get_settings_db_async),
 ) -> UserPublic:
     result = commands.login_user(
         session,
@@ -224,7 +212,7 @@ def login(
 
 @router.post('/logout')
 @handle_errors(operation='logout')
-def logout(request: Request, response: Response, session: Session = Depends(get_settings_db)) -> dict[str, bool]:
+def logout(request: Request, response: Response, session: Session = Depends(get_settings_db_async)) -> dict[str, bool]:
     token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
     if token:
         commands.revoke_session(session, token)
@@ -237,7 +225,7 @@ def logout(request: Request, response: Response, session: Session = Depends(get_
 def delete_account_route(
     response: Response,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
+    session: Session = Depends(get_settings_db_async),
 ) -> dict[str, bool]:
     commands.delete_user_account(session, current_user.id)
     _clear_session_cookie(response)
@@ -291,20 +279,17 @@ def _resolve_me(session: Session, token: str | None) -> UserPublic:
     raise HTTPException(status_code=401, detail='Not authenticated')
 
 
-@router.get('/me', response_model=UserPublic)
-@handle_errors(operation='get current user')
-async def me(request: Request) -> UserPublic:
-    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
-    return await _run_auth_db(_resolve_me, token)
+def _update_profile(session: Session, token: str | None, body: UpdateProfileRequest) -> UserPublic:
+    """Authenticate and update the profile on the dedicated auth DB executor."""
+    if token:
+        current_user = validate_session(session, token)
+        if current_user is None:
+            raise HTTPException(status_code=401, detail='Not authenticated')
+    elif not auth_settings.auth_required:
+        current_user = ensure_default_user(session)
+    else:
+        raise HTTPException(status_code=401, detail='Not authenticated')
 
-
-@router.put('/profile', response_model=UserPublic)
-@handle_errors(operation='update profile')
-def update_profile_route(
-    body: UpdateProfileRequest,
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
-) -> UserPublic:
     updated = commands.update_profile(
         session,
         user_id=current_user.id,
@@ -315,12 +300,29 @@ def update_profile_route(
     return _build_user_public(session, updated)
 
 
+@router.get('/me', response_model=UserPublic)
+@handle_errors(operation='get current user')
+async def me(request: Request) -> UserPublic:
+    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    return await _run_auth_db(_resolve_me, token)
+
+
+@router.put('/profile', response_model=UserPublic)
+@handle_errors(operation='update profile')
+async def update_profile_route(
+    request: Request,
+    body: UpdateProfileRequest,
+) -> UserPublic:
+    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    return await _run_auth_db(_update_profile, token, body)
+
+
 @router.put('/password')
 @handle_errors(operation='change password')
 def change_password_route(
     body: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
+    session: Session = Depends(get_settings_db_async),
 ) -> dict[str, bool]:
     commands.change_password(session, current_user.id, body.current_password, body.new_password)
     return {'success': True}
@@ -332,7 +334,7 @@ def revoke_all_sessions_route(
     request: Request,
     response: Response,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
+    session: Session = Depends(get_settings_db_async),
 ) -> dict[str, bool]:
     current_token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
     commands.revoke_all_user_sessions(
@@ -511,7 +513,7 @@ async def github_oauth_callback(
 def unlink_provider_route(
     provider: str,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
+    session: Session = Depends(get_settings_db_async),
 ) -> dict[str, bool]:
     try:
         provider_name = AuthProviderName(provider)
