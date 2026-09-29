@@ -34,6 +34,7 @@ from runtime.worker_runtime import (
     build_worker_loop,
 )
 from runtime.worker_runtime_client import (
+    BackendWorkerRpcError,
     ClaimedBuildJob,
     WorkerRuntimeClient,
     client_from_env,
@@ -48,6 +49,7 @@ _MIN_RUNTIME_RECOVERY_SECONDS = 5.0
 # executor small for startup, shutdown, and occasional lifecycle glue.
 _DEFAULT_EXECUTOR_WORKERS = 4
 _SHUTDOWN_CONTROL_CONCURRENCY = 4
+_COORDINATOR_GENERATION_POLL_SECONDS = 5.0
 
 
 def worker_runtime_client() -> WorkerRuntimeClient:
@@ -364,10 +366,115 @@ def install_stop_handlers(stop_event: asyncio.Event) -> None:
             loop.add_signal_handler(sig, _stop)
 
 
+async def _wait_for_coordinator_generation(stop_event: asyncio.Event, client: WorkerRuntimeClient) -> int | None:
+    retry_seconds = 0.25
+    while not stop_event.is_set():
+        try:
+            return await run_control_in_thread(client.get_coordinator_generation)
+        except BackendWorkerRpcError as exc:
+            if exc.error_code not in {"UNAVAILABLE", "DEADLINE_EXCEEDED"}:
+                raise
+            logger.info("Runtime coordinator unavailable; worker manager waiting to connect: %s", exc.error)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=retry_seconds)
+        except TimeoutError:
+            retry_seconds = min(retry_seconds * 2, 2.0)
+    return None
+
+
+async def _watch_coordinator_generation(
+    process_stop_event: asyncio.Event,
+    generation_stop_event: asyncio.Event,
+    client: WorkerRuntimeClient,
+    generation: int,
+) -> None:
+    while not process_stop_event.is_set():
+        try:
+            active_generation = await run_control_in_thread(client.get_coordinator_generation)
+        except BackendWorkerRpcError as exc:
+            if exc.error_code not in {"UNAVAILABLE", "DEADLINE_EXCEEDED"}:
+                logger.warning("Worker coordinator generation check failed permanently: %s", exc.error)
+                generation_stop_event.set()
+                return
+            logger.info("Runtime coordinator temporarily unavailable; preserving worker state generation=%s", generation)
+        else:
+            if active_generation != generation:
+                logger.info("Runtime coordinator generation changed old=%s new=%s", generation, active_generation)
+                generation_stop_event.set()
+                return
+
+        try:
+            await asyncio.wait_for(process_stop_event.wait(), timeout=_COORDINATOR_GENERATION_POLL_SECONDS)
+        except TimeoutError:
+            continue
+
+
+async def _run_worker_generation(
+    process_stop_event: asyncio.Event,
+    client: WorkerRuntimeClient,
+    generation: int,
+) -> None:
+    generation_stop_event = asyncio.Event()
+    runtime_task = asyncio.create_task(
+        run_runtime_coordinator(
+            stop_event=generation_stop_event,
+            coordinator_generation=generation,
+            coordinator_guard=lambda: client.assert_coordinator_generation(generation),
+        ),
+        name=f"worker-runtime-generation-{generation}",
+    )
+    monitor_task = asyncio.create_task(
+        _watch_coordinator_generation(process_stop_event, generation_stop_event, client, generation),
+        name=f"worker-generation-monitor-{generation}",
+    )
+    process_stop_task = asyncio.create_task(process_stop_event.wait(), name="worker-process-stop")
+    primary_error: BaseException | None = None
+    try:
+        done, _pending = await asyncio.wait(
+            {runtime_task, monitor_task, process_stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if process_stop_task in done or monitor_task in done:
+            generation_stop_event.set()
+        if monitor_task in done:
+            await monitor_task
+        await runtime_task
+    except BaseException as exc:
+        primary_error = exc
+    finally:
+        generation_stop_event.set()
+        for task in (monitor_task, process_stop_task):
+            if not task.done():
+                task.cancel()
+        results = await asyncio.gather(runtime_task, monitor_task, process_stop_task, return_exceptions=True)
+
+    if primary_error is not None:
+        raise primary_error
+    runtime_result = results[0]
+    if isinstance(runtime_result, BaseException) and not isinstance(runtime_result, asyncio.CancelledError):
+        raise runtime_result
+
+
 async def main() -> None:
     stop_event = asyncio.Event()
     install_stop_handlers(stop_event)
-    await run_runtime_coordinator(stop_event=stop_event)
+    client = worker_runtime_client()
+    while not stop_event.is_set():
+        generation = await _wait_for_coordinator_generation(stop_event, client)
+        if generation is None:
+            return
+        os.environ["RUNTIME_COORDINATOR_GENERATION"] = str(generation)
+        try:
+            await _run_worker_generation(stop_event, client, generation)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Worker manager generation failed; waiting for coordinator recovery generation=%s", generation)
+        finally:
+            os.environ.pop("RUNTIME_COORDINATOR_GENERATION", None)
+        if not stop_event.is_set():
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop_event.wait(), timeout=1.0)
 
 
 if __name__ == "__main__":

@@ -123,7 +123,8 @@ The checked-in Docker topology still includes `postgres` because the supported D
 
 The checked-in Docker production env defaults to `DF_WORKERS=4`. API children are
 stateless HTTP frontends; the separate `runtime` service owns the internal gRPC
-control plane, durable dispatch, and Docker engine lifecycle. Its
+control plane and durable dispatch. The separate `worker` service owns Docker
+access and engine lifecycle. The worker service's
 `COMPUTE_WORKERS` is the single runtime capacity budget: it caps concurrent
 compute jobs and active engine identities. Work queues remain durable while
 waiting. `COMPUTE_WARM_WORKERS` is the additional count of identical ready
@@ -142,9 +143,10 @@ just prod
 ```
 
 `just prod` generates protocol bindings, builds the frontend, and runs the API,
-scheduler, and worker together. The checked-in `docker/env/prod.env` defaults to
-`WORKERS=4`. API workers are stateless HTTP processes; the separate runtime
-coordinator owns durable compute dispatch and engine lifecycle.
+runtime coordinator, scheduler, and worker as separate processes. The checked-in
+`docker/env/prod.env` defaults to `WORKERS=4`. API workers are stateless HTTP processes; the separate runtime
+coordinator owns durable compute dispatch, while the worker manager owns engine
+lifecycle.
 
 ### Local development
 
@@ -334,7 +336,7 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 
 | Variable         | Default | Notes                                |
 | ---------------- | ------- | ------------------------------------ |
-| `PW_E2E_WORKERS` | `4`     | Playwright workers per E2E shard. The checked-in E2E topology uses three shards (up to twelve browser workers) against four stateless API workers, one runtime coordinator, a 32-worker compute budget, and four prewarmed workers. |
+| `PW_E2E_WORKERS` | `4`     | Playwright workers per E2E shard. The checked-in E2E topology uses three shards against stateless API workers, one runtime coordinator, one worker manager, a 32-worker compute budget, and four prewarmed workers. |
 
 ## Recommended additions to consider later
 

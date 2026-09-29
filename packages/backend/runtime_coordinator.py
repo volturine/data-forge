@@ -7,7 +7,6 @@ import logging
 import os
 import signal
 import threading
-from collections.abc import Callable
 
 import psycopg
 
@@ -229,31 +228,6 @@ async def _wait_for_lease(stop_event: asyncio.Event, lease: RuntimeCoordinatorLe
     return False
 
 
-async def _run_worker_runtime(
-    stop_event: asyncio.Event,
-    *,
-    coordinator_generation: int,
-    coordinator_guard: Callable[[], None],
-) -> None:
-    """Run engine ownership in this process, beside the backend gRPC server."""
-    try:
-        from runtime.coordinator import run_runtime_coordinator  # type: ignore[import-untyped]  # Worker runtime is a separate package in this image.
-    except ModuleNotFoundError as exc:
-        raise RuntimeError('The runtime coordinator image must include the worker runtime package') from exc
-    previous_generation = os.environ.get('RUNTIME_COORDINATOR_GENERATION')
-    try:
-        await run_runtime_coordinator(
-            stop_event=stop_event,
-            coordinator_generation=coordinator_generation,
-            coordinator_guard=coordinator_guard,
-        )
-    finally:
-        if previous_generation is None:
-            os.environ.pop('RUNTIME_COORDINATOR_GENERATION', None)
-        else:
-            os.environ['RUNTIME_COORDINATOR_GENERATION'] = previous_generation
-
-
 async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoordinatorLease) -> None:
     owner_stop_event = asyncio.Event()
     process_stop_task = asyncio.create_task(process_stop_event.wait(), name='runtime-process-stop')
@@ -263,7 +237,6 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
     listener_task: asyncio.Task[None] | None = None
     dispatcher_task: asyncio.Task[None] | None = None
     lease_task: asyncio.Task[None] | None = None
-    engine_task: asyncio.Task[None] | None = None
     coordinator_generation: int | None = None
     try:
         if process_stop_event.is_set():
@@ -275,34 +248,24 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
         coordinator_generation = await asyncio.to_thread(lease.activate_generation)
         set_active_runtime_coordinator_generation(coordinator_generation)
         await asyncio.to_thread(ensure_backend_public_tables)
-        grpc_server = await start_runtime_grpc_server()
+        grpc_server = await start_runtime_grpc_server(coordinator_guard=lease.check)
         if process_stop_event.is_set() or owner_stop_event.is_set():
             raise RuntimeError('Runtime coordinator lease was lost during gRPC startup')
-        engine_task = asyncio.create_task(
-            _run_worker_runtime(
-                owner_stop_event,
-                coordinator_generation=coordinator_generation,
-                coordinator_guard=lease.check,
-            ),
-            name='runtime-engine-coordinator',
-        )
         listener = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.JOB)
         listener_task = asyncio.create_task(runtime_ipc.serve_api_notifications(listener, owner_stop_event, _handle_coordinator_notification))
         dispatcher_task = asyncio.create_task(RuntimeOutboxDispatcher().run(owner_stop_event))
         logger.info(
-            'Runtime coordinator started pid=%s grpc=%s:%s coordinator_generation=%s lease=postgres-advisory-lock engine-owner=coordinator',
+            'Runtime coordinator started pid=%s grpc=%s:%s coordinator_generation=%s lease=postgres-advisory-lock engine-owner=worker-service',
             os.getpid(),
             settings.internal_grpc_host,
             settings.internal_grpc_port,
             coordinator_generation,
         )
         done, _pending = await asyncio.wait(
-            {process_stop_task, owner_stop_task, engine_task},
+            {process_stop_task, owner_stop_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if engine_task in done:
-            await engine_task
-        elif process_stop_task in done:
+        if process_stop_task in done:
             owner_stop_event.set()
     finally:
         owner_stop_event.set()
@@ -317,7 +280,7 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
             await grpc_server.stop(grace=0.5)
             grpc_server = None
         await runtime_ipc.stop_api_server(listener, listener=RuntimeListenerKind.JOB)
-        tasks = [task for task in (listener_task, dispatcher_task, lease_task, engine_task) if task is not None]
+        tasks = [task for task in (listener_task, dispatcher_task, lease_task) if task is not None]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         set_active_runtime_coordinator_generation(None)

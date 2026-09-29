@@ -17,7 +17,17 @@ from typing import Any, TypeVar, cast
 
 import grpc
 
-from dataforge_protocol import analysis_pb2, common_pb2, compute_pb2, datasource_pb2, enums_pb2, worker_runtime_pb2, worker_runtime_pb2_grpc
+from dataforge_protocol import (
+    analysis_pb2,
+    common_pb2,
+    compute_pb2,
+    datasource_pb2,
+    enums_pb2,
+    runtime_coordinator_pb2,
+    runtime_coordinator_pb2_grpc,
+    worker_runtime_pb2,
+    worker_runtime_pb2_grpc,
+)
 from runtime.protocol_mapping import (
     datasource_record_payload as _datasource_record_payload,
     datetime_to_timestamp,
@@ -323,6 +333,34 @@ class WorkerRuntimeClient:
         self._registration_retry_seconds = registration_retry_seconds
         self._channel = _shared_channel(target)
         self._stub = worker_runtime_pb2_grpc.WorkerRuntimeServiceStub(self._channel)
+        self._coordinator_stub = runtime_coordinator_pb2_grpc.RuntimeCoordinatorServiceStub(self._channel)
+
+    def get_coordinator_generation(self) -> int:
+        request = common_pb2.EmptyRequest()
+        response = self._call(
+            lambda: self._coordinator_stub.GetCoordinatorGeneration(
+                request,
+                timeout=self._control_timeout(5.0),
+                metadata=self._token_metadata(),
+            )
+        )
+        return response.generation
+
+    def assert_coordinator_generation(self, generation: int) -> None:
+        request = runtime_coordinator_pb2.RuntimeCoordinatorGenerationRequest(generation=generation)
+        response = self._call(
+            lambda: self._coordinator_stub.AssertCoordinatorGeneration(
+                request,
+                timeout=self._control_timeout(5.0),
+                metadata=self._metadata_for_generation(generation),
+            )
+        )
+        if response.generation != generation:
+            raise BackendWorkerRpcError(
+                status_code=grpc.StatusCode.FAILED_PRECONDITION.value[0],
+                error=f"Runtime coordinator generation {generation} is fenced by {response.generation}",
+                error_code="FAILED_PRECONDITION",
+            )
 
     def register_worker(
         self,
@@ -1251,7 +1289,6 @@ class WorkerRuntimeClient:
         self.close()
 
     def _metadata(self) -> tuple[tuple[str, str], ...]:
-        metadata = [(_TOKEN_METADATA_KEY, self._token)]
         raw_generation = os.environ.get("RUNTIME_COORDINATOR_GENERATION", "").strip()
         try:
             generation = int(raw_generation)
@@ -1259,8 +1296,18 @@ class WorkerRuntimeClient:
             raise RuntimeError("Worker runtime RPCs require an active RUNTIME_COORDINATOR_GENERATION") from exc
         if generation < 1:
             raise RuntimeError("RUNTIME_COORDINATOR_GENERATION must be a positive integer")
-        metadata.append((_COORDINATOR_GENERATION_METADATA_KEY, str(generation)))
-        return tuple(metadata)
+        return self._metadata_for_generation(generation)
+
+    def _token_metadata(self) -> tuple[tuple[str, str], ...]:
+        return ((_TOKEN_METADATA_KEY, self._token),)
+
+    def _metadata_for_generation(self, generation: int) -> tuple[tuple[str, str], ...]:
+        if generation < 1:
+            raise ValueError("Runtime coordinator generation must be a positive integer")
+        return (
+            (_TOKEN_METADATA_KEY, self._token),
+            (_COORDINATOR_GENERATION_METADATA_KEY, str(generation)),
+        )
 
     def _control_timeout(self, timeout_seconds: float | None = None) -> float:
         requested = self._timeout_seconds if timeout_seconds is None else float(timeout_seconds)

@@ -40,6 +40,8 @@ services:
         condition: service_healthy
       runtime:
         condition: service_healthy
+      worker:
+        condition: service_healthy
     environment: &api-env
       ENV_FILE: ""
       PGAPPNAME: dataforge-api
@@ -54,7 +56,7 @@ services:
       INTERNAL_GRPC_HOST: 0.0.0.0
       INTERNAL_GRPC_PORT: ${INTERNAL_GRPC_PORT}
       RUNTIME_COORDINATOR_TARGET: ${RUNTIME_COORDINATOR_TARGET}
-      WORKER_DATA_PLANE_GRPC_TARGET: runtime:50052
+      WORKER_DATA_PLANE_GRPC_TARGET: worker:50052
       DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE}
       DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW}
       DATABASE_POOL_TIMEOUT: ${DATABASE_POOL_TIMEOUT}
@@ -106,26 +108,72 @@ services:
     environment:
       <<: *api-env
       PGAPPNAME: dataforge-runtime
-      INTERNAL_GRPC_TARGET: 127.0.0.1:50051
       DATABASE_POOL_SIZE: ${COMPUTE_WORKERS:-32}
       DATABASE_MAX_OVERFLOW: "13"
-      COMPUTE_WORKERS: ${COMPUTE_WORKERS}
       WORKERS: "1"
+      DATAFORGE_DEPLOYMENT_ID: ${E2E_DEPLOYMENT_ID}
+    command: ["python3", "runtime_coordinator.py"]
+    volumes:
+      - data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import grpc,os; from dataforge_protocol import common_pb2,runtime_coordinator_pb2_grpc; c=grpc.insecure_channel('127.0.0.1:50051'); r=runtime_coordinator_pb2_grpc.RuntimeCoordinatorServiceStub(c).GetCoordinatorGeneration(common_pb2.EmptyRequest(),timeout=3,metadata=(('x-internal-token',os.environ['INTERNAL_API_TOKEN']),)); c.close(); exit(0 if r.generation>0 else 1)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  worker:
+    image: data-forge-worker:e2e
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+      runtime:
+        condition: service_healthy
+    environment:
+      ENV_FILE: ""
+      PGAPPNAME: dataforge-worker
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+      DEBUG: ${DEBUG}
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: /app/data
+      DATABASE_URL: ${DATABASE_URL}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_TARGET: runtime:50051
       WORKER_DATA_PLANE_GRPC_HOST: 0.0.0.0
       WORKER_DATA_PLANE_GRPC_PORT: ${WORKER_DATA_PLANE_GRPC_PORT}
+      DEFAULT_NAMESPACE: ${DEFAULT_NAMESPACE}
+      OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+      POLARS_CORES_AVAILABLE: ${POLARS_CORES_AVAILABLE}
+      POLARS_MAX_MEMORY_MB: ${POLARS_MAX_MEMORY_MB}
+      POLARS_STREAMING_CHUNK_SIZE: ${POLARS_STREAMING_CHUNK_SIZE}
+      TIMEZONE: ${TIMEZONE}
+      NORMALIZE_TZ: ${NORMALIZE_TZ}
+      PERSIST_PREVIEW_RUNS: ${PERSIST_PREVIEW_RUNS}
+      COMPUTE_WORKERS: ${COMPUTE_WORKERS}
+      COMPUTE_WARM_WORKERS: ${COMPUTE_WARM_WORKERS}
+      RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS: ${RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS:-5}
       ENGINE_DOCKER_HOST: unix:///var/run/docker.sock
       ENGINE_DOCKER_NETWORK: ${E2E_DOCKER_NETWORK}
       ENGINE_IMAGE: data-forge-polars-engine:e2e
+      ENGINE_OBJECT_STORE_ENDPOINT: http://rustfs:9000
       ENGINE_RPC_PORT: "50053"
-      COMPUTE_WARM_WORKERS: ${COMPUTE_WARM_WORKERS}
       ENGINE_START_TIMEOUT_SECONDS: ${E2E_ENGINE_START_TIMEOUT_SECONDS}
       ENGINE_SHUTDOWN_GRACE_SECONDS: "10"
       ENGINE_HEARTBEAT_INTERVAL_SECONDS: "5"
-      ENGINE_OBJECT_STORE_ENDPOINT: http://rustfs:9000
       ENGINE_IDLE_TTL_SECONDS: ${E2E_ENGINE_IDLE_TTL_SECONDS}
       ENGINE_IDLE_REAP_INTERVAL_SECONDS: ${E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS}
       DATAFORGE_DEPLOYMENT_ID: ${E2E_DEPLOYMENT_ID}
-    command: ["python3", "runtime_coordinator.py"]
+      LOG_LEVEL: ${LOG_LEVEL}
     volumes:
       - data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
@@ -135,7 +183,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python3 -c \"import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\\\"select count(*) from public.runtime_workers where kind='coordinator' and stopped_at is null and last_heartbeat_at > now() - interval '20 seconds'\\\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)\"",
+          "python3 -c \"import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\\\"select count(*) from public.runtime_workers where kind='coordinator' and stopped_at is null and last_heartbeat_at > now() - interval '10 seconds'\\\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)\"",
         ]
       interval: 5s
       timeout: 5s

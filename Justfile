@@ -11,7 +11,6 @@ install:
     cd packages/backend && uv sync
     cd packages/scheduler && uv sync
     cd packages/worker && uv sync
-    uv pip install --python packages/backend/.venv/bin/python packages/worker
     cd packages/frontend && bun install
 
 # Update dependencies to the newest available releases.
@@ -26,7 +25,6 @@ update-deps:
     cd packages/scheduler && uv lock --upgrade --resolution highest && uv sync
     @echo "Updating worker dependencies to latest allowed releases..."
     cd packages/worker && uv lock --upgrade --resolution highest && uv sync
-    uv pip install --python packages/backend/.venv/bin/python packages/worker
 
 dev:
     #!/usr/bin/env bash
@@ -34,17 +32,22 @@ dev:
     just generate-protocol
     set -a; source docker/env/dev.env; set +a
     just engine-image "$DF_ENGINE_IMAGE"
-    # Worker runs on the host: engines are spawned in Docker on a dedicated
-    # network and reached via published host ports (same topology as e2e).
+    # The coordinator and worker run as separate package processes; only the
+    # worker owns Docker access and the engine lifecycle.
+    export ENGINE_DOCKER_HOST="$DF_ENGINE_DOCKER_HOST"
     export ENGINE_IMAGE="$DF_ENGINE_IMAGE"
     export ENGINE_DOCKER_NETWORK="$DF_ENGINE_DOCKER_NETWORK"
+    export ENGINE_RPC_PORT="$DF_ENGINE_RPC_PORT"
+    export ENGINE_START_TIMEOUT_SECONDS="$DF_ENGINE_START_TIMEOUT_SECONDS"
+    export ENGINE_SHUTDOWN_GRACE_SECONDS="$DF_ENGINE_SHUTDOWN_GRACE_SECONDS"
+    export ENGINE_HEARTBEAT_INTERVAL_SECONDS="$DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS"
     export ENGINE_CONNECT_HOST=127.0.0.1
-    export PYTHONPATH="$PWD/packages/backend:$PWD/packages/worker${PYTHONPATH:+:$PYTHONPATH}"
     docker network inspect "$ENGINE_DOCKER_NETWORK" >/dev/null 2>&1 || docker network create "$ENGINE_DOCKER_NETWORK" >/dev/null
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_postgres.py
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_rustfs.py
     (cd packages/backend && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
     (cd packages/backend && env -u VIRTUAL_ENV DATABASE_POOL_SIZE="$COMPUTE_WORKERS" DATABASE_MAX_OVERFLOW=13 uv run --env-file ../../docker/env/dev.env runtime_coordinator.py) & \
+    (cd packages/worker && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
     (cd packages/scheduler && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
     (cd packages/frontend && bun run dev) & wait
 
@@ -68,7 +71,14 @@ prod:
     set -a
     source docker/env/prod.env
     set +a
-    export PYTHONPATH="$PWD/packages/backend:$PWD/packages/worker${PYTHONPATH:+:$PYTHONPATH}"
+    export ENGINE_DOCKER_HOST="$DF_ENGINE_DOCKER_HOST"
+    export ENGINE_DOCKER_NETWORK="$DF_ENGINE_DOCKER_NETWORK"
+    export ENGINE_IMAGE="$DF_ENGINE_IMAGE"
+    export ENGINE_RPC_PORT="$DF_ENGINE_RPC_PORT"
+    export ENGINE_START_TIMEOUT_SECONDS="$DF_ENGINE_START_TIMEOUT_SECONDS"
+    export ENGINE_SHUTDOWN_GRACE_SECONDS="$DF_ENGINE_SHUTDOWN_GRACE_SECONDS"
+    export ENGINE_HEARTBEAT_INTERVAL_SECONDS="$DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS"
+    export ENGINE_CONNECT_HOST=127.0.0.1
     pids=()
     shutdown() {
         trap - EXIT INT TERM
@@ -87,6 +97,8 @@ prod:
     (cd packages/backend && env -u VIRTUAL_ENV uv run main.py) &
     pids+=("$!")
     (cd packages/backend && env -u VIRTUAL_ENV DATABASE_POOL_SIZE="$COMPUTE_WORKERS" DATABASE_MAX_OVERFLOW=13 uv run runtime_coordinator.py) &
+    pids+=("$!")
+    (cd packages/worker && env -u VIRTUAL_ENV uv run main.py) &
     pids+=("$!")
     (cd packages/scheduler && env -u VIRTUAL_ENV uv run main.py) &
     pids+=("$!")
@@ -353,10 +365,12 @@ docker-prod:
     docker build -f docker/Dockerfile --target api -t "data-forge-api:${TAG}" .
     docker build -f docker/Dockerfile --target scheduler -t "data-forge-scheduler:${TAG}" .
     docker build -f docker/Dockerfile --target runtime -t "data-forge-runtime:${TAG}" .
+    docker build -f docker/Dockerfile --target worker -t "data-forge-worker:${TAG}" .
     docker build -f docker/Dockerfile --target engine -t "data-forge-polars-engine:${TAG}" .
     DF_API_IMAGE="data-forge-api:${TAG}" \
     DF_SCHEDULER_IMAGE="data-forge-scheduler:${TAG}" \
     DF_RUNTIME_IMAGE="data-forge-runtime:${TAG}" \
+    DF_WORKER_IMAGE="data-forge-worker:${TAG}" \
     DF_ENGINE_IMAGE="data-forge-polars-engine:${TAG}" \
     DF_API_PORT="${DF_SMOKE_API_PORT:-8300}" \
       docker compose --env-file docker/env/prod.env \

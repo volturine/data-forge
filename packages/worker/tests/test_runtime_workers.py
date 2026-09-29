@@ -21,7 +21,7 @@ from runtime.domain.compute_requests.live import ComputeRequestWake, request_hub
 from runtime.live_hubs import VersionHub
 from runtime.protocol_mapping import datetime_to_timestamp
 from runtime.worker_runtime import NamespaceRecovery, RuntimeNamespaceDirectory, build_worker_loop
-from runtime.worker_runtime_client import ClaimedBuildJob, WorkerRuntimeClient, _claim_lease_timing, run_worker_heartbeat_loop
+from runtime.worker_runtime_client import BackendWorkerRpcError, ClaimedBuildJob, WorkerRuntimeClient, _claim_lease_timing, run_worker_heartbeat_loop
 
 
 @pytest.fixture(autouse=True)
@@ -525,6 +525,50 @@ def _load_runtime_process():
 
 
 runtime_process = _load_runtime_process()
+
+
+@pytest.mark.asyncio
+async def test_worker_runtime_stops_old_generation_when_coordinator_fences_it(monkeypatch) -> None:
+    class Client:
+        def get_coordinator_generation(self) -> int:
+            return 8
+
+    process_stop_event = asyncio.Event()
+    generation_stop_event = asyncio.Event()
+    monkeypatch.setattr(runtime_process, "_COORDINATOR_GENERATION_POLL_SECONDS", 0.001)
+
+    await asyncio.wait_for(
+        runtime_process._watch_coordinator_generation(
+            process_stop_event,
+            generation_stop_event,
+            cast(WorkerRuntimeClient, Client()),
+            generation=7,
+        ),
+        timeout=1.0,
+    )
+
+    assert generation_stop_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_worker_generation_waits_for_runtime_teardown_after_monitor_error(monkeypatch) -> None:
+    teardown_finished = asyncio.Event()
+
+    async def runtime(stop_event: asyncio.Event, **_kwargs) -> None:
+        await stop_event.wait()
+        await asyncio.sleep(0.01)
+        teardown_finished.set()
+
+    async def failing_monitor(*_args) -> None:
+        raise RuntimeError("generation monitor failed")
+
+    monkeypatch.setattr(runtime_process, "run_runtime_coordinator", runtime)
+    monkeypatch.setattr(runtime_process, "_watch_coordinator_generation", failing_monitor)
+
+    with pytest.raises(RuntimeError, match="generation monitor failed"):
+        await runtime_process._run_worker_generation(asyncio.Event(), cast(WorkerRuntimeClient, object()), 7)
+
+    assert teardown_finished.is_set()
 
 
 @pytest.mark.asyncio
@@ -1226,3 +1270,40 @@ def test_runtime_clients_share_one_channel_per_target(monkeypatch) -> None:
     # Releasing a client leaves the shared channel usable for the next hop.
     first.close()
     assert client_module.client_from_env()._channel is second._channel
+
+
+def test_coordinator_generation_rpc_bootstraps_and_validates_generation(monkeypatch) -> None:
+    class CoordinatorStub:
+        def __init__(self) -> None:
+            self.active_generation = 7
+            self.bootstrap_metadata = None
+            self.assertion: tuple[int, tuple[tuple[str, str], ...]] | None = None
+
+        def GetCoordinatorGeneration(self, _request, *, timeout: float, metadata):
+            self.bootstrap_metadata = metadata
+            return SimpleNamespace(generation=self.active_generation)
+
+        def AssertCoordinatorGeneration(self, request, *, timeout: float, metadata):
+            self.assertion = (request.generation, metadata)
+            return SimpleNamespace(generation=self.active_generation)
+
+    client = object.__new__(WorkerRuntimeClient)
+    client._target = "runtime:50051"
+    client._token = "internal-token"
+    client._timeout_seconds = 15.0
+    client._coordinator_stub = CoordinatorStub()
+    client._call = lambda operation: operation()
+    monkeypatch.delenv("RUNTIME_COORDINATOR_GENERATION", raising=False)
+
+    assert client.get_coordinator_generation() == 7
+    assert client._coordinator_stub.bootstrap_metadata == (("x-internal-token", "internal-token"),)
+
+    client.assert_coordinator_generation(7)
+    assert client._coordinator_stub.assertion == (
+        7,
+        (("x-internal-token", "internal-token"), ("x-runtime-coordinator-generation", "7")),
+    )
+
+    client._coordinator_stub.active_generation = 8
+    with pytest.raises(BackendWorkerRpcError, match="fenced by 8"):
+        client.assert_coordinator_generation(7)

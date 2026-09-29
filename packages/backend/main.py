@@ -898,7 +898,7 @@ def _run_api_server() -> None:
     # String form 'main:app' is required for --reload to work.
     uvicorn.run(
         'main:app',
-        host='0.0.0.0',
+        host=os.environ.get('HOST', '0.0.0.0'),
         port=settings.port,
         reload=settings.debug,
         workers=workers,

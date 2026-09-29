@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
+import grpc
 import pytest
 
 import runtime_coordinator
+from backend_grpc import server as grpc_server
+from dataforge_protocol import common_pb2, runtime_coordinator_pb2
 
 
 class _Result:
@@ -38,6 +41,23 @@ class _Connection:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _RpcAbort(Exception):
+    def __init__(self, status: grpc.StatusCode, details: str) -> None:
+        super().__init__(details)
+        self.status = status
+
+
+class _RpcContext:
+    def __init__(self, metadata: tuple[tuple[str, str], ...]) -> None:
+        self._metadata = metadata
+
+    def invocation_metadata(self) -> tuple[tuple[str, str], ...]:
+        return self._metadata
+
+    async def abort(self, status: grpc.StatusCode, details: str) -> None:
+        raise _RpcAbort(status, details)
 
 
 def test_runtime_coordinator_lease_holds_and_releases_session_lock(monkeypatch) -> None:
@@ -95,6 +115,36 @@ def test_runtime_coordinator_lease_reports_another_active_owner(monkeypatch) -> 
     lease.release()
 
     assert connection.closed
+
+
+@pytest.mark.asyncio
+async def test_generation_rpc_requires_the_live_postgres_owner(monkeypatch) -> None:
+    lease_checks: list[str] = []
+    monkeypatch.setattr(grpc_server.settings, 'internal_api_token', 'test-token')
+    monkeypatch.setattr(grpc_server, 'active_runtime_coordinator_generation', lambda: 7)
+    servicer = grpc_server.RuntimeCoordinatorServicer(lambda: lease_checks.append('checked'))
+
+    response = await servicer.GetCoordinatorGeneration(
+        common_pb2.EmptyRequest(),
+        _RpcContext((('x-internal-token', 'test-token'),)),
+    )
+    assert response.generation == 7
+    assert lease_checks == ['checked']
+
+    response = await servicer.AssertCoordinatorGeneration(
+        runtime_coordinator_pb2.RuntimeCoordinatorGenerationRequest(generation=7),
+        _RpcContext((('x-internal-token', 'test-token'), ('x-runtime-coordinator-generation', '7'))),
+    )
+    assert response.generation == 7
+    assert lease_checks == ['checked', 'checked']
+
+    with pytest.raises(_RpcAbort) as abort:
+        await servicer.AssertCoordinatorGeneration(
+            runtime_coordinator_pb2.RuntimeCoordinatorGenerationRequest(generation=6),
+            _RpcContext((('x-internal-token', 'test-token'), ('x-runtime-coordinator-generation', '6'))),
+        )
+    assert abort.value.status is grpc.StatusCode.FAILED_PRECONDITION
+    assert lease_checks == ['checked', 'checked']
 
 
 def test_runtime_coordinator_standby_reuses_its_database_session(monkeypatch) -> None:

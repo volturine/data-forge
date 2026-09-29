@@ -21,11 +21,16 @@ BACKEND_ROOT = REPO_ROOT / 'packages' / 'backend'
 CORE_ROOT = BACKEND_ROOT
 SCHEDULER_ROOT = REPO_ROOT / 'packages' / 'scheduler'
 WORKER_ROOT = REPO_ROOT / 'packages' / 'worker'
+LOCAL_SERVICE_HOST = '127.0.0.1' if os.environ.get('CI') else 'rolands-mac-mini.bee-justice.ts.net'
+
+
+def local_service_bind_address() -> str:
+    return '127.0.0.1' if os.environ.get('CI') else socket.gethostbyname(LOCAL_SERVICE_HOST)
 
 
 def docker_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     env = os.environ.copy()
-    env['PYTHONPATH'] = f'{BACKEND_ROOT}{os.pathsep}{SCHEDULER_ROOT}{os.pathsep}{WORKER_ROOT}{os.pathsep}{CORE_ROOT}'
+    env.pop('PYTHONPATH', None)
     if extra is not None:
         env.update(extra)
     return env
@@ -112,7 +117,7 @@ def run_command(
 
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(('127.0.0.1', 0))
+        sock.bind((local_service_bind_address(), 0))
         sock.listen()
         return int(sock.getsockname()[1])
 
@@ -233,7 +238,7 @@ class RustfsContainer:
     @property
     def endpoint(self) -> str:
         assert self.port is not None
-        return f'http://127.0.0.1:{self.port}'
+        return f'http://{LOCAL_SERVICE_HOST}:{self.port}'
 
     def start(self) -> None:
         try:
@@ -252,7 +257,7 @@ class RustfsContainer:
                     '-e',
                     f'RUSTFS_SECRET_KEY={self.secret_key}',
                     '-p',
-                    '127.0.0.1::9000',
+                    f'{local_service_bind_address()}::9000',
                     self.image,
                     '/data',
                 ],
@@ -328,7 +333,7 @@ class PostgresContainer:
     @property
     def url(self) -> str:
         assert self.port is not None
-        return f'postgresql+psycopg://{self.user}:{self.password}@127.0.0.1:{self.port}/{self.database}'
+        return f'postgresql+psycopg://{self.user}:{self.password}@{LOCAL_SERVICE_HOST}:{self.port}/{self.database}'
 
     def start(self) -> None:
         try:
@@ -356,7 +361,7 @@ class PostgresContainer:
                     '-e',
                     f'POSTGRES_PASSWORD={self.password}',
                     '-p',
-                    '127.0.0.1::5432',
+                    f'{local_service_bind_address()}::5432',
                     self.image,
                 ],
                 env=docker_env(),

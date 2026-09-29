@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E2E harness for the containerized application stack.
 #
-# Exactly one app stack (postgres, rustfs, api, runtime, scheduler) exists per
+# Exactly one app stack (postgres, rustfs, api, runtime, worker, scheduler) exists per
 # run. CI runs Playwright containers on the Compose network; local runs use the
 # host browser through its Tailscale address so Chromium does not compete with
 # the stack for Docker Desktop VM CPU. The 50-tab probe has its own runner and
@@ -66,6 +66,7 @@ export E2E_DOCKER_NETWORK E2E_DEPLOYMENT_ID
 COMPOSE=(docker compose -p "dataforge-e2e-${E2E_STACK_ID}" -f "${ROOT_DIR}/docker/compose.e2e.yaml")
 
 ENGINE_IMAGE="data-forge-polars-engine:e2e"
+WORKER_IMAGE="data-forge-worker:e2e"
 CONCURRENCY_TEST_TITLE_PATTERN='runs [0-9]+ parallel tabs across [0-9]+ accounts'
 
 NORMAL_TEST_FILES=()
@@ -133,7 +134,7 @@ run_playwright() {
 
 build_images() {
     echo "Building e2e images"
-    for target in api scheduler runtime; do
+    for target in api scheduler runtime worker; do
         # BuildKit layer cache keeps rebuilds cheap when a target is unchanged.
         DOCKER_BUILDKIT=1 docker build -q -f docker/Dockerfile --target "$target" -t "data-forge-${target}:e2e" . >/dev/null
     done
@@ -143,9 +144,9 @@ build_images() {
 resolve_docker_socket_gid() {
     # The gid the runtime coordinator needs is the one *containers* see: on Docker Desktop
     # the daemon runs in a VM where the socket is root-owned, which does not
-    # match the host inode. Ask a container instead of stat-ing the host.
+    # match the host inode. Ask the worker image instead of stat-ing the host.
     DOCKER_SOCKET_GID="$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-        --entrypoint stat "data-forge-runtime:e2e" -c %g /var/run/docker.sock)"
+        --entrypoint stat "${WORKER_IMAGE}" -c %g /var/run/docker.sock)"
     export DOCKER_SOCKET_GID
 }
 
@@ -156,7 +157,7 @@ stack_up() {
     stack_down
     build_images
     resolve_docker_socket_gid
-    echo "Starting e2e stack (postgres, rustfs, api, runtime, scheduler)"
+    echo "Starting e2e stack (postgres, rustfs, api, runtime, worker, scheduler)"
     if ! "${COMPOSE[@]}" up -d --wait; then
         echo "E2E stack failed readiness; capturing service logs" >&2
         dump_service_logs startup
@@ -213,7 +214,7 @@ dump_service_logs() {
     local phase_dir="${LOG_DIR}/${phase}"
     mkdir -p "$phase_dir"
     local service
-    for service in api runtime scheduler rustfs; do
+    for service in api runtime worker scheduler rustfs; do
         "${COMPOSE[@]}" logs --no-color "$service" >"$phase_dir/${service}.log" 2>&1 || true
     done
     # Engine container stderr/stdout: job tracebacks (datasource load errors,
@@ -224,7 +225,7 @@ dump_service_logs() {
         done
     if [ "$print_tails" -eq 1 ]; then
         echo "::group::service log tails"
-        for service in api runtime scheduler rustfs; do
+        for service in api runtime worker scheduler rustfs; do
             echo "--- ${service} ---"
             tail -n 100 "$phase_dir/${service}.log" || true
         done
@@ -584,12 +585,11 @@ case "$action" in
             if [ "$only_concurrency_probe" -ne 1 ]; then
                 wait_for_runtime_drain || failed=1
                 dump_slow_requests full-suite
-                # Keep the same API, database, and fixtures, but reset the
-                # coordinator-owned engine pool so shard workers cannot consume
-                # capacity intended for the isolated load probe.
-                echo "Restarting the E2E runtime coordinator for a clean load-probe worker pool"
-                if "${COMPOSE[@]}" stop --timeout 60 runtime; then
-                    "${COMPOSE[@]}" up -d --wait runtime || failed=1
+                # Stop the worker first so it drains under the active lease,
+                # then restart the coordinator and start a fresh worker manager.
+                echo "Restarting the E2E coordinator and worker for a clean load-probe pool"
+                if "${COMPOSE[@]}" stop --timeout 60 worker && "${COMPOSE[@]}" stop --timeout 60 runtime; then
+                    "${COMPOSE[@]}" up -d --wait runtime worker || failed=1
                 else
                     failed=1
                 fi

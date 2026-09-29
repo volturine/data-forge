@@ -71,6 +71,8 @@ from dataforge_protocol import (
     common_pb2,
     compute_pb2,
     enums_pb2,
+    runtime_coordinator_pb2,
+    runtime_coordinator_pb2_grpc,
     scheduler_runtime_pb2,
     scheduler_runtime_pb2_grpc,
     worker_runtime_pb2,
@@ -230,6 +232,8 @@ _LEASE_VALIDATION_METHODS = frozenset(
         'HeartbeatWorker',
         'RenewBuildJobLease',
         'RenewComputeRequestLeases',
+        'GetCoordinatorGeneration',
+        'AssertCoordinatorGeneration',
     }
 )
 
@@ -1869,6 +1873,48 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         )
 
 
+class RuntimeCoordinatorServicer(runtime_coordinator_pb2_grpc.RuntimeCoordinatorServiceServicer):
+    def __init__(self, coordinator_guard: Callable[[], None]) -> None:
+        self._coordinator_guard = coordinator_guard
+
+    @_run_critical_runtime_handler_in_thread
+    async def GetCoordinatorGeneration(
+        self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext
+    ) -> runtime_coordinator_pb2.RuntimeCoordinatorGenerationResponse:
+        del request
+        self._check_owner_lease()
+        generation = active_runtime_coordinator_generation()
+        if generation is None:
+            raise _ThreadedRpcAbort(grpc.StatusCode.UNAVAILABLE, 'Runtime coordinator generation is not active')
+        return runtime_coordinator_pb2.RuntimeCoordinatorGenerationResponse(generation=generation)
+
+    @_run_critical_runtime_handler_in_thread
+    async def AssertCoordinatorGeneration(
+        self, request: runtime_coordinator_pb2.RuntimeCoordinatorGenerationRequest, context: grpc.aio.ServicerContext
+    ) -> runtime_coordinator_pb2.RuntimeCoordinatorGenerationResponse:
+        generation = active_runtime_coordinator_generation()
+        rejection = _runtime_generation_rejection(
+            generation,
+            dict(cast(Any, context.invocation_metadata() or ())).get(_RUNTIME_GENERATION_METADATA_KEY),
+        )
+        if rejection is not None:
+            raise _ThreadedRpcAbort(*rejection)
+        if request.generation != generation:
+            raise _ThreadedRpcAbort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                f'Runtime coordinator generation {request.generation} is fenced by {generation}',
+            )
+        self._check_owner_lease()
+        assert generation is not None
+        return runtime_coordinator_pb2.RuntimeCoordinatorGenerationResponse(generation=generation)
+
+    def _check_owner_lease(self) -> None:
+        try:
+            self._coordinator_guard()
+        except Exception as exc:
+            raise _ThreadedRpcAbort(grpc.StatusCode.UNAVAILABLE, 'Runtime coordinator lease is not active') from exc
+
+
 class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServiceServicer):
     @_run_control_handler_in_thread
     async def RegisterScheduler(
@@ -2053,10 +2099,11 @@ async def _prewarm_internal_rpc_executors() -> None:
     await asyncio.gather(*(prewarm(executor, size) for executor, size in executors.items()))
 
 
-async def _start_runtime_grpc_server_on_loop() -> grpc.aio.Server:
+async def _start_runtime_grpc_server_on_loop(coordinator_guard: Callable[[], None]) -> grpc.aio.Server:
     await _prewarm_internal_rpc_executors()
     server = grpc.aio.server(interceptors=(_BackendRequestValidationInterceptor(),))
     worker_runtime_pb2_grpc.add_WorkerRuntimeServiceServicer_to_server(WorkerRuntimeServicer(), server)
+    runtime_coordinator_pb2_grpc.add_RuntimeCoordinatorServiceServicer_to_server(RuntimeCoordinatorServicer(coordinator_guard), server)
     scheduler_runtime_pb2_grpc.add_SchedulerRuntimeServiceServicer_to_server(SchedulerRuntimeServicer(), server)
     address = f'{settings.internal_grpc_host}:{settings.internal_grpc_port}'
     bound_port = server.add_insecure_port(address)
@@ -2092,7 +2139,7 @@ class ThreadedRuntimeGrpcServer:
         await asyncio.to_thread(self._thread.join)
 
 
-def start_runtime_grpc_server_in_thread() -> ThreadedRuntimeGrpcServer:
+def start_runtime_grpc_server_in_thread(*, coordinator_guard: Callable[[], None]) -> ThreadedRuntimeGrpcServer:
     ready: threading.Event = threading.Event()
     holder: dict[str, object] = {}
 
@@ -2100,7 +2147,7 @@ def start_runtime_grpc_server_in_thread() -> ThreadedRuntimeGrpcServer:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            server = loop.run_until_complete(_start_runtime_grpc_server_on_loop())
+            server = loop.run_until_complete(_start_runtime_grpc_server_on_loop(coordinator_guard))
         except Exception as exc:
             holder['error'] = exc
             ready.set()
@@ -2128,6 +2175,6 @@ def start_runtime_grpc_server_in_thread() -> ThreadedRuntimeGrpcServer:
     )
 
 
-async def start_runtime_grpc_server() -> ThreadedRuntimeGrpcServer:
+async def start_runtime_grpc_server(*, coordinator_guard: Callable[[], None]) -> ThreadedRuntimeGrpcServer:
     """Start runtime gRPC without sharing Uvicorn's event loop."""
-    return await asyncio.to_thread(start_runtime_grpc_server_in_thread)
+    return await asyncio.to_thread(start_runtime_grpc_server_in_thread, coordinator_guard=coordinator_guard)

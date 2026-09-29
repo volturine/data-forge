@@ -21,8 +21,8 @@ Production requires:
   encryption secrets;
 - a reverse proxy with TLS for any host exposed outside a trusted network.
 
-Keep the API, runtime coordinator, scheduler, and worker on the same release. They share database and
-gRPC contracts and must be upgraded together.
+Keep the API, runtime coordinator, scheduler, worker, and engine images on the
+same release. They share protocol contracts and must be upgraded together.
 
 ## Docker Compose (recommended)
 
@@ -55,7 +55,7 @@ CI publishes every role image to GHCR on three channels:
 | Release | tag `v*` | `<version>`, semver aliases, `latest` | `linux/amd64`, `linux/arm64` |
 
 Dev-channel images feed PR-preview deployments; release images are pinned in
-production. Keep all four `DF_*_IMAGE` values on the same channel and commit.
+production. Keep all five `DF_*_IMAGE` values on the same channel and commit.
 
 ### Naming, ports, and collision rules
 
@@ -80,7 +80,7 @@ compose files mirror this directory's topology and follow the same registry.
 ### Configure and start
 
 1. Review `docker/env/prod.env` and replace every `replace-with-...` value.
-2. Set the four image variables to tags published from the same release. `DF_ENGINE_IMAGE` must be available to the local Docker daemon before the worker starts. Pin it to a `repository@sha256:<digest>` reference when engines must stay byte-identical across launches; a tag is accepted (and logged as unpinned) so custom engine images with extra libraries can be used.
+2. Set the five image variables to tags published from the same release. `DF_ENGINE_IMAGE` must be available to the local Docker daemon before the worker starts. Pin it to a `repository@sha256:<digest>` reference when engines must stay byte-identical across launches; a tag is accepted (and logged as unpinned) so custom engine images with extra libraries can be used.
 3. Set `DF_AUTH_FRONTEND_URL`, OAuth callback URLs, and `DF_CORS_ORIGINS` to the
    public HTTPS origin.
 4. Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the deployment host. The worker is the only service with Docker access; this permission is equivalent to administrative host access.

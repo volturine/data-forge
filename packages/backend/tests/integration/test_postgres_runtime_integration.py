@@ -21,13 +21,16 @@ from dataforge_protocol import compute_pb2, enums_pb2
 from tests.harness.postgres_harness import (
     BACKEND_ROOT,
     CORE_ROOT,
+    LOCAL_SERVICE_HOST,
     SCHEDULER_ROOT,
+    WORKER_ROOT,
     ManagedProcess,
     PostgresContainer,
     RustfsContainer,
     cleanup_stale_test_engine_networks,
     docker_env,
     free_port,
+    local_service_bind_address,
     require_docker,
     run_command,
     wait_for_condition,
@@ -80,6 +83,14 @@ INTERNAL_API_TOKEN = 'dataforge-runtime-test-internal-token'
 ENGINE_TEST_IMAGE = 'data-forge-polars-engine:integration'
 
 
+def _http_base_url(port: int) -> str:
+    return f'http://{LOCAL_SERVICE_HOST}:{port}'
+
+
+def _websocket_url(port: int, path: str) -> str:
+    return f'ws://{LOCAL_SERVICE_HOST}:{port}{path}'
+
+
 def _make_csv(rows: int) -> str:
     header = 'id,name,age,city,score\n'
     body = ''.join(f'{index},name-{index},{20 + (index % 50)},city-{index % 100},{index % 1000}\n' for index in range(1, rows + 1))
@@ -105,6 +116,7 @@ def _runtime_env(
             'DEBUG': 'false',
             'PROD_MODE_ENABLED': 'false',
             'PORT': str(port),
+            'HOST': local_service_bind_address(),
             'DATA_DIR': str(data_dir),
             'DATABASE_URL': database_url,
             'DISTRIBUTED_RUNTIME_ENABLED': 'true',
@@ -114,20 +126,20 @@ def _runtime_env(
             'UVICORN_ACCESS_LOG': 'false',
             'WORKERS': '1',
             'WORKER_CONNECTIONS': '100',
-            'CORS_ORIGINS': f'http://127.0.0.1:{port}',
-            'AUTH_FRONTEND_URL': f'http://127.0.0.1:{port}',
+            'CORS_ORIGINS': _http_base_url(port),
+            'AUTH_FRONTEND_URL': _http_base_url(port),
             'OBJECT_STORE_ENDPOINT': rustfs.endpoint,
             'OBJECT_STORE_REGION': 'us-east-1',
             'OBJECT_STORE_ACCESS_KEY': rustfs.access_key,
             'OBJECT_STORE_SECRET_KEY': rustfs.secret_key,
             'INTERNAL_API_TOKEN': INTERNAL_API_TOKEN,
-            'INTERNAL_GRPC_HOST': '127.0.0.1',
+            'INTERNAL_GRPC_HOST': local_service_bind_address(),
             'INTERNAL_GRPC_PORT': str(grpc_port),
-            'INTERNAL_GRPC_TARGET': f'127.0.0.1:{target_port}',
-            'RUNTIME_COORDINATOR_TARGET': f'127.0.0.1:{target_port}',
-            'WORKER_DATA_PLANE_GRPC_HOST': '127.0.0.1',
+            'INTERNAL_GRPC_TARGET': f'{LOCAL_SERVICE_HOST}:{target_port}',
+            'RUNTIME_COORDINATOR_TARGET': f'{LOCAL_SERVICE_HOST}:{target_port}',
+            'WORKER_DATA_PLANE_GRPC_HOST': local_service_bind_address(),
             'WORKER_DATA_PLANE_GRPC_PORT': str(worker_data_plane_port),
-            'WORKER_DATA_PLANE_GRPC_TARGET': f'127.0.0.1:{worker_data_plane_port}',
+            'WORKER_DATA_PLANE_GRPC_TARGET': f'{LOCAL_SERVICE_HOST}:{worker_data_plane_port}',
         }
     )
 
@@ -164,7 +176,7 @@ def engine_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str,
             'ENGINE_DOCKER_HOST': docker_host,
             'ENGINE_DOCKER_NETWORK': network_name,
             'ENGINE_OBJECT_STORE_ENDPOINT': f'http://{rustfs_container.name}:9000',
-            'ENGINE_CONNECT_HOST': '127.0.0.1',
+            'ENGINE_CONNECT_HOST': LOCAL_SERVICE_HOST,
         }
     finally:
         run_command(['docker', 'network', 'disconnect', '--force', network_name, rustfs_container.name], env=docker_env(), check=False, timeout=120)
@@ -206,6 +218,18 @@ def _registered_worker_count(container: PostgresContainer, kind: str) -> int:
     return int(value) if value is not None else 0
 
 
+def _worker_registration_count(container: PostgresContainer, kind: str) -> int:
+    with container.connect() as connection:
+        value = _query_value(connection, 'SELECT count(*) FROM public.runtime_workers WHERE kind = %s', (kind,))
+    return int(value) if value is not None else 0
+
+
+def _coordinator_generation(container: PostgresContainer) -> int:
+    with container.connect() as connection:
+        value = _query_value(connection, 'SELECT generation FROM public.runtime_coordinator_state WHERE singleton_id = 1')
+    return int(value) if value is not None else 0
+
+
 def _runtime_coordinator(
     *,
     data_dir: Path,
@@ -229,6 +253,33 @@ def _runtime_coordinator(
         name='runtime-coordinator',
         command=['uv', 'run', '--no-env-file', str(BACKEND_ROOT / 'runtime_coordinator.py')],
         cwd=CORE_ROOT,
+        env=env,
+    )
+
+
+def _worker_manager(
+    *,
+    data_dir: Path,
+    database_url: str,
+    grpc_port: int,
+    data_plane_port: int,
+    rustfs: RustfsContainer,
+    extra_env: dict[str, str] | None = None,
+) -> ManagedProcess:
+    env = _runtime_env(
+        data_dir=data_dir,
+        database_url=database_url,
+        port=free_port(),
+        grpc_port=grpc_port,
+        rustfs=rustfs,
+        data_plane_port=data_plane_port,
+    )
+    if extra_env:
+        env.update(extra_env)
+    return ManagedProcess(
+        name='worker-manager',
+        command=['uv', 'run', '--no-env-file', str(WORKER_ROOT / 'main.py')],
+        cwd=WORKER_ROOT,
         env=env,
     )
 
@@ -1470,6 +1521,13 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
             grpc_port=grpc_port,
             data_plane_port=data_plane_port,
             rustfs=rustfs_container,
+        )
+        worker_manager = _worker_manager(
+            data_dir=data_dir,
+            database_url=container.url,
+            grpc_port=grpc_port,
+            data_plane_port=data_plane_port,
+            rustfs=rustfs_container,
             extra_env=engine_runtime_env,
         )
 
@@ -1487,8 +1545,9 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
         )
         try:
             api.start()
-            wait_for_http_ready(f'http://127.0.0.1:{api_port}/health/ready')
+            wait_for_http_ready(f'{_http_base_url(api_port)}/health/ready')
             coordinator.start()
+            worker_manager.start()
             wait_for_condition(
                 lambda: _registered_worker_count(container, 'coordinator') >= 1,
                 timeout=90,
@@ -1507,13 +1566,27 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
             )
 
             api.restart()
-            wait_for_http_ready(f'http://127.0.0.1:{api_port}/health/ready')
+            wait_for_http_ready(f'{_http_base_url(api_port)}/health/ready')
 
+            previous_generation = _coordinator_generation(container)
+            previous_worker_registrations = _worker_registration_count(container, 'coordinator')
             coordinator.restart()
             wait_for_condition(
-                lambda: _registered_worker_count(container, 'coordinator') >= 1,
+                lambda: _coordinator_generation(container) > previous_generation,
                 timeout=90,
-                description='replacement runtime coordinator registration',
+                description='replacement runtime coordinator generation',
+            )
+            wait_for_condition(
+                lambda: _worker_registration_count(container, 'coordinator') > previous_worker_registrations,
+                timeout=90,
+                description='worker manager resynchronization after coordinator restart',
+            )
+            previous_worker_registrations = _worker_registration_count(container, 'coordinator')
+            worker_manager.restart()
+            wait_for_condition(
+                lambda: _worker_registration_count(container, 'coordinator') > previous_worker_registrations,
+                timeout=90,
+                description='replacement worker manager registration',
             )
 
             scheduler.restart()
@@ -1523,9 +1596,13 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
                 description='replacement scheduler registration',
             )
         except AssertionError as exc:
-            raise AssertionError(f'{exc}\napi tail:\n{api.tail()}\ncoordinator tail:\n{coordinator.tail()}\nscheduler tail:\n{scheduler.tail()}') from exc
+            raise AssertionError(
+                f'{exc}\napi tail:\n{api.tail()}\ncoordinator tail:\n{coordinator.tail()}\n'
+                f'worker manager tail:\n{worker_manager.tail()}\nscheduler tail:\n{scheduler.tail()}'
+            ) from exc
         finally:
             scheduler.stop()
+            worker_manager.stop()
             coordinator.stop()
             api.stop()
 
@@ -1589,20 +1666,28 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
             grpc_port=coordinator_grpc_port,
             data_plane_port=data_plane_port,
             rustfs=rustfs_container,
+        )
+        worker_manager = _worker_manager(
+            data_dir=data_dir,
+            database_url=container.url,
+            grpc_port=coordinator_grpc_port,
+            data_plane_port=data_plane_port,
+            rustfs=rustfs_container,
             extra_env=engine_runtime_env,
         )
         try:
             api_one.start()
             api_two.start()
             coordinator.start()
+            worker_manager.start()
             wait_for_condition(
                 lambda: _registered_worker_count(container, 'coordinator') >= 1,
                 timeout=90,
                 description='runtime coordinator registration',
             )
             try:
-                wait_for_http_ready(f'http://127.0.0.1:{api_one_port}/health/ready')
-                wait_for_http_ready(f'http://127.0.0.1:{api_two_port}/health/ready')
+                wait_for_http_ready(f'{_http_base_url(api_one_port)}/health/ready')
+                wait_for_http_ready(f'{_http_base_url(api_two_port)}/health/ready')
             except AssertionError as exc:
                 raise AssertionError(
                     f'{exc}\napi-one tail:\n{api_one.tail()}\napi-two tail:\n{api_two.tail()}\ncoordinator tail:\n{coordinator.tail()}'
@@ -1616,7 +1701,7 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
 
             import httpx
 
-            with httpx.Client(base_url=f'http://127.0.0.1:{api_one_port}', timeout=30) as client_one:
+            with httpx.Client(base_url=_http_base_url(api_one_port), timeout=30) as client_one:
                 datasource_id = _upload_datasource(client_one, 'cross-api-runtime', content=_make_csv(200000))
                 analysis = _create_analysis(client_one, 'Cross API Runtime', datasource_id, steps=_slow_steps())
                 build_id = _start_build(client_one, analysis)
@@ -1649,7 +1734,7 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
                     import httpx
 
                     try:
-                        with httpx.Client(base_url=f'http://127.0.0.1:{api_one_port}', timeout=180) as preview_client:
+                        with httpx.Client(base_url=_http_base_url(api_one_port), timeout=180) as preview_client:
                             preview_result['response'] = preview_client.post(
                                 '/api/v1/compute/preview',
                                 json=preview_request,
@@ -1681,7 +1766,7 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
                 preview_thread.join(timeout=30)
                 assert not preview_thread.is_alive(), 'crashed API preview client did not observe process termination'
 
-            with httpx.Client(base_url=f'http://127.0.0.1:{api_two_port}', timeout=30) as client_two:
+            with httpx.Client(base_url=_http_base_url(api_two_port), timeout=30) as client_two:
                 preview_response = client_two.post(
                     '/api/v1/compute/preview',
                     json=preview_request,
@@ -1740,7 +1825,7 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
                 assert detail['build_id'] == build_id
                 assert detail['status'] == 'completed', json.dumps(detail, indent=2, sort_keys=True)
 
-            async with connect(f'ws://127.0.0.1:{api_two_port}/api/v1/compute/ws/builds/{build_id}?namespace=default') as websocket:
+            async with connect(_websocket_url(api_two_port, f'/api/v1/compute/ws/builds/{build_id}?namespace=default')) as websocket:
                 snapshot = json.loads(await websocket.recv())
 
             assert snapshot['type'] == 'snapshot'
@@ -1750,7 +1835,7 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
             assert snapshot['last_sequence'] >= 1
 
             if snapshot['last_sequence'] > 1:
-                async with connect(f'ws://127.0.0.1:{api_two_port}/api/v1/compute/ws/builds/{build_id}?namespace=default&last_sequence=1') as websocket:
+                async with connect(_websocket_url(api_two_port, f'/api/v1/compute/ws/builds/{build_id}?namespace=default&last_sequence=1')) as websocket:
                     replay = json.loads(await websocket.recv())
 
                 assert replay['context']['buildId'] == build_id
@@ -1758,6 +1843,7 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
                 event_cases = {'plan', 'stepStarted', 'stepCompleted', 'stepFailed', 'progress', 'resources', 'log', 'completed', 'failed', 'cancelled'}
                 assert len(event_cases & set(replay)) == 1
         finally:
+            worker_manager.stop()
             coordinator.stop()
             api_two.stop()
             api_one.stop()
@@ -1821,20 +1907,28 @@ def test_postgres_runtime_supports_cross_api_cancellation(
             grpc_port=coordinator_grpc_port,
             data_plane_port=data_plane_port,
             rustfs=rustfs_container,
+        )
+        worker_manager = _worker_manager(
+            data_dir=data_dir,
+            database_url=container.url,
+            grpc_port=coordinator_grpc_port,
+            data_plane_port=data_plane_port,
+            rustfs=rustfs_container,
             extra_env=engine_runtime_env,
         )
         try:
             api_one.start()
             api_two.start()
             coordinator.start()
+            worker_manager.start()
             wait_for_condition(
                 lambda: _registered_worker_count(container, 'coordinator') >= 1,
                 timeout=90,
                 description='runtime coordinator registration',
             )
             try:
-                wait_for_http_ready(f'http://127.0.0.1:{api_one_port}/health/ready')
-                wait_for_http_ready(f'http://127.0.0.1:{api_two_port}/health/ready')
+                wait_for_http_ready(f'{_http_base_url(api_one_port)}/health/ready')
+                wait_for_http_ready(f'{_http_base_url(api_two_port)}/health/ready')
             except AssertionError as exc:
                 raise AssertionError(
                     f'{exc}\napi-one tail:\n{api_one.tail()}\napi-two tail:\n{api_two.tail()}\ncoordinator tail:\n{coordinator.tail()}'
@@ -1850,13 +1944,13 @@ def test_postgres_runtime_supports_cross_api_cancellation(
 
             big_csv = _make_csv(200000)
 
-            with httpx.Client(base_url=f'http://127.0.0.1:{api_one_port}', timeout=30) as client_one:
+            with httpx.Client(base_url=_http_base_url(api_one_port), timeout=30) as client_one:
                 datasource_id = _upload_datasource(client_one, 'cross-api-cancel', content=big_csv)
                 analysis = _create_analysis(client_one, 'Cross API Cancel', datasource_id, steps=_slow_steps())
                 build_id = _start_build(client_one, analysis)
                 _wait_for_running_build(client_one, build_id, timeout=180)
 
-            with httpx.Client(base_url=f'http://127.0.0.1:{api_two_port}', timeout=30) as client_two:
+            with httpx.Client(base_url=_http_base_url(api_two_port), timeout=30) as client_two:
                 cancelled = client_two.post(f'/api/v1/compute/builds/{build_id}/cancel')
 
                 assert cancelled.status_code == 200, cancelled.text
@@ -1891,6 +1985,7 @@ def test_postgres_runtime_supports_cross_api_cancellation(
 
             assert build_status == 'cancelled'
         finally:
+            worker_manager.stop()
             coordinator.stop()
             api_two.stop()
             api_one.stop()

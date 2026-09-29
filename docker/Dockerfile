@@ -119,27 +119,25 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
     CMD python3 -c "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\"select count(*) from public.runtime_workers where kind='scheduler' and stopped_at is null\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)"
 CMD ["python3", "main.py"]
 
-FROM api-builder AS coordinator-builder
-COPY packages/worker/ /app/packages/worker/
-COPY --from=protocol-builder /app/packages/worker/buf /app/packages/worker/buf
-COPY --from=protocol-builder /app/packages/worker/dataforge_protocol /app/packages/worker/dataforge_protocol
-WORKDIR /app/packages/worker
-# The coordinator is the only image that combines the backend control plane
-# with engine ownership. Install the worker package into the backend virtualenv
-# so both sides share one process and one fenced runtime owner.
-RUN uv pip install --python /app/packages/backend/.venv/bin/python /app/packages/worker
-
 FROM app-runtime AS runtime
-COPY --from=coordinator-builder --chown=appuser:appgroup /app/packages/backend /app/packages/backend
-COPY --from=coordinator-builder --chown=appuser:appgroup /app/packages/worker /app/packages/worker
+COPY --from=api-builder --chown=appuser:appgroup /app/packages/backend /app/packages/backend
 RUN mkdir -p /app/data/default/uploads /app/data/default/clean /app/data/default/exports /app/packages/backend/database && \
     chmod -R 755 /app/data /app/packages/backend/database && \
     chown -R appuser:appgroup /app/data /app/packages/backend/database
 USER appuser
 WORKDIR /app/packages/backend
 ENV PATH="/app/packages/backend/.venv/bin:${PATH}"
-ENV PYTHONPATH="/app/packages/worker:/app/packages/backend"
+ENV PYTHONPATH="/app/packages/backend"
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
-    CMD python3 -c "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\"select count(*) from public.runtime_workers where kind='coordinator' and stopped_at is null and last_heartbeat_at > now() - interval '20 seconds'\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)"
-EXPOSE 50051 50052
+    CMD python3 -c "import grpc,os; from dataforge_protocol import common_pb2,runtime_coordinator_pb2_grpc; c=grpc.insecure_channel('127.0.0.1:50051'); r=runtime_coordinator_pb2_grpc.RuntimeCoordinatorServiceStub(c).GetCoordinatorGeneration(common_pb2.EmptyRequest(),timeout=3,metadata=(('x-internal-token',os.environ['INTERNAL_API_TOKEN']),)); c.close(); exit(0 if r.generation>0 else 1)"
+EXPOSE 50051
 CMD ["python3", "runtime_coordinator.py"]
+
+FROM app-runtime AS worker
+COPY --from=engine-builder --chown=appuser:appgroup /app/packages/worker /app/packages/worker
+USER appuser
+WORKDIR /app/packages/worker
+ENV PATH="/app/packages/worker/.venv/bin:${PATH}"
+ENV PYTHONPATH="/app/packages/worker"
+EXPOSE 50052
+CMD ["python3", "main.py"]
