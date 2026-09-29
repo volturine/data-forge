@@ -294,7 +294,7 @@ test-backend-unit-raw:
         just generate-protocol
     fi
     cd packages/backend
-    {{pytest}} -n 2 --dist=loadfile tests --ignore=tests/integration
+    {{pytest}} -n auto --maxprocesses=8 --dist=loadfile tests --ignore=tests/integration
 
 test-backend-integration:
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-backend-integration-raw
@@ -307,7 +307,7 @@ test-backend-integration-raw:
     fi
     docker build -f docker/Dockerfile --target engine -t data-forge-polars-engine:integration .
     cd packages/backend
-    {{pytest}} tests/integration
+    {{pytest}} -n auto --maxprocesses=4 --dist=loadfile tests/integration
 
 test-worker:
     cd packages/worker && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-worker-raw
@@ -319,7 +319,7 @@ test-worker-raw:
         just generate-protocol
     fi
     cd packages/worker
-    {{pytest}} tests --ignore=tests/integration
+    {{pytest}} -n auto --maxprocesses=4 --dist=loadfile tests --ignore=tests/integration
 
 test-scheduler:
     cd packages/scheduler && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-scheduler-raw

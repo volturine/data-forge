@@ -27,7 +27,6 @@ from tests.harness.postgres_harness import (
     ManagedProcess,
     PostgresContainer,
     RustfsContainer,
-    cleanup_stale_test_engine_networks,
     docker_env,
     free_port,
     local_service_bind_address,
@@ -161,8 +160,6 @@ def engine_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str,
     if not docker_host:
         raise RuntimeError('Docker context did not provide a daemon endpoint')
     network_label = 'data-forge.test-engine-network=1'
-    # Prior failed runs leave labeled networks that exhaust Docker's default IP pool.
-    cleanup_stale_test_engine_networks(label=network_label)
     network_name = f'dataforge-integration-engine-{uuid.uuid4().hex[:10]}'
     run_command(
         ['docker', 'network', 'create', '--label', network_label, network_name],
@@ -1767,11 +1764,20 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
                 assert not preview_thread.is_alive(), 'crashed API preview client did not observe process termination'
 
             with httpx.Client(base_url=_http_base_url(api_two_port), timeout=30) as client_two:
-                preview_response = client_two.post(
-                    '/api/v1/compute/preview',
-                    json=preview_request,
+                try:
+                    preview_response = client_two.post(
+                        '/api/v1/compute/preview',
+                        json=preview_request,
+                    )
+                except httpx.HTTPError as exc:
+                    raise AssertionError(
+                        f'preview request failed: {exc}\napi-two tail:\n{api_two.tail()}\n'
+                        f'coordinator tail:\n{coordinator.tail()}\nworker-manager tail:\n{worker_manager.tail()}'
+                    ) from exc
+                assert preview_response.status_code == 200, (
+                    f'{preview_response.text}\napi-two tail:\n{api_two.tail()}\n'
+                    f'coordinator tail:\n{coordinator.tail()}\nworker-manager tail:\n{worker_manager.tail()}'
                 )
-                assert preview_response.status_code == 200, preview_response.text
                 preview_payload = dict(preview_response.json())
                 assert preview_payload['data']
 
