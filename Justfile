@@ -294,7 +294,7 @@ test-backend-unit-raw:
         just generate-protocol
     fi
     cd packages/backend
-    {{pytest}} tests --ignore=tests/integration
+    {{pytest}} -n 2 --dist=loadfile tests --ignore=tests/integration
 
 test-backend-integration:
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-backend-integration-raw
