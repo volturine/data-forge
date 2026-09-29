@@ -160,14 +160,17 @@ docker compose --env-file docker/env/prod.env \
 
 The repository defaults are tuned for concurrent clients:
 
-- Docker production defaults to `4` stateless API workers in the `api` service;
-  the dedicated `runtime` service owns the runtime control plane
-- `COMPUTE_WORKERS` is one shared cap for previews, datasource jobs, and builds;
-  the same value bounds assigned workers, and queued work stays durable
+- Docker production defaults to `1` API process inside one `api` container;
+  one active `runtime` coordinator and one worker manager own runtime dispatch
+  and Docker engine lifecycle. This is not yet horizontally sharded capacity.
+- `COMPUTE_WORKERS` bounds previews, datasource jobs, builds, and assigned
+  workers in the current single-manager topology; queued work stays durable
 - `COMPUTE_WARM_WORKERS` keeps ready, unassigned workers in reserve. These are
   the same worker containers as assigned workers, just not yet bound to a
   resource identity; claiming one binds it to that exact identity and starts
   its replacement. This reserve is additional to active `COMPUTE_WORKERS`.
+- The capacity-first optimization plan and measured scale gates are in
+  [Capacity-First Runtime Optimization](docs/prd/active/elastic-runtime-scale-out.md).
 
 ### Development (local runtime)
 

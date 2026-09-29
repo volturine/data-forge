@@ -1,8 +1,8 @@
 # Deployment
 
-Data-Forge has one production architecture: PostgreSQL and S3-compatible object
- storage support four fixed application roles—API, runtime coordinator, scheduler,
- and worker. Docker
+The current production architecture uses PostgreSQL and S3-compatible object
+storage with four application roles—API, runtime coordinator, scheduler, and
+worker. Docker
 Compose is the recommended deployment method. Running the same roles from source
 is supported when the infrastructure is managed separately.
 
@@ -38,12 +38,21 @@ RustFS ─────┼── API (HTTP) ◄── Runtime coordinator (intern
 Browser ────┘
 ```
 
-The API workers serve the built frontend and HTTP API on port 8000. They do not
-own runtime gRPC, engine lifecycle, or durable outbox dispatch. The dedicated
-runtime coordinator is the singleton internal gRPC/control-plane owner; the
-worker manager owns Docker compute workers and maintains a reserve of ready,
-unassigned workers; a claimed worker is bound to one resource identity. The API
-reaches the worker data-plane gRPC for object-store operations such as file upload.
+The API processes serve the built frontend and HTTP API on port 8000. They do not
+own durable compute dispatch or engine lifecycle, but do hold disposable
+process-local request/websocket state and currently start the optional Telegram
+poller. The runtime coordinator is one active internal gRPC/control-plane owner
+with a fenced standby. One worker-manager process owns Docker compute workers
+and its local active/warm accounting; an assigned worker is bound to one exact
+resource identity. This topology is a reliable distributed-runtime baseline,
+not horizontally sharded control-plane or compute capacity. Increasing
+`WORKERS` scales API processes inside that container only. The Compose API
+service publishes one fixed host port, so adding API containers also requires
+an ingress/load-balancer topology. See [Capacity-First Runtime Optimization](prd/active/elastic-runtime-scale-out.md)
+for the 1×1 baseline and evidence-gated scale path.
+
+The API reaches the worker data-plane gRPC for object-store operations such as
+file upload.
 
 ### Image channels
 

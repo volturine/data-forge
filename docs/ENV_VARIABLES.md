@@ -81,7 +81,7 @@ If you only want the high-value knobs, start with these:
 - `CORS_ORIGINS` — allowed browser origins (only needed in dev or multi-origin setups)
 - `AUTH_REQUIRED` — turn login on/off
 - `SETTINGS_ENCRYPTION_KEY` — strongly recommended when auth is enabled
-- `COMPUTE_WORKERS` — the single runtime capacity budget for compute work and assigned workers
+- `COMPUTE_WORKERS` — the active compute capacity for the current single worker-manager topology
 - `COMPUTE_WARM_WORKERS` — additional ready workers reserved before assignment; they are the same worker type, not a second execution pool
 - `POLARS_CORES_AVAILABLE`, `POLARS_MAX_MEMORY_MB` — per-engine resource limits
 - **Dev-only:** `BACKEND_HOST`, `BACKEND_PORT`, `FRONTEND_PORT` — Vite proxy wiring (Bun/Vite only, not exposed to browser)
@@ -121,18 +121,19 @@ for production releases only.
 The compose topology uses separate `api`, `runtime`, `scheduler`, and `worker` containers from the same codebase release.
 The checked-in Docker topology still includes `postgres` because the supported Docker runtime path is Postgres-backed. `DF_DATABASE_URL` in the Docker env files points at that service.
 
-The checked-in Docker production env defaults to `DF_WORKERS=4`. API children are
-stateless HTTP frontends; the separate `runtime` service owns the internal gRPC
-control plane and durable dispatch. The separate `worker` service owns Docker
-access and engine lifecycle. The worker service's
-`COMPUTE_WORKERS` is the single runtime capacity budget: it caps concurrent
-compute jobs and active engine identities. Work queues remain durable while
-waiting. `COMPUTE_WARM_WORKERS` is the additional count of identical ready
-workers that do not yet have a resource identity. Claiming one binds it to an
-exact analysis/datasource identity and starts its replacement; the reserve
-does not consume active `COMPUTE_WORKERS` capacity. Active and warm worker
-starts are bounded by these configured budgets; there is no hidden CPU-derived
-startup limit.
+The checked-in Docker production env defaults to `DF_WORKERS=1`. API processes
+do not own durable compute dispatch or engine lifecycle, but they retain
+disposable request/websocket state and currently start the optional Telegram
+poller. The separate `runtime` service is one active fenced coordinator; the
+separate `worker` service is one Docker-owning manager. In this current topology,
+`COMPUTE_WORKERS` and `COMPUTE_WARM_WORKERS` bound that manager's assigned
+compute workers/jobs and ready-but-unassigned reserve. Work remains durable
+while waiting. These are not yet cluster-wide leases across multiple manager
+containers; horizontal worker-service scaling is unsupported until distributed
+identity ownership and capacity grants are implemented and load-tested in the
+[capacity-first runtime plan](prd/active/elastic-runtime-scale-out.md).
+Active and warm starts are bounded by their configured budgets; there is no
+host-CPU-derived startup cap.
 
 ### Production — bare-metal (`just prod`)
 
@@ -144,9 +145,10 @@ just prod
 
 `just prod` generates protocol bindings, builds the frontend, and runs the API,
 runtime coordinator, scheduler, and worker as separate processes. The checked-in
-`docker/env/prod.env` defaults to `WORKERS=4`. API workers are stateless HTTP processes; the separate runtime
-coordinator owns durable compute dispatch, while the worker manager owns engine
-lifecycle.
+`docker/env/prod.env` defaults to `WORKERS=1`. This controls API processes in
+the API container; it does not add runtime coordinator or worker-manager
+capacity. For the current supported topology and the future scale-out target,
+see [Deployment](DEPLOYMENT.md) and [Capacity-First Runtime Optimization](prd/active/elastic-runtime-scale-out.md).
 
 ### Local development
 
@@ -229,7 +231,7 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 | `INTERNAL_GRPC_HOST`   | `127.0.0.1`               | Host the dedicated runtime coordinator gRPC server binds to.                                            |
 | `INTERNAL_GRPC_PORT`   | `50051`                   | Port the dedicated runtime coordinator gRPC server listens on.                                         |
 | `INTERNAL_GRPC_TARGET` | `127.0.0.1:50051`         | Full `host:port` target string that scheduler and worker clients connect to.                          |
-| `RUNTIME_COORDINATOR_TARGET` | empty | Deployment contract for the dedicated coordinator; required when `WORKERS > 1` so API children never own runtime state. The API does not use this as a per-request RPC path; durable requests and outbox events flow through PostgreSQL. |
+| `RUNTIME_COORDINATOR_TARGET` | empty | Current deployment contract for the single dedicated coordinator; required when API `WORKERS > 1` so API children do not own runtime gRPC or engine lifecycle. API processes still have disposable local state and the optional Telegram poller; this does not enable multiple active coordinators. |
 | `WORKER_DATA_PLANE_GRPC_HOST` | `127.0.0.1`          | Host the worker data-plane gRPC server binds to.                                                      |
 | `WORKER_DATA_PLANE_GRPC_PORT` | `50052`              | Port the worker data-plane gRPC server listens on.                                                    |
 | `WORKER_DATA_PLANE_GRPC_TARGET` | `127.0.0.1:50052`  | Full `host:port` target string that the API uses to reach the worker data-plane.                      |
@@ -244,8 +246,8 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 | `POLARS_CORES_AVAILABLE`          | `0`     | Total cores for analysis engines; `0` = all host logical CPUs. Not Polars' native `POLARS_MAX_THREADS`. |
 | `POLARS_MAX_MEMORY_MB`            | `0`     | `0` means unlimited.                                            |
 | `POLARS_STREAMING_CHUNK_SIZE`     | `0`     | `0` means automatic chunk sizing.                               |
-| `COMPUTE_WORKERS`                  | `14`    | The one global runtime capacity budget (`1`–`100`): concurrent compute jobs and assigned workers. Builds, previews, and datasource operations share it; excess work remains durable and waits. Each assigned worker is bound to one exact analysis/datasource identity. |
-| `WORKERS`                         | `1`     | Valid range: `0` to `32`; `0` means auto in deployment scripts. Values above `1` require the dedicated runtime coordinator service. |
+| `COMPUTE_WORKERS`                  | `14`    | Current single-manager active capacity (`1`–`100` in this implementation): concurrent compute jobs and assigned workers. Builds, previews, and datasource operations share it; excess work remains durable and waits. Each assigned worker is bound to one exact analysis/datasource identity. Cluster-wide grants across multiple managers are not implemented. |
+| `WORKERS`                         | `1`     | Valid range: `0` to `32`; `0` means auto in deployment scripts. Values above `1` require the dedicated runtime coordinator service and scale API processes only, not compute capacity. |
 | `WORKER_CONNECTIONS`              | `1000`  | Maximum connections per worker.                                 |
 | `DATABASE_POOL_SIZE`              | `8`     | SQLAlchemy pool size per API process and per engine. The runtime coordinator derives its pool size from `COMPUTE_WORKERS`; its pool plus overflow must allow at least three connections for the dedicated lease lane, general RPC lane, and outbox recovery. |
 | `DATABASE_MAX_OVERFLOW`           | `4`     | Extra Postgres connections allowed above the API process pool size; the runtime coordinator derives a separate fixed overflow of `13` to preserve lease, general RPC, and outbox capacity. |
@@ -336,7 +338,7 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 
 | Variable         | Default | Notes                                |
 | ---------------- | ------- | ------------------------------------ |
-| `PW_E2E_WORKERS` | `4`     | Playwright workers per E2E shard. The checked-in E2E topology uses three shards against stateless API workers, one runtime coordinator, one worker manager, a 32-worker compute budget, and four prewarmed workers. |
+| `PW_E2E_WORKERS` | `5`     | Playwright workers per E2E shard (3×5 validated). The checked-in E2E topology uses four API processes, one active runtime coordinator, one worker manager, a 32-worker compute budget, and four prewarmed workers. |
 
 ## Recommended additions to consider later
 

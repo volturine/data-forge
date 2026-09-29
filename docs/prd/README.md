@@ -47,6 +47,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 
 ## Active
 
+- [Capacity-First Runtime Optimization](active/elastic-runtime-scale-out.md) — minimize orchestration overhead and prove the 2,000-session target before scaling the saturated layer
 - [Lineage Revamp](active/lineage-revamp.md)
 
 ## Backlog

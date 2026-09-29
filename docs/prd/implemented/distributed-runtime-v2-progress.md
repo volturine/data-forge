@@ -3,6 +3,8 @@
 > **Status (audited 2026-09-22): Implemented — archived runtime progress record.**
 > **Portfolio:** [PRD index](../README.md)
 
+> **Scope clarification (2026-09-29):** “Stateless multi-worker API” here means API children do not own durable compute/runtime lifecycle. The shipped topology still has one active coordinator and one Docker-owning worker manager; it is not elastic coordinator/manager scale-out. See [Capacity-First Runtime Optimization](../active/elastic-runtime-scale-out.md) for when additional processes are justified.
+
 ## Status Summary
 
 This tracker reflects the current repository state after the distributed runtime v2 implementation and the subsequent correctness remediation. The detailed invariant-level source of truth is [the completed remediation record](../implemented/runtime-correctness-and-architecture-remediation.md).
@@ -31,15 +33,16 @@ Current claim:
 
 - Postgres is the supported distributed runtime backend.
 - Local dev/test uses the same Postgres-backed runtime model.
-- API workers are stateless HTTP frontends. A dedicated runtime coordinator owns
-  runtime gRPC, the durable outbox dispatcher, and coordinator fencing; one
-  worker manager owns engine lifecycle, Docker reconciliation, and the ready
-  compute-worker reserve. Concurrent Docker startups are separately bounded
-  from host CPU availability, without another public capacity setting.
-  Build workers spawn dynamically from zero.
+- API children do not own durable compute dispatch, runtime gRPC, or engine
+  lifecycle. They still have disposable caches/websocket waiters and the
+  optional Telegram poller. One active fenced runtime coordinator owns runtime
+  gRPC/outbox dispatch; one worker manager owns Docker lifecycle and the warm
+  reserve. Build workers still spawn dynamically from zero. This is not
+  multi-active coordinator/manager scaling.
 - Durable build state, renewable fenced leasing, DB-backed websocket replay, and scheduler leasing are implemented.
-- `WORKERS > 1` is supported when distributed runtime is enabled on Postgres and
-  `RUNTIME_COORDINATOR_TARGET` points at the dedicated coordinator service.
+- `WORKERS > 1` supports multiple API child processes when distributed runtime
+  is enabled on Postgres and `RUNTIME_COORDINATOR_TARGET` points at the single
+  dedicated coordinator; it does not add coordinator or compute capacity.
 
 Residual audit note:
 
@@ -206,7 +209,7 @@ Notes:
 - production topology is now migration-first, Postgres-backed, Docker-native, and split into fixed runtime roles
 - examples target `postgres:18-alpine` per the PRD decision
 
-### Phase 8: Enable Stateless Multi-Worker API
+### Phase 8: Enable Multi-Process API with a Single Coordinator
 
 Status: complete
 
