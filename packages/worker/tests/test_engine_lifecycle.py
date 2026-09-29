@@ -1063,7 +1063,8 @@ async def test_cancelled_request_does_not_release_runner_owned_admission(monkeyp
 async def test_cold_engine_start_fanout_is_bounded_by_compute_workers(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 8)
     monkeypatch.setattr(settings, "compute_warm_workers", 0)
-    starts_entered = threading.Event()
+    loop = asyncio.get_running_loop()
+    starts_entered = asyncio.Event()
     release_starts = threading.Event()
     lock = threading.Lock()
     active_starts = 0
@@ -1079,7 +1080,7 @@ async def test_cold_engine_start_fanout_is_bounded_by_compute_workers(monkeypatc
                 start_count += 1
                 peak_starts = max(peak_starts, active_starts)
                 if active_starts == start_limit:
-                    starts_entered.set()
+                    loop.call_soon_threadsafe(starts_entered.set)
             assert release_starts.wait(timeout=2)
             try:
                 super().start()
@@ -1099,7 +1100,7 @@ async def test_cold_engine_start_fanout_is_bounded_by_compute_workers(monkeypatc
 
     tasks = [asyncio.create_task(spawn(identity)) for identity in identities]
     try:
-        assert await asyncio.wait_for(asyncio.to_thread(starts_entered.wait, 1), timeout=2)
+        await asyncio.wait_for(starts_entered.wait(), timeout=5)
         with manager._capacity_changed:
             assert manager._cold_starts == start_limit
             assert len(manager._engine_events) == start_limit
@@ -1130,7 +1131,8 @@ async def test_cold_engine_start_fanout_is_bounded_by_compute_workers(monkeypatc
 async def test_warm_and_assigned_starts_use_independent_budgets(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 8)
     monkeypatch.setattr(settings, "compute_warm_workers", 1)
-    starts_entered = threading.Event()
+    loop = asyncio.get_running_loop()
+    starts_entered = asyncio.Event()
     release_starts = threading.Event()
     lock = threading.Lock()
     active_starts = 0
@@ -1142,7 +1144,7 @@ async def test_warm_and_assigned_starts_use_independent_budgets(monkeypatch) -> 
             active_starts += 1
             peak_starts = max(peak_starts, active_starts)
             if active_starts == 4:
-                starts_entered.set()
+                loop.call_soon_threadsafe(starts_entered.set)
         try:
             assert release_starts.wait(timeout=2)
         finally:
@@ -1174,7 +1176,7 @@ async def test_warm_and_assigned_starts_use_independent_budgets(monkeypatch) -> 
 
     tasks = [asyncio.create_task(spawn(identity)) for identity in identities]
     try:
-        assert await asyncio.wait_for(asyncio.to_thread(starts_entered.wait, 1), timeout=2)
+        await asyncio.wait_for(starts_entered.wait(), timeout=5)
         with manager._capacity_changed:
             assert manager._cold_starts == 4
             assert manager._warm_worker_starts == 1
