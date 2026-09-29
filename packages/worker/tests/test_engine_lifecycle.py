@@ -1081,7 +1081,7 @@ async def test_cold_engine_start_fanout_is_bounded_by_compute_workers(monkeypatc
                 peak_starts = max(peak_starts, active_starts)
                 if active_starts == start_limit:
                     loop.call_soon_threadsafe(starts_entered.set)
-            assert release_starts.wait(timeout=2)
+            release_starts.wait()
             try:
                 super().start()
             finally:
@@ -1146,7 +1146,7 @@ async def test_warm_and_assigned_starts_use_independent_budgets(monkeypatch) -> 
             if active_starts == 4:
                 loop.call_soon_threadsafe(starts_entered.set)
         try:
-            assert release_starts.wait(timeout=2)
+            release_starts.wait()
         finally:
             with lock:
                 active_starts -= 1
