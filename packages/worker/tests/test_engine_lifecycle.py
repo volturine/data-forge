@@ -1183,9 +1183,11 @@ async def test_warm_and_assigned_starts_use_independent_budgets(monkeypatch) -> 
 
         release_starts.set()
         await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
+        assert await asyncio.to_thread(manager.wait_for_warm_workers_ready, timeout_seconds=2)
 
         assert peak_starts == 4
-        assert manager._cold_starts == 0
+        with manager._capacity_changed:
+            assert manager._cold_starts == 0
         assert all(manager.get_engine(identity) is not None for identity in identities)
     finally:
         release_starts.set()
