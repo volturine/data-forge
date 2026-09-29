@@ -277,10 +277,17 @@ verify:
 
 
 test:
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-backend-raw
+    just generate-protocol
+    DATAFORGE_SKIP_PROTOCOL_GENERATE=1 just test-backend-unit
+    DATAFORGE_SKIP_PROTOCOL_GENERATE=1 just test-backend-integration
+    DATAFORGE_SKIP_PROTOCOL_GENERATE=1 just test-worker
+    DATAFORGE_SKIP_PROTOCOL_GENERATE=1 just test-scheduler
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-frontend-raw
 
-test-backend-raw:
+test-backend-unit:
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-backend-unit-raw
+
+test-backend-unit-raw:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
@@ -288,13 +295,42 @@ test-backend-raw:
     fi
     cd packages/backend
     {{pytest}} tests --ignore=tests/integration
-    cd ../..
+
+test-backend-integration:
+    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-backend-integration-raw
+
+test-backend-integration-raw:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
+        just generate-protocol
+    fi
     docker build -f docker/Dockerfile --target engine -t data-forge-polars-engine:integration .
     cd packages/backend
     {{pytest}} tests/integration
-    cd ../worker
+
+test-worker:
+    cd packages/worker && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-worker-raw
+
+test-worker-raw:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
+        just generate-protocol
+    fi
+    cd packages/worker
     {{pytest}} tests --ignore=tests/integration
-    cd ../scheduler
+
+test-scheduler:
+    cd packages/scheduler && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-scheduler-raw
+
+test-scheduler-raw:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
+        just generate-protocol
+    fi
+    cd packages/scheduler
     {{pytest}} tests
 
 test-frontend-raw:

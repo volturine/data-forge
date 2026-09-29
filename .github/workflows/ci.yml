@@ -14,7 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
+  verify:
+    name: verification
     runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v7
@@ -39,9 +40,6 @@ jobs:
         with:
           tool: just@1.51.0
 
-      - name: Generate protocol code
-        run: just generate-protocol
-
       - name: Install backend dependencies
         working-directory: packages/backend
         run: uv sync
@@ -61,18 +59,84 @@ jobs:
       - name: Canonical verification
         run: just verify
 
-      - name: Canonical tests
+  python-tests:
+    name: ${{ matrix.suite }}
+    runs-on: [self-hosted, linux, x64]
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [backend-unit, backend-integration, worker, scheduler]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          version: "0.10.4"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.2"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.51.0
+
+      - name: Generate protocol code
+        run: just generate-protocol
+
+      - name: Install suite dependencies
+        env:
+          TEST_SUITE: ${{ matrix.suite }}
         run: |
-          # Self-hosted runners retain resources from prior jobs. The engine
-          # integration tests build an image, so reclaim all unused Docker
-          # state instead of retaining a day's build cache.
-          docker container prune --force
-          docker volume prune --force
-          docker builder prune --all --force
-          docker image prune --force
-          docker system df
-          df -h
-          just test
+          case "$TEST_SUITE" in
+            backend-unit)
+              (cd packages/backend && uv sync)
+              ;;
+            backend-integration)
+              (cd packages/backend && uv sync)
+              (cd packages/worker && uv sync)
+              (cd packages/scheduler && uv sync)
+              ;;
+            worker)
+              (cd packages/worker && uv sync)
+              ;;
+            scheduler)
+              (cd packages/scheduler && uv sync)
+              ;;
+            *)
+              echo "Unknown Python test suite: $TEST_SUITE" >&2
+              exit 2
+              ;;
+          esac
+
+      - name: Run suite
+        env:
+          DATAFORGE_SKIP_PROTOCOL_GENERATE: "1"
+        run: just test-${{ matrix.suite }}
+
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    needs: [verify, python-tests]
+    if: always()
+    steps:
+      - name: Require verification and every Python suite to pass
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          PYTHON_TESTS_RESULT: ${{ needs.python-tests.result }}
+        run: |
+          if [[ "$VERIFY_RESULT" != "success" || "$PYTHON_TESTS_RESULT" != "success" ]]; then
+            echo "Verification: $VERIFY_RESULT; Python test matrix: $PYTHON_TESTS_RESULT" >&2
+            exit 1
+          fi
 
   frontend:
     name: frontend
@@ -107,9 +171,9 @@ jobs:
         working-directory: packages/frontend
         run: bun install --frozen-lockfile
 
-      - name: Frontend static checks
+      - name: Generate frontend styles
         working-directory: packages/frontend
-        run: bun run panda:codegen && bun run check && bun run lint
+        run: bun run panda:codegen
 
       - name: Frontend unit tests
         working-directory: packages/frontend
@@ -161,17 +225,9 @@ jobs:
           PLAYWRIGHT_VERSION="$(node -p "require('./packages/frontend/node_modules/playwright/package.json').version")"
           docker pull "mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
 
-      - name: Reclaim unused Docker state
-        run: |
-          # Free stopped containers/volumes without wiping the engine image
-          # build cache. A cold 2.5GB engine rebuild dominates e2e wall time.
-          docker container prune --force
-          docker volume prune --force
-          docker image prune --force
-          docker system df
-          df -h
-
       - name: Run e2e tests
+        env:
+          E2E_STACK_ID: ci-${{ github.run_id }}
         run: |
           set -o pipefail
           mkdir -p .artifacts/ci/e2e
