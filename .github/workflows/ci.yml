@@ -181,9 +181,8 @@ jobs:
 
   e2e:
     name: e2e
-    needs: [backend, frontend]
     runs-on: [self-hosted, linux, x64]
-    if: github.event_name == 'pull_request' && github.base_ref == 'master'
+    if: ${{ always() && github.event_name == 'pull_request' && github.base_ref == 'master' }}
     timeout-minutes: 35
     permissions:
       contents: read
