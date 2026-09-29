@@ -18,6 +18,17 @@ jobs:
     name: verification
     runs-on: [self-hosted, linux, x64]
     steps:
+      - name: Remove stale container-owned test artifacts
+        run: |
+          if ! rm -rf -- \
+            "$GITHUB_WORKSPACE/.e2e-artifacts" \
+            "$GITHUB_WORKSPACE/.e2e-logs" \
+            "$GITHUB_WORKSPACE/.artifacts/ci/e2e" \
+            "$GITHUB_WORKSPACE/packages/frontend/tests/.artifacts" 2>/dev/null; then
+            docker run --rm --network none -v "$GITHUB_WORKSPACE:/workspace" busybox:1.36 \
+              sh -c 'rm -rf /workspace/.e2e-artifacts /workspace/.e2e-logs /workspace/.artifacts/ci/e2e /workspace/packages/frontend/tests/.artifacts'
+          fi
+
       - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v10.0.1
@@ -67,6 +78,17 @@ jobs:
       matrix:
         suite: [backend-unit, backend-integration, worker, scheduler]
     steps:
+      - name: Remove stale container-owned test artifacts
+        run: |
+          if ! rm -rf -- \
+            "$GITHUB_WORKSPACE/.e2e-artifacts" \
+            "$GITHUB_WORKSPACE/.e2e-logs" \
+            "$GITHUB_WORKSPACE/.artifacts/ci/e2e" \
+            "$GITHUB_WORKSPACE/packages/frontend/tests/.artifacts" 2>/dev/null; then
+            docker run --rm --network none -v "$GITHUB_WORKSPACE:/workspace" busybox:1.36 \
+              sh -c 'rm -rf /workspace/.e2e-artifacts /workspace/.e2e-logs /workspace/.artifacts/ci/e2e /workspace/packages/frontend/tests/.artifacts'
+          fi
+
       - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v10.1.0
@@ -142,6 +164,17 @@ jobs:
     name: frontend
     runs-on: [self-hosted, linux, x64]
     steps:
+      - name: Remove stale container-owned test artifacts
+        run: |
+          if ! rm -rf -- \
+            "$GITHUB_WORKSPACE/.e2e-artifacts" \
+            "$GITHUB_WORKSPACE/.e2e-logs" \
+            "$GITHUB_WORKSPACE/.artifacts/ci/e2e" \
+            "$GITHUB_WORKSPACE/packages/frontend/tests/.artifacts" 2>/dev/null; then
+            docker run --rm --network none -v "$GITHUB_WORKSPACE:/workspace" busybox:1.36 \
+              sh -c 'rm -rf /workspace/.e2e-artifacts /workspace/.e2e-logs /workspace/.artifacts/ci/e2e /workspace/packages/frontend/tests/.artifacts'
+          fi
+
       - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v10.0.1
@@ -190,6 +223,17 @@ jobs:
     # E2E runtime defaults are centralized in docker/env/e2e.env so local and
     # CI runs exercise the same concurrency, memory, and timeout settings.
     steps:
+      - name: Remove stale container-owned test artifacts
+        run: |
+          if ! rm -rf -- \
+            "$GITHUB_WORKSPACE/.e2e-artifacts" \
+            "$GITHUB_WORKSPACE/.e2e-logs" \
+            "$GITHUB_WORKSPACE/.artifacts/ci/e2e" \
+            "$GITHUB_WORKSPACE/packages/frontend/tests/.artifacts" 2>/dev/null; then
+            docker run --rm --network none -v "$GITHUB_WORKSPACE:/workspace" busybox:1.36 \
+              sh -c 'rm -rf /workspace/.e2e-artifacts /workspace/.e2e-logs /workspace/.artifacts/ci/e2e /workspace/packages/frontend/tests/.artifacts'
+          fi
+
       - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v10.0.1

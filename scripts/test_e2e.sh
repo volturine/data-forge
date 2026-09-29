@@ -205,6 +205,21 @@ stack_down() {
     docker network rm "${E2E_DOCKER_NETWORK}" >/dev/null 2>&1 || true
 }
 
+normalize_e2e_artifact_ownership() {
+    if [ -z "${CI:-}" ] || [ ! -d "${E2E_ARTIFACTS_DIR}" ]; then
+        return
+    fi
+
+    docker run --rm --network none \
+        -v "${ROOT_DIR}:/work" \
+        -e "ARTIFACT_UID=$(id -u)" \
+        -e "ARTIFACT_GID=$(id -g)" \
+        -e "E2E_ARTIFACTS_DIR=${E2E_ARTIFACTS_CONTAINER_DIR}" \
+        -e "PLAYWRIGHT_ARTIFACTS_DIR=/work/packages/frontend/tests/.artifacts" \
+        --entrypoint sh "${PLAYWRIGHT_IMAGE}" \
+        -c 'for path in "$E2E_ARTIFACTS_DIR" "$PLAYWRIGHT_ARTIFACTS_DIR"; do if [ -d "$path" ]; then chown -R "$ARTIFACT_UID:$ARTIFACT_GID" "$path"; fi; done'
+}
+
 dump_service_logs() {
     if [ -z "$LOG_DIR" ]; then
         return
@@ -520,6 +535,12 @@ case "$action" in
         cleanup() {
             status=$?
             stop_database_activity_sampler
+            if ! normalize_e2e_artifact_ownership; then
+                echo "Failed to restore ownership of E2E artifacts for the next checkout" >&2
+                if [ "$status" -eq 0 ]; then
+                    status=1
+                fi
+            fi
             if [ "$keep_stack" != "1" ]; then
                 stack_down
             else
@@ -572,12 +593,6 @@ case "$action" in
             done
         fi
         stop_database_activity_sampler
-        # Container runners write artifacts as root; host-runner artifacts are
-        # already owned by the invoking user.
-        if [ -n "${CI:-}" ]; then
-            docker run --rm --network none -v "${ROOT_DIR}:/work" --entrypoint sh \
-                "${PLAYWRIGHT_IMAGE}" -c "chown -R $(id -u):$(id -g) ${E2E_ARTIFACTS_CONTAINER_DIR}" >/dev/null 2>&1 || true
-        fi
         if [ "$failed" -ne 0 ]; then
             dump_service_logs full-suite
         fi
