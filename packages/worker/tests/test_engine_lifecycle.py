@@ -1090,11 +1090,12 @@ async def test_cold_engine_start_fanout_is_bounded_by_compute_workers(monkeypatc
 
     manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, BlockingStartEngine(identity.resource_id, resource_config)))
     identities = [_analysis_identity(f"analysis-cold-limit-{index}") for index in range(10)]
+    start_executor = ThreadPoolExecutor(max_workers=start_limit)
 
     async def spawn(identity: compute_pb2.EngineIdentity) -> None:
         owns_admission = await manager.await_spawn_admission(identity)
         try:
-            await asyncio.to_thread(manager.spawn_engine, identity)
+            await loop.run_in_executor(start_executor, manager.spawn_engine, identity)
         finally:
             manager.release_spawn_admission(identity, owned=owns_admission)
 
@@ -1124,6 +1125,7 @@ async def test_cold_engine_start_fanout_is_bounded_by_compute_workers(monkeypatc
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        start_executor.shutdown(wait=True)
         manager.shutdown_all()
 
 
@@ -1166,11 +1168,12 @@ async def test_warm_and_assigned_starts_use_independent_budgets(monkeypatch) -> 
         warm_worker_factory=lambda: cast(ComputeEngine, BlockingWarmWorker()),
     )
     identities = [_analysis_identity(f"analysis-warm-start-budget-{index}") for index in range(3)]
+    start_executor = ThreadPoolExecutor(max_workers=len(identities))
 
     async def spawn(identity: compute_pb2.EngineIdentity) -> None:
         owns_admission = await manager.await_spawn_admission(identity)
         try:
-            await asyncio.to_thread(manager.spawn_engine, identity)
+            await loop.run_in_executor(start_executor, manager.spawn_engine, identity)
         finally:
             manager.release_spawn_admission(identity, owned=owns_admission)
 
@@ -1197,6 +1200,7 @@ async def test_warm_and_assigned_starts_use_independent_budgets(monkeypatch) -> 
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        start_executor.shutdown(wait=True)
         manager.shutdown_all()
 
 
