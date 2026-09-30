@@ -73,9 +73,10 @@ async def run_compute_in_thread[T](
     /,
     *args: Any,
     cancel_work: Callable[[], object] | None = None,
+    expected_cancel_errors: tuple[type[Exception], ...] = (),
     **kwargs: Any,
 ) -> T:
-    return await _run_in_executor(COMPUTE_LANE, "compute-work", function, True, cancel_work, *args, **kwargs)
+    return await _run_in_executor(COMPUTE_LANE, "compute-work", function, True, cancel_work, *args, expected_cancel_errors=expected_cancel_errors, **kwargs)
 
 
 async def run_control_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
@@ -102,6 +103,7 @@ async def _run_in_executor[T](
     cancel_work: Callable[[], object] | None,
     /,
     *args: Any,
+    expected_cancel_errors: tuple[type[Exception], ...] = (),
     **kwargs: Any,
 ) -> T:
     loop = asyncio.get_running_loop()
@@ -138,26 +140,36 @@ async def _run_in_executor[T](
     concurrent_future.add_done_callback(release_admission)
     future = asyncio.wrap_future(concurrent_future, loop=loop)
     try:
-        return await asyncio.shield(future)
+        # This owner always joins its work. Unlike shield(), wait() does not
+        # install Python 3.14's detached-future exception logger on cancellation.
+        await asyncio.wait({future})
+        return future.result()
     except asyncio.CancelledError:
-        cleanup = asyncio.create_task(_settle_cancelled_work(future, cancel_work))
-        while True:
+        cleanup = asyncio.create_task(_settle_cancelled_work(future, cancel_work, expected_cancel_errors))
+        while not cleanup.done():
             try:
-                await asyncio.shield(cleanup)
-                break
+                await asyncio.wait({cleanup})
             except asyncio.CancelledError:
                 continue
+        cleanup.result()
         raise
 
 
 async def _settle_cancelled_work[T](
     future: asyncio.Future[T],
     cancel_work: Callable[[], object] | None,
+    expected_cancel_errors: tuple[type[Exception], ...],
 ) -> None:
     if cancel_work is not None:
         try:
             await _run_cleanup_in_thread(cancel_work)
         except Exception:
             logger.warning("Runtime compute cancellation callback failed", exc_info=True)
-    with contextlib.suppress(BaseException):
-        await asyncio.shield(future)
+    try:
+        await future
+    except asyncio.CancelledError:
+        return
+    except expected_cancel_errors:
+        return
+    except Exception:
+        logger.error("Runtime work failed while cancellation was settling", exc_info=True)

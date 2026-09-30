@@ -15,8 +15,10 @@ import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, resolve_ai_provider
+from backend_core.database import RuntimeCoordinatorFenced
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace
 from backend_core.websocket import serialize_json
@@ -25,8 +27,8 @@ from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.chat.chat_http import ChatHttpError, chat_with_tools, list_models
 from modules.chat.models import ChatSession
-from modules.chat.sessions import normalize_epoch_milliseconds, session_store
-from modules.chat.store import ConfirmationPending, chat_stream_recovery, chat_turn_store
+from modules.chat.sessions import ChatSessionBusy, normalize_epoch_milliseconds, session_store
+from modules.chat.store import ChatClaimRevoked, ConfirmationPending, chat_stream_recovery, chat_turn_store
 from modules.mcp.executor import call_tool
 from modules.mcp.models import MCPToolDefinition, MCPToolSafety
 from modules.mcp.tool_output import format_output_hint
@@ -574,7 +576,6 @@ async def _run_agent_turn(
     MAX_AGENT_TOOL_TURNS = 16
     turn_usage = session.turn_usage
     logger.info('chat turn start session=%s user_len=%d', session.id, len(user_content))
-    suspended = False
 
     try:
         registry = [MCPToolDefinition.coerce(item) for item in registry]
@@ -606,6 +607,7 @@ async def _run_agent_turn(
             )
             await session.append_message({'role': 'assistant', 'content': assistant_content})
             await session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content})
+            await session.finish('completed')
             return
 
         safe_tools = [t for t in registry if t.safety == MCPToolSafety.SAFE]
@@ -693,7 +695,9 @@ async def _run_agent_turn(
 
         await session.push_event({'type': 'usage', **turn_usage})
     except ConfirmationPending:
-        suspended = True
+        return
+    except ChatClaimRevoked, RuntimeCoordinatorFenced, SQLAlchemyError:
+        raise
     except ChatHttpError as exc:
         logger.error('Chat HTTP error session=%s: %s', session.id, exc)
         session.failed = True
@@ -728,9 +732,8 @@ async def _run_agent_turn(
             elapsed,
             tool_count,
         )
-        if not suspended:
-            status = 'interrupted' if session.owner_stopping else 'failed' if session.failed or session.stop_requested else 'completed'
-            await session.finish(status)
+    status = 'interrupted' if session.owner_stopping else 'failed' if session.failed or session.stop_requested else 'completed'
+    await session.finish(status)
 
 
 @router.get('/sessions')
@@ -902,8 +905,12 @@ async def stream(
 @handle_errors('delete chat session')
 def delete_session(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Close and delete a chat session."""
-    _require_owned_session(session_id, user)
-    session_store.delete(session_id, user_id=user.id)
+    try:
+        deleted = session_store.delete(session_id, user_id=user.id)
+    except ChatSessionBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail='Session not found')
     return {'status': 'closed', 'session_id': session_id}
 
 

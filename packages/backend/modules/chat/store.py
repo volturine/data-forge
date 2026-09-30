@@ -14,22 +14,25 @@ from typing import Any
 from sqlalchemy import and_, delete, func, or_, select, text
 from sqlmodel import Session
 
-from backend_core.database import run_settings_db
+from backend_core.database import RuntimeCoordinatorFenced, run_settings_db
 from backend_core.live_hubs import KeyedVersionHub
 from backend_core.secrets import decrypt_secret, encrypt_secret
 from backend_core.sqlmodel_typing import col
 from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn
-from modules.chat.sessions import MAX_EVENTS, MAX_MESSAGES, normalize_epoch_milliseconds
+from modules.chat.sessions import ACTIVE_TURN_STATUSES, MAX_EVENTS, MAX_MESSAGES, normalize_epoch_milliseconds
 
 CHAT_TURN_WAKE_KIND = 'chat_turn'
 CHAT_EVENT_WAKE_KIND = 'chat_event'
 _RUNTIME_CHANNEL = 'runtime_events'
-_ACTIVE = ('queued', 'running', 'awaiting_confirmation')
 logger = logging.getLogger(__name__)
 
 
 class ConfirmationPending(Exception):
     """The durable turn is suspended until an API child records a decision."""
+
+
+class ChatClaimRevoked(Exception):
+    """The turn was removed, finished, or reassigned within this epoch."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,18 +64,13 @@ def _notify(db: Session, payload: dict[str, Any]) -> None:
 
 
 def _verify_claim(db: Session, turn_id: str, claim_token: str, generation: int) -> ChatTurn:
-    turn = db.execute(
-        select(ChatTurn)
-        .where(
-            col(ChatTurn.id) == turn_id,
-            col(ChatTurn.claim_token) == claim_token,
-            col(ChatTurn.coordinator_generation) == generation,
-            col(ChatTurn.status).in_(('running', 'awaiting_confirmation')),
-        )
-        .with_for_update()
-    ).scalar_one_or_none()
+    turn = db.execute(select(ChatTurn).where(col(ChatTurn.id) == turn_id).with_for_update()).scalar_one_or_none()
     if turn is None:
-        raise RuntimeError('Chat turn claim was fenced or is no longer active')
+        raise ChatClaimRevoked('Chat turn was removed')
+    if turn.coordinator_generation is not None and turn.coordinator_generation != generation:
+        raise RuntimeCoordinatorFenced(f'Chat turn generation {generation} was fenced by generation {turn.coordinator_generation}')
+    if turn.coordinator_generation != generation or turn.claim_token != claim_token or turn.status not in ('running', 'awaiting_confirmation'):
+        raise ChatClaimRevoked('Chat turn claim was revoked or is no longer active')
     return turn
 
 
@@ -126,7 +124,9 @@ def _enqueue(
     ).scalar_one_or_none()
     if session is None:
         raise LookupError('Session not found')
-    active = db.execute(select(col(ChatTurn.id)).where(col(ChatTurn.session_id) == session_id, col(ChatTurn.status).in_(_ACTIVE))).scalar_one_or_none()
+    active = db.execute(
+        select(col(ChatTurn.id)).where(col(ChatTurn.session_id) == session_id, col(ChatTurn.status).in_(ACTIVE_TURN_STATUSES))
+    ).scalar_one_or_none()
     if active is not None:
         raise RuntimeError('Agent busy')
     turn_id = secrets.token_urlsafe(18)
@@ -204,7 +204,7 @@ def _recover(db: Session, *, generation: int) -> int:
         db.execute(
             select(ChatTurn)
             .where(
-                col(ChatTurn.status).in_(_ACTIVE),
+                col(ChatTurn.status).in_(ACTIVE_TURN_STATUSES),
                 (col(ChatTurn.coordinator_generation).is_(None)) | (col(ChatTurn.coordinator_generation) < generation),
             )
             .with_for_update(skip_locked=True)
@@ -303,7 +303,9 @@ def _finish(db: Session, *, turn_id: str, claim_token: str, generation: int, sta
 
 def _request_stop(db: Session, *, session_id: str, user_id: str) -> bool:
     turn = db.execute(
-        select(ChatTurn).where(col(ChatTurn.session_id) == session_id, col(ChatTurn.user_id) == user_id, col(ChatTurn.status).in_(_ACTIVE)).with_for_update()
+        select(ChatTurn)
+        .where(col(ChatTurn.session_id) == session_id, col(ChatTurn.user_id) == user_id, col(ChatTurn.status).in_(ACTIVE_TURN_STATUSES))
+        .with_for_update()
     ).scalar_one_or_none()
     if turn is None:
         return False

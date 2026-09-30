@@ -227,7 +227,6 @@ async def upload_file(
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
     user: User | None = Depends(get_current_user),
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if not file.filename:
@@ -266,7 +265,6 @@ async def upload_file(
     try:
         owner_id = user.id if user else None
         datasource = await create_remote_file_datasource(
-            session,
             runtime_probe=runtime_probe,
             name=name,
             description=description,
@@ -295,7 +293,6 @@ async def upload_bulk(
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
     user: User | None = Depends(get_current_user),
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if not files:
@@ -368,7 +365,6 @@ async def upload_bulk(
         try:
             owner_id = user.id if user else None
             datasource = await create_remote_file_datasource(
-                session,
                 runtime_probe=runtime_probe,
                 name=name,
                 description=None,
@@ -416,7 +412,6 @@ async def preflight_excel(
     table_name: str | None = Form(None),
     named_range: str | None = Form(None),
     cell_range: str | None = Form(None),
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if not file.filename:
@@ -457,7 +452,6 @@ async def preflight_excel(
 
     try:
         preflight_id, preflight, result = await create_preflight(
-            session,
             source_path=source_path,
             selection={
                 'sheet_name': sheet_name,
@@ -505,7 +499,6 @@ async def preflight_excel(
 @handle_errors(operation='preflight excel path', value_error_status=400)
 async def preflight_excel_path(
     payload: schemas.ExcelPreflightPathRequest,
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     data_plane = await asyncio.to_thread(client_from_settings)
@@ -515,7 +508,6 @@ async def preflight_excel_path(
     if DataSourceFileType.from_upload_suffix(Path(urlparse(payload.file_path).path).suffix.lower()) != DataSourceFileType.EXCEL:
         raise HTTPException(status_code=400, detail='Only .xlsx files are supported for preflight')
     preflight_id, preflight, result = await create_preflight(
-        session,
         source_path=payload.file_path,
         selection={
             'sheet_name': payload.sheet_name,
@@ -566,7 +558,6 @@ async def preflight_preview(
     table_name: str | None = None,
     named_range: str | None = None,
     cell_range: str | None = None,
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     preflight = await get_preflight(parse_preflight_id(preflight_id))
@@ -574,7 +565,6 @@ async def preflight_preview(
         raise HTTPException(status_code=404, detail='Preflight not found')
 
     result = await execute_excel_preflight(
-        session,
         preflight_id=parse_preflight_id(preflight_id),
         source_path=preflight.source_path,
         action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_PREVIEW,
@@ -619,7 +609,6 @@ async def confirm_excel(
     named_range: str | None = Form(None),
     cell_range: str | None = Form(None),
     user: User | None = Depends(get_current_user),
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     preflight = await get_preflight(parse_preflight_id(preflight_id))
@@ -633,7 +622,6 @@ async def confirm_excel(
 
     try:
         resolved = await execute_excel_preflight(
-            session,
             preflight_id=parse_preflight_id(preflight_id),
             source_path=preflight.source_path,
             action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_RESOLVE_SELECTION,
@@ -665,7 +653,6 @@ async def confirm_excel(
                 resolved_end_col,
             )
         datasource = await create_remote_file_datasource(
-            session,
             runtime_probe=runtime_probe,
             name=name,
             description=description,
@@ -698,7 +685,6 @@ async def confirm_excel(
 @handle_errors(operation='connect datasource', value_error_status=400)
 async def connect_datasource(
     datasource: schemas.DataSourceCreate,
-    session: Session = Depends(get_db_async),
     user: User | None = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -717,7 +703,6 @@ async def connect_datasource(
     if source_type == DataSourceType.FILE:
         file_config = await asyncio.to_thread(schemas.FileDataSourceConfig.model_validate, datasource.config)
         result = await create_remote_file_datasource(
-            session,
             runtime_probe=runtime_probe,
             name=datasource.name,
             description=datasource.description,
@@ -740,7 +725,6 @@ async def connect_datasource(
     if source_type == DataSourceType.DATABASE:
         db_config = await asyncio.to_thread(schemas.DatabaseDataSourceConfig.model_validate, datasource.config)
         result = await create_remote_database_datasource(
-            session,
             runtime_probe=runtime_probe,
             name=datasource.name,
             description=datasource.description,
@@ -753,7 +737,6 @@ async def connect_datasource(
     if source_type == DataSourceType.ICEBERG:
         iceberg_config = await asyncio.to_thread(schemas.IcebergDataSourceConfig.model_validate, datasource.config)
         result = await create_remote_iceberg_datasource(
-            session,
             runtime_probe=runtime_probe,
             name=datasource.name,
             description=datasource.description,
@@ -893,7 +876,6 @@ async def get_datasource_schema(
     datasource_id: DataSourceId,
     sheet_name: str | None = None,
     refresh: bool = False,
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get the column schema of a datasource (column names, types, nullability).
@@ -909,7 +891,6 @@ async def get_datasource_schema(
         source_type = DataSourceType.read(source.get('source_type') if isinstance(source, dict) else None, default=None)
         if datasource.source_type == DataSourceType.ICEBERG and source_type is not None and source_type.supports_external_ingestion:
             await ingest_remote_datasource(
-                session,
                 datasource_id=datasource_id_value,
                 runtime_probe=runtime_probe,
             )
@@ -918,7 +899,6 @@ async def get_datasource_schema(
         schema = await asyncio.to_thread(run_db, service.cached_schema, datasource_id_value)
     if schema is None:
         schema = await get_remote_datasource_schema(
-            session,
             datasource_id=datasource_id_value,
             sheet_name=sheet_name,
             refresh=False,
@@ -934,7 +914,6 @@ async def get_datasource_schema(
 async def update_datasource_column_metadata(
     datasource_id: DataSourceId,
     payload: schemas.BatchColumnDescriptionUpdate,
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Update one or more datasource column descriptions and return the active schema."""
@@ -943,7 +922,6 @@ async def update_datasource_column_metadata(
     schema = await asyncio.to_thread(run_db, service.cached_schema, datasource_id_value)
     if schema is None:
         schema = await get_remote_datasource_schema(
-            session,
             datasource_id=datasource_id_value,
             sheet_name=None,
             refresh=False,
@@ -963,7 +941,6 @@ async def update_datasource_column_metadata(
 async def compare_snapshots(
     datasource_id: DataSourceId,
     payload: schemas.SnapshotCompareRequest,
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Compare two Iceberg snapshots of a datasource.
@@ -974,7 +951,6 @@ async def compare_snapshots(
     datasource_id_value = parse_datasource_id(datasource_id)
     await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
     response = await compare_remote_iceberg_snapshots(
-        session,
         datasource_id=datasource_id_value,
         snapshot_a=payload.snapshot_a,
         snapshot_b=payload.snapshot_b,
@@ -989,7 +965,6 @@ async def _handle_column_stats(
     column_name: str,
     sample: bool,
     payload: schemas.ColumnStatsRequest | None,
-    session: Session,
     runtime_probe: RuntimeAvailabilityProbe,
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
@@ -999,7 +974,6 @@ async def _handle_column_stats(
     if isinstance(datasource, dict):
         config = datasource.get('config')
     return await get_remote_column_stats(
-        session,
         datasource_id=datasource_id_value,
         column_name=column_name,
         use_sample=sample,
@@ -1019,14 +993,13 @@ async def get_column_stats(
     datasource_id: DataSourceId,
     column_name: str,
     sample: bool = True,
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get statistics for a single column: count, nulls, unique values, min/max, mean, histogram.
 
     Set sample=false for exact stats (slower on large datasets).
     """
-    response = await _handle_column_stats(datasource_id, column_name, sample, None, session, runtime_probe)
+    response = await _handle_column_stats(datasource_id, column_name, sample, None, runtime_probe)
     return await json_response(response)
 
 
@@ -1041,11 +1014,10 @@ async def get_column_stats_with_config(
     column_name: str,
     payload: schemas.ColumnStatsRequest,
     sample: bool = True,
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get column statistics with custom datasource config (e.g., different branch or snapshot)."""
-    response = await _handle_column_stats(datasource_id, column_name, sample, payload, session, runtime_probe)
+    response = await _handle_column_stats(datasource_id, column_name, sample, payload, runtime_probe)
     return await json_response(response)
 
 
@@ -1054,13 +1026,12 @@ async def get_column_stats_with_config(
 async def update_datasource(
     datasource_id: DataSourceId,
     update: schemas.DataSourceUpdate,
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Update a datasource's name or config. Use GET /datasource/{id} to see current values."""
     datasource_id_value = parse_datasource_id(datasource_id)
     if update.config is None or not any(key in update.config for key in (*_EXCEL_PARSING_KEYS, 'csv_options', 'skip_rows')):
-        return service.update_datasource(session, datasource_id_value, update)
+        return await asyncio.to_thread(run_db, service.update_datasource, datasource_id_value, update)
 
     snapshot = await asyncio.to_thread(run_db, _datasource_update_snapshot, datasource_id_value)
     current_config, expected_revision, source_type, file_type = snapshot
@@ -1073,15 +1044,14 @@ async def update_datasource(
         if is_excel:
             simple_config = {key: value for key, value in update.config.items() if key not in _EXCEL_PARSING_KEYS or value != current_config.get(key)}
             update = update.model_copy(update={'config': simple_config})
-        return service.update_datasource(session, datasource_id_value, update)
+        return await asyncio.to_thread(run_db, service.update_datasource, datasource_id_value, update)
 
     source_path = current_config.get('file_path')
     if not isinstance(source_path, str) or not source_path:
-        return service.update_datasource(session, datasource_id_value, update)
+        return await asyncio.to_thread(run_db, service.update_datasource, datasource_id_value, update)
     selection = {key: next_config[key] for key in _EXCEL_PARSING_KEYS if key in next_config}
     selection.setdefault('has_header', True)
     resolved = await execute_excel_preflight(
-        session,
         preflight_id=str(uuid.uuid4()),
         source_path=source_path,
         action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_RESOLVE_SELECTION,
@@ -1090,8 +1060,9 @@ async def update_datasource(
         delete_source=False,
         datasource_id=datasource_id_value,
     )
-    return service.update_datasource(
-        session,
+    return await asyncio.to_thread(
+        run_db,
+        service.update_datasource,
         datasource_id_value,
         update,
         resolved_excel_selection=resolved_selection(resolved),
@@ -1103,14 +1074,12 @@ async def update_datasource(
 @handle_errors(operation='ingest datasource')
 async def ingest_datasource(
     datasource_id: DataSourceId,
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Ingest an external datasource again from source. Useful after upstream data changes."""
     datasource_id_value = parse_datasource_id(datasource_id)
     await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
     response = await ingest_remote_datasource(
-        session,
         datasource_id=datasource_id_value,
         runtime_probe=runtime_probe,
     )

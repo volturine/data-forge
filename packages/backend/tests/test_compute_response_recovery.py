@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import pytest
 
@@ -20,6 +21,80 @@ def _terminal_request(request_id: str) -> compute_requests_service.TerminalCompu
         artifact_name=None,
         artifact_content_type=None,
     )
+
+
+def test_recovery_can_run_on_successive_lifespan_loops() -> None:
+    recovery = ComputeResponseRecovery(poll_seconds=3_600)
+
+    async def lifespan() -> None:
+        stop = asyncio.Event()
+        task = asyncio.create_task(recovery.run(stop))
+        for _ in range(3):
+            await asyncio.sleep(0)
+        recovery.request_poll()
+        for _ in range(3):
+            await asyncio.sleep(0)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1)
+
+    asyncio.run(lifespan())
+    asyncio.run(lifespan())
+
+
+@pytest.mark.asyncio
+async def test_pre_start_recovery_requests_are_covered_by_one_immediate_initial_poll() -> None:
+    terminal = _terminal_request('before-start')
+    calls = 0
+
+    def poll(_namespace, _request_ids) -> list[compute_requests_service.TerminalComputeRequest]:
+        nonlocal calls
+        calls += 1
+        return [terminal]
+
+    recovery = ComputeResponseRecovery(poll_seconds=3_600, poll_namespace=poll)
+    await recovery.register(terminal.id, 'default')
+    for _ in range(50_000):
+        recovery.request_poll()
+    stop = asyncio.Event()
+    task = asyncio.create_task(recovery.run(stop))
+    try:
+        assert await asyncio.wait_for(recovery.wait_for_wake(terminal.id, 0), timeout=1) == 1
+        assert calls == 1
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1)
+        await recovery.unregister(terminal.id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_run_is_rejected_without_replacing_the_active_waiter_event() -> None:
+    terminal = _terminal_request('active-owner')
+    first_polled = threading.Event()
+    calls = 0
+
+    def poll(_namespace, _request_ids) -> list[compute_requests_service.TerminalComputeRequest]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            first_polled.set()
+            return []
+        return [terminal]
+
+    recovery = ComputeResponseRecovery(poll_seconds=3_600, poll_namespace=poll)
+    await recovery.register(terminal.id, 'default')
+    stop = asyncio.Event()
+    task = asyncio.create_task(recovery.run(stop))
+    try:
+        assert await asyncio.to_thread(first_polled.wait, 1)
+        with pytest.raises(RuntimeError, match='already running'):
+            await recovery.run(asyncio.Event())
+        recovery.request_poll()
+        assert await asyncio.wait_for(recovery.wait_for_wake(terminal.id, 0), timeout=1) == 1
+        assert calls == 2
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1)
+        await recovery.unregister(terminal.id)
 
 
 @pytest.mark.asyncio
@@ -138,3 +213,70 @@ async def test_recovery_poll_wakes_an_already_waiting_http_follower() -> None:
     assert await asyncio.wait_for(waiter, timeout=0.1) == wake_version + 1
     assert await recovery.terminal_request(terminal.id) is terminal
     await recovery.unregister(terminal.id)
+
+
+@pytest.mark.asyncio
+async def test_listener_recovery_wakes_terminal_poll_without_waiting_for_periodic_timer() -> None:
+    terminal = _terminal_request('lost-notify')
+    first_polled = threading.Event()
+    completed = False
+    calls = 0
+
+    def poll(_namespace, _request_ids) -> list[compute_requests_service.TerminalComputeRequest]:
+        nonlocal calls
+        calls += 1
+        first_polled.set()
+        if calls == 1:
+            return []
+        return [terminal] if completed else []
+
+    recovery = ComputeResponseRecovery(poll_seconds=3_600, poll_namespace=poll)
+    await recovery.register(terminal.id, 'default')
+    stop = asyncio.Event()
+    task = asyncio.create_task(recovery.run(stop))
+    try:
+        assert await asyncio.to_thread(first_polled.wait, 1)
+        completed = True
+        for _ in range(50_000):
+            recovery.request_poll()
+        assert await asyncio.wait_for(recovery.wait_for_wake(terminal.id, 0), timeout=1) == 1
+        assert await recovery.terminal_request(terminal.id) is terminal
+        assert calls == 2
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=1)
+        await recovery.unregister(terminal.id)
+
+
+@pytest.mark.asyncio
+async def test_listener_recovery_requested_during_database_poll_is_not_lost() -> None:
+    terminal = _terminal_request('poll-race')
+    first_polled = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def poll(_namespace, _request_ids) -> list[compute_requests_service.TerminalComputeRequest]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            first_polled.set()
+            if not release.wait(2):
+                raise TimeoutError('Test did not release the initial database poll')
+            return []
+        return [terminal]
+
+    recovery = ComputeResponseRecovery(poll_seconds=3_600, poll_namespace=poll)
+    await recovery.register(terminal.id, 'default')
+    stop = asyncio.Event()
+    task = asyncio.create_task(recovery.run(stop))
+    try:
+        assert await asyncio.to_thread(first_polled.wait, 1)
+        recovery.request_poll()
+        release.set()
+        assert await asyncio.wait_for(recovery.wait_for_wake(terminal.id, 0), timeout=1) == 1
+        assert calls == 2
+    finally:
+        release.set()
+        stop.set()
+        await asyncio.wait_for(task, timeout=1)
+        await recovery.unregister(terminal.id)

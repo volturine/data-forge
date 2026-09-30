@@ -64,20 +64,20 @@ Data-Forge is a **local-first**, **no-code** data transformation tool. Build mul
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| **Backend Runtime** | Python 3.14+ with [uv](https://github.com/astral-sh/uv) |
-| **API Framework** | FastAPI (async) |
-| **Data Engine** | [Polars](https://pola.rs) + DuckDB |
-| **Storage** | Apache Iceberg via [PyIceberg](https://py.iceberg.apache.org) |
-| **Database** | PostgreSQL 18+ |
-| **Schema Validation** | Pydantic V2 |
-| **Frontend Runtime** | [Bun](https://bun.sh) |
-| **UI Framework** | [SvelteKit 2](https://kit.svelte.dev) + [Svelte 5](https://svelte.dev) (runes mode) |
-| **Type System** | TypeScript |
-| **Styling** | [Panda CSS](https://panda-css.com) |
-| **Data Fetching** | [TanStack Query](https://tanstack.com/query) |
-| **Container** | Docker + Docker Compose |
+| Layer                 | Technology                                                                          |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| **Backend Runtime**   | Python 3.14+ with [uv](https://github.com/astral-sh/uv)                             |
+| **API Framework**     | FastAPI (async)                                                                     |
+| **Data Engine**       | [Polars](https://pola.rs) + DuckDB                                                  |
+| **Storage**           | Apache Iceberg via [PyIceberg](https://py.iceberg.apache.org)                       |
+| **Database**          | PostgreSQL 18+                                                                      |
+| **Schema Validation** | Pydantic V2                                                                         |
+| **Frontend Runtime**  | [Bun](https://bun.sh)                                                               |
+| **UI Framework**      | [SvelteKit 2](https://kit.svelte.dev) + [Svelte 5](https://svelte.dev) (runes mode) |
+| **Type System**       | TypeScript                                                                          |
+| **Styling**           | [Panda CSS](https://panda-css.com)                                                  |
+| **Data Fetching**     | [TanStack Query](https://tanstack.com/query)                                        |
+| **Container**         | Docker + Docker Compose                                                             |
 
 ---
 
@@ -143,7 +143,6 @@ just dev
 - API Docs: http://localhost:8000/docs
 - Background runtime: scheduler + dynamic build workers supervised by the local app runtime
 
-
 ---
 
 ## Configuration
@@ -161,21 +160,32 @@ docker compose --env-file docker/env/prod.env \
 The repository defaults are tuned for concurrent clients:
 
 - Docker production defaults to `1` API process inside one `api` container;
-  one active `runtime` coordinator and one worker manager own runtime dispatch
-  and Docker engine lifecycle. This is not yet horizontally sharded capacity.
+  one fenced `runtime` coordinator owns gRPC/dispatch, durable chat processing,
+  Telegram polling, and independent durable email/Telegram delivery lanes. One
+  Docker-owning worker manager owns isolated compute containers. API processes
+  serve HTTP, WebSocket/SSE, and durable enqueue-and-wait requests; their local
+  caches, projections, and waiters are disposable. Increasing API process count
+  does not scale authoritative runtime dispatch or compute.
 - `COMPUTE_WORKERS` bounds previews, datasource jobs, builds, and assigned
   workers in the current single-manager topology; queued work stays durable
 - `COMPUTE_WARM_WORKERS` keeps ready, unassigned workers in reserve. These are
   the same worker containers as assigned workers, just not yet bound to a
   resource identity; claiming one binds it to that exact identity and starts
   its replacement. This reserve is additional to active `COMPUTE_WORKERS`.
+- Each assigned compute worker serves one exact analysis or datasource RID.
+  Identical full commands share durable results; distinct commands for that RID
+  are serialized. Keep synchronous database and blocking integration work in
+  bounded threads; Polars-heavy parsing and execution stay in compute containers.
+- Durable external notification metadata is recorded in the outbox; email and
+  Telegram network delivery runs outside the database transaction.
 - The capacity-first optimization plan and measured scale gates are in
   [Capacity-First Runtime Optimization](docs/prd/active/elastic-runtime-scale-out.md).
 
 ### Development (local runtime)
 
 Vite dev server on port 3000 proxies `/api` to FastAPI on port 8000. `just dev`
-starts one supervised app runtime that runs API, scheduler, and dynamic build workers so queued builds do not run inside the API process.
+starts the API, runtime coordinator, scheduler, and one worker manager; the
+manager starts isolated compute containers for queued work.
 
 ```bash
 just dev
@@ -183,15 +193,15 @@ just dev
 
 ### Key Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DEBUG` | `false` | Enable debug logging and SQL echo |
-| `PROD_MODE_ENABLED` | `false` | Serve static frontend from `packages/frontend/build` |
-| `AUTH_REQUIRED` | `false` | Require login before accessing routes |
-| `DATA_DIR` | — | Base directory for all data storage |
-| `DATABASE_URL` | PostgreSQL connection URL | Runtime database connection |
-| `DISTRIBUTED_RUNTIME_ENABLED` | `false` | Enables supported Postgres distributed runtime mode |
-| `DEFAULT_NAMESPACE` | `default` | Default data namespace |
+| Variable                      | Default                   | Description                                          |
+| ----------------------------- | ------------------------- | ---------------------------------------------------- |
+| `DEBUG`                       | `false`                   | Enable debug logging and SQL echo                    |
+| `PROD_MODE_ENABLED`           | `false`                   | Serve static frontend from `packages/frontend/build` |
+| `AUTH_REQUIRED`               | `false`                   | Require login before accessing routes                |
+| `DATA_DIR`                    | —                         | Base directory for all data storage                  |
+| `DATABASE_URL`                | PostgreSQL connection URL | Runtime database connection                          |
+| `DISTRIBUTED_RUNTIME_ENABLED` | `false`                   | Enables supported Postgres distributed runtime mode  |
+| `DEFAULT_NAMESPACE`           | `default`                 | Default data namespace                               |
 
 See [Environment Variables](docs/ENV_VARIABLES.md) for the complete reference
 and [Deployment](docs/DEPLOYMENT.md) for production operations.
@@ -267,15 +277,26 @@ data-forge/
 
 Production and local development use the same role split:
 
-- **API** — FastAPI HTTP/WebSocket surface, auth, metadata, build enqueue
+- **API** — HTTP/WebSocket/SSE surface, auth, metadata, durable enqueue/wait, and disposable local caches/projections/waiters
+- **Runtime coordinator** — fenced internal gRPC/dispatch, durable chat, Telegram polling, and independent external delivery lanes
 - **Scheduler** — evaluates cron/dependency/event schedules and enqueues builds
-- **Worker** — claims build/compute work, runs Polars engines, Iceberg I/O, data-plane gRPC
+- **Worker manager** — sole Docker owner, claims build/compute work, manages exact-RID engine containers and the warm reserve, and serves data-plane gRPC
 
 Coordination is Postgres-backed (claims, leases, outbox, run history). Process-to-process control uses internal gRPC; product data lives in S3-compatible object storage (Iceberg tables, uploads, exports).
 
+API/coordinator notification receivers use dedicated native async LISTEN connections
+and durable recovery callbacks; publication remains synchronous database/thread
+work. Short database units open and close their own sessions in bounded threads.
+Private storage cleanup reuses the outbox and an independent worker I/O lane to
+retire abandoned source/staging data; published snapshots retain their existing
+retention policy. The [runtime contracts](docs/prd/active/elastic-runtime-scale-out.md#implemented-runtime-contracts)
+describe mutation, cancellation, recovery, and cleanup boundaries.
+
 ### Compute Engine
 
-Each analysis preview or build runs in an **isolated engine subprocess** owned by a worker. That provides:
+Analysis and datasource compute runs in **isolated engine containers** owned by
+the worker manager. Each assigned worker serves one exact RID and serializes its
+commands; identical full commands share durable results. That provides:
 
 - Memory isolation between analyses
 - Configurable resource limits per engine
@@ -347,6 +368,7 @@ If you discover a security vulnerability, please report it privately to the proj
 - [AGENTS.md](AGENTS.md) — Developer guidelines
 - [STYLE_GUIDE.md](STYLE_GUIDE.md) — Code style
 - [docs/prd/implemented/mcp-tool-contract.md](docs/prd/implemented/mcp-tool-contract.md) — How API routes are exposed as MCP tools
+
 ---
 
 ## License

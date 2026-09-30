@@ -26,6 +26,10 @@ service WorkerRuntimeService {
   rpc PublishDatasourceCreate(WorkerPublishDatasourceCreateRequest) returns (WorkerPublishDatasourceCreateResponse);
   rpc PublishDatasourceIngest(WorkerPublishDatasourceIngestRequest) returns (WorkerPublishDatasourceIngestResponse);
   rpc PublishDatasourceSchemaCache(WorkerPublishDatasourceSchemaCacheRequest) returns (WorkerPublishDatasourceSchemaCacheResponse);
+  rpc RegisterDatasourceStage(WorkerRegisterDatasourceStageRequest) returns (BoolResponse);
+  rpc ClaimStorageCleanup(WorkerClaimStorageCleanupRequest) returns (WorkerStorageCleanupClaimsResponse);
+  rpc AuthorizeStorageCleanup(WorkerStorageCleanupClaimRequest) returns (BoolResponse);
+  rpc CompleteStorageCleanup(WorkerCompleteStorageCleanupRequest) returns (BoolResponse);
   rpc GetDatasourceMetadata(WorkerDatasourceMetadataRequest) returns (WorkerDatasourceMetadataResponse);
   rpc GetUdfCodes(WorkerUdfCodesRequest) returns (WorkerUdfCodesResponse);
   rpc GetEngineCredentials(WorkerEngineCredentialsRequest) returns (WorkerEngineCredentialsResponse);
@@ -187,6 +191,55 @@ message WorkerFailComputeRequestRequest {
   string claim_token = 7 [(buf.validate.field).string.min_len = 1];
   int64 lease_generation = 8 [(buf.validate.field).int64.gte = 1];
   optional WorkerEngineRunFinalization engine_run_finalization = 9;
+}
+
+message WorkerRegisterDatasourceStageRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 3 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 4 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 5 [(buf.validate.field).int64.gte = 1];
+  oneof owner {
+    option (buf.validate.oneof).required = true;
+    string compute_request_id = 6 [(buf.validate.field).string.min_len = 1];
+    string job_id = 7 [(buf.validate.field).string.min_len = 1];
+  }
+  optional string build_id = 8 [(buf.validate.field).string.min_len = 1];
+  string prefix_url = 9 [(buf.validate.field).string.min_len = 1];
+  string artifact_url = 10 [(buf.validate.field).string.min_len = 1];
+  string catalog_identifier = 11 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerClaimStorageCleanupRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 16
+  }];
+}
+
+message WorkerStorageCleanupClaimRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string event_id = 2 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 3 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 4 [(buf.validate.field).int64.gte = 1];
+}
+
+message WorkerStorageCleanupClaim {
+  WorkerStorageCleanupClaimRequest claim = 1 [(buf.validate.field).required = true];
+  string resource_id = 2 [(buf.validate.field).string.min_len = 1];
+  string url = 3 [(buf.validate.field).string.min_len = 1];
+  bool is_prefix = 4;
+  optional string catalog_identifier = 5 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerStorageCleanupClaimsResponse {
+  repeated WorkerStorageCleanupClaim cleanups = 1;
+}
+
+message WorkerCompleteStorageCleanupRequest {
+  WorkerStorageCleanupClaimRequest claim = 1 [(buf.validate.field).required = true];
+  optional string error = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerPublishDatasourceCreateRequest {

@@ -186,11 +186,7 @@ services:
     mem_limit: ${DF_WORKER_MEM_LIMIT:-8g}
     cpus: ${DF_WORKER_CPUS:-0}
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python3 -c \"import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\\\"select count(*) from public.runtime_workers where kind='coordinator' and stopped_at is null and last_heartbeat_at > now() - interval '10 seconds'\\\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)\"",
-        ]
+      test: ["CMD", "python3", "-m", "runtime.dispatcher_health"]
       interval: 5s
       timeout: 5s
       retries: 30

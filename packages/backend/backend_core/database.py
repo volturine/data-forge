@@ -60,6 +60,13 @@ def _record_database_duration(metrics: dict[str, object], field: str, duration: 
     metrics[field] = float(recorded) + max(duration, 0.0)
 
 
+def record_database_admission_wait(duration_ms: float) -> None:
+    """Add API DB admission delay to the active request timing context."""
+    metrics = _DATABASE_STATEMENT_TIMING.get()
+    if metrics is not None:
+        _record_database_duration(metrics, 'api_db_admission_wait_ms', duration_ms)
+
+
 def _before_cursor_execute(_connection, _cursor, _statement, _parameters, context, _executemany) -> None:
     metrics = _DATABASE_STATEMENT_TIMING.get()
     if metrics is None:

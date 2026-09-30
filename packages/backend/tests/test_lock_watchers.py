@@ -1,6 +1,9 @@
 import threading
+from collections import Counter
+from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import WebSocket
 
 from backend_core import websocket
 from modules.locks import schemas, watchers
@@ -8,7 +11,11 @@ from modules.locks import schemas, watchers
 
 @pytest.mark.asyncio
 async def test_notify_watchers_serializes_once_for_fifty_sockets(monkeypatch) -> None:
-    sockets = [object() for _ in range(50)]
+    sockets = [WebSocket({'type': 'websocket'}, AsyncMock(), AsyncMock()) for _ in range(50)]
+    registry = watchers.LockWatcherRegistry()
+    monkeypatch.setattr(watchers, 'registry', registry)
+    for socket in sockets:
+        await registry.add(socket, 'default', 'analysis', 'analysis-1')
     payload = schemas.LockWebsocketStatusMessage(
         resource_type='analysis',
         resource_id='analysis-1',
@@ -16,10 +23,6 @@ async def test_notify_watchers_serializes_once_for_fifty_sockets(monkeypatch) ->
     )
     serialize_calls = []
     send_calls = []
-
-    async def get_sockets(namespace, resource_type, resource_id):
-        assert (namespace, resource_type, resource_id) == ('default', 'analysis', 'analysis-1')
-        return sockets
 
     async def serialize(value):
         serialize_calls.append(value)
@@ -29,15 +32,17 @@ async def test_notify_watchers_serializes_once_for_fifty_sockets(monkeypatch) ->
         send_calls.append((websocket, serialized))
         return True
 
-    monkeypatch.setattr(watchers.registry, 'sockets', get_sockets)
     monkeypatch.setattr(watchers, 'serialize_json', serialize)
     monkeypatch.setattr(watchers, 'safe_send_serialized_json', send_serialized_json)
 
-    await watchers.notify_watchers('default', 'analysis', 'analysis-1', payload)
+    try:
+        assert await watchers.notify_watchers('default', 'analysis', 'analysis-1', payload)
+    finally:
+        await registry.clear()
 
     assert serialize_calls == [payload]
     assert len(send_calls) == len(sockets)
-    assert [websocket for websocket, _ in send_calls] == sockets
+    assert Counter(websocket for websocket, _ in send_calls) == Counter(sockets)
     assert {serialized for _, serialized in send_calls} == {'{"type":"status","resource_type":"analysis","resource_id":"analysis-1","lock":null}'}
 
 

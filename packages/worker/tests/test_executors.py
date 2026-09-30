@@ -1,9 +1,11 @@
 import asyncio
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from runtime.build_events import BuildCancelledError
 from runtime.executors import _ExecutorLane, _run_in_executor
 
 
@@ -115,3 +117,86 @@ async def test_lease_lane_progresses_while_compute_lane_is_full() -> None:
         await compute
         compute_executor.shutdown(wait=True)
         lease_executor.shutdown(wait=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expected_error", [False, True])
+async def test_cancelled_executor_retrieves_work_errors_and_reports_unexpected_failures(caplog, expected_error: bool) -> None:
+    executor = ThreadPoolExecutor(max_workers=1)
+    lane = _ExecutorLane(executor, max_pending=1)
+    started = threading.Event()
+    stop_requested = threading.Event()
+    release = threading.Event()
+    loop_errors = []
+    loop = asyncio.get_running_loop()
+    original_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
+    caplog.set_level(logging.WARNING, logger="runtime.executors")
+
+    def work() -> None:
+        started.set()
+        assert release.wait(timeout=5)
+        if expected_error:
+            raise BuildCancelledError("build-id")
+        raise RuntimeError("Unexpected work failure")
+
+    task = asyncio.create_task(_run_in_executor(lane, "test", work, False, stop_requested.set, expected_cancel_errors=(BuildCancelledError,)))
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        task.cancel()
+        assert await asyncio.to_thread(stop_requested.wait, 5)
+        assert not task.done()
+        assert lane._semaphore(loop)._value == 0
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+        assert lane._semaphore(loop)._value == 1
+        assert loop_errors == []
+        if expected_error:
+            assert caplog.records == []
+        else:
+            assert "Runtime work failed while cancellation was settling" in caplog.text
+            assert "Unexpected work failure" in caplog.text
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        executor.shutdown(wait=True)
+        loop.set_exception_handler(original_handler)
+
+
+@pytest.mark.asyncio
+async def test_cancel_callback_failure_is_reported_and_work_is_still_joined(caplog) -> None:
+    executor = ThreadPoolExecutor(max_workers=1)
+    lane = _ExecutorLane(executor, max_pending=1)
+    started = threading.Event()
+    stop_requested = threading.Event()
+    release = threading.Event()
+
+    def work() -> None:
+        started.set()
+        assert release.wait(timeout=5)
+        raise BuildCancelledError("build-id")
+
+    def cancel_work() -> None:
+        stop_requested.set()
+        raise RuntimeError("Stop request failed")
+
+    task = asyncio.create_task(_run_in_executor(lane, "test", work, False, cancel_work, expected_cancel_errors=(BuildCancelledError,)))
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        task.cancel()
+        assert await asyncio.to_thread(stop_requested.wait, 5)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert "Runtime compute cancellation callback failed" in caplog.text
+        assert "Stop request failed" in caplog.text
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        executor.shutdown(wait=True)

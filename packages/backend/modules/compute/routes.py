@@ -4,10 +4,12 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
+import anyio
 from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
@@ -117,6 +119,10 @@ def _override_manager(container) -> Any | None:
 
 def _override_compute_executor(container) -> Any | None:
     return getattr(container.app.state, 'compute_override_executor', None)
+
+
+def _run_compute_override[T](session: Session, execute: Callable[..., T], **kwargs: object) -> T:
+    return execute(session=session, **kwargs)
 
 
 def _resolve_websocket_user(websocket: WebSocket) -> User | None:
@@ -358,13 +364,6 @@ async def _send_build_list_snapshot(websocket: WebSocket, namespace: str) -> Non
     await safe_send_json(websocket, message)
 
 
-def _get_latest_build_namespace_update(namespace: str) -> str | None:
-    latest = build_hub.latest_namespace_sequence(namespace)
-    if latest <= 0:
-        return None
-    return str(latest)
-
-
 def _resolved_default_max_threads() -> int:
     """Default engine threads when an analysis does not set max_threads.
 
@@ -438,7 +437,6 @@ async def _wait_for_engine_notification(websocket: WebSocket, namespace: str, la
 async def preview_step(
     http_request: Request,
     request: schemas.StepPreviewRequest = Depends(_parse_preview_request),
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -459,9 +457,10 @@ async def preview_step(
         if executor is None:
             raise RuntimeError('Missing compute override executor for manager override')
 
-        response = await run_in_threadpool(
+        response = await asyncio.to_thread(
+            run_db,
+            _run_compute_override,
             executor.preview_step,
-            session=session,
             manager=manager,
             target_step_id=normalized.target_step_id,
             analysis_pipeline=await executor_client.model_payload(normalized.analysis_pipeline, mode='json'),
@@ -474,7 +473,7 @@ async def preview_step(
             request_json=await executor_client.model_payload(normalized, mode='json'),
         )
         return await executor_client.json_response(response)
-    response = await executor_client.preview_step(session, normalized, runtime_probe=runtime_probe, http_request=http_request)
+    response = await executor_client.preview_step(normalized, runtime_probe=runtime_probe, http_request=http_request)
     return await executor_client.json_response(response)
 
 
@@ -483,7 +482,6 @@ async def preview_step(
 async def get_step_schema(
     http_request: Request,
     request: schemas.StepSchemaRequest = Depends(_parse_schema_request),
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -500,9 +498,10 @@ async def get_step_schema(
         if executor is None:
             raise RuntimeError('Missing compute override executor for manager override')
 
-        response = await run_in_threadpool(
+        response = await asyncio.to_thread(
+            run_db,
+            _run_compute_override,
             executor.get_step_schema,
-            session=session,
             manager=manager,
             target_step_id=normalized.target_step_id,
             analysis_id=analysis_id,
@@ -510,7 +509,7 @@ async def get_step_schema(
             tab_id=normalized.tab_id,
         )
         return await executor_client.json_response(response)
-    response = await executor_client.get_step_schema(session, normalized, runtime_probe=runtime_probe, http_request=http_request)
+    response = await executor_client.get_step_schema(normalized, runtime_probe=runtime_probe, http_request=http_request)
     return await executor_client.json_response(response)
 
 
@@ -519,7 +518,6 @@ async def get_step_schema(
 async def get_step_row_count(
     http_request: Request,
     request: schemas.StepRowCountRequest = Depends(_parse_row_count_request),
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -532,9 +530,10 @@ async def get_step_row_count(
         if executor is None:
             raise RuntimeError('Missing compute override executor for manager override')
 
-        response = await run_in_threadpool(
+        response = await asyncio.to_thread(
+            run_db,
+            _run_compute_override,
             executor.get_step_row_count,
-            session=session,
             manager=manager,
             target_step_id=normalized.target_step_id,
             analysis_id=analysis_id,
@@ -543,7 +542,7 @@ async def get_step_row_count(
             request_json=await executor_client.model_payload(normalized, mode='json'),
         )
         return await executor_client.json_response(response)
-    response = await executor_client.get_step_row_count(session, normalized, runtime_probe=runtime_probe, http_request=http_request)
+    response = await executor_client.get_step_row_count(normalized, runtime_probe=runtime_probe, http_request=http_request)
     return await executor_client.json_response(response)
 
 
@@ -820,7 +819,6 @@ async def _spawn_engine_identity(
     identity,
     http_request: Request,
     request: schemas.SpawnEngineRequest | None,
-    session: Session,
     runtime_probe: RuntimeAvailabilityProbe,
 ):
     resource_config = await executor_client.model_payload(request.resource_config) if request and request.resource_config else None
@@ -833,7 +831,6 @@ async def _spawn_engine_identity(
 
         return await run_in_threadpool(spawn_and_read_status)
     return await executor_client.spawn_engine(
-        session,
         identity=identity,
         resource_config=resource_config,
         runtime_probe=runtime_probe,
@@ -844,7 +841,6 @@ async def _configure_engine_identity(
     identity,
     request: schemas.EngineResourceConfig,
     http_request: Request,
-    session: Session,
     runtime_probe: RuntimeAvailabilityProbe,
 ):
     resource_config = await executor_client.model_payload(request)
@@ -857,7 +853,6 @@ async def _configure_engine_identity(
 
         return await run_in_threadpool(configure_and_read_status)
     return await executor_client.configure_engine(
-        session,
         identity=identity,
         resource_config=resource_config,
         runtime_probe=runtime_probe,
@@ -867,7 +862,6 @@ async def _configure_engine_identity(
 async def _shutdown_engine_identity(
     identity,
     http_request: Request,
-    session: Session,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
     """Queue engine shutdown after cancelling any active job.
@@ -897,9 +891,9 @@ async def _shutdown_engine_identity(
 
         await run_in_threadpool(shutdown_override_engine)
         return
-    await run_in_threadpool(
+    await asyncio.to_thread(
+        run_db,
         executor_client.request_engine_shutdown,
-        session,
         identity=identity,
         runtime_probe=runtime_probe,
     )
@@ -911,7 +905,6 @@ async def spawn_analysis_engine(
     analysis_id: AnalysisId,
     http_request: Request,
     request: schemas.SpawnEngineRequest | None = None,
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -924,7 +917,6 @@ async def spawn_analysis_engine(
         ),
         http_request,
         request,
-        session,
         runtime_probe,
     )
 
@@ -935,7 +927,6 @@ async def spawn_datasource_preview_engine(
     datasource_id: DataSourceId,
     http_request: Request,
     request: schemas.SpawnEngineRequest | None = None,
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -949,7 +940,6 @@ async def spawn_datasource_preview_engine(
         ),
         http_request,
         request,
-        session,
         runtime_probe,
     )
 
@@ -960,7 +950,6 @@ async def configure_analysis_engine(
     analysis_id: AnalysisId,
     request: schemas.EngineResourceConfig,
     http_request: Request,
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -973,7 +962,6 @@ async def configure_analysis_engine(
         ),
         request,
         http_request,
-        session,
         runtime_probe,
     )
 
@@ -984,7 +972,6 @@ async def configure_datasource_preview_engine(
     datasource_id: DataSourceId,
     request: schemas.EngineResourceConfig,
     http_request: Request,
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -998,7 +985,6 @@ async def configure_datasource_preview_engine(
         ),
         request,
         http_request,
-        session,
         runtime_probe,
     )
 
@@ -1008,7 +994,6 @@ async def configure_datasource_preview_engine(
 async def shutdown_analysis_engine(
     analysis_id: AnalysisId,
     http_request: Request,
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -1020,7 +1005,6 @@ async def shutdown_analysis_engine(
             resource_id=analysis_id,
         ),
         http_request,
-        session,
         runtime_probe,
     )
 
@@ -1030,7 +1014,6 @@ async def shutdown_analysis_engine(
 async def shutdown_datasource_preview_engine(
     datasource_id: DataSourceId,
     http_request: Request,
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -1043,7 +1026,6 @@ async def shutdown_datasource_preview_engine(
             resource_id=datasource_id_value,
         ),
         http_request,
-        session,
         runtime_probe,
     )
 
@@ -1053,7 +1035,6 @@ async def shutdown_datasource_preview_engine(
 async def shutdown_build_engine(
     build_id: str,
     http_request: Request,
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -1065,7 +1046,6 @@ async def shutdown_build_engine(
             resource_id=build_id,
         ),
         http_request,
-        session,
         runtime_probe,
     )
 
@@ -1074,9 +1054,12 @@ async def shutdown_build_engine(
 async def engine_list_stream(websocket: WebSocket) -> None:
     token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
     namespace = get_namespace()
+    subscribed = False
     await websocket.accept()
     try:
         await _require_websocket_user(websocket)
+        await engine_registry.subscribe(namespace)
+        subscribed = True
         last_seen = await _send_engine_snapshot(websocket)
         while True:
             updated = await _wait_for_engine_notification(websocket, namespace, last_seen)
@@ -1110,6 +1093,9 @@ async def engine_list_stream(websocket: WebSocket) -> None:
             schemas.EngineWebsocketErrorMessage(error='An internal error occurred'),
         )
     finally:
+        if subscribed:
+            with anyio.CancelScope(shield=True):
+                await engine_registry.unsubscribe(namespace)
         reset_namespace(token)
         await safe_close_websocket(websocket)
 
@@ -1118,10 +1104,12 @@ async def engine_list_stream(websocket: WebSocket) -> None:
 async def build_list_stream(websocket: WebSocket) -> None:
     token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
     namespace = get_namespace()
+    subscribed = False
     await websocket.accept()
     try:
         await _require_websocket_user(websocket)
-        last_seen = await run_in_threadpool(_get_latest_build_namespace_update, namespace)
+        last_seen = str(build_hub.subscribe_namespace(namespace))
+        subscribed = True
         await _send_build_list_snapshot(websocket, namespace)
         while True:
             updated = await _wait_for_namespace_build_update(websocket, namespace, last_seen)
@@ -1166,6 +1154,8 @@ async def build_list_stream(websocket: WebSocket) -> None:
             schemas.BuildWebsocketErrorMessage(error='An internal error occurred'),
         )
     finally:
+        if subscribed:
+            build_hub.unsubscribe_namespace(namespace)
         reset_namespace(token)
         await safe_close_websocket(websocket)
 
@@ -1173,11 +1163,15 @@ async def build_list_stream(websocket: WebSocket) -> None:
 @router.websocket('/ws/builds/{build_id}')
 async def build_stream(websocket: WebSocket, build_id: str) -> None:
     token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
+    namespace = get_namespace()
+    subscribed = False
     raw_last_sequence = websocket.query_params.get('last_sequence')
     last_sequence = int(raw_last_sequence) if raw_last_sequence and raw_last_sequence.isdigit() else 0
     await websocket.accept()
     try:
         await _require_websocket_user(websocket)
+        build_hub.subscribe_build(namespace, build_id)
+        subscribed = True
         while True:
 
             def _load_snapshot() -> schemas.BuildSnapshotMessage | None:
@@ -1237,6 +1231,8 @@ async def build_stream(websocket: WebSocket, build_id: str) -> None:
             schemas.BuildWebsocketErrorMessage(error='An internal error occurred'),
         )
     finally:
+        if subscribed:
+            build_hub.unsubscribe_build(namespace, build_id)
         reset_namespace(token)
         await safe_close_websocket(websocket)
 
@@ -1257,7 +1253,6 @@ async def get_engine_defaults():
 async def export_data(
     http_request: Request,
     request: schemas.ExportRequest = Depends(_parse_export_request),
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -1281,9 +1276,10 @@ async def export_data(
             if executor is None:
                 raise RuntimeError('Missing compute override executor for manager override')
 
-            file_bytes, filename, content_type = await run_in_threadpool(
+            file_bytes, filename, content_type = await asyncio.to_thread(
+                run_db,
+                _run_compute_override,
                 executor.download_step,
-                session=session,
                 manager=manager,
                 target_step_id=download_request.target_step_id,
                 analysis_pipeline=await executor_client.model_payload(download_request.analysis_pipeline, mode='json'),
@@ -1294,7 +1290,6 @@ async def export_data(
             )
         else:
             file_bytes, filename, content_type = await executor_client.download_step(
-                session,
                 download_request,
                 runtime_probe=runtime_probe,
             )
@@ -1311,9 +1306,10 @@ async def export_data(
         if executor is None:
             raise RuntimeError('Missing compute override executor for manager override')
 
-        result = await run_in_threadpool(
+        result = await asyncio.to_thread(
+            run_db,
+            _run_compute_override,
             executor.export_data,
-            session=session,
             manager=manager,
             target_step_id=request.target_step_id,
             analysis_pipeline=await executor_client.model_payload(request.analysis_pipeline, mode='json'),
@@ -1333,7 +1329,7 @@ async def export_data(
             datasource_id=result.datasource_id,
             datasource_name=result.result_meta.get('datasource_name') if isinstance(result.result_meta, dict) else None,
         )
-    response = await executor_client.export_data(session, request, runtime_probe=runtime_probe)
+    response = await executor_client.export_data(request, runtime_probe=runtime_probe)
     return await executor_client.json_response(response)
 
 
@@ -1342,7 +1338,6 @@ async def export_data(
 async def download_step(
     http_request: Request,
     request: schemas.DownloadRequest = Depends(_parse_download_request),
-    session: Session = Depends(get_db_async),
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
@@ -1357,9 +1352,10 @@ async def download_step(
         if executor is None:
             raise RuntimeError('Missing compute override executor for manager override')
 
-        file_bytes, filename, content_type = await run_in_threadpool(
+        file_bytes, filename, content_type = await asyncio.to_thread(
+            run_db,
+            _run_compute_override,
             executor.download_step,
-            session=session,
             manager=manager,
             target_step_id=request.target_step_id,
             analysis_pipeline=await executor_client.model_payload(request.analysis_pipeline, mode='json'),
@@ -1370,7 +1366,6 @@ async def download_step(
         )
     else:
         file_bytes, filename, content_type = await executor_client.download_step(
-            session,
             request,
             runtime_probe=runtime_probe,
         )

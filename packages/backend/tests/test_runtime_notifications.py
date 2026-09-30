@@ -2,10 +2,12 @@ import asyncio
 import json
 import os
 import threading
+from collections.abc import AsyncGenerator, Iterable
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from psycopg import Notify
 from sqlalchemy import Engine
 from sqlmodel import Session as SqlModelSession
 
@@ -173,115 +175,360 @@ def test_compute_wakes_skip_postgres_notification_for_sqlite() -> None:
     runtime_ipc.notify_compute_response_on_commit(Session(), request_id='request-1', namespace='tenant-a')  # type: ignore[arg-type]
 
 
-@pytest.mark.asyncio
-async def test_runtime_listener_owns_sync_connection_on_dedicated_thread(monkeypatch) -> None:
-    from backend_core import runtime_ipc
+class _NotificationConnection:
+    def __init__(self, payloads: Iterable[str] = (), *, fail_receive: bool = False) -> None:
+        self.payloads = payloads
+        self.fail_receive = fail_receive
+        self.closed = False
+        self.emitted = 0
+        self.operation_threads: list[int] = []
+        self.entered = asyncio.Event()
+        self.generator_closed = asyncio.Event()
+        self.listen_started = asyncio.Event()
+        self.listen_ready = asyncio.Event()
+        self.listen_ready.set()
 
-    class Connection:
-        def __init__(self) -> None:
-            self.closed = False
-            self.operation_threads: list[int] = []
-            self.finished = threading.Event()
+    async def execute(self, query: str) -> None:
+        assert query == 'LISTEN runtime_events'
+        self.operation_threads.append(threading.get_ident())
+        self.listen_started.set()
+        await self.listen_ready.wait()
 
-        def execute(self, query: str) -> None:
-            assert query == 'LISTEN runtime_events'
-            self.operation_threads.append(threading.get_ident())
+    async def notifies(self) -> AsyncGenerator[Notify]:
+        from backend_core import runtime_ipc
 
-        def notifies(self, *, timeout: float, stop_after: int):
-            del stop_after
-            self.finished.wait(timeout)
-            return []
-
-        def close(self) -> None:
-            self.closed = True
-            self.operation_threads.append(threading.get_ident())
-            self.finished.set()
-
-    connection = Connection()
-    connect_threads: list[int] = []
-    loop_thread = threading.get_ident()
-
-    def connect(*args, **kwargs) -> Connection:
-        connect_threads.append(threading.get_ident())
-        return connection
-
-    monkeypatch.setattr(runtime_ipc, 'psycopg', SimpleNamespace(connect=connect))
-
-    listener = await runtime_ipc.start_api_server()
-
-    assert connect_threads and connect_threads[0] != loop_thread
-    assert connection.operation_threads[0] != loop_thread
-    await runtime_ipc.stop_api_server(listener)
-    assert connection.closed
-    assert connection.operation_threads[-1] == connect_threads[0]
-
-
-@pytest.mark.asyncio
-async def test_runtime_listener_reconnects_and_delivers_notifications(monkeypatch) -> None:
-    from backend_core import runtime_ipc
-
-    stop_event = asyncio.Event()
-    received: list[dict[str, object]] = []
-    loop_thread = threading.get_ident()
-    operation_threads: list[int] = []
-
-    class Connection:
-        def __init__(self, *, fail_first_poll: bool = False) -> None:
-            self.fail_first_poll = fail_first_poll
-            self.emitted = False
-            self.closed = False
-            self.closed_event = threading.Event()
-
-        def execute(self, query: str) -> None:
-            del query
-            operation_threads.append(threading.get_ident())
-
-        def notifies(self, *, timeout: float, stop_after: int):
-            del timeout, stop_after
-            operation_threads.append(threading.get_ident())
-            if self.fail_first_poll:
-                self.fail_first_poll = False
+        self.operation_threads.append(threading.get_ident())
+        self.entered.set()
+        try:
+            if self.fail_receive:
                 raise runtime_ipc.psycopg.OperationalError('connection lost')
-            if not self.emitted:
-                self.emitted = True
-                return [SimpleNamespace(payload='{"kind":"reconnected"}')]
-            self.closed_event.wait(timeout=0.01)
-            return []
+            for payload in self.payloads:
+                self.emitted += 1
+                yield Notify('runtime_events', payload, 1)
+            await asyncio.Event().wait()
+        finally:
+            self.generator_closed.set()
 
-        def close(self) -> None:
-            self.closed = True
-            self.closed_event.set()
-            operation_threads.append(threading.get_ident())
+    async def close(self) -> None:
+        self.operation_threads.append(threading.get_ident())
+        self.closed = True
 
-    connections = [Connection(fail_first_poll=True), Connection()]
-    opened_connections: list[Connection] = []
 
-    def connect(*args, **kwargs) -> Connection:
-        del args, kwargs
-        connection = connections[min(len(opened_connections), len(connections) - 1)]
-        opened_connections.append(connection)
-        return connection
+def _install_connections(monkeypatch: pytest.MonkeyPatch, *connections: _NotificationConnection) -> None:
+    from backend_core import runtime_ipc
+
+    pending = iter(connections)
+
+    async def connect(conninfo: str, *, autocommit: bool, connect_timeout: int) -> _NotificationConnection:
+        assert conninfo
+        assert autocommit and connect_timeout == 5
+        return next(pending)
+
+    monkeypatch.setattr(runtime_ipc.psycopg.AsyncConnection, 'connect', connect)
+
+
+async def _recover_nothing() -> None:
+    return None
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_owns_async_connection_on_the_event_loop(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    connection = _NotificationConnection()
+    _install_connections(monkeypatch, connection)
+    listener = await runtime_ipc.start_api_server()
+    await runtime_ipc.stop_api_server(listener)
+
+    assert connection.closed
+    assert connection.operation_threads == [threading.get_ident(), threading.get_ident()]
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_cancelled_readiness_closes_connection(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    connection = _NotificationConnection()
+    connection.listen_ready.clear()
+    _install_connections(monkeypatch, connection)
+    startup = asyncio.create_task(runtime_ipc.start_api_server())
+    await asyncio.wait_for(connection.listen_started.wait(), timeout=1)
+    assert not startup.done()
+    startup.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await startup
+    assert connection.closed
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_reconnect_requests_recovery_without_a_new_notification(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    first = _NotificationConnection(fail_receive=True)
+    second = _NotificationConnection()
+    _install_connections(monkeypatch, first, second)
+    listener = await runtime_ipc.start_api_server()
+    stop = asyncio.Event()
+    recovered = asyncio.Event()
+
+    async def handle(_payload: dict[str, object]) -> None:
+        pytest.fail('A reconnect must recover even when no further NOTIFY arrives')
+
+    async def recover() -> None:
+        if second.entered.is_set():
+            recovered.set()
+
+    task = asyncio.create_task(runtime_ipc.serve_api_notifications(listener, stop, handle, recover=recover))
+    try:
+        await asyncio.wait_for(recovered.wait(), timeout=2)
+        assert first.closed and first.generator_closed.is_set()
+    finally:
+        stop.set()
+        await task
+        await listener.close()
+    assert second.closed and second.generator_closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_burst_has_one_inflight_hint_and_no_threadsafe_callbacks(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    burst_size = 50_000
+    connection = _NotificationConnection(json.dumps({'kind': 'compute_response', 'request_id': str(index)}) for index in range(burst_size))
+    _install_connections(monkeypatch, connection)
+    listener = await runtime_ipc.start_api_server()
+    loop = asyncio.get_running_loop()
+    original_schedule = loop.call_soon_threadsafe
+    scheduled = 0
+
+    def schedule(callback, *args, context=None):
+        nonlocal scheduled
+        scheduled += 1
+        return original_schedule(callback, *args, context=context)
+
+    monkeypatch.setattr(loop, 'call_soon_threadsafe', schedule)
+    stop = asyncio.Event()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    received = 0
+    maximum_inflight = 0
 
     async def handle(payload: dict[str, object]) -> None:
-        assert threading.get_ident() == loop_thread
-        received.append(payload)
-        stop_event.set()
+        nonlocal received, maximum_inflight
+        assert payload['request_id'] == str(received)
+        maximum_inflight = max(maximum_inflight, connection.emitted - received)
+        entered.set()
+        await release.wait()
+        received += 1
+        if received == burst_size:
+            stop.set()
 
-    psycopg = runtime_ipc.psycopg
-    monkeypatch.setattr(
-        runtime_ipc,
-        'psycopg',
-        SimpleNamespace(connect=connect, OperationalError=psycopg.OperationalError),
-    )
+    tasks_before = asyncio.all_tasks()
+    task = asyncio.create_task(runtime_ipc.serve_api_notifications(listener, stop, handle, recover=_recover_nothing))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert connection.emitted == 1
+        assert len(asyncio.all_tasks() - tasks_before) == 4
+        release.set()
+        await asyncio.wait_for(task, timeout=5)
+        assert received == burst_size and maximum_inflight == 1
+        assert scheduled == 0
+        assert connection.generator_closed.is_set()
+    finally:
+        await listener.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_stop_cancels_slow_handler_and_closes_generator(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    connection = _NotificationConnection(['{"kind":"lock"}'])
+    _install_connections(monkeypatch, connection)
+    listener = await runtime_ipc.start_api_server()
+    stop = asyncio.Event()
+    entered = asyncio.Event()
+    exited = asyncio.Event()
+
+    async def handle(_payload: dict[str, object]) -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            exited.set()
+
+    task = asyncio.create_task(runtime_ipc.serve_api_notifications(listener, stop, handle, recover=_recover_nothing))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert exited.is_set() and connection.generator_closed.is_set()
+    finally:
+        await listener.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_close_joins_receive_and_recovery_tasks(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    connection = _NotificationConnection()
+    _install_connections(monkeypatch, connection)
+    listener = await runtime_ipc.start_api_server()
+    recovering = asyncio.Event()
+    recovered = asyncio.Event()
+
+    async def handle(_payload: dict[str, object]) -> None:
+        return None
+
+    async def recover() -> None:
+        recovering.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            recovered.set()
+
+    task = asyncio.create_task(runtime_ipc.serve_api_notifications(listener, asyncio.Event(), handle, recover=recover))
+    await asyncio.wait_for(recovering.wait(), timeout=1)
+    await asyncio.wait_for(listener.close(), timeout=1)
+    assert task.cancelled()
+    assert connection.closed and connection.generator_closed.is_set() and recovered.is_set()
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_coalesces_recovery_requests_during_a_slow_pass(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    connection = _NotificationConnection()
+    _install_connections(monkeypatch, connection)
+    listener = await runtime_ipc.start_api_server()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    stop = asyncio.Event()
+    calls = 0
+
+    async def handle(_payload: dict[str, object]) -> None:
+        return None
+
+    async def recover() -> None:
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        if calls == 2:
+            stop.set()
+
+    task = asyncio.create_task(runtime_ipc.serve_api_notifications(listener, stop, handle, recover=recover))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        for _ in range(50_000):
+            listener._recovery_requested.set()
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert calls == 2
+    finally:
+        await listener.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_handler_failure_requests_recovery_and_keeps_receiving(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    connection = _NotificationConnection(['{"kind":"failed"}', '{"kind":"next"}'])
+    _install_connections(monkeypatch, connection)
+    listener = await runtime_ipc.start_api_server()
+    failed = False
+    recovered = asyncio.Event()
+    stop = asyncio.Event()
+    received: list[str] = []
+
+    async def handle(payload: dict[str, object]) -> None:
+        nonlocal failed
+        if payload['kind'] == 'failed':
+            failed = True
+            raise ValueError('handler failed')
+        await recovered.wait()
+        received.append(str(payload['kind']))
+        stop.set()
+
+    async def recover() -> None:
+        if failed:
+            recovered.set()
+
+    try:
+        await asyncio.wait_for(runtime_ipc.serve_api_notifications(listener, stop, handle, recover=recover), timeout=1)
+        assert received == ['next']
+    finally:
+        await listener.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_initial_ready_connection_requests_recovery(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    connection = _NotificationConnection()
+    _install_connections(monkeypatch, connection)
+    listener = await runtime_ipc.start_api_server()
+    stop = asyncio.Event()
+    recovered = asyncio.Event()
+
+    async def handle(_payload: dict[str, object]) -> None:
+        pytest.fail('Initial recovery must not require a subsequent NOTIFY')
+
+    async def recover() -> None:
+        assert connection.entered.is_set()
+        recovered.set()
+        stop.set()
+
+    try:
+        await asyncio.wait_for(runtime_ipc.serve_api_notifications(listener, stop, handle, recover=recover), timeout=1)
+        assert recovered.is_set()
+    finally:
+        await listener.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_rejects_cross_loop_connection_use(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    connection = _NotificationConnection()
+    _install_connections(monkeypatch, connection)
     listener = await runtime_ipc.start_api_server()
 
-    await asyncio.wait_for(runtime_ipc.serve_api_notifications(listener, stop_event, handle), timeout=2)
-    await runtime_ipc.stop_api_server(listener)
+    def close_from_another_loop() -> None:
+        asyncio.run(listener.close())
 
-    assert len(opened_connections) == 2
-    assert all(connection.closed for connection in opened_connections)
-    assert operation_threads and all(thread_id != loop_thread for thread_id in operation_threads)
-    assert received == [{'kind': 'reconnected'}]
+    try:
+        with pytest.raises(RuntimeError, match='owning event loop'):
+            await asyncio.to_thread(close_from_another_loop)
+        assert not connection.closed
+    finally:
+        await listener.close()
+
+
+@pytest.mark.asyncio
+async def test_api_recovery_requests_all_durable_projection_lanes_even_if_one_fails(monkeypatch) -> None:
+    from backend_core import runtime_notifications
+    from modules.chat.store import chat_stream_recovery
+
+    called: list[str] = []
+    monkeypatch.setattr(runtime_notifications.response_recovery, 'request_poll', lambda: called.append('compute'))
+    monkeypatch.setattr(chat_stream_recovery, 'wake', lambda: called.append('chat'))
+    monkeypatch.setattr(runtime_notifications.OUTBOX_WAKE_HUB, 'publish', lambda payload: called.append('outbox'))
+
+    async def builds() -> None:
+        called.append('builds')
+        raise ValueError('build database unavailable')
+
+    async def engines() -> None:
+        called.append('engines')
+
+    async def locks() -> None:
+        called.append('locks')
+
+    with pytest.raises(ExceptionGroup, match='Runtime projection recovery failed'):
+        await runtime_notifications.recover_runtime_notifications(refresh_builds=builds, refresh_engines=engines, refresh_locks=locks)
+    assert called == ['compute', 'chat', 'outbox', 'builds', 'engines', 'locks']
 
 
 @pytest.mark.asyncio

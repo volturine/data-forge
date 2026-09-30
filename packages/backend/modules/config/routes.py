@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 
 from fastapi import Query
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
+from backend_core.api_execution_budget import run_bootstrap_settings_db
 from backend_core.auth_config import settings as auth_settings
 from backend_core.config import settings
 from backend_core.error_handlers import handle_errors
@@ -56,9 +56,7 @@ def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
 @handle_errors(operation='get config')
 async def get_config() -> FrontendConfig:
     """Get application configuration: runtime settings, logging settings, feature flags, and default namespace."""
-    from backend_core.database import run_settings_db
-
-    db_settings = await run_in_threadpool(run_settings_db, get_settings)
+    db_settings = await run_bootstrap_settings_db(get_settings)
     return _build_frontend_config(db_settings)
 
 

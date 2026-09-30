@@ -180,6 +180,13 @@ async def _handle_coordinator_notification(
         telegram_wake()
 
 
+async def _recover_coordinator_notifications(*, chat_wake: Callable[[], None], telegram_wake: Callable[[], None]) -> None:
+    """Wake durable consumers after initial LISTEN readiness or a reconnect."""
+    OUTBOX_WAKE_HUB.publish(None)
+    chat_wake()
+    telegram_wake()
+
+
 async def _supervise_epoch(tasks: list[asyncio.Task[None]], process_stop: asyncio.Task[bool], owner_stop: asyncio.Task[bool]) -> None:
     done, _pending = await asyncio.wait({process_stop, owner_stop, *tasks}, return_when=asyncio.FIRST_COMPLETED)
     if process_stop in done or owner_stop in done:
@@ -284,9 +291,12 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
         chat_consumer = await asyncio.to_thread(ChatTurnConsumer, app, coordinator_generation)
         telegram_runtime = TelegramIntegrationRuntime(coordinator_generation)
         handler = partial(_handle_coordinator_notification, chat_wake=chat_consumer.wake, telegram_wake=telegram_runtime.wake)
+        recover = partial(_recover_coordinator_notifications, chat_wake=chat_consumer.wake, telegram_wake=telegram_runtime.wake)
         tasks.extend(
             [
-                asyncio.create_task(runtime_ipc.serve_api_notifications(listener, owner_stop_event, handler), name='coordinator-notifications'),
+                asyncio.create_task(
+                    runtime_ipc.serve_api_notifications(listener, owner_stop_event, handler, recover=recover), name='coordinator-notifications'
+                ),
                 asyncio.create_task(RuntimeOutboxDispatcher().run(owner_stop_event), name='runtime-outbox'),
                 asyncio.create_task(NotificationDeliveryDispatcher().run(owner_stop_event), name='notification-delivery'),
                 asyncio.create_task(chat_consumer.run(owner_stop_event), name='chat-turn-consumer'),

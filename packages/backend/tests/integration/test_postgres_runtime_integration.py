@@ -1459,11 +1459,17 @@ async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path
         async def handler(payload: dict[str, object]) -> None:
             await received.put(payload)
 
+        recovered = asyncio.Event()
+
+        async def recover() -> None:
+            recovered.set()
+
         server = await runtime_ipc.start_api_server()
         assert server is not None
         engine = create_engine(container.url)
         try:
-            task = asyncio.create_task(runtime_ipc.serve_api_notifications(server, stop_event, handler))
+            task = asyncio.create_task(runtime_ipc.serve_api_notifications(server, stop_event, handler, recover=recover))
+            await asyncio.wait_for(recovered.wait(), timeout=15)
             await asyncio.to_thread(runtime_ipc.notify_api_build, 'default', 'build-1', 7)
             await asyncio.to_thread(runtime_ipc.notify_build_job)
 

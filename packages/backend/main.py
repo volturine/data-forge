@@ -9,7 +9,7 @@ import time
 import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,6 +23,7 @@ from starlette.requests import ClientDisconnect
 
 from api import include_api_routes
 from backend_core import runtime_ipc
+from backend_core.api_execution_budget import ApiDatabaseBudget, register_bootstrap_executor_lifecycle
 from backend_core.auth_config import settings as auth_settings
 from backend_core.compute_response_recovery import response_recovery
 from backend_core.config import settings
@@ -33,6 +34,7 @@ from backend_core.database import (
     run_db,
     run_settings_db,
 )
+from backend_core.engine_live import registry as engine_registry
 from backend_core.error_handlers import (
     app_error_handler,
     client_disconnect_handler,
@@ -53,7 +55,7 @@ from backend_core.logging import (
 from backend_core.namespace import namespace_paths, normalize_namespace, reset_namespace, set_namespace_context
 from backend_core.namespaces_service import register_namespace
 from backend_core.runtime_ipc import RuntimeListenerKind
-from backend_core.runtime_notifications import handle_runtime_payload
+from backend_core.runtime_notifications import handle_runtime_payload, recover_runtime_notifications, refresh_build_projections, refresh_lock_projections
 from backend_core.settings_store import seed_settings_from_env
 from modules.udf import service as udf_service
 
@@ -62,11 +64,11 @@ register_settings_bootstrap_hook(seed_settings_from_env)
 ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger(__name__)
 
-# AnyIO serves synchronous routes; asyncio.to_thread serves blocking calls in
-# async routes. Size the latter to one SQLAlchemy pool and keep the implicit
-# sync-handler pool small, so async auth/data paths can use the pool's capacity.
+# These are API-local upper bounds. Runtime coordinator processes never install
+# this budget or inherit its worker allocations.
 _API_BLOCKING_WORKERS = 12
 _API_SYNC_HANDLER_WORKERS = 4
+_API_BOOTSTRAP_WORKERS = 2
 _API_DIAGNOSTICS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='api-diagnostics')
 _API_PROCESS_SNAPSHOT_TTL_SECONDS = 1.0
 _API_PROCESS_SNAPSHOT_LOCK = threading.Lock()
@@ -74,20 +76,16 @@ _api_process_snapshot_cache: tuple[float, dict[str, object]] | None = None
 _api_process_snapshot_refreshing = False
 
 
-def _api_thread_budget() -> tuple[int, int]:
-    """Return bounded asyncio and AnyIO worker counts for one API process.
-
-    Most request paths are async and explicitly offload synchronous database
-    work through ``asyncio.to_thread``. Each SQLAlchemy engine has its own
-    bounded pool; the default executor can use one pool's capacity, while
-    synchronous FastAPI handlers retain a separate small AnyIO allowance.
-    """
-    database_capacity = max(settings.database_pool_size + settings.database_max_overflow, 1)
-    connection_limit = settings.worker_connections if settings.worker_connections > 0 else database_capacity
-    request_capacity = min(connection_limit, database_capacity)
-    blocking_workers = min(_API_BLOCKING_WORKERS, request_capacity)
-    sync_workers = min(_API_SYNC_HANDLER_WORKERS, request_capacity)
-    return blocking_workers, sync_workers
+def _api_thread_budget() -> ApiDatabaseBudget:
+    """Derive disjoint API thread lanes from both engine pool capacities."""
+    pool_capacity = settings.database_pool_size + settings.database_max_overflow
+    return ApiDatabaseBudget.derive(
+        settings_pool_capacity=pool_capacity,
+        tenant_pool_capacity=pool_capacity,
+        api_thread_upper_bound=_API_BLOCKING_WORKERS,
+        sync_worker_upper_bound=_API_SYNC_HANDLER_WORKERS,
+        bootstrap_worker_upper_bound=_API_BOOTSTRAP_WORKERS,
+    )
 
 
 def _new_api_blocking_executor(workers: int | None = None) -> ThreadPoolExecutor:
@@ -102,7 +100,7 @@ def _new_api_blocking_executor(workers: int | None = None) -> ThreadPoolExecutor
     # their loop, which also shuts down its default executor; a process-global
     # executor would then be reused after shutdown by the next lifespan.
     return ThreadPoolExecutor(
-        max_workers=_api_thread_budget()[0] if workers is None else workers,
+        max_workers=_api_thread_budget().general_workers if workers is None else workers,
         thread_name_prefix='api-blocking',
     )
 
@@ -342,12 +340,10 @@ def _configure_sync_thread_capacity() -> int:
     """Align AnyIO's sync-handler limiter with the API DB-work budget.
 
     Starlette runs synchronous route handlers and ``run_in_threadpool`` calls
-    through AnyIO's default limiter, which is 40 tokens regardless of
-    ``WORKER_CONNECTIONS``. Bound it together with the asyncio default
-    executor; both can run synchronous DB work, so neither consumes the full
-    database pool independently.
+    through AnyIO's default limiter. Its allocation is disjoint from the
+    general executor and protected bootstrap executor.
     """
-    _blocking_workers, target = _api_thread_budget()
+    target = _api_thread_budget().sync_workers
     limiter = anyio.to_thread.current_default_thread_limiter()
     limiter.total_tokens = target
     return int(limiter.total_tokens)
@@ -414,22 +410,45 @@ async def event_loop_lag_loop(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async with AsyncExitStack() as cleanup:
+        await _start_api_lifespan(app, cleanup)
+        yield
+
+
+async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     # Validate the external coordinator contract here rather than only in the
     # __main__ block: launching via `uvicorn main:app --workers N` bypasses
     # __main__ entirely.
     _guard_runtime_workers(_resolve_uvicorn_workers())
+    api_budget = _api_thread_budget()
     sync_handler_workers = _configure_sync_thread_capacity()
     # ``asyncio.to_thread`` otherwise creates a host-sized default executor.
-    # Use the same bounded budget as synchronous route handlers so durable
-    # request polling, object-store work, and filesystem cleanup cannot create
-    # an unbounded second control plane beside AnyIO's limiter.
+    # General, AnyIO, and bootstrap threads together fit the database capacity.
     loop = asyncio.get_running_loop()
-    api_blocking_workers, _ = _api_thread_budget()
+    api_blocking_workers = api_budget.general_workers
     api_blocking_executor = _new_api_blocking_executor(api_blocking_workers)
     loop.set_default_executor(api_blocking_executor)
+    bootstrap_executor = ThreadPoolExecutor(max_workers=api_budget.bootstrap_workers, thread_name_prefix='api-bootstrap')
+    api_logging_configured = False
+
+    async def shutdown_api_resources() -> None:
+        if not api_logging_configured:
+            return
+        logger.info('Application shutdown complete')
+        await asyncio.to_thread(flush_request_logs)
+        await asyncio.to_thread(shutdown_logging)
+
+    register_bootstrap_executor_lifecycle(
+        loop,
+        bootstrap_executor,
+        api_budget.bootstrap_workers,
+        cleanup,
+        _API_DIAGNOSTICS_EXECUTOR,
+        after_shutdown=shutdown_api_resources,
+    )
     # ThreadPoolExecutor creates threads on its first submissions. Doing that
     # lazily during a burst blocks the submitting event loop in Thread.start().
-    # Prime the request-path pools while startup is still closed to traffic.
+    # Prime all API-owned request pools while startup is still closed to traffic.
     from backend_core.websocket import _WEBSOCKET_SERIALIZATION_EXECUTOR
     from modules.compute.executor_client import _COMPUTE_SERIALIZATION_EXECUTOR
 
@@ -442,6 +461,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _prewarm_executor(_COMPUTE_SERIALIZATION_EXECUTOR, 4),
         _prewarm_executor(_WEBSOCKET_SERIALIZATION_EXECUTOR, 2),
         request_log_prewarm,
+        _prewarm_executor(bootstrap_executor, api_budget.bootstrap_workers),
     )
     # Fail closed at boot if any /v1 route was added without authentication.
     from api.v1.router import verify_v1_auth_coverage
@@ -456,6 +476,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # cannot serialize on filesystem access or the default AnyIO threadpool.
     await asyncio.to_thread(_load_frontend_asset_cache)
     await configure_logging_off_loop()
+    api_logging_configured = True
+    cleanup.push_async_callback(close_clients)
     logger.info('Starting application...')
     # This is an observability identity only. API children do not register as
     # runtime workers and never own runtime leases, gRPC listeners, or engine
@@ -473,14 +495,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     stop_event = asyncio.Event()
     event_loop_watchdog = EventLoopBlockWatchdog()
     event_loop_watchdog.start()
+    cleanup.callback(event_loop_watchdog.stop)
     ipc_server = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.API)
+    cleanup.push_async_callback(runtime_ipc.stop_api_server, ipc_server, listener=RuntimeListenerKind.API)
 
-    event_loop_lag_task = asyncio.create_task(
-        event_loop_lag_loop(stop_event, watchdog=event_loop_watchdog),
-        name='api-event-loop-lag',
+    background_tasks: list[asyncio.Task[None]] = []
+
+    async def stop_background_tasks() -> None:
+        stop_event.set()
+        await asyncio.gather(*background_tasks)
+
+    cleanup.push_async_callback(stop_background_tasks)
+
+    background_tasks.append(
+        asyncio.create_task(
+            event_loop_lag_loop(stop_event, watchdog=event_loop_watchdog),
+            name='api-event-loop-lag',
+        )
     )
-    compute_response_recovery_task = asyncio.create_task(response_recovery.run(stop_event))
-    ipc_task = asyncio.create_task(runtime_ipc.serve_api_notifications(ipc_server, stop_event, handle_runtime_payload))
+    background_tasks.append(asyncio.create_task(response_recovery.run(stop_event)))
+    background_tasks.append(
+        asyncio.create_task(runtime_ipc.serve_api_notifications(ipc_server, stop_event, handle_runtime_payload, recover=_recover_api_notifications))
+    )
 
     from modules.mcp.routes import get_registry
 
@@ -488,20 +524,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     warmed_anyio_threads = await _prewarm_anyio_thread_pool(sync_handler_workers)
     logger.info('Prewarmed AnyIO synchronous-handler threads=%s', warmed_anyio_threads)
 
-    try:
-        yield
-    finally:
-        stop_event.set()
-        event_loop_watchdog.stop()
-        shutdown_tasks = [event_loop_lag_task, compute_response_recovery_task, ipc_task]
-        try:
-            await asyncio.gather(*shutdown_tasks)
-            await runtime_ipc.stop_api_server(ipc_server, listener=RuntimeListenerKind.API)
-            await close_clients()
-        finally:
-            logger.info('Application shutdown complete')
-            await asyncio.to_thread(flush_request_logs)
-            await asyncio.to_thread(shutdown_logging)
+
+async def _recover_api_notifications() -> None:
+    await recover_runtime_notifications(
+        refresh_builds=refresh_build_projections, refresh_engines=engine_registry.recover_active, refresh_locks=refresh_lock_projections
+    )
 
 
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
@@ -614,7 +641,9 @@ app.add_middleware(
         'X-Client-Id',
         'X-Namespace',
         'X-Session-Token',
+        'X-Request-ID',
     ],
+    expose_headers=['X-Request-ID'],
 )
 
 

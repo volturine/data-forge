@@ -15,6 +15,7 @@ export interface RequestTraceEntry {
 	durationMs: number | null;
 	serverDurationMs: number | null;
 	status: number | null;
+	clientRequestId: string | null;
 	requestId: string | null;
 	responseFields: string[] | null;
 	responseBuildId: string | null;
@@ -111,6 +112,7 @@ export function createRequestTrace(
 			durationMs: null,
 			serverDurationMs: null,
 			status: null,
+			clientRequestId: request.headers()['x-request-id'] ?? null,
 			requestId: null,
 			responseFields: null,
 			responseBuildId: null,

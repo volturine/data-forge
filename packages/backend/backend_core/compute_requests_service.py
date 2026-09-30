@@ -313,6 +313,16 @@ def _stage_request(
         # while deletion retains an exclusive fence.
         validate()
 
+    if command.WhichOneof('command') == 'datasource' and command.datasource.WhichOneof('command') == 'preflight':
+        preflight = command.datasource.preflight
+        if preflight.action != enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL and not preflight.HasField('datasource_id'):
+            parent = session.get(ComputeRequest, preflight.preflight_id, with_for_update=True, populate_existing=True)
+            if parent is None or parent.kind != enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT:
+                raise ValueError('Excel preflight source has been retired')
+            original = command_envelope_for_request(parent).command.datasource.preflight
+            if parent.status != enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED or original.source_path != preflight.source_path:
+                raise ValueError('Excel preflight source is not available for this command')
+
     _snapshot_input_revisions(session, command)
     datasource_ids = _datasource_ids_for_command(command)
     flight_key = _flight_key(kind, command) if deduplicate_flight else None
@@ -334,6 +344,13 @@ def _stage_request(
             return existing, False
 
     request_id = request_id or str(uuid.uuid4())
+    if command.WhichOneof('command') == 'datasource':
+        from backend_core import storage_cleanup_service
+
+        if command.datasource.WhichOneof('command') == 'create_file':
+            storage_cleanup_service.transfer_preflight_source(session, source_path=command.datasource.create_file.file_path, request_id=request_id)
+        if command.datasource.WhichOneof('command') == 'preflight':
+            storage_cleanup_service.validate_source_enqueue(session, source_path=command.datasource.preflight.source_path)
     envelope = command_envelope(
         kind=kind,
         command=command,
@@ -356,10 +373,22 @@ def _stage_request(
     session.add(request)
     if command.WhichOneof('command') == 'datasource' and command.datasource.WhichOneof('command') == 'preflight':
         preflight = command.datasource.preflight
+        request.artifact_path = preflight.source_path
         if preflight.action == enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL and preflight.delete_source:
+            from backend_core import storage_cleanup_service
+
             request.artifact_path = preflight.source_path
             request.artifact_name = 'preflight-source'
             request.artifact_content_type = 'application/vnd.dataforge.preflight-source'
+            storage_cleanup_service.register_preflight_source(
+                session,
+                preflight_id=request.id,
+                resource_id=preflight.preflight_id,
+                source_path=preflight.source_path,
+                available_at=now + storage_cleanup_service.PREFLIGHT_TTL,
+            )
+    if command.WhichOneof('command') == 'datasource' and command.datasource.WhichOneof('command') == 'create_file':
+        request.artifact_path = command.datasource.create_file.file_path
     session.flush()
     session.add_all(ComputeRequestDatasource(request_id=request.id, datasource_id=datasource_id) for datasource_id in datasource_ids)
     if flight_key is not None:

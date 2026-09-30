@@ -37,6 +37,7 @@ from backend_core import (
     runtime_outbox_service,
     runtime_work_service,
     runtime_workers_service as runtime_worker_service,
+    storage_cleanup_service,
 )
 from backend_core.ai_clients import get_ai_client
 from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS
@@ -89,7 +90,7 @@ from modules.scheduler import commands as scheduler_commands, service as schedul
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = 'x-internal-token'
 _RUNTIME_GENERATION_METADATA_KEY = 'x-runtime-coordinator-generation'
-_WORKER_RUNTIME_SERVICE_PREFIX = '/dataforge_protocol.WorkerRuntimeService/'
+_WORKER_RUNTIME_SERVICE_PREFIX = f'/{worker_runtime_pb2.DESCRIPTOR.services_by_name["WorkerRuntimeService"].full_name}/'
 _BUILD_JOB_PROTOCOL_VERSION = 2
 
 
@@ -1172,6 +1173,91 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
+    def RegisterDatasourceStage(
+        self, request: worker_runtime_pb2.WorkerRegisterDatasourceStageRequest, metadata: RpcMetadata
+    ) -> worker_runtime_pb2.BoolResponse:
+        token = set_namespace_context(request.namespace)
+        try:
+            owner = request.WhichOneof('owner')
+            run_db(
+                storage_cleanup_service.register_stage,
+                datasource_id=request.datasource_id,
+                owner_kind='compute' if owner == 'compute_request_id' else 'build',
+                owner_id=request.compute_request_id if owner == 'compute_request_id' else request.job_id,
+                worker_id=request.worker_id,
+                claim_token=request.claim_token,
+                lease_generation=request.lease_generation,
+                prefix_url=request.prefix_url,
+                artifact_url=request.artifact_url,
+                catalog_identifier=request.catalog_identifier,
+                build_id=request.build_id if request.HasField('build_id') else None,
+            )
+            return _bool(True)
+        except storage_cleanup_service.StorageCleanupConflict as exc:
+            raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, str(exc)) from exc
+        finally:
+            reset_namespace(token)
+
+    @_run_control_handler_in_thread
+    def ClaimStorageCleanup(
+        self, request: worker_runtime_pb2.WorkerClaimStorageCleanupRequest, metadata: RpcMetadata
+    ) -> worker_runtime_pb2.WorkerStorageCleanupClaimsResponse:
+        token = set_namespace_context(request.namespace)
+        try:
+            claims = run_db(storage_cleanup_service.claim_cleanups, limit=request.limit)
+            cleanups = []
+            for claim in claims:
+                cleanup = worker_runtime_pb2.WorkerStorageCleanupClaim(
+                    claim=worker_runtime_pb2.WorkerStorageCleanupClaimRequest(
+                        namespace=request.namespace,
+                        event_id=claim.event_id,
+                        claim_token=claim.claim_token,
+                        lease_generation=claim.lease_generation,
+                    ),
+                    resource_id=str(claim.payload['resource_id']),
+                    url=str(claim.payload['url']),
+                    is_prefix=claim.payload['is_prefix'] is True,
+                )
+                catalog_identifier = claim.payload.get('catalog_identifier')
+                if isinstance(catalog_identifier, str):
+                    cleanup.catalog_identifier = catalog_identifier
+                cleanups.append(cleanup)
+            return worker_runtime_pb2.WorkerStorageCleanupClaimsResponse(cleanups=cleanups)
+        finally:
+            reset_namespace(token)
+
+    @_run_control_handler_in_thread
+    def AuthorizeStorageCleanup(self, request: worker_runtime_pb2.WorkerStorageCleanupClaimRequest, metadata: RpcMetadata) -> worker_runtime_pb2.BoolResponse:
+        token = set_namespace_context(request.namespace)
+        try:
+            return _bool(
+                run_db(
+                    storage_cleanup_service.authorize_cleanup,
+                    event_id=request.event_id,
+                    claim_token=request.claim_token,
+                    lease_generation=request.lease_generation,
+                )
+            )
+        finally:
+            reset_namespace(token)
+
+    @_run_control_handler_in_thread
+    def CompleteStorageCleanup(self, request: worker_runtime_pb2.WorkerCompleteStorageCleanupRequest, metadata: RpcMetadata) -> worker_runtime_pb2.BoolResponse:
+        token = set_namespace_context(request.claim.namespace)
+        try:
+            return _bool(
+                run_db(
+                    storage_cleanup_service.complete_cleanup,
+                    event_id=request.claim.event_id,
+                    claim_token=request.claim.claim_token,
+                    lease_generation=request.claim.lease_generation,
+                    error=request.error if request.HasField('error') else None,
+                )
+            )
+        finally:
+            reset_namespace(token)
+
+    @_run_async_handler_in_thread
     def PublishDatasourceCreate(
         self, request: worker_runtime_pb2.WorkerPublishDatasourceCreateRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerPublishDatasourceCreateResponse:
@@ -1179,6 +1265,18 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         session_gen = get_db()
         session = next(session_gen)
         try:
+
+            def guard_publication(active_session: Session) -> None:
+                claim = compute_requests_service.lock_active_request_claim(
+                    active_session,
+                    request.compute_request_id,
+                    worker_id=request.worker_id,
+                    claim_token=request.claim_token,
+                    lease_generation=request.lease_generation,
+                )
+                if claim is None or request.datasource_id != request.compute_request_id:
+                    raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Datasource create publication claim is no longer active')
+
             schema_info = None
             if request.HasField('schema_info') and len(request.schema_info.columns) > 0:
                 schema_info = request.schema_info
@@ -1191,6 +1289,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 config=struct_to_dict(request.config),
                 owner_id=request.owner_id if request.HasField('owner_id') else None,
                 schema_info=schema_info,
+                publication_guard=guard_publication,
             )
             record = datasource_result_from_payload(
                 enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
@@ -1199,6 +1298,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             if record.WhichOneof('result') != 'datasource':
                 raise ValueError('create publication must return a datasource result')
             return worker_runtime_pb2.WorkerPublishDatasourceCreateResponse(datasource=record.datasource)
+        except storage_cleanup_service.StorageCleanupConflict as exc:
+            raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, str(exc)) from exc
         finally:
             close_rpc_session(session_gen)
             reset_namespace(token)
@@ -1221,7 +1322,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             if has_build and not (request.HasField('job_id') and request.HasField('build_id')):
                 raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build job claim fields must be provided together')
 
-            def _guard_publication(active_session: Any) -> None:
+            def _guard_publication(active_session: Session) -> None:
                 if has_compute:
                     request_claim = compute_requests_service.lock_active_request_claim(
                         active_session,
@@ -1268,6 +1369,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             if record.WhichOneof('result') != 'datasource':
                 raise ValueError('ingest publication must return a datasource result')
             return worker_runtime_pb2.WorkerPublishDatasourceIngestResponse(datasource=record.datasource)
+        except storage_cleanup_service.StorageCleanupConflict as exc:
+            raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, str(exc)) from exc
         finally:
             close_rpc_session(session_gen)
             reset_namespace(token)

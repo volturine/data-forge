@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import tempfile
@@ -44,7 +45,6 @@ class FauxDatasourceRuntime:
 
     async def create_preflight(
         self,
-        session: Session,
         *,
         source_path: str,
         selection: dict[str, object],
@@ -53,7 +53,7 @@ class FauxDatasourceRuntime:
     ) -> tuple[str, Any, dict[str, object]]:
         from modules.datasource.preflight import ExcelPreflight
 
-        del session, runtime_probe
+        del runtime_probe
         preflight_id = str(uuid.uuid4())
         self.preflight_calls.append(('initial', dict(selection)))
         preflight = ExcelPreflight(
@@ -76,7 +76,6 @@ class FauxDatasourceRuntime:
 
     async def execute_excel_preflight(
         self,
-        session: Session,
         *,
         preflight_id: str,
         source_path: str,
@@ -86,7 +85,7 @@ class FauxDatasourceRuntime:
         delete_source: bool = False,
         datasource_id: str | None = None,
     ) -> dict[str, object]:
-        del session, preflight_id, source_path, runtime_probe, delete_source, datasource_id
+        del preflight_id, source_path, runtime_probe, delete_source, datasource_id
         self.preflight_calls.append((str(action), dict(selection)))
         return self._preflight_result(selection)
 
@@ -126,7 +125,6 @@ class FauxDatasourceRuntime:
 
     async def create_file_datasource(
         self,
-        session: Session,
         *,
         name: str,
         description: str | None,
@@ -137,45 +135,49 @@ class FauxDatasourceRuntime:
         owner_id: str | None = None,
         **kwargs: Any,
     ):
-        from backend_core.data_plane_client import client_from_settings
-        from backend_core.namespace import get_namespace
+        from backend_core.database import run_db
 
-        data_plane = client_from_settings()
-        metadata_root = data_plane.build_object_url('clean', uuid.uuid4().hex, 'master', namespace=get_namespace())
-        data_plane.upload_object_bytes(
-            b'{"metadata":"placeholder"}',
-            data_plane.join_object_url(metadata_root, 'metadata', '00000-placeholder.metadata.json'),
-        )
+        def _work(session: Session):
+            from backend_core.data_plane_client import client_from_settings
+            from backend_core.namespace import get_namespace
 
-        datasource = DataSource(
-            id=str(uuid.uuid4()),
-            name=name,
-            description=description,
-            source_type=DataSourceType.ICEBERG,
-            config={
-                'metadata_path': metadata_root,
-                'branch': 'master',
-                'source': {
-                    'source_type': 'file',
-                    'file_path': file_path,
-                    'file_type': file_type,
-                    'options': options or csv_options or {},
-                    **{key: value for key, value in kwargs.items() if value is not None and key not in {'runtime_probe', 'branch'}},
+            data_plane = client_from_settings()
+            metadata_root = data_plane.build_object_url('clean', uuid.uuid4().hex, 'master', namespace=get_namespace())
+            data_plane.upload_object_bytes(
+                b'{"metadata":"placeholder"}',
+                data_plane.join_object_url(metadata_root, 'metadata', '00000-placeholder.metadata.json'),
+            )
+
+            datasource = DataSource(
+                id=str(uuid.uuid4()),
+                name=name,
+                description=description,
+                source_type=DataSourceType.ICEBERG,
+                config={
+                    'metadata_path': metadata_root,
+                    'branch': 'master',
+                    'source': {
+                        'source_type': 'file',
+                        'file_path': file_path,
+                        'file_type': file_type,
+                        'options': options or csv_options or {},
+                        **{key: value for key, value in kwargs.items() if value is not None and key not in {'runtime_probe', 'branch'}},
+                    },
                 },
-            },
-            owner_id=owner_id,
-            created_by='import',
-            created_at=datetime.now(UTC),
-        )
-        datasource.schema_cache = schema_info_payload(self._schema_for(datasource))
-        session.add(datasource)
-        session.commit()
-        session.refresh(datasource)
-        return self._response(datasource)
+                owner_id=owner_id,
+                created_by='import',
+                created_at=datetime.now(UTC),
+            )
+            datasource.schema_cache = schema_info_payload(self._schema_for(datasource))
+            session.add(datasource)
+            session.commit()
+            session.refresh(datasource)
+            return self._response(datasource)
+
+        return await asyncio.to_thread(run_db, _work)
 
     async def create_database_datasource(
         self,
-        session: Session,
         *,
         name: str,
         description: str | None,
@@ -185,29 +187,32 @@ class FauxDatasourceRuntime:
         owner_id: str | None = None,
         **kwargs: Any,
     ):
-        del kwargs
-        datasource = DataSource(
-            id=str(uuid.uuid4()),
-            name=name,
-            description=description,
-            source_type=DataSourceType.DATABASE,
-            config={
-                'connection_string': connection_string,
-                'query': query,
-                'branch': branch,
-            },
-            owner_id=owner_id,
-            created_by='import',
-            created_at=datetime.now(UTC),
-        )
-        session.add(datasource)
-        session.commit()
-        session.refresh(datasource)
-        return self._response(datasource)
+        from backend_core.database import run_db
+
+        def _work(session: Session):
+            datasource = DataSource(
+                id=str(uuid.uuid4()),
+                name=name,
+                description=description,
+                source_type=DataSourceType.DATABASE,
+                config={
+                    'connection_string': connection_string,
+                    'query': query,
+                    'branch': branch,
+                },
+                owner_id=owner_id,
+                created_by='import',
+                created_at=datetime.now(UTC),
+            )
+            session.add(datasource)
+            session.commit()
+            session.refresh(datasource)
+            return self._response(datasource)
+
+        return await asyncio.to_thread(run_db, _work)
 
     async def create_iceberg_datasource(
         self,
-        session: Session,
         *,
         name: str,
         description: str | None,
@@ -217,7 +222,6 @@ class FauxDatasourceRuntime:
         **kwargs: Any,
     ):
         return await self.create_file_datasource(
-            session,
             name=name,
             description=description,
             file_path=str(source.get('file_path')),
@@ -228,42 +232,54 @@ class FauxDatasourceRuntime:
             **kwargs,
         )
 
-    async def get_datasource_schema(self, session: Session, *, datasource_id: str, **kwargs: Any):
-        del kwargs
-        datasource = self._get_datasource(session, datasource_id)
-        schema = self._schema_for(datasource)
-        datasource.schema_cache = schema_info_payload(schema)
-        session.add(datasource)
-        session.commit()
-        return schema
+    async def get_datasource_schema(self, *, datasource_id: str, **kwargs: Any):
+        from backend_core.database import run_db
 
-    async def ingest_datasource(self, session: Session, *, datasource_id: str, **kwargs: Any):
-        del kwargs
-        datasource = self._get_datasource(session, datasource_id)
-        datasource.schema_cache = schema_info_payload(self._schema_for(datasource))
-        session.add(datasource)
-        session.commit()
-        session.refresh(datasource)
-        return self._response(datasource)
+        def _work(session: Session):
+            datasource = self._get_datasource(session, datasource_id)
+            schema = self._schema_for(datasource)
+            datasource.schema_cache = schema_info_payload(schema)
+            session.add(datasource)
+            session.commit()
+            return schema
 
-    async def get_column_stats(self, session: Session, *, datasource_id: str, column_name: str, **kwargs: Any):
-        del kwargs
-        from modules.datasource import schemas
+        return await asyncio.to_thread(run_db, _work)
 
-        datasource = self._get_datasource(session, datasource_id)
-        series = self._read_dataframe(datasource)[column_name]
-        count = len(series)
-        null_count = series.null_count()
-        return schemas.ColumnStatsResponse(
-            column=column_name,
-            dtype=str(series.dtype),
-            count=count,
-            null_count=null_count,
-            null_percentage=(null_count / count * 100) if count else 0,
-            unique=series.n_unique(),
-            min=self._stat_value(series.min()),
-            max=self._stat_value(series.max()),
-        )
+    async def ingest_datasource(self, *, datasource_id: str, **kwargs: Any):
+        from backend_core.database import run_db
+
+        def _work(session: Session):
+            datasource = self._get_datasource(session, datasource_id)
+            datasource.schema_cache = schema_info_payload(self._schema_for(datasource))
+            session.add(datasource)
+            session.commit()
+            session.refresh(datasource)
+            return self._response(datasource)
+
+        return await asyncio.to_thread(run_db, _work)
+
+    async def get_column_stats(self, *, datasource_id: str, column_name: str, **kwargs: Any):
+        from backend_core.database import run_db
+
+        def _work(session: Session):
+            from modules.datasource import schemas
+
+            datasource = self._get_datasource(session, datasource_id)
+            series = self._read_dataframe(datasource)[column_name]
+            count = len(series)
+            null_count = series.null_count()
+            return schemas.ColumnStatsResponse(
+                column=column_name,
+                dtype=str(series.dtype),
+                count=count,
+                null_count=null_count,
+                null_percentage=(null_count / count * 100) if count else 0,
+                unique=series.n_unique(),
+                min=self._stat_value(series.min()),
+                max=self._stat_value(series.max()),
+            )
+
+        return await asyncio.to_thread(run_db, _work)
 
     def _source_options(self, source: dict[str, object]) -> dict[str, Any]:
         options = source.get('options')

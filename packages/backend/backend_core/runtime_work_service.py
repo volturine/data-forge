@@ -20,6 +20,7 @@ class RuntimeWorkKind(StrEnum):
     BUILD = 'build'
     COMPUTE = 'compute'
     DATASOURCE_DELETE = 'datasource_delete'
+    STORAGE_CLEANUP = 'storage_cleanup'
     SCHEDULE = 'schedule'
 
 
@@ -27,6 +28,7 @@ WORKER_RECOVERY_KINDS = (
     RuntimeWorkKind.BUILD,
     RuntimeWorkKind.COMPUTE,
     RuntimeWorkKind.DATASOURCE_DELETE,
+    RuntimeWorkKind.STORAGE_CLEANUP,
 )
 _SLOW_WAKE_OPERATION_SECONDS = 0.25
 

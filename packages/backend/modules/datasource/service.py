@@ -8,7 +8,7 @@ from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import defer
 from sqlmodel import Session
 
-from backend_core import datasource_delete_service
+from backend_core import datasource_delete_service, storage_cleanup_service
 from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy
@@ -611,7 +611,7 @@ def update_datasource(
     resolved_excel_selection: tuple[str, int, int, int, int] | None = None,
     expected_revision: int | None = None,
 ) -> DataSourceResponse:
-    datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
+    datasource = datasource_delete_service.get_active_datasource(session, datasource_id, for_update=True)
     if expected_revision is not None and datasource.revision != expected_revision:
         raise DataSourceValidationError('Datasource changed while Excel selection was being resolved', details={'datasource_id': datasource_id})
     changed = False
@@ -742,6 +742,7 @@ def update_datasource(
     if changed:
         datasource.revision += 1
         session.add(datasource)
+        storage_cleanup_service.settle_publication(session, datasource.config)
     session.commit()
     session.refresh(datasource)
 

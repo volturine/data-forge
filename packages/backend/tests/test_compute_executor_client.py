@@ -11,7 +11,6 @@ from typing import cast
 import pytest
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlmodel import Session
 
 import modules.compute.executor_client as executor_client
 from backend_core import compute_requests_service
@@ -129,7 +128,7 @@ async def test_download_step_initializes_data_plane_off_event_loop(monkeypatch: 
     async def request_command(*_args, **_kwargs) -> object:
         return object()
 
-    async def submit_and_wait(*_args, **_kwargs) -> SimpleNamespace:
+    async def submit_and_wait(**_kwargs) -> SimpleNamespace:
         return SimpleNamespace(
             artifact_path='s3://bucket/result.parquet',
             artifact_name='result.parquet',
@@ -157,7 +156,6 @@ async def test_download_step_initializes_data_plane_off_event_loop(monkeypatch: 
         ),
     )
     result = await executor_client.download_step(
-        cast(Session, None),
         request,
         runtime_probe=cast(RuntimeAvailabilityProbe, None),
     )
@@ -193,7 +191,6 @@ async def test_slow_terminal_compute_request_logs_http_and_durable_ids(
 
     with caplog.at_level('WARNING', logger='modules.compute.executor_client'):
         result = await executor_client._submit_and_wait(
-            cast(Session, None),
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             command=command,
             runtime_probe=cast(RuntimeAvailabilityProbe, None),
@@ -239,7 +236,6 @@ async def test_failed_compute_request_logs_correlation_and_error_code(
 
     with caplog.at_level('WARNING', logger='modules.compute.executor_client'), pytest.raises(HTTPException) as exc_info:
         await executor_client._submit_and_wait(
-            cast(Session, None),
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             command=command,
             runtime_probe=cast(RuntimeAvailabilityProbe, None),
@@ -307,7 +303,6 @@ async def test_local_recovery_delivers_batched_terminal_state_without_another_db
         with caplog.at_level('DEBUG'):
             result = await asyncio.wait_for(
                 executor_client._submit_and_wait(
-                    cast(Session, None),
                     kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
                     command=command,
                     runtime_probe=cast(RuntimeAvailabilityProbe, None),
@@ -382,7 +377,6 @@ async def test_shared_flight_wait_skips_per_viewer_disconnect_polling(monkeypatc
 
     waiter = asyncio.create_task(
         executor_client._submit_and_wait(
-            cast(Session, None),
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             command=command,
             runtime_probe=cast(RuntimeAvailabilityProbe, None),
@@ -436,7 +430,6 @@ async def test_cancelling_a_shared_flight_waiter_does_not_cancel_the_durable_req
 
     waiter = asyncio.create_task(
         executor_client._submit_and_wait(
-            cast(Session, None),
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             command=command,
             runtime_probe=cast(RuntimeAvailabilityProbe, None),

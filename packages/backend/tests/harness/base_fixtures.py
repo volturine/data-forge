@@ -44,6 +44,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     if os.environ.get('TEST_POSTGRES_URL'):
         return
     if docker_available():
+        # Startup cleanup checks each resource's owner before removing it.
         cleanup_stale_test_postgres()
         cleanup_stale_test_rustfs()
 

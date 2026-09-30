@@ -9,6 +9,7 @@ import re
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
@@ -248,6 +249,7 @@ async def compute_request_loop(
     work_semaphore: asyncio.Semaphore | None = None,
     namespace_directory: RuntimeNamespaceDirectory,
     recovery: NamespaceRecovery | None = None,
+    on_progress: Callable[[], None] | None = None,
 ) -> None:
     """Dispatch request wakes and bounded recovery work into the shared budget."""
     concurrency = max(1, max_concurrency or compute_request_worker_count())
@@ -322,6 +324,8 @@ async def compute_request_loop(
     try:
         next_recovery_poll = 0.0
         while not stop_event.is_set():
+            if on_progress is not None:
+                on_progress()
             enqueue_notifications(request_hub.version())
             if not pending_wakes and not in_flight:
                 for namespace in tuple(drain_namespaces):
@@ -961,6 +965,17 @@ def _publish_staged_datasource(
     staging_id = f"{datasource_id}__claim_{claimed.claim_token.replace('-', '_')}"
     target_path = object_store_url("clean", staging_id, branch, namespace=claimed.namespace)
     artifact_url = object_store_url("runtime-staging", "datasource-stage", claimed.id, str(claimed.lease_generation), "data.arrow", namespace=claimed.namespace)
+    client.register_datasource_stage(
+        namespace=claimed.namespace,
+        datasource_id=datasource_id,
+        compute_request_id=claimed.id,
+        worker_id=claimed.worker_id,
+        claim_token=claimed.claim_token,
+        lease_generation=claimed.lease_generation,
+        prefix_url=target_path,
+        artifact_url=artifact_url,
+        catalog_identifier=f"clean.{target_path.rstrip('/').split('/')[-2]}",
+    )
     run_id = datasource_execution._create_ingest_run(
         client,
         namespace=claimed.namespace,
@@ -981,7 +996,7 @@ def _publish_staged_datasource(
         else:
             assert metadata is not None
             config = dict(metadata.config or {})
-        config.update({"metadata_path": target_path, "table": staging_id, "branch": branch, "source": source})
+        config.update(datasource_execution._build_iceberg_config(target_path, branch, source_config=source))
         datasource_execution._set_snapshot_metadata(config, table)
         if create:
             assert isinstance(

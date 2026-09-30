@@ -13,11 +13,16 @@ from sqlmodel import Session as DbSession
 from backend_core.database import get_settings_engine, run_settings_db
 from backend_core.secrets import encrypt_secret
 from backend_core.sqlmodel_typing import col
-from modules.chat.models import ChatEvent, ChatMessage, ChatSession
+from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn
 
 MAX_EVENTS = 500
 MAX_MESSAGES = 100
 SECOND_EPOCH_THRESHOLD = 10_000_000_000
+ACTIVE_TURN_STATUSES = ('queued', 'running', 'awaiting_confirmation')
+
+
+class ChatSessionBusy(Exception):
+    """An active turn still owns the session."""
 
 
 def normalize_epoch_milliseconds(value: Any) -> int | None:
@@ -107,9 +112,16 @@ class SessionStore:
 
     def delete(self, session_id: str, *, user_id: str) -> bool:
         with DbSession(get_settings_engine()) as db:
-            row = _session(db, session_id, user_id=user_id)
+            row = db.execute(
+                select(ChatSession).where(col(ChatSession.id) == session_id, col(ChatSession.user_id) == user_id).with_for_update()
+            ).scalar_one_or_none()
             if row is None:
                 return False
+            active = db.execute(
+                select(col(ChatTurn.id)).where(col(ChatTurn.session_id) == session_id, col(ChatTurn.status).in_(ACTIVE_TURN_STATUSES))
+            ).scalar_one_or_none()
+            if active is not None:
+                raise ChatSessionBusy('Cannot delete a chat session while a turn is active')
             db.delete(row)
             db.commit()
             return True

@@ -1,12 +1,12 @@
 import logging
 import uuid
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import croniter  # type: ignore[import-untyped]
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import Select, case, func, literal, or_, select, tuple_
 from sqlmodel import Session
 
 from backend_core import (
@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 _SCHEDULE_TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
 _SCHEDULE_LEASE_DURATION = timedelta(minutes=5)
+_SCHEDULE_CANDIDATE_BATCH_SIZE = 100
 
 
 def _build_request_json(request: compute_schemas.BuildRequest) -> dict[str, object]:
@@ -647,19 +648,45 @@ def should_run(cron_expr: str, last_run: datetime | None) -> bool:
     return next_run <= now
 
 
-def get_due_schedules(session: Session) -> list[Schedule]:
-    """Return enabled schedules that may be due without reading future cron rows."""
-    now = _naive_utc(_utcnow())
+def _schedule_candidate_query(now: datetime) -> Select[tuple[Schedule]]:
     due_candidates = or_(
         col(Schedule.depends_on).is_not(None),
         col(Schedule.trigger_on_datasource_id).is_not(None),
         col(Schedule.next_run).is_(None),
         col(Schedule.next_run) <= now,
     )
-    result = session.execute(
-        select(Schedule).where(col(Schedule.enabled).is_(True)).where(due_candidates),
-    )
-    schedules = result.scalars().all()
+    return select(Schedule).where(col(Schedule.enabled).is_(True)).where(due_candidates)
+
+
+def _schedule_candidate_batches(session: Session, statement: Select[tuple[Schedule]]) -> Iterator[list[Schedule]]:
+    # NULL next_run sorts first, followed by a stable total order. Advance over
+    # every examined candidate, including dependency/event rows that are not due.
+    due_key = func.coalesce(col(Schedule.next_run), datetime.min)
+    key = tuple_(due_key, col(Schedule.created_at), col(Schedule.id))
+    cursor: tuple[datetime, datetime, str] | None = None
+    while True:
+        batch_query = statement.order_by(due_key, col(Schedule.created_at), col(Schedule.id)).limit(_SCHEDULE_CANDIDATE_BATCH_SIZE)
+        if cursor is not None:
+            batch_query = batch_query.where(key > tuple_(literal(cursor[0]), literal(cursor[1]), literal(cursor[2])))
+        schedules = list(session.execute(batch_query).scalars().all())
+        if not schedules:
+            return
+        last = schedules[-1]
+        cursor = (_naive_utc(last.next_run) if last.next_run is not None else datetime.min, _naive_utc(last.created_at), last.id)
+        yield schedules
+        if len(schedules) < _SCHEDULE_CANDIDATE_BATCH_SIZE:
+            return
+
+
+def get_due_schedules(session: Session) -> list[Schedule]:
+    """Evaluate eligibility using bounded, ordered database candidate batches."""
+    now = _naive_utc(_utcnow())
+    return [
+        schedule for batch in _schedule_candidate_batches(session, _schedule_candidate_query(now)) for schedule in _due_schedule_candidates(session, batch, now)
+    ]
+
+
+def _due_schedule_candidates(session: Session, schedules: Sequence[Schedule], now: datetime) -> list[Schedule]:
     ds_ids = {
         datasource_id for schedule in schedules for datasource_id in (schedule.datasource_id, schedule.trigger_on_datasource_id) if datasource_id is not None
     }
@@ -802,13 +829,17 @@ def claim_due_schedules(
     naive_stamp = _naive_utc(stamp)
     table = Schedule.metadata.tables[Schedule.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
-    due_ids = {schedule.id for schedule in get_due_schedules(session)}
-    if not due_ids:
+    if limit < 1:
         return []
+    active_build = (
+        select(col(BuildRun.id))
+        .where(col(BuildRun.schedule_id) == col(Schedule.id))
+        .where(col(BuildRun.status).in_((BuildRunStatus.QUEUED, BuildRunStatus.RUNNING)))
+        .exists()
+    )
     base = (
-        select(Schedule)
-        .where(col(Schedule.id).in_(due_ids))
-        .where(col(Schedule.enabled).is_(True))
+        _schedule_candidate_query(naive_stamp)
+        .where(~active_build)
         .where(
             or_(
                 table.c.lease_owner.is_(None),
@@ -816,44 +847,55 @@ def claim_due_schedules(
                 table.c.lease_expires_at <= naive_stamp,
             )
         )
-        .order_by(table.c.next_run.asc().nullsfirst(), table.c.created_at.asc(), table.c.id.asc())
-        .limit(limit)
     )
-    stmt = with_for_update_skip_locked(session, base)
-    schedules = list(session.execute(stmt).scalars().all())
     claimed: list[Schedule] = []
-    for schedule in schedules:
-        if build_run_service.has_inflight_build_for_schedule(session, schedule.id):
+    for candidates in _schedule_candidate_batches(session, base):
+        due_ids = [schedule.id for schedule in _due_schedule_candidates(session, candidates, naive_stamp)]
+        if not due_ids:
             continue
-        claim_token = str(uuid.uuid4())
-        claimed_schedule = claim_by_lease_owner(
-            session,
-            Schedule,
-            table=table,
-            row_id=schedule.id,
-            previous_owner=schedule.lease_owner,
-            values={
-                'lease_owner': worker_id,
-                'claim_token': claim_token,
-                'lease_generation': table.c.lease_generation + 1,
-                'lease_expires_at': naive_stamp + _SCHEDULE_LEASE_DURATION,
-                'last_claimed_at': naive_stamp,
-                'attempts': table.c.attempts + 1,
-            },
+        locked_query = (
+            base.where(col(Schedule.id).in_(due_ids))
+            .order_by(table.c.next_run.asc().nullsfirst(), table.c.created_at.asc(), table.c.id.asc())
+            .limit(_SCHEDULE_CANDIDATE_BATCH_SIZE)
+            .execution_options(populate_existing=True)
         )
-        if not claimed_schedule:
-            continue
-        record_lease_transition(
-            kind='schedule',
-            transition='reclaim' if schedule.lease_owner is not None else 'claim',
-            outcome=TransitionOutcome.APPLIED,
-            entity_id=schedule.id,
-            owner_id=worker_id,
-            claim_token=claim_token,
-            generation=schedule.lease_generation + 1,
-            attempt=schedule.attempts + 1,
-        )
-        claimed.append(schedule)
+        schedules = session.execute(with_for_update_skip_locked(session, locked_query)).scalars().all()
+        for schedule in _due_schedule_candidates(session, schedules, naive_stamp):
+            if build_run_service.has_inflight_build_for_schedule(session, schedule.id):
+                continue
+            claim_token = str(uuid.uuid4())
+            claimed_schedule = claim_by_lease_owner(
+                session,
+                Schedule,
+                table=table,
+                row_id=schedule.id,
+                previous_owner=schedule.lease_owner,
+                values={
+                    'lease_owner': worker_id,
+                    'claim_token': claim_token,
+                    'lease_generation': table.c.lease_generation + 1,
+                    'lease_expires_at': naive_stamp + _SCHEDULE_LEASE_DURATION,
+                    'last_claimed_at': naive_stamp,
+                    'attempts': table.c.attempts + 1,
+                },
+            )
+            if not claimed_schedule:
+                continue
+            record_lease_transition(
+                kind='schedule',
+                transition='reclaim' if schedule.lease_owner is not None else 'claim',
+                outcome=TransitionOutcome.APPLIED,
+                entity_id=schedule.id,
+                owner_id=worker_id,
+                claim_token=claim_token,
+                generation=schedule.lease_generation + 1,
+                attempt=schedule.attempts + 1,
+            )
+            claimed.append(schedule)
+            if len(claimed) >= limit:
+                break
+        if len(claimed) >= limit:
+            break
     if not claimed:
         session.rollback()
         return []

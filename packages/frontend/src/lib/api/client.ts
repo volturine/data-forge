@@ -1,6 +1,7 @@
 import { err, okAsync, ResultAsync } from 'neverthrow';
 import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
 import { requireNamespace, isNamespaceReady } from '$lib/stores/namespace.svelte';
+import { uuid } from '$lib/utils/uuid';
 import { track } from '$lib/utils/audit-log';
 
 export const BASE_URL = '/api';
@@ -81,6 +82,7 @@ function buildHeaders(options?: RequestInit): Headers {
 		headers.set('X-Client-Id', identity.clientId);
 	if (identity.clientSignature && !headers.has('X-Client-Signature'))
 		headers.set('X-Client-Signature', identity.clientSignature);
+	if (!headers.has('X-Request-ID')) headers.set('X-Request-ID', uuid());
 	if (namespace && !headers.has('X-Namespace')) headers.set('X-Namespace', namespace);
 	if (!(options?.body instanceof FormData) && !headers.has('Content-Type'))
 		headers.set('Content-Type', 'application/json');

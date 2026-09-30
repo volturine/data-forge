@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from collections.abc import Awaitable, Callable
 
 from backend_core import engine_instances_service as engine_instance_service
@@ -13,6 +14,7 @@ class EngineRegistry:
         self._waiters: dict[str, list[asyncio.Future[str]]] = {}
         self._lock = asyncio.Lock()
         self._version: dict[str, int] = {}
+        self._subscribers: Counter[str] = Counter()
         self._snapshot_cache: dict[str, tuple[int, schemas.EngineListSnapshotMessage]] = {}
         self._snapshot_loads: dict[tuple[str, int], asyncio.Future[tuple[int, schemas.EngineListSnapshotMessage]]] = {}
         self._serialized_snapshot_cache: dict[str, tuple[int, str]] = {}
@@ -23,6 +25,7 @@ class EngineRegistry:
             waiters = self._waiters
             self._waiters = {}
             self._version = {}
+            self._subscribers.clear()
             snapshot_loads = self._snapshot_loads
             self._snapshot_loads = {}
             self._snapshot_cache = {}
@@ -54,6 +57,29 @@ class EngineRegistry:
             return await future
         finally:
             await self._discard_waiter(namespace, future)
+
+    async def subscribe(self, namespace: str) -> None:
+        async with self._lock:
+            self._subscribers[namespace] += 1
+            if self._subscribers[namespace] == 1:
+                self._version[namespace] = self._version.get(namespace, 0) + 1
+                self._snapshot_cache.pop(namespace, None)
+                self._serialized_snapshot_cache.pop(namespace, None)
+
+    async def unsubscribe(self, namespace: str) -> None:
+        async with self._lock:
+            self._subscribers[namespace] -= 1
+            if self._subscribers[namespace] <= 0:
+                self._subscribers.pop(namespace, None)
+                self._snapshot_cache.pop(namespace, None)
+                self._serialized_snapshot_cache.pop(namespace, None)
+
+    async def recover_active(self) -> None:
+        async with self._lock:
+            namespaces = list(self._subscribers)
+        for namespace in namespaces:
+            await self.publish_namespace(namespace)
+            await asyncio.sleep(0)
 
     async def publish_namespace(self, namespace: str) -> None:
         async with self._lock:

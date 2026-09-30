@@ -439,6 +439,24 @@ def ingest_datasource_for_schedule(
     try:
         with manager.acquire_engine(identity) as engine:
             if is_reingestable_raw(metadata):
+                branch = config.get("branch")
+                if not isinstance(branch, str) or not branch:
+                    raise DataSourceValidationError("Datasource branch is required")
+                branch_name = branch
+                staging_id = f"{datasource_id}__claim_{staging_key.replace('-', '_')}"
+                target = object_store_url("clean", staging_id, branch, namespace=namespace)
+                client.register_datasource_stage(
+                    namespace=namespace,
+                    datasource_id=datasource_id,
+                    job_id=job_id,
+                    build_id=build_id,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
+                    prefix_url=target,
+                    artifact_url=artifact_url,
+                    catalog_identifier=f"clean.{target.rstrip('/').split('/')[-2]}",
+                )
                 source, _source_type = _external_source(metadata)
                 engine_job = engine.datasource_job("datasource_stage", {"source_config": source, "artifact_url": artifact_url})
             else:
@@ -455,32 +473,27 @@ def ingest_datasource_for_schedule(
                     },
                 )
             result = await_engine_result(engine, job_id=engine_job)
-        if result.get("error") or not isinstance(result.get("data"), dict):
-            raise DataSourceConnectionError("Scheduled datasource computation failed", details={"datasource_id": datasource_id})
-        if is_reingestable_raw(metadata):
-            branch = config.get("branch")
-            if not isinstance(branch, str) or not branch:
-                raise DataSourceValidationError("Datasource branch is required")
-            staging_id = f"{datasource_id}__claim_{staging_key.replace('-', '_')}"
-            target = object_store_url("clean", staging_id, branch, namespace=namespace)
-            table = import_staged_arrow_artifact(artifact_url, table_path=target, database_url=database_url)
-            config.update({"metadata_path": target, "table": staging_id})
-            _set_snapshot_metadata(config, table)
-        else:
-            schema = schema_info_proto(result["data"])
-        config["ingest"] = {"ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat(), "mode": "schedule_ingest"}
-        return client.publish_datasource_ingest(
-            namespace=namespace,
-            datasource_id=datasource_id,
-            config=config,
-            expected_revision=metadata.revision,
-            schema_info=schema,
-            worker_id=worker_id,
-            claim_token=claim_token,
-            lease_generation=lease_generation,
-            job_id=job_id,
-            build_id=build_id,
-        )
+            if result.get("error") or not isinstance(result.get("data"), dict):
+                raise DataSourceConnectionError("Scheduled datasource computation failed", details={"datasource_id": datasource_id})
+            if is_reingestable_raw(metadata):
+                table = import_staged_arrow_artifact(artifact_url, table_path=target, database_url=database_url)
+                config.update(_build_iceberg_config(target, branch_name, source_config=source))
+                _set_snapshot_metadata(config, table)
+            else:
+                schema = schema_info_proto(result["data"])
+            config["ingest"] = {"ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat(), "mode": "schedule_ingest"}
+            return client.publish_datasource_ingest(
+                namespace=namespace,
+                datasource_id=datasource_id,
+                config=config,
+                expected_revision=metadata.revision,
+                schema_info=schema,
+                worker_id=worker_id,
+                claim_token=claim_token,
+                lease_generation=lease_generation,
+                job_id=job_id,
+                build_id=build_id,
+            )
     except BackendWorkerRpcError as exc:
         if exc.error_code == "FAILED_PRECONDITION":
             raise DatasourcePublicationClaimLost("Datasource publication claim is no longer active") from exc

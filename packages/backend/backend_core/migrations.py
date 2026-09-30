@@ -11,7 +11,7 @@ from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
 _PUBLIC_REVISION = '0016_telegram_runtime'
-_TENANT_REVISION = '0012_compute_request_flights'
+_TENANT_REVISION = '0017_compute_source_index'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 

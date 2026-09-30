@@ -606,7 +606,7 @@ class RequestTimingMiddleware:
                 break
         request_id = request_id or uuid.uuid4().hex
         state['request_id'] = request_id
-        database_metrics: dict[str, object] = {'sql_count': 0, 'sql_ms': 0.0, 'commit_ms': 0.0}
+        database_metrics: dict[str, object] = {'sql_count': 0, 'sql_ms': 0.0, 'commit_ms': 0.0, 'api_db_admission_wait_ms': 0.0}
 
         async def report_slow_request() -> None:
             await asyncio.sleep(self.slow_request_seconds)
@@ -634,7 +634,11 @@ class RequestTimingMiddleware:
                 headers = [(name, value) for name, value in message.get('headers', []) if name.lower() not in {b'x-request-id', b'server-timing'}]
                 headers.append((b'x-request-id', request_id.encode('latin-1')))
                 server_duration_ms = max(0.0, (response_started_at - start) * 1000)
-                headers.append((b'server-timing', f'app;dur={server_duration_ms:.1f}'.encode('ascii')))
+                admission_wait_ms = database_metrics.get('api_db_admission_wait_ms', 0.0)
+                if not isinstance(admission_wait_ms, (int, float)):
+                    admission_wait_ms = 0.0
+                server_timing = f'app;dur={server_duration_ms:.1f}, api-db-admission;dur={admission_wait_ms:.1f}'
+                headers.append((b'server-timing', server_timing.encode('ascii')))
                 message = {**message, 'headers': headers}
             await send(message)
 

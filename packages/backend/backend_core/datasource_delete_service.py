@@ -31,7 +31,7 @@ def get_active_datasource(session: Session, datasource_id: str, *, for_update: b
     one transaction boundary from the delete worker's perspective: deletion
     waits for the request commit, then its finalizer sees the active request.
     """
-    datasource = session.get(DataSource, datasource_id, with_for_update=for_update)
+    datasource = session.get(DataSource, datasource_id, with_for_update=for_update, populate_existing=for_update)
     if datasource is None or datasource.is_pending_delete:
         raise datasource_not_found(datasource_id)
     return datasource

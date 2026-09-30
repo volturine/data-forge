@@ -35,29 +35,31 @@ _SENSITIVE_ERROR_FIELDS = frozenset(
 _OUTBOX_PENDING_QUERY = """
     SELECT 1
     FROM runtime_outbox_events
-    WHERE (status IN ('pending', 'failed') AND available_at <= statement_timestamp())
+    WHERE kind <> 'storage_cleanup' AND ((status IN ('pending', 'failed') AND available_at <= statement_timestamp())
        OR (
             status = 'dispatching'
             AND lease_expires_at <= statement_timestamp()
             AND available_at <= statement_timestamp()
-       )
+       ))
 """
 _OUTBOX_DUE_QUERY = """
     SELECT min(next_attempt_at)
     FROM (
         SELECT available_at AS next_attempt_at
         FROM runtime_outbox_events
-        WHERE status IN ('pending', 'failed')
+        WHERE kind <> 'storage_cleanup' AND status IN ('pending', 'failed')
         UNION ALL
         SELECT greatest(available_at, lease_expires_at) AS next_attempt_at
         FROM runtime_outbox_events
-        WHERE status = 'dispatching' AND lease_expires_at IS NOT NULL
+        WHERE kind <> 'storage_cleanup' AND status = 'dispatching' AND lease_expires_at IS NOT NULL
     ) AS scheduled_events
     WHERE next_attempt_at > statement_timestamp()
 """
 OUTBOX_WAKE_KIND = 'runtime_outbox_wakeup'
 _RUNTIME_EVENTS_CHANNEL = 'runtime_events'
 _EXTERNAL_DELIVERY_KINDS = notification_delivery.EXTERNAL_DELIVERY_KINDS
+STORAGE_CLEANUP_KIND = 'storage_cleanup'
+_ISOLATED_DELIVERY_KINDS = _EXTERNAL_DELIVERY_KINDS | {STORAGE_CLEANUP_KIND}
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,8 +77,9 @@ def _redact_payload_secrets(message: str, payload: dict[str, object]) -> str:
     return redact_secrets_in_text(message, *secrets)
 
 
-def _database_now(session: Session) -> datetime:
-    value = session.execute(select(func.current_timestamp())).scalar_one()
+def _database_now(session: Session, *, wall_clock: bool = False) -> datetime:
+    clock = func.clock_timestamp() if wall_clock and session.get_bind().dialect.name == 'postgresql' else func.current_timestamp()
+    value = session.execute(select(clock)).scalar_one()
     if not isinstance(value, datetime):
         raise TypeError('Database CURRENT_TIMESTAMP did not return a datetime')
     if value.tzinfo is None:
@@ -258,6 +261,15 @@ def claim_external_deliveries(session: Session, *, kind: str, limit: int = 1) ->
     return _claim_next_events(session, limit=limit, event_kinds=(kind,))
 
 
+def claim_storage_cleanups(session: Session, *, limit: int = 1) -> list[OutboxClaim]:
+    return _claim_next_events(session, limit=min(max(limit, 1), 16), event_kinds=(STORAGE_CLEANUP_KIND,))
+
+
+def finalize_storage_cleanup(session: Session, claim: OutboxClaim, *, error: str | None = None) -> bool:
+    finalized, _dispatched = _finalize_claims(session, [(claim, error)])
+    return finalized == 1
+
+
 def finalize_external_delivery(session: Session, claim: OutboxClaim, *, error: str | None = None) -> bool:
     """Persist a provider result only while its claim token and generation are current.
 
@@ -298,7 +310,7 @@ def _claim_next_events(
         .order_by(sa(RuntimeOutboxEvent.available_at), sa(RuntimeOutboxEvent.created_at), sa(RuntimeOutboxEvent.id))
         .limit(limit)
     )
-    base = base.where(table.c.kind.not_in(_EXTERNAL_DELIVERY_KINDS)) if event_kinds is None else base.where(table.c.kind.in_(event_kinds))
+    base = base.where(table.c.kind.not_in(_ISOLATED_DELIVERY_KINDS)) if event_kinds is None else base.where(table.c.kind.in_(event_kinds))
     stmt = with_for_update_skip_locked(session, base)
     events = list(session.execute(stmt).scalars().all())
     if not events:
@@ -386,13 +398,13 @@ def _finalize_claims(
         claim, error = claims_by_id[event.id]
         if event.claim_token != claim.claim_token or event.lease_generation != claim.lease_generation:
             continue
-        if error is None and event.kind not in _EXTERNAL_DELIVERY_KINDS:
+        if error is None and event.kind not in _ISOLATED_DELIVERY_KINDS:
             runtime_ipc.notify_runtime_payload_on_commit(session, {**event.payload_json, 'event_id': event.id})
         if record_external_receipt and error is None and event.kind in _EXTERNAL_DELIVERY_KINDS:
             receipt = session.get(NotificationDeliveryReceipt, event.id)
             if receipt is None:
                 session.add(NotificationDeliveryReceipt(event_id=event.id, kind=event.kind, delivered_at=now))
-        poisoned = error is not None and event.attempts >= settings.runtime_outbox_max_attempts
+        poisoned = error is not None and event.kind != STORAGE_CLEANUP_KIND and event.attempts >= settings.runtime_outbox_max_attempts
         event.status = RuntimeOutboxStatus.DISPATCHED if error is None else RuntimeOutboxStatus.POISONED if poisoned else RuntimeOutboxStatus.FAILED
         event.claim_token = None
         event.lease_expires_at = None

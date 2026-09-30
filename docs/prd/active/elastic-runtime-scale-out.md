@@ -1,6 +1,6 @@
 # PRD: Capacity-First Runtime Optimization
 
-> **Status (2026-09-29): Active — optimize and measure the current topology first.**
+> **Status (2026-09-30): Active — architecture fixes implemented; static/unit gates passed; E2E verification pending. Capacity validation remains open.**
 > **Target:** Sustain 2,000 concurrent users with the fewest service replicas that measurements support. The 2,000-user workload profile and SLOs still need validation; this is not yet a capacity claim, and the active PRD records no successful 2,000-user run.
 > **Portfolio:** [PRD index](../README.md)
 
@@ -22,19 +22,87 @@ its configured capacity. A single hot RID remains serialized by design.
 
 ## Current topology and constraints
 
-| Role | Current responsibility | Keep or change |
-| --- | --- | --- |
-| API | HTTP, frontend assets, auth, WebSockets, durable request creation. FastAPI async processes can multiplex network I/O. | Start capacity testing at one container × one Uvicorn process. Add API replicas/processes only if API CPU, loop lag, or request latency is the limiting resource. |
-| Runtime coordinator | One active fenced owner for runtime gRPC, heartbeat, and durable outbox dispatch; standby is for recovery. | Keep one active instance while its RPC and DB lanes have headroom. Do not build partitioned coordinators preemptively. |
-| Worker manager | One process owns Docker access, engine lifecycle, active engine accounting, and warm workers. | Keep separate from API for stability/security. Do not replicate the current manager without global identity/capacity fencing. |
-| Compute workers | Separate containers, one bound to an exact analysis RID or datasource RID while active; each engine executes one command at a time. | Preserve this isolation boundary. Increase worker capacity only when unique-RID compute queueing is the measured bottleneck. |
-| PostgreSQL | Durable application state, requests, leases, outbox, and single-flight results. | Keep as source of truth. Optimize queries, indexes, transactions, and pool budgets before considering database sharding. |
-| Object/data plane | Blocking object-store/Iceberg work is performed outside API event loops through bounded service-owned lanes. | Keep it independent of API lifecycle; scale it only if its own queue/latency is saturated. |
+| Role                | Current responsibility                                                                                                                                                                                                                                                                    | Keep or change                                                                                                                                                    |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API                 | HTTP, frontend assets, auth, WebSocket/SSE delivery, durable enqueue-and-wait paths, and disposable process-local caches/projections/waiters. PostgreSQL owns durable runtime state.                                                                                                      | Start capacity testing at one container × one Uvicorn process. Add API replicas/processes only if API CPU, loop lag, or request latency is the limiting resource. |
+| Runtime coordinator | One active fenced owner for runtime gRPC/dispatch, durable chat processing, Telegram polling, and independent durable external email/Telegram delivery lanes; standby is for recovery. External delivery uses durable outbox metadata and performs network calls outside DB transactions. | Keep one active instance while its RPC and DB lanes have headroom. Do not build partitioned coordinators preemptively.                                            |
+| Worker manager      | One process owns Docker access, engine-container lifecycle, active identity accounting, and warm workers.                                                                                                                                                                                 | Keep separate from API for stability/security. Do not replicate the current manager without global identity/capacity fencing.                                     |
+| Compute workers     | Isolated containers, each assigned to one exact analysis or datasource RID. Identical full commands share durable results; distinct commands on one RID are serialized.                                                                                                                   | Preserve this isolation boundary. Increase worker capacity only when unique-RID compute queueing is the measured bottleneck.                                      |
+| PostgreSQL          | Durable application state, requests, leases, outbox, and single-flight results.                                                                                                                                                                                                           | Keep as source of truth. Optimize queries, indexes, transactions, and pool budgets before considering database sharding.                                          |
+| Object/data plane   | Blocking object-store/Iceberg work is performed outside API event loops through bounded service-owned lanes.                                                                                                                                                                              | Keep it independent of API lifecycle; scale it only if its own queue/latency is saturated.                                                                        |
 
-The current defaults and code do not prove 2,000-user capacity. In particular,
-`WORKERS` multiplies API processes but does not add coordinator or compute
-capacity. The coordinator and Docker-owning worker manager are deliberately
-separate from the API; compute workers remain separate containers.
+Implementation references: [API lifecycle and thread budgets](../../../packages/backend/main.py),
+[fenced coordinator and durable actors](../../../packages/backend/runtime_coordinator.py),
+[durable external delivery lanes](../../../packages/backend/backend_core/runtime_integration_delivery.py),
+and [Docker worker manager](../../../packages/worker/runtime/compute_manager.py).
+
+The current defaults and code do not prove 2,000-user capacity. `WORKERS`
+multiplies API processes but does not add coordinator or compute capacity.
+`COMPUTE_WORKERS` is the concurrent job/assigned-worker budget, and
+`COMPUTE_WARM_WORKERS` is the additional ready-but-unassigned reserve. API
+process count remains a separate control. The coordinator, Docker-owning worker
+manager, and compute containers remain separate roles.
+
+## Implemented runtime contracts
+
+- **Database/session boundary:** async compute helpers carry no unused session
+  or database dependency through a remote wait. Each short synchronous DB unit
+  opens, commits/rolls back, and closes its own session in a bounded thread.
+  Datasource updates run off the API loop, lock and reread the row, and advance
+  the fresh revision atomically; a stale revision cannot overwrite a concurrent
+  update.
+- **Notification receive/recovery:** each API/coordinator receiver owns one
+  dedicated `psycopg.AsyncConnection` and continuous `notifies()` generator.
+  Publication remains synchronous DB/thread work. Explicit recovery callbacks
+  are wired at both process edges, and subscriptions precede initial snapshots.
+  Recovery targets active compute/build/engine/lock/chat projections, reads
+  build/lock projections in batches of at most 128, and wakes durable coordinator
+  chat/settings consumers. See
+  [receiver](../../../packages/backend/backend_core/runtime_ipc.py) and
+  [projection recovery](../../../packages/backend/backend_core/runtime_notifications.py).
+- **Chat lifecycle:** enqueue and deletion lock the same session row; competing
+  enqueue or deletion with an active turn returns HTTP 409. Typed claim revocation within the local
+  epoch settles that turn. SQL failures and coordinator-epoch fencing propagate
+  and fail closed rather than being treated as local revocation. See
+  [chat store](../../../packages/backend/modules/chat/store.py).
+- **Engine cancellation:** cancel the exact engine job ID. A request made before
+  startup is remembered and applied when the job ID is bound. The owner joins
+  the actual execution thread and holds admission until it settles; cancelling
+  an async task does not by itself stop blocking work. See
+  [execution ownership](../../../packages/worker/runtime/executors.py).
+- **SMTP test deadline:** admit one sending thread and observe its owned future
+  with an async wait, without a detached shield. A deadline before sending can
+  prevent the send; once the thread is running, provider acceptance is uncertain.
+  Admission stays occupied and late errors are observed until the thread settles.
+  See [SMTP test](../../../packages/backend/modules/settings/routes.py).
+- **Health/scheduler progress:** worker/scheduler Docker probes use PID1's
+  private Unix socket and require actual registration plus fresh progress on
+  every dispatch lane. A registry row or heartbeat cannot hide a stalled lane.
+  Scheduler candidates use ordered batches of 100, advancing over non-due
+  candidates to preserve fairness and rereading eligibility under row locks.
+  See [scheduler claims](../../../packages/backend/modules/scheduler/service.py).
+
+### Private storage GC
+
+The existing durable outbox stores private source intents before staging and
+retirement. `TRACKED → PUBLISHED` retains referenced data;
+abandoned targets proceed through `TRACKED → AUTHORIZED → DELETED`. An
+independent worker I/O lane cleans exact managed objects/prefixes and associated
+catalog identifiers idempotently, deferring a busy RID until its writer and job
+slot settle. Cleanup is driven by intents and indexed exact source references,
+rather than discovery through blob scans. Tenant migration
+[0017_compute_source_index](../../../packages/backend/database/alembic/versions/0017_compute_source_index.py)
+supplies the exact-source index.
+
+Source ownership transfer advances the generation and invalidates the old
+cleanup claim. Authorization locks the owner and intent, rereads references,
+and checks fresh PostgreSQL wall-clock time after acquiring the locks. A valid
+deletion grant may be acknowledged after its lease deadline if the token and
+generation still match; a superseded claim cannot acknowledge it. Published
+snapshots keep their existing retention policy. This contract preserves one
+Docker-owning manager and adds no service or public tunables. See
+[authorization and state transitions](../../../packages/backend/backend_core/storage_cleanup_service.py)
+and [worker cleanup lane](../../../packages/worker/runtime/storage_cleanup_runtime.py).
 
 ## Why start with 1×1
 
@@ -48,25 +116,25 @@ serve every workload.
 
 Keep the existing process boundaries that provide real safety: API processes
 do not get Docker access, the worker manager owns container lifecycle, and
-compute workers remain isolated containers. Minimize orchestration *inside*
+compute workers remain isolated containers. Minimize orchestration _inside_
 those boundaries; do not collapse them merely to reduce service count.
 
 ### API topology choices
 
 Notation here is `API replicas × Uvicorn processes per replica`:
 
-| Shape | Expected effect | Policy |
-| --- | --- | --- |
-| `1×1` | One async API event loop and one set of local pools/caches; lowest process and DB-pool overhead. | Default capacity-test baseline. Keep if it meets the measured workload/SLO. |
-| `1×4` | Four processes in one container; can use multiple cores, but multiplies per-process memory, DB pools, executors, listeners, and local state while sharing the same container CPU/memory limit. | Benchmark only when API CPU-bound; do not assume four workers means four times HTTP or compute capacity. |
-| `1×20` | Twenty processes in one container; magnifies pool and startup overhead, competes inside one resource limit, and can duplicate process-owned integrations. | Not a default or a user-count setting. Test only if measurements show process-level API CPU parallelism is the bottleneck and DB/resource budgets allow it. |
-| `N×1` | One event loop per API container behind ingress; adds host/service replicas and their per-process pools, but distributes API CPU/memory. | Use only after `1×1` is API-bound. It does not scale the coordinator, worker manager, or compute workers. |
+| Shape  | Expected effect                                                                                                                                                                                | Policy                                                                                                                                                      |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1×1`  | One async API event loop and one set of local pools/caches; lowest process and DB-pool overhead.                                                                                               | Default capacity-test baseline. Keep if it meets the measured workload/SLO.                                                                                 |
+| `1×4`  | Four processes in one container; can use multiple cores, but multiplies per-process memory, DB pools, executors, listeners, and local state while sharing the same container CPU/memory limit. | Benchmark only when API CPU-bound; do not assume four workers means four times HTTP or compute capacity.                                                    |
+| `1×20` | Twenty processes in one container; magnifies pool and startup overhead, competes inside one resource limit, and duplicates process-local listeners and state.                                  | Not a default or a user-count setting. Test only if measurements show process-level API CPU parallelism is the bottleneck and DB/resource budgets allow it. |
+| `N×1`  | One event loop per API container behind ingress; adds host/service replicas and their per-process pools, but distributes API CPU/memory.                                                       | Use only after `1×1` is API-bound. It does not scale the coordinator, worker manager, or compute workers.                                                   |
 
 Never scale to 20 API processes just because the target is 2,000 users. First
 determine whether load is mostly idle sockets, API/DB requests, or unique-RID
-compute work. If multiple API replicas are eventually needed, move the
-Telegram poller out of API ownership first and account for the multiplied
-PostgreSQL pools.
+compute work. The runtime coordinator owns Telegram polling and durable
+external delivery; account for each API process's PostgreSQL pools when adding
+API processes or replicas.
 
 ## Correctness invariants
 
@@ -79,9 +147,11 @@ PostgreSQL pools.
 3. A viewer disconnect cannot cancel work still needed by other viewers. A
    stale request/worker lease cannot publish an accepted result or overwrite a
    newer lifecycle state.
-4. PostgreSQL is authoritative. Notifications only wake consumers; polling and
-   durable rows recover missed notifications. Accepted work is never silently
-   dropped.
+4. PostgreSQL is authoritative. Notifications only wake consumers; durable
+   rows recover missed notifications. Accepted work is never silently dropped.
+   Native async PostgreSQL notification handling is receive-only; publication
+   remains synchronous DB/thread work. Both process edges supply explicit
+   durable recovery callbacks.
 5. Waiting work consumes neither a compute execution permit nor a thread.
    Admission is fair and bounded; overload is explicit rather than hidden by
    browser reloads, random retries, or unbounded executor queues.
@@ -105,10 +175,11 @@ PostgreSQL pools.
 - Reuse a warm worker for the first cold identity, then replenish the reserve
   asynchronously. Do not start duplicate workers for one RID or repeatedly
   tear down an engine needed by followers.
-- Keep API event loops on network I/O, async coordination, and WebSockets.
-  Synchronous SQLAlchemy, Docker, gRPC, filesystem, object-store, and expensive
-  serialization work stays in named, bounded thread lanes. Sync FastAPI
-  handlers remain sync. Bound submitted work as well as executor thread counts.
+- Keep API event loops on native async network I/O, WebSocket/SSE delivery, and
+  waits. A synchronous SQLAlchemy transaction is one short, session-owned unit
+  inside a bounded thread; do not share a live session across threads. Blocking
+  Docker, storage/catalog, and SMTP work also stays in bounded threads. Parsing
+  and Polars-heavy execution stay in compute containers.
 - `COMPUTE_WORKERS` is job/assigned-worker capacity, not a thread-pool size.
   The worker currently has several independently sized executors; measure their
   aggregate threads and queue occupancy. Keep separate progress lanes where
@@ -147,7 +218,25 @@ tests. Define p95/p99 latency and error thresholds before claiming the target;
 report throughput, queue age, API loop lag, DB checkout/lock waits, coordinator
 RPC lane wait, worker starts, executor occupancy, and CPU/memory in the same run.
 
-### Exploratory 1×1 evidence (2026-09-29)
+### Current architecture gate status (2026-09-30)
+
+Recorded gate results: `just verify` and `just test` both exited 0. The test gate
+passed 3,369 cases in 376.77s: 1,407 backend unit, 103 integration (plus two
+skipped), 581 worker, 11 scheduler, and 1,267 frontend cases.
+
+E2E run `run-20260930104837-9934` is in progress with the 3×5 suite, eight
+architecture checks, and the 50-tab probe. The expected full-suite population
+is 372 cases; that count and the final result are not yet verified. No final
+E2E pass count or new probe latency is recorded pending the run's final result.
+
+### Pre-review regression baseline
+
+The previously proven full E2E baseline passed 371 cases and measured about
+36.8s p95 on the 50-tab probe. Those results precede the completed architecture
+fixes and remain readiness regression evidence; they do not establish capacity
+or verify the current E2E run.
+
+### Historical exploratory 1×1 evidence (2026-09-29)
 
 - With `WORKERS=1`, the full 3×4 Playwright suite passed 362 tests and the
   isolated 50-tab/30-account probe passed. The API container was verified to
@@ -185,10 +274,10 @@ RPC lane wait, worker starts, executor occupancy, and CPU/memory in the same run
   full-suite-then-probe run had larger lag and slower previews, so clean-stack
   and post-suite results must remain separate.
 
-These runs show that one API process can pass the current regression workload,
-not that it meets the 2,000-session SLO. They also show that cold engine
-startup/CPU demand and occasional API response-send stalls are the current
-optimization leads. Run at least three more paired probes in alternating
+These historical runs show that one API process can pass the regression
+workload measured then, not that it meets the 2,000-session SLO. Their cold engine
+startup/CPU demand and occasional API response-send stalls remain optimization
+leads. Run at least three more paired probes in alternating
 `WORKERS=1`/`4` order with clean stacks, and collect per-container CPU before
 attributing the loop stalls. Based on the successful 1×1 full E2E and no
 repeatable 4-process throughput benefit, `docker/env/prod.env` now defaults to
@@ -202,8 +291,9 @@ target.
    2,000-session workload with one coordinator and one worker manager.
 2. **If API-bound:** fix synchronous work on async paths, serialization, pool
    contention, or logging first. Add API replicas behind an ingress only when
-   CPU/loop lag or HTTP latency still shows API saturation. Move the Telegram
-   poller out of API ownership before running multiple API processes/replicas.
+   CPU/loop lag or HTTP latency still shows API saturation. The runtime
+   coordinator owns Telegram polling; account for multiplied API pools when
+   adding processes or replicas.
 3. **If coordinator-bound:** identify whether the wait is RPC executor queue,
    database checkout/lock, serialization, or dispatch scanning. Optimize that
    path and its pool budget first. Multi-active partitioned coordination is a

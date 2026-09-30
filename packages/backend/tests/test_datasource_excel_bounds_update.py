@@ -105,7 +105,7 @@ def test_put_resolves_excel_bounds_on_worker_and_preserves_source(
     _insert_excel_datasource(test_db_session, datasource_id=datasource_id, file_path=file_url, file_type='excel')
     calls: list[dict[str, object]] = []
 
-    async def resolve(_session, **kwargs):
+    async def resolve(**kwargs):
         calls.append(kwargs)
         return {
             'sheet_name': 'Sheet',
@@ -143,7 +143,7 @@ def test_put_rejects_excel_update_when_revision_changes_during_resolution(
         file_type='excel',
     )
 
-    async def resolve(_session, **_kwargs):
+    async def resolve(**_kwargs):
         datasource = test_db_session.get(DataSource, datasource_id)
         assert datasource is not None
         datasource.revision += 1

@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-from typing import cast
 
 import pytest
 
 import main as scheduler_main
+from scheduler_grpc.health import DispatcherHealth
 
 
 class FakeSchedulerClient:
@@ -15,16 +15,16 @@ class FakeSchedulerClient:
         self.calls: list[tuple[str, str]] = []
         self.run_due_calls = 0
 
-    def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int) -> None:
+    def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None:
         assert hostname
         assert pid == os.getpid()
         assert capacity == 1
         self.calls.append(("register", worker_id))
 
-    def heartbeat(self, *, worker_id: str) -> None:
+    def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
         self.calls.append(("heartbeat", worker_id))
 
-    def stop(self, *, worker_id: str) -> None:
+    def stop(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
         self.calls.append(("stop", worker_id))
 
     def due_schedule_namespaces(self) -> list[scheduler_main.DueScheduleNamespace]:
@@ -41,8 +41,16 @@ class FakeSchedulerClient:
 def test_scheduler_heartbeat_retries_transient_deadline_without_error_traceback(caplog: pytest.LogCaptureFixture) -> None:
     stop = threading.Event()
     timeouts: list[float | None] = []
+    health = DispatcherHealth("scheduler:test", lanes=("scheduler",), max_age_seconds=30)
+    health.registered()
+    health.progress("scheduler")
 
-    class _Client:
+    class _Client(FakeSchedulerClient):
+        def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None:
+            assert worker_id == "scheduler:test"
+            assert retry_seconds == 0.0
+            assert health.snapshot()["registered"] is False
+
         def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
             assert worker_id == "scheduler:test"
             timeouts.append(timeout_seconds)
@@ -51,13 +59,16 @@ def test_scheduler_heartbeat_retries_transient_deadline_without_error_traceback(
             stop.set()
 
     scheduler_main._heartbeat_loop_sync(
-        client=cast(scheduler_main.SchedulerApiClient, _Client()),
+        client=_Client(),
         stop_signal=stop,
         worker_id="scheduler:test",
         heartbeat_seconds=0.001,
+        health=health,
     )
 
     assert timeouts == [5.0, 5.0]
+    assert health.snapshot()["registered"] is True
+    assert health.snapshot()["healthy"] is False
     assert [record.levelname for record in caplog.records if "Scheduler heartbeat" in record.message] == ["WARNING"]
 
 
@@ -96,7 +107,8 @@ async def test_scheduler_loop_registers_runs_due_work_and_stops() -> None:
     await scheduler_main.scheduler_loop(
         stop_event,
         "scheduler-1",
-        client=cast(scheduler_main.SchedulerApiClient, client),
+        client=client,
+        health=DispatcherHealth("scheduler-1", lanes=("scheduler",), max_age_seconds=30),
         check_interval_seconds=1,
         heartbeat_seconds=60,
     )
@@ -133,10 +145,51 @@ async def test_scheduler_loop_retries_after_backend_restart() -> None:
     await scheduler_main.scheduler_loop(
         stop_event,
         "scheduler-restart",
-        client=cast(scheduler_main.SchedulerApiClient, client),
+        client=client,
+        health=DispatcherHealth("scheduler-restart", lanes=("scheduler",), max_age_seconds=30),
         check_interval_seconds=1,
         heartbeat_seconds=60,
     )
     await stopper
 
     assert client.run_due_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_stalled_scheduler_dispatch_expires_health_while_heartbeat_continues() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    heartbeat_seen = threading.Event()
+    now = 100.0
+    health = DispatcherHealth("scheduler:hung", lanes=("scheduler",), max_age_seconds=45, clock=lambda: now)
+
+    class StalledSchedulerClient(FakeSchedulerClient):
+        def run_due(self, *, worker_id: str, namespace: str, generation: int) -> scheduler_main.SchedulerRunDueResult:
+            entered.set()
+            assert release.wait(5)
+            return super().run_due(worker_id=worker_id, namespace=namespace, generation=generation)
+
+        def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+            heartbeat_seen.set()
+
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(
+        scheduler_main.scheduler_loop(
+            stop_event,
+            "scheduler:hung",
+            client=StalledSchedulerClient(),
+            health=health,
+            check_interval_seconds=1,
+            heartbeat_seconds=0.001,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        assert health.snapshot()["healthy"] is True
+        now += 46
+        assert await asyncio.to_thread(heartbeat_seen.wait, 1)
+        assert health.snapshot()["healthy"] is False
+    finally:
+        stop_event.set()
+        release.set()
+        await task

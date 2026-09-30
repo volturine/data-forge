@@ -4,9 +4,15 @@ from runtime.datasource_delete_runtime import datasource_delete_hub
 from runtime.domain.build_jobs.live import hub as build_job_hub
 from runtime.domain.compute_requests.live import ComputeRequestWake, request_hub
 from runtime.domain.runtime.events import RuntimePayloadKind
+from runtime.storage_cleanup_runtime import storage_cleanup_hub
 
 
 async def handle_runtime_payload(payload: dict[str, object]) -> None:
+    if payload.get("kind") == "storage_cleanup_wakeup":
+        namespace = payload.get("namespace")
+        if isinstance(namespace, str) and namespace:
+            storage_cleanup_hub.publish(namespace)
+        return
     kind = RuntimePayloadKind.from_payload(payload)
     if kind == RuntimePayloadKind.JOB:
         namespace = payload.get("namespace")

@@ -4,8 +4,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from backend_core.api_execution_budget import ApiDatabaseBudget
 from main import (
     _api_observability_snapshot,
     _api_thread_budget,
@@ -15,6 +17,7 @@ from main import (
     _prewarm_executor,
     _resolve_uvicorn_limit_concurrency,
     _resolve_uvicorn_workers,
+    app,
 )
 
 
@@ -128,6 +131,13 @@ class TestUvicornSettings:
 
         assert call['ws_per_message_deflate'] is False
 
+    def test_cors_allows_and_exposes_client_request_ids(self) -> None:
+        cors = next(middleware for middleware in app.user_middleware if middleware.cls is CORSMiddleware)
+        allow_headers = cors.kwargs.get('allow_headers')
+        expose_headers = cors.kwargs.get('expose_headers')
+        assert isinstance(allow_headers, list) and 'X-Request-ID' in allow_headers
+        assert isinstance(expose_headers, list) and 'X-Request-ID' in expose_headers
+
     @pytest.mark.asyncio
     async def test_sync_thread_capacity_matches_database_budget(self, monkeypatch) -> None:
         import anyio.to_thread
@@ -141,7 +151,7 @@ class TestUvicornSettings:
         original = limiter.total_tokens
         try:
             limiter.total_tokens = 40
-            assert _api_thread_budget() == (12, 4)
+            assert _api_thread_budget() == ApiDatabaseBudget(12, 6, 4, 2)
             assert _configure_sync_thread_capacity() == 4
         finally:
             limiter.total_tokens = original
@@ -153,7 +163,7 @@ class TestUvicornSettings:
         monkeypatch.setattr(settings, 'database_pool_size', 8, raising=False)
         monkeypatch.setattr(settings, 'database_max_overflow', 4, raising=False)
 
-        assert _api_thread_budget() == (12, 4)
+        assert _api_thread_budget() == ApiDatabaseBudget(12, 6, 4, 2)
 
     def test_api_thread_budget_scales_down_with_database_pool(self, monkeypatch) -> None:
         from backend_core.config import settings
@@ -162,7 +172,25 @@ class TestUvicornSettings:
         monkeypatch.setattr(settings, 'database_pool_size', 2, raising=False)
         monkeypatch.setattr(settings, 'database_max_overflow', 1, raising=False)
 
-        assert _api_thread_budget() == (3, 3)
+        assert _api_thread_budget() == ApiDatabaseBudget(3, 1, 1, 1)
+
+    def test_api_budget_ignores_http_connection_limit(self, monkeypatch) -> None:
+        from backend_core.config import settings
+
+        monkeypatch.setattr(settings, 'worker_connections', 1, raising=False)
+        monkeypatch.setattr(settings, 'database_pool_size', 8, raising=False)
+        monkeypatch.setattr(settings, 'database_max_overflow', 4, raising=False)
+
+        assert _api_thread_budget() == ApiDatabaseBudget(12, 6, 4, 2)
+
+    def test_api_budget_rejects_database_capacity_below_three(self, monkeypatch) -> None:
+        from backend_core.config import settings
+
+        monkeypatch.setattr(settings, 'database_pool_size', 2, raising=False)
+        monkeypatch.setattr(settings, 'database_max_overflow', 0, raising=False)
+
+        with pytest.raises(ValueError, match='at least 3 pooled database connections'):
+            _api_thread_budget()
 
     def test_resolve_uvicorn_workers_uses_auto_for_non_positive(self, monkeypatch) -> None:
         from backend_core.config import settings

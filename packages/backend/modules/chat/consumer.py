@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -14,7 +13,7 @@ from fastapi import FastAPI
 
 from backend_core.namespace import normalize_namespace
 from modules.chat.sessions import session_store
-from modules.chat.store import ConfirmationPending, TurnClaim, chat_turn_store
+from modules.chat.store import ChatClaimRevoked, ConfirmationPending, TurnClaim, chat_turn_store
 from modules.mcp.models import MCPToolDefinition
 from modules.mcp.registry import build_tool_registry
 
@@ -24,7 +23,6 @@ _RECOVERY_SECONDS = 1.0
 _CONTROL_POLL_SECONDS = 0.5
 _DATABASE_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix='chat-database')
 _PROVIDER_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix='chat-provider')
-logger = logging.getLogger(__name__)
 
 
 class TurnRuntime:
@@ -138,19 +136,23 @@ class TurnRuntime:
         try:
             return await asyncio.shield(future)
         except asyncio.CancelledError:
-            if not self._finished:
-                interrupted = self.owner_stopping
-                await self.push_event({'type': 'error', 'content': 'Generation interrupted by coordinator restart' if interrupted else 'Generation stopped'})
-                await self.finish('interrupted' if interrupted else 'failed')
-            # Keep the admission slot until the bounded HTTP request exits;
-            # cancelling a thread future cannot terminate its provider I/O.
-            while not future.done():
-                try:
-                    await asyncio.shield(future)
-                except asyncio.CancelledError:
-                    continue
-                except Exception:
-                    break
+            try:
+                if not self._finished:
+                    interrupted = self.owner_stopping
+                    await self.push_event(
+                        {'type': 'error', 'content': 'Generation interrupted by coordinator restart' if interrupted else 'Generation stopped'}
+                    )
+                    await self.finish('interrupted' if interrupted else 'failed')
+            finally:
+                # A failed terminal write must not free admission while the
+                # uncancellable provider thread is still doing network I/O.
+                while not future.done():
+                    try:
+                        await asyncio.shield(future)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
             raise
 
     @property
@@ -244,7 +246,7 @@ class ChatTurnConsumer:
         return await loop.run_in_executor(_DATABASE_EXECUTOR, partial(function, *args, **kwargs))
 
     async def _run_claim(self, claim: TurnClaim) -> None:
-        try:
+        with contextlib.suppress(ChatClaimRevoked):
             runtime = await _load_turn(claim, self.app, self.registry)
             stop_requested, _decision = await runtime.control_state()
             if stop_requested:
@@ -265,48 +267,30 @@ class ChatTurnConsumer:
                 ),
                 name=f'chat-agent-{claim.id}',
             )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception('Could not start durable chat turn id=%s', claim.id)
-            await self._database(
-                chat_turn_store.append_event,
-                turn_id=claim.id,
-                claim_token=claim.claim_token,
-                generation=claim.coordinator_generation,
-                payload={'type': 'error', 'content': 'Chat turn could not be resumed'},
-            )
-            await self._database(
-                chat_turn_store.finish,
-                turn_id=claim.id,
-                claim_token=claim.claim_token,
-                generation=claim.coordinator_generation,
-                status='failed',
-            )
-            return
-        watcher = asyncio.create_task(self._watch_stop(runtime, turn_task), name=f'chat-stop-{claim.id}')
-        try:
-            await asyncio.shield(turn_task)
-        except asyncio.CancelledError:
-            runtime.owner_stopping = self._stopping
-            turn_task.cancel()
-            await asyncio.gather(turn_task, return_exceptions=True)
-        finally:
-            watcher.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await watcher
+            watcher = asyncio.create_task(self._watch_stop(runtime, turn_task), name=f'chat-stop-{claim.id}')
+            try:
+                await asyncio.shield(turn_task)
+            except asyncio.CancelledError:
+                runtime.owner_stopping = self._stopping
+                turn_task.cancel()
+                await turn_task
+            finally:
+                watcher.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watcher
 
     async def _watch_stop(self, runtime: TurnRuntime, turn_task: asyncio.Task[None]) -> None:
-        while not turn_task.done():
-            try:
+        try:
+            while not turn_task.done():
                 stop_requested, _decision = await runtime.control_state()
-            except RuntimeError:
-                return
-            if stop_requested:
-                runtime.stop_requested = True
+                if stop_requested:
+                    runtime.stop_requested = True
+                    turn_task.cancel()
+                    return
+                await asyncio.sleep(_CONTROL_POLL_SECONDS)
+        finally:
+            if not turn_task.done():
                 turn_task.cancel()
-                return
-            await asyncio.sleep(_CONTROL_POLL_SECONDS)
 
     async def _wait_for_work(
         self,

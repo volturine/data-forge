@@ -1,5 +1,8 @@
 import asyncio
 import secrets
+from collections.abc import Callable
+from functools import partial
+from typing import Concatenate
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -7,6 +10,7 @@ from fastapi.responses import RedirectResponse
 from sqlmodel import Session
 
 from backend_core import http as http_client
+from backend_core.api_execution_budget import run_bootstrap_settings_db
 from backend_core.auth_config import settings as auth_settings
 from backend_core.auth_exceptions import OAuthError
 from backend_core.database import get_settings_db_async, run_settings_db
@@ -40,8 +44,9 @@ from modules.auth.service import (
 router = APIRouter(prefix='/auth', tags=['auth'])
 
 
-async def _run_auth_db(function, *args, **kwargs):
-    return await asyncio.to_thread(run_settings_db, function, *args, **kwargs)
+async def _run_auth_db[**P, T](function: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
+    work = partial(run_settings_db, function, *args, **kwargs)
+    return await asyncio.to_thread(work)
 
 
 async def send_verification_email(user_email: str, token: str) -> bool:
@@ -304,7 +309,7 @@ def _update_profile(session: Session, token: str | None, body: UpdateProfileRequ
 @handle_errors(operation='get current user')
 async def me(request: Request) -> UserPublic:
     token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
-    return await _run_auth_db(_resolve_me, token)
+    return await run_bootstrap_settings_db(_resolve_me, token)
 
 
 @router.put('/profile', response_model=UserPublic)

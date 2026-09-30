@@ -69,6 +69,7 @@ class ComputeResponseRecovery:
         # and terminal cache until the last HTTP follower unregisters.
         self._pending: dict[str, _PendingComputeResponse] = {}
         self._lock = asyncio.Lock()
+        self._poll_requested: asyncio.Event | None = None
 
     async def register(self, request_id: str, namespace: str) -> None:
         async with self._lock:
@@ -153,10 +154,24 @@ class ComputeResponseRecovery:
         async with self._lock:
             self._pending.clear()
 
+    def request_poll(self) -> None:
+        """Coalesce requests on the API loop; the initial scan covers pre-start hints."""
+        if self._poll_requested is not None:
+            self._poll_requested.set()
+
     async def run(self, stop_event: asyncio.Event) -> None:
-        while not stop_event.is_set():
-            await self._poll_once()
-            await self._wait_for_next_poll(stop_event)
+        if self._poll_requested is not None:
+            raise RuntimeError('Compute response recovery is already running')
+        # Allocate once per lifespan, never replace an active waiter's event.
+        wake = asyncio.Event()
+        self._poll_requested = wake
+        try:
+            while not stop_event.is_set():
+                wake.clear()
+                await self._poll_once()
+                await self._wait_for_next_poll(stop_event, wake)
+        finally:
+            self._poll_requested = None
 
     async def _poll_once(self) -> None:
         async with self._lock:
@@ -241,16 +256,16 @@ class ComputeResponseRecovery:
                         ','.join(recovered_wake_states[:10]),
                     )
 
-    async def _wait_for_next_poll(self, stop_event: asyncio.Event) -> None:
+    async def _wait_for_next_poll(self, stop_event: asyncio.Event, wake: asyncio.Event) -> None:
         stop_task = asyncio.create_task(stop_event.wait())
-        timer_task = asyncio.create_task(asyncio.sleep(self._poll_seconds))
-        done, pending = await asyncio.wait({stop_task, timer_task}, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
-            task.cancel()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
-        if stop_task in done:
-            return
+        wake_task = asyncio.create_task(wake.wait())
+        tasks = (stop_task, wake_task)
+        try:
+            await asyncio.wait(tasks, timeout=self._poll_seconds, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 response_recovery = ComputeResponseRecovery()

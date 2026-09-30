@@ -2,12 +2,11 @@ import asyncio
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 
-from backend_core import compute_requests_service
-from backend_core.data_plane_client import client_from_settings
+from backend_core import compute_requests_service, storage_cleanup_service
 from backend_core.database import run_db
 from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.persistence.compute_requests.models import ComputeRequest
@@ -15,7 +14,7 @@ from backend_core.sqlmodel_typing import col
 from dataforge_protocol import enums_pb2
 from modules.compute.executor_client import execute_excel_preflight
 
-_PREFLIGHT_TTL = timedelta(minutes=30)
+_PREFLIGHT_TTL = storage_cleanup_service.PREFLIGHT_TTL
 
 
 def _string_list(value: object) -> list[str]:
@@ -51,12 +50,11 @@ def _load_preflight(session: Session, preflight_id: str) -> ExcelPreflight | Non
         tables={name: list(value.get('columns', [])) for name, value in tables.items()} if isinstance(tables, dict) else {},
         named_ranges=_string_list(payload.get('named_ranges', [])),
         created_at=row.created_at,
-        delete_source=row.artifact_path is not None,
+        delete_source=row.artifact_path is not None and row.artifact_name == 'preflight-source',
     )
 
 
 async def create_preflight(
-    session: Session,
     *,
     source_path: str,
     selection: Mapping[str, object],
@@ -65,7 +63,6 @@ async def create_preflight(
 ) -> tuple[str, ExcelPreflight, dict[str, object]]:
     preflight_id = str(uuid.uuid4())
     result = await execute_excel_preflight(
-        session,
         preflight_id=preflight_id,
         source_path=source_path,
         action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL,
@@ -88,20 +85,21 @@ def _remove_preflight(session: Session, preflight_id: str, *, delete_source: boo
     row = session.exec(select(ComputeRequest).where(ComputeRequest.id == preflight_id).with_for_update()).first()
     if row is None or row.kind != enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT:
         return None
-    source = row.artifact_path if delete_source else None
+    source = row.artifact_path if delete_source and row.artifact_name == 'preflight-source' else None
+    if source is not None:
+        if row.engine_resource_id is None:
+            raise ValueError('Preflight source ownership requires its exact engine RID')
+        storage_cleanup_service.register_preflight_source(session, preflight_id=preflight_id, resource_id=row.engine_resource_id, source_path=source)
     session.delete(row)
     session.commit()
     return source
 
 
 async def clear_preflight(preflight_id: str, *, delete_source: bool = True) -> None:
-    source = await asyncio.to_thread(run_db, _remove_preflight, preflight_id, delete_source=delete_source)
-    if source is not None:
-        data_plane = await asyncio.to_thread(client_from_settings)
-        await asyncio.to_thread(data_plane.delete_object, source)
+    await asyncio.to_thread(run_db, _remove_preflight, preflight_id, delete_source=delete_source)
 
 
-def _expire_preflights(session: Session) -> list[str]:
+def _expire_preflights(session: Session) -> None:
     before = datetime.now(UTC) - _PREFLIGHT_TTL
     rows = session.exec(
         select(ComputeRequest)
@@ -110,8 +108,8 @@ def _expire_preflights(session: Session) -> list[str]:
         .where(ComputeRequest.created_at < before)
         .where(col(ComputeRequest.status).in_([enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED, enums_pb2.COMPUTE_REQUEST_STATUS_FAILED]))
         .with_for_update(skip_locked=True)
+        .limit(32)
     ).all()
-    sources = []
     for row in rows:
         active = session.exec(
             select(ComputeRequest.id)
@@ -120,20 +118,16 @@ def _expire_preflights(session: Session) -> list[str]:
         ).first()
         if active is not None:
             continue
-        if row.artifact_path is not None:
-            sources.append(row.artifact_path)
+        if row.artifact_path is not None and row.artifact_name == 'preflight-source':
+            if row.engine_resource_id is None:
+                raise ValueError('Preflight source ownership requires its exact engine RID')
+            storage_cleanup_service.register_preflight_source(session, preflight_id=row.id, resource_id=row.engine_resource_id, source_path=row.artifact_path)
         session.delete(row)
     session.commit()
-    return sources
 
 
 async def _cleanup_expired() -> None:
-    sources = await asyncio.to_thread(run_db, _expire_preflights)
-    if not sources:
-        return
-    data_plane = await asyncio.to_thread(client_from_settings)
-    for source in sources:
-        await asyncio.to_thread(data_plane.delete_object, source)
+    await asyncio.to_thread(run_db, _expire_preflights)
 
 
 def preview_rows(result: Mapping[str, object]) -> list[list[str | None]]:

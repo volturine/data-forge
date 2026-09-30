@@ -2,7 +2,7 @@
 
 import asyncio
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from email.message import EmailMessage
 from functools import partial
 
@@ -38,12 +38,29 @@ from modules.telegram.runtime import (
 
 router = MCPRouter(prefix='/settings', tags=['settings'])
 _SMTP_TEST_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='smtp-test')
-_SMTP_TEST_CAPACITY = threading.BoundedSemaphore(2)
+_SMTP_TEST_CAPACITY = threading.BoundedSemaphore(1)
+_SMTP_TEST_DEADLINE = 12.0
 _TELEGRAM_TEST_TIMEOUT = httpx.Timeout(connect=3.0, read=10.0, write=5.0, pool=3.0)
 
 
 def _redact_token(value: str, token: str) -> str:
     return value.replace(token, MASKED_SECRET) if token else value
+
+
+def _finish_smtp_test(future: Future[None]) -> None:
+    """Observe late worker errors and release capacity only after the worker settles."""
+    try:
+        future.exception()
+    except CancelledError:
+        pass
+    finally:
+        _SMTP_TEST_CAPACITY.release()
+
+
+def _consume_smtp_test_result(future: asyncio.Future[None]) -> None:
+    """Retrieve a worker error even when its HTTP request has already ended."""
+    if not future.cancelled():
+        future.exception()
 
 
 @router.get('', response_model=SettingsResponse, mcp=True)
@@ -95,15 +112,32 @@ async def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user
     if not _SMTP_TEST_CAPACITY.acquire(blocking=False):
         raise HTTPException(status_code=429, detail='SMTP testing is busy; try again shortly')
     try:
-        loop = asyncio.get_running_loop()
-        future = loop.run_in_executor(_SMTP_TEST_EXECUTOR, partial(send_smtp_message, host, port, smtp_user, password, msg, timeout=10))
-        future.add_done_callback(lambda _future: _SMTP_TEST_CAPACITY.release())
-        await asyncio.wait_for(asyncio.shield(future), timeout=12.0)
-        return TestResult(success=True, message=f'Test email sent to {body.to}')
-    except TimeoutError as exc:
-        raise HTTPException(status_code=504, detail='SMTP test deadline expired') from exc
+        future = _SMTP_TEST_EXECUTOR.submit(
+            partial(send_smtp_message, host, port, smtp_user, password, msg, timeout=10),
+        )
+    except BaseException:
+        _SMTP_TEST_CAPACITY.release()
+        raise
+
+    future.add_done_callback(_finish_smtp_test)
+    async_future = asyncio.wrap_future(future)
+    async_future.add_done_callback(_consume_smtp_test_result)
+    try:
+        completed, _pending = await asyncio.wait({async_future}, timeout=_SMTP_TEST_DEADLINE)
+        if completed:
+            async_future.result()
+            return TestResult(success=True, message=f'Test email sent to {body.to}')
+    except asyncio.CancelledError:
+        future.cancel()
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=_redact_token(str(exc), password)) from exc
+
+    if future.cancel():
+        detail = 'SMTP test deadline expired before sending; the email was not sent'
+    else:
+        detail = 'SMTP test deadline expired while sending; the SMTP provider may have accepted the email'
+    raise HTTPException(status_code=504, detail=detail)
 
 
 @router.post('/test-telegram', response_model=TestResult, mcp=True)

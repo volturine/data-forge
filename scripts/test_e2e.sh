@@ -77,6 +77,7 @@ NORMAL_GREP_ARGS=()
 RUN_CONCURRENCY_PROBE=0
 RUN_ARCHITECTURE_TESTS=0
 DB_ACTIVITY_SAMPLER_PID=""
+LOAD_PROBE_RESOURCE_SAMPLER_PID=""
 
 PLAYWRIGHT_VERSION="$(node -p "require('./packages/frontend/node_modules/playwright/package.json').version")"
 PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
@@ -376,6 +377,31 @@ stop_database_activity_sampler() {
     DB_ACTIVITY_SAMPLER_PID=""
 }
 
+start_load_probe_resource_sampler() {
+    if [ -z "$LOG_DIR" ] || [ -n "$LOAD_PROBE_RESOURCE_SAMPLER_PID" ]; then
+        return
+    fi
+    local phase_dir="${LOG_DIR}/load-probe"
+    mkdir -p "$phase_dir"
+    python3 "${ROOT_DIR}/scripts/e2e/resource_sampler.py" \
+        "dataforge-e2e-${E2E_STACK_ID}" \
+        "$E2E_DEPLOYMENT_ID" \
+        "dataforge-e2e-${E2E_STACK_ID}-playwright-load-probe" \
+        "$$" \
+        "$phase_dir/host-resource.tsv" \
+        >"$phase_dir/resource-sampler.log" 2>&1 &
+    LOAD_PROBE_RESOURCE_SAMPLER_PID=$!
+}
+
+stop_load_probe_resource_sampler() {
+    if [ -z "$LOAD_PROBE_RESOURCE_SAMPLER_PID" ]; then
+        return
+    fi
+    kill -TERM "$LOAD_PROBE_RESOURCE_SAMPLER_PID" >/dev/null 2>&1 || true
+    wait "$LOAD_PROBE_RESOURCE_SAMPLER_PID" >/dev/null 2>&1 || true
+    LOAD_PROBE_RESOURCE_SAMPLER_PID=""
+}
+
 wait_for_runtime_drain() {
     echo "Waiting for e2e runtime work to drain"
     # Let ordinary asynchronous work finish, but do not let a request orphaned
@@ -615,6 +641,7 @@ case "$action" in
         keep_stack="${E2E_KEEP_STACK:-0}"
         cleanup() {
             status=$?
+            stop_load_probe_resource_sampler
             stop_database_activity_sampler
             if ! normalize_e2e_artifact_ownership; then
                 echo "Failed to restore ownership of E2E artifacts for the next checkout" >&2
@@ -630,6 +657,8 @@ case "$action" in
             exit "$status"
         }
         trap cleanup EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
         if [ -n "$LOG_DIR" ]; then
             mkdir -p "$LOG_DIR"
         fi
@@ -704,8 +733,10 @@ case "$action" in
                     failed=1
                 fi
             fi
+            start_load_probe_resource_sampler
             start_database_activity_sampler load-probe
             run_playwright_concurrency_probe || failed=1
+            stop_load_probe_resource_sampler
             stop_database_activity_sampler
         fi
         if [ "$RUN_CONCURRENCY_PROBE" -eq 1 ] || [ "$failed" -ne 0 ]; then

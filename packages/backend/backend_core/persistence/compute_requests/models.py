@@ -7,6 +7,7 @@ from sqlmodel import Field, SQLModel
 class ComputeRequest(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     __tablename__ = 'compute_requests'  # type: ignore[assignment]
     __table_args__ = (
+        Index('ix_compute_requests_active_source', 'artifact_path', 'status'),
         Index(
             'ix_compute_requests_engine_identity',
             'namespace',

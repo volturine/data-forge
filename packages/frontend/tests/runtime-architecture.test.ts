@@ -1,21 +1,60 @@
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import { request as httpRequest } from 'node:http';
+import { promisify } from 'node:util';
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures.js';
-import { createCsvDatasource } from './utils/api.js';
+import { createCsvDatasource, deleteDatasource } from './utils/api.js';
 import { waitForLayoutReady } from './utils/readiness.js';
 
 type ChatEvent = { type: string; [key: string]: unknown };
 type SseEvent = { id: string; data: ChatEvent };
+const execFileAsync = promisify(execFile);
+
+async function chatDatabaseContainer(): Promise<string> {
+	const deploymentId = process.env.E2E_DEPLOYMENT_ID;
+	if (!deploymentId) throw new Error('E2E_DEPLOYMENT_ID was not provided by the owned test recipe');
+	const result = await execFileAsync('docker', [
+		'ps',
+		'--filter',
+		`label=com.docker.compose.project=${deploymentId}`,
+		'--filter',
+		'label=com.docker.compose.service=postgres',
+		'--format',
+		'{{.ID}}'
+	]);
+	const containers = result.stdout.trim().split('\n');
+	if (containers.length !== 1 || !containers[0])
+		throw new Error('Expected the owned E2E PostgreSQL container');
+	return containers[0];
+}
+
+async function chatTurnState(containerId: string, sessionId: string): Promise<string> {
+	if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) throw new Error('Invalid owned chat session ID');
+	const result = await execFileAsync('docker', [
+		'exec',
+		containerId,
+		'psql',
+		'-U',
+		'dataforge',
+		'-d',
+		'dataforge',
+		'-At',
+		'-c',
+		`SELECT status || ':' || COALESCE(checkpoint ->> 'phase', '') FROM public.chat_turns WHERE session_id = '${sessionId}' ORDER BY created_at DESC LIMIT 1`
+	]);
+	return result.stdout.trim();
+}
 
 async function readChatStreams(
 	page: Page,
 	sessionId: string,
 	count: number,
-	after = 0
+	after = 0,
+	stopAfter: 'done' | 'turn_start' | 'user_message' = 'done'
 ): Promise<SseEvent[][]> {
 	return page.evaluate(
-		async ({ sessionId, count, after }) => {
+		async ({ sessionId, count, after, stopAfter }) => {
 			const open = async () => {
 				const response = await fetch(
 					`/api/v1/ai/chat/stream/${encodeURIComponent(sessionId)}?after=${after}`
@@ -50,7 +89,11 @@ async function readChatStreams(
 							if (!id || !data) continue;
 							const event = JSON.parse(data) as ChatEvent;
 							events.push({ id, data: event });
-							if (event.type === 'done') {
+							if (
+								event.type === 'done' ||
+								(stopAfter === 'turn_start' && event.type === 'turn_start') ||
+								(stopAfter === 'user_message' && event.type === 'message' && event.role === 'user')
+							) {
 								await reader.cancel();
 								return events;
 							}
@@ -59,7 +102,7 @@ async function readChatStreams(
 				})
 			);
 		},
-		{ sessionId, count, after }
+		{ sessionId, count, after, stopAfter }
 	);
 }
 
@@ -117,6 +160,31 @@ async function waitForChatHeartbeat(page: Page, sessionId: string): Promise<bool
 
 test.describe('runtime architecture', () => {
 	test.describe.configure({ mode: 'default' });
+
+	test('chat stream helper serializes the default completion and early turn gate', async ({
+		page
+	}) => {
+		await page.goto('/');
+		const sessionId = `e2e-stream-helper-${randomUUID()}`;
+		const events: SseEvent[] = [
+			{ id: '1', data: { type: 'message', role: 'user', content: 'start' } },
+			{ id: '2', data: { type: 'turn_start', turn: 1 } },
+			{ id: '3', data: { type: 'message', role: 'assistant', content: 'finished' } },
+			{ id: '4', data: { type: 'done' } }
+		];
+		await page.route(`**/api/v1/ai/chat/stream/${sessionId}?after=*`, (route) =>
+			route.fulfill({
+				contentType: 'text/event-stream',
+				body: events
+					.map((event) => `id: ${event.id}\ndata: ${JSON.stringify(event.data)}\n\n`)
+					.join('')
+			})
+		);
+		expect(await readChatStreams(page, sessionId, 2)).toEqual([events, events]);
+		expect(await readChatStreams(page, sessionId, 1, 0, 'turn_start')).toEqual([
+			events.slice(0, 2)
+		]);
+	});
 
 	test('fresh API connections consume the current projected AI provider settings', async ({
 		browser,
@@ -519,5 +587,174 @@ test.describe('runtime architecture', () => {
 				(event) => event.data.type === 'error' && event.data.content === 'Generation stopped'
 			)
 		).toBeTruthy();
+	});
+
+	test('deleting a session during a durable turn does not disrupt the runtime', async ({
+		browser,
+		page,
+		request
+	}) => {
+		await page.goto('/');
+		const fixtureUrl = process.env.E2E_OPENAI_FIXTURE_URL;
+		if (!fixtureUrl) throw new Error('E2E_OPENAI_FIXTURE_URL was not provided by the harness');
+		const settingsResponse = await page.context().request.get('/api/v1/settings');
+		expect(settingsResponse.ok()).toBeTruthy();
+		const originalSettings = (await settingsResponse.json()) as Record<string, unknown>;
+		const settingsUpdate = await page.context().request.put('/api/v1/settings', {
+			data: { openai_endpoint_url: fixtureUrl.replace(/\/v1$/, '') }
+		});
+		expect(settingsUpdate.ok()).toBeTruthy();
+
+		const datasourceId = await createCsvDatasource(
+			request,
+			`e2e-chat-delete-preview-${randomUUID()}`,
+			'id,value\n1,while-chat-runs\n'
+		);
+		const sessionId = await createChatSession(page, `e2e-chat-delete-${randomUUID()}`);
+		const apiContext = await browser.newContext({
+			baseURL: request.baseURL,
+			storageState: request.sessionState
+		});
+		let turnActive = false;
+		let lastEventId = 0;
+		let sessionDeleted = false;
+		try {
+			const databaseContainer = await chatDatabaseContainer();
+			const slowContent = '[e2e-heartbeat] hold this durable turn';
+			const send = await apiContext.request.post('/api/v1/ai/chat/message', {
+				headers: { Connection: 'close' },
+				data: { session_id: sessionId, content: slowContent }
+			});
+			expect(send.ok(), await send.text()).toBeTruthy();
+			turnActive = true;
+
+			const [startedEvents] = await readChatStreams(page, sessionId, 1, 0, 'user_message');
+			expect(
+				startedEvents.some((event) => event.data.type === 'message' && event.data.role === 'user')
+			).toBeTruthy();
+			const userEvent = startedEvents.find(
+				(event) => event.data.type === 'message' && event.data.role === 'user'
+			);
+			if (!userEvent) throw new Error('The durable chat turn did not emit its user message');
+			lastEventId = Number(userEvent.id);
+			await expect
+				.poll(() => chatTurnState(databaseContainer, sessionId))
+				.toBe('running:provider_request');
+
+			const deletion = await apiContext.request.delete(`/api/v1/ai/chat/sessions/${sessionId}`, {
+				headers: { Connection: 'close' }
+			});
+			expect(deletion.status()).toBe(409);
+			expect(await deletion.json()).toMatchObject({
+				detail: 'Cannot delete a chat session while a turn is active'
+			});
+			const stillPresent = await apiContext.request.get('/api/v1/ai/chat/sessions', {
+				headers: { Connection: 'close' }
+			});
+			expect(stillPresent.ok()).toBeTruthy();
+			expect(
+				((await stillPresent.json()) as Array<{ id?: string; session_id?: string }>).some(
+					(session) => (session.id ?? session.session_id) === sessionId
+				)
+			).toBeTruthy();
+
+			const pipeline = {
+				analysis_id: randomUUID(),
+				tabs: [
+					{
+						id: randomUUID(),
+						name: 'Source',
+						datasource: {
+							id: datasourceId,
+							analysis_tab_id: null,
+							config: { branch: 'master' }
+						},
+						output: { result_id: randomUUID(), filename: 'source', format: 'parquet' },
+						steps: []
+					}
+				]
+			};
+			const preview = await apiContext.request.post('/api/v1/compute/preview', {
+				headers: { 'X-Namespace': process.env.DEFAULT_NAMESPACE ?? 'default' },
+				data: {
+					datasource_id: datasourceId,
+					target_step_id: 'source',
+					analysis_pipeline: pipeline,
+					row_limit: 1,
+					page: 1
+				}
+			});
+			expect(preview.ok(), await preview.text()).toBeTruthy();
+			expect((await preview.json()).data[0]?.value).toBe('while-chat-runs');
+			expect(await chatTurnState(databaseContainer, sessionId)).toBe('running:provider_request');
+
+			const stop = await apiContext.request.post(`/api/v1/ai/chat/sessions/${sessionId}/stop`, {
+				headers: { Connection: 'close' }
+			});
+			expect(stop.ok()).toBeTruthy();
+			const stoppedEvents = await readChatStreams(page, sessionId, 1, Number(userEvent.id));
+			const terminalEvents = stoppedEvents[0] ?? [];
+			expect(terminalEvents.at(-1)?.data.type).toBe('done');
+			expect(
+				terminalEvents.some(
+					(event) => event.data.type === 'error' && event.data.content === 'Generation stopped'
+				)
+			).toBeTruthy();
+			turnActive = false;
+
+			const afterStop = terminalEvents.at(-1);
+			if (!afterStop) throw new Error('The stopped chat turn did not emit a terminal event');
+			lastEventId = Number(afterStop.id);
+			const nextStreamReady = page.waitForResponse((response) =>
+				isChatStreamResponse(sessionId, response.url())
+			);
+			const nextEvents = readChatStreams(page, sessionId, 1, Number(afterStop.id));
+			await nextStreamReady;
+			const nextTurn = await apiContext.request.post('/api/v1/ai/chat/message', {
+				headers: { Connection: 'close' },
+				data: { session_id: sessionId, content: 'a later turn still works' }
+			});
+			expect(nextTurn.ok(), await nextTurn.text()).toBeTruthy();
+			turnActive = true;
+			const [laterEvents] = await nextEvents;
+			expect(laterEvents?.at(-1)?.data.type).toBe('done');
+			expect(
+				laterEvents?.some(
+					(event) =>
+						event.data.type === 'message' &&
+						event.data.role === 'assistant' &&
+						event.data.content ===
+							`E2E fixture reply: user: ${slowContent}\nuser: a later turn still works\nassistant:`
+				)
+			).toBeTruthy();
+			lastEventId = Number(laterEvents?.at(-1)?.id ?? lastEventId);
+			turnActive = false;
+
+			const idleDelete = await apiContext.request.delete(`/api/v1/ai/chat/sessions/${sessionId}`, {
+				headers: { Connection: 'close' }
+			});
+			expect(idleDelete.ok()).toBeTruthy();
+			sessionDeleted = true;
+		} finally {
+			if (turnActive) {
+				await apiContext.request.post(`/api/v1/ai/chat/sessions/${sessionId}/stop`, {
+					headers: { Connection: 'close' }
+				});
+				await readChatStreams(page, sessionId, 1, lastEventId);
+			}
+			if (!sessionDeleted) {
+				await apiContext.request.delete(`/api/v1/ai/chat/sessions/${sessionId}`, {
+					headers: { Connection: 'close' }
+				});
+			}
+			await apiContext.close();
+			await deleteDatasource(request, datasourceId);
+			const restore = await page.context().request.put('/api/v1/settings', {
+				data: {
+					openai_endpoint_url: originalSettings.openai_endpoint_url
+				}
+			});
+			expect(restore.ok()).toBeTruthy();
+		}
 	});
 });

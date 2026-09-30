@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import contextlib
+import json
+import math
 import os
 import signal
 import socket
@@ -8,12 +10,16 @@ import subprocess
 import threading
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import httpx
+
+# psutil is a declared runtime dependency but has no installed type stubs.
+import psutil  # type: ignore[import-untyped]
 import psycopg
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -22,6 +28,107 @@ CORE_ROOT = BACKEND_ROOT
 SCHEDULER_ROOT = REPO_ROOT / 'packages' / 'scheduler'
 WORKER_ROOT = REPO_ROOT / 'packages' / 'worker'
 LOCAL_SERVICE_HOST = '127.0.0.1' if os.environ.get('CI') else 'rolands-mac-mini.bee-justice.ts.net'
+OWNER_HOST_LABEL = 'data-forge.test-owner-host'
+OWNER_PID_LABEL = 'data-forge.test-owner-pid'
+OWNER_START_LABEL = 'data-forge.test-owner-start'
+
+
+@dataclass(frozen=True)
+class DockerResourceOwner:
+    host: str
+    pid: int
+    process_start: float
+
+    @classmethod
+    def current(cls) -> DockerResourceOwner:
+        return cls.for_pid(os.getpid())
+
+    @classmethod
+    def for_pid(cls, pid: int) -> DockerResourceOwner:
+        host = socket.gethostname()
+        if not host:
+            raise RuntimeError('Cannot identify the host that owns test Docker resources')
+        process = psutil.Process(pid)
+        return cls(host=host, pid=process.pid, process_start=process.create_time())
+
+    def docker_labels(self, resource_label: str) -> list[str]:
+        label_key, label_value = resource_label.split('=', maxsplit=1)
+        labels = {
+            label_key: label_value,
+            OWNER_HOST_LABEL: self.host,
+            OWNER_PID_LABEL: str(self.pid),
+            OWNER_START_LABEL: format(self.process_start, '.17g'),
+        }
+        return [argument for key, value in labels.items() for argument in ('--label', f'{key}={value}')]
+
+
+def _resource_owner_is_stale(labels: Mapping[str, object]) -> bool:
+    owner_host = labels.get(OWNER_HOST_LABEL)
+    owner_pid = labels.get(OWNER_PID_LABEL)
+    owner_start = labels.get(OWNER_START_LABEL)
+    if not isinstance(owner_host, str) or owner_host != socket.gethostname():
+        return False
+    if not isinstance(owner_pid, str) or not owner_pid.isdecimal():
+        return False
+    if not isinstance(owner_start, str):
+        return False
+    try:
+        pid = int(owner_pid)
+        process_start = float(owner_start)
+    except ValueError:
+        return False
+    if pid <= 0 or not math.isfinite(process_start):
+        return False
+    try:
+        actual_process_start = psutil.Process(pid).create_time()
+    except psutil.NoSuchProcess:
+        return True
+    except psutil.AccessDenied, OSError:
+        return False
+    return not math.isclose(actual_process_start, process_start, rel_tol=0, abs_tol=1e-6)
+
+
+def _inspect_docker_labels(resource_type: Literal['container', 'volume'], resource_id: str) -> dict[str, object] | None:
+    if resource_type == 'container':
+        command = ['docker', 'inspect', '--format', '{{json .Config.Labels}}', resource_id]
+    else:
+        command = ['docker', 'volume', 'inspect', '--format', '{{json .Labels}}', resource_id]
+    result = run_command(command, env=docker_env(), check=False)
+    if result.returncode != 0:
+        return None
+    try:
+        labels = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(labels, dict):
+        return None
+    return labels
+
+
+def _cleanup_stale_owned_resources(resource_type: Literal['container', 'volume'], label: str) -> None:
+    if resource_type == 'container':
+        listed = run_command(
+            ['docker', 'ps', '-aq', '--filter', f'label={label}'],
+            env=docker_env(),
+            check=False,
+            timeout=120,
+        )
+    else:
+        listed = run_command(
+            ['docker', 'volume', 'ls', '-q', '--filter', f'label={label}'],
+            env=docker_env(),
+            check=False,
+            timeout=120,
+        )
+    if listed.returncode != 0:
+        return
+    resource_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+    for resource_id in resource_ids:
+        labels = _inspect_docker_labels(resource_type, resource_id)
+        if labels is None or not _resource_owner_is_stale(labels):
+            continue
+        command = ['docker', 'rm', '-f', resource_id] if resource_type == 'container' else ['docker', 'volume', 'rm', '-f', resource_id]
+        run_command(command, env=docker_env(), check=False, timeout=300)
 
 
 def local_service_bind_address() -> str:
@@ -55,37 +162,12 @@ def require_docker() -> None:
 
 
 def cleanup_stale_test_postgres(*, label: str = 'data-forge.test-postgres=1') -> None:
-    stale_containers = run_command(
-        ['docker', 'ps', '-aq', '--filter', f'label={label}'],
-        env=docker_env(),
-        check=False,
-        timeout=120,
-    )
-    container_ids = [line.strip() for line in stale_containers.stdout.splitlines() if line.strip()]
-    if container_ids:
-        run_command(['docker', 'rm', '-f', *container_ids], env=docker_env(), check=False, timeout=300)
-
-    stale_volumes = run_command(
-        ['docker', 'volume', 'ls', '-q', '--filter', f'label={label}'],
-        env=docker_env(),
-        check=False,
-        timeout=120,
-    )
-    volume_ids = [line.strip() for line in stale_volumes.stdout.splitlines() if line.strip()]
-    if volume_ids:
-        run_command(['docker', 'volume', 'rm', '-f', *volume_ids], env=docker_env(), check=False, timeout=300)
+    _cleanup_stale_owned_resources('container', label)
+    _cleanup_stale_owned_resources('volume', label)
 
 
 def cleanup_stale_test_rustfs(*, label: str = 'data-forge.test-rustfs=1') -> None:
-    stale_containers = run_command(
-        ['docker', 'ps', '-aq', '--filter', f'label={label}'],
-        env=docker_env(),
-        check=False,
-        timeout=120,
-    )
-    container_ids = [line.strip() for line in stale_containers.stdout.splitlines() if line.strip()]
-    if container_ids:
-        run_command(['docker', 'rm', '-f', *container_ids], env=docker_env(), check=False, timeout=300)
+    _cleanup_stale_owned_resources('container', label)
 
 
 def cleanup_stale_test_engine_networks(*, label: str = 'data-forge.test-engine-network=1') -> None:
@@ -232,6 +314,7 @@ class RustfsContainer:
     bucket: str = 'dataforge'
     name: str = field(default_factory=lambda: f'df-rustfs-{uuid.uuid4().hex[:10]}')
     label: str = 'data-forge.test-rustfs=1'
+    owner: DockerResourceOwner = field(default_factory=DockerResourceOwner.current)
     container_id: str | None = None
     port: int | None = None
 
@@ -248,8 +331,7 @@ class RustfsContainer:
                     'run',
                     '-d',
                     '--rm',
-                    '--label',
-                    self.label,
+                    *self.owner.docker_labels(self.label),
                     '--name',
                     self.name,
                     '-e',
@@ -327,6 +409,7 @@ class PostgresContainer:
     name: str = field(default_factory=lambda: f'df-pg-{uuid.uuid4().hex[:10]}')
     label: str = 'data-forge.test-postgres=1'
     volume_name: str = field(default_factory=lambda: f'df-pg-data-{uuid.uuid4().hex[:10]}')
+    owner: DockerResourceOwner = field(default_factory=DockerResourceOwner.current)
     container_id: str | None = None
     port: int | None = None
 
@@ -338,7 +421,7 @@ class PostgresContainer:
     def start(self) -> None:
         try:
             run_command(
-                ['docker', 'volume', 'create', '--label', self.label, self.volume_name],
+                ['docker', 'volume', 'create', *self.owner.docker_labels(self.label), self.volume_name],
                 env=docker_env(),
                 timeout=120,
             )
@@ -348,8 +431,7 @@ class PostgresContainer:
                     'run',
                     '-d',
                     '--rm',
-                    '--label',
-                    self.label,
+                    *self.owner.docker_labels(self.label),
                     '--name',
                     self.name,
                     '-v',
@@ -403,7 +485,8 @@ class PostgresContainer:
         return psycopg.connect(self.url.replace('+psycopg', ''), autocommit=True)
 
     def stop(self) -> None:
-        run_command(['docker', 'rm', '-f', self.name], env=docker_env(), check=False, timeout=120)
+        container = self.container_id or self.name
+        run_command(['docker', 'rm', '-f', container], env=docker_env(), check=False, timeout=120)
         run_command(['docker', 'volume', 'rm', '-f', self.volume_name], env=docker_env(), check=False, timeout=120)
         self.container_id = None
         self.port = None

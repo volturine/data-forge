@@ -1,7 +1,11 @@
 """Tests for the settings module — GET/PUT settings, test SMTP/Telegram."""
 
+import asyncio
+import gc
+import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import AsyncIterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +16,40 @@ from sqlmodel import Session, create_engine
 
 from backend_core.secrets import MASKED_SECRET, decrypt_secret, encrypt_secret
 from tests.http_client import TestClient
+
+
+@pytest.fixture
+async def smtp_loop_errors() -> AsyncIterator[list[dict[str, object]]]:
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    errors: list[dict[str, object]] = []
+
+    def _record_error(_loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
+        errors.append(context)
+
+    loop.set_exception_handler(_record_error)
+    try:
+        yield errors
+        # Drain result propagation after the tests join their SMTP worker threads.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        gc.collect()
+        assert errors == []
+    finally:
+        loop.set_exception_handler(previous_handler)
+
+
+async def _smtp_settings_lookup(_operation: object) -> dict[str, object]:
+    return {'host': 'smtp.test.com', 'port': 587, 'user': 'user@test.com', 'password': 'pw'}
+
+
+def _use_smtp_test_executor(monkeypatch, executor: object, deadline: float = 12.0) -> None:
+    from modules.settings import routes
+
+    monkeypatch.setattr(routes, 'run_in_threadpool', _smtp_settings_lookup)
+    monkeypatch.setattr(routes, '_SMTP_TEST_EXECUTOR', executor)
+    monkeypatch.setattr(routes, '_SMTP_TEST_CAPACITY', threading.BoundedSemaphore(1))
+    monkeypatch.setattr(routes, '_SMTP_TEST_DEADLINE', deadline)
 
 
 def _make_postgres_engine(prefix: str = 'settings'):
@@ -373,6 +411,222 @@ class TestTestSmtp:
         assert resp.status_code == 502
         data = resp.json()
         assert 'refused' in data['detail'].lower()
+
+    @pytest.mark.asyncio
+    async def test_slow_provider_does_not_block_event_loop(self, monkeypatch) -> None:
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings.routes import test_smtp
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def _slow_send(*_args, **_kwargs) -> None:
+            started.set()
+            assert release.wait(timeout=2)
+
+        monkeypatch.setattr('modules.settings.routes.send_smtp_message', _slow_send)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            _use_smtp_test_executor(monkeypatch, executor)
+            request = asyncio.create_task(test_smtp(TestSmtpRequest(to='recipient@test.com')))
+            assert await asyncio.to_thread(started.wait, 1)
+            release.set()
+            result = await request
+
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_busy_while_provider_call_is_running(self, monkeypatch) -> None:
+        from fastapi import HTTPException
+
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings.routes import test_smtp
+
+        started = threading.Event()
+        release = threading.Event()
+        calls = 0
+
+        def _slow_send(*_args, **_kwargs) -> None:
+            nonlocal calls
+            calls += 1
+            started.set()
+            assert release.wait(timeout=2)
+
+        monkeypatch.setattr('modules.settings.routes.send_smtp_message', _slow_send)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            _use_smtp_test_executor(monkeypatch, executor, deadline=1)
+            request = TestSmtpRequest(to='recipient@test.com')
+            first = asyncio.create_task(test_smtp(request))
+            assert await asyncio.to_thread(started.wait, 1)
+            with pytest.raises(HTTPException, match='busy') as exc_info:
+                await test_smtp(request)
+            assert exc_info.value.status_code == 429
+
+            release.set()
+            await first
+
+        assert calls == 1
+
+    @pytest.mark.asyncio
+    async def test_cancellation_before_submission_does_not_consume_capacity(self, monkeypatch, smtp_loop_errors) -> None:
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings import routes
+
+        waiting = asyncio.Event()
+        continue_lookup = asyncio.Event()
+        sent = threading.Event()
+
+        async def _blocked_lookup(_operation):
+            waiting.set()
+            await continue_lookup.wait()
+            return {'host': 'smtp.test.com', 'port': 587, 'user': 'user@test.com', 'password': 'pw'}
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            _use_smtp_test_executor(monkeypatch, executor)
+            monkeypatch.setattr(routes, 'run_in_threadpool', _blocked_lookup)
+            monkeypatch.setattr(routes, 'send_smtp_message', lambda *_args, **_kwargs: sent.set())
+            request = asyncio.create_task(routes.test_smtp(TestSmtpRequest(to='recipient@test.com')))
+            await waiting.wait()
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+
+            continue_lookup.set()
+            result = await routes.test_smtp(TestSmtpRequest(to='recipient@test.com'))
+
+        assert result.success is True
+        assert sent.is_set()
+
+    @pytest.mark.asyncio
+    async def test_deadline_cancels_executor_work_that_has_not_started(self, monkeypatch, smtp_loop_errors) -> None:
+        from fastapi import HTTPException
+
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings import routes
+
+        class DelayedExecutor:
+            def __init__(self) -> None:
+                self.future: Future[None] = Future()
+
+            def submit(self, *_args: object, **_kwargs: object) -> Future[None]:
+                return self.future
+
+        executor = DelayedExecutor()
+        sent = threading.Event()
+        monkeypatch.setattr(routes, 'send_smtp_message', lambda *_args, **_kwargs: sent.set())
+        monkeypatch.setattr(routes, 'run_in_threadpool', _smtp_settings_lookup)
+        monkeypatch.setattr(routes, '_SMTP_TEST_EXECUTOR', executor)
+        monkeypatch.setattr(routes, '_SMTP_TEST_CAPACITY', threading.BoundedSemaphore(1))
+        monkeypatch.setattr(routes, '_SMTP_TEST_DEADLINE', 0.01)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await routes.test_smtp(TestSmtpRequest(to='recipient@test.com'))
+
+        assert exc_info.value.status_code == 504
+        assert 'not sent' in exc_info.value.detail
+        assert executor.future.cancelled()
+        assert not executor.future.set_running_or_notify_cancel()
+        assert not sent.is_set()
+
+    @pytest.mark.asyncio
+    async def test_timeout_keeps_admission_occupied_until_worker_settles(self, monkeypatch, smtp_loop_errors) -> None:
+        from fastapi import HTTPException
+
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings.routes import test_smtp
+
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        calls = 0
+
+        def _slow_send(*_args, **_kwargs) -> None:
+            nonlocal calls
+            calls += 1
+            started.set()
+            if calls == 1:
+                assert release.wait(timeout=5)
+                finished.set()
+
+        monkeypatch.setattr('modules.settings.routes.send_smtp_message', _slow_send)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            _use_smtp_test_executor(monkeypatch, executor, deadline=0.05)
+            request = TestSmtpRequest(to='recipient@test.com')
+            first = asyncio.create_task(test_smtp(request))
+            assert await asyncio.to_thread(started.wait, 1)
+            with pytest.raises(HTTPException) as exc_info:
+                await first
+            assert exc_info.value.status_code == 504
+            assert 'may have accepted' in exc_info.value.detail
+
+            with pytest.raises(HTTPException) as busy:
+                await test_smtp(request)
+            assert busy.value.status_code == 429
+
+            release.set()
+            assert await asyncio.to_thread(finished.wait, 1)
+
+            loop = asyncio.get_running_loop()
+            admission_deadline = loop.time() + 1
+            while True:
+                try:
+                    result = await test_smtp(request)
+                except HTTPException as exc:
+                    assert exc.status_code == 429
+                    assert loop.time() < admission_deadline
+                    await asyncio.sleep(0.01)
+                    continue
+                break
+
+        assert result.success is True
+        assert calls == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('cancel_request', [False, True])
+    async def test_ended_request_observes_late_smtp_error(self, monkeypatch, smtp_loop_errors, cancel_request: bool) -> None:
+        from fastapi import HTTPException
+
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings.routes import test_smtp
+
+        started = threading.Event()
+        finished = threading.Event()
+        release = threading.Event()
+
+        def _late_failure(*_args, **_kwargs) -> None:
+            started.set()
+            assert release.wait(timeout=2)
+            try:
+                raise RuntimeError('late SMTP failure')
+            finally:
+                finished.set()
+
+        monkeypatch.setattr('modules.settings.routes.send_smtp_message', _late_failure)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            _use_smtp_test_executor(monkeypatch, executor, deadline=0.05)
+            request = TestSmtpRequest(to='recipient@test.com')
+            sending = asyncio.create_task(test_smtp(request))
+            assert await asyncio.to_thread(started.wait, 1)
+            if cancel_request:
+                sending.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await sending
+            else:
+                with pytest.raises(HTTPException) as exc_info:
+                    await sending
+                assert exc_info.value.status_code == 504
+                assert 'may have accepted' in exc_info.value.detail
+
+            with pytest.raises(HTTPException) as busy:
+                await test_smtp(request)
+            assert busy.value.status_code == 429
+
+            release.set()
+            assert await asyncio.to_thread(finished.wait, 1)
+
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        gc.collect()
+        assert smtp_loop_errors == []
 
 
 class TestTestTelegram:

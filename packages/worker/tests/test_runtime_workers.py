@@ -581,12 +581,16 @@ async def test_supervised_runtime_loop_restarts_after_transient_failure(caplog) 
         nonlocal attempts
         attempts += 1
         if attempts == 1:
+            health.progress("test-loop")
             raise RuntimeError("temporary runtime RPC failure")
         restarted.set()
         await stop_event.wait()
 
-    task = asyncio.create_task(runtime_process._supervise_runtime_loop(stop_event, "test-loop", run))
+    health = runtime_process.DispatcherHealth("worker:test", lanes=("test-loop",), max_age_seconds=30)
+    health.registered()
+    task = asyncio.create_task(runtime_process._supervise_runtime_loop(stop_event, "test-loop", run, health=health))
     await asyncio.wait_for(restarted.wait(), timeout=2)
+    assert health.snapshot()["healthy"] is False
     stop_event.set()
     await task
 
@@ -743,6 +747,109 @@ async def test_engine_build_does_not_wait_for_duplicate_execution_permit() -> No
     await asyncio.wait_for(execution_started.wait(), timeout=1)
     assert work_semaphore.locked()
     await asyncio.wait_for(task, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_build_dispatch_progress_ticks_without_jobs() -> None:
+    client = FakeWorkerRuntimeClient()
+    stop = asyncio.Event()
+    ticks = 0
+
+    def progress() -> None:
+        nonlocal ticks
+        ticks += 1
+        if ticks >= 3:
+            stop.set()
+
+    async def unexpected_job(_claim: ClaimedBuildJob) -> None:
+        raise AssertionError("Idle dispatcher must not execute a job")
+
+    await asyncio.wait_for(
+        build_worker_loop(
+            stop,
+            "worker:idle",
+            unexpected_job,
+            client=cast(WorkerRuntimeClient, client),
+            announce_worker=False,
+            poll_interval_seconds=0.001,
+            on_progress=progress,
+        ),
+        timeout=1,
+    )
+    assert ticks >= 3
+    assert any(name == "claim_build_job" for name, _ in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_build_dispatch_progress_ticks_at_full_capacity() -> None:
+    client = FakeWorkerRuntimeClient([_job()])
+    stop = asyncio.Event()
+    running = asyncio.Event()
+    release = asyncio.Event()
+    full_ticks = 0
+
+    def progress() -> None:
+        nonlocal full_ticks
+        if running.is_set():
+            full_ticks += 1
+            if full_ticks >= 3:
+                release.set()
+                stop.set()
+
+    async def run_job(_claim: ClaimedBuildJob) -> None:
+        running.set()
+        await release.wait()
+
+    await asyncio.wait_for(
+        build_worker_loop(
+            stop,
+            "worker:busy",
+            run_job,
+            client=cast(WorkerRuntimeClient, client),
+            capacity=1,
+            announce_worker=False,
+            poll_interval_seconds=0.001,
+            on_progress=progress,
+        ),
+        timeout=1,
+    )
+    assert full_ticks >= 3
+
+
+@pytest.mark.asyncio
+async def test_delete_dispatch_progress_ticks_without_tombstones(monkeypatch) -> None:
+    from runtime import datasource_delete_runtime as deletion
+    from runtime.compute_manager import ProcessManager
+
+    stop = asyncio.Event()
+    ticks = 0
+    closed = False
+
+    class EmptyClient:
+        def pending_runtime_work_namespaces(self, *, work_kinds: tuple[str, ...] = ()) -> list[str]:
+            return []
+
+        def close(self) -> None:
+            nonlocal closed
+            closed = True
+
+    client = EmptyClient()
+    monkeypatch.setattr(deletion, "worker_runtime_client", lambda: client)
+    monkeypatch.setattr(deletion, "_DATASOURCE_DELETE_RECOVERY_SECONDS", 0.001)
+    await deletion.datasource_delete_hub.clear()
+
+    def progress() -> None:
+        nonlocal ticks
+        ticks += 1
+        if ticks >= 3:
+            stop.set()
+
+    await asyncio.wait_for(
+        deletion.datasource_delete_loop(stop, manager=cast(ProcessManager, object()), on_progress=progress),
+        timeout=1,
+    )
+    assert ticks >= 3
+    assert closed
 
 
 @pytest.mark.asyncio
@@ -1152,6 +1259,7 @@ async def test_run_runtime_coordinator_shares_compute_budget_across_lanes(
                 wait_for_warm_workers_ready=lambda **_kwargs: True,
                 _warm_workers=[],
                 shutdown_all=lambda: calls.append(("shutdown_all", None)),
+                resynchronize_snapshots=lambda: None,
             )
         ),
     )
@@ -1253,6 +1361,9 @@ async def test_runtime_coordinator_cleans_up_when_registration_fails(monkeypatch
 
         def shutdown_all(self) -> None:
             cleanup.append("manager")
+
+        def resynchronize_snapshots(self) -> None:
+            pass
 
     monkeypatch.setattr(runtime_process, "ProcessManager", FakeManager)
 

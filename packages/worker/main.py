@@ -9,6 +9,7 @@ import threading
 import uuid
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 from runtime.compute_manager import ProcessManager
 from runtime.compute_request_runtime import (
@@ -20,6 +21,7 @@ from runtime.compute_request_runtime import (
 )
 from runtime.config import settings
 from runtime.datasource_delete_runtime import datasource_delete_loop
+from runtime.dispatcher_health import DispatcherHealth
 from runtime.docker_engine import reconcile_deployment_containers, validate_engine_runtime_readiness
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
 from runtime.engine_notifications import create_snapshot_notifier
@@ -28,6 +30,7 @@ from runtime.logging import configure_logging
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
 from runtime.runtime_ipc import serve_runtime_notifications, start_runtime_listener, stop_runtime_listener
 from runtime.runtime_notifications import handle_runtime_payload
+from runtime.storage_cleanup_runtime import storage_cleanup_loop
 from runtime.worker_runtime import (
     NamespaceRecovery,
     RuntimeNamespaceDirectory,
@@ -50,6 +53,7 @@ _MIN_RUNTIME_RECOVERY_SECONDS = 5.0
 _DEFAULT_EXECUTOR_WORKERS = 4
 _SHUTDOWN_CONTROL_CONCURRENCY = 4
 _COORDINATOR_GENERATION_POLL_SECONDS = 5.0
+_DISPATCH_LANES = ("compute-active", "compute-shutdown", "build", "datasource-delete", "outbox-cleanup")
 
 
 def worker_runtime_client() -> WorkerRuntimeClient:
@@ -65,6 +69,7 @@ def _manager_heartbeat_loop(
     worker_id: str,
     *,
     client: WorkerRuntimeClient,
+    health: DispatcherHealth,
     on_reconnected: Callable[[], None] | None = None,
     heartbeat_seconds: float = 5.0,
 ) -> None:
@@ -78,6 +83,7 @@ def _manager_heartbeat_loop(
         capacity=settings.compute_workers,
         heartbeat_seconds=heartbeat_seconds,
         on_reconnected=on_reconnected,
+        on_registration_changed=health.registration_changed,
     )
 
 
@@ -90,6 +96,8 @@ async def _supervise_runtime_loop(
     stop_event: asyncio.Event,
     name: str,
     run: Callable[[], Awaitable[None]],
+    *,
+    health: DispatcherHealth,
 ) -> None:
     delay = 0.25
     while not stop_event.is_set():
@@ -99,8 +107,10 @@ async def _supervise_runtime_loop(
                 return
             raise RuntimeError(f"Runtime loop {name} exited unexpectedly")
         except asyncio.CancelledError:
+            health.failed(name)
             raise
         except Exception:
+            health.failed(name)
             logger.exception("Runtime loop %s failed; restarting in %.2fs", name, delay)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=delay)
@@ -114,6 +124,30 @@ async def run_runtime_coordinator(
     stop_event: asyncio.Event | None = None,
     coordinator_generation: int | None = None,
     coordinator_guard: Callable[[], None] | None = None,
+) -> None:
+    worker_id = coordinator_id()
+    health = DispatcherHealth(
+        worker_id,
+        lanes=_DISPATCH_LANES,
+        max_age_seconds=max(90.0, float(settings.runtime_reconciliation_poll_interval_seconds) + 60.0),
+    )
+    async with health.serve():
+        await _run_runtime_coordinator(
+            stop_event=stop_event,
+            coordinator_generation=coordinator_generation,
+            coordinator_guard=coordinator_guard,
+            worker_id=worker_id,
+            health=health,
+        )
+
+
+async def _run_runtime_coordinator(
+    *,
+    stop_event: asyncio.Event | None,
+    coordinator_generation: int | None,
+    coordinator_guard: Callable[[], None] | None,
+    worker_id: str,
+    health: DispatcherHealth,
 ) -> None:
     configure_logging()
     _configure_blocking_executor(max_workers=_DEFAULT_EXECUTOR_WORKERS, thread_name_prefix="runtime-default")
@@ -130,7 +164,6 @@ async def run_runtime_coordinator(
         logger.warning("Removed %s orphaned engine container(s) during startup", removed)
     local_stop = stop_event or asyncio.Event()
     client = worker_runtime_client()
-    worker_id = coordinator_id()
     recovery_poll_seconds = max(
         _MIN_RUNTIME_RECOVERY_SECONDS,
         float(settings.runtime_reconciliation_poll_interval_seconds),
@@ -152,6 +185,11 @@ async def run_runtime_coordinator(
         client,
         refresh_seconds=recovery_poll_seconds,
         work_kinds=("datasource_delete",),
+    )
+    storage_cleanup_namespace_directory = RuntimeNamespaceDirectory(
+        client,
+        refresh_seconds=recovery_poll_seconds,
+        work_kinds=("storage_cleanup",),
     )
     compute_request_recovery = NamespaceRecovery(
         client.reconcile_expired_compute_requests,
@@ -212,6 +250,7 @@ async def run_runtime_coordinator(
             pid=os.getpid(),
             capacity=settings.compute_workers,
         )
+        health.registered()
     except BaseException:
         if runtime_listener_task is not None:
             runtime_listener_task.cancel()
@@ -232,7 +271,8 @@ async def run_runtime_coordinator(
             "client": client,
             "stop_signal": heartbeat_stop,
             "worker_id": worker_id,
-            "on_reconnected": getattr(manager, "resynchronize_snapshots", None),
+            "on_reconnected": manager.resynchronize_snapshots,
+            "health": health,
         },
         daemon=True,
     )
@@ -259,12 +299,14 @@ async def run_runtime_coordinator(
     ]
     request_tasks = []
     for lane, (allowed_kinds, max_concurrency, claim_semaphore, work_semaphore) in enumerate(request_lanes):
+        lane_name = _DISPATCH_LANES[lane]
 
         async def run_request_lane(
             allowed_kinds=allowed_kinds,
             max_concurrency=max_concurrency,
             claim_semaphore=claim_semaphore,
             work_semaphore=work_semaphore,
+            lane_name=lane_name,
         ) -> None:
             await compute_request_loop(
                 local_stop,
@@ -277,11 +319,12 @@ async def run_runtime_coordinator(
                 work_semaphore=work_semaphore,
                 namespace_directory=compute_namespace_directory,
                 recovery=compute_request_recovery,
+                on_progress=partial(health.progress, lane_name),
             )
 
         request_tasks.append(
             asyncio.create_task(
-                _supervise_runtime_loop(local_stop, f"compute-request-{lane}", run_request_lane),
+                _supervise_runtime_loop(local_stop, lane_name, run_request_lane, health=health),
                 name=f"compute-request-supervisor-{lane}",
             )
         )
@@ -293,8 +336,24 @@ async def run_runtime_coordinator(
                 local_stop,
                 manager=manager,
                 namespace_directory=datasource_delete_namespace_directory,
+                on_progress=partial(health.progress, "datasource-delete"),
             ),
+            health=health,
         )
+    )
+    storage_cleanup_task = asyncio.create_task(
+        _supervise_runtime_loop(
+            local_stop,
+            "outbox-cleanup",
+            lambda: storage_cleanup_loop(
+                local_stop,
+                manager=manager,
+                namespace_directory=storage_cleanup_namespace_directory,
+                on_progress=partial(health.progress, "outbox-cleanup"),
+            ),
+            health=health,
+        ),
+        name="storage-cleanup-dispatcher",
     )
     from builds.build_execution import run_queued_build_job
 
@@ -321,15 +380,16 @@ async def run_runtime_coordinator(
             capacity=request_worker_count,
             heartbeat_seconds=float(settings.engine_heartbeat_interval_seconds),
             poll_interval_seconds=recovery_poll_seconds,
-            on_reconnected=getattr(manager, "resynchronize_snapshots", None),
+            on_reconnected=manager.resynchronize_snapshots,
             namespace_directory=build_namespace_directory,
             recovery=build_job_recovery,
             announce_worker=False,
+            on_progress=partial(health.progress, "build"),
         )
 
     build_tasks = [
         asyncio.create_task(
-            _supervise_runtime_loop(local_stop, "build-dispatcher", run_build_dispatcher),
+            _supervise_runtime_loop(local_stop, "build", run_build_dispatcher, health=health),
             name="build-dispatcher",
         )
     ]
@@ -337,13 +397,14 @@ async def run_runtime_coordinator(
     try:
         await local_stop.wait()
     finally:
+        health.stopped()
         local_stop.set()
         heartbeat_stop.set()
         await run_control_in_thread(heartbeat_thread.join)
         # Closing the manager first rejects parked capacity admissions. Waiting
         # for request tasks before this point can deadlock shutdown forever.
         await run_control_in_thread(manager.shutdown_all)
-        await asyncio.gather(*request_tasks, datasource_delete_task, *build_tasks, return_exceptions=True)
+        await asyncio.gather(*request_tasks, datasource_delete_task, storage_cleanup_task, *build_tasks, return_exceptions=True)
         await run_control_in_thread(shutdown_compute_request_lease_batcher)
         if runtime_listener_task is not None:
             await asyncio.gather(runtime_listener_task, return_exceptions=True)

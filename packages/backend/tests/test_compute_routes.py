@@ -5,7 +5,7 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import select
 
-from backend_core import datasource_delete_service, dependencies, engine_runs_service as engine_run_service
+from backend_core import database, datasource_delete_service, dependencies, engine_runs_service as engine_run_service
 from backend_core.dependencies import get_manager, get_runtime_availability_probe
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.datasource.models import DataSourceCreatedBy
@@ -63,6 +63,46 @@ def test_compute_response_read_scopes_namespace_for_database_session(monkeypatch
 
     assert response is result
     assert read_ids == ['request-1']
+
+
+@pytest.mark.asyncio
+async def test_engine_shutdown_creates_uses_and_closes_session_in_its_db_thread(monkeypatch) -> None:
+    loop_thread = threading.get_ident()
+    operations: list[tuple[str, int, str]] = []
+
+    class OwnedSession:
+        def __init__(self, _engine):
+            self.owner = threading.get_ident()
+            operations.append(('create', self.owner, get_namespace()))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_error):
+            assert threading.get_ident() == self.owner
+            operations.append(('close', threading.get_ident(), get_namespace()))
+
+    def request_shutdown(session, *, identity, runtime_probe):
+        assert threading.get_ident() == session.owner
+        assert identity.resource_id == 'analysis-1'
+        operations.append(('queue', threading.get_ident(), get_namespace()))
+
+    monkeypatch.setattr(database, 'Session', OwnedSession)
+    monkeypatch.setattr(database, '_get_tenant_engine', lambda: object())
+    monkeypatch.setattr(compute_routes, '_override_manager', lambda _request: None)
+    monkeypatch.setattr(executor_client, 'request_engine_shutdown', request_shutdown)
+    namespace_token = set_namespace_context('shutdown-test')
+    try:
+        await compute_routes._shutdown_engine_identity(
+            compute_pb2.EngineIdentity(resource_id='analysis-1'),
+            cast(Any, object()),
+            _AvailableRuntimeProbe(),
+        )
+    finally:
+        reset_namespace(namespace_token)
+
+    assert [name for name, _, _ in operations] == ['create', 'queue', 'close']
+    assert all(thread != loop_thread and namespace == 'shutdown-test' for _, thread, namespace in operations)
 
 
 def test_validated_compute_request_stages_on_one_thread(monkeypatch) -> None:
@@ -210,7 +250,6 @@ async def test_override_engine_lifecycle_runs_outside_event_loop(monkeypatch) ->
         cast(Any, None),
         None,
         cast(Any, None),
-        cast(Any, None),
     )
     assert status == 'status'
 
@@ -219,9 +258,8 @@ async def test_override_engine_lifecycle_runs_outside_event_loop(monkeypatch) ->
         compute_schemas.EngineResourceConfig(max_threads=4),
         cast(Any, None),
         cast(Any, None),
-        cast(Any, None),
     )
-    await compute_routes._shutdown_engine_identity(identity, cast(Any, None), cast(Any, None), cast(Any, None))
+    await compute_routes._shutdown_engine_identity(identity, cast(Any, None), cast(Any, None))
 
     assert operation_threads
     assert all(thread_id != loop_thread for thread_id in operation_threads)

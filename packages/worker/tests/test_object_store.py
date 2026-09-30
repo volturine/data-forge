@@ -103,6 +103,29 @@ def test_bucket_readiness_does_not_serialize_different_buckets(monkeypatch) -> N
     assert max_active == 2
 
 
+def test_prefix_cleanup_retries_partial_s3_deletion_errors(monkeypatch) -> None:
+    failed = True
+
+    class Paginator:
+        def paginate(self, **_kwargs):
+            yield {"Contents": [{"Key": "clean/attempt/master/data.parquet"}]}
+
+    class Client:
+        def get_paginator(self, _operation):
+            return Paginator()
+
+        def delete_objects(self, **_kwargs):
+            if failed:
+                return {"Errors": [{"Key": "clean/attempt/master/data.parquet", "Code": "AccessDenied"}]}
+            return {"Deleted": [{"Key": "clean/attempt/master/data.parquet"}]}
+
+    monkeypatch.setattr(object_store, "_client", Client)
+    with pytest.raises(RuntimeError, match="deletion errors"):
+        object_store.delete_prefix("s3://default/clean/attempt/master")
+    failed = False
+    object_store.delete_prefix("s3://default/clean/attempt/master")
+
+
 def test_multipart_object_upload_streams_bounded_parts_and_commits(monkeypatch) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
 

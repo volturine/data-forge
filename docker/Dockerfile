@@ -116,7 +116,7 @@ WORKDIR /app/packages/scheduler
 ENV PATH="/app/packages/scheduler/.venv/bin:${PATH}"
 ENV PYTHONPATH="/app/packages/scheduler"
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
-    CMD python3 -c "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); r=c.execute(\"select count(*) from public.runtime_workers where kind='scheduler' and stopped_at is null\").fetchone(); c.close(); exit(0 if (r or [0])[0] > 0 else 1)"
+    CMD python3 -m scheduler_grpc.health
 CMD ["python3", "main.py"]
 
 FROM app-runtime AS runtime
@@ -140,4 +140,6 @@ WORKDIR /app/packages/worker
 ENV PATH="/app/packages/worker/.venv/bin:${PATH}"
 ENV PYTHONPATH="/app/packages/worker"
 EXPOSE 50052
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
+    CMD python3 -m runtime.dispatcher_health
 CMD ["python3", "main.py"]

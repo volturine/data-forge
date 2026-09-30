@@ -204,6 +204,18 @@ async def test_coordinator_notification_only_wakes_outbox(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_coordinator_listener_recovery_wakes_all_durable_consumers(monkeypatch) -> None:
+    published: list[object] = []
+    wakes: list[str] = []
+    monkeypatch.setattr(runtime_coordinator.OUTBOX_WAKE_HUB, 'publish', published.append)
+
+    await runtime_coordinator._recover_coordinator_notifications(chat_wake=lambda: wakes.append('chat'), telegram_wake=lambda: wakes.append('telegram'))
+
+    assert published == [None]
+    assert wakes == ['chat', 'telegram']
+
+
+@pytest.mark.asyncio
 async def test_silent_actor_exit_fails_owned_epoch() -> None:
     async def actor() -> None:
         return

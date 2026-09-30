@@ -31,6 +31,7 @@ def test_runtime_schema_has_only_public_and_tenant_creation_revisions() -> None:
         '0014_runtime_coordinator_fencing.py',
         '0015_durable_chat_turns.py',
         '0016_telegram_integration_runtime.py',
+        '0017_compute_source_index.py',
     ]
 
 

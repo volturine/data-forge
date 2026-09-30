@@ -6,6 +6,7 @@ import math
 import os
 import re
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -87,6 +88,39 @@ from runtime.time import utc_now as _utcnow
 from runtime.worker_runtime_client import ClaimedBuildJob, DatasourceMetadata, EngineRunFinalization, HealthCheckSpec, client_from_env
 
 logger = logging.getLogger(__name__)
+
+
+class _BuildJobCancellation:
+    def __init__(self, manager: ProcessManager, identity: compute_pb2.EngineIdentity, *, namespace: str) -> None:
+        self._manager = manager
+        self._identity = identity
+        self._namespace = namespace
+        self._lock = threading.Lock()
+        self._requested = False
+        self._job_id: str | None = None
+
+    def raise_if_cancelled(self) -> None:
+        with self._lock:
+            requested = self._requested
+        if requested:
+            raise BuildCancelledError(self._identity.build_id)
+
+    def job_started(self, job_id: str) -> None:
+        with self._lock:
+            self._job_id = job_id
+            requested = self._requested
+        if requested:
+            self._manager.cancel_engine_job(self._identity, namespace=self._namespace, job_id=job_id)
+            raise BuildCancelledError(self._identity.build_id)
+
+    def cancel(self) -> None:
+        with self._lock:
+            if self._requested:
+                return
+            self._requested = True
+            job_id = self._job_id
+        if job_id is not None:
+            self._manager.cancel_engine_job(self._identity, namespace=self._namespace, job_id=job_id)
 
 
 def _ensure_catalog_namespace(catalog, namespace: str) -> None:
@@ -3307,6 +3341,7 @@ async def run_analysis_build_stream(
         progress_task: asyncio.Task | None = None
         resource_task: asyncio.Task | None = None
         export_result: ExportDatasourceResult | None = None
+        cancellation = _BuildJobCancellation(manager, build_identity, namespace=build.namespace)
         read_stage = _SyntheticBuildStage(
             step_id=f"{tab_id}:initial_read",
             step_name="Initial Read",
@@ -3373,12 +3408,16 @@ async def run_analysis_build_stream(
                 current_output_id_value: str | None = current_output_id,
                 current_output_name_value: str | None = current_output_name,
                 current_read_stage: _SyntheticBuildStage = read_stage,
+                current_cancellation: _BuildJobCancellation = cancellation,
             ) -> None:
                 nonlocal progress_task, resource_task
-                job_id = info.get("job_id")
+                job_id = info["job_id"]
                 engine = info.get("engine")
                 run_id = info.get("engine_run_id")
-                if not isinstance(job_id, str) or engine is None:
+                if not isinstance(job_id, str) or not job_id:
+                    raise ValueError("Build engine job ID is required")
+                current_cancellation.job_started(job_id)
+                if engine is None:
                     return
                 if isinstance(run_id, str):
                     build.current_engine_run_id = run_id
@@ -3394,7 +3433,8 @@ async def run_analysis_build_stream(
                     )
                     _cancel_started_engine_run_if_build_cancelled(build, run_id=run_id)
                     if build.status == compute_schemas.BuildLifecycleStatus.CANCELLED:
-                        return
+                        current_cancellation.cancel()
+                        current_cancellation.raise_if_cancelled()
 
                 async def emit_run_started() -> None:
                     payload: dict[str, object] = {
@@ -3589,7 +3629,9 @@ async def run_analysis_build_stream(
                 current_tab_id: str = tab_id,
                 current_result_id: str | None = result_id,
                 current_build_mode: str = tab_build_mode,
+                current_cancellation: _BuildJobCancellation = cancellation,
             ) -> ExportDatasourceResult:
+                current_cancellation.raise_if_cancelled()
                 request_json = {
                     "analysis_pipeline": pipeline,
                     "analysis_id": analysis_id_value,
@@ -3625,12 +3667,11 @@ async def run_analysis_build_stream(
                 build.current_engine_run_id = result.engine_run_id
                 return result
 
-            def cancel_build_execution() -> None:
-                cancel_job = getattr(manager, "cancel_engine_job", None)
-                if callable(cancel_job):
-                    cancel_job(build_identity, namespace=build.namespace)
-
-            export_result = await run_compute_in_thread(run_export_job, cancel_work=cancel_build_execution)
+            export_result = await run_compute_in_thread(
+                run_export_job,
+                cancel_work=cancellation.cancel,
+                expected_cancel_errors=(BuildCancelledError,),
+            )
 
             if progress_task is not None:
                 _ = await progress_task

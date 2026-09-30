@@ -162,6 +162,7 @@ async def build_worker_loop(
     namespace_directory: RuntimeNamespaceDirectory | None = None,
     recovery: NamespaceRecovery | None = None,
     announce_worker: bool = True,
+    on_progress: Callable[[], None] | None = None,
 ) -> None:
     concurrency = max(1, min(capacity, max_jobs) if max_jobs is not None else capacity)
 
@@ -237,6 +238,8 @@ async def build_worker_loop(
 
     try:
         while not stop_event.is_set() and (max_jobs is None or handled_jobs < max_jobs):
+            if on_progress is not None:
+                on_progress()
             while len(active_tasks) < concurrency and not stop_event.is_set() and (max_jobs is None or handled_jobs + len(active_tasks) < max_jobs):
                 try:
                     namespace = await namespace_directory.next_namespace()
@@ -249,6 +252,8 @@ async def build_worker_loop(
                         await recovery.reconcile(namespace)
                     claim_started = asyncio.get_running_loop().time()
                     job = await run_control_in_thread(client.claim_build_job, worker_id=worker_id, namespace=namespace)
+                    if on_progress is not None:
+                        on_progress()
                     if job is None:
                         break
                     lease_deadline = job.lease_deadline_monotonic if job.lease_deadline_monotonic is not None else claim_started + job.lease_ttl_seconds

@@ -448,7 +448,11 @@ def delete_prefix(prefix_url: str) -> None:
                 continue
             delete_batch.append({"Key": object_key})
             if len(delete_batch) == 1000:
-                _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
+                response = _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
+                if response.get("Errors"):
+                    raise RuntimeError(f"Object prefix cleanup returned deletion errors: {response['Errors']}")
                 delete_batch = []
     if delete_batch:
-        _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
+        response = _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
+        if response.get("Errors"):
+            raise RuntimeError(f"Object prefix cleanup returned deletion errors: {response['Errors']}")

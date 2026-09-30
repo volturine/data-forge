@@ -272,7 +272,6 @@ def delete_analysis(
 async def preview_analysis(
     analysis_id: AnalysisId,
     request: Request,
-    session: Session = Depends(get_db_async),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Preview the analysis pipeline and return results with schema, rows, and row count."""
@@ -325,7 +324,6 @@ async def preview_analysis(
         analysis_payload,
     )
     preview = await executor_client.preview_step(
-        session,
         compute_schemas.StepPreviewRequest(
             analysis_id=analysis_id_value,
             engine_identity=compute_pb2.EngineIdentity(

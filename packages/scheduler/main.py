@@ -10,12 +10,14 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
 import grpc
 
 from dataforge_protocol import common_pb2, scheduler_runtime_pb2, scheduler_runtime_pb2_grpc
+from scheduler_grpc.health import DispatcherHealth
 
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"
@@ -72,6 +74,14 @@ class DueScheduleNamespace:
     generation: int
 
 
+class SchedulerClient(Protocol):
+    def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None: ...
+    def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None: ...
+    def stop(self, *, worker_id: str, timeout_seconds: float | None = None) -> None: ...
+    def due_schedule_namespaces(self) -> list[DueScheduleNamespace]: ...
+    def run_due(self, *, worker_id: str, namespace: str, generation: int) -> SchedulerRunDueResult: ...
+
+
 class SchedulerApiClient:
     def __init__(self, *, target: str, token: str, timeout_seconds: float = 30.0, registration_retry_seconds: float = 90.0) -> None:
         self._target = target
@@ -81,7 +91,7 @@ class SchedulerApiClient:
         self._channel = grpc.insecure_channel(target)
         self._stub = scheduler_runtime_pb2_grpc.SchedulerRuntimeServiceStub(self._channel)
 
-    def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int) -> None:
+    def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None:
         self._call_registration(
             lambda: self._stub.RegisterScheduler(
                 scheduler_runtime_pb2.SchedulerRegisterRequest(
@@ -92,7 +102,8 @@ class SchedulerApiClient:
                 ),
                 timeout=min(self._timeout_seconds, 5.0),
                 metadata=self._metadata(),
-            )
+            ),
+            retry_seconds=retry_seconds,
         )
 
     def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
@@ -151,8 +162,8 @@ class SchedulerApiClient:
             details = exc.details() or f"Backend scheduler gRPC call to {self._target} failed"
             raise RuntimeError(f"Backend scheduler gRPC failed with {code.name}: {details}") from exc
 
-    def _call_registration(self, fn: Callable[[], _T]) -> _T:
-        deadline = time.monotonic() + self._registration_retry_seconds
+    def _call_registration(self, fn: Callable[[], _T], *, retry_seconds: float | None = None) -> _T:
+        deadline = time.monotonic() + (self._registration_retry_seconds if retry_seconds is None else max(retry_seconds, 0.0))
         while True:
             try:
                 return self._call(fn)
@@ -166,7 +177,8 @@ async def scheduler_loop(
     stop_event: asyncio.Event,
     worker_id: str,
     *,
-    client: SchedulerApiClient,
+    client: SchedulerClient,
+    health: DispatcherHealth,
     check_interval_seconds: int,
     heartbeat_seconds: float = 5.0,
 ) -> None:
@@ -177,6 +189,7 @@ async def scheduler_loop(
         pid=os.getpid(),
         capacity=1,
     )
+    health.registered()
     heartbeat_stop = threading.Event()
     heartbeat_thread = threading.Thread(
         target=_heartbeat_loop_sync,
@@ -185,6 +198,7 @@ async def scheduler_loop(
             "stop_signal": heartbeat_stop,
             "worker_id": worker_id,
             "heartbeat_seconds": heartbeat_seconds,
+            "health": health,
         },
         daemon=True,
     )
@@ -193,6 +207,7 @@ async def scheduler_loop(
         while not stop_event.is_set():
             try:
                 due_namespaces = await asyncio.to_thread(client.due_schedule_namespaces)
+                health.progress("scheduler")
                 for due_namespace in due_namespaces:
                     result = await asyncio.to_thread(
                         client.run_due,
@@ -200,6 +215,7 @@ async def scheduler_loop(
                         namespace=due_namespace.namespace,
                         generation=due_namespace.generation,
                     )
+                    health.progress("scheduler")
                     if result.handled:
                         _log_run_due_result(result)
             except RuntimeError as exc:
@@ -208,8 +224,9 @@ async def scheduler_loop(
                 continue
             await _sleep_until_tick_or_stop(stop_event, check_interval_seconds)
     finally:
+        health.stopped()
         heartbeat_stop.set()
-        heartbeat_thread.join()
+        await asyncio.to_thread(heartbeat_thread.join)
         with contextlib.suppress(RuntimeError):
             await asyncio.to_thread(client.stop, worker_id=worker_id)
 
@@ -246,16 +263,25 @@ async def _sleep_until_tick_or_stop(stop_event: asyncio.Event, seconds: int) -> 
             _task_result = task.result()
 
 
-def _heartbeat_loop_sync(*, client: SchedulerApiClient, stop_signal: threading.Event, worker_id: str, heartbeat_seconds: float) -> None:
+def _heartbeat_loop_sync(*, client: SchedulerClient, stop_signal: threading.Event, worker_id: str, heartbeat_seconds: float, health: DispatcherHealth) -> None:
+    needs_registration = False
     while not stop_signal.wait(heartbeat_seconds):
         try:
+            if needs_registration:
+                client.register(worker_id=worker_id, hostname=socket.gethostname(), pid=os.getpid(), capacity=1, retry_seconds=0.0)
+                health.registered()
+                needs_registration = False
             client.heartbeat(worker_id=worker_id, timeout_seconds=_HEARTBEAT_RPC_TIMEOUT_SECONDS)
         except RuntimeError as exc:
+            needs_registration = True
+            health.registration_changed(False)
             if "DEADLINE_EXCEEDED" in str(exc) or "UNAVAILABLE" in str(exc):
                 logger.warning("Scheduler heartbeat delayed; retrying on the next interval: %s", exc)
             else:
                 logger.exception("Scheduler heartbeat failed")
         except Exception:
+            needs_registration = True
+            health.registration_changed(False)
             logger.exception("Scheduler heartbeat failed")
 
 
@@ -278,16 +304,21 @@ async def main() -> None:
     settings = SchedulerSettings.from_env()
     logging.basicConfig(level=settings.log_level.upper())
     logger.info("Starting scheduler process...")
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=2, thread_name_prefix="scheduler-rpc"))
     stop_event = asyncio.Event()
     install_stop_handlers(stop_event)
     client = SchedulerApiClient(target=settings.internal_grpc_target, token=settings.internal_api_token)
+    worker_id = scheduler_id()
+    health = DispatcherHealth(worker_id, lanes=("scheduler",), max_age_seconds=settings.scheduler_check_interval + 45.0)
     try:
-        await scheduler_loop(
-            stop_event,
-            scheduler_id(),
-            client=client,
-            check_interval_seconds=settings.scheduler_check_interval,
-        )
+        async with health.serve():
+            await scheduler_loop(
+                stop_event,
+                worker_id,
+                client=client,
+                health=health,
+                check_interval_seconds=settings.scheduler_check_interval,
+            )
     finally:
         client.close()
 

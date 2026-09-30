@@ -38,18 +38,32 @@ RustFS ─────┼── API (HTTP) ◄── Runtime coordinator (intern
 Browser ────┘
 ```
 
-The API processes serve the built frontend and HTTP API on port 8000. They do not
-own durable compute dispatch or engine lifecycle, but do hold disposable
-process-local request/websocket state and currently start the optional Telegram
-poller. The runtime coordinator is one active internal gRPC/control-plane owner
-with a fenced standby. One worker-manager process owns Docker compute workers
-and its local active/warm accounting; an assigned worker is bound to one exact
-resource identity. This topology is a reliable distributed-runtime baseline,
-not horizontally sharded control-plane or compute capacity. Increasing
+The API processes serve the built frontend and HTTP API on port 8000, including
+WebSocket/SSE delivery and durable enqueue-and-wait request paths. They retain
+disposable process-local caches, projections, and waiters; these are not
+authoritative durable runtime state. They do not own compute dispatch, Telegram
+polling, or engine lifecycle. One active fenced runtime
+coordinator owns internal gRPC/dispatch, durable chat processing, Telegram
+polling, and independent durable email/Telegram delivery lanes. One worker
+manager owns Docker and isolated compute containers; each assigned worker is
+bound to one exact analysis or datasource RID. Identical full commands share
+durable results, while distinct commands for one RID are serialized. Increasing
 `WORKERS` scales API processes inside that container only. The Compose API
 service publishes one fixed host port, so adding API containers also requires
 an ingress/load-balancer topology. See [Capacity-First Runtime Optimization](prd/active/elastic-runtime-scale-out.md)
 for the 1×1 baseline and evidence-gated scale path.
+
+External notification delivery claims durable outbox metadata before making
+email or Telegram network calls; those calls run outside the database
+transaction. Compute parsing and Polars-heavy work remain in isolated engine
+containers managed by the worker service.
+
+Engine cancellation targets the exact job ID, remembers requests made before
+the job starts, and waits for the actual execution thread to settle before
+releasing its admission. SMTP tests admit one thread; a deadline while sending
+can return before that thread settles, so the provider may already have accepted
+the email. Admission remains occupied until the thread finishes; a deadline is
+not proof that no email was sent.
 
 The API reaches the worker data-plane gRPC for object-store operations such as
 file upload.
@@ -58,10 +72,10 @@ file upload.
 
 CI publishes every role image to GHCR on three channels:
 
-| Channel | Trigger | Tags | Platforms |
-| --- | --- | --- | --- |
-| Dev / PR preview | pull request, push to `master` | `dev-pr-<number>`, `dev-master` | `linux/amd64` |
-| Release | tag `v*` | `<version>`, semver aliases, `latest` | `linux/amd64`, `linux/arm64` |
+| Channel          | Trigger                        | Tags                                  | Platforms                    |
+| ---------------- | ------------------------------ | ------------------------------------- | ---------------------------- |
+| Dev / PR preview | pull request, push to `master` | `dev-pr-<number>`, `dev-master`       | `linux/amd64`                |
+| Release          | tag `v*`                       | `<version>`, semver aliases, `latest` | `linux/amd64`, `linux/arm64` |
 
 Dev-channel images feed PR-preview deployments; release images are pinned in
 production. Keep all five `DF_*_IMAGE` values on the same channel and commit.
@@ -233,11 +247,11 @@ available. For either proxy, set `AUTH_FRONTEND_URL` and OAuth callback URLs to
 
 Use the unauthenticated root health endpoints:
 
-| Endpoint | Purpose | Healthy response |
-| --- | --- | --- |
-| `/health` | Liveness: the API process can answer HTTP | `200` |
-| `/health/ready` | Readiness: PostgreSQL and required local directories are available | `200`; otherwise `503` |
-| `/health/startup` | Startup: application settings initialized | `200` |
+| Endpoint          | Purpose                                                                               | Healthy response       |
+| ----------------- | ------------------------------------------------------------------------------------- | ---------------------- |
+| `/health`         | Liveness: the API process can answer HTTP                                             | `200`                  |
+| `/health/ready`   | Readiness: PostgreSQL, required local directories, and the object-store probe succeed | `200`; otherwise `503` |
+| `/health/startup` | Startup: application settings initialized                                             | `200`                  |
 
 Example:
 
@@ -245,9 +259,28 @@ Example:
 curl --fail --silent https://dataforge.example.com/health/ready
 ```
 
-The Compose health check uses `/health/ready`. Also monitor PostgreSQL and object
-store capacity, application-role restarts, error logs, and backup age; the API
-readiness endpoint is not a complete infrastructure monitor.
+The API Compose health check uses `/health/ready` to verify API dependencies.
+Worker and scheduler Docker probes query PID1's private Unix socket through
+`python3 -m runtime.dispatcher_health` and `python3 -m scheduler_grpc.health`,
+respectively. They require that process's actual registration and fresh progress
+on every configured dispatch lane. Worker lanes cover compute execution and
+shutdown, builds, datasource deletion, and outbox cleanup. A database registry
+row or independent heartbeat cannot mask a stalled lane. API readiness does not establish
+coordinator dispatch progress. Also monitor PostgreSQL and object-store capacity,
+application-role restarts, error logs, and backup age.
+
+## Private storage cleanup
+
+Storage GC uses the existing durable outbox and an independent worker I/O lane.
+It records durable source intents before staging and retirement, then
+cleans exact managed objects/prefixes and associated catalog IDs idempotently.
+Busy RIDs defer cleanup. Referenced targets become `PUBLISHED` and retain their
+data; abandoned targets require fenced `AUTHORIZED` grants before deletion.
+Published snapshots keep their existing retention policy. Cleanup uses durable
+intents and indexed source references rather than blob discovery; it introduces
+no additional service or public configuration. See the
+[private GC contract](prd/active/elastic-runtime-scale-out.md#private-storage-gc)
+for authorization, ownership transfer, and acknowledgement rules.
 
 ## Backup and restore
 

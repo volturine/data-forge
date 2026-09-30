@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
+from collections.abc import Callable
 
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_manager import ProcessManager
@@ -33,6 +34,7 @@ async def datasource_delete_loop(
     *,
     manager: ProcessManager,
     namespace_directory: RuntimeNamespaceDirectory | None = None,
+    on_progress: Callable[[], None] | None = None,
 ) -> None:
     client = worker_runtime_client()
     namespace_directory = namespace_directory or RuntimeNamespaceDirectory(client, refresh_seconds=_DATASOURCE_DELETE_RECOVERY_SECONDS)
@@ -41,6 +43,8 @@ async def datasource_delete_loop(
     wake_version = datasource_delete_hub.version()
     try:
         while not stop_event.is_set():
+            if on_progress is not None:
+                on_progress()
             try:
                 current_version = datasource_delete_hub.version()
                 for namespace_hint in datasource_delete_hub.payloads_since(wake_version):
@@ -61,6 +65,8 @@ async def datasource_delete_loop(
                         continue
                     namespace = recovery_namespace
                 handled = await _run_once(manager=manager, client=client, namespace=namespace)
+                if on_progress is not None:
+                    on_progress()
                 if handled:
                     # Drain more tombstones in the same namespace before
                     # waiting again, without turning an empty namespace into a

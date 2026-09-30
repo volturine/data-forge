@@ -615,11 +615,31 @@ def test_request_timing_middleware_marks_response_serialization_boundary(caplog,
 
     assert response.status_code == 200
     assert response.headers['x-request-id'] == 'timing-test'
-    assert response.headers['server-timing'] == 'app;dur=5200.0'
+    assert response.headers['server-timing'] == 'app;dur=5200.0, api-db-admission;dur=0.0'
     assert 'phase=completed' in caplog.text
     assert 'response_start_ms=5200.0' in caplog.text
     assert 'db_sql_count=2 db_sql_ms=3.5 db_commit_ms=1.3' in caplog.text
     assert 'settings_checkedout' in caplog.text
+
+
+def test_request_timing_middleware_exposes_accumulated_database_admission_wait() -> None:
+    from backend_core.database import record_database_admission_wait
+
+    app = FastAPI()
+    timestamps = iter([0.0, 5.2, 5.3])
+    app.add_middleware(RequestTimingMiddleware, get_time=lambda: next(timestamps, 5.3))
+
+    @app.get('/api/admission-timing')
+    async def admission_timing() -> dict[str, str]:
+        record_database_admission_wait(12.5)
+        record_database_admission_wait(25.0)
+        return {'status': 'ok'}
+
+    with TestClient(app) as client:
+        response = client.get('/api/admission-timing')
+
+    assert response.status_code == 200
+    assert response.headers['server-timing'] == 'app;dur=5200.0, api-db-admission;dur=37.5'
 
 
 def test_request_timing_middleware_logs_completed_duration_after_in_flight_warning(caplog) -> None:

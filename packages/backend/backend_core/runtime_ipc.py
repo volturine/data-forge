@@ -5,7 +5,6 @@ import contextlib
 import json
 import logging
 import os
-import queue
 import threading
 from collections.abc import Awaitable, Callable
 
@@ -22,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 _CHANNEL = 'runtime_events'
 _database_url_provider: Callable[[], str] | None = None
+type RuntimePayloadHandler = Callable[[dict[str, object]], Awaitable[None]]
+type RuntimeRecovery = Callable[[], Awaitable[None]]
 
 
 class RuntimeListenerKind(DataForgeStrEnum):
@@ -36,86 +37,106 @@ _notify_connection_io_lock = threading.Lock()
 
 
 class RuntimeNotificationListener:
-    """Own a reconnectable PostgreSQL LISTEN connection on a dedicated thread.
+    """Own a dedicated async LISTEN connection and consume without prefetching.
 
-    LISTEN/NOTIFY is an acceleration path only; the outbox and response
-    recovery tasks are durable backstops. psycopg drains notifications in
-    synchronous libpq code, so polling never runs on an API/coordinator event
-    loop. Notifications are handed back to that loop for async fan-out.
+    One continuous generator applies transport backpressure while a handler
+    awaits. There is no application queue or callback per notification. Lost
+    connections request durable recovery through one coalesced event.
     """
 
     def __init__(self, conninfo: str) -> None:
         self._conninfo = conninfo
-        self._stop = threading.Event()
-        self._ready = threading.Event()
-        self._messages: queue.SimpleQueue[dict[str, object]] = queue.SimpleQueue()
+        self._connection: psycopg.AsyncConnection | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._wake: asyncio.Event | None = None
-        self._thread: threading.Thread | None = None
-        self._startup_error: Exception | None = None
+        self._serving_task: asyncio.Task[None] | None = None
+        self._recovery_requested = asyncio.Event()
 
-    def start(self) -> None:
+    async def start(self) -> None:
+        if self._loop is not None:
+            raise RuntimeError('PostgreSQL runtime notification listener is already started')
         self._loop = asyncio.get_running_loop()
-        self._wake = asyncio.Event()
-        self._thread = threading.Thread(target=self._listen, name='runtime-notifications', daemon=True)
-        self._thread.start()
+        async with asyncio.timeout(10.0):
+            await self._connect()
 
-    def wait_ready(self) -> None:
-        if not self._ready.wait(timeout=10):
-            raise TimeoutError('PostgreSQL runtime notification listener did not connect within 10 seconds')
-        if self._startup_error is not None:
-            raise RuntimeError('PostgreSQL runtime notification listener failed to start') from self._startup_error
+    async def _connect(self) -> None:
+        connection = await psycopg.AsyncConnection.connect(self._conninfo, autocommit=True, connect_timeout=5)
+        try:
+            await connection.execute(f'LISTEN {_CHANNEL}')
+        except BaseException:
+            await connection.close()
+            raise
+        self._connection = connection
+        self._recovery_requested.set()
+        logger.info('Runtime notification listener connected')
 
-    def _publish(self, payload: dict[str, object]) -> None:
-        self._messages.put(payload)
-        loop, wake = self._loop, self._wake
-        if loop is not None and wake is not None:
-            with contextlib.suppress(RuntimeError):
-                loop.call_soon_threadsafe(wake.set)
-
-    def _listen(self) -> None:
+    async def _listen(self, handler: RuntimePayloadHandler) -> None:
         reconnect_delay = 0.25
-        first_connection = True
-        while not self._stop.is_set():
-            connection: psycopg.Connection | None = None
+        while True:
             try:
-                connection = psycopg.connect(self._conninfo, autocommit=True, connect_timeout=5)
-                connection.execute(f'LISTEN {_CHANNEL}')
-                if first_connection:
-                    first_connection = False
-                    self._ready.set()
+                if self._connection is None:
+                    await self._connect()
+                connection = self._connection
+                assert connection is not None
                 reconnect_delay = 0.25
-                logger.info('Runtime notification listener connected')
-                while not self._stop.is_set():
-                    for notify in connection.notifies(timeout=0.5, stop_after=100):
+                # Keep the generator open even while awaiting a slow handler.
+                # psycopg disables its notification backlog for this lifetime.
+                async with contextlib.aclosing(connection.notifies()) as notifications:
+                    delivered = 0
+                    async for notify in notifications:
                         try:
                             payload = json.loads(_notify_payload(notify))
                         except json.JSONDecodeError as exc:
                             logger.debug('Ignoring malformed Postgres runtime notification: %s', exc)
+                            self._recovery_requested.set()
                             continue
                         if isinstance(payload, dict):
-                            self._publish(payload)
-            except Exception as exc:
-                if first_connection:
-                    self._startup_error = exc
-                    self._ready.set()
-                elif not self._stop.is_set():
-                    logger.warning('Runtime notification listener lost its connection; reconnecting', exc_info=True)
-                if self._stop.wait(reconnect_delay):
-                    break
+                            try:
+                                await handler(payload)
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:
+                                logger.exception('Runtime notification handler failed kind=%s', payload.get('kind', '-'))
+                                self._recovery_requested.set()
+                        delivered += 1
+                        if delivered % 100 == 0:
+                            await asyncio.sleep(0)
+                raise RuntimeError('PostgreSQL runtime notification generator exited unexpectedly')
+            except psycopg.Error, OSError:
+                logger.warning('Runtime notification listener lost its connection; reconnecting', exc_info=True)
+                self._recovery_requested.set()
+                await self._close_connection()
+                await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 5.0)
-            finally:
-                if connection is not None:
-                    with contextlib.suppress(Exception):
-                        connection.close()
+
+    async def _recover(self, recover: RuntimeRecovery) -> None:
+        while True:
+            await self._recovery_requested.wait()
+            self._recovery_requested.clear()
+            try:
+                await recover()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning('Runtime notification recovery failed; retrying', exc_info=True)
+                self._recovery_requested.set()
+                await asyncio.sleep(1.0)
+
+    async def _close_connection(self) -> None:
+        connection, self._connection = self._connection, None
+        if connection is not None:
+            await connection.close()
+
+    def _require_owner_loop(self) -> None:
+        if self._loop is not asyncio.get_running_loop():
+            raise RuntimeError('PostgreSQL runtime notification listener must be used on its owning event loop')
 
     async def close(self) -> None:
-        self._stop.set()
-        thread = self._thread
-        if thread is not None and thread.is_alive():
-            await asyncio.to_thread(thread.join, 6.0)
-            if thread.is_alive():
-                logger.error('PostgreSQL runtime notification listener did not stop within 6 seconds')
+        self._require_owner_loop()
+        task = self._serving_task
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await self._close_connection()
 
 
 def _psycopg_conninfo() -> str:
@@ -134,9 +155,8 @@ def configure_database_url_provider(provider: Callable[[], str] | None) -> None:
 async def start_api_server(listener: ListenerKind = RuntimeListenerKind.API) -> RuntimeNotificationListener:
     del listener
     server = RuntimeNotificationListener(_psycopg_conninfo())
-    server.start()
     try:
-        await asyncio.to_thread(server.wait_ready)
+        await server.start()
     except BaseException:
         await server.close()
         raise
@@ -145,55 +165,36 @@ async def start_api_server(listener: ListenerKind = RuntimeListenerKind.API) -> 
 
 async def serve_api_notifications(
     listener: RuntimeNotificationListener,
-    stop_event,
-    handler: Callable[[dict[str, object]], Awaitable[None]],
+    stop_event: asyncio.Event,
+    handler: RuntimePayloadHandler,
+    *,
+    recover: RuntimeRecovery,
 ) -> None:
-    await _serve_postgres_notifications(listener, stop_event, handler)
-
-
-async def _serve_postgres_notifications(
-    listener: RuntimeNotificationListener,
-    stop_event,
-    handler: Callable[[dict[str, object]], Awaitable[None]],
-) -> None:
-    wake = listener._wake
-    if wake is None:
+    listener._require_owner_loop()
+    if listener._connection is None:
         raise RuntimeError('PostgreSQL runtime notification listener has not started')
-    stop_task = asyncio.create_task(stop_event.wait())
-    wake_task: asyncio.Task[bool] | None = None
+    if listener._serving_task is not None:
+        raise RuntimeError('PostgreSQL runtime notification listener is already serving')
+    if stop_event.is_set():
+        return
+    listener._serving_task = asyncio.current_task()
+    consume_task = asyncio.create_task(listener._listen(handler), name='runtime-notification-receive')
+    recovery_task = asyncio.create_task(listener._recover(recover), name='runtime-notification-recovery')
+    stop_task = asyncio.create_task(stop_event.wait(), name='runtime-notification-stop')
+    tasks = (consume_task, recovery_task, stop_task)
     try:
-        while not stop_event.is_set():
-            wake.clear()
-            if listener._messages.empty():
-                if not listener._messages.empty():
-                    continue
-                wake_task = asyncio.create_task(wake.wait())
-                done, _pending = await asyncio.wait({stop_task, wake_task}, return_when=asyncio.FIRST_COMPLETED)
-                if stop_task in done:
-                    return
-                wake_task = None
-
-            for _ in range(100):
-                try:
-                    payload = listener._messages.get_nowait()
-                except queue.Empty:
-                    break
-                try:
-                    await handler(payload)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception('Runtime notification handler failed kind=%s', payload.get('kind', '-'))
-            if not listener._messages.empty():
-                await asyncio.sleep(0)
-                wake.set()
+        done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        if stop_task in done:
+            return
+        for task in (consume_task, recovery_task):
+            if task in done:
+                task.result()
+                raise RuntimeError(f'Runtime notification task {task.get_name()} exited unexpectedly')
     finally:
-        stop_task.cancel()
-        pending_tasks = [stop_task]
-        if wake_task is not None and not wake_task.done():
-            wake_task.cancel()
-            pending_tasks.append(wake_task)
-        await asyncio.gather(*pending_tasks, return_exceptions=True)
+        for pending_task in tasks:
+            pending_task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        listener._serving_task = None
 
 
 def _notify_payload(notify: Notify) -> str:

@@ -46,7 +46,7 @@ def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataS
         ],
     }
 
-    def fake_preview_step(*_args, **kwargs):
+    def fake_preview_step(request, *, runtime_probe, http_request):
         return MagicMock(
             column_types={'name': 'String'},
             data=[{'name': 'Alice'}],
@@ -70,7 +70,7 @@ def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataS
         assert payload['rows'] == [{'name': 'Alice'}]
         assert mock_preview.call_count == 1
         args, _kwargs = mock_preview.call_args
-        request = args[1]
+        request = args[0]
         assert request.analysis_pipeline.analysis_id == analysis_id
         assert request.engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
         assert request.engine_identity.analysis_id == analysis_id

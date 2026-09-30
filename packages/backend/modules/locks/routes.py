@@ -309,36 +309,37 @@ async def lock_websocket(websocket: WebSocket) -> None:
                     assert next_type is not None
                     assert next_id is not None
                     if message.lock_token is not None:
-                        lock = await _heartbeat_lock(
-                            next_type,
-                            next_id,
-                            owner_id,
-                            message.lock_token,
-                            message.ttl_seconds,
-                        )
+                        switching = (watch_type, watch_id) != (next_type, next_id)
+                        await watchers.registry.add(websocket, namespace, next_type, next_id)
+                        try:
+                            lock = await _heartbeat_lock(next_type, next_id, owner_id, message.lock_token, message.ttl_seconds)
+                        except BaseException:
+                            if switching:
+                                with anyio.CancelScope(shield=True):
+                                    await watchers.registry.discard(websocket, namespace, next_type, next_id)
+                            raise
                         next_token = message.lock_token
-                        if watch_type is not None and watch_id is not None:
+                        if switching and watch_type is not None and watch_id is not None:
                             await watchers.registry.discard(websocket, namespace, watch_type, watch_id)
                         watch_type = next_type
                         watch_id = next_id
                         watch_token = next_token
-                        await watchers.registry.add(websocket, namespace, watch_type, watch_id)
                         await _notify_watchers(watch_type, watch_id, lock)
                         continue
-                    status, cleaned = await _lookup_lock_status(next_type, next_id)
                     if watch_type is not None and watch_id is not None:
                         await watchers.registry.discard(websocket, namespace, watch_type, watch_id)
                     watch_type = next_type
                     watch_id = next_id
                     watch_token = next_token
                     await watchers.registry.add(websocket, namespace, watch_type, watch_id)
+                    version = await watchers.registry.current_version(namespace, watch_type, watch_id)
+                    status, cleaned = await _lookup_lock_status(next_type, next_id)
                     if cleaned:
-                        await _notify_watchers(watch_type, watch_id, None)
+                        if await watchers.registry.current_version(namespace, watch_type, watch_id) != version:
+                            status, _cleaned = await _lookup_lock_status(watch_type, watch_id)
+                        await _notify_watchers(watch_type, watch_id, status)
                         continue
-                    if status is None:
-                        await _send_status(websocket, watch_type, watch_id, None)
-                        continue
-                    await _send_status(websocket, watch_type, watch_id, status)
+                    await watchers.refresh_watchers(namespace, watch_type, watch_id, _status_message(watch_type, watch_id, status), expected_version=version)
                     continue
 
                 if message.action == schemas.LockWebsocketAction.ACQUIRE:

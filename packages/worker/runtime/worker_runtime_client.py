@@ -329,6 +329,26 @@ class ClaimedComputeRequest:
 
 
 @dataclass(frozen=True)
+class StorageCleanupClaim:
+    namespace: str
+    event_id: str
+    claim_token: str
+    lease_generation: int
+    resource_id: str
+    url: str
+    is_prefix: bool
+    catalog_identifier: str | None = None
+
+    def protocol_claim(self) -> worker_runtime_pb2.WorkerStorageCleanupClaimRequest:
+        return worker_runtime_pb2.WorkerStorageCleanupClaimRequest(
+            namespace=self.namespace,
+            event_id=self.event_id,
+            claim_token=self.claim_token,
+            lease_generation=self.lease_generation,
+        )
+
+
+@dataclass(frozen=True)
 class EngineRunFinalization:
     run_id: str
     fields: Mapping[str, object]
@@ -668,6 +688,76 @@ class WorkerRuntimeClient:
                 metadata=self._metadata(),
             )
         )
+
+    def register_datasource_stage(
+        self,
+        *,
+        namespace: str,
+        datasource_id: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
+        prefix_url: str,
+        artifact_url: str,
+        catalog_identifier: str,
+        compute_request_id: str | None = None,
+        job_id: str | None = None,
+        build_id: str | None = None,
+    ) -> None:
+        if (compute_request_id is None) == (job_id is None) or (job_id is not None and build_id is None):
+            raise ValueError("Datasource staging requires one complete compute or build claim")
+        request = worker_runtime_pb2.WorkerRegisterDatasourceStageRequest(
+            namespace=namespace,
+            datasource_id=datasource_id,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+            prefix_url=prefix_url,
+            artifact_url=artifact_url,
+            catalog_identifier=catalog_identifier,
+        )
+        if compute_request_id is not None:
+            request.compute_request_id = compute_request_id
+        if job_id is not None:
+            request.job_id = job_id
+        if build_id is not None:
+            request.build_id = build_id
+        response = self._call(lambda: self._stub.RegisterDatasourceStage(request, timeout=self._control_timeout(), metadata=self._metadata()))
+        if not response.value:
+            raise RuntimeError("Datasource staging cleanup intents were not accepted")
+
+    def claim_storage_cleanups(self, *, namespace: str, limit: int = 1) -> list[StorageCleanupClaim]:
+        response = self._call(
+            lambda: self._stub.ClaimStorageCleanup(
+                worker_runtime_pb2.WorkerClaimStorageCleanupRequest(namespace=namespace, limit=limit),
+                timeout=self._control_timeout(),
+                metadata=self._metadata(),
+            )
+        )
+        return [
+            StorageCleanupClaim(
+                namespace=row.claim.namespace,
+                event_id=row.claim.event_id,
+                claim_token=row.claim.claim_token,
+                lease_generation=row.claim.lease_generation,
+                resource_id=row.resource_id,
+                url=row.url,
+                is_prefix=row.is_prefix,
+                catalog_identifier=row.catalog_identifier if row.HasField("catalog_identifier") else None,
+            )
+            for row in response.cleanups
+        ]
+
+    def authorize_storage_cleanup(self, claim: StorageCleanupClaim) -> bool:
+        response = self._call(lambda: self._stub.AuthorizeStorageCleanup(claim.protocol_claim(), timeout=self._control_timeout(), metadata=self._metadata()))
+        return bool(response.value)
+
+    def complete_storage_cleanup(self, claim: StorageCleanupClaim, *, error: str | None = None) -> bool:
+        request = worker_runtime_pb2.WorkerCompleteStorageCleanupRequest(claim=claim.protocol_claim())
+        if error is not None:
+            request.error = error
+        response = self._call(lambda: self._stub.CompleteStorageCleanup(request, timeout=self._control_timeout(), metadata=self._metadata()))
+        return bool(response.value)
 
     def publish_datasource_create(
         self,
@@ -1418,6 +1508,7 @@ def run_worker_heartbeat_loop(
     heartbeat_seconds: float = 5.0,
     active_jobs: Callable[[], int] | None = None,
     on_reconnected: Callable[[], None] | None = None,
+    on_registration_changed: Callable[[bool], None] | None = None,
 ) -> None:
     """Heartbeat a runtime worker and re-register it after API reconnects.
 
@@ -1471,8 +1562,12 @@ def run_worker_heartbeat_loop(
                 )
             except Exception as exc:
                 logger.warning("Runtime worker re-registration failed worker_id=%s: %s", worker_id, exc)
+                if on_registration_changed is not None:
+                    on_registration_changed(False)
             else:
                 needs_registration = False
+                if on_registration_changed is not None:
+                    on_registration_changed(True)
                 schedule_resynchronization()
         try:
             client.heartbeat_worker(
@@ -1482,6 +1577,8 @@ def run_worker_heartbeat_loop(
             )
         except Exception as exc:
             needs_registration = True
+            if on_registration_changed is not None:
+                on_registration_changed(False)
             logger.warning("Runtime worker heartbeat failed worker_id=%s: %s", worker_id, exc)
 
 

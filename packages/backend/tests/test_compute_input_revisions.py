@@ -72,9 +72,15 @@ def test_preflight_initial_and_preview_jobs_share_only_the_stable_draft_rid(test
         )
         requests.append(
             compute_requests_service.create_request(
-                test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT, command=command
+                test_db_session,
+                namespace='default',
+                kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT,
+                command=command,
+                request_id=preflight_id if action == enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL else None,
             )
         )
+        requests[-1].status = enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
+        test_db_session.commit()
     assert requests[0].id != requests[1].id
     assert {request.engine_resource_id for request in requests} == {preflight_id}
 
