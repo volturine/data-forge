@@ -57,16 +57,17 @@ _OUTBOX_DUE_QUERY = """
 """
 OUTBOX_WAKE_KIND = 'runtime_outbox_wakeup'
 _RUNTIME_EVENTS_CHANNEL = 'runtime_events'
-_EXTERNAL_DELIVERY_KINDS = frozenset({notification_delivery.EMAIL_DELIVERY_KIND, notification_delivery.TELEGRAM_DELIVERY_KIND})
+_EXTERNAL_DELIVERY_KINDS = notification_delivery.EXTERNAL_DELIVERY_KINDS
 
 
 @dataclass(frozen=True, slots=True)
-class _OutboxClaim:
+class OutboxClaim:
     event_id: str
     claim_token: str
     lease_generation: int
     event_kind: str
     payload: dict[str, object]
+    already_delivered: bool = False
 
 
 def _redact_payload_secrets(message: str, payload: dict[str, object]) -> str:
@@ -109,7 +110,7 @@ def enqueue_runtime_event(session: Session, payload: dict[str, object]) -> Runti
 
 def enqueue_notification_delivery(session: Session, payload: dict[str, object]) -> RuntimeOutboxEvent:
     kind = payload.get('kind')
-    if kind not in {notification_delivery.EMAIL_DELIVERY_KIND, notification_delivery.TELEGRAM_DELIVERY_KIND}:
+    if kind not in _EXTERNAL_DELIVERY_KINDS:
         raise ValueError(f'Unsupported notification delivery kind: {kind!r}')
     now = _database_now(session)
     event = RuntimeOutboxEvent(
@@ -191,51 +192,31 @@ def enqueue_datasource_delete_notification(session: Session, *, datasource_id: s
 
 
 def dispatch_pending_events(session: Session, *, limit: int = 1) -> int:
-    """Dispatch a bounded number of durable notifications.
-
-    Dispatching is called from request paths and runtime recovery.  Draining a
-    large batch from each caller turns one notification into a multiplying
-    database/gRPC workload under a browser burst.  Recovery invokes this
-    function again, and callers that intentionally need a larger batch pass an
-    explicit limit. External email and chat delivery is at-least-once: the
-    provider send and database receipt cannot share one transaction, so a
-    process crash between them can cause a retry to deliver twice.
-    """
+    """Dispatch runtime wakes; external deliveries have isolated consumers."""
     bind = session.get_bind()
     if settings.distributed_runtime_enabled and getattr(getattr(bind, 'dialect', None), 'name', None) == 'postgresql':
-        return _dispatch_postgres_events(session, limit=max(int(limit), 0))
+        return _dispatch_postgres_runtime_events(session, limit=max(int(limit), 0))
 
     dispatched = 0
     for _ in range(max(int(limit), 0)):
-        claim = _claim_next_event(session)
-        if claim is None:
+        claims = _claim_next_events(session, limit=1)
+        if not claims:
             break
-        event_id, claim_token, lease_generation, event_kind, payload = claim
-        delivery_payload = {**payload, 'event_id': event_id}
+        claim = claims[0]
         try:
-            if event_kind in _EXTERNAL_DELIVERY_KINDS:
-                if not _notification_was_delivered(session, event_id):
-                    notification_delivery.deliver(delivery_payload, event_id=event_id)
-                    _record_notification_delivery(session, event_id=event_id, kind=event_kind)
-            else:
-                runtime_ipc.notify_runtime_payload(delivery_payload)
+            runtime_ipc.notify_runtime_payload({**claim.payload, 'event_id': claim.event_id})
         except Exception as exc:  # noqa: BLE001 - outbox must preserve retry state for transport failures.
-            _finalize_claim(
-                session,
-                event_id,
-                claim_token=claim_token,
-                lease_generation=lease_generation,
-                error=_redact_payload_secrets(str(exc), payload),
-            )
+            _finalize_claims(session, [(claim, _redact_payload_secrets(str(exc), claim.payload))])
             continue
-        if _finalize_claim(session, event_id, claim_token=claim_token, lease_generation=lease_generation, error=None):
+        finalized, _dispatched = _finalize_claims(session, [(claim, None)])
+        if finalized:
             dispatched += 1
     _clear_namespace_pending_if_idle(session)
     session.commit()
     return dispatched
 
 
-def _dispatch_postgres_events(session: Session, *, limit: int) -> int:
+def _dispatch_postgres_runtime_events(session: Session, *, limit: int) -> int:
     """Claim runtime wakes in batches and commit each batch with its NOTIFYs."""
     dispatched = 0
     processed = 0
@@ -244,22 +225,6 @@ def _dispatch_postgres_events(session: Session, *, limit: int) -> int:
         if not claims:
             break
         processed += len(claims)
-
-        if claims[0].event_kind in _EXTERNAL_DELIVERY_KINDS:
-            claim = claims[0]
-            error: str | None = None
-            try:
-                if not _notification_was_delivered(session, claim.event_id):
-                    notification_delivery.deliver(
-                        {**claim.payload, 'event_id': claim.event_id},
-                        event_id=claim.event_id,
-                    )
-                    _record_notification_delivery(session, event_id=claim.event_id, kind=claim.event_kind)
-            except Exception as exc:  # noqa: BLE001 - preserve retry state for transport failures.
-                error = _redact_payload_secrets(str(exc), claim.payload)
-            _finalized, delivered = _finalize_claims(session, [(claim, error)])
-            dispatched += delivered
-            continue
 
         outcomes = [(claim, None) for claim in claims]
         try:
@@ -286,18 +251,37 @@ def _clear_namespace_pending_if_idle(session: Session) -> None:
     )
 
 
-def _notification_was_delivered(session: Session, event_id: str) -> bool:
-    return session.get(NotificationDeliveryReceipt, event_id) is not None
+def claim_external_deliveries(session: Session, *, kind: str, limit: int = 1) -> list[OutboxClaim]:
+    """Claim work for one provider lane; the caller closes the session before sending."""
+    if kind not in _EXTERNAL_DELIVERY_KINDS:
+        raise ValueError(f'Unsupported external delivery kind: {kind!r}')
+    return _claim_next_events(session, limit=limit, event_kinds=(kind,))
 
 
-def _record_notification_delivery(session: Session, *, event_id: str, kind: str) -> None:
-    if _notification_was_delivered(session, event_id):
-        return
-    session.add(NotificationDeliveryReceipt(event_id=event_id, kind=kind, delivered_at=_database_now(session)))
-    session.commit()
+def finalize_external_delivery(session: Session, claim: OutboxClaim, *, error: str | None = None) -> bool:
+    """Persist a provider result only while its claim token and generation are current.
+
+    Provider delivery and the receipt transaction cannot be atomic. A process
+    failure after provider acceptance and before this commit can cause a retry.
+    """
+    redacted_error = _redact_payload_secrets(error, claim.payload) if error is not None else None
+    finalized, _delivered = _finalize_claims(
+        session,
+        [(claim, redacted_error)],
+        record_external_receipt=error is None and not claim.already_delivered,
+    )
+    if finalized:
+        _clear_namespace_pending_if_idle(session)
+        session.commit()
+    return finalized == 1
 
 
-def _claim_next_events(session: Session, *, limit: int) -> list[_OutboxClaim]:
+def _claim_next_events(
+    session: Session,
+    *,
+    limit: int,
+    event_kinds: Sequence[str] | None = None,
+) -> list[OutboxClaim]:
     if limit < 1:
         return []
     now = _database_now(session)
@@ -314,22 +298,15 @@ def _claim_next_events(session: Session, *, limit: int) -> list[_OutboxClaim]:
         .order_by(sa(RuntimeOutboxEvent.available_at), sa(RuntimeOutboxEvent.created_at), sa(RuntimeOutboxEvent.id))
         .limit(limit)
     )
+    base = base.where(table.c.kind.not_in(_EXTERNAL_DELIVERY_KINDS)) if event_kinds is None else base.where(table.c.kind.in_(event_kinds))
     stmt = with_for_update_skip_locked(session, base)
     events = list(session.execute(stmt).scalars().all())
     if not events:
         session.rollback()
         return []
 
-    selected: list[RuntimeOutboxEvent] = []
+    claims: list[OutboxClaim] = []
     for event in events:
-        if event.kind in _EXTERNAL_DELIVERY_KINDS:
-            if not selected:
-                selected.append(event)
-            break
-        selected.append(event)
-
-    claims: list[_OutboxClaim] = []
-    for event in selected:
         claim_token = str(uuid.uuid4())
         event.status = RuntimeOutboxStatus.DISPATCHING
         event.claim_token = claim_token
@@ -338,12 +315,13 @@ def _claim_next_events(session: Session, *, limit: int) -> list[_OutboxClaim]:
         event.attempts += 1
         event.updated_at = now
         claims.append(
-            _OutboxClaim(
+            OutboxClaim(
                 event_id=event.id,
                 claim_token=claim_token,
                 lease_generation=event.lease_generation,
                 event_kind=event.kind,
                 payload=dict(event.payload_json),
+                already_delivered=(event.kind in _EXTERNAL_DELIVERY_KINDS and session.get(NotificationDeliveryReceipt, event.id) is not None),
             )
         )
         session.add(event)
@@ -377,7 +355,7 @@ def _finalize_claim(
     lease_generation: int,
     error: str | None,
 ) -> bool:
-    claim = _OutboxClaim(
+    claim = OutboxClaim(
         event_id=event_id,
         claim_token=claim_token,
         lease_generation=lease_generation,
@@ -388,7 +366,12 @@ def _finalize_claim(
     return finalized == 1
 
 
-def _finalize_claims(session: Session, outcomes: Sequence[tuple[_OutboxClaim, str | None]]) -> tuple[int, int]:
+def _finalize_claims(
+    session: Session,
+    outcomes: Sequence[tuple[OutboxClaim, str | None]],
+    *,
+    record_external_receipt: bool = False,
+) -> tuple[int, int]:
     if not outcomes:
         return 0, 0
 
@@ -405,6 +388,10 @@ def _finalize_claims(session: Session, outcomes: Sequence[tuple[_OutboxClaim, st
             continue
         if error is None and event.kind not in _EXTERNAL_DELIVERY_KINDS:
             runtime_ipc.notify_runtime_payload_on_commit(session, {**event.payload_json, 'event_id': event.id})
+        if record_external_receipt and error is None and event.kind in _EXTERNAL_DELIVERY_KINDS:
+            receipt = session.get(NotificationDeliveryReceipt, event.id)
+            if receipt is None:
+                session.add(NotificationDeliveryReceipt(event_id=event.id, kind=event.kind, delivered_at=now))
         poisoned = error is not None and event.attempts >= settings.runtime_outbox_max_attempts
         event.status = RuntimeOutboxStatus.DISPATCHED if error is None else RuntimeOutboxStatus.POISONED if poisoned else RuntimeOutboxStatus.FAILED
         event.claim_token = None

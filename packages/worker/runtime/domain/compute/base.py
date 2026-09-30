@@ -193,6 +193,9 @@ class ComputeEngine(Protocol):
     ) -> str:
         raise NotImplementedError
 
+    def datasource_job(self, kind: str, payload: dict[str, Any]) -> str:
+        raise NotImplementedError
+
     def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> EngineResult | None:
         raise NotImplementedError
 

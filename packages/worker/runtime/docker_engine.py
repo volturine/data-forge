@@ -925,6 +925,9 @@ class DockerComputeEngine(ComputeEngine):
     def get_row_count(self, datasource_config: dict, steps: list[dict], additional_datasources: dict[str, dict] | None = None) -> str:
         return self._submit("row_count", {"datasource_config": datasource_config, "steps": steps, "additional_datasources": additional_datasources or {}})
 
+    def datasource_job(self, kind: str, payload: dict[str, object]) -> str:
+        return self._submit(kind, {**payload, "resource_id": self.identity.resource_id})
+
     def cancel_job(self, job_id: str | None = None) -> bool:
         expected = job_id or self.current_job_id
         if not expected:

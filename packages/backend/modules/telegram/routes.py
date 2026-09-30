@@ -4,9 +4,8 @@ from fastapi import Depends
 from sqlmodel import Session
 
 from backend_core import telegram_store
-from backend_core.database import get_db_async
+from backend_core.database import get_db_async, run_settings_db
 from backend_core.error_handlers import handle_errors
-from backend_core.settings_store import get_resolved_telegram_settings
 from backend_core.telegram_schemas import (
     BotStatusResponse,
     ListenerCreate,
@@ -15,6 +14,7 @@ from backend_core.telegram_schemas import (
 )
 from backend_core.validation import DataSourceId, parse_datasource_id
 from modules.mcp.router import MCPRouter
+from modules.telegram import store as telegram_runtime_store
 
 router = MCPRouter(prefix='/telegram', tags=['telegram'])
 
@@ -25,9 +25,9 @@ def bot_status(session: Session = Depends(get_db_async)) -> BotStatusResponse:
     """Get Telegram bot status: whether the bot is running, token is configured, and active subscriber count."""
     subs = telegram_store.list_subscribers(session)
     active = sum(1 for s in subs if s.is_active)
-    telegram_settings = get_resolved_telegram_settings()
-    token_configured = bool(telegram_settings['token'])
-    running = bool(telegram_settings['enabled'])
+    telegram_settings = run_settings_db(telegram_runtime_store.read_settings)
+    token_configured = bool(telegram_settings.token)
+    running = telegram_settings.enabled
     return BotStatusResponse(
         running=running,
         token_configured=token_configured,

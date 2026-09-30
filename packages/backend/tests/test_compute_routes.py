@@ -151,8 +151,7 @@ class _StubManager:
         return _StubEngine() if self._identity_key(identity).endswith(':build-1') else None
 
     def get_engine_status(self, identity) -> dict[str, object]:
-        return {
-            'analysis_id': identity.analysis_id if identity.HasField('analysis_id') else '',
+        status: dict[str, object] = {
             'resource_id': identity.resource_id,
             'status': 'healthy',
             'scope': 'datasource_preview' if identity.HasField('datasource_id') else 'build' if identity.HasField('build_id') else 'analysis_interactive',
@@ -160,6 +159,9 @@ class _StubManager:
             'datasource_id': identity.datasource_id if identity.HasField('datasource_id') else None,
             'build_id': identity.build_id if identity.HasField('build_id') else None,
         }
+        if identity.HasField('analysis_id'):
+            status['analysis_id'] = identity.analysis_id
+        return status
 
     def spawn_engine(self, identity, resource_config: dict | None = None) -> None:
         self.spawn_calls.append((self._identity_key(identity), resource_config))
@@ -295,9 +297,25 @@ def test_spawn_engine_accepts_datasource_preview_identity(client) -> None:
         app.dependency_overrides.pop(get_manager, None)
 
     assert response.status_code == 200
+    assert response.json()['analysis_id'] is None
     assert response.json()['resource_id'] == 'datasource-1'
     assert response.json()['scope'] == 'datasource_preview'
+    assert response.json()['datasource_id'] == 'datasource-1'
     assert manager.spawn_calls == [('1:datasource-1', None)]
+
+
+def test_spawn_engine_retains_analysis_identity(client) -> None:
+    manager = _StubManager()
+    app.dependency_overrides[get_manager] = lambda: manager
+    try:
+        response = client.post('/api/v1/compute/engine/spawn/analysis/analysis-1')
+    finally:
+        app.dependency_overrides.pop(get_manager, None)
+
+    assert response.status_code == 200
+    assert response.json()['analysis_id'] == 'analysis-1'
+    assert response.json()['resource_id'] == 'analysis-1'
+    assert response.json()['scope'] == 'analysis_interactive'
 
 
 def test_configure_engine_accepts_datasource_preview_identity(client) -> None:

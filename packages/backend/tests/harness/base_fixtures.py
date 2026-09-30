@@ -137,13 +137,9 @@ def _settings_tables() -> list[Any]:
 
 
 def _reset_settings_state(engine: Engine) -> None:
-    from backend_core.settings_projection import invalidate_resolved_settings_cache
-
     with engine.begin() as conn:
         for table in reversed(_settings_tables()):
             conn.execute(table.delete())
-
-    invalidate_resolved_settings_cache()
 
 
 @pytest.fixture(scope='session')
@@ -334,6 +330,29 @@ class _TestWorkerDataPlaneClient:
         if content_type is not None:
             kwargs['ContentType'] = content_type
         self._s3().put_object(**kwargs)
+        return target_url
+
+    def upload_object_file(
+        self,
+        path: Path,
+        target_url: str,
+        *,
+        max_bytes: int,
+        content_type: str | None = None,
+    ) -> str:
+        from backend_core.data_plane_client import _MAX_OBJECT_TRANSFER_BYTES
+
+        bounded_limit = min(max_bytes or _MAX_OBJECT_TRANSFER_BYTES, _MAX_OBJECT_TRANSFER_BYTES)
+        bucket, key = self._parse_object_url(target_url)
+        extra_args: dict[str, str] = {}
+        if content_type is not None:
+            extra_args['ContentType'] = content_type
+
+        with path.open('rb') as source:
+            if os.fstat(source.fileno()).st_size > bounded_limit:
+                raise ValueError(f'object upload exceeds {bounded_limit} byte limit')
+            self._ensure_bucket_exists(bucket)
+            self._s3().upload_fileobj(source, bucket, key, ExtraArgs=extra_args)
         return target_url
 
     def download_object_bytes(self, source_url: str) -> bytes:

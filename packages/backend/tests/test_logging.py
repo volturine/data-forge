@@ -75,7 +75,7 @@ def test_configure_logging_queues_console_writes_off_request_threads(monkeypatch
     listener_handlers: list[tuple[object, ...]] = []
 
     class CapturingListener:
-        def __init__(self, _queue, *handlers) -> None:
+        def __init__(self, _queue, *handlers, **_kwargs) -> None:
             self.handlers = handlers
             listener_handlers.append(handlers)
 
@@ -86,13 +86,15 @@ def test_configure_logging_queues_console_writes_off_request_threads(monkeypatch
             pass
 
     monkeypatch.setattr(backend_logging, 'DatabaseLogWriter', lambda **_kwargs: writer)
-    monkeypatch.setattr(logging.handlers, 'QueueListener', CapturingListener)
+    monkeypatch.setattr(backend_logging, '_BoundedQueueListener', CapturingListener)
     monkeypatch.setattr(backend_logging.atexit, 'register', lambda _callback: None)
 
     backend_logging.configure_logging()
 
     assert len(root_logger.handlers) == 1
     assert isinstance(root_logger.handlers[0], logging.handlers.QueueHandler)
+    log_queue = cast(queue.Queue[logging.LogRecord], root_logger.handlers[0].queue)
+    assert log_queue.maxsize == backend_logging.settings.log_queue_max_size
     assert len(listener_handlers) == 1
     assert isinstance(listener_handlers[0][0], logging.StreamHandler)
     assert isinstance(listener_handlers[0][1], backend_logging.DatabaseLogHandler)
@@ -149,6 +151,35 @@ def test_queue_handler_defers_message_and_traceback_formatting_to_listener_threa
 
     assert formatting_threads
     assert all(thread_id != producer_thread for thread_id in formatting_threads)
+
+
+def test_slow_logging_consumer_cannot_grow_outer_queue() -> None:
+    log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=2)
+    queue_handler = backend_logging._BoundedFormattingQueueHandler(log_queue)
+
+    for index in range(10):
+        queue_handler.emit(logging.LogRecord('test', logging.INFO, __file__, index, 'message %s', (index,), None))
+
+    assert log_queue.qsize() == 2
+    assert queue_handler.dropped == 8
+
+
+def test_bounded_log_queue_reports_overflow_from_listener_thread() -> None:
+    log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=1)
+    queue_handler = backend_logging._BoundedFormattingQueueHandler(log_queue)
+    output: list[str] = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            output.append(record.getMessage())
+
+    console = CaptureHandler()
+    listener = backend_logging._BoundedQueueListener(log_queue, console, overflow_handler=queue_handler)
+    queue_handler.emit(logging.LogRecord('test', logging.INFO, __file__, 1, 'queued', (), None))
+    queue_handler.emit(logging.LogRecord('test', logging.INFO, __file__, 2, 'dropped', (), None))
+    listener.handle(logging.LogRecord('test', logging.INFO, __file__, 3, 'consumed', (), None))
+
+    assert output == ['consumed', 'Backend log queue overflow; dropped_total=1']
 
 
 @pytest.mark.asyncio

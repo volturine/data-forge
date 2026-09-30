@@ -191,7 +191,7 @@ class AnalysisPipelinePayload(BaseModel):
 class EngineStatusSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    analysis_id: str
+    analysis_id: str | None = None
     resource_id: str
     status: EngineStatus
     container_id: str | None = None

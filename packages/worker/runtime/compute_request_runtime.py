@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -16,7 +17,6 @@ from google.protobuf import json_format, message
 
 from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2, errors_pb2
 from datasources import execution as datasource_execution
-from datasources.schemas import CSVOptions
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
 from runtime.compute_manager import (
@@ -31,15 +31,31 @@ from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import ComputeRequestWake, request_hub
 from runtime.domain.domain_enums import domain_token
-from runtime.exceptions import AppError, status_for_app_error
+from runtime.exceptions import AppError, StaleComputeInputError, status_for_app_error
 from runtime.executors import run_compute_in_thread, run_control_in_thread, run_lease_in_thread
 from runtime.json_values import dict_to_struct
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
 from runtime.worker_runtime import NamespaceRecovery, RuntimeNamespaceDirectory
-from runtime.worker_runtime_client import BackendWorkerRpcError, EngineRunFinalization, WorkerRuntimeClient, client_from_env
+from runtime.worker_runtime_client import (
+    BackendWorkerRpcError,
+    DatasourceMetadata,
+    EngineRunFinalization,
+    WorkerRuntimeClient,
+    client_from_env,
+    reset_datasource_metadata_snapshot,
+    set_datasource_metadata_snapshot,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_engine_error_message(value: object) -> str:
+    message = str(value)
+    message = re.sub(r"(?i)(postgres(?:ql)?://)[^/@\s]+@", r"\1[REDACTED]@", message)
+    message = re.sub(r"(?i)(password|secret|token|access[_-]?key)(\s*[=:]\s*)\S+", r"\1\2[REDACTED]", message)
+    return message[:300]
+
 
 # ``COMPUTE_WORKERS`` is the one public execution budget. The shared semaphore
 # is acquired only after worker admission, so cold-worker waiters do not hold
@@ -68,6 +84,7 @@ _DATASOURCE_REQUEST_KINDS = {
     enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
     enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
     enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
+    enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT,
 }
 ENGINE_SHUTDOWN_REQUEST_KINDS = frozenset({enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE})
 ENGINE_LIFECYCLE_REQUEST_KINDS = frozenset(
@@ -108,6 +125,32 @@ def compute_request_claim_worker_count() -> int:
 def _compute_request_kind_name(kind: enums_pb2.ComputeRequestKind) -> str:
     enum_name = enums_pb2.ComputeRequestKind.Name(kind)
     return enum_name.removeprefix("COMPUTE_REQUEST_KIND_").lower()
+
+
+def _freeze_claimed_input_metadata(
+    client: WorkerRuntimeClient,
+    claimed: ClaimedComputeRequest,
+) -> dict[tuple[str, str], DatasourceMetadata]:
+    snapshot: dict[tuple[str, str], DatasourceMetadata] = {}
+    for expected in claimed.command_envelope.command.input_revisions:
+        key = (claimed.namespace, expected.datasource_id)
+        if key in snapshot:
+            raise ValueError(f"Compute request {claimed.id} contains duplicate datasource revision entries")
+        metadata = client.datasource_metadata(namespace=claimed.namespace, datasource_id=expected.datasource_id)
+        if not metadata.found:
+            # A datasource can disappear between staging and claim. Preserve
+            # its user-facing not-found result; a present datasource with a
+            # changed revision is stale.
+            snapshot[key] = metadata
+            continue
+        if metadata.revision != expected.revision:
+            raise StaleComputeInputError(
+                expected.datasource_id,
+                expected_revision=int(expected.revision),
+                actual_revision=metadata.revision,
+            )
+        snapshot[key] = metadata
+    return snapshot
 
 
 def _engine_admission_priority(
@@ -795,141 +838,274 @@ def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload:
             proto_payload["schema_diff"] = converted
         result.snapshot_compare.CopyFrom(json_format.ParseDict(proto_payload, datasource_pb2.SnapshotCompareResult()))
         return result
+    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT:
+        result.preflight.CopyFrom(json_format.ParseDict(payload, datasource_pb2.DatasourcePreflightResult()))
+        return result
     raise ValueError(f"Unsupported datasource response kind: {_compute_request_kind_name(kind)}")
 
 
-def _execute_datasource_command(client: WorkerRuntimeClient, claimed: ClaimedComputeRequest, command) -> datasource_pb2.DatasourceResult:
-    from runtime.protocol_mapping import proto_value_to_enum_name, struct_to_dict
+def _datasource_metadata_payload(metadata: DatasourceMetadata) -> dict[str, object]:
+    return {
+        "id": metadata.id,
+        "name": metadata.name,
+        "source_type": metadata.source_type,
+        "config": metadata.config,
+        "revision": metadata.revision,
+        "is_hidden": metadata.is_hidden,
+        "description": metadata.description,
+        "column_descriptions": metadata.column_descriptions or {},
+    }
 
-    kind = claimed.kind
-    namespace = claimed.namespace
-    database_url = settings.database_url
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE:
-        if command.WhichOneof("command") != "create_file":
-            raise ValueError("datasource command must contain create_file")
-        create_file = command.create_file
-        csv_options = None
-        if create_file.HasField("csv_options"):
-            csv_options = CSVOptions(
-                delimiter=create_file.csv_options.delimiter,
-                quote_char=create_file.csv_options.quote_char,
-                has_header=create_file.csv_options.has_header,
-                skip_rows=create_file.csv_options.skip_rows,
-                encoding=create_file.csv_options.encoding,
+
+def _datasource_engine_job(
+    manager: ProcessManager,
+    claimed: ClaimedComputeRequest,
+    kind: str,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    from runtime.compute_utils import await_engine_result
+    from runtime.exceptions import PipelineExecutionError
+
+    identity = _engine_identity_for_claimed(claimed)
+    if identity is None:
+        raise ValueError("Datasource work requires an exact RID engine identity")
+    with manager.acquire_engine(identity) as engine:
+        job_id = engine.datasource_job(kind, payload)
+        result = await_engine_result(engine, job_id=job_id)
+    if result.get("error"):
+        error_kind = result.get("error_kind", "-")
+        error_details = result.get("error_details")
+        error_type = error_details.get("exception_type", "-") if isinstance(error_details, dict) else "-"
+        error_message = _safe_engine_error_message(result["error"]) if error_kind == "value_error" else "-"
+        logger.error(
+            "Datasource engine job failed request_id=%s resource_id=%s kind=%s error_kind=%s error_type=%s error_message=%s",
+            claimed.id,
+            identity.resource_id,
+            kind,
+            error_kind,
+            error_type,
+            error_message,
+        )
+        raise PipelineExecutionError(
+            "Datasource computation failed",
+            details={"error_kind": result.get("error_kind"), "resource_id": identity.resource_id},
+        )
+    data = result.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("Datasource engine result must contain an object")
+    return data
+
+
+def _publish_staged_datasource(
+    client: WorkerRuntimeClient,
+    manager: ProcessManager,
+    claimed: ClaimedComputeRequest,
+    command: datasource_pb2.DatasourceCommand,
+) -> datasource_pb2.DatasourceResult:
+    from datetime import UTC, datetime
+
+    from runtime.domain.datasource.source_types import DataSourceType
+    from runtime.object_store import delete_object
+    from runtime.protocol_mapping import proto_value_to_enum_name, schema_info_proto, struct_to_dict
+
+    operation = command.WhichOneof("command")
+    create = operation != "ingest"
+    metadata = None
+    request: (
+        datasource_pb2.CreateFileDatasourceCommand
+        | datasource_pb2.CreateDatabaseDatasourceCommand
+        | datasource_pb2.CreateIcebergDatasourceCommand
+        | datasource_pb2.IngestDatasourceCommand
+    )
+    source: dict[str, object]
+    branch: object
+    if operation == "create_file":
+        request = command.create_file
+        source = {
+            "source_type": "file",
+            "file_path": request.file_path,
+            "file_type": proto_value_to_enum_name(enums_pb2.DataSourceFileType, "DATA_SOURCE_FILE_TYPE", request.file_type),
+            "options": struct_to_dict(request.options),
+        }
+        if request.HasField("csv_options"):
+            source["csv_options"] = _message_to_service_payload(request.csv_options)
+        for field in ("sheet_name", "start_row", "start_col", "end_col", "end_row", "has_header", "table_name", "named_range", "cell_range"):
+            if request.HasField(field):
+                source[field] = getattr(request, field)
+        branch = "master"
+    elif operation == "create_database":
+        request = command.create_database
+        source = {"source_type": "database", "connection_string": request.connection_string, "query": request.query}
+        branch = request.branch
+    elif operation == "create_iceberg":
+        request = command.create_iceberg
+        source = struct_to_dict(request.source)
+        branch = request.branch
+    elif operation == "ingest":
+        metadata = datasource_execution._require_metadata(client, namespace=claimed.namespace, datasource_id=command.ingest.datasource_id)
+        source, _source_type = datasource_execution._external_source(metadata)
+        branch = (metadata.config or {}).get("branch") or source.get("branch")
+        request = command.ingest
+    else:
+        raise ValueError("Datasource staging requires a create or ingest command")
+    if not isinstance(branch, str) or not branch.strip():
+        raise ValueError("Datasource branch is required")
+    branch = branch.strip()
+    source_type_value = source.get("source_type")
+    if not isinstance(source_type_value, str):
+        raise ValueError("Datasource source type is required")
+    source_type = DataSourceType.require(source_type_value)
+    if not source_type.supports_external_ingestion:
+        raise ValueError("Datasource source is not ingestable")
+    datasource_id = claimed.id if create else command.ingest.datasource_id
+    staging_id = f"{datasource_id}__claim_{claimed.claim_token.replace('-', '_')}"
+    target_path = object_store_url("clean", staging_id, branch, namespace=claimed.namespace)
+    artifact_url = object_store_url("runtime-staging", "datasource-stage", claimed.id, str(claimed.lease_generation), "data.arrow", namespace=claimed.namespace)
+    run_id = datasource_execution._create_ingest_run(
+        client,
+        namespace=claimed.namespace,
+        datasource_id=datasource_id,
+        source_type=source_type,
+        branch=branch,
+        mode="initial_ingest" if create else "manual_ingest",
+        triggered_by="manual",
+    )
+    started = time.monotonic()
+    try:
+        artifact = _datasource_engine_job(manager, claimed, "datasource_stage", {"source_config": source, "artifact_url": artifact_url})
+        schema_info = schema_info_proto(artifact)
+        client.update_engine_run(namespace=claimed.namespace, run_id=run_id, fields={"current_step": "Importing staged batches", "progress": 0.7})
+        table = datasource_execution.import_staged_arrow_artifact(artifact_url, table_path=target_path, database_url=settings.database_url)
+        if create:
+            config = datasource_execution._build_iceberg_config(target_path, branch, source_config=source)
+        else:
+            assert metadata is not None
+            config = dict(metadata.config or {})
+        config.update({"metadata_path": target_path, "table": staging_id, "branch": branch, "source": source})
+        datasource_execution._set_snapshot_metadata(config, table)
+        if create:
+            assert isinstance(
+                request,
+                (datasource_pb2.CreateFileDatasourceCommand, datasource_pb2.CreateDatabaseDatasourceCommand, datasource_pb2.CreateIcebergDatasourceCommand),
             )
-        record = datasource_execution.create_file_datasource(
+            record = client.publish_datasource_create(
+                namespace=claimed.namespace,
+                datasource_id=datasource_id,
+                name=request.name,
+                description=request.description if request.HasField("description") else None,
+                source_type="iceberg",
+                config=config,
+                schema_info=schema_info,
+                compute_request_id=claimed.id,
+                worker_id=claimed.worker_id,
+                claim_token=claimed.claim_token,
+                lease_generation=claimed.lease_generation,
+                owner_id=request.owner_id if request.HasField("owner_id") else None,
+            )
+        else:
+            assert metadata is not None and metadata.revision is not None
+            config["ingest"] = {"ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat()}
+            record = client.publish_datasource_ingest(
+                namespace=claimed.namespace,
+                datasource_id=datasource_id,
+                config=config,
+                expected_revision=int(metadata.revision),
+                schema_info=schema_info,
+                worker_id=claimed.worker_id,
+                claim_token=claimed.claim_token,
+                lease_generation=claimed.lease_generation,
+                compute_request_id=claimed.id,
+            )
+        datasource_execution._complete_ingest_run(
             client,
-            datasource_id=claimed.id,
-            namespace=namespace,
-            database_url=database_url,
-            name=create_file.name,
-            description=create_file.description if create_file.HasField("description") else None,
-            file_path=create_file.file_path,
-            file_type=proto_value_to_enum_name(enums_pb2.DataSourceFileType, "DATA_SOURCE_FILE_TYPE", create_file.file_type),
-            options=struct_to_dict(create_file.options),
-            csv_options=csv_options,
-            sheet_name=create_file.sheet_name if create_file.HasField("sheet_name") else None,
-            start_row=create_file.start_row if create_file.HasField("start_row") else None,
-            start_col=create_file.start_col if create_file.HasField("start_col") else None,
-            end_col=create_file.end_col if create_file.HasField("end_col") else None,
-            end_row=create_file.end_row if create_file.HasField("end_row") else None,
-            has_header=create_file.has_header if create_file.HasField("has_header") else None,
-            table_name=create_file.table_name if create_file.HasField("table_name") else None,
-            named_range=create_file.named_range if create_file.HasField("named_range") else None,
-            cell_range=create_file.cell_range if create_file.HasField("cell_range") else None,
-            owner_id=create_file.owner_id if create_file.HasField("owner_id") else None,
+            namespace=claimed.namespace,
+            run_id=run_id,
+            started=started,
+            record=record,
+            original_source_type=source_type,
+            metadata_path=target_path,
         )
-        return _datasource_result_from_payload(kind, record.model_dump(mode="json"))
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE:
-        if command.WhichOneof("command") != "create_database":
-            raise ValueError("datasource command must contain create_database")
-        create_database = command.create_database
-        record = datasource_execution.create_database_datasource(
-            client,
-            datasource_id=claimed.id,
-            namespace=namespace,
-            database_url=database_url,
-            name=create_database.name,
-            description=create_database.description if create_database.HasField("description") else None,
-            connection_string=create_database.connection_string,
-            query=create_database.query,
-            branch=create_database.branch,
-            owner_id=create_database.owner_id if create_database.HasField("owner_id") else None,
-        )
-        return _datasource_result_from_payload(kind, record.model_dump(mode="json"))
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE:
-        if command.WhichOneof("command") != "create_iceberg":
-            raise ValueError("datasource command must contain create_iceberg")
-        create_iceberg = command.create_iceberg
-        record = datasource_execution.create_iceberg_datasource(
-            client,
-            datasource_id=claimed.id,
-            namespace=namespace,
-            database_url=database_url,
-            name=create_iceberg.name,
-            description=create_iceberg.description if create_iceberg.HasField("description") else None,
-            source=struct_to_dict(create_iceberg.source),
-            branch=create_iceberg.branch,
-            owner_id=create_iceberg.owner_id if create_iceberg.HasField("owner_id") else None,
-        )
-        return _datasource_result_from_payload(kind, record.model_dump(mode="json"))
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE:
-        if command.WhichOneof("command") != "ingest":
-            raise ValueError("datasource command must contain ingest")
-        record = datasource_execution.ingest_external_datasource(
-            client,
-            namespace=namespace,
-            database_url=database_url,
-            datasource_id=command.ingest.datasource_id,
-            staging_key=claimed.claim_token,
-            worker_id=claimed.worker_id,
-            claim_token=claimed.claim_token,
-            lease_generation=claimed.lease_generation,
-            compute_request_id=claimed.id,
-        )
-        return _datasource_result_from_payload(kind, record.model_dump(mode="json"))
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
-        if command.WhichOneof("command") != "schema":
-            raise ValueError("datasource command must contain schema")
-        from runtime.protocol_mapping import schema_info_payload
+        return _datasource_result_from_payload(claimed.kind, record.model_dump(mode="json"))
+    except BackendWorkerRpcError as exc:
+        datasource_execution._fail_ingest_run(client, namespace=claimed.namespace, run_id=run_id, started=started, exc=exc)
+        if exc.error_code == "FAILED_PRECONDITION":
+            raise datasource_execution.DatasourcePublicationClaimLost("Datasource publication claim is no longer active") from exc
+        raise
+    except Exception as exc:
+        datasource_execution._fail_ingest_run(client, namespace=claimed.namespace, run_id=run_id, started=started, exc=exc)
+        raise
+    finally:
+        with contextlib.suppress(Exception):
+            delete_object(artifact_url)
 
-        schema = command.schema
-        schema_result = datasource_execution.get_datasource_schema(
-            client,
-            namespace=namespace,
-            datasource_id=schema.datasource_id,
-            sheet_name=schema.sheet_name if schema.HasField("sheet_name") else None,
-            refresh=schema.refresh,
+
+def _execute_datasource_command(
+    client: WorkerRuntimeClient,
+    claimed: ClaimedComputeRequest,
+    manager: ProcessManager,
+    command: datasource_pb2.DatasourceCommand,
+) -> datasource_pb2.DatasourceResult:
+    from runtime.protocol_mapping import schema_info_payload, schema_info_proto, struct_to_dict
+
+    operation = command.WhichOneof("command")
+    if operation in {"create_file", "create_database", "create_iceberg", "ingest"}:
+        return _publish_staged_datasource(client, manager, claimed, command)
+    if operation == "preflight":
+        request = command.preflight
+        action = {
+            enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL: "excel_preflight",
+            enums_pb2.DATASOURCE_PREFLIGHT_ACTION_PREVIEW: "excel_preview",
+            enums_pb2.DATASOURCE_PREFLIGHT_ACTION_RESOLVE_SELECTION: "excel_resolve_selection",
+        }[request.action]
+        payload = _message_to_service_payload(request)
+        result = _datasource_engine_job(manager, claimed, action, {"preflight": payload})
+        return _datasource_result_from_payload(claimed.kind, result)
+    if operation not in {"schema", "column_stats", "compare_iceberg_snapshots"}:
+        raise ValueError("Unsupported datasource compute operation")
+    request = getattr(command, operation)
+    metadata = datasource_execution._require_metadata(client, namespace=claimed.namespace, datasource_id=request.datasource_id)
+    if metadata.revision is None:
+        raise ValueError("Datasource snapshot is missing its revision")
+    payload = {"datasource_metadata": _datasource_metadata_payload(metadata)}
+    if operation == "schema":
+        sheet_name = request.sheet_name if request.HasField("sheet_name") else None
+        if metadata.schema_cache and sheet_name is None and not request.refresh:
+            try:
+                cached = schema_info_proto(metadata.schema_cache)
+            except ValueError:
+                cached = None
+            if cached is not None and cached.columns:
+                datasource_execution._attach_column_descriptions(metadata, cached)
+                return _datasource_result_from_payload(claimed.kind, schema_info_payload(cached))
+        payload["sheet_name"] = sheet_name
+        schema = schema_info_proto(_datasource_engine_job(manager, claimed, "datasource_schema", payload))
+        if sheet_name is None:
+            schema = client.publish_datasource_schema_cache(
+                namespace=claimed.namespace,
+                datasource_id=request.datasource_id,
+                expected_revision=int(metadata.revision),
+                schema_info=schema,
+                compute_request_id=claimed.id,
+                worker_id=claimed.worker_id,
+                claim_token=claimed.claim_token,
+                lease_generation=claimed.lease_generation,
+            )
+        datasource_execution._attach_column_descriptions(metadata, schema)
+        return _datasource_result_from_payload(claimed.kind, schema_info_payload(schema))
+    if operation == "column_stats":
+        payload.update(
+            {
+                "column_name": request.column_name,
+                "use_sample": request.use_sample,
+                "sample_size": request.sample_size,
+                "datasource_config": struct_to_dict(request.datasource_config),
+            }
         )
-        return _datasource_result_from_payload(kind, schema_info_payload(schema_result))
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS:
-        if command.WhichOneof("command") != "column_stats":
-            raise ValueError("datasource command must contain column_stats")
-        column_stats = command.column_stats
-        stats_result = datasource_execution.get_column_stats(
-            client,
-            namespace=namespace,
-            datasource_id=column_stats.datasource_id,
-            column_name=column_stats.column_name,
-            use_sample=column_stats.use_sample,
-            sample_size=column_stats.sample_size,
-            datasource_config=(struct_to_dict(column_stats.datasource_config) or None),
-        )
-        return _datasource_result_from_payload(kind, cast(dict[str, object], stats_result.model_dump(mode="json")))
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS:
-        if command.WhichOneof("command") != "compare_iceberg_snapshots":
-            raise ValueError("datasource command must contain compare_iceberg_snapshots")
-        compare_snapshots = command.compare_iceberg_snapshots
-        compare_result = datasource_execution.compare_iceberg_snapshots(
-            client,
-            namespace=namespace,
-            datasource_id=compare_snapshots.datasource_id,
-            snapshot_a=compare_snapshots.snapshot_a,
-            snapshot_b=compare_snapshots.snapshot_b,
-            row_limit=compare_snapshots.row_limit,
-        )
-        return _datasource_result_from_payload(kind, cast(dict[str, object], compare_result.model_dump(mode="json")))
-    raise ValueError(f"Unsupported datasource request kind: {_compute_request_kind_name(kind)}")
+        result = _datasource_engine_job(manager, claimed, "datasource_column_stats", payload)
+    else:
+        payload.update({"snapshot_a": request.snapshot_a, "snapshot_b": request.snapshot_b, "row_limit": request.row_limit})
+        result = _datasource_engine_job(manager, claimed, "datasource_snapshot_compare", payload)
+    return _datasource_result_from_payload(claimed.kind, result)
 
 
 def _execute_request_sync(
@@ -961,19 +1137,35 @@ def _execute_request_sync(
             engine_run_finalization=engine_run_finalization,
         )
 
+    metadata_snapshot_token = None
     try:
+        metadata_snapshot_token = set_datasource_metadata_snapshot(_freeze_claimed_input_metadata(client, claimed))
         if claimed.kind in _DATASOURCE_REQUEST_KINDS:
             if claimed.command_envelope.command.WhichOneof("command") != "datasource":
                 raise ValueError("compute command envelope must contain datasource")
             datasource_command = claimed.command_envelope.command.datasource
             try:
-                result = _execute_datasource_command(client, claimed, datasource_command)
+                result = _execute_datasource_command(client, claimed, manager, datasource_command)
             except datasource_execution.DatasourceNotFound as exc:
                 payload: dict[str, object] = {"error": "datasource_not_found", "message": str(exc)}
                 result = _datasource_result_from_payload(claimed.kind, payload)
             except datasource_execution.DatasourcePublicationClaimLost as exc:
                 raise ComputeRequestLeaseLost(str(exc) or "Datasource publication claim is no longer active") from exc
-            publish_complete(response=compute_pb2.ComputeResponse(datasource=result))
+            except BackendWorkerRpcError as exc:
+                if exc.error_code == "FAILED_PRECONDITION":
+                    raise ComputeRequestLeaseLost("Datasource publication claim is no longer active") from exc
+                raise
+            source_artifact = None
+            if datasource_command.WhichOneof("command") == "preflight":
+                preflight = datasource_command.preflight
+                if preflight.action == enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL and preflight.delete_source:
+                    source_artifact = preflight.source_path
+            publish_complete(
+                response=compute_pb2.ComputeResponse(datasource=result),
+                artifact_path=source_artifact,
+                artifact_name="preflight-source" if source_artifact else None,
+                artifact_content_type="application/vnd.dataforge.preflight-source" if source_artifact else None,
+            )
             return True
 
         if claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
@@ -1157,6 +1349,8 @@ def _execute_request_sync(
             logger.warning("Compute request %s failed: %s", claimed.id, error_to_report)
         return True
     finally:
+        if metadata_snapshot_token is not None:
+            reset_datasource_metadata_snapshot(metadata_snapshot_token)
         reset_compute_request_id(request_token)
         reset_namespace(namespace_token)
         client.close()
@@ -1179,7 +1373,22 @@ def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.
     """Identity that will need a capacity slot, or None if no Polars engine is required."""
     kind = claimed.kind
     if kind in _DATASOURCE_REQUEST_KINDS:
-        return None
+        command = claimed.command_envelope.command.datasource
+        command_name = command.WhichOneof("command")
+        if command_name is None:
+            raise ValueError("datasource compute command is missing its operation")
+        if command_name in {"create_file", "create_database", "create_iceberg"}:
+            resource_id = claimed.id
+        elif command_name == "preflight":
+            resource_id = command.preflight.preflight_id
+        else:
+            resource_id = getattr(command, command_name).datasource_id
+        return compute_pb2.EngineIdentity(
+            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            datasource_id=resource_id,
+            resource_id=resource_id,
+        )
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
         # Shutdown frees capacity; never waits for a slot.
         return None

@@ -1,11 +1,9 @@
 """Tests for the Telegram subscriber/listener module."""
 
 import uuid
-from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
 from backend_core.persistence.telegram.models import TelegramSubscriber
@@ -22,7 +20,6 @@ from backend_core.telegram_store import (
     list_subscribers,
     remove_listener,
 )
-from modules.telegram.bot import TelegramBot
 from tests.http_client import TestClient
 
 # ---------------------------------------------------------------------------
@@ -229,295 +226,38 @@ class TestListenerEndpoints:
         assert len(resp.json()) == 1
 
 
-# ---------------------------------------------------------------------------
-# Bot unit tests
-# ---------------------------------------------------------------------------
+# Stateless command handling runs only within the coordinator owner.
 
 
-class TestTelegramBot:
-    def test_initial_state(self) -> None:
-        bot = TelegramBot()
-        assert bot.running is False
-        assert bot.token == ''
+class TestTelegramUpdateHandling:
+    @pytest.mark.asyncio
+    async def test_subscribe_replay_is_idempotent(self, test_db_session: Session, monkeypatch) -> None:
+        from modules.telegram.bot import handle_update
 
-    @patch('modules.telegram.bot.http_client.get')
-    def test_start_stop(self, mock_get: MagicMock) -> None:
-        # Make getUpdates return empty so the loop doesn't process anything
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {'result': []}
-        mock_get.return_value = mock_resp
+        monkeypatch.setattr('modules.telegram.bot.require_generation', lambda _session, _generation: None)
+        messages: list[httpx.Request] = []
 
-        bot = TelegramBot()
-        bot.start('test-token')
-        assert bot.running is True
-        assert bot.token == 'test-token'
-        bot.stop()
-        assert bot.running is False
+        def respond(request: httpx.Request) -> httpx.Response:
+            messages.append(request)
+            return httpx.Response(200, json={'ok': True})
 
-    def test_handle_update_subscribe(self, test_db_session: Session) -> None:
-        bot = TelegramBot()
-        bot._token = 'tok-test'
-
-        update = {
-            'message': {
-                'text': '/subscribe',
-                'chat': {'id': 42, 'first_name': 'TestUser'},
-            },
-        }
-
-        with patch.object(bot, '_send_message') as mock_send:
-            bot._handle_update(update)
-            mock_send.assert_called_once()
-            assert 'Subscribed' in mock_send.call_args[0][1]
-
-        sub = get_subscriber_by_chat(test_db_session, '42', 'tok-test')
-        assert sub is not None
-        assert sub.is_active is True
-
-    def test_handle_update_unsubscribe(self, test_db_session: Session) -> None:
-        bot = TelegramBot()
-        bot._token = 'tok-test'
-
-        # First subscribe
-        add_subscriber(test_db_session, '43', 'Unsub', 'tok-test')
-
-        update = {
-            'message': {
-                'text': '/unsubscribe',
-                'chat': {'id': 43, 'first_name': 'Unsub'},
-            },
-        }
-
-        with patch.object(bot, '_send_message'):
-            bot._handle_update(update)
-
-        sub = get_subscriber_by_chat(test_db_session, '43', 'tok-test')
-        assert sub is not None
-        assert sub.is_active is False
-
-    def test_handle_update_start(self) -> None:
-        bot = TelegramBot()
-        bot._token = 'tok-test'
-
-        update = {
-            'message': {
-                'text': '/start',
-                'chat': {'id': 44, 'first_name': 'Starter'},
-            },
-        }
-
-        with patch.object(bot, '_send_message') as mock_send:
-            bot._handle_update(update)
-            mock_send.assert_called_once()
-            assert 'Welcome' in mock_send.call_args[0][1]
-
-    def test_handle_update_no_message(self) -> None:
-        bot = TelegramBot()
-        bot._token = 'tok-test'
-
-        with patch.object(bot, '_send_message') as mock_send:
-            bot._handle_update({'update_id': 1})
-            mock_send.assert_not_called()
-
-    @patch('modules.telegram.bot.http_client.post')
-    def test_send_message(self, mock_post: MagicMock) -> None:
-        bot = TelegramBot()
-        bot._token = 'tok-test'
-        bot._send_message('123', 'hello')
-        mock_post.assert_called_once()
-        call_kwargs = mock_post.call_args
-        assert call_kwargs[1]['json']['chat_id'] == '123'
-        assert call_kwargs[1]['json']['text'] == 'hello'
-
-    @patch(
-        'modules.telegram.bot.http_client.post',
-        side_effect=httpx.ConnectError('network'),
-    )
-    def test_send_message_failure_no_raise(self, mock_post: MagicMock) -> None:
-        bot = TelegramBot()
-        bot._token = 'tok-test'
-        # Should not raise
-        bot._send_message('123', 'hello')
-
-    def test_subscribe_unsubscribe_resubscribe_cycle(self, test_db_session: Session) -> None:
-        """Full subscribe/unsubscribe/resubscribe cycle does not corrupt state."""
-        bot = TelegramBot()
-        bot._token = 'tok-cycle'
-
-        # Subscribe
-        with patch.object(bot, '_send_message'):
-            bot._handle_update(
-                {
-                    'message': {
-                        'text': '/subscribe',
-                        'chat': {'id': 50, 'first_name': 'Cycler'},
-                    },
-                },
-            )
+        update: dict[str, object] = {'message': {'text': '/subscribe', 'chat': {'id': 42, 'first_name': 'Test'}}}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            await handle_update(client, token='tok-test', update=update, generation=7)
+            first = get_subscriber_by_chat(test_db_session, '42', 'tok-test')
+            assert first is not None
+            first_id = first.id
+            await handle_update(client, token='tok-test', update=update, generation=7)
         test_db_session.expire_all()
-        sub = get_subscriber_by_chat(test_db_session, '50', 'tok-cycle')
-        assert sub is not None
-        assert sub.is_active is True
-        original_id = sub.id
+        subscribers = list_subscribers(test_db_session, 'tok-test')
+        assert len(subscribers) == 1
+        assert subscribers[0].id == first_id
+        assert len(messages) == 2
 
-        # Unsubscribe
-        with patch.object(bot, '_send_message'):
-            bot._handle_update(
-                {
-                    'message': {
-                        'text': '/unsubscribe',
-                        'chat': {'id': 50, 'first_name': 'Cycler'},
-                    },
-                },
-            )
-        test_db_session.expire_all()
-        sub = get_subscriber_by_chat(test_db_session, '50', 'tok-cycle')
-        assert sub is not None
-        assert sub.is_active is False
+    @pytest.mark.asyncio
+    async def test_failed_reply_propagates_for_offset_retry(self) -> None:
+        from modules.telegram.bot import handle_update
 
-        # Resubscribe — should reactivate same row
-        with patch.object(bot, '_send_message'):
-            bot._handle_update(
-                {
-                    'message': {
-                        'text': '/subscribe',
-                        'chat': {'id': 50, 'first_name': 'Cycler'},
-                    },
-                },
-            )
-        test_db_session.expire_all()
-        sub = get_subscriber_by_chat(test_db_session, '50', 'tok-cycle')
-        assert sub is not None
-        assert sub.is_active is True
-        assert sub.id == original_id
-
-    def test_handle_subscribe_db_error_sends_failure_message(self) -> None:
-        bot = TelegramBot()
-        bot._token = 'tok-error'
-
-        with (
-            patch('backend_core.database.run_db', side_effect=SQLAlchemyError('db down')),
-            patch.object(bot, '_send_message') as mock_send,
-        ):
-            bot._handle_subscribe('51', 'Broken')
-
-        mock_send.assert_called_once_with('51', 'Failed to subscribe. Please try again.')
-
-    def test_handle_unsubscribe_db_error_does_not_reraise(self) -> None:
-        bot = TelegramBot()
-        bot._token = 'tok-error'
-
-        with patch('backend_core.database.run_db', side_effect=SQLAlchemyError('db down')):
-            bot._handle_unsubscribe('52')
-
-    def test_poll_lock_prevents_concurrent_get_updates(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """_do_get_updates returns None when lock is held by another caller."""
-        bot = TelegramBot()
-        lock = MagicMock()
-        lock.acquire.return_value = False
-        monkeypatch.setattr(bot, '_poll_lock', lock)
-
-        with patch('modules.telegram.bot.http_client.get') as mock_get:
-            result = bot._do_get_updates('tok', {'offset': 0, 'timeout': 5}, timeout=5)
-        assert result is None
-        mock_get.assert_not_called()
-
-    def test_offset_tracked_per_token(self) -> None:
-        """Offsets are tracked independently per bot token."""
-        bot = TelegramBot()
-        assert bot.get_offset('tok-a') == 0
-        bot._set_offset('tok-a', 100)
-        bot._set_offset('tok-b', 200)
-        assert bot.get_offset('tok-a') == 100
-        assert bot.get_offset('tok-b') == 200
-
-    @patch('modules.telegram.bot.http_client.get')
-    def test_409_clears_webhook_and_retries(self, mock_get: MagicMock) -> None:
-        """409 response triggers webhook clear and does not immediately crash."""
-        bot = TelegramBot()
-        bot._token = 'tok-409'
-        bot._stop_event = MagicMock()
-        bot._stop_event.is_set.return_value = False
-
-        resp_409 = MagicMock()
-        resp_409.status_code = 409
-
-        resp_ok = MagicMock()
-        resp_ok.status_code = 200
-        resp_ok.json.return_value = {'result': []}
-
-        # First call 409, second call should work
-        mock_get.side_effect = [resp_409, resp_ok]
-
-        with patch.object(bot, '_clear_webhook') as mock_clear:
-            # Simulate one iteration manually via _do_get_updates
-            result = bot._do_get_updates('tok-409', {'offset': 0, 'timeout': 5}, timeout=10)
-            assert result is not None
-            assert result.status_code == 409
-            # On 409, the poll loop calls _clear_webhook
-            bot._clear_webhook('tok-409')
-            mock_clear.assert_called_once_with('tok-409')
-
-
-# ---------------------------------------------------------------------------
-# Settings write_settings restarts bot
-# ---------------------------------------------------------------------------
-
-
-class TestSettingsRestartBot:
-    @patch('modules.telegram.bot.telegram_bot')
-    def test_start_on_token_set(self, mock_bot: MagicMock, client: TestClient) -> None:
-        mock_bot.running = False
-        resp = client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': 'new-token',
-                'telegram_bot_enabled': True,
-                'public_idb_debug': False,
-            },
-        )
-        assert resp.status_code == 200
-        mock_bot.start.assert_called_once_with('new-token')
-
-    @patch('modules.telegram.bot.telegram_bot')
-    def test_stop_on_token_clear(self, mock_bot: MagicMock, client: TestClient) -> None:
-        mock_bot.running = True
-        resp = client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': '',
-                'public_idb_debug': False,
-            },
-        )
-        assert resp.status_code == 200
-        mock_bot.stop.assert_called_once_with()
-
-    @patch('modules.telegram.bot.telegram_bot')
-    def test_write_settings_surfaces_runtime_failure(self, mock_bot: MagicMock, client: TestClient) -> None:
-        mock_bot.running = False
-        mock_bot.start.side_effect = RuntimeError('boom')
-
-        resp = client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': 'broken-token',
-                'telegram_bot_enabled': True,
-                'public_idb_debug': False,
-            },
-        )
-
-        assert resp.status_code == 502
-        assert resp.json()['detail'] == 'Telegram bot runtime update failed: boom'
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(503))) as client:
+            with pytest.raises(httpx.HTTPStatusError):
+                await handle_update(client, token='tok-test', update={'message': {'text': '/start', 'chat': {'id': 42}}}, generation=7)

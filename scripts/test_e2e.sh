@@ -67,11 +67,15 @@ COMPOSE=(docker compose -p "dataforge-e2e-${E2E_STACK_ID}" -f "${ROOT_DIR}/docke
 
 ENGINE_IMAGE="data-forge-polars-engine:e2e"
 WORKER_IMAGE="data-forge-worker:e2e"
-CONCURRENCY_TEST_TITLE_PATTERN='runs [0-9]+ parallel tabs across [0-9]+ accounts'
+ARCHITECTURE_TEST_FILES=(
+    tests/runtime-architecture.test.ts
+    tests/datasource-compute-isolation.test.ts
+)
 
 NORMAL_TEST_FILES=()
 NORMAL_GREP_ARGS=()
 RUN_CONCURRENCY_PROBE=0
+RUN_ARCHITECTURE_TESTS=0
 DB_ACTIVITY_SAMPLER_PID=""
 
 PLAYWRIGHT_VERSION="$(node -p "require('./packages/frontend/node_modules/playwright/package.json').version")"
@@ -157,13 +161,14 @@ stack_up() {
     stack_down
     build_images
     resolve_docker_socket_gid
-    echo "Starting e2e stack (postgres, rustfs, api, runtime, worker, scheduler)"
+    echo "Starting e2e stack (postgres, rustfs, openai-fixture, api, runtime, worker, scheduler)"
     if ! "${COMPOSE[@]}" up -d --wait; then
         echo "E2E stack failed readiness; capturing service logs" >&2
         dump_service_logs startup
         return 1
     fi
     resolve_playwright_base_url
+    resolve_openai_fixture_urls
     echo "E2E stack is ready"
 }
 
@@ -191,6 +196,29 @@ resolve_playwright_base_url() {
     echo "Playwright API address: ${E2E_PLAYWRIGHT_BASE_URL}"
 }
 
+resolve_openai_fixture_urls() {
+    E2E_OPENAI_FIXTURE_URL="http://openai-fixture:8001/v1"
+    if [ -n "${CI:-}" ]; then
+        E2E_OPENAI_FIXTURE_HOST_URL="${E2E_OPENAI_FIXTURE_URL}"
+    else
+        local tailscale_ip host_port published_port
+        tailscale_ip="$(dig +short A rolands-mac-mini.bee-justice.ts.net | awk 'NF {print; exit}')"
+        if [ -z "${tailscale_ip}" ]; then
+            echo "Could not resolve this Mac's Tailscale IPv4 address for the OpenAI fixture" >&2
+            return 1
+        fi
+        published_port="$("${COMPOSE[@]}" port openai-fixture 8001)"
+        host_port="${published_port##*:}"
+        if [[ ! "${host_port}" =~ ^[0-9]+$ ]]; then
+            echo "Could not resolve the published OpenAI fixture port from: ${published_port}" >&2
+            return 1
+        fi
+        E2E_OPENAI_FIXTURE_HOST_URL="http://${tailscale_ip}:${host_port}/v1"
+    fi
+    export E2E_OPENAI_FIXTURE_URL E2E_OPENAI_FIXTURE_HOST_URL
+    echo "OpenAI fixture endpoint: ${E2E_OPENAI_FIXTURE_HOST_URL}"
+}
+
 stack_down() {
     # Stop services first so the coordinator cannot spawn engines during teardown,
     # then sweep the spawned engines (label filter) both before and after: an
@@ -198,6 +226,7 @@ stack_down() {
     docker ps -aq --filter "label=io.dataforge.deployment=${E2E_DEPLOYMENT_ID}" | xargs -r docker rm -f >/dev/null 2>&1 || true
     docker ps -aq --filter "name=dataforge-e2e-${E2E_STACK_ID}-playwright-shard" | xargs -r docker rm -f >/dev/null 2>&1 || true
     docker ps -aq --filter "name=dataforge-e2e-${E2E_STACK_ID}-playwright-load-probe" | xargs -r docker rm -f >/dev/null 2>&1 || true
+    docker ps -aq --filter "name=dataforge-e2e-${E2E_STACK_ID}-runtime-architecture" | xargs -r docker rm -f >/dev/null 2>&1 || true
     docker ps -aq --filter "name=dataforge-e2e-${E2E_STACK_ID}-shared-fixture-bootstrap" | xargs -r docker rm -f >/dev/null 2>&1 || true
     "${COMPOSE[@]}" stop >/dev/null 2>&1 || true
     docker ps -aq --filter "label=io.dataforge.deployment=${E2E_DEPLOYMENT_ID}" | xargs -r docker rm -f >/dev/null 2>&1 || true
@@ -229,7 +258,7 @@ dump_service_logs() {
     local phase_dir="${LOG_DIR}/${phase}"
     mkdir -p "$phase_dir"
     local service
-    for service in api runtime worker scheduler rustfs; do
+    for service in api runtime worker scheduler rustfs openai-fixture; do
         "${COMPOSE[@]}" logs --no-color "$service" >"$phase_dir/${service}.log" 2>&1 || true
     done
     # Engine container stderr/stdout: job tracebacks (datasource load errors,
@@ -240,7 +269,7 @@ dump_service_logs() {
         done
     if [ "$print_tails" -eq 1 ]; then
         echo "::group::service log tails"
-        for service in api runtime worker scheduler rustfs; do
+        for service in api runtime worker scheduler rustfs openai-fixture; do
             echo "--- ${service} ---"
             tail -n 100 "$phase_dir/${service}.log" || true
         done
@@ -467,20 +496,69 @@ run_playwright_concurrency_probe() {
         "${runner_env[@]}" -- tests/concurrency.test.ts
 }
 
+run_playwright_architecture_tests() {
+    cd "${ROOT_DIR}/packages/frontend"
+    local artifacts_dir="${E2E_ARTIFACTS_DIR}/runtime-architecture"
+    local runner_artifacts_root
+    runner_artifacts_root="$(playwright_artifacts_root)"
+    local output_dir="${runner_artifacts_root}/runtime-architecture/test-results"
+    local report_dir="${runner_artifacts_root}/runtime-architecture/playwright-report"
+    local request_trace_root="${PLAYWRIGHT_REQUEST_TRACE_DIR:-$(playwright_artifacts_root)/request-traces}"
+    mkdir -p "${artifacts_dir}/test-results" "${artifacts_dir}/playwright-report"
+    echo "Running serialized runtime architecture regressions"
+    local runner_env=(
+        "PW_E2E_WORKERS=1"
+        "DEFAULT_NAMESPACE=${DEFAULT_NAMESPACE}"
+        "E2E_GLOBAL_RUN_STAMP=${E2E_GLOBAL_RUN_STAMP}"
+        "E2E_ARTIFACTS_DIR=$(playwright_artifacts_root)"
+        "E2E_SHARED_FIXTURES_READ_ONLY=1"
+        "E2E_RUN_STAMP=${E2E_GLOBAL_RUN_STAMP}-runtime-architecture"
+        "PLAYWRIGHT_BASE_URL=${E2E_PLAYWRIGHT_BASE_URL}"
+        "PLAYWRIGHT_OUTPUT_DIR=${output_dir}"
+        "PLAYWRIGHT_HTML_OUTPUT_DIR=${report_dir}"
+        "PLAYWRIGHT_JSON_REPORT=${output_dir}/playwright-report.json"
+        "PLAYWRIGHT_REQUEST_TRACE_DIR=${request_trace_root}/runtime-architecture"
+        "E2E_OPENAI_FIXTURE_URL=${E2E_OPENAI_FIXTURE_URL}"
+        "E2E_OPENAI_FIXTURE_HOST_URL=${E2E_OPENAI_FIXTURE_HOST_URL}"
+    )
+    if [ -n "${PLAYWRIGHT_GREP:-}" ]; then
+        runner_env+=("PLAYWRIGHT_GREP=${PLAYWRIGHT_GREP}")
+    fi
+    local playwright_args=("${ARCHITECTURE_TEST_FILES[@]}")
+    if [ -n "${PLAYWRIGHT_GREP:-}" ]; then
+        playwright_args+=(--grep "${PLAYWRIGHT_GREP}")
+    fi
+    run_playwright "${E2E_ARCHITECTURE_TIMEOUT_SECONDS:-1200}" "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
+        "dataforge-e2e-${E2E_STACK_ID}-runtime-architecture" \
+        "${runner_env[@]}" -- "${playwright_args[@]}"
+}
+
 prepare_playwright_selection() {
     NORMAL_TEST_FILES=()
     NORMAL_GREP_ARGS=()
     RUN_CONCURRENCY_PROBE=0
+    RUN_ARCHITECTURE_TESTS=0
 
     if [ -n "${PLAYWRIGHT_GREP:-}" ]; then
         NORMAL_GREP_ARGS+=(--grep "${PLAYWRIGHT_GREP}")
     fi
 
     if [ -z "${PLAYWRIGHT_TEST_FILES:-}" ]; then
-        # The full suite always includes the 50-tab probe, but the ordinary
-        # shards must not put its 50 live pages into one of their renderers.
+        # Keep architecture and load cases out of normal shards by file path.
         RUN_CONCURRENCY_PROBE=1
-        NORMAL_GREP_ARGS+=(--grep-invert "${CONCURRENCY_TEST_TITLE_PATTERN}")
+        RUN_ARCHITECTURE_TESTS=1
+        local test_file
+        while IFS= read -r test_file; do
+            case "$test_file" in
+                tests/runtime-architecture.test.ts|tests/datasource-compute-isolation.test.ts)
+                    ;;
+                tests/concurrency.test.ts)
+                    ;;
+                *)
+                    NORMAL_TEST_FILES+=("$test_file")
+                    ;;
+            esac
+        done < <(cd "${ROOT_DIR}/packages/frontend" && rg --files tests -g '*.test.ts' | sort)
         return
     fi
 
@@ -489,6 +567,9 @@ prepare_playwright_selection() {
     local test_file
     for test_file in "${requested_files[@]}"; do
         case "$test_file" in
+            tests/runtime-architecture.test.ts|./tests/runtime-architecture.test.ts|runtime-architecture.test.ts|tests/datasource-compute-isolation.test.ts|./tests/datasource-compute-isolation.test.ts|datasource-compute-isolation.test.ts)
+                RUN_ARCHITECTURE_TESTS=1
+                ;;
             tests/concurrency.test.ts|./tests/concurrency.test.ts|concurrency.test.ts)
                 RUN_CONCURRENCY_PROBE=1
                 ;;
@@ -566,14 +647,21 @@ case "$action" in
         prepare_playwright_selection
         bootstrap_shared_fixtures
         only_concurrency_probe=0
-        if [ "${#NORMAL_TEST_FILES[@]}" -eq 0 ] && [ -n "${PLAYWRIGHT_TEST_FILES:-}" ]; then
+        if [ "${#NORMAL_TEST_FILES[@]}" -eq 0 ] && [ -n "${PLAYWRIGHT_TEST_FILES:-}" ] \
+            && [ "$RUN_CONCURRENCY_PROBE" -eq 1 ] && [ "$RUN_ARCHITECTURE_TESTS" -eq 0 ]; then
             only_concurrency_probe=1
         fi
         if [ "$RUN_CONCURRENCY_PROBE" -eq 1 ]; then
             echo "The 50-tab concurrency test is isolated into its own runner"
         fi
         if [ "${#NORMAL_TEST_FILES[@]}" -eq 0 ] && [ -n "${PLAYWRIGHT_TEST_FILES:-}" ]; then
-            echo "No ordinary Playwright files selected; running only the isolated concurrency probe"
+            if [ "$RUN_ARCHITECTURE_TESTS" -eq 1 ] && [ "$RUN_CONCURRENCY_PROBE" -eq 1 ]; then
+                echo "No ordinary Playwright files selected; running the architecture suite and isolated concurrency probe"
+            elif [ "$RUN_ARCHITECTURE_TESTS" -eq 1 ]; then
+                echo "No ordinary Playwright files selected; running only the architecture suite"
+            else
+                echo "No ordinary Playwright files selected; running only the isolated concurrency probe"
+            fi
         else
             echo "Running ${shards} Playwright shard runner(s), ${PW_E2E_WORKERS} browser workers each"
         fi
@@ -595,6 +683,13 @@ case "$action" in
         stop_database_activity_sampler
         if [ "$failed" -ne 0 ]; then
             dump_service_logs full-suite
+        fi
+        if [ "$RUN_ARCHITECTURE_TESTS" -eq 1 ]; then
+            start_database_activity_sampler runtime-architecture
+            run_playwright_architecture_tests || failed=1
+            stop_database_activity_sampler
+            dump_service_logs runtime-architecture
+            dump_slow_requests runtime-architecture
         fi
         if [ "$RUN_CONCURRENCY_PROBE" -eq 1 ]; then
             if [ "$only_concurrency_probe" -ne 1 ]; then

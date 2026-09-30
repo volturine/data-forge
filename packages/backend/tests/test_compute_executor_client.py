@@ -18,6 +18,7 @@ from backend_core import compute_requests_service
 from backend_core.compute_response_recovery import ComputeResponseRecovery
 from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.domain.compute.schemas import AnalysisPipelinePayload, DownloadRequest
+from backend_core.domain.compute_requests.models import command_envelope
 from backend_core.exceptions import ClientDisconnectedError
 from dataforge_protocol import compute_pb2, enums_pb2
 
@@ -29,6 +30,28 @@ class _DisconnectedRequest:
         self.checks += 1
         await asyncio.sleep(0)
         return self.checks >= 2
+
+
+def _staged_request(
+    request_id: str,
+    namespace: str,
+    command: compute_pb2.ComputeCommand,
+    *,
+    engine_resource_id: str | None = None,
+) -> SimpleNamespace:
+    kind = enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW
+    envelope = command_envelope(
+        kind=kind,
+        request_id=request_id,
+        command=command,
+    )
+    return SimpleNamespace(
+        id=request_id,
+        namespace=namespace,
+        kind=kind,
+        engine_resource_id=engine_resource_id,
+        command_envelope=envelope.SerializeToString(),
+    )
 
 
 @pytest.mark.asyncio
@@ -149,7 +172,8 @@ async def test_slow_terminal_compute_request_logs_http_and_durable_ids(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    staged = SimpleNamespace(id='durable-request-1', namespace='tenant-a', engine_resource_id=None)
+    command = compute_pb2.ComputeCommand()
+    staged = _staged_request('durable-request-1', 'tenant-a', command)
     completed = SimpleNamespace(status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED)
     clock_values = iter((100.0, 106.0, 106.1))
 
@@ -171,7 +195,7 @@ async def test_slow_terminal_compute_request_logs_http_and_durable_ids(
         result = await executor_client._submit_and_wait(
             cast(Session, None),
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-            command=compute_pb2.ComputeCommand(),
+            command=command,
             runtime_probe=cast(RuntimeAvailabilityProbe, None),
             http_request=request,
         )
@@ -187,7 +211,8 @@ async def test_failed_compute_request_logs_correlation_and_error_code(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    staged = SimpleNamespace(id='durable-request-2', namespace='tenant-a', engine_resource_id=None)
+    command = compute_pb2.ComputeCommand()
+    staged = _staged_request('durable-request-2', 'tenant-a', command)
     failed = SimpleNamespace(status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED)
 
     async def register(_request_id: str, _namespace: str) -> None:
@@ -216,7 +241,7 @@ async def test_failed_compute_request_logs_correlation_and_error_code(
         await executor_client._submit_and_wait(
             cast(Session, None),
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-            command=compute_pb2.ComputeCommand(),
+            command=command,
             runtime_probe=cast(RuntimeAvailabilityProbe, None),
             http_request=request,
         )
@@ -234,7 +259,8 @@ async def test_local_recovery_delivers_batched_terminal_state_without_another_db
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     request_id = 'durable-request-local-recovery'
-    staged = SimpleNamespace(id=request_id, namespace='tenant-a', engine_resource_id=None)
+    command = compute_pb2.ComputeCommand()
+    staged = _staged_request(request_id, 'tenant-a', command)
     pending = SimpleNamespace(status=enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
     completed = compute_requests_service.TerminalComputeRequest(
         id=request_id,
@@ -283,7 +309,7 @@ async def test_local_recovery_delivers_batched_terminal_state_without_another_db
                 executor_client._submit_and_wait(
                     cast(Session, None),
                     kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-                    command=compute_pb2.ComputeCommand(),
+                    command=command,
                     runtime_probe=cast(RuntimeAvailabilityProbe, None),
                     http_request=request,
                 ),
@@ -304,7 +330,8 @@ async def test_local_recovery_delivers_batched_terminal_state_without_another_db
 @pytest.mark.asyncio
 async def test_shared_flight_wait_skips_per_viewer_disconnect_polling(monkeypatch: pytest.MonkeyPatch) -> None:
     request_id = 'shared-preview-request'
-    staged = SimpleNamespace(id=request_id, namespace='default', engine_resource_id='analysis-1')
+    command = compute_pb2.ComputeCommand()
+    staged = _staged_request(request_id, 'default', command, engine_resource_id='analysis-1')
     running = SimpleNamespace(status=enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
     completed = compute_requests_service.TerminalComputeRequest(
         id=request_id,
@@ -357,7 +384,7 @@ async def test_shared_flight_wait_skips_per_viewer_disconnect_polling(monkeypatc
         executor_client._submit_and_wait(
             cast(Session, None),
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-            command=compute_pb2.ComputeCommand(),
+            command=command,
             runtime_probe=cast(RuntimeAvailabilityProbe, None),
             http_request=request,
         )
@@ -371,7 +398,8 @@ async def test_shared_flight_wait_skips_per_viewer_disconnect_polling(monkeypatc
 @pytest.mark.asyncio
 async def test_cancelling_a_shared_flight_waiter_does_not_cancel_the_durable_request(monkeypatch: pytest.MonkeyPatch) -> None:
     request_id = 'shared-preview-cancelled-viewer'
-    staged = SimpleNamespace(id=request_id, namespace='default', engine_resource_id='analysis-1')
+    command = compute_pb2.ComputeCommand()
+    staged = _staged_request(request_id, 'default', command, engine_resource_id='analysis-1')
     running = SimpleNamespace(status=enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
 
     class Recovery:
@@ -410,7 +438,7 @@ async def test_cancelling_a_shared_flight_waiter_does_not_cancel_the_durable_req
         executor_client._submit_and_wait(
             cast(Session, None),
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-            command=compute_pb2.ComputeCommand(),
+            command=command,
             runtime_probe=cast(RuntimeAvailabilityProbe, None),
             http_request=request,
         )

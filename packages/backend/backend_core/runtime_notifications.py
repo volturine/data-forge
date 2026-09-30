@@ -12,6 +12,8 @@ from backend_core.runtime_outbox_service import OUTBOX_WAKE_KIND
 from modules.locks import watchers as lock_watchers
 
 logger = logging.getLogger(__name__)
+_CHAT_EVENT_WAKE_KIND = 'chat_event'
+_CHAT_TURN_WAKE_KIND = 'chat_turn'
 
 
 async def _handle_lock_payload(payload: dict[str, object]) -> None:
@@ -29,6 +31,16 @@ async def _handle_lock_payload(payload: dict[str, object]) -> None:
 
 
 async def handle_runtime_payload(payload: dict[str, object]) -> None:
+    if payload.get('kind') == _CHAT_EVENT_WAKE_KIND:
+        session_id = payload.get('session_id')
+        sequence = payload.get('sequence')
+        if isinstance(session_id, str):
+            from modules.chat.store import chat_stream_recovery
+
+            chat_stream_recovery.publish(session_id, sequence if isinstance(sequence, int) else None)
+        return
+    if payload.get('kind') == _CHAT_TURN_WAKE_KIND:
+        return
     if payload.get('kind') == OUTBOX_WAKE_KIND:
         namespace = payload.get('namespace')
         OUTBOX_WAKE_HUB.publish(namespace if isinstance(namespace, str) and namespace else None)

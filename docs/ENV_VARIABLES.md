@@ -184,7 +184,7 @@ just dev
 | `DEFAULT_NAMESPACE`          | `default`                                                                                 | Namespace used when no namespace is selected.                                                                                                                 |
 | `CORS_ORIGINS`               | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed browser origins. Required in dev (Vite server is cross-origin). In prod (single port) same-origin applies and this can be left unset. |
 | `UPLOAD_CHUNK_SIZE`          | `5242880`                                                                                 | Upload chunk size in bytes. Valid range: `1024` to `104857600`.                                                                                               |
-| `UPLOAD_MAX_FILE_SIZE_BYTES` | `2147483648`                                                                              | Maximum upload size in bytes.                                                                                                                                 |
+| `UPLOAD_MAX_FILE_SIZE_BYTES` | `2147483648`                                                                              | Configurable upload size limit in bytes, from `0` to `2147483648` (2 GiB). Values above 2 GiB are rejected because the worker data-plane transport has a hard 2 GiB ceiling. `0` disables the configurable soft cap but does not disable that transport ceiling. |
 
 ### Object storage
 

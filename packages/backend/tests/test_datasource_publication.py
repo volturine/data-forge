@@ -106,7 +106,13 @@ def test_publish_schema_cache(test_db_session: Session) -> None:
         columns=[datasource_pb2.ColumnSchema(name='x', dtype='Utf8', nullable=True, sample_value='a')],
         row_count=2,
     )
-    published = publication_service.publish_schema_cache(test_db_session, datasource_id=datasource_id, schema_info=schema)
+    published = publication_service.publish_schema_cache(
+        test_db_session,
+        datasource_id=datasource_id,
+        expected_revision=1,
+        schema_info=schema,
+        publication_guard=lambda _session: None,
+    )
     assert published.row_count == 2
     stored = test_db_session.get(DataSource, datasource_id)
     assert stored is not None
@@ -132,8 +138,40 @@ def test_publish_schema_cache_rejects_datasource_pending_delete(test_db_session:
         publication_service.publish_schema_cache(
             test_db_session,
             datasource_id=datasource_id,
+            expected_revision=1,
             schema_info=datasource_pb2.SchemaInfo(row_count=1),
+            publication_guard=lambda _session: None,
         )
+
+
+def test_publish_schema_cache_rejects_schema_from_outdated_source_revision(test_db_session: Session) -> None:
+    datasource_id = str(uuid.uuid4())
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='Changed while schema was loading',
+            source_type=DataSourceType.FILE.value,
+            config={'file_path': 's3://bucket/new.csv'},
+            revision=2,
+            schema_cache={'columns': [{'name': 'new_column', 'dtype': 'Int64', 'nullable': True}]},
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    with pytest.raises(publication_service.DatasourcePublicationRevisionChanged, match='revision changed'):
+        publication_service.publish_schema_cache(
+            test_db_session,
+            datasource_id=datasource_id,
+            expected_revision=1,
+            schema_info=datasource_pb2.SchemaInfo(columns=[datasource_pb2.ColumnSchema(name='old_column', dtype='String', nullable=True)]),
+            publication_guard=lambda _session: None,
+        )
+
+    stored = test_db_session.get(DataSource, datasource_id)
+    assert stored is not None
+    assert stored.revision == 2
+    assert stored.schema_cache == {'columns': [{'name': 'new_column', 'dtype': 'Int64', 'nullable': True}]}
 
 
 def test_output_publication_reactivates_pending_delete_row(test_db_session: Session) -> None:

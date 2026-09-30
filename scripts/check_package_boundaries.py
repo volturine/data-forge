@@ -299,6 +299,7 @@ PROTO_STRUCT_ALLOWLIST = {
     'proto/dataforge_protocol/datasource.proto:CreateIcebergDatasourceCommand.source': 'Iceberg source descriptors are provider-specific JSON escape hatches',
     'proto/dataforge_protocol/datasource.proto:DatasourceColumnStatsCommand.datasource_config': 'column stats run against datasource config JSON persisted at the boundary',
     'proto/dataforge_protocol/datasource.proto:DataSourceRecord.config': 'datasource records expose provider/user-defined config JSON',
+    'proto/dataforge_protocol/datasource.proto:DatasourcePreflightResult.preview_rows': 'preflight preview rows are arbitrary datasource result objects',
     'proto/dataforge_protocol/datasource.proto:SnapshotPreview.rows': 'snapshot previews contain arbitrary row objects',
     'proto/dataforge_protocol/datasource.proto:ColumnStatsResult.top_values': 'top-value stats contain arbitrary value/count records by column type',
     'proto/dataforge_protocol/errors.proto:ErrorInfo.details': 'error details are intentionally extensible diagnostics',

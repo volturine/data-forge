@@ -5,7 +5,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -89,7 +89,7 @@ def test_runtime_rpc_executor_sizes_stay_within_database_budget() -> None:
     assert backend_grpc_server._runtime_rpc_executor_sizes(8, 13) == (4, 8, 1)
     assert backend_grpc_server._runtime_rpc_executor_sizes(1, 4) == (1, 2, 1)
     assert backend_grpc_server._runtime_rpc_executor_sizes(100, 13) == (25, 32, 1)
-    with pytest.raises(ValueError, match='at least three pooled database connections'):
+    with pytest.raises(ValueError, match='at least four pooled database connections'):
         backend_grpc_server._runtime_rpc_executor_sizes(1, 0)
 
     for pool_size, overflow in ((100, 13), (32, 13), (16, 13), (8, 13), (1, 4)):
@@ -228,13 +228,13 @@ def test_compute_claim_rpc_executor_runs_a_db_pool_bounded_batch(monkeypatch: py
     started_count = 0
     started_lock = threading.Lock()
 
-    async def blocked_handler(_servicer, request, _context):
+    def blocked_handler(_servicer, request, _metadata):
         nonlocal started_count
         with started_lock:
             started_count += 1
             if started_count == capacity:
                 capacity_reached.set()
-        await asyncio.get_running_loop().run_in_executor(None, release.wait)
+        assert release.wait(timeout=5)
         return request
 
     claim_handler = backend_grpc_server._run_claim_handler_in_thread(blocked_handler)
@@ -262,7 +262,7 @@ def test_lease_rpcs_do_not_queue_behind_lifecycle_control(monkeypatch: pytest.Mo
     started_count = 0
     started_lock = threading.Lock()
 
-    async def blocked_handler(_servicer, request, _context):
+    def blocked_handler(_servicer, request, _metadata):
         nonlocal started_count
         with started_lock:
             started_count += 1
@@ -270,7 +270,7 @@ def test_lease_rpcs_do_not_queue_behind_lifecycle_control(monkeypatch: pytest.Mo
                 lane_filled.set()
             if request == 'control':
                 control_started.set()
-        await asyncio.get_running_loop().run_in_executor(None, release.wait)
+        assert release.wait(timeout=5)
         return request
 
     lease_handler = backend_grpc_server._run_critical_runtime_handler_in_thread(blocked_handler)
@@ -303,16 +303,16 @@ def test_scheduler_heartbeat_bypasses_saturated_general_rpc_lane(monkeypatch: py
     started_count = 0
     started_lock = threading.Lock()
 
-    async def block_general_handler(_servicer, request, _context):
+    def block_general_handler(_servicer, request, _metadata):
         nonlocal started_count
         with started_lock:
             started_count += 1
             if started_count == backend_grpc_server._INTERNAL_GENERAL_RPC_WORKERS:
                 general_lane_full.set()
-        await asyncio.get_running_loop().run_in_executor(None, general_release.wait)
+        assert general_release.wait(timeout=5)
         return request
 
-    async def heartbeat_handler(_servicer, request, _context):
+    def heartbeat_handler(_servicer, request, _metadata):
         heartbeat_started.set()
         return request
 
@@ -348,12 +348,12 @@ def test_scheduler_heartbeat_does_not_queue_behind_saturated_lease_lane(monkeypa
     monkeypatch.setattr(backend_grpc_server, '_INTERNAL_LEASE_RPC_EXECUTOR', lease_executor)
     monkeypatch.setattr(backend_grpc_server, '_INTERNAL_SCHEDULER_RPC_EXECUTOR', scheduler_executor)
 
-    async def blocked_lease(_servicer, request, _context):
+    def blocked_lease(_servicer, request, _metadata):
         lease_started.set()
-        await asyncio.get_running_loop().run_in_executor(None, release_lease.wait)
+        assert release_lease.wait(timeout=5)
         return request
 
-    async def heartbeat(_servicer, request, _context):
+    def heartbeat(_servicer, request, _metadata):
         heartbeat_started.set()
         return request
 
@@ -374,6 +374,221 @@ def test_scheduler_heartbeat_does_not_queue_behind_saturated_lease_lane(monkeypa
         release_lease.set()
         lease_executor.shutdown(wait=True)
         scheduler_executor.shutdown(wait=True)
+
+
+@pytest.mark.asyncio
+async def test_critical_rpc_is_admitted_during_general_lane_overload(monkeypatch: pytest.MonkeyPatch) -> None:
+    general_lane = backend_grpc_server._RpcAdmissionLane('general-test', 1, queue_limit=1)
+    critical_lane = backend_grpc_server._RpcAdmissionLane('critical-test', 1)
+    monkeypatch.setattr(
+        backend_grpc_server,
+        '_RPC_ADMISSION_LANES',
+        {
+            'general': general_lane,
+            'critical': critical_lane,
+            'scheduler': backend_grpc_server._RpcAdmissionLane('scheduler-test', 1),
+            'external-io': backend_grpc_server._RpcAdmissionLane('external-test', 1),
+        },
+    )
+    monkeypatch.setattr(backend_grpc_server, 'active_runtime_coordinator_generation', lambda: 7)
+    interceptor = backend_grpc_server._BackendRequestValidationInterceptor()
+    interceptor._validator = cast(Any, SimpleNamespace(validate=lambda _request: None))
+    release_general = asyncio.Event()
+    general_started = asyncio.Event()
+    queued_general_started = asyncio.Event()
+    general_calls_started = 0
+
+    async def blocked_general(_request, _context):
+        nonlocal general_calls_started
+        general_calls_started += 1
+        if general_calls_started == 2:
+            queued_general_started.set()
+        general_started.set()
+        await release_general.wait()
+        return 'general'
+
+    async def heartbeat(_request, _context):
+        return 'heartbeat'
+
+    async def general_continuation(_details):
+        return backend_grpc_server.grpc.unary_unary_rpc_method_handler(blocked_general)
+
+    async def critical_continuation(_details):
+        return backend_grpc_server.grpc.unary_unary_rpc_method_handler(heartbeat)
+
+    class Context:
+        def invocation_metadata(self):
+            return ((backend_grpc_server._RUNTIME_GENERATION_METADATA_KEY, '7'),)
+
+        def time_remaining(self):
+            return None
+
+        async def abort(self, status, details):
+            raise RuntimeError(f'{status.name}: {details}')
+
+    general_method = f'{backend_grpc_server._WORKER_RUNTIME_SERVICE_PREFIX}ClaimBuildJob'
+    critical_method = f'{backend_grpc_server._WORKER_RUNTIME_SERVICE_PREFIX}HeartbeatWorker'
+    general_handler = await interceptor.intercept_service(general_continuation, SimpleNamespace(method=general_method))
+    critical_handler = await interceptor.intercept_service(critical_continuation, SimpleNamespace(method=critical_method))
+    assert general_handler is not None and general_handler.unary_unary is not None
+    assert critical_handler is not None and critical_handler.unary_unary is not None
+
+    first_general = asyncio.create_task(general_handler.unary_unary(common_pb2.EmptyRequest(), cast(Any, Context())))
+    queued_general = None
+    try:
+        await asyncio.wait_for(general_started.wait(), timeout=2)
+        queued_general = asyncio.create_task(general_handler.unary_unary(common_pb2.EmptyRequest(), cast(Any, Context())))
+        await asyncio.sleep(0)
+        assert general_lane.pending_count == 1
+        with pytest.raises(RuntimeError, match='RESOURCE_EXHAUSTED'):
+            await general_handler.unary_unary(common_pb2.EmptyRequest(), cast(Any, Context()))
+        assert await asyncio.wait_for(critical_handler.unary_unary(common_pb2.EmptyRequest(), cast(Any, Context())), timeout=1) == 'heartbeat'
+        release_general.set()
+        assert await asyncio.gather(first_general, queued_general) == ['general', 'general']
+        assert queued_general_started.is_set()
+    finally:
+        release_general.set()
+        await asyncio.gather(first_general, *([queued_general] if queued_general is not None else []), return_exceptions=True)
+
+
+class _AdmissionContext:
+    def __init__(self, remaining: float | None = None) -> None:
+        self.remaining = remaining
+
+    def time_remaining(self) -> float | None:
+        return self.remaining
+
+
+def _admission_context(*, remaining: float | None = None) -> _AdmissionContext:
+    return _AdmissionContext(remaining)
+
+
+@pytest.mark.asyncio
+async def test_rpc_admission_queues_burst_beyond_active_width() -> None:
+    lane = backend_grpc_server._RpcAdmissionLane('critical-test', 2, queue_limit=3)
+    context = _admission_context()
+
+    assert await lane.acquire(context)
+    assert await lane.acquire(context)
+    queued = [asyncio.create_task(lane.acquire(context)) for _ in range(3)]
+    await asyncio.sleep(0)
+    assert lane.active_count == 2
+    assert lane.pending_count == 3
+
+    lane.release()
+    lane.release()
+    assert await asyncio.gather(*queued[:2]) == [True, True]
+    assert lane.active_count == 2
+    assert lane.pending_count == 1
+    lane.release()
+    assert await queued[2]
+    assert lane.pending_count == 0
+    lane.release()
+    lane.release()
+    assert lane.active_count == 0
+
+    granted_lane = backend_grpc_server._RpcAdmissionLane('critical-grant-race-test', 1, queue_limit=1)
+    assert await granted_lane.acquire(_admission_context())
+    granted_then_cancelled = asyncio.create_task(granted_lane.acquire(_admission_context()))
+    await asyncio.sleep(0)
+    granted_lane.release()
+    granted_then_cancelled.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await granted_then_cancelled
+    assert granted_lane.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_rpc_admission_cancellation_and_deadline_remove_waiters() -> None:
+    lane = backend_grpc_server._RpcAdmissionLane('critical-test', 1, queue_limit=2)
+    assert await lane.acquire(_admission_context())
+
+    cancelled = asyncio.create_task(lane.acquire(_admission_context()))
+    await asyncio.sleep(0)
+    cancelled.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled
+    assert lane.pending_count == 0
+    assert lane.active_count == 1
+
+    with pytest.raises(TimeoutError):
+        await lane.acquire(_admission_context(remaining=0.001))
+    assert lane.pending_count == 0
+    assert lane.active_count == 1
+    lane.release()
+    assert lane.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_rpc_admission_rejects_only_after_bounded_pending_capacity_is_full() -> None:
+    lane = backend_grpc_server._RpcAdmissionLane('critical-test', 1, queue_limit=1)
+    context = _admission_context()
+    assert await lane.acquire(context)
+
+    queued = asyncio.create_task(lane.acquire(context))
+    await asyncio.sleep(0)
+    assert lane.pending_count == 1
+    assert not await lane.acquire(context)
+    assert lane.pending_count == 1
+
+    lane.release()
+    assert await queued
+    lane.release()
+    assert lane.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_rpc_admission_critical_lane_is_independent_of_general_queue() -> None:
+    general = backend_grpc_server._RpcAdmissionLane('general-test', 1, queue_limit=1)
+    critical = backend_grpc_server._RpcAdmissionLane('critical-test', 1, queue_limit=1)
+    context = _admission_context()
+
+    assert await general.acquire(context)
+    general_waiter = asyncio.create_task(general.acquire(context))
+    await asyncio.sleep(0)
+    assert general.pending_count == 1
+    assert await critical.acquire(context)
+    assert critical.active_count == 1
+
+    critical.release()
+    general.release()
+    assert await general_waiter
+    general.release()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_rpc_waits_for_running_handler_and_uses_copied_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    settled = threading.Event()
+    rpc_metadata = backend_grpc_server.RpcMetadata(MappingProxyType({'x-test': 'copied'}))
+
+    async def authenticate(_context):
+        return rpc_metadata
+
+    def handler(_servicer, request, metadata):
+        assert metadata is rpc_metadata
+        started.set()
+        assert release.wait(timeout=5)
+        settled.set()
+        return request
+
+    monkeypatch.setattr(backend_grpc_server, '_require_internal_token', authenticate)
+    wrapped = backend_grpc_server._run_control_handler_in_thread(handler)
+    call = asyncio.create_task(wrapped(None, 'terminal-write', object()))
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        call.cancel()
+        await asyncio.sleep(0.05)
+        assert not call.done()
+        assert not settled.is_set()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+        assert settled.is_set()
+    finally:
+        release.set()
+        await asyncio.gather(call, return_exceptions=True)
 
 
 def _context(monkeypatch: pytest.MonkeyPatch) -> FakeGrpcContext:
@@ -1070,6 +1285,113 @@ async def test_internal_worker_grpc_maps_lost_datasource_publication_claim(monke
             ),
             context,
         )
+
+
+@pytest.mark.asyncio
+async def test_schema_publication_rejects_expired_and_replaced_compute_claim(monkeypatch: pytest.MonkeyPatch, test_db_session: Session) -> None:
+    context = _context(monkeypatch)
+    datasource_id = str(uuid.uuid4())
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='Claim fenced schema',
+            source_type=DataSourceType.FILE.value,
+            config={'file_path': 's3://bucket/source.csv'},
+            revision=2,
+            schema_cache={'columns': [{'name': 'current', 'dtype': 'Int64', 'nullable': True}]},
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+        request_json={'datasource_id': datasource_id, 'refresh': True},
+    )
+    stale_claim = compute_requests_service.claim_next_request(test_db_session, worker_id='worker:old')
+    assert stale_claim is not None
+    assert stale_claim.id == request.id
+    stale_token = stale_claim.claim_token
+    stale_generation = stale_claim.lease_generation
+    assert stale_token is not None
+    stale_claim.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    test_db_session.add(stale_claim)
+    test_db_session.commit()
+
+    replacement = compute_requests_service.claim_next_request(test_db_session, worker_id='worker:new')
+    assert replacement is not None
+    assert replacement.id == request.id
+    assert replacement.claim_token != stale_token
+
+    with pytest.raises(RuntimeError, match='claim is no longer active'):
+        await WorkerRuntimeServicer().PublishDatasourceSchemaCache(
+            worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheRequest(
+                namespace='default',
+                datasource_id=datasource_id,
+                schema_info=datasource_pb2.SchemaInfo(columns=[datasource_pb2.ColumnSchema(name='obsolete', dtype='String', nullable=True)]),
+                expected_revision=2,
+                compute_request_id=request.id,
+                worker_id='worker:old',
+                claim_token=stale_token,
+                lease_generation=stale_generation,
+            ),
+            context,
+        )
+
+    test_db_session.expire_all()
+    stored = test_db_session.get(DataSource, datasource_id)
+    assert stored is not None
+    assert stored.schema_cache == {'columns': [{'name': 'current', 'dtype': 'Int64', 'nullable': True}]}
+
+
+@pytest.mark.asyncio
+async def test_schema_publication_rejects_valid_claim_for_another_datasource(monkeypatch: pytest.MonkeyPatch, test_db_session: Session) -> None:
+    context = _context(monkeypatch)
+    source_id = str(uuid.uuid4())
+    other_id = str(uuid.uuid4())
+    original_schema = {'columns': [{'name': 'current', 'dtype': 'Int64', 'nullable': True}]}
+    for datasource_id, name in ((source_id, 'Schema source'), (other_id, 'Foreign target')):
+        test_db_session.add(
+            DataSource(
+                id=datasource_id,
+                name=name,
+                source_type=DataSourceType.FILE.value,
+                config={'file_path': 's3://bucket/source.csv'},
+                revision=2,
+                schema_cache=original_schema,
+                created_at=datetime.now(UTC),
+            )
+        )
+    test_db_session.commit()
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+        request_json={'datasource_id': source_id, 'refresh': True},
+    )
+    claim = compute_requests_service.claim_next_request(test_db_session, worker_id='worker:schema')
+    assert claim is not None and claim.id == request.id and claim.claim_token is not None
+
+    with pytest.raises(RuntimeError, match='targets a different datasource'):
+        await WorkerRuntimeServicer().PublishDatasourceSchemaCache(
+            worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheRequest(
+                namespace='default',
+                datasource_id=other_id,
+                schema_info=datasource_pb2.SchemaInfo(columns=[datasource_pb2.ColumnSchema(name='foreign', dtype='String', nullable=True)]),
+                expected_revision=2,
+                compute_request_id=claim.id,
+                worker_id='worker:schema',
+                claim_token=claim.claim_token,
+                lease_generation=claim.lease_generation,
+            ),
+            context,
+        )
+
+    test_db_session.expire_all()
+    for datasource_id in (source_id, other_id):
+        stored = test_db_session.get(DataSource, datasource_id)
+        assert stored is not None and stored.schema_cache == original_schema
 
 
 @pytest.mark.asyncio

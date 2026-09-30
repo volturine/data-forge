@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from builds.build_live import RuntimeBuild
 from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2
+from datasources import execution as datasource_execution
 from operations.download import DownloadParams
 from operations.export import ExportParams
 from operations.notification import NotificationHandler, NotificationParams
@@ -35,6 +36,7 @@ from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
 from runtime.executors import (
+    CLEANUP_EXECUTOR,
     COMPUTE_EXECUTOR,
     CONTROL_EXECUTOR,
     ENGINE_IO_EXECUTOR,
@@ -49,6 +51,80 @@ from runtime.worker_runtime_client import BackendWorkerRpcError, PendingDatasour
 # ---------------------------------------------------------------------------
 # Build runtime regressions
 # ---------------------------------------------------------------------------
+
+
+def test_datasource_schema_publication_carries_metadata_revision_and_claim(monkeypatch) -> None:
+    from contextlib import contextmanager
+
+    from runtime.domain.compute.result import EngineResult
+
+    schema_info = datasource_pb2.SchemaInfo(columns=[datasource_pb2.ColumnSchema(name="value", dtype="Int64", nullable=True)])
+    published: dict[str, object] = {}
+    engine_payloads = []
+
+    class Client:
+        def datasource_metadata(self, **_kwargs):
+            return worker_runtime_client.DatasourceMetadata(
+                found=True,
+                id="datasource-1",
+                name="Source",
+                source_type="file",
+                config={"file_path": "s3://default/uploads/source.csv", "file_type": "csv"},
+                schema_cache=None,
+                is_hidden=False,
+                revision=7,
+            )
+
+        def publish_datasource_schema_cache(self, **kwargs):
+            published.update(kwargs)
+            return kwargs["schema_info"]
+
+    class Engine:
+        def datasource_job(self, kind, payload):
+            engine_payloads.append((kind, payload))
+            return "engine-job"
+
+        def get_result(self, **_kwargs):
+            return EngineResult(job_id="engine-job", data={"columns": [{"name": "value", "dtype": "Int64", "nullable": True}]}, error=None)
+
+    class Manager:
+        @contextmanager
+        def acquire_engine(self, identity):
+            assert identity.resource_id == "datasource-1"
+            yield Engine()
+
+    def fail_local_compute(*_args, **_kwargs):
+        raise AssertionError("Datasource schema extraction ran in the manager")
+
+    monkeypatch.setattr(datasource_execution, "_extract_schema_from_metadata", fail_local_compute)
+    command = compute_pb2.ComputeCommand()
+    command.datasource.schema.CopyFrom(datasource_pb2.DatasourceSchemaCommand(datasource_id="datasource-1", refresh=True))
+    command.input_revisions.add(datasource_id="datasource-1", revision=7)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="request-1",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+        command_envelope=compute_pb2.ComputeCommandEnvelope(command=command),
+        worker_id="worker-1",
+        claim_token="claim-1",
+        lease_generation=3,
+        lease_ttl_seconds=300,
+    )
+    result = compute_request_runtime._execute_datasource_command(Client(), claimed, Manager(), command.datasource)
+    assert result.schema == schema_info
+    assert published == {
+        "namespace": "default",
+        "datasource_id": "datasource-1",
+        "schema_info": schema_info,
+        "expected_revision": 7,
+        "compute_request_id": "request-1",
+        "worker_id": "worker-1",
+        "claim_token": "claim-1",
+        "lease_generation": 3,
+    }
+    assert engine_payloads[0][0] == "datasource_schema"
+    assert engine_payloads[0][1]["datasource_metadata"]["revision"] == 7
+    assert "claim_token" not in engine_payloads[0][1]
 
 
 def test_terminal_compute_completion_retries_after_api_reconnect(monkeypatch) -> None:
@@ -293,9 +369,11 @@ async def test_control_executor_remains_available_when_compute_budget_is_full() 
 def test_compute_executor_matches_the_single_runtime_work_budget() -> None:
     workers = compute_request_runtime.compute_request_worker_count()
     assert COMPUTE_EXECUTOR._max_workers == workers
-    assert CONTROL_EXECUTOR._max_workers == workers
-    assert LEASE_EXECUTOR._max_workers == workers
     assert ENGINE_IO_EXECUTOR._max_workers == workers
+    assert CONTROL_EXECUTOR._max_workers == min(4, workers)
+    assert LEASE_EXECUTOR._max_workers == min(2, workers)
+    assert CLEANUP_EXECUTOR._max_workers == min(2, workers)
+    assert len({COMPUTE_EXECUTOR, CONTROL_EXECUTOR, LEASE_EXECUTOR, CLEANUP_EXECUTOR, ENGINE_IO_EXECUTOR}) == 5
 
 
 @pytest.mark.asyncio
@@ -1828,6 +1906,7 @@ def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monke
 
 def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) -> None:
     completed: list[compute_pb2.ComputeResponse] = []
+    metadata_calls = 0
 
     monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
     monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
@@ -1837,6 +1916,8 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
             pass
 
         def datasource_metadata(self, **_kwargs):
+            nonlocal metadata_calls
+            metadata_calls += 1
             from runtime.worker_runtime_client import DatasourceMetadata
 
             return DatasourceMetadata(
@@ -1847,6 +1928,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
                 config=None,
                 schema_cache=None,
                 is_hidden=None,
+                revision=None,
             )
 
         def complete_compute_request(self, **kwargs):
@@ -1868,6 +1950,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
             payload={"datasource_id": "datasource-1"},
         ),
     )
+    claimed.command_envelope.command.input_revisions.add(datasource_id="datasource-1", revision=7)
 
     compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
 
@@ -1876,6 +1959,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
     assert completed[0].datasource.WhichOneof("result") == "error"
     assert completed[0].datasource.error.error == "datasource_not_found"
     assert completed[0].datasource.error.message == "datasource-1"
+    assert metadata_calls == 1
 
 
 def test_grpc_precondition_error_does_not_invent_domain_error_code() -> None:

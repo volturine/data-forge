@@ -8,10 +8,13 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Iterator
-from concurrent.futures import Executor, ThreadPoolExecutor
+from collections import deque
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from concurrent.futures import Executor, Future as ConcurrentFuture, ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from types import MappingProxyType
+from typing import Any, Protocol, cast
 
 import grpc
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
@@ -135,6 +138,21 @@ def proto_value_to_enum_name(enum_type: Any, prefix: str, value: int) -> str:
     return suffix.lower()
 
 
+async def _await_thread_future[T](future: ConcurrentFuture[T], loop: asyncio.AbstractEventLoop) -> T:
+    wrapped = asyncio.wrap_future(future, loop=loop)
+    try:
+        return await asyncio.shield(wrapped)
+    except asyncio.CancelledError:
+        while not wrapped.done():
+            try:
+                await asyncio.shield(wrapped)
+            except asyncio.CancelledError:
+                continue
+            except BaseException:
+                break
+        raise
+
+
 class _BackendRequestValidationInterceptor(grpc.aio.ServerInterceptor):
     def __init__(self) -> None:
         self._validator = Validator()
@@ -148,8 +166,17 @@ class _BackendRequestValidationInterceptor(grpc.aio.ServerInterceptor):
         if handler is None or handler.unary_unary is None:
             return handler
         unary_unary = cast(Callable[[Message, grpc.aio.ServicerContext], Awaitable[Any]], handler.unary_unary)
+        admission_lane = _rpc_admission_lane(handler_call_details.method)
 
         async def validate_request(request: Message, context: grpc.aio.ServicerContext) -> Any:
+            try:
+                acquired = await admission_lane.acquire(context)
+            except TimeoutError:
+                await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, f'Internal runtime RPC admission deadline expired for {admission_lane.name}')
+                raise RuntimeError('gRPC context.abort returned after RPC admission deadline')
+            if not acquired:
+                await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, f'Internal runtime RPC admission is full for {admission_lane.name}')
+                raise RuntimeError('gRPC context.abort returned after RPC admission rejection')
             timing = {'request_started': time.monotonic()}
             timing_token = _RPC_TIMING.set(timing)
             try:
@@ -172,7 +199,7 @@ class _BackendRequestValidationInterceptor(grpc.aio.ServerInterceptor):
                         finally:
                             timing['validation_finished'] = time.monotonic()
 
-                    await loop.run_in_executor(_validation_executor(handler_call_details.method), validate)
+                    await _await_thread_future(_validation_executor(handler_call_details.method).submit(validate), loop)
                     timing['validation_queue_ms'] = (timing['validation_started'] - validation_submitted) * 1000
                     timing['validation_ms'] = (timing['validation_finished'] - timing['validation_started']) * 1000
                 except ValidationError as exc:
@@ -186,6 +213,7 @@ class _BackendRequestValidationInterceptor(grpc.aio.ServerInterceptor):
                 return await unary_unary(request, context)
             finally:
                 _RPC_TIMING.reset(timing_token)
+                admission_lane.release()
 
         return grpc.unary_unary_rpc_method_handler(
             validate_request,
@@ -216,15 +244,23 @@ def _runtime_generation_rejection(
     return None
 
 
-async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
+@dataclass(frozen=True, slots=True)
+class RpcMetadata:
+    values: Mapping[str, str]
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+
+async def _require_internal_token(context: grpc.aio.ServicerContext) -> RpcMetadata:
     if not settings.internal_api_token:
         await context.abort(grpc.StatusCode.UNAVAILABLE, 'INTERNAL_API_TOKEN must be configured before internal runtime services can be used')
-    metadata = dict(cast(Any, context.invocation_metadata() or ()))
+    metadata = RpcMetadata(MappingProxyType(dict(cast(Any, context.invocation_metadata() or ()))))
     if not hmac.compare_digest(metadata.get(_TOKEN_METADATA_KEY) or '', settings.internal_api_token):
         await context.abort(grpc.StatusCode.UNAUTHENTICATED, 'Invalid internal runtime token')
+    return metadata
 
 
-_THREAD_LOCAL = threading.local()
 _RPC_TIMING: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar('runtime_rpc_timing', default=None)
 _SCHEDULER_HEARTBEAT_METHODS = frozenset({'HeartbeatScheduler'})
 _LEASE_VALIDATION_METHODS = frozenset(
@@ -256,10 +292,12 @@ def _runtime_rpc_executor_sizes(
 ) -> tuple[int, int, int]:
     """Return (lease, general, scheduler-heartbeat) RPC counts for one coordinator."""
     database_capacity = max(database_pool_size + database_max_overflow, 1)
-    if database_capacity < 3:
-        raise ValueError('Runtime coordinator requires at least three pooled database connections for lease RPCs, general RPCs, and outbox recovery')
+    if database_capacity < 4:
+        raise ValueError(
+            'Runtime coordinator requires at least four pooled database connections for lease RPCs, scheduler heartbeat, general RPCs, and outbox recovery'
+        )
     rpc_capacity = database_capacity - 1
-    scheduler_heartbeat_workers = min(1, max(rpc_capacity - 2, 0))
+    scheduler_heartbeat_workers = 1
     remaining_capacity = rpc_capacity - scheduler_heartbeat_workers
     # The runtime coordinator's pool size is configured from COMPUTE_WORKERS.
     # Match that concurrency for claims/completions, instead of capping the
@@ -294,6 +332,7 @@ _INTERNAL_SCHEDULER_VALIDATION_EXECUTOR = (
     else None
 )
 _INTERNAL_EXTERNAL_IO_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix='internal-runtime-external-io')
+_INTERNAL_EXTERNAL_IO_WORKERS = 2
 _INTERNAL_RPC_EXECUTOR = ThreadPoolExecutor(
     max_workers=_INTERNAL_GENERAL_RPC_WORKERS,
     thread_name_prefix='internal-runtime-rpc',
@@ -310,6 +349,101 @@ _INTERNAL_SCHEDULER_RPC_EXECUTOR = (
     if _INTERNAL_SCHEDULER_RPC_WORKERS
     else None
 )
+_INTERNAL_RPC_ADMISSION_QUEUE_LIMIT = max(8, 2 * _INTERNAL_RPC_WORKERS)
+
+
+class _RpcAdmissionContext(Protocol):
+    def time_remaining(self) -> float | None: ...
+
+
+class _RpcAdmissionLane:
+    def __init__(self, name: str, capacity: int, queue_limit: int = _INTERNAL_RPC_ADMISSION_QUEUE_LIMIT) -> None:
+        self.name = name
+        self.capacity = capacity
+        self.queue_limit = queue_limit
+        self._active = 0
+        self._waiters: deque[ConcurrentFuture[None]] = deque()
+        self._lock = threading.Lock()
+
+    async def acquire(self, context: _RpcAdmissionContext) -> bool:
+        with self._lock:
+            if self._active < self.capacity and not self._waiters:
+                self._active += 1
+                return True
+            if len(self._waiters) >= self.queue_limit:
+                return False
+            waiter: ConcurrentFuture[None] = ConcurrentFuture()
+            self._waiters.append(waiter)
+
+        try:
+            remaining = context.time_remaining()
+            wrapped_waiter = asyncio.wrap_future(waiter)
+            if remaining is None:
+                await asyncio.shield(wrapped_waiter)
+            else:
+                await asyncio.wait_for(asyncio.shield(wrapped_waiter), timeout=max(remaining, 0))
+            return True
+        except TimeoutError, asyncio.CancelledError:
+            self._withdraw(waiter)
+            raise
+
+    def release(self) -> None:
+        with self._lock:
+            self._release_locked()
+
+    def _withdraw(self, waiter: ConcurrentFuture[None]) -> None:
+        with self._lock:
+            try:
+                self._waiters.remove(waiter)
+            except ValueError:
+                if waiter.done() and not waiter.cancelled():
+                    self._release_locked()
+            else:
+                waiter.cancel()
+
+    def _release_locked(self) -> None:
+        while self._waiters:
+            waiter = self._waiters.popleft()
+            if waiter.set_running_or_notify_cancel():
+                waiter.set_result(None)
+                return
+        if self._active <= 0:
+            raise RuntimeError(f'RPC admission lane {self.name} released without an active call')
+        self._active -= 1
+
+    @property
+    def active_count(self) -> int:
+        with self._lock:
+            return self._active
+
+    @property
+    def pending_count(self) -> int:
+        with self._lock:
+            return len(self._waiters)
+
+
+_RPC_ADMISSION_LANES = {
+    'critical': _RpcAdmissionLane('critical', _INTERNAL_LEASE_RPC_WORKERS),
+    'general': _RpcAdmissionLane('general', _INTERNAL_GENERAL_RPC_WORKERS),
+    'scheduler': _RpcAdmissionLane(
+        'scheduler',
+        _INTERNAL_SCHEDULER_RPC_WORKERS or _INTERNAL_LEASE_RPC_WORKERS,
+    ),
+    'external-io': _RpcAdmissionLane('external-io', _INTERNAL_EXTERNAL_IO_WORKERS),
+}
+
+
+def _rpc_admission_lane(method: str) -> _RpcAdmissionLane:
+    method_name = method.rsplit('/', 1)[-1]
+    if method_name in _SCHEDULER_HEARTBEAT_METHODS:
+        return _RPC_ADMISSION_LANES['scheduler']
+    if method_name in _LEASE_VALIDATION_METHODS:
+        return _RPC_ADMISSION_LANES['critical']
+    if method_name == 'GenerateAI':
+        return _RPC_ADMISSION_LANES['external-io']
+    return _RPC_ADMISSION_LANES['general']
+
+
 _RUNTIME_WORK_CACHE_TTL_SECONDS = 5.0
 _RUNTIME_WORK_CACHE_LOCK = threading.Lock()
 _RUNTIME_PENDING_NAMESPACE_CACHE: dict[tuple[str, ...], tuple[float, tuple[str, ...]]] = {}
@@ -352,16 +486,6 @@ def _cached_pending_runtime_work_namespaces(
         return list(namespaces)
 
 
-def _thread_event_loop() -> asyncio.AbstractEventLoop:
-    """One reusable event loop per worker thread instead of a fresh loop per RPC."""
-    loop = getattr(_THREAD_LOCAL, 'loop', None)
-    if loop is None or loop.is_closed():
-        loop = asyncio.new_event_loop()
-        _THREAD_LOCAL.loop = loop
-        asyncio.set_event_loop(loop)
-    return loop
-
-
 def close_rpc_session(session_gen) -> None:
     """Exhaust and close a get_db() generator so post-yield cleanup runs."""
     with contextlib.suppress(StopIteration):
@@ -372,7 +496,7 @@ def close_rpc_session(session_gen) -> None:
 def _threaded_rpc(executor: Executor):
     def decorator(func):
         async def wrapper(self, request, context):
-            await _require_internal_token(context)
+            metadata = await _require_internal_token(context)
             started = time.monotonic()
             rpc_timing = _RPC_TIMING.get()
             timing: dict[str, float] = {}
@@ -381,17 +505,17 @@ def _threaded_rpc(executor: Executor):
             def _run():
                 timing['worker_started'] = time.monotonic()
                 try:
-                    loop = _thread_event_loop()
                     timing['handler_started'] = time.monotonic()
                     with database_statement_timing(database_timing):
-                        return loop.run_until_complete(func(self, request, context))
+                        return func(self, request, metadata)
                 finally:
                     timing['worker_finished'] = time.monotonic()
 
             try:
                 loop = asyncio.get_running_loop()
                 contextvars_context = contextvars.copy_context()
-                return await loop.run_in_executor(executor, contextvars_context.run, _run)
+                future = executor.submit(contextvars_context.run, _run)
+                return await _await_thread_future(future, loop)
             except _ThreadedRpcAbort as exc:
                 await context.abort(exc.status, exc.details)
             except RuntimeCoordinatorFenced as exc:
@@ -838,9 +962,7 @@ def _id(value: str) -> worker_runtime_pb2.IdResponse:
 
 class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer):
     @_run_control_handler_in_thread
-    async def RegisterWorker(
-        self, request: worker_runtime_pb2.RuntimeWorkerRegisterRequest, context: grpc.aio.ServicerContext
-    ) -> common_pb2.RuntimeWorkerResponse:
+    def RegisterWorker(self, request: worker_runtime_pb2.RuntimeWorkerRegisterRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
 
         def _register(session: Any) -> None:
             runtime_worker_service.register_worker(
@@ -857,9 +979,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _response(request.worker_id)
 
     @_run_critical_runtime_handler_in_thread
-    async def HeartbeatWorker(
-        self, request: worker_runtime_pb2.RuntimeWorkerHeartbeatRequest, context: grpc.aio.ServicerContext
-    ) -> common_pb2.RuntimeWorkerResponse:
+    def HeartbeatWorker(self, request: worker_runtime_pb2.RuntimeWorkerHeartbeatRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
         active_jobs = _optional_int(request, 'active_jobs')
 
         def _heartbeat(session: Any) -> None:
@@ -869,8 +989,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _response(request.worker_id)
 
     @_run_control_handler_in_thread
-    async def StopWorker(self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext) -> common_pb2.RuntimeWorkerResponse:
-        await _require_internal_token(context)
+    def StopWorker(self, request: common_pb2.RuntimeWorkerRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
 
         def _stop(session: Any) -> None:
             runtime_worker_service.mark_worker_stopped(session, worker_id=request.worker_id)
@@ -879,9 +998,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _response(request.worker_id)
 
     @_run_claim_handler_in_thread
-    async def ClaimBuildJob(
-        self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.WorkerClaimBuildJobResponse:
+    def ClaimBuildJob(self, request: common_pb2.RuntimeWorkerRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerClaimBuildJobResponse:
         if request.protocol_version != _BUILD_JOB_PROTOCOL_VERSION:
             raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Build worker protocol version is incompatible')
         if not request.target_namespace:
@@ -915,8 +1032,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return worker_runtime_pb2.WorkerClaimBuildJobResponse()
 
     @_run_critical_runtime_handler_in_thread
-    async def RenewBuildJobLease(
-        self, request: worker_runtime_pb2.WorkerBuildJobClaimRequest, context: grpc.aio.ServicerContext
+    def RenewBuildJobLease(
+        self, request: worker_runtime_pb2.WorkerBuildJobClaimRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerRenewBuildJobLeaseResponse:
         token = set_namespace_context(request.namespace)
         try:
@@ -938,9 +1055,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return response
 
     @_run_claim_handler_in_thread
-    async def ClaimComputeRequest(
-        self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.WorkerClaimComputeRequestResponse:
+    def ClaimComputeRequest(self, request: common_pb2.RuntimeWorkerRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerClaimComputeRequestResponse:
         if request.protocol_version != _BUILD_JOB_PROTOCOL_VERSION:
             raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, 'Compute worker protocol version is incompatible')
         if not request.target_namespace:
@@ -977,8 +1092,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_critical_runtime_handler_in_thread
-    async def RenewComputeRequestLeases(
-        self, request: worker_runtime_pb2.WorkerRenewComputeRequestLeasesRequest, context: grpc.aio.ServicerContext
+    def RenewComputeRequestLeases(
+        self, request: worker_runtime_pb2.WorkerRenewComputeRequestLeasesRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerRenewComputeRequestLeasesResponse:
         claims = [
             compute_requests_service.ComputeRequestLeaseClaim(
@@ -1009,8 +1124,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return response
 
     @_run_control_handler_in_thread
-    async def CompleteComputeRequest(
-        self, request: worker_runtime_pb2.WorkerCompleteComputeRequestRequest, context: grpc.aio.ServicerContext
+    def CompleteComputeRequest(
+        self, request: worker_runtime_pb2.WorkerCompleteComputeRequestRequest, metadata: RpcMetadata
     ) -> common_pb2.RuntimeWorkerResponse:
         token = set_namespace_context(request.namespace)
         try:
@@ -1035,9 +1150,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_control_handler_in_thread
-    async def FailComputeRequest(
-        self, request: worker_runtime_pb2.WorkerFailComputeRequestRequest, context: grpc.aio.ServicerContext
-    ) -> common_pb2.RuntimeWorkerResponse:
+    def FailComputeRequest(self, request: worker_runtime_pb2.WorkerFailComputeRequestRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
         token = set_namespace_context(request.namespace)
         try:
             failed = run_db(
@@ -1059,8 +1172,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def PublishDatasourceCreate(
-        self, request: worker_runtime_pb2.WorkerPublishDatasourceCreateRequest, context: grpc.aio.ServicerContext
+    def PublishDatasourceCreate(
+        self, request: worker_runtime_pb2.WorkerPublishDatasourceCreateRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerPublishDatasourceCreateResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
@@ -1091,8 +1204,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def PublishDatasourceIngest(
-        self, request: worker_runtime_pb2.WorkerPublishDatasourceIngestRequest, context: grpc.aio.ServicerContext
+    def PublishDatasourceIngest(
+        self, request: worker_runtime_pb2.WorkerPublishDatasourceIngestRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerPublishDatasourceIngestResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
@@ -1160,19 +1273,61 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def PublishDatasourceSchemaCache(
-        self, request: worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheRequest, context: grpc.aio.ServicerContext
+    def PublishDatasourceSchemaCache(
+        self, request: worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
         session = next(session_gen)
         try:
+
+            def _guard_publication(active_session: Any) -> None:
+                request_claim = compute_requests_service.lock_active_request_claim(
+                    active_session,
+                    request.compute_request_id,
+                    worker_id=request.worker_id,
+                    claim_token=request.claim_token,
+                    lease_generation=request.lease_generation,
+                )
+                if request_claim is None:
+                    raise datasource_publication_service.DatasourcePublicationClaimLost('Datasource schema publication claim is no longer active')
+                if request_claim.kind != enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
+                    raise datasource_publication_service.DatasourcePublicationClaimLost(
+                        'Datasource schema publication claim has a different compute request kind'
+                    )
+                try:
+                    command_envelope = compute_requests_service.command_envelope_for_request(request_claim)
+                except ValueError as exc:
+                    raise datasource_publication_service.DatasourcePublicationClaimLost(
+                        'Datasource schema publication claim has an invalid command snapshot'
+                    ) from exc
+                command = command_envelope.command
+                if command.WhichOneof('command') != 'datasource' or command.datasource.WhichOneof('command') != 'schema':
+                    raise datasource_publication_service.DatasourcePublicationClaimLost('Datasource schema publication claim does not contain a schema command')
+                if command.datasource.schema.datasource_id != request.datasource_id:
+                    raise datasource_publication_service.DatasourcePublicationClaimLost('Datasource schema publication claim targets a different datasource')
+                source_revisions = [revision.revision for revision in command.input_revisions if revision.datasource_id == request.datasource_id]
+                if len(source_revisions) != 1:
+                    raise datasource_publication_service.DatasourcePublicationClaimLost(
+                        'Datasource schema publication claim has no unique source revision snapshot'
+                    )
+                if source_revisions[0] != request.expected_revision:
+                    raise datasource_publication_service.DatasourcePublicationRevisionChanged(
+                        'Datasource schema publication revision does not match its claimed command snapshot'
+                    )
+
             published = datasource_publication_service.publish_schema_cache(
                 session,
                 datasource_id=request.datasource_id,
+                expected_revision=int(request.expected_revision),
                 schema_info=request.schema_info,
+                publication_guard=_guard_publication,
             )
             return worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheResponse(schema_info=published)
+        except datasource_publication_service.DatasourcePublicationRevisionChanged as exc:
+            raise _ThreadedRpcAbort(grpc.StatusCode.ABORTED, str(exc)) from exc
+        except datasource_publication_service.DatasourcePublicationClaimLost as exc:
+            raise _ThreadedRpcAbort(grpc.StatusCode.FAILED_PRECONDITION, str(exc)) from exc
         except AppError as exc:
             if exc.error_code != 'DATASOURCE_NOT_FOUND':
                 raise
@@ -1182,8 +1337,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def GetDatasourceMetadata(
-        self, request: worker_runtime_pb2.WorkerDatasourceMetadataRequest, context: grpc.aio.ServicerContext
+    def GetDatasourceMetadata(
+        self, request: worker_runtime_pb2.WorkerDatasourceMetadataRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerDatasourceMetadataResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
@@ -1215,9 +1370,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def GetUdfCodes(
-        self, request: worker_runtime_pb2.WorkerUdfCodesRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.WorkerUdfCodesResponse:
+    def GetUdfCodes(self, request: worker_runtime_pb2.WorkerUdfCodesRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerUdfCodesResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
         session = next(session_gen)
@@ -1233,8 +1386,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def GetEngineCredentials(
-        self, request: worker_runtime_pb2.WorkerEngineCredentialsRequest, context: grpc.aio.ServicerContext
+    def GetEngineCredentials(
+        self, request: worker_runtime_pb2.WorkerEngineCredentialsRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerEngineCredentialsResponse:
         from backend_core.namespace_credentials_service import NamespaceCredentialError, resolve_namespace_engine_credentials
 
@@ -1249,8 +1402,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return worker_runtime_pb2.WorkerEngineCredentialsResponse(access_key=access_key, secret_key=secret_key)
 
     @_run_async_handler_in_thread
-    async def GetAnalysisMetadata(
-        self, request: worker_runtime_pb2.WorkerAnalysisMetadataRequest, context: grpc.aio.ServicerContext
+    def GetAnalysisMetadata(
+        self, request: worker_runtime_pb2.WorkerAnalysisMetadataRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerAnalysisMetadataResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
@@ -1265,8 +1418,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def GetBuildCancelStatus(
-        self, request: worker_runtime_pb2.WorkerBuildCancelStatusRequest, context: grpc.aio.ServicerContext
+    def GetBuildCancelStatus(
+        self, request: worker_runtime_pb2.WorkerBuildCancelStatusRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerBuildCancelStatusResponse:
         token = set_namespace_context(request.namespace)
         try:
@@ -1282,9 +1435,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def UpdateBuildResult(
-        self, request: worker_runtime_pb2.WorkerUpdateBuildResultRequest, context: grpc.aio.ServicerContext
-    ) -> common_pb2.RuntimeWorkerResponse:
+    def UpdateBuildResult(self, request: worker_runtime_pb2.WorkerUpdateBuildResultRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
         session = next(session_gen)
@@ -1306,8 +1457,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def UpsertOutputDatasource(
-        self, request: worker_runtime_pb2.WorkerUpsertOutputDatasourceRequest, context: grpc.aio.ServicerContext
+    def UpsertOutputDatasource(
+        self, request: worker_runtime_pb2.WorkerUpsertOutputDatasourceRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerUpsertOutputDatasourceResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
@@ -1382,8 +1533,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def ListHealthChecks(
-        self, request: worker_runtime_pb2.WorkerListHealthChecksRequest, context: grpc.aio.ServicerContext
+    def ListHealthChecks(
+        self, request: worker_runtime_pb2.WorkerListHealthChecksRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerListHealthChecksResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
@@ -1408,8 +1559,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def RecordHealthCheckResults(
-        self, request: worker_runtime_pb2.WorkerRecordHealthCheckResultsRequest, context: grpc.aio.ServicerContext
+    def RecordHealthCheckResults(
+        self, request: worker_runtime_pb2.WorkerRecordHealthCheckResultsRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.CountResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
@@ -1435,9 +1586,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def CreateEngineRun(
-        self, request: worker_runtime_pb2.WorkerCreateEngineRunRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.IdResponse:
+    def CreateEngineRun(self, request: worker_runtime_pb2.WorkerCreateEngineRunRequest, metadata: RpcMetadata) -> worker_runtime_pb2.IdResponse:
         token = set_namespace_context(request.namespace)
         try:
             run = run_db(
@@ -1467,9 +1616,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def UpdateEngineRun(
-        self, request: worker_runtime_pb2.WorkerUpdateEngineRunRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.IdResponse:
+    def UpdateEngineRun(self, request: worker_runtime_pb2.WorkerUpdateEngineRunRequest, metadata: RpcMetadata) -> worker_runtime_pb2.IdResponse:
         kwargs = _engine_run_update_kwargs(request.update, merge_result=request.merge_result)
         token = set_namespace_context(request.namespace)
         try:
@@ -1479,8 +1626,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def GetEngineRunState(
-        self, request: worker_runtime_pb2.WorkerEngineRunStateRequest, context: grpc.aio.ServicerContext
+    def GetEngineRunState(
+        self, request: worker_runtime_pb2.WorkerEngineRunStateRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerEngineRunStateResponse:
         token = set_namespace_context(request.namespace)
         try:
@@ -1503,7 +1650,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_control_handler_in_thread
-    async def FailBuildJob(self, request: worker_runtime_pb2.WorkerFailBuildJobRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.BoolResponse:
+    def FailBuildJob(self, request: worker_runtime_pb2.WorkerFailBuildJobRequest, metadata: RpcMetadata) -> worker_runtime_pb2.BoolResponse:
         token = set_namespace_context(request.namespace)
         try:
             result = run_db(
@@ -1522,9 +1669,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _bool(result is not None)
 
     @_run_control_handler_in_thread
-    async def FinalizeBuildJob(
-        self, request: worker_runtime_pb2.WorkerFinalizeBuildJobRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.BoolResponse:
+    def FinalizeBuildJob(self, request: worker_runtime_pb2.WorkerFinalizeBuildJobRequest, metadata: RpcMetadata) -> worker_runtime_pb2.BoolResponse:
 
         token = set_namespace_context(request.namespace)
         try:
@@ -1543,7 +1688,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _bool(result is not None)
 
     @_run_control_handler_in_thread
-    async def ReleaseBuildWorkerJobs(self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
+    def ReleaseBuildWorkerJobs(self, request: common_pb2.RuntimeWorkerRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
         if not request.target_namespace:
             raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build worker release must target a namespace')
         token = set_namespace_context(request.target_namespace)
@@ -1554,7 +1699,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _count(released)
 
     @_run_maintenance_handler_in_thread
-    async def GetQueuedBuildJobCount(self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
+    def GetQueuedBuildJobCount(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
         if not request.namespace:
             raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Queued build count must target a namespace')
         token = set_namespace_context(request.namespace)
@@ -1565,7 +1710,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _count(count)
 
     @_run_maintenance_handler_in_thread
-    async def ReconcileExpiredBuildJobs(self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
+    def ReconcileExpiredBuildJobs(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
         if not request.namespace:
             raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build job reconciliation must target a namespace')
         token = set_namespace_context(request.namespace)
@@ -1576,7 +1721,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _count(reconciled)
 
     @_run_maintenance_handler_in_thread
-    async def ReconcileExpiredComputeRequests(self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.CountResponse:
+    def ReconcileExpiredComputeRequests(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
         if not request.namespace:
             raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Compute request reconciliation must target a namespace')
         token = set_namespace_context(request.namespace)
@@ -1587,13 +1732,13 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _count(reconciled)
 
     @_run_maintenance_handler_in_thread
-    async def GetIdleBuildWorkerPids(self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.WorkerIdlePidsResponse:
+    def GetIdleBuildWorkerPids(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerIdlePidsResponse:
         workers = run_settings_db(runtime_worker_service.list_workers, kind=RuntimeWorkerKind.BUILD_WORKER)
         return worker_runtime_pb2.WorkerIdlePidsResponse(pids=[worker.pid for worker in workers if worker.stopped_at is None and worker.active_jobs == 0])
 
     @_run_maintenance_handler_in_thread
-    async def ListPendingRuntimeWorkNamespaces(
-        self, request: worker_runtime_pb2.WorkerPendingRuntimeWorkNamespacesRequest, context: grpc.aio.ServicerContext
+    def ListPendingRuntimeWorkNamespaces(
+        self, request: worker_runtime_pb2.WorkerPendingRuntimeWorkNamespacesRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerNamespacesResponse:
         try:
             kinds = tuple(sorted({runtime_work_service.RuntimeWorkKind(kind) for kind in request.kinds})) or runtime_work_service.WORKER_RECOVERY_KINDS
@@ -1602,8 +1747,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return worker_runtime_pb2.WorkerNamespacesResponse(namespaces=_cached_pending_runtime_work_namespaces(kinds))
 
     @_run_async_handler_in_thread
-    async def PersistBuildEvent(
-        self, request: worker_runtime_pb2.WorkerPersistBuildEventRequest, context: grpc.aio.ServicerContext
+    def PersistBuildEvent(
+        self, request: worker_runtime_pb2.WorkerPersistBuildEventRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerPersistBuildEventResponse:
         started = time.perf_counter()
         timings: dict[str, float] = {}
@@ -1673,9 +1818,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return worker_runtime_pb2.WorkerPersistBuildEventResponse(sequence=int(result[1]))
 
     @_run_async_handler_in_thread
-    async def StartBuildRun(
-        self, request: worker_runtime_pb2.WorkerStartBuildRunRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.WorkerStartBuildRunResponse:
+    def StartBuildRun(self, request: worker_runtime_pb2.WorkerStartBuildRunRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerStartBuildRunResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
         session = next(session_gen)
@@ -1721,9 +1864,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def PersistEngineSnapshot(
-        self, request: worker_runtime_pb2.WorkerPersistEngineSnapshotRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.CountResponse:
+    def PersistEngineSnapshot(self, request: worker_runtime_pb2.WorkerPersistEngineSnapshotRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
         statuses = [_engine_status_info_payload(status) for status in request.engine_status]
 
         def _write(session: Any) -> None:
@@ -1739,8 +1880,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _count(len(statuses))
 
     @_run_maintenance_handler_in_thread
-    async def ListPendingDatasourceDeletes(
-        self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext
+    def ListPendingDatasourceDeletes(
+        self, request: common_pb2.EmptyRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerPendingDatasourceDeletesResponse:
         if not request.namespace:
             raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Datasource delete listing must target a namespace')
@@ -1755,8 +1896,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return worker_runtime_pb2.WorkerPendingDatasourceDeletesResponse(deletes=deletes)
 
     @_run_maintenance_handler_in_thread
-    async def FinalizeDatasourceDelete(
-        self, request: worker_runtime_pb2.WorkerFinalizeDatasourceDeleteRequest, context: grpc.aio.ServicerContext
+    def FinalizeDatasourceDelete(
+        self, request: worker_runtime_pb2.WorkerFinalizeDatasourceDeleteRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerFinalizeDatasourceDeleteResponse:
         token = set_namespace_context(request.namespace)
         session_gen = get_db()
@@ -1769,14 +1910,12 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             reset_namespace(token)
 
     @_run_async_handler_in_thread
-    async def GetTelegramSettings(
-        self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.WorkerTelegramSettingsResponse:
+    def GetTelegramSettings(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerTelegramSettingsResponse:
         resolved = get_resolved_telegram_settings()
         return worker_runtime_pb2.WorkerTelegramSettingsResponse(enabled=bool(resolved.get('enabled')))
 
     @_run_async_handler_in_thread
-    async def SendEmail(self, request: worker_runtime_pb2.WorkerSendEmailRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.BoolResponse:
+    def SendEmail(self, request: worker_runtime_pb2.WorkerSendEmailRequest, metadata: RpcMetadata) -> worker_runtime_pb2.BoolResponse:
         if not request.to:
             return _bool(False)
         token = set_namespace_context(request.namespace)
@@ -1798,7 +1937,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _bool(True)
 
     @_run_async_handler_in_thread
-    async def SendTelegram(self, request: worker_runtime_pb2.WorkerSendTelegramRequest, context: grpc.aio.ServicerContext) -> worker_runtime_pb2.BoolResponse:
+    def SendTelegram(self, request: worker_runtime_pb2.WorkerSendTelegramRequest, metadata: RpcMetadata) -> worker_runtime_pb2.BoolResponse:
         token = set_namespace_context(request.namespace)
         try:
             payload: dict[str, object] = {
@@ -1821,9 +1960,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _bool(True)
 
     @_run_external_io_handler_in_thread
-    async def GenerateAI(
-        self, request: worker_runtime_pb2.WorkerGenerateAIRequest, context: grpc.aio.ServicerContext
-    ) -> worker_runtime_pb2.WorkerGenerateAIResponse:
+    def GenerateAI(self, request: worker_runtime_pb2.WorkerGenerateAIRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerGenerateAIResponse:
         client = get_ai_client(
             request.provider,
             endpoint_url=_optional_str(request, 'endpoint_url'),
@@ -1833,8 +1970,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return worker_runtime_pb2.WorkerGenerateAIResponse(outputs=outputs)
 
     @_run_async_handler_in_thread
-    async def GetTelegramTargets(
-        self, request: worker_runtime_pb2.WorkerTelegramTargetsRequest, context: grpc.aio.ServicerContext
+    def GetTelegramTargets(
+        self, request: worker_runtime_pb2.WorkerTelegramTargetsRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerTelegramTargetsResponse:
         datasource_id = _optional_str(request, 'datasource_id')
 
@@ -1878,9 +2015,7 @@ class RuntimeCoordinatorServicer(runtime_coordinator_pb2_grpc.RuntimeCoordinator
         self._coordinator_guard = coordinator_guard
 
     @_run_critical_runtime_handler_in_thread
-    async def GetCoordinatorGeneration(
-        self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext
-    ) -> runtime_coordinator_pb2.RuntimeCoordinatorGenerationResponse:
+    def GetCoordinatorGeneration(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> runtime_coordinator_pb2.RuntimeCoordinatorGenerationResponse:
         del request
         self._check_owner_lease()
         generation = active_runtime_coordinator_generation()
@@ -1889,13 +2024,13 @@ class RuntimeCoordinatorServicer(runtime_coordinator_pb2_grpc.RuntimeCoordinator
         return runtime_coordinator_pb2.RuntimeCoordinatorGenerationResponse(generation=generation)
 
     @_run_critical_runtime_handler_in_thread
-    async def AssertCoordinatorGeneration(
-        self, request: runtime_coordinator_pb2.RuntimeCoordinatorGenerationRequest, context: grpc.aio.ServicerContext
+    def AssertCoordinatorGeneration(
+        self, request: runtime_coordinator_pb2.RuntimeCoordinatorGenerationRequest, metadata: RpcMetadata
     ) -> runtime_coordinator_pb2.RuntimeCoordinatorGenerationResponse:
         generation = active_runtime_coordinator_generation()
         rejection = _runtime_generation_rejection(
             generation,
-            dict(cast(Any, context.invocation_metadata() or ())).get(_RUNTIME_GENERATION_METADATA_KEY),
+            metadata.get(_RUNTIME_GENERATION_METADATA_KEY),
         )
         if rejection is not None:
             raise _ThreadedRpcAbort(*rejection)
@@ -1917,9 +2052,7 @@ class RuntimeCoordinatorServicer(runtime_coordinator_pb2_grpc.RuntimeCoordinator
 
 class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServiceServicer):
     @_run_control_handler_in_thread
-    async def RegisterScheduler(
-        self, request: scheduler_runtime_pb2.SchedulerRegisterRequest, context: grpc.aio.ServicerContext
-    ) -> common_pb2.RuntimeWorkerResponse:
+    def RegisterScheduler(self, request: scheduler_runtime_pb2.SchedulerRegisterRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
 
         def _register(session: Any) -> None:
             runtime_worker_service.register_worker(
@@ -1935,7 +2068,7 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
         return _response(request.worker_id)
 
     @_run_scheduler_heartbeat_handler_in_thread
-    async def HeartbeatScheduler(self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext) -> common_pb2.RuntimeWorkerResponse:
+    def HeartbeatScheduler(self, request: common_pb2.RuntimeWorkerRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
 
         def _heartbeat(session: Any) -> None:
             runtime_worker_service.heartbeat_worker(session, worker_id=request.worker_id)
@@ -1944,7 +2077,7 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
         return _response(request.worker_id)
 
     @_run_control_handler_in_thread
-    async def StopScheduler(self, request: common_pb2.RuntimeWorkerRequest, context: grpc.aio.ServicerContext) -> common_pb2.RuntimeWorkerResponse:
+    def StopScheduler(self, request: common_pb2.RuntimeWorkerRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
 
         def _stop(session: Any) -> None:
             runtime_worker_service.mark_worker_stopped(session, worker_id=request.worker_id)
@@ -1953,18 +2086,14 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
         return _response(request.worker_id)
 
     @_run_maintenance_handler_in_thread
-    async def ListDueScheduleNamespaces(
-        self, request: common_pb2.EmptyRequest, context: grpc.aio.ServicerContext
-    ) -> scheduler_runtime_pb2.SchedulerDueNamespacesResponse:
+    def ListDueScheduleNamespaces(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> scheduler_runtime_pb2.SchedulerDueNamespacesResponse:
         due = run_settings_db(runtime_work_service.list_due_schedule_namespaces)
         return scheduler_runtime_pb2.SchedulerDueNamespacesResponse(
             namespaces=[scheduler_runtime_pb2.SchedulerDueNamespace(namespace=namespace, generation=generation) for namespace, generation in due]
         )
 
     @_run_maintenance_handler_in_thread
-    async def RunDueSchedules(
-        self, request: scheduler_runtime_pb2.SchedulerRunDueRequest, context: grpc.aio.ServicerContext
-    ) -> scheduler_runtime_pb2.SchedulerRunDueResponse:
+    def RunDueSchedules(self, request: scheduler_runtime_pb2.SchedulerRunDueRequest, metadata: RpcMetadata) -> scheduler_runtime_pb2.SchedulerRunDueResponse:
         if not request.target_namespace:
             raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Scheduler run must target a namespace')
         enqueued: list[scheduler_runtime_pb2.SchedulerEnqueuedRun] = []
@@ -2101,6 +2230,9 @@ async def _prewarm_internal_rpc_executors() -> None:
 
 async def _start_runtime_grpc_server_on_loop(coordinator_guard: Callable[[], None]) -> grpc.aio.Server:
     await _prewarm_internal_rpc_executors()
+    # Keep admission per class in the interceptor. A core-level global RPC
+    # ceiling runs before that classification and can let general bursts
+    # consume capacity needed by lease and heartbeat calls.
     server = grpc.aio.server(interceptors=(_BackendRequestValidationInterceptor(),))
     worker_runtime_pb2_grpc.add_WorkerRuntimeServiceServicer_to_server(WorkerRuntimeServicer(), server)
     runtime_coordinator_pb2_grpc.add_RuntimeCoordinatorServiceServicer_to_server(RuntimeCoordinatorServicer(coordinator_guard), server)

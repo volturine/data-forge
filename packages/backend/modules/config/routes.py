@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
-import time
 import uuid
-from collections.abc import Callable
-from threading import Lock
 
 from fastapi import Query
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from backend_core.auth_config import settings as auth_settings
 from backend_core.config import settings
 from backend_core.error_handlers import handle_errors
+from backend_core.settings_schemas import SettingsResponse
 from backend_core.settings_store import get_settings
 from modules.mcp.router import MCPRouter
 
@@ -44,77 +42,6 @@ class UuidResponse(BaseModel):
     uuids: list[str]
 
 
-_CONFIG_CACHE_TTL: float = 10.0
-
-
-class FrontendConfigCache:
-    def __init__(self, ttl: float, clock: Callable[[], float] = time.monotonic) -> None:
-        self._ttl = ttl
-        self._clock = clock
-        self._config: FrontendConfig | None = None
-        self._expires_at = 0.0
-        self._state_lock = Lock()
-        self._generation = 0
-        self._refresh_task: asyncio.Task[FrontendConfig] | None = None
-
-    async def get_or_create(self, create: Callable[[], FrontendConfig]) -> FrontendConfig:
-        with self._state_lock:
-            if self._config is not None and self._clock() < self._expires_at:
-                return self._config
-
-            task = self._refresh_task
-            if task is None:
-                task = asyncio.create_task(self._refresh(create))
-                task.add_done_callback(self._consume_refresh_exception)
-                self._refresh_task = task
-
-        # A cancelled request must not cancel a config refresh shared by other
-        # browser tabs. Followers await the same task without occupying threads.
-        return await asyncio.shield(task)
-
-    async def _refresh(self, create: Callable[[], FrontendConfig]) -> FrontendConfig:
-        task = asyncio.current_task()
-        try:
-            while True:
-                with self._state_lock:
-                    generation = self._generation
-
-                config = await asyncio.to_thread(create)
-
-                with self._state_lock:
-                    if generation != self._generation:
-                        continue
-                    self._config = config
-                    self._expires_at = self._clock() + self._ttl
-                    if self._refresh_task is task:
-                        self._refresh_task = None
-                    return config
-        except BaseException:
-            with self._state_lock:
-                if self._refresh_task is task:
-                    self._refresh_task = None
-            raise
-
-    @staticmethod
-    def _consume_refresh_exception(task: asyncio.Task[FrontendConfig]) -> None:
-        if not task.cancelled():
-            task.exception()
-
-    def invalidate(self) -> None:
-        with self._state_lock:
-            self._generation += 1
-            self._config = None
-            self._expires_at = 0.0
-
-
-_frontend_config_cache = FrontendConfigCache(_CONFIG_CACHE_TTL)
-
-
-def invalidate_config_cache() -> None:
-    """Clear cached config so the next request rebuilds it."""
-    _frontend_config_cache.invalidate()
-
-
 @router.get('/uuid', response_model=UuidResponse, mcp=True)
 @handle_errors(operation='generate UUID')
 def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
@@ -129,14 +56,14 @@ def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
 @handle_errors(operation='get config')
 async def get_config() -> FrontendConfig:
     """Get application configuration: runtime settings, logging settings, feature flags, and default namespace."""
-    return await _frontend_config_cache.get_or_create(_build_frontend_config)
-
-
-def _build_frontend_config() -> FrontendConfig:
-    """Build the frontend configuration from current runtime and persisted settings."""
     from backend_core.database import run_settings_db
 
-    db_settings = run_settings_db(get_settings)
+    db_settings = await run_in_threadpool(run_settings_db, get_settings)
+    return _build_frontend_config(db_settings)
+
+
+def _build_frontend_config(db_settings: SettingsResponse) -> FrontendConfig:
+    """Build the frontend configuration from current runtime and persisted settings."""
     return FrontendConfig(
         timezone=settings.timezone,
         normalize_tz=settings.normalize_tz,

@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -25,10 +24,15 @@ from dataforge_protocol import enums_pb2
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.chat.chat_http import ChatHttpError, chat_with_tools, list_models
-from modules.chat.sessions import LiveSession, session_store
-from modules.mcp.executor import build_tool_context, call_tool
+from modules.chat.models import ChatSession
+from modules.chat.sessions import normalize_epoch_milliseconds, session_store
+from modules.chat.store import ConfirmationPending, chat_stream_recovery, chat_turn_store
+from modules.mcp.executor import call_tool
 from modules.mcp.models import MCPToolDefinition, MCPToolSafety
 from modules.mcp.tool_output import format_output_hint
+
+if TYPE_CHECKING:
+    from modules.chat.consumer import TurnRuntime
 
 router = APIRouter(prefix='/ai/chat', tags=['ai-chat'])
 
@@ -37,21 +41,21 @@ logger = logging.getLogger(__name__)
 HEARTBEAT_INTERVAL = 15
 
 
-def _require_owned_session(session_id: str, user: User) -> LiveSession:
-    """Return the live session, or 404 when it does not exist or belongs to another user."""
-    session = session_store.get(session_id)
-    if session is None or session.user_id != user.id:
+def _require_owned_session(session_id: str, user: User) -> ChatSession:
+    """Return persisted session configuration, or 404 for an unowned session."""
+    session = session_store.get(session_id, user_id=user.id)
+    if session is None:
         raise HTTPException(status_code=404, detail='Session not found')
     return session
 
 
-async def _require_owned_session_async(session_id: str, user: User) -> LiveSession:
+async def _require_owned_session_async(session_id: str, user: User) -> ChatSession:
     """Load a chat session without running its synchronous DB fallback on the loop."""
     return await _run_chat_db(_require_owned_session, session_id, user)
 
 
-async def _run_chat_db(function, *args):
-    return await asyncio.to_thread(function, *args)
+async def _run_chat_db[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    return await asyncio.to_thread(function, *args, **kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +161,62 @@ def _infer_patch(tool_id: str, method: str, path: str, result: dict) -> dict | N
     return {'resource': resource, 'action': action, 'id': record_id, 'data': body}
 
 
+async def _resume_checkpointed_tool(
+    session: TurnRuntime,
+    app: FastAPI,
+    registry: Sequence[MCPToolDefinition],
+    tool_context: dict[str, Any] | None,
+) -> None:
+    checkpoint = session.checkpoint
+    call = checkpoint.get('tool_call')
+    if not isinstance(call, dict):
+        raise RuntimeError('Checkpointed chat tool call is malformed')
+    tool_id = str(call.get('tool_id', ''))
+    tool = next((item for item in registry if item.id == tool_id), None)
+    if tool is None:
+        raise RuntimeError(f'Checkpointed chat tool {tool_id!r} is no longer registered')
+    method = str(call.get('method', tool.method.value))
+    path = str(call.get('path', tool.path))
+    args = call.get('args')
+    if not isinstance(args, dict):
+        raise RuntimeError('Checkpointed chat tool arguments are malformed')
+    tc = {'id': call.get('id', tool_id)}
+    remaining_calls = checkpoint.get('remaining_calls', [])
+    if not isinstance(remaining_calls, list):
+        raise RuntimeError('Checkpointed chat continuation is malformed')
+    if method != tool.method.value or path != tool.path:
+        raise RuntimeError('Checkpointed chat tool definition changed')
+
+    if checkpoint.get('phase') == 'awaiting_confirmation' and not await session.wait_for_confirm():
+        await _push_tool_error(session, tc, tool_id, method, path, args, 'User denied tool execution')
+        await session.set_checkpoint({'phase': 'provider_request'})
+        await _execute_tool_calls(session, app, registry, remaining_calls, tool_context)
+        return
+
+    await session.set_checkpoint({'phase': 'tool_running', 'tool_call': call})
+    await session.push_event({'type': 'tool_start', 'tool_id': tool_id, 'method': method, 'path': path})
+    try:
+        result = await call_tool(app, method, path, args, tool_context)
+    except ValueError as exc:
+        await _push_tool_error(session, tc, tool_id, method, path, args, str(exc))
+        await session.set_checkpoint({'phase': 'provider_request'})
+        await _execute_tool_calls(session, app, registry, remaining_calls, tool_context)
+        return
+    patch = _infer_patch(tool_id, method, path, result)
+    await session.push_event({'type': 'tool_result', 'tool_id': tool_id, 'result': result})
+    if patch:
+        await session.push_event({'type': 'ui_patch', **patch})
+    await session.append_message(
+        {
+            'role': 'tool',
+            'tool_call_id': call.get('id', tool_id),
+            'content': await serialize_json(result.get('body', '')),
+        }
+    )
+    await session.set_checkpoint({'phase': 'provider_request'})
+    await _execute_tool_calls(session, app, registry, remaining_calls, tool_context)
+
+
 _TOOL_CALL_RE = re.compile(r'TOOLCALL>\s*(\[.*\])', re.DOTALL)
 _TOOL_CALL_OBJ_RE = re.compile(r'TOOLCALL>\s*(\{.*\})', re.DOTALL)
 
@@ -260,8 +320,8 @@ def _build_tool_system_message(tools: Sequence[MCPToolDefinition | dict[str, Any
     return '\n'.join(lines)
 
 
-def _push_tool_error(
-    session: LiveSession,
+async def _push_tool_error(
+    session: TurnRuntime,
     tc: dict,
     tool_id: str,
     method: str,
@@ -270,7 +330,7 @@ def _push_tool_error(
     message: str,
 ) -> None:
     """Push tool_error event and append tool-role message for the LLM context."""
-    session.push_event(
+    await session.push_event(
         {
             'type': 'tool_error',
             'tool_id': tool_id,
@@ -280,7 +340,7 @@ def _push_tool_error(
             'errors': [{'path': '$', 'message': message}],
         },
     )
-    session.append_message(
+    await session.append_message(
         {
             'role': 'tool',
             'tool_call_id': tc.get('id', tool_id),
@@ -332,39 +392,198 @@ def _parse_text_tool_calls(content: str) -> tuple[str, list[dict]]:
     return cleaned, tool_calls
 
 
+async def _execute_tool_calls(
+    session: TurnRuntime,
+    app: FastAPI,
+    all_tools: Sequence[MCPToolDefinition],
+    tool_calls: list[dict[str, Any]],
+    tool_context: dict[str, Any] | None,
+) -> None:
+    for call_index, tc in enumerate(tool_calls):
+        remaining_calls = tool_calls[call_index + 1 :]
+        fn = tc.get('function', {})
+        tool_id = fn.get('name', '')
+        raw_args = fn.get('arguments', '{}')
+
+        tool = next((t for t in all_tools if t.id == tool_id), None)
+        if tool is None:
+            logger.warning('Unknown tool_id session=%s tool=%s', session.id, tool_id)
+            await _push_tool_error(session, tc, tool_id, '', '', {}, f"Unknown tool '{tool_id}'")
+            continue
+
+        method = tool.method.value
+        path = tool.path
+
+        try:
+            args = await asyncio.to_thread(json.loads, raw_args) if isinstance(raw_args, str) else raw_args
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                'Malformed tool args session=%s tool=%s: %s',
+                session.id,
+                tool_id,
+                exc,
+            )
+            await _push_tool_error(
+                session,
+                tc,
+                tool_id,
+                method,
+                path,
+                {},
+                f'Malformed arguments: {exc}',
+            )
+            continue
+
+        await session.push_event(
+            {
+                'type': 'tool_call',
+                'tool_id': tool_id,
+                'method': method,
+                'path': path,
+                'args': args,
+            }
+        )
+
+        valid, errors, normalized = await asyncio.to_thread(tool.validate_arguments, args)
+        if not valid:
+            await session.push_event(
+                {
+                    'type': 'tool_error',
+                    'tool_id': tool_id,
+                    'method': method,
+                    'path': path,
+                    'args': args,
+                    'errors': errors,
+                },
+            )
+            await session.append_message(
+                {
+                    'role': 'tool',
+                    'tool_call_id': tc.get('id', tool_id),
+                    'content': json.dumps({'status': 'validation_error', 'errors': errors}),
+                },
+            )
+            continue
+
+        if tool.confirm_required:
+            pending_call = {
+                'id': tc.get('id', tool_id),
+                'tool_id': tool_id,
+                'method': method,
+                'path': path,
+                'args': normalized,
+            }
+            await session.set_checkpoint(
+                {'phase': 'awaiting_confirmation', 'tool_call': pending_call, 'remaining_calls': remaining_calls},
+                status='awaiting_confirmation',
+            )
+            await session.push_event(
+                {
+                    'type': 'tool_confirm',
+                    'tool_id': tool_id,
+                    'method': method,
+                    'path': path,
+                    'args': normalized,
+                },
+            )
+            approved = await session.wait_for_confirm()
+            if not approved:
+                await _push_tool_error(
+                    session,
+                    tc,
+                    tool_id,
+                    method,
+                    path,
+                    normalized,
+                    'User denied tool execution',
+                )
+                await session.set_checkpoint({'phase': 'provider_request'})
+                continue
+
+        await session.set_checkpoint(
+            {
+                'phase': 'tool_running',
+                'remaining_calls': remaining_calls,
+                'tool_call': {
+                    'id': tc.get('id', tool_id),
+                    'tool_id': tool_id,
+                    'method': method,
+                    'path': path,
+                    'args': normalized,
+                },
+            }
+        )
+        await session.push_event(
+            {
+                'type': 'tool_start',
+                'tool_id': tool_id,
+                'method': method,
+                'path': path,
+            }
+        )
+        t0 = time.monotonic()
+        try:
+            result = await call_tool(app, method, path, normalized, tool_context)
+        except ValueError as exc:
+            await _push_tool_error(session, tc, tool_id, method, path, normalized, str(exc))
+            await session.set_checkpoint({'phase': 'provider_request'})
+            continue
+        duration_ms = round((time.monotonic() - t0) * 1000)
+        patch = _infer_patch(tool_id, method, path, result)
+
+        await session.push_event(
+            {
+                'type': 'tool_result',
+                'tool_id': tool_id,
+                'result': result,
+                'duration_ms': duration_ms,
+            }
+        )
+        if patch:
+            await session.push_event({'type': 'ui_patch', **patch})
+
+        tool_result_str = await serialize_json(result.get('body', ''))
+        await session.append_message(
+            {
+                'role': 'tool',
+                'tool_call_id': tc.get('id', tool_id),
+                'content': tool_result_str,
+            },
+        )
+        await session.set_checkpoint({'phase': 'provider_request'})
+
+
 async def _run_agent_turn(
-    session: LiveSession,
-    app: Any,
+    session: TurnRuntime,
+    app: FastAPI,
     user_content: str,
     tool_ids: list[str] | None = None,
     tool_context: dict[str, Any] | None = None,
+    registry: Sequence[MCPToolDefinition] = (),
 ) -> None:
     """Run one agent turn: send message, handle tool calls, push SSE events."""
-    from modules.mcp.routes import get_registry
-
     provider = ChatProviderDefinition.require(session.provider)
     api_key = session.api_key
     if provider.requires_session_api_key and not api_key:
-        session.push_event({'type': 'error', 'content': 'No API key configured'})
-        session.push_event({'type': 'done'})
-        await session.set_busy(False)
-        await _run_chat_db(session_store.flush, session.id)
+        await session.push_event({'type': 'error', 'content': 'No API key configured'})
+        await session.finish('failed')
         return
 
     turn_start = time.monotonic()
     tool_count = 0
     MAX_AGENT_TOOL_TURNS = 16
-    turn_usage: dict[str, int] = {
-        'prompt_tokens': 0,
-        'completion_tokens': 0,
-        'total_tokens': 0,
-    }
+    turn_usage = session.turn_usage
     logger.info('chat turn start session=%s user_len=%d', session.id, len(user_content))
-
-    session.add_message('user', user_content)
-    session.push_event({'type': 'message', 'role': 'user', 'content': user_content})
+    suspended = False
 
     try:
+        registry = [MCPToolDefinition.coerce(item) for item in registry]
+        if tool_ids:
+            id_set = set(tool_ids)
+            registry = [tool for tool in registry if tool.id in id_set]
+        if session.checkpoint.get('phase') in {'awaiting_confirmation', 'tool_ready'}:
+            await _resume_checkpointed_tool(session, app, registry, tool_context)
+
         if not provider.supports_mcp_tool_calls:
             prompt_lines: list[str] = []
             for history_msg in session.messages:
@@ -378,31 +597,30 @@ async def _run_agent_turn(
             prompt_lines.append('assistant:')
             prompt = '\n'.join(prompt_lines)
             client = get_ai_client(provider.provider, api_key=api_key)
-            assistant_content = await asyncio.to_thread(
+            await session.set_checkpoint({'phase': 'provider_request'})
+            assistant_content = await session.run_sync_provider(
                 client.generate,
                 prompt,
                 model=session.model,
                 options=None,
             )
-            session.append_message({'role': 'assistant', 'content': assistant_content})
-            session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content})
+            await session.append_message({'role': 'assistant', 'content': assistant_content})
+            await session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content})
             return
 
-        registry = [MCPToolDefinition.coerce(item) for item in get_registry(app)]
-        if tool_ids:
-            id_set = set(tool_ids)
-            registry = [t for t in registry if t.id in id_set]
         safe_tools = [t for t in registry if t.safety == MCPToolSafety.SAFE]
         mutating_tools = [t for t in registry if t.safety == MCPToolSafety.MUTATING]
         all_tools = safe_tools + mutating_tools
 
         tool_system_msg = {'role': 'system', 'content': _build_tool_system_message(all_tools)} if all_tools else None
-        use_text_format = True  # becomes False once native function calling is confirmed
+        use_text_format = session.use_text_format
 
-        turn = 0
+        turn = session.provider_turn
         while True:
             turn += 1
-            session.push_event({'type': 'turn_start', 'turn': turn})
+            session.provider_turn = turn
+            await session.set_checkpoint({'phase': 'provider_request'})
+            await session.push_event({'type': 'turn_start', 'turn': turn})
             api_messages = list(session.messages)
             if tool_system_msg and use_text_format:
                 insert_idx = 1 if api_messages and api_messages[0].get('role') == 'system' else 0
@@ -428,6 +646,7 @@ async def _run_agent_turn(
 
             if tool_calls:
                 use_text_format = False  # model uses native calling; drop text instructions hereafter
+                session.use_text_format = False
             elif assistant_content:
                 cleaned, parsed = await asyncio.to_thread(_parse_text_tool_calls, assistant_content)
                 if parsed:
@@ -445,20 +664,20 @@ async def _run_agent_turn(
             disallowed_finish = finish not in ('tool_calls', 'stop', None, '')
             if tool_calls and disallowed_finish:
                 msg = {'role': 'assistant', 'content': assistant_content or f'Stopped after {turn} turns ({finish}).'}
-                session.append_message(msg)
-                session.push_event({'type': 'message', 'role': 'assistant', 'content': msg['content']})
+                await session.append_message(msg)
+                await session.push_event({'type': 'message', 'role': 'assistant', 'content': msg['content']})
                 break
 
             if tool_calls and turn >= MAX_AGENT_TOOL_TURNS:
                 note = f'Stopped: reached the {MAX_AGENT_TOOL_TURNS} tool-turn limit.'
-                session.append_message({'role': 'assistant', 'content': assistant_content or note})
-                session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content or note})
+                await session.append_message({'role': 'assistant', 'content': assistant_content or note})
+                await session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content or note})
                 break
 
-            session.append_message(msg)
+            await session.append_message(msg)
 
             if assistant_content:
-                session.push_event(
+                await session.push_event(
                     {
                         'type': 'message',
                         'role': 'assistant',
@@ -469,148 +688,38 @@ async def _run_agent_turn(
             if not tool_calls:
                 break
 
-            for tc in tool_calls:
-                fn = tc.get('function', {})
-                tool_id = fn.get('name', '')
-                raw_args = fn.get('arguments', '{}')
+            tool_count += len(tool_calls)
+            await _execute_tool_calls(session, app, all_tools, tool_calls, tool_context)
 
-                tool = next((t for t in all_tools if t.id == tool_id), None)
-                if tool is None:
-                    logger.warning('Unknown tool_id session=%s tool=%s', session.id, tool_id)
-                    _push_tool_error(session, tc, tool_id, '', '', {}, f"Unknown tool '{tool_id}'")
-                    continue
-
-                method = tool.method.value
-                path = tool.path
-
-                try:
-                    args = await asyncio.to_thread(json.loads, raw_args) if isinstance(raw_args, str) else raw_args
-                except json.JSONDecodeError as exc:
-                    logger.warning(
-                        'Malformed tool args session=%s tool=%s: %s',
-                        session.id,
-                        tool_id,
-                        exc,
-                    )
-                    _push_tool_error(
-                        session,
-                        tc,
-                        tool_id,
-                        method,
-                        path,
-                        {},
-                        f'Malformed arguments: {exc}',
-                    )
-                    continue
-                tool_count += 1
-
-                session.push_event(
-                    {
-                        'type': 'tool_call',
-                        'tool_id': tool_id,
-                        'method': method,
-                        'path': path,
-                        'args': args,
-                    }
-                )
-
-                valid, errors, normalized = await asyncio.to_thread(tool.validate_arguments, args)
-                if not valid:
-                    session.push_event(
-                        {
-                            'type': 'tool_error',
-                            'tool_id': tool_id,
-                            'method': method,
-                            'path': path,
-                            'args': args,
-                            'errors': errors,
-                        },
-                    )
-                    session.append_message(
-                        {
-                            'role': 'tool',
-                            'tool_call_id': tc.get('id', tool_id),
-                            'content': json.dumps({'status': 'validation_error', 'errors': errors}),
-                        },
-                    )
-                    continue
-
-                if tool.confirm_required:
-                    session.push_event(
-                        {
-                            'type': 'tool_confirm',
-                            'tool_id': tool_id,
-                            'method': method,
-                            'path': path,
-                            'args': normalized,
-                        },
-                    )
-                    approved = await session.wait_for_confirm()
-                    if not approved:
-                        _push_tool_error(
-                            session,
-                            tc,
-                            tool_id,
-                            method,
-                            path,
-                            normalized,
-                            'User denied tool execution',
-                        )
-                        continue
-
-                session.push_event(
-                    {
-                        'type': 'tool_start',
-                        'tool_id': tool_id,
-                        'method': method,
-                        'path': path,
-                    }
-                )
-                t0 = time.monotonic()
-                try:
-                    result = await call_tool(app, method, path, normalized, tool_context)
-                except ValueError as exc:
-                    _push_tool_error(session, tc, tool_id, method, path, normalized, str(exc))
-                    continue
-                duration_ms = round((time.monotonic() - t0) * 1000)
-                patch = _infer_patch(tool_id, method, path, result)
-
-                session.push_event(
-                    {
-                        'type': 'tool_result',
-                        'tool_id': tool_id,
-                        'result': result,
-                        'duration_ms': duration_ms,
-                    }
-                )
-                if patch:
-                    session.push_event({'type': 'ui_patch', **patch})
-
-                tool_result_str = await serialize_json(result.get('body', ''))
-                session.append_message(
-                    {
-                        'role': 'tool',
-                        'tool_call_id': tc.get('id', tool_id),
-                        'content': tool_result_str,
-                    },
-                )
-
-        session.push_event({'type': 'usage', **turn_usage})
+        await session.push_event({'type': 'usage', **turn_usage})
+    except ConfirmationPending:
+        suspended = True
     except ChatHttpError as exc:
         logger.error('Chat HTTP error session=%s: %s', session.id, exc)
-        session.push_event({'type': 'error', 'content': f'AI provider error: {exc}'})
+        session.failed = True
+        await session.push_event({'type': 'error', 'content': f'AI provider error: {exc}'})
     except AIError as exc:
         logger.error('AI client error session=%s: %s', session.id, exc)
-        session.push_event({'type': 'error', 'content': f'AI provider error: {exc}'})
+        session.failed = True
+        await session.push_event({'type': 'error', 'content': f'AI provider error: {exc}'})
     except asyncio.CancelledError:
         logger.info('Agent turn cancelled session=%s', session.id)
-        session.push_event({'type': 'error', 'content': 'Generation stopped'})
+        if session.finished:
+            pass
+        elif session.owner_stopping:
+            session.failed = True
+            await session.push_event({'type': 'error', 'content': 'Generation interrupted by coordinator restart'})
+        else:
+            session.stop_requested = True
+            await session.push_event({'type': 'error', 'content': 'Generation stopped'})
     except httpx.TimeoutException as exc:
         logger.error('Timeout session=%s: %s', session.id, exc)
-        session.push_event({'type': 'error', 'content': 'Request timed out'})
+        session.failed = True
+        await session.push_event({'type': 'error', 'content': 'Request timed out'})
     except Exception as exc:
         logger.exception('Unexpected error session=%s', session.id)
-        session.push_event({'type': 'error', 'content': f'Internal error: {type(exc).__name__}'})
+        session.failed = True
+        await session.push_event({'type': 'error', 'content': f'Internal error: {type(exc).__name__}'})
     finally:
         elapsed = time.monotonic() - turn_start
         logger.info(
@@ -619,9 +728,9 @@ async def _run_agent_turn(
             elapsed,
             tool_count,
         )
-        session.push_event({'type': 'done'})
-        await session.set_busy(False)
-        await _run_chat_db(session_store.flush, session.id)
+        if not suspended:
+            status = 'interrupted' if session.owner_stopping else 'failed' if session.failed or session.stop_requested else 'completed'
+            await session.finish(status)
 
 
 @router.get('/sessions')
@@ -636,7 +745,13 @@ def list_sessions(user: User = Depends(get_current_user)) -> list[dict]:
 def create_session(body: CreateSessionRequest, user: User = Depends(get_current_user)) -> dict:
     """Create a new chat session with the given provider/model/key."""
     provider = ChatProviderDefinition.require(body.provider).provider
-    session = session_store.create(ai_provider_name(provider), body.model, body.api_key or '', body.system_prompt or '', user_id=user.id)
+    session = session_store.create(
+        ai_provider_name(provider),
+        body.model,
+        body.api_key or '',
+        body.system_prompt or '',
+        user_id=user.id,
+    )
     return {
         'session_id': session.id,
         'model': session.model,
@@ -648,21 +763,18 @@ def create_session(body: CreateSessionRequest, user: User = Depends(get_current_
 @handle_errors('update chat session')
 def update_session(session_id: str, body: UpdateSessionRequest, user: User = Depends(get_current_user)) -> dict:
     """Update model, system prompt, or API key on a live session."""
-    session = _require_owned_session(session_id, user)
-    if body.provider is not None:
-        session.provider = ai_provider_name(ChatProviderDefinition.require(body.provider).provider)
-    if body.model is not None:
-        session.model = body.model
-    if body.api_key is not None:
-        session.api_key = body.api_key
-    if body.system_prompt is not None:
-        session.system_prompt = body.system_prompt
-        # Update system message in conversation history
-        if session.messages and session.messages[0].get('role') == 'system':
-            session.messages[0]['content'] = body.system_prompt
-        elif body.system_prompt:
-            session.messages.insert(0, {'role': 'system', 'content': body.system_prompt})
-    session_store.flush(session_id)
+    _require_owned_session(session_id, user)
+    provider = ai_provider_name(ChatProviderDefinition.require(body.provider).provider) if body.provider is not None else None
+    session = session_store.update(
+        session_id,
+        user_id=user.id,
+        provider=provider,
+        model=body.model,
+        api_key=body.api_key,
+        system_prompt=body.system_prompt,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail='Session not found')
     return {
         'session_id': session_id,
         'model': session.model,
@@ -674,25 +786,24 @@ def update_session(session_id: str, body: UpdateSessionRequest, user: User = Dep
 @handle_errors('send chat message')
 async def send_message(request: Request, body: MessageRequest, user: User = Depends(get_current_user)) -> dict:
     """Send a user message; agent processing is kicked off asynchronously."""
-    session = await _require_owned_session_async(body.session_id, user)
-
-    acquired = await session.acquire_turn()
-    if not acquired:
-        session.push_event(
-            {
-                'type': 'error',
-                'content': 'Agent is busy — wait for the current turn to finish',
-            }
+    await _require_owned_session_async(body.session_id, user)
+    session_token = request.headers.get('X-Session-Token') or request.cookies.get('session_token') or ''
+    try:
+        await _run_chat_db(
+            chat_turn_store.enqueue,
+            session_id=body.session_id,
+            user_id=user.id,
+            content=body.content,
+            tool_ids=body.tool_ids,
+            namespace=get_namespace(),
+            session_token=session_token,
         )
-        raise HTTPException(status_code=409, detail='Agent busy')
-    context = build_tool_context(
-        {
-            'X-Session-Token': request.headers.get('X-Session-Token') or request.cookies.get('session_token') or '',
-            'X-Namespace': request.headers.get('X-Namespace') or get_namespace(),
-        },
-    )
-    task = asyncio.create_task(_run_agent_turn(session, request.app, body.content, body.tool_ids or None, context))
-    session.set_task(task)
+    except RuntimeError as exc:
+        if str(exc) != 'Agent busy':
+            raise
+        raise HTTPException(status_code=409, detail='Agent busy') from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail='Session not found') from exc
     return {'status': 'processing', 'session_id': body.session_id}
 
 
@@ -700,9 +811,8 @@ async def send_message(request: Request, body: MessageRequest, user: User = Depe
 @handle_errors('stop chat generation')
 async def stop_generation(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Cancel the running agent turn for a session."""
-    session = await _require_owned_session_async(session_id, user)
-    session.cancel_task()
-    await session.set_busy(False)
+    await _require_owned_session_async(session_id, user)
+    await _run_chat_db(chat_turn_store.request_stop, session_id=session_id, user_id=user.id)
     return {'status': 'stopped', 'session_id': session_id}
 
 
@@ -714,54 +824,72 @@ class ConfirmRequest(BaseModel):
 
 @router.post('/sessions/{session_id}/confirm')
 @handle_errors('confirm chat tool')
-def confirm_tool(session_id: str, body: ConfirmRequest, user: User = Depends(get_current_user)) -> dict:
+async def confirm_tool(session_id: str, body: ConfirmRequest, user: User = Depends(get_current_user)) -> dict:
     """Confirm or deny a pending tool execution."""
-    session = _require_owned_session(session_id, user)
-    session.resolve_confirm(body.approved)
+    await _require_owned_session_async(session_id, user)
+    await _run_chat_db(chat_turn_store.confirm, session_id=session_id, user_id=user.id, approved=body.approved)
     return {'status': 'resolved', 'approved': body.approved}
 
 
 @router.get('/history/{session_id}')
 @handle_errors('get chat history')
-def get_history(session_id: str, user: User = Depends(get_current_user)) -> dict:
+async def get_history(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Return the full event history for a session."""
-    session = _require_owned_session(session_id, user)
-    return {'session_id': session_id, 'history': session.get_history()}
+    await _require_owned_session_async(session_id, user)
+    history, cursor, gap = await _run_chat_db(session_store.history, session_id)
+    return {'session_id': session_id, 'history': history, 'last_event_id': cursor, 'history_gap': gap}
 
 
 @router.get('/stream/{session_id}')
 @handle_errors('stream chat events')
-async def stream(session_id: str, user: User = Depends(get_current_user)) -> StreamingResponse:
+async def stream(
+    session_id: str,
+    request: Request,
+    after: int = 0,
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
     """SSE stream of chat events for a session with heartbeat."""
-    session = await _require_owned_session_async(session_id, user)
-
-    session.reopen_stream()
+    await _require_owned_session_async(session_id, user)
+    header_cursor = request.headers.get('Last-Event-ID')
+    if header_cursor is not None:
+        try:
+            after = max(int(header_cursor), 0)
+        except ValueError:
+            after = 0
+    after = max(after, 0)
 
     async def generate() -> AsyncIterator[bytes]:
-        queue = session._queue
-        heartbeat_task: asyncio.Task[None] | None = None
-
-        async def _heartbeat_loop() -> None:
-            while True:
-                await asyncio.sleep(HEARTBEAT_INTERVAL)
-                if not session._closed:
-                    queue.put_nowait({'_heartbeat': True})
-
+        cursor = after
+        chat_stream_recovery.subscribe(session_id)
         try:
-            heartbeat_task = asyncio.create_task(_heartbeat_loop())
             while True:
-                event = await queue.get()
-                if event is None:
-                    break
-                if event.get('_heartbeat'):
-                    yield b': heartbeat\n\n'
+                version = chat_stream_recovery.version(session_id)
+                rows, latest, oldest = await _run_chat_db(
+                    chat_turn_store.read_events,
+                    session_id=session_id,
+                    after=cursor,
+                    limit=100,
+                )
+                if cursor > latest:
+                    cursor = 0
                     continue
-                yield f'data: {await serialize_json(event)}\n\n'.encode()
+                if oldest is not None and cursor < oldest - 1:
+                    gap_event = {'type': 'history_gap', 'oldest_event_id': oldest}
+                    yield f'id: {oldest - 1}\ndata: {await serialize_json(gap_event)}\n\n'.encode()
+                    cursor = oldest - 1
+                    continue
+                if rows:
+                    for row in rows:
+                        cursor = int(row.sequence)
+                        event = {**row.payload, 'ts': normalize_epoch_milliseconds(row.payload.get('ts')) or int(row.created_at.timestamp() * 1000)}
+                        yield f'id: {cursor}\ndata: {await serialize_json(event)}\n\n'.encode()
+                    continue
+                try:
+                    await asyncio.wait_for(chat_stream_recovery.wait(session_id, version), timeout=HEARTBEAT_INTERVAL)
+                except TimeoutError:
+                    yield b': heartbeat\n\n'
         finally:
-            if heartbeat_task is not None:
-                heartbeat_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await heartbeat_task
+            chat_stream_recovery.unsubscribe(session_id)
 
     return StreamingResponse(
         generate(),
@@ -775,7 +903,7 @@ async def stream(session_id: str, user: User = Depends(get_current_user)) -> Str
 def delete_session(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Close and delete a chat session."""
     _require_owned_session(session_id, user)
-    session_store.delete(session_id)
+    session_store.delete(session_id, user_id=user.id)
     return {'status': 'closed', 'session_id': session_id}
 
 

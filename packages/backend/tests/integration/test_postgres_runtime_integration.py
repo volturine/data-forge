@@ -12,11 +12,12 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from alembic import command
 from sqlalchemy import text
 from sqlmodel import Session
 from websockets.asyncio.client import connect
 
-from backend_core.migrations import _PUBLIC_REVISION, _TENANT_REVISION
+from backend_core.migrations import _PUBLIC_REVISION, _TENANT_REVISION, _alembic_config
 from dataforge_protocol import compute_pb2, enums_pb2
 from tests.harness.postgres_harness import (
     BACKEND_ROOT,
@@ -203,6 +204,28 @@ def _upload_datasource(client, name: str, *, content: str = SAMPLE_CSV) -> str:
     )
     assert response.status_code == 200, response.text
     return str(response.json()['id'])
+
+
+def _runtime_failure_context(container: PostgresContainer, **processes: ManagedProcess) -> str:
+    with container.connect() as connection:
+        requests = connection.execute(
+            'SELECT id, kind, status, engine_resource_id, lease_owner, attempts, error_message FROM "default".compute_requests ORDER BY created_at DESC LIMIT 5'
+        ).fetchall()
+        wakes = connection.execute(
+            'SELECT namespace, kind, pending, generation, processed_generation FROM public.runtime_namespace_work ORDER BY namespace, kind'
+        ).fetchall()
+    engine_logs = ''
+    if requests:
+        request_id = str(requests[0][0])
+        engine_name = f'dataforge-engine-default-{request_id[:15]}'
+        containers = run_command(
+            ['docker', 'ps', '-a', '--filter', f'name={engine_name}', '--format', '{{.ID}}'],
+            env=docker_env(),
+            check=False,
+        ).stdout.splitlines()
+        engine_logs = '\n'.join(run_command(['docker', 'logs', container_id], env=docker_env(), check=False).stdout for container_id in containers)
+    tails = '\n'.join(f'{name} tail:\n{process.tail()}' for name, process in processes.items())
+    return f'\nrecent compute requests: {requests!r}\nruntime work: {wakes!r}\nengine logs:\n{engine_logs}\n{tails}'
 
 
 def _registered_worker_count(container: PostgresContainer, kind: str) -> int:
@@ -566,15 +589,9 @@ def test_runtime_work_migration_backfills_existing_tenant_work(monkeypatch, tmp_
             session.add(schedule)
             session.commit()
 
-        # Simulate an upgrade from the last schema before the durable index.
-        # The tenant event survives; the public recovery marker does not.
-        with container.connect() as connection:
-            connection.execute('DROP TABLE public.runtime_namespace_work_wakes')
-            connection.execute('DROP TABLE public.runtime_namespace_work')
-            connection.execute('DROP TABLE public.runtime_coordinator_state')
-            connection.execute('DROP TABLE public.mcp_pending_actions')
-            connection.execute('UPDATE public.alembic_version SET version_num = %s', ('0001_runtime_public',))
-            connection.commit()
+        # Downgrade the public schema as Alembic would, preserving tenant work
+        # while removing every public object introduced after this revision.
+        command.downgrade(_alembic_config(scope='public', schema='public'), '0001_runtime_public', tag='public')
 
         migrate_runtime(['default'])
 
@@ -584,6 +601,14 @@ def test_runtime_work_migration_backfills_existing_tenant_work(monkeypatch, tmp_
                     connection,
                     'SELECT pending FROM public.runtime_namespace_work WHERE namespace = %s AND kind = %s',
                     ('default', 'schedule'),
+                )
+                is True
+            )
+            assert (
+                _query_value(
+                    connection,
+                    'SELECT pending FROM public.runtime_namespace_work WHERE namespace = %s AND kind = %s',
+                    ('default', 'outbox'),
                 )
                 is True
             )
@@ -1699,7 +1724,19 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
             import httpx
 
             with httpx.Client(base_url=_http_base_url(api_one_port), timeout=30) as client_one:
-                datasource_id = _upload_datasource(client_one, 'cross-api-runtime', content=_make_csv(200000))
+                try:
+                    datasource_id = _upload_datasource(client_one, 'cross-api-runtime', content=_make_csv(200000))
+                except AssertionError as exc:
+                    raise AssertionError(
+                        f'{exc}'
+                        + _runtime_failure_context(
+                            container,
+                            api_one=api_one,
+                            api_two=api_two,
+                            coordinator=coordinator,
+                            worker_manager=worker_manager,
+                        )
+                    ) from exc
                 analysis = _create_analysis(client_one, 'Cross API Runtime', datasource_id, steps=_slow_steps())
                 build_id = _start_build(client_one, analysis)
 
@@ -1951,7 +1988,19 @@ def test_postgres_runtime_supports_cross_api_cancellation(
             big_csv = _make_csv(200000)
 
             with httpx.Client(base_url=_http_base_url(api_one_port), timeout=30) as client_one:
-                datasource_id = _upload_datasource(client_one, 'cross-api-cancel', content=big_csv)
+                try:
+                    datasource_id = _upload_datasource(client_one, 'cross-api-cancel', content=big_csv)
+                except AssertionError as exc:
+                    raise AssertionError(
+                        f'{exc}'
+                        + _runtime_failure_context(
+                            container,
+                            api_one=api_one,
+                            api_two=api_two,
+                            coordinator=coordinator,
+                            worker_manager=worker_manager,
+                        )
+                    ) from exc
                 analysis = _create_analysis(client_one, 'Cross API Cancel', datasource_id, steps=_slow_steps())
                 build_id = _start_build(client_one, analysis)
                 _wait_for_running_build(client_one, build_id, timeout=180)

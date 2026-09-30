@@ -24,15 +24,16 @@ _cache_lock = threading.Lock()
 
 
 def _credential_role(identity: compute_pb2.EngineIdentity) -> str:
-    return "builder" if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD else "reader"
+    return "builder" if identity.scope in {enums_pb2.ENGINE_SCOPE_BUILD, enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW} else "reader"
 
 
 def resolve_engine_credentials(namespace: str, identity: compute_pb2.EngineIdentity) -> ObjectStoreCredentials:
     """Fetch namespace-scoped engine credentials from the backend.
 
-    The backend provisions one reader and one builder identity per namespace
-    and hands out only the role matching the engine scope. A missing record
-    fails the launch; there is no broader-credential fallback.
+    The backend provisions one reader and one builder identity per namespace.
+    Datasource containers need the builder role to stream claim-scoped staging
+    artifacts; both roles remain confined to their namespace bucket. A missing
+    record fails the launch; there is no broader-credential fallback.
     """
     role = _credential_role(identity)
     key = (namespace, role)

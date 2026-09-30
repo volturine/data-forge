@@ -7,6 +7,23 @@
 # E2E_DEPLOYMENT_ID before invoking compose.
 
 services:
+  openai-fixture:
+    image: data-forge-api:e2e
+    command: ["python3", "/e2e/openai_fixture.py"]
+    ports:
+      - "0:8001"
+    volumes:
+      - ../scripts/e2e/openai_fixture.py:/e2e/openai_fixture.py:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://openai-fixture:8001/health').status==200 else 1)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   postgres:
     image: postgres:18-alpine
     command: ["postgres", "-c", "max_connections=500"]

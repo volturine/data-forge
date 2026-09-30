@@ -215,22 +215,11 @@ _tenant_engine_lock = Lock()
 _engine_override: Engine | None = None
 _settings_engine_override: Engine | None = None
 _settings_bootstrap_hook: Callable[[Session], None] | None = None
-_settings_cache_invalidator: Callable[[], None] | None = None
 
 
 def register_settings_bootstrap_hook(hook: Callable[[Session], None] | None) -> None:
     global _settings_bootstrap_hook
     _settings_bootstrap_hook = hook
-
-
-def register_settings_cache_invalidator(hook: Callable[[], None] | None) -> None:
-    global _settings_cache_invalidator
-    _settings_cache_invalidator = hook
-
-
-def _invalidate_settings_cache() -> None:
-    if _settings_cache_invalidator is not None:
-        _settings_cache_invalidator()
 
 
 def set_engine_override(test_engine: Engine):
@@ -246,13 +235,11 @@ def clear_engine_override():
 def set_settings_engine_override(test_engine: Engine):
     global _settings_engine_override
     _settings_engine_override = test_engine
-    _invalidate_settings_cache()
 
 
 def clear_settings_engine_override():
     global _settings_engine_override
     _settings_engine_override = None
-    _invalidate_settings_cache()
 
 
 def _set_postgres_search_path(raw_connection: object, namespace: str) -> None:
@@ -416,6 +403,7 @@ def _shared_tables():
     from backend_core.persistence.runtime_events.models import RuntimeCoordinatorState, RuntimeNamespaceWork
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
     from backend_core.persistence.settings.models import AppSettings
+    from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn
 
     table_names = {
         AppSettings.__tablename__,
@@ -426,6 +414,10 @@ def _shared_tables():
         RuntimeCoordinatorState.__tablename__,
         RuntimeNamespaceWork.__tablename__,
         RuntimeWorker.__tablename__,
+        ChatSession.__tablename__,
+        ChatTurn.__tablename__,
+        ChatMessage.__tablename__,
+        ChatEvent.__tablename__,
     }
     return [table for table in AppSettings.metadata.sorted_tables if table.name in table_names]
 
@@ -507,7 +499,6 @@ def _seed_shared_state() -> None:
         register_namespace(session, settings.default_namespace)
 
     run_settings_db(_seed)
-    _invalidate_settings_cache()
 
 
 def run_settings_connection_locked[T](func: Callable[[Connection], T]) -> T:
@@ -594,7 +585,6 @@ def _bootstrap_postgres() -> None:
         migrate_runtime(normalized)
     for namespace in normalized:
         namespace_paths(namespace)
-    _invalidate_settings_cache()
 
 
 async def init_db() -> None:

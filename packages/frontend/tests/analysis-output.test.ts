@@ -34,7 +34,19 @@ test.beforeEach(async ({ sharedDatasource }) => {
 
 async function expectCompletedEventually(locator: Locator) {
 	// Builds under parallel Docker engines need the full cold-start budget.
-	await expect(locator).toContainText(/Completed/i, { timeout: buildTimeoutMs() });
+	let terminalSummary = '';
+	await expect
+		.poll(
+			async () => {
+				terminalSummary = await locator.innerText().catch(() => '');
+				return /\bcompleted\b|\bfailed\b|\bcancelled\b|\bcanceled\b/i.test(terminalSummary);
+			},
+			{ timeout: buildTimeoutMs() }
+		)
+		.toBe(true);
+	expect(terminalSummary, `Build ended without success: ${terminalSummary}`).toMatch(
+		/\bcompleted\b/i
+	);
 }
 
 /** Delete through gallery UI (product delete shuts the analysis engine once). */

@@ -23,6 +23,16 @@ _OUTBOX_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='runtime
 T = TypeVar('T')
 
 
+def wake(namespace: str) -> None:
+    """Wake runtime event consumers for one namespace."""
+    OUTBOX_WAKE_HUB.publish(namespace)
+
+
+async def run(stop_event: asyncio.Event) -> None:
+    """Exported lifecycle hook for the runtime wake lane."""
+    await RuntimeOutboxDispatcher().run(stop_event)
+
+
 class RuntimeOutboxDispatcher:
     """Deliver durable runtime events with one bounded recovery cursor.
 

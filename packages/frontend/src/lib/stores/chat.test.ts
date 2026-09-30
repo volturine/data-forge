@@ -179,7 +179,9 @@ describe('ChatStore — pure local logic', () => {
 			vi.mocked(chatApi.getHistory).mockReturnValue(
 				okAsync({
 					session_id: 'session-1',
-					history: []
+					history: [],
+					last_event_id: 0,
+					history_gap: false
 				})
 			);
 			vi.mocked(chatApi.openEventStream).mockReturnValue({
@@ -194,6 +196,17 @@ describe('ChatStore — pure local logic', () => {
 			expect(store.sessionId).toBe('session-1');
 			expect(store.configured).toBe(true);
 			expect(chatApi.getHistory).toHaveBeenCalledWith('session-1');
+			expect(chatApi.openEventStream).toHaveBeenLastCalledWith('session-1', 0);
+			const source = vi.mocked(chatApi.openEventStream).mock.results[0].value;
+			source.onmessage?.call(
+				source,
+				new MessageEvent('message', {
+					data: JSON.stringify({ type: 'message', role: 'assistant', content: 'replayed' }),
+					lastEventId: '37'
+				})
+			);
+			store.reconnectNow();
+			expect(chatApi.openEventStream).toHaveBeenLastCalledWith('session-1', 37);
 		});
 
 		test('open_panel falls back to a usable provider when the default one is not configured', async () => {

@@ -135,6 +135,10 @@ class KeyedVersionHub:
                 continue
             loop.call_soon_threadsafe(self._resolve_waiter, future, version)
 
+    def version(self, key: str) -> int:
+        with self._lock:
+            return self._versions.get(key, 0)
+
     def waiter_count(self) -> int:
         with self._lock:
             return sum(len(entries) for entries in self._waiters.values())

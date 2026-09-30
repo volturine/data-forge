@@ -120,6 +120,8 @@ message ComputeCommand {
   reserved 9;
   reserved "datasource_request";
 
+  repeated DatasourceInputRevision input_revisions = 11;
+
   oneof command {
     StepPreviewCommand preview = 1;
     StepSchemaCommand schema = 2;

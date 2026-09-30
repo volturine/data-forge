@@ -32,6 +32,10 @@ class DatasourcePublicationClaimLost(RuntimeError):
     """Raised when a fenced ingest publication loses ownership before commit."""
 
 
+class DatasourcePublicationRevisionChanged(RuntimeError):
+    """Raised when schema work was computed from an obsolete datasource revision."""
+
+
 def _schema_cache_payload(schema_info: datasource_pb2.SchemaInfo | None) -> dict[str, Any] | None:
     if schema_info is None:
         return None
@@ -133,16 +137,31 @@ def publish_ingest(
     return _response(datasource)
 
 
-def publish_schema_cache(session: Session, *, datasource_id: str, schema_info: datasource_pb2.SchemaInfo) -> datasource_pb2.SchemaInfo:
+def publish_schema_cache(
+    session: Session,
+    *,
+    datasource_id: str,
+    expected_revision: int,
+    schema_info: datasource_pb2.SchemaInfo,
+    publication_guard: Any,
+) -> datasource_pb2.SchemaInfo:
+    publication_guard(session)
     statement = (
         update(DataSource)
-        .where(sa(DataSource.id == datasource_id), col(DataSource.is_pending_delete).is_(False))
+        .where(
+            sa(DataSource.id == datasource_id),
+            sa(DataSource.revision == expected_revision),
+            col(DataSource.is_pending_delete).is_(False),
+        )
         .values(schema_cache=_schema_cache_payload(schema_info))
     )
     publication = cast(CursorResult[Any], session.execute(statement))
     if publication.rowcount != 1:
         session.rollback()
-        raise datasource_not_found(datasource_id)
+        datasource = session.get(DataSource, datasource_id)
+        if datasource is None or datasource.is_pending_delete:
+            raise datasource_not_found(datasource_id)
+        raise DatasourcePublicationRevisionChanged(f'Datasource {datasource_id} revision changed before schema publication')
     session.commit()
     return attach_column_descriptions(session, datasource_id, schema_info)
 

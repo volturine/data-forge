@@ -191,10 +191,32 @@ async def test_coordinator_notification_only_wakes_outbox(monkeypatch) -> None:
     published: list[object] = []
     monkeypatch.setattr(runtime_coordinator.OUTBOX_WAKE_HUB, 'publish', published.append)
 
-    await runtime_coordinator._handle_coordinator_notification({'kind': runtime_coordinator.OUTBOX_WAKE_KIND, 'namespace': 'tenant-a'})
-    await runtime_coordinator._handle_coordinator_notification({'kind': 'compute_response', 'request_id': 'request-1'})
+    wakes: list[str] = []
+    callbacks = {'chat_wake': lambda: wakes.append('chat'), 'telegram_wake': lambda: wakes.append('telegram')}
+    await runtime_coordinator._handle_coordinator_notification({'kind': runtime_coordinator.OUTBOX_WAKE_KIND, 'namespace': 'tenant-a'}, **callbacks)
+    await runtime_coordinator._handle_coordinator_notification({'kind': 'compute_response', 'request_id': 'request-1'}, **callbacks)
+    await runtime_coordinator._handle_coordinator_notification({'kind': 'chat_turn'}, **callbacks)
+    await runtime_coordinator._handle_coordinator_notification({'kind': 'settings_changed'}, **callbacks)
+    await runtime_coordinator._handle_coordinator_notification({'kind': 'telegram_detection'}, **callbacks)
 
     assert published == ['tenant-a']
+    assert wakes == ['chat', 'telegram', 'telegram']
+
+
+@pytest.mark.asyncio
+async def test_silent_actor_exit_fails_owned_epoch() -> None:
+    async def actor() -> None:
+        return
+
+    process_stop = asyncio.create_task(asyncio.Event().wait())
+    owner_stop = asyncio.create_task(asyncio.Event().wait())
+    try:
+        with pytest.raises(RuntimeError, match='exited unexpectedly'):
+            await runtime_coordinator._supervise_epoch([asyncio.create_task(actor(), name='test-actor')], process_stop, owner_stop)
+    finally:
+        process_stop.cancel()
+        owner_stop.cancel()
+        await asyncio.gather(process_stop, owner_stop, return_exceptions=True)
 
 
 @pytest.mark.asyncio

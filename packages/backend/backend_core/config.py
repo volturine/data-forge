@@ -7,6 +7,8 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import DotEnvSettingsSource
 
+_MAX_UPLOAD_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024
+
 # (field_name, min_inclusive, max_inclusive) — None means no bound
 _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('port', 1, 65535),
@@ -36,7 +38,7 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('log_client_flush_interval_ms', 1, None),
     ('log_client_dedupe_window_ms', 1, None),
     ('log_client_flush_cooldown_ms', 1, None),
-    ('upload_max_file_size_bytes', 0, None),
+    ('upload_max_file_size_bytes', 0, _MAX_UPLOAD_FILE_SIZE_BYTES),
 ]
 _PLACEHOLDER_ENCRYPTION_KEYS = {'your-encryption-key-here'}
 _PLACEHOLDER_PASSWORDS = {'changeme123', 'changeme123!', 'replaceme123', 'replace-with-strong-password'}
@@ -109,7 +111,8 @@ class Settings(BaseSettings):
     default_namespace: str = Field(default='default', alias='DEFAULT_NAMESPACE')
 
     upload_chunk_size: int = Field(default=5 * 1024 * 1024, alias='UPLOAD_CHUNK_SIZE')
-    upload_max_file_size_bytes: int = Field(default=2 * 1024 * 1024 * 1024, alias='UPLOAD_MAX_FILE_SIZE_BYTES')
+    # Zero disables the configurable soft cap; the data-plane transport still enforces its 2 GiB ceiling.
+    upload_max_file_size_bytes: int = Field(default=_MAX_UPLOAD_FILE_SIZE_BYTES, alias='UPLOAD_MAX_FILE_SIZE_BYTES')
 
     # Scheduler check interval in seconds (default 60 seconds)
     # How often to check for schedules that need to run

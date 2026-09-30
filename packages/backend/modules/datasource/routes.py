@@ -5,13 +5,14 @@ import os
 import tempfile
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import Depends, Form, HTTPException, UploadFile
 from sqlmodel import Session
 
 from backend_core import datasource_delete_service
 from backend_core.config import settings
-from backend_core.data_plane_client import client_from_settings
+from backend_core.data_plane_client import WorkerDataPlaneClient, client_from_settings
 from backend_core.database import get_db_async, run_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
@@ -28,6 +29,7 @@ from backend_core.validation import (
     parse_datasource_id,
     parse_preflight_id,
 )
+from dataforge_protocol import enums_pb2
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.compute.executor_client import (
@@ -35,6 +37,7 @@ from modules.compute.executor_client import (
     create_database_datasource as create_remote_database_datasource,
     create_file_datasource as create_remote_file_datasource,
     create_iceberg_datasource as create_remote_iceberg_datasource,
+    execute_excel_preflight,
     get_column_stats as get_remote_column_stats,
     get_datasource_schema as get_remote_datasource_schema,
     ingest_datasource as ingest_remote_datasource,
@@ -44,14 +47,40 @@ from modules.datasource import schemas, service
 from modules.datasource.preflight import (
     clear_preflight,
     create_preflight,
+    format_excel_cell_range,
     get_preflight,
+    preview_result,
+    resolved_selection,
 )
 from modules.datasource.schema_protocol import schema_info_response_payload
 from modules.mcp.router import MCPRouter
 
 logger = logging.getLogger(__name__)
+_MAX_OBJECT_TRANSFER_BYTES = 2 * 1024 * 1024 * 1024
 
 router = MCPRouter(prefix='/datasource', tags=['datasource'])
+
+_EXCEL_PARSING_KEYS = (
+    'sheet_name',
+    'start_row',
+    'start_col',
+    'end_col',
+    'end_row',
+    'has_header',
+    'table_name',
+    'named_range',
+    'cell_range',
+)
+
+
+def _datasource_update_snapshot(session: Session, datasource_id: str) -> tuple[dict[str, object], int, str, str]:
+    datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
+    return (
+        dict(datasource.config),
+        datasource.revision,
+        datasource.source_type,
+        datasource.config.get('file_type', '') if isinstance(datasource.config.get('file_type', ''), str) else '',
+    )
 
 
 def _require_active_datasource(session: Session, datasource_id: str) -> None:
@@ -69,6 +98,7 @@ def _write_chunk(path: Path, chunk: bytes) -> None:
 
 
 async def _save_upload_file(file: UploadFile, file_path: Path, max_bytes: int) -> None:
+    effective_max_bytes = min(max_bytes or _MAX_OBJECT_TRANSFER_BYTES, _MAX_OBJECT_TRANSFER_BYTES)
     total = 0
     await asyncio.to_thread(file_path.write_bytes, b'')
     while True:
@@ -76,7 +106,7 @@ async def _save_upload_file(file: UploadFile, file_path: Path, max_bytes: int) -
         if not chunk:
             return
         total += len(chunk)
-        if max_bytes and total > max_bytes:
+        if total > effective_max_bytes:
             raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
         await asyncio.to_thread(_write_chunk, file_path, chunk)
 
@@ -89,36 +119,54 @@ def _temporary_upload_path(suffix: str) -> Path:
     return Path(path)
 
 
+async def _wait_for_transfer_task[T](task: asyncio.Task[T]) -> T:
+    while True:
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.done():
+                return task.result()
+
+
+async def _upload_staged_file_to_object_store(
+    data_plane: WorkerDataPlaneClient,
+    file_path: Path,
+    target_url: str,
+    *,
+    max_bytes: int,
+) -> None:
+    upload_task = asyncio.create_task(asyncio.to_thread(data_plane.upload_object_file, file_path, target_url, max_bytes=max_bytes))
+    try:
+        await asyncio.shield(upload_task)
+    except asyncio.CancelledError:
+        try:
+            await _wait_for_transfer_task(upload_task)
+        except Exception:
+            logger.debug('Cancelled staged upload did not complete successfully: %s', target_url, exc_info=True)
+        cleanup_task = asyncio.create_task(asyncio.to_thread(data_plane.delete_object, target_url))
+        try:
+            await _wait_for_transfer_task(cleanup_task)
+        except Exception:
+            logger.exception('Failed to remove cancelled staged upload target: %s', target_url)
+        raise
+
+
 async def _stage_upload_to_object_store(file: UploadFile, target_name: str) -> str:
     temp_path = await asyncio.to_thread(_temporary_upload_path, Path(target_name).suffix.lower())
     try:
         await _save_upload_file(file, temp_path, settings.upload_max_file_size_bytes)
         data_plane = await asyncio.to_thread(client_from_settings)
         target_url = await asyncio.to_thread(lambda: data_plane.build_object_url('uploads', target_name, namespace=get_namespace()))
-        data = await asyncio.to_thread(temp_path.read_bytes)
-        await asyncio.to_thread(data_plane.upload_object_bytes, data, target_url)
+        await _upload_staged_file_to_object_store(
+            data_plane,
+            temp_path,
+            target_url,
+            max_bytes=settings.upload_max_file_size_bytes,
+        )
         return target_url
     finally:
         with contextlib.suppress(FileNotFoundError):
             await asyncio.to_thread(temp_path.unlink)
-
-
-@contextlib.asynccontextmanager
-async def _local_excel_source(source_path: str):
-    data_plane = await asyncio.to_thread(client_from_settings)
-    classification = await asyncio.to_thread(data_plane.classify_object_url, source_path)
-    if classification.is_object_store:
-        temp_path = await asyncio.to_thread(_temporary_upload_path, Path(source_path).suffix or '.xlsx')
-        try:
-            await asyncio.to_thread(temp_path.parent.mkdir, parents=True, exist_ok=True)
-            source_bytes = await asyncio.to_thread(data_plane.download_object_bytes, source_path)
-            await asyncio.to_thread(temp_path.write_bytes, source_bytes)
-            yield temp_path
-        finally:
-            with contextlib.suppress(FileNotFoundError):
-                await asyncio.to_thread(temp_path.unlink)
-        return
-    yield Path(source_path)
 
 
 async def _delete_managed_object(source_path: str) -> None:
@@ -368,6 +416,8 @@ async def preflight_excel(
     table_name: str | None = Form(None),
     named_range: str | None = Form(None),
     cell_range: str | None = Form(None),
+    session: Session = Depends(get_db_async),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail='No filename provided')
@@ -385,8 +435,16 @@ async def preflight_excel(
         await _save_upload_file(file, temp_path, settings.upload_max_file_size_bytes)
         data_plane = await asyncio.to_thread(client_from_settings)
         source_path = await asyncio.to_thread(lambda: data_plane.build_object_url('uploads', unique_filename, namespace=get_namespace()))
-        data = await asyncio.to_thread(temp_path.read_bytes)
-        await asyncio.to_thread(data_plane.upload_object_bytes, data, source_path)
+        await _upload_staged_file_to_object_store(
+            data_plane,
+            temp_path,
+            source_path,
+            max_bytes=settings.upload_max_file_size_bytes,
+        )
+    except asyncio.CancelledError:
+        with contextlib.suppress(FileNotFoundError):
+            await asyncio.to_thread(temp_path.unlink)
+        raise
     except HTTPException:
         with contextlib.suppress(FileNotFoundError):
             await asyncio.to_thread(temp_path.unlink)
@@ -397,84 +455,98 @@ async def preflight_excel(
             await asyncio.to_thread(temp_path.unlink)
         raise HTTPException(status_code=500, detail='Failed to save file') from e
 
-    preflight_id, preflight = await create_preflight(temp_path, source_path=source_path, delete_source=True)
+    try:
+        preflight_id, preflight, result = await create_preflight(
+            session,
+            source_path=source_path,
+            selection={
+                'sheet_name': sheet_name,
+                'start_row': start_row,
+                'start_col': start_col,
+                'end_col': end_col,
+                'end_row': end_row,
+                'has_header': has_header,
+                'table_name': table_name,
+                'named_range': named_range,
+                'cell_range': cell_range,
+            },
+            runtime_probe=runtime_probe,
+            delete_source=True,
+        )
+    except asyncio.CancelledError:
+        cleanup_task = asyncio.create_task(_delete_managed_object(source_path))
+        with contextlib.suppress(Exception):
+            await _wait_for_transfer_task(cleanup_task)
+        raise
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            await asyncio.to_thread(temp_path.unlink)
     target_sheet = sheet_name or (preflight.sheets[0] if preflight.sheets else None)
     if not target_sheet:
         await clear_preflight(preflight_id)
         raise HTTPException(status_code=400, detail='No sheets found in file')
 
-    try:
-        preview_result = await asyncio.to_thread(
-            service.build_excel_preview,
-            file_path=temp_path,
-            sheet_name=target_sheet,
-            start_row=start_row,
-            start_col=start_col,
-            end_col=end_col,
-            end_row=end_row,
-            has_header=has_header,
-            table_name=table_name,
-            named_range=named_range,
-            cell_range=cell_range,
-        )
-    finally:
-        with contextlib.suppress(FileNotFoundError):
-            await asyncio.to_thread(temp_path.unlink)
-
+    result_sheet, result_start_row, result_start_col, result_end_col, result_end_row, rows = preview_result(result)
     return schemas.ExcelPreflightResponse(
         preflight_id=preflight_id,
-        sheet_name=preview_result.sheet_name,
+        sheet_name=result_sheet or target_sheet,
         sheet_names=preflight.sheets,
         tables=preflight.tables,
         named_ranges=preflight.named_ranges,
-        preview=preview_result.preview,
-        start_row=preview_result.start_row,
-        start_col=preview_result.start_col,
-        end_col=preview_result.end_col,
-        detected_end_row=preview_result.detected_end_row,
+        preview=rows,
+        start_row=result_start_row,
+        start_col=result_start_col,
+        end_col=result_end_col,
+        detected_end_row=result_end_row,
     )
 
 
 @router.post('/preflight-path', response_model=schemas.ExcelPreflightResponse)
 @handle_errors(operation='preflight excel path', value_error_status=400)
-async def preflight_excel_path(payload: schemas.ExcelPreflightPathRequest):
+async def preflight_excel_path(
+    payload: schemas.ExcelPreflightPathRequest,
+    session: Session = Depends(get_db_async),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
+):
     data_plane = await asyncio.to_thread(client_from_settings)
     if not await asyncio.to_thread(data_plane.object_exists, payload.file_path):
         raise HTTPException(status_code=400, detail='Excel file not found')
 
-    async with _local_excel_source(payload.file_path) as file_path:
-        if DataSourceFileType.from_upload_suffix(file_path.suffix.lower()) != DataSourceFileType.EXCEL:
-            raise HTTPException(status_code=400, detail='Only .xlsx files are supported for preflight')
-        preflight_id, preflight = await create_preflight(file_path, source_path=payload.file_path, delete_source=False)
-        target_sheet = payload.sheet_name or (preflight.sheets[0] if preflight.sheets else None)
-        if not target_sheet:
-            await clear_preflight(preflight_id, delete_source=False)
-            raise HTTPException(status_code=400, detail='No sheets found in file')
-        preview_result = await asyncio.to_thread(
-            service.build_excel_preview,
-            file_path=file_path,
-            sheet_name=target_sheet,
-            start_row=payload.start_row,
-            start_col=payload.start_col,
-            end_col=payload.end_col,
-            end_row=payload.end_row,
-            has_header=payload.has_header,
-            table_name=payload.table_name,
-            named_range=payload.named_range,
-            cell_range=payload.cell_range,
-        )
-
+    if DataSourceFileType.from_upload_suffix(Path(urlparse(payload.file_path).path).suffix.lower()) != DataSourceFileType.EXCEL:
+        raise HTTPException(status_code=400, detail='Only .xlsx files are supported for preflight')
+    preflight_id, preflight, result = await create_preflight(
+        session,
+        source_path=payload.file_path,
+        selection={
+            'sheet_name': payload.sheet_name,
+            'start_row': payload.start_row,
+            'start_col': payload.start_col,
+            'end_col': payload.end_col,
+            'end_row': payload.end_row,
+            'has_header': payload.has_header,
+            'table_name': payload.table_name,
+            'named_range': payload.named_range,
+            'cell_range': payload.cell_range,
+        },
+        runtime_probe=runtime_probe,
+        delete_source=False,
+    )
+    target_sheet = payload.sheet_name or (preflight.sheets[0] if preflight.sheets else None)
+    if not target_sheet:
+        await clear_preflight(preflight_id, delete_source=False)
+        raise HTTPException(status_code=400, detail='No sheets found in file')
+    result_sheet, result_start_row, result_start_col, result_end_col, result_end_row, rows = preview_result(result)
     return schemas.ExcelPreflightResponse(
         preflight_id=preflight_id,
-        sheet_name=preview_result.sheet_name,
+        sheet_name=result_sheet or target_sheet,
         sheet_names=preflight.sheets,
         tables=preflight.tables,
         named_ranges=preflight.named_ranges,
-        preview=preview_result.preview,
-        start_row=preview_result.start_row,
-        start_col=preview_result.start_col,
-        end_col=preview_result.end_col,
-        detected_end_row=preview_result.detected_end_row,
+        preview=rows,
+        start_row=result_start_row,
+        start_col=result_start_col,
+        end_col=result_end_col,
+        detected_end_row=result_end_row,
     )
 
 
@@ -494,32 +566,40 @@ async def preflight_preview(
     table_name: str | None = None,
     named_range: str | None = None,
     cell_range: str | None = None,
+    session: Session = Depends(get_db_async),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     preflight = await get_preflight(parse_preflight_id(preflight_id))
     if not preflight:
         raise HTTPException(status_code=404, detail='Preflight not found')
 
-    async with _local_excel_source(preflight.source_path) as local_path:
-        preview_result = await asyncio.to_thread(
-            service.build_excel_preview,
-            file_path=local_path,
-            sheet_name=sheet_name,
-            start_row=start_row,
-            start_col=start_col,
-            end_col=end_col,
-            end_row=end_row,
-            has_header=has_header,
-            table_name=table_name,
-            named_range=named_range,
-            cell_range=cell_range,
-        )
+    result = await execute_excel_preflight(
+        session,
+        preflight_id=parse_preflight_id(preflight_id),
+        source_path=preflight.source_path,
+        action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_PREVIEW,
+        selection={
+            'sheet_name': sheet_name,
+            'start_row': start_row,
+            'start_col': start_col,
+            'end_col': end_col,
+            'end_row': end_row,
+            'has_header': has_header,
+            'table_name': table_name,
+            'named_range': named_range,
+            'cell_range': cell_range,
+        },
+        runtime_probe=runtime_probe,
+        delete_source=False,
+    )
+    result_sheet, result_start_row, result_start_col, result_end_col, result_end_row, rows = preview_result(result)
     return schemas.ExcelPreflightPreviewResponse(
-        preview=preview_result.preview,
-        sheet_name=preview_result.sheet_name,
-        start_row=preview_result.start_row,
-        start_col=preview_result.start_col,
-        end_col=preview_result.end_col,
-        detected_end_row=preview_result.detected_end_row,
+        preview=rows,
+        sheet_name=result_sheet,
+        start_row=result_start_row,
+        start_col=result_start_col,
+        end_col=result_end_col,
+        detected_end_row=result_end_row,
     )
 
 
@@ -552,29 +632,32 @@ async def confirm_excel(
         raise HTTPException(status_code=400, detail='No sheet selected')
 
     try:
-        async with _local_excel_source(preflight.source_path) as local_path:
-            (
-                resolved_sheet,
-                resolved_start_row,
-                resolved_start_col,
-                resolved_end_col,
-                resolved_end_row,
-            ) = await asyncio.to_thread(
-                service.resolve_excel_selection,
-                local_path,
-                target_sheet,
-                start_row,
-                start_col,
-                end_col,
-                end_row,
-                table_name,
-                named_range,
-                cell_range,
-            )
+        resolved = await execute_excel_preflight(
+            session,
+            preflight_id=parse_preflight_id(preflight_id),
+            source_path=preflight.source_path,
+            action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_RESOLVE_SELECTION,
+            selection={
+                'sheet_name': target_sheet,
+                'start_row': start_row,
+                'start_col': start_col,
+                'end_col': end_col,
+                'end_row': end_row,
+                'has_header': has_header,
+                'table_name': table_name,
+                'named_range': named_range,
+                'cell_range': cell_range,
+            },
+            runtime_probe=runtime_probe,
+            delete_source=False,
+        )
+        resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = resolved_selection(resolved)
+        if resolved_end_row is None:
+            raise ValueError('Excel selection result has no end row')
         target_path = preflight.source_path
         resolved_cell_range = cell_range
         if not resolved_cell_range and (table_name or named_range or cell_range):
-            resolved_cell_range = service.format_excel_cell_range(
+            resolved_cell_range = format_excel_cell_range(
                 resolved_sheet,
                 resolved_start_row,
                 resolved_start_col,
@@ -968,13 +1051,52 @@ async def get_column_stats_with_config(
 
 @router.put('/{datasource_id}', response_model=schemas.DataSourceResponse, mcp=True)
 @handle_errors(operation='update datasource')
-def update_datasource(
+async def update_datasource(
     datasource_id: DataSourceId,
     update: schemas.DataSourceUpdate,
     session: Session = Depends(get_db_async),
+    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Update a datasource's name or config. Use GET /datasource/{id} to see current values."""
-    return service.update_datasource(session, parse_datasource_id(datasource_id), update)
+    datasource_id_value = parse_datasource_id(datasource_id)
+    if update.config is None or not any(key in update.config for key in (*_EXCEL_PARSING_KEYS, 'csv_options', 'skip_rows')):
+        return service.update_datasource(session, datasource_id_value, update)
+
+    snapshot = await asyncio.to_thread(run_db, _datasource_update_snapshot, datasource_id_value)
+    current_config, expected_revision, source_type, file_type = snapshot
+    next_config = {**current_config, **update.config}
+    is_excel = (
+        DataSourceType.read(source_type, default=None) == DataSourceType.FILE and DataSourceFileType.read(file_type, default=None) == DataSourceFileType.EXCEL
+    )
+    parsing_changed = is_excel and any(key in update.config and update.config[key] != current_config.get(key) for key in _EXCEL_PARSING_KEYS)
+    if not parsing_changed:
+        if is_excel:
+            simple_config = {key: value for key, value in update.config.items() if key not in _EXCEL_PARSING_KEYS or value != current_config.get(key)}
+            update = update.model_copy(update={'config': simple_config})
+        return service.update_datasource(session, datasource_id_value, update)
+
+    source_path = current_config.get('file_path')
+    if not isinstance(source_path, str) or not source_path:
+        return service.update_datasource(session, datasource_id_value, update)
+    selection = {key: next_config[key] for key in _EXCEL_PARSING_KEYS if key in next_config}
+    selection.setdefault('has_header', True)
+    resolved = await execute_excel_preflight(
+        session,
+        preflight_id=str(uuid.uuid4()),
+        source_path=source_path,
+        action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_RESOLVE_SELECTION,
+        selection=selection,
+        runtime_probe=runtime_probe,
+        delete_source=False,
+        datasource_id=datasource_id_value,
+    )
+    return service.update_datasource(
+        session,
+        datasource_id_value,
+        update,
+        resolved_excel_selection=resolved_selection(resolved),
+        expected_revision=expected_revision,
+    )
 
 
 @router.post('/{datasource_id}/ingest', response_model=schemas.DataSourceResponse, mcp=True)

@@ -216,10 +216,17 @@ async def _run_queued_build_job(
             from datasources import execution as datasource_execution
             from runtime.config import settings as worker_settings
 
-            async with _work_slot(work_semaphore):
+            datasource_identity = compute_pb2.EngineIdentity(
+                scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                datasource_id=datasource_id,
+                resource_id=datasource_id,
+            )
+            async with _admitted_build_work_slot(manager, datasource_identity, namespace=build.namespace, work_semaphore=work_semaphore):
                 refreshed = await run_compute_in_thread(
                     datasource_execution.ingest_datasource_for_schedule,
                     worker_runtime_client(),
+                    manager=manager,
                     namespace=build.namespace,
                     database_url=worker_settings.database_url,
                     datasource_id=datasource_id,
@@ -323,8 +330,8 @@ async def _cancel_build_engine(manager: ProcessManager, claim: ClaimedBuildJob) 
     Cancellation can be caused by a lost lease or a cooperative child retire.
     ``shutdown_all`` is process-wide and permanently closes the manager, which
     made one interrupted build poison every later build handled by that child.
-    The build identity is exclusive, so scoped cancellation is sufficient and
-    leaves the manager available for the next durable claim.
+    The exclusive build engine's shutdown cancels its active engine job before
+    stopping it, while leaving the manager available for the next durable claim.
     """
     identity = compute_pb2.EngineIdentity(
         scope=enums_pb2.ENGINE_SCOPE_BUILD,
@@ -332,8 +339,6 @@ async def _cancel_build_engine(manager: ProcessManager, claim: ClaimedBuildJob) 
         build_id=claim.build_id,
         resource_id=claim.build_id,
     )
-    with contextlib.suppress(Exception):
-        await run_control_in_thread(manager.cancel_engine_job, identity, namespace=claim.namespace)
     with contextlib.suppress(Exception):
         await run_control_in_thread(manager.shutdown_engine, identity, namespace=claim.namespace)
 

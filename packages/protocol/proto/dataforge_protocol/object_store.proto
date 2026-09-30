@@ -48,10 +48,31 @@ message ObjectStoreStorageOptionsResponse {
   ObjectStoreStorageOptions storage_options = 2 [(buf.validate.field).required = true];
 }
 
-message ObjectStoreBytes {
+message ObjectStoreUploadStart {
   ObjectStoreUrl target = 1 [(buf.validate.field).required = true];
-  bytes data = 2;
-  optional string content_type = 3;
+  optional string content_type = 2;
+  uint64 max_bytes = 3;
+}
+
+message ObjectStoreUploadChunk {
+  bytes data = 1;
+}
+
+message ObjectStoreUploadCommit {}
+
+message ObjectStoreUploadAbort {}
+
+message ObjectStoreUploadRequest {
+  oneof frame {
+    ObjectStoreUploadStart start = 1;
+    ObjectStoreUploadChunk chunk = 2;
+    ObjectStoreUploadCommit commit = 3;
+    ObjectStoreUploadAbort abort = 4;
+  }
+}
+
+message ObjectStoreTransferChunk {
+  bytes data = 1;
 }
 
 message ObjectStoreBucket {
@@ -76,8 +97,8 @@ service ObjectStoreService {
   rpc JoinUrl(ObjectStoreJoinRequest) returns (ObjectStoreUrl);
   rpc StorageOptions(EmptyRequest) returns (ObjectStoreStorageOptionsResponse);
   rpc EnsureBucket(ObjectStoreBucket) returns (EmptyRequest);
-  rpc UploadBytes(ObjectStoreBytes) returns (ObjectStoreUrl);
-  rpc DownloadBytes(ObjectStoreUrl) returns (ObjectStoreBytes);
+  rpc UploadObject(stream ObjectStoreUploadRequest) returns (ObjectStoreUrl);
+  rpc DownloadObject(ObjectStoreUrl) returns (stream ObjectStoreTransferChunk);
   rpc DeleteObject(ObjectStoreUrl) returns (EmptyRequest);
   rpc Exists(ObjectStoreUrl) returns (ObjectStoreExistsResponse);
   rpc ListPrefixes(ObjectStoreUrl) returns (ObjectStorePrefixesResponse);

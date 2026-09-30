@@ -1,5 +1,4 @@
 import hashlib
-import json
 import uuid
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
@@ -44,6 +43,7 @@ _HIGH_PRIORITY_REQUEST_KINDS = frozenset(
         enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
         enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
         enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
+        enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT,
         enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
         enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
     }
@@ -187,8 +187,6 @@ def _refresh_pending_work(session: Session) -> None:
 def _flight_key(
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
-    *,
-    source_revisions: tuple[tuple[str, int | None], ...] = (),
 ) -> str | None:
     if kind not in SHARED_FLIGHT_REQUEST_KINDS:
         return None
@@ -197,18 +195,26 @@ def _flight_key(
     # API processes one stable key while keeping different transforms, pages,
     # refresh modes, columns, or snapshots independent.
     digest = hashlib.sha256(command.SerializeToString(deterministic=True))
-    if source_revisions:
-        digest.update(b'\0source-revisions:')
-        digest.update(json.dumps(source_revisions, separators=(',', ':')).encode())
     return f'{kind}:{digest.hexdigest()}'
 
 
-def _source_revisions(session: Session, datasource_ids: set[str]) -> tuple[tuple[str, int | None], ...]:
+def _snapshot_input_revisions(session: Session, command: compute_pb2.ComputeCommand) -> None:
+    datasource_ids = _datasource_ids_for_command(command)
+    del command.input_revisions[:]
     if not datasource_ids:
-        return ()
-    rows = session.execute(select(col(DataSource.id), col(DataSource.revision)).where(col(DataSource.id).in_(datasource_ids))).all()
+        return
+    rows = session.execute(
+        select(col(DataSource.id), col(DataSource.revision))
+        .where(col(DataSource.id).in_(datasource_ids))
+        .order_by(col(DataSource.id))
+        .with_for_update(read=True)
+    ).all()
     revisions = {datasource_id: revision for datasource_id, revision in rows}
-    return tuple((datasource_id, revisions.get(datasource_id)) for datasource_id in sorted(datasource_ids))
+    for datasource_id in sorted(datasource_ids):
+        revision = revisions.get(datasource_id)
+        if revision is None:
+            continue
+        command.input_revisions.add(datasource_id=datasource_id, revision=revision)
 
 
 def _flight_lock_key(namespace: str, flight_key: str) -> int:
@@ -297,6 +303,7 @@ def _stage_request(
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
     deduplicate_flight: bool,
+    request_id: str | None = None,
     validate: Callable[[], None] | None = None,
 ) -> tuple[ComputeRequest, bool]:
     now = _utcnow()
@@ -306,8 +313,9 @@ def _stage_request(
         # while deletion retains an exclusive fence.
         validate()
 
+    _snapshot_input_revisions(session, command)
     datasource_ids = _datasource_ids_for_command(command)
-    flight_key = _flight_key(kind, command, source_revisions=_source_revisions(session, datasource_ids)) if deduplicate_flight else None
+    flight_key = _flight_key(kind, command) if deduplicate_flight else None
     if flight_key is not None:
         # PostgreSQL advisory transaction locking serializes only equal keys;
         # unrelated read commands remain fully concurrent across API
@@ -325,13 +333,13 @@ def _stage_request(
             # write or marker-row lock of their own.
             return existing, False
 
-    request_id = str(uuid.uuid4())
+    request_id = request_id or str(uuid.uuid4())
     envelope = command_envelope(
         kind=kind,
         command=command,
         request_id=request_id,
     )
-    identity = _engine_identity_for_command(command)
+    identity = _engine_identity_for_command(command, request_id=request_id)
     request = ComputeRequest(
         id=request_id,
         namespace=namespace,
@@ -346,6 +354,12 @@ def _stage_request(
         updated_at=now,
     )
     session.add(request)
+    if command.WhichOneof('command') == 'datasource' and command.datasource.WhichOneof('command') == 'preflight':
+        preflight = command.datasource.preflight
+        if preflight.action == enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL and preflight.delete_source:
+            request.artifact_path = preflight.source_path
+            request.artifact_name = 'preflight-source'
+            request.artifact_content_type = 'application/vnd.dataforge.preflight-source'
     session.flush()
     session.add_all(ComputeRequestDatasource(request_id=request.id, datasource_id=datasource_id) for datasource_id in datasource_ids)
     if flight_key is not None:
@@ -368,6 +382,7 @@ def stage_request(
     namespace: str,
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
+    request_id: str | None = None,
 ) -> ComputeRequest:
     request, _created = _stage_request(
         session,
@@ -375,6 +390,7 @@ def stage_request(
         kind=kind,
         command=command,
         deduplicate_flight=False,
+        request_id=request_id,
     )
     return request
 
@@ -385,6 +401,7 @@ def stage_shared_flight_request(
     namespace: str,
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
+    request_id: str | None = None,
     validate: Callable[[], None] | None = None,
 ) -> tuple[ComputeRequest, bool]:
     if kind not in SHARED_FLIGHT_REQUEST_KINDS:
@@ -398,6 +415,7 @@ def stage_shared_flight_request(
         kind=kind,
         command=command,
         deduplicate_flight=True,
+        request_id=request_id,
         validate=validate,
     )
 
@@ -491,7 +509,16 @@ def list_terminal_requests(session: Session, request_ids: Collection[str]) -> li
     ]
 
 
-def _engine_identity_for_command(command: compute_pb2.ComputeCommand) -> compute_pb2.EngineIdentity | None:
+def _datasource_engine_identity(resource_id: str) -> compute_pb2.EngineIdentity:
+    return compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        datasource_id=resource_id,
+        resource_id=resource_id,
+    )
+
+
+def _engine_identity_for_command(command: compute_pb2.ComputeCommand, *, request_id: str) -> compute_pb2.EngineIdentity | None:
     command_name = command.WhichOneof('command')
     if command_name in {'spawn_engine', 'configure_engine', 'shutdown_engine'}:
         return getattr(command, command_name).engine_identity
@@ -518,6 +545,18 @@ def _engine_identity_for_command(command: compute_pb2.ComputeCommand) -> compute
                 analysis_id=analysis_id,
                 resource_id=analysis_id,
             )
+    if command_name == 'datasource':
+        datasource = command.datasource
+        datasource_command = datasource.WhichOneof('command')
+        if datasource_command in {'create_file', 'create_database', 'create_iceberg'}:
+            return _datasource_engine_identity(request_id)
+        if datasource_command == 'preflight':
+            return _datasource_engine_identity(datasource.preflight.preflight_id)
+        if datasource_command is not None:
+            operation = getattr(datasource, datasource_command)
+            datasource_id = getattr(operation, 'datasource_id', '')
+            if datasource_id:
+                return _datasource_engine_identity(datasource_id)
     return None
 
 
@@ -583,7 +622,7 @@ def _cancel_request(
 
     if request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING and allow_running_engine_request:
         envelope = command_envelope_for_request(request)
-        if _engine_identity_for_command(envelope.command) is None:
+        if _engine_identity_for_command(envelope.command, request_id=request.id) is None:
             # Datasource ingestion/publication is not tied to a killable engine.
             # Let it finish its publication claim instead of creating orphaned
             # source objects when a browser closes the upload request.

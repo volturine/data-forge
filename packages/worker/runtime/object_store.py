@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
@@ -22,6 +23,8 @@ _BUCKET_LOCKS_LOCK = Lock()
 # generous request setting silently create a second oversized pool; the queue
 # and the bounded worker executors already provide burst absorption.
 _OBJECT_STORE_MAX_POOL_CONNECTIONS = max(4, min(8, settings.compute_workers))
+MAX_TRANSFER_BYTES = 2 * 1024 * 1024 * 1024
+_MULTIPART_PART_SIZE = 8 * 1024 * 1024
 
 # Namespace name == bucket name. No rewriting.
 # Lowercase letters, digits, hyphens, underscores; start/end alphanumeric.
@@ -227,6 +230,85 @@ def upload_bytes(data: bytes, target_url: str, *, content_type: str | None = Non
     return target_url
 
 
+class MultipartObjectUpload:
+    """Bounded multipart writer; the RPC owner must abort every uncommitted upload.
+
+    Successful completion is the point of no return. If RPC cancellation races
+    completion, the object remains committed; abort only removes an incomplete
+    multipart upload.
+    """
+
+    def __init__(self, target_url: str, *, content_type: str | None, max_bytes: int = MAX_TRANSFER_BYTES) -> None:
+        self.target_url = target_url
+        self.bucket, self.key = parse_object_store_url(target_url)
+        ensure_bucket_exists(self.bucket)
+        self._client = _client()
+        self._content_type = content_type
+        self._max_bytes = min(max_bytes, MAX_TRANSFER_BYTES)
+        self._total_bytes = 0
+        self._buffer = bytearray()
+        self._parts: list[dict[str, object]] = []
+        self._upload_id = self._client.create_multipart_upload(
+            Bucket=self.bucket,
+            Key=self.key,
+            **({"ContentType": content_type} if content_type is not None else {}),
+        )["UploadId"]
+        self._finished = False
+
+    def write(self, data: bytes) -> None:
+        if self._finished:
+            raise RuntimeError("multipart object upload is already finished")
+        if self._total_bytes + len(data) > self._max_bytes:
+            raise ValueError(f"object upload exceeds {self._max_bytes} byte limit")
+        self._total_bytes += len(data)
+        self._buffer.extend(data)
+        while len(self._buffer) >= _MULTIPART_PART_SIZE:
+            self._upload_part(_MULTIPART_PART_SIZE)
+
+    def commit(self) -> str:
+        """Complete the object; the caller aborts this upload if completion fails."""
+        if self._finished:
+            raise RuntimeError("multipart object upload is already finished")
+        if not self._total_bytes:
+            self.abort()
+            kwargs: dict[str, object] = {"Bucket": self.bucket, "Key": self.key, "Body": b""}
+            if self._content_type is not None:
+                kwargs["ContentType"] = self._content_type
+            self._client.put_object(**kwargs)
+            self._finished = True
+            return self.target_url
+        if self._buffer:
+            self._upload_part(len(self._buffer))
+        self._client.complete_multipart_upload(
+            Bucket=self.bucket,
+            Key=self.key,
+            UploadId=self._upload_id,
+            MultipartUpload={"Parts": self._parts},
+        )
+        self._finished = True
+        return self.target_url
+
+    def abort(self) -> None:
+        if self._finished:
+            return
+        try:
+            self._client.abort_multipart_upload(Bucket=self.bucket, Key=self.key, UploadId=self._upload_id)
+        finally:
+            self._finished = True
+
+    def _upload_part(self, size: int) -> None:
+        data = bytes(self._buffer[:size])
+        part = self._client.upload_part(
+            Bucket=self.bucket,
+            Key=self.key,
+            UploadId=self._upload_id,
+            PartNumber=len(self._parts) + 1,
+            Body=data,
+        )
+        self._parts.append({"PartNumber": len(self._parts) + 1, "ETag": part["ETag"]})
+        del self._buffer[:size]
+
+
 def presigned_put_url(
     target_url: str,
     *,
@@ -264,6 +346,16 @@ def download_bytes(source_url: str) -> bytes:
     response = _client().get_object(Bucket=bucket, Key=key)
     body = response["Body"]
     return body.read()
+
+
+def download_chunks(source_url: str, *, chunk_size: int) -> Generator[bytes]:
+    bucket, key = parse_object_store_url(source_url)
+    body = _client().get_object(Bucket=bucket, Key=key)["Body"]
+    try:
+        while chunk := body.read(chunk_size):
+            yield chunk
+    finally:
+        body.close()
 
 
 def download_file(source_url: str, target_path: Path) -> Path:

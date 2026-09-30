@@ -294,7 +294,7 @@ def latest_namespace_update(session: Session, *, namespace: str) -> datetime | N
 
 def serialize_engine_instance(row: EngineInstance, *, defaults: dict[str, object]) -> dict[str, object]:
     return {
-        'analysis_id': row.analysis_id,
+        'analysis_id': row.analysis_id or None,
         'resource_id': _row_resource_id(row),
         'status': row.status_kind().overview_status,
         'container_id': row.container_id,

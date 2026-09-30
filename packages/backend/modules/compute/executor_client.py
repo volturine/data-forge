@@ -17,7 +17,7 @@ from fastapi import HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError as PydanticValidationError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from backend_core import compute_requests_service, datasource_delete_service, runtime_ipc
 from backend_core.compute_response_recovery import response_recovery
@@ -29,6 +29,7 @@ from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_requests.models import command_from_payload
 from backend_core.exceptions import ClientDisconnectedError, PipelineExecutionCancelledError, PipelineExecutionError
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
+from backend_core.persistence.compute_requests.models import ComputeRequest
 from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2
 from modules.analysis.step_schemas import normalize_step_config_for_protocol
 from modules.datasource import schemas as datasource_schemas
@@ -238,6 +239,8 @@ def _submit(
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
     runtime_probe: RuntimeAvailabilityProbe,
+    request_id: str | None = None,
+    source_preflight_id: str | None = None,
     validate: Callable[[], None] | None = None,
 ):
     _ensure_runtime_available(runtime_probe)
@@ -248,6 +251,7 @@ def _submit(
                 namespace=get_namespace(),
                 kind=kind,
                 command=command,
+                request_id=request_id,
                 validate=validate,
             )
         else:
@@ -258,8 +262,26 @@ def _submit(
                 namespace=get_namespace(),
                 kind=kind,
                 command=command,
+                request_id=request_id,
             )
             created = True
+        if source_preflight_id is not None:
+            preflight = session.exec(select(ComputeRequest).where(ComputeRequest.id == source_preflight_id).with_for_update()).first()
+            if preflight is None or preflight.kind != enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT:
+                raise ValueError('Excel preflight is no longer available')
+            if preflight.status != enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED:
+                raise ValueError('Excel preflight has not completed')
+            original = compute_requests_service.command_envelope_for_request(preflight).command.datasource.preflight
+            if original.action != enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL:
+                raise ValueError('Excel source ownership belongs to the initial preflight request')
+            if command.WhichOneof('command') != 'datasource' or command.datasource.WhichOneof('command') != 'create_file':
+                raise ValueError('Only a datasource create request can take ownership of a preflight source')
+            if original.source_path != command.datasource.create_file.file_path:
+                raise ValueError('Datasource source does not match its preflight')
+            preflight.artifact_path = None
+            preflight.artifact_name = None
+            preflight.artifact_content_type = None
+            session.add(preflight)
         if created:
             runtime_ipc.notify_compute_request_on_commit(
                 session,
@@ -285,6 +307,8 @@ def _stage_validated_request(
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
     runtime_probe: RuntimeAvailabilityProbe,
+    request_id: str | None = None,
+    source_preflight_id: str | None = None,
 ):
     """Validate referenced datasources and enqueue in one short DB task.
 
@@ -309,6 +333,8 @@ def _stage_validated_request(
         kind=kind,
         command=command,
         runtime_probe=runtime_probe,
+        request_id=request_id,
+        source_preflight_id=source_preflight_id,
         validate=validate,
     )
 
@@ -321,6 +347,8 @@ def _stage_validated_request_in_new_session(
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
     runtime_probe: RuntimeAvailabilityProbe,
+    request_id: str | None = None,
+    source_preflight_id: str | None = None,
 ):
     """Stage a request with a session owned by the blocking DB thread.
 
@@ -338,6 +366,8 @@ def _stage_validated_request_in_new_session(
             kind=kind,
             command=command,
             runtime_probe=runtime_probe,
+            request_id=request_id,
+            source_preflight_id=source_preflight_id,
         )
     finally:
         reset_namespace(token)
@@ -360,6 +390,8 @@ async def _submit_and_wait(
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
     runtime_probe: RuntimeAvailabilityProbe,
+    request_id: str | None = None,
+    source_preflight_id: str | None = None,
     pipeline: compute_schemas.AnalysisPipelinePayload | None = None,
     datasource_ids: tuple[str, ...] = (),
     http_request: Request | None = None,
@@ -370,7 +402,6 @@ async def _submit_and_wait(
     wait_started = time.monotonic()
     slow_wait_reported = False
     last_wake_wait_ms: float | None = None
-    command_hash = await _run_compute_serialization(_command_fingerprint, command)
     stage = partial(
         _stage_validated_request_in_new_session,
         namespace=namespace,
@@ -379,11 +410,17 @@ async def _submit_and_wait(
         kind=kind,
         command=command,
         runtime_probe=runtime_probe,
+        request_id=request_id,
+        source_preflight_id=source_preflight_id,
     )
     if kind in compute_requests_service.SHARED_FLIGHT_REQUEST_KINDS:
         request = await _stage_shared_request_without_waiting_on_a_database_lock(stage)
     else:
         request = await asyncio.to_thread(stage)
+    command_hash = await _run_compute_serialization(
+        _command_fingerprint,
+        compute_requests_service.command_envelope_for_request(request).command,
+    )
     await response_recovery.register(request.id, request.namespace)
     request_state = http_request.scope.get('state', {}) if http_request is not None else {}
     http_request_id = request_state.get('request_id', '-')
@@ -672,6 +709,7 @@ async def create_file_datasource(
     named_range: str | None = None,
     cell_range: str | None = None,
     owner_id: str | None = None,
+    source_preflight_id: str | None = None,
 ) -> datasource_schemas.DataSourceResponse:
     command = await _payload_command(
         enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
@@ -699,8 +737,42 @@ async def create_file_datasource(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
         runtime_probe=runtime_probe,
         command=command,
+        source_preflight_id=source_preflight_id,
     )
     return await _validated_response(datasource_schemas.DataSourceResponse, completed)
+
+
+async def execute_excel_preflight(
+    session: Session,
+    *,
+    preflight_id: str,
+    source_path: str,
+    action: enums_pb2.DatasourcePreflightAction,
+    selection: Mapping[str, object],
+    runtime_probe: RuntimeAvailabilityProbe,
+    delete_source: bool = False,
+    datasource_id: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        'preflight_id': preflight_id,
+        'source_path': source_path,
+        'action': action,
+        'has_header': True,
+        'delete_source': delete_source,
+        **selection,
+    }
+    if datasource_id is not None:
+        payload['datasource_id'] = datasource_id
+    command = await _payload_command(enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT, payload)
+    completed = await _submit_and_wait(
+        session,
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT,
+        command=command,
+        runtime_probe=runtime_probe,
+        request_id=preflight_id if action == enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL else None,
+        datasource_ids=(datasource_id,) if datasource_id is not None else (),
+    )
+    return await _response_payload(completed)
 
 
 async def create_database_datasource(

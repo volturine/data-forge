@@ -1,5 +1,7 @@
+import json
 import logging
 
+from sqlalchemy import text
 from sqlmodel import Session
 
 from backend_core.exceptions import SettingsConfigurationError
@@ -13,11 +15,13 @@ from backend_core.settings_projection import (
     get_resolved_smtp as get_resolved_smtp,
     get_resolved_telegram_settings as get_resolved_telegram_settings,
     get_resolved_telegram_token as get_resolved_telegram_token,
-    invalidate_resolved_settings_cache,
 )
 from backend_core.settings_schemas import SettingsResponse, SettingsUpdate
 
 logger = logging.getLogger(__name__)
+
+_SETTINGS_CHANGED_NOTIFICATION = {'kind': 'settings_changed'}
+_RUNTIME_EVENTS_CHANNEL = 'runtime_events'
 
 _SECRET_FIELDS = (
     'smtp_password',
@@ -59,6 +63,19 @@ _BOOTSTRAP_SECRET_FIELDS = (
 
 def _warn_bootstrap_secret_missing(name: str) -> None:
     logging.warning('Skipping %s bootstrap because SETTINGS_ENCRYPTION_KEY is not set', name)
+
+
+def _notify_settings_changed(session: Session) -> None:
+    bind = session.get_bind()
+    if getattr(getattr(bind, 'dialect', None), 'name', None) != 'postgresql':
+        return
+    session.execute(
+        text('SELECT pg_notify(:channel, :payload)'),
+        {
+            'channel': _RUNTIME_EVENTS_CHANNEL,
+            'payload': json.dumps(_SETTINGS_CHANGED_NOTIFICATION, separators=(',', ':')),
+        },
+    )
 
 
 def _read_secret(row: AppSettings, field: str) -> str:
@@ -131,9 +148,9 @@ def seed_settings_from_env(session: Session) -> None:
         changed = True
 
     if changed:
+        _notify_settings_changed(session)
         session.commit()
         session.refresh(row)
-        invalidate_resolved_settings_cache()
 
 
 def get_settings(session: Session) -> SettingsResponse:
@@ -146,7 +163,6 @@ def get_settings(session: Session) -> SettingsResponse:
         session.add(row)
         session.commit()
         session.refresh(row)
-        invalidate_resolved_settings_cache()
 
     return _masked_settings_response(row)
 
@@ -165,7 +181,7 @@ def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
         _write_secret(row, field, _resolve_updated_secret(row, field, getattr(data, field)))
     row.env_bootstrap_complete = True
 
+    _notify_settings_changed(session)
     session.commit()
     session.refresh(row)
-    invalidate_resolved_settings_cache()
     return _masked_settings_response(row)

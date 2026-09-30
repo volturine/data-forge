@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextvars
 import hashlib
 import logging
 import os
@@ -271,6 +272,35 @@ class DatasourceMetadata:
     description: str | None = None
     column_descriptions: dict[str, str] | None = None
     created_by: str | None = None
+
+
+_datasource_metadata_snapshot: contextvars.ContextVar[Mapping[tuple[str, str], DatasourceMetadata] | None] = contextvars.ContextVar(
+    "worker_datasource_metadata_snapshot",
+    default=None,
+)
+
+
+def set_datasource_metadata_snapshot(
+    snapshot: Mapping[tuple[str, str], DatasourceMetadata],
+) -> contextvars.Token[Mapping[tuple[str, str], DatasourceMetadata] | None]:
+    return _datasource_metadata_snapshot.set(snapshot)
+
+
+def reset_datasource_metadata_snapshot(
+    token: contextvars.Token[Mapping[tuple[str, str], DatasourceMetadata] | None],
+) -> None:
+    _datasource_metadata_snapshot.reset(token)
+
+
+def frozen_datasource_metadata(namespace: str, datasource_id: str) -> DatasourceMetadata | None:
+    snapshot = _datasource_metadata_snapshot.get()
+    if snapshot is None:
+        return None
+    if (namespace, datasource_id) not in snapshot:
+        from runtime.exceptions import StaleComputeInputError
+
+        raise StaleComputeInputError(datasource_id, expected_revision=0, actual_revision=None)
+    return snapshot[(namespace, datasource_id)]
 
 
 @dataclass(frozen=True)
@@ -648,6 +678,10 @@ class WorkerRuntimeClient:
         description: str | None,
         source_type: str,
         config: dict[str, object],
+        compute_request_id: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
         owner_id: str | None = None,
         schema_info: datasource_pb2.SchemaInfo | None = None,
     ):
@@ -659,6 +693,10 @@ class WorkerRuntimeClient:
             name=name,
             source_type=enum_to_proto_value("DATA_SOURCE_TYPE", source_type),
             config=dict_to_struct(config),
+            compute_request_id=compute_request_id,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
         )
         if description is not None:
             request.description = description
@@ -712,16 +750,29 @@ class WorkerRuntimeClient:
         namespace: str,
         datasource_id: str,
         schema_info: datasource_pb2.SchemaInfo,
+        expected_revision: int,
+        compute_request_id: str,
+        worker_id: str,
+        claim_token: str,
+        lease_generation: int,
     ) -> datasource_pb2.SchemaInfo:
         request = worker_runtime_pb2.WorkerPublishDatasourceSchemaCacheRequest(
             namespace=namespace,
             datasource_id=datasource_id,
             schema_info=schema_info,
+            expected_revision=expected_revision,
+            compute_request_id=compute_request_id,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
         )
         response = self._call(lambda: self._stub.PublishDatasourceSchemaCache(request, timeout=self._timeout_seconds, metadata=self._metadata()))
         return response.schema_info
 
     def datasource_metadata(self, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
+        snapshot = _datasource_metadata_snapshot.get()
+        if snapshot is not None and (namespace, datasource_id) in snapshot:
+            return snapshot[(namespace, datasource_id)]
         response = self._call(
             lambda: self._stub.GetDatasourceMetadata(
                 worker_runtime_pb2.WorkerDatasourceMetadataRequest(namespace=namespace, datasource_id=datasource_id),

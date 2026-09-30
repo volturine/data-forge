@@ -185,6 +185,7 @@ class _EngineJobs:
                 error_kind, error_details = _load_compute_engine()._classify_engine_error(exc)
             except Exception:
                 error_kind, error_details = "execution_error", {}
+            error_details = {**error_details, "exception_type": type(exc).__name__}
             logger.exception("Engine job %s failed", state.job_id)
             result = EngineResult(
                 job_id=state.job_id,
@@ -219,6 +220,95 @@ def _required_steps(payload: dict[str, object]) -> list[dict[str, object]]:
     return value
 
 
+def _job_text(payload: dict[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _job_integer(payload: dict[str, object], key: str, default: int | None = None) -> int:
+    value = payload.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{key} must be an integer")
+    return value
+
+
+def _execute_datasource_job(
+    kind: str,
+    payload: dict[str, object],
+    progress_callback: Callable[[dict[str, object]], None],
+) -> dict[str, object]:
+    from datasources import excel_preflight, execution as datasource_execution
+    from runtime.protocol_mapping import schema_info_payload
+    from runtime.worker_runtime_client import DatasourceMetadata
+
+    if kind.startswith("excel_"):
+        preflight_payload = _required_mapping(payload, "preflight")
+        action = {
+            "excel_preflight": "initial",
+            "excel_preview": "preview",
+            "excel_resolve_selection": "resolve_selection",
+        }[kind]
+        return excel_preflight.execute_preflight(
+            preflight_id=str(preflight_payload["preflight_id"]),
+            source_path=str(preflight_payload["source_path"]),
+            action=action,
+            delete_source=bool(preflight_payload.get("delete_source", False)),
+            sheet_name=_job_text(preflight_payload, "sheet_name"),
+            start_row=_job_integer(preflight_payload, "start_row", 0),
+            start_col=_job_integer(preflight_payload, "start_col", 0),
+            end_col=_job_integer(preflight_payload, "end_col", 0),
+            end_row=_job_integer(preflight_payload, "end_row") if "end_row" in preflight_payload else None,
+            table_name=_job_text(preflight_payload, "table_name"),
+            named_range=_job_text(preflight_payload, "named_range"),
+            cell_range=_job_text(preflight_payload, "cell_range"),
+        )
+
+    if kind == "datasource_stage":
+        return datasource_execution.stage_datasource_to_object_store(
+            _required_mapping(payload, "source_config"),
+            artifact_url=str(payload.get("artifact_url", "")),
+            progress_callback=progress_callback,
+        )
+
+    raw_metadata = _required_mapping(payload, "datasource_metadata")
+    metadata = DatasourceMetadata(
+        found=True,
+        id=str(raw_metadata["id"]),
+        name=str(raw_metadata["name"]) if isinstance(raw_metadata.get("name"), str) else None,
+        source_type=str(raw_metadata["source_type"]),
+        config=_required_mapping(raw_metadata, "config"),
+        schema_cache=None,
+        is_hidden=bool(raw_metadata.get("is_hidden", False)),
+        revision=_job_integer(raw_metadata, "revision"),
+        description=_job_text(raw_metadata, "description"),
+        column_descriptions={},
+    )
+    if kind == "datasource_schema":
+        schema = datasource_execution.get_datasource_schema_from_metadata(
+            metadata,
+            sheet_name=_job_text(payload, "sheet_name"),
+        )
+        return schema_info_payload(schema)
+    if kind == "datasource_column_stats":
+        result = datasource_execution.get_column_stats_from_metadata(
+            metadata,
+            column_name=str(payload["column_name"]),
+            use_sample=bool(payload.get("use_sample", True)),
+            sample_size=_job_integer(payload, "sample_size", 10000),
+            datasource_config=_required_mapping(payload, "datasource_config") or None,
+        )
+        return result.model_dump(mode="json")
+    if kind == "datasource_snapshot_compare":
+        comparison = datasource_execution.compare_iceberg_snapshots_from_metadata(
+            metadata,
+            snapshot_a=str(payload["snapshot_a"]),
+            snapshot_b=str(payload["snapshot_b"]),
+            row_limit=_job_integer(payload, "row_limit"),
+        )
+        return comparison.model_dump(mode="json")
+    raise ValueError(f"Unsupported datasource engine job kind: {kind}")
+
+
 def _execute_job(
     *,
     job_id: str,
@@ -226,6 +316,14 @@ def _execute_job(
     payload: dict[str, object],
     progress_callback: Callable[[dict[str, object]], None],
 ) -> EngineResult:
+    if kind.startswith("datasource_") or kind.startswith("excel_"):
+        return EngineResult(
+            job_id=job_id,
+            data=_execute_datasource_job(kind, payload, progress_callback),
+            error=None,
+            step_timings={},
+        )
+
     datasource_config = _required_mapping(payload, "datasource_config")
     steps = _required_steps(payload)
     additional_datasources = _optional_mapping(payload, "additional_datasources")
@@ -453,6 +551,15 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"Invalid job payload JSON: {exc}")
         if not isinstance(payload, dict):
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Job payload JSON must be an object")
+        if request.kind.startswith("datasource_") or request.kind.startswith("excel_"):
+            if payload.get("resource_id") != self._engine_identity:
+                context.abort(grpc.StatusCode.PERMISSION_DENIED, "Datasource work must match the assigned RID")
+            metadata = payload.get("datasource_metadata")
+            if isinstance(metadata, dict) and metadata.get("id") != self._engine_identity:
+                context.abort(grpc.StatusCode.PERMISSION_DENIED, "Datasource snapshot must match the assigned RID")
+            preflight = payload.get("preflight")
+            if isinstance(preflight, dict) and preflight.get("preflight_id") != self._engine_identity:
+                context.abort(grpc.StatusCode.PERMISSION_DENIED, "Excel preflight must match the assigned RID")
         try:
             self._jobs.submit(job_id=request.job_id, kind=request.kind, payload=payload)
         except RuntimeError as exc:

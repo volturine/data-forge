@@ -30,7 +30,6 @@ from backend_core.database import (
     database_pool_snapshot,
     init_db,
     register_settings_bootstrap_hook,
-    register_settings_cache_invalidator,
     run_db,
     run_settings_db,
 )
@@ -55,14 +54,10 @@ from backend_core.namespace import namespace_paths, normalize_namespace, reset_n
 from backend_core.namespaces_service import register_namespace
 from backend_core.runtime_ipc import RuntimeListenerKind
 from backend_core.runtime_notifications import handle_runtime_payload
-from backend_core.settings_store import (
-    invalidate_resolved_settings_cache,
-    seed_settings_from_env,
-)
+from backend_core.settings_store import seed_settings_from_env
 from modules.udf import service as udf_service
 
 register_settings_bootstrap_hook(seed_settings_from_env)
-register_settings_cache_invalidator(invalidate_resolved_settings_cache)
 
 ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger(__name__)
@@ -377,30 +372,6 @@ async def _provision_default_namespace_credentials() -> None:
             await asyncio.sleep(2.0)
 
 
-async def _wait_until_stopped(stop_event: asyncio.Event, delay_seconds: float) -> bool:
-    stop_task = asyncio.create_task(stop_event.wait())
-    delay_task = asyncio.create_task(asyncio.sleep(delay_seconds))
-    done, pending = await asyncio.wait({stop_task, delay_task}, return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-    return stop_task in done
-
-
-async def chat_sweep_loop(stop_event: asyncio.Event) -> None:
-    """Periodically sweep expired chat sessions."""
-    from modules.chat.sessions import session_store
-
-    while not stop_event.is_set():
-        if await _wait_until_stopped(stop_event, 300):
-            break
-        try:
-            await asyncio.to_thread(session_store.sweep)
-        except Exception as e:
-            logger.error('Chat sweep error: %s', e, exc_info=True)
-
-
 async def event_loop_lag_loop(
     stop_event: asyncio.Event,
     *,
@@ -504,29 +475,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     event_loop_watchdog.start()
     ipc_server = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.API)
 
-    chat_sweep_task = asyncio.create_task(chat_sweep_loop(stop_event))
     event_loop_lag_task = asyncio.create_task(
         event_loop_lag_loop(stop_event, watchdog=event_loop_watchdog),
         name='api-event-loop-lag',
     )
     compute_response_recovery_task = asyncio.create_task(response_recovery.run(stop_event))
     ipc_task = asyncio.create_task(runtime_ipc.serve_api_notifications(ipc_server, stop_event, handle_runtime_payload))
-
-    # Start Telegram bot only if explicitly enabled in settings
-    from modules.telegram.bot import telegram_bot
-
-    def _check_bot_enabled(session: Session) -> tuple[bool, str]:
-        from backend_core.settings_store import get_resolved_telegram_settings
-
-        del session
-        resolved = get_resolved_telegram_settings()
-        enabled = bool(resolved.get('enabled'))
-        token = str(resolved.get('token', ''))
-        return enabled, token
-
-    enabled, token = await asyncio.to_thread(run_settings_db, _check_bot_enabled)
-    if enabled:
-        telegram_bot.start(token)
 
     from modules.mcp.routes import get_registry
 
@@ -537,25 +491,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        stop_event.set()
+        event_loop_watchdog.stop()
+        shutdown_tasks = [event_loop_lag_task, compute_response_recovery_task, ipc_task]
         try:
-            telegram_bot.stop()
+            await asyncio.gather(*shutdown_tasks)
+            await runtime_ipc.stop_api_server(ipc_server, listener=RuntimeListenerKind.API)
+            await close_clients()
         finally:
-            stop_event.set()
-            event_loop_watchdog.stop()
-            shutdown_tasks = [
-                chat_sweep_task,
-                event_loop_lag_task,
-                compute_response_recovery_task,
-                ipc_task,
-            ]
-            try:
-                await asyncio.gather(*shutdown_tasks)
-                await runtime_ipc.stop_api_server(ipc_server, listener=RuntimeListenerKind.API)
-                await close_clients()
-            finally:
-                logger.info('Application shutdown complete')
-                await asyncio.to_thread(flush_request_logs)
-                await asyncio.to_thread(shutdown_logging)
+            logger.info('Application shutdown complete')
+            await asyncio.to_thread(flush_request_logs)
+            await asyncio.to_thread(shutdown_logging)
 
 
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)

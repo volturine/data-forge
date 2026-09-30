@@ -124,6 +124,7 @@ export class ChatStore {
 
 	private _es: EventSource | null = null;
 	private _counter = 0;
+	private _lastEventId = 0;
 	private _retries = 0;
 	private _retryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -451,6 +452,7 @@ export class ChatStore {
 		result.match(
 			(s) => {
 				this.sessionId = s.session_id;
+				this._lastEventId = 0;
 				this._refreshConfigured();
 				if (typeof window !== 'undefined') {
 					localStorage.setItem(SESSION_KEY, s.session_id);
@@ -469,6 +471,7 @@ export class ChatStore {
 		return result.match(
 			(data) => {
 				this.sessionId = sessionId;
+				this._lastEventId = data.last_event_id;
 				this._refreshConfigured();
 				this.messages = [];
 				this.toolCalls = [];
@@ -478,6 +481,10 @@ export class ChatStore {
 
 				for (const event of data.history) {
 					this._handleEvent(event);
+				}
+				if (data.history_gap) {
+					this.error =
+						'Earlier chat events expired; the visible history contains the retained events.';
 				}
 				this._connectStream(sessionId);
 				return true;
@@ -524,7 +531,7 @@ export class ChatStore {
 		if (this._es) {
 			this._es.close();
 		}
-		this._es = openEventStream(sid);
+		this._es = openEventStream(sid, this._lastEventId);
 		this._es.onopen = () => {
 			this.connection = 'connected';
 			this._retries = 0;
@@ -532,6 +539,10 @@ export class ChatStore {
 		};
 		this._es.onmessage = (ev) => {
 			try {
+				const sequence = Number(ev.lastEventId);
+				if (Number.isSafeInteger(sequence) && sequence > this._lastEventId) {
+					this._lastEventId = sequence;
+				}
 				const event: ChatEvent = JSON.parse(ev.data);
 				this._handleEvent(event);
 			} catch {
@@ -573,6 +584,12 @@ export class ChatStore {
 
 	private _handleEvent(event: ChatEvent): void {
 		switch (event.type) {
+			case 'history_gap': {
+				this._lastEventId = Math.max(this._lastEventId, event.oldest_event_id - 1);
+				this.error = 'Earlier chat events expired; refreshing the retained history.';
+				if (this.sessionId) void this.resumeSession(this.sessionId);
+				break;
+			}
 			case 'message': {
 				const displayContent =
 					event.role === 'user' ? ChatStore._stripPageContext(event.content) : event.content;
@@ -604,6 +621,7 @@ export class ChatStore {
 				break;
 			}
 			case 'tool_error': {
+				if (this.pendingConfirm?.tool_id === event.tool_id) this.pendingConfirm = null;
 				this._updateToolStatus(event.tool_id, 'error', undefined, event.errors);
 				const summary =
 					event.errors.length > 0
@@ -626,6 +644,7 @@ export class ChatStore {
 				break;
 			}
 			case 'tool_start': {
+				if (this.pendingConfirm?.tool_id === event.tool_id) this.pendingConfirm = null;
 				const startTc = this.toolCalls.findLast(
 					(t) => t.tool_id === event.tool_id && t.status === 'running'
 				);

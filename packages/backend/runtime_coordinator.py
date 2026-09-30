@@ -7,6 +7,8 @@ import logging
 import os
 import signal
 import threading
+from collections.abc import Callable
+from functools import partial
 
 import psycopg
 
@@ -15,10 +17,14 @@ from backend_core.config import settings
 from backend_core.database import init_db, set_active_runtime_coordinator_generation
 from backend_core.logging import configure_logging_off_loop
 from backend_core.public_schema import ensure_backend_public_tables
+from backend_core.runtime_integration_delivery import NotificationDeliveryDispatcher
 from backend_core.runtime_ipc import RuntimeListenerKind
 from backend_core.runtime_outbox_dispatcher import OUTBOX_WAKE_HUB, RuntimeOutboxDispatcher
 from backend_core.runtime_outbox_service import OUTBOX_WAKE_KIND
 from backend_grpc.server import start_runtime_grpc_server
+from modules.chat.consumer import ChatTurnConsumer
+from modules.chat.store import CHAT_TURN_WAKE_KIND
+from modules.telegram.runtime import TelegramIntegrationRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -156,12 +162,35 @@ class RuntimeCoordinatorLease:
             connection.close()
 
 
-async def _handle_coordinator_notification(payload: dict[str, object]) -> None:
-    """Wake the one outbox dispatcher without owning UI/runtime projections."""
-    if payload.get('kind') != OUTBOX_WAKE_KIND:
+async def _handle_coordinator_notification(
+    payload: dict[str, object],
+    *,
+    chat_wake: Callable[[], None],
+    telegram_wake: Callable[[], None],
+) -> None:
+    kind = payload.get('kind')
+    if kind == OUTBOX_WAKE_KIND:
+        namespace = payload.get('namespace')
+        OUTBOX_WAKE_HUB.publish(namespace if isinstance(namespace, str) and namespace else None)
         return
-    namespace = payload.get('namespace')
-    OUTBOX_WAKE_HUB.publish(namespace if isinstance(namespace, str) and namespace else None)
+    if kind == CHAT_TURN_WAKE_KIND:
+        chat_wake()
+        return
+    if kind in {'settings_changed', 'telegram_detection'}:
+        telegram_wake()
+
+
+async def _supervise_epoch(tasks: list[asyncio.Task[None]], process_stop: asyncio.Task[bool], owner_stop: asyncio.Task[bool]) -> None:
+    done, _pending = await asyncio.wait({process_stop, owner_stop, *tasks}, return_when=asyncio.FIRST_COMPLETED)
+    if process_stop in done or owner_stop in done:
+        return
+    for task in done:
+        if task.cancelled():
+            raise RuntimeError(f'Coordinator actor {task.get_name()} was unexpectedly canceled')
+        error = task.exception()
+        if error is not None:
+            raise RuntimeError(f'Coordinator actor {task.get_name()} failed') from error
+        raise RuntimeError(f'Coordinator actor {task.get_name()} exited unexpectedly')
 
 
 def _install_stop_handlers(stop_event: asyncio.Event) -> None:
@@ -234,14 +263,14 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
     owner_stop_task = asyncio.create_task(owner_stop_event.wait(), name='runtime-owner-stop')
     grpc_server = None
     listener = None
-    listener_task: asyncio.Task[None] | None = None
-    dispatcher_task: asyncio.Task[None] | None = None
-    lease_task: asyncio.Task[None] | None = None
+    tasks: list[asyncio.Task[None]] = []
     coordinator_generation: int | None = None
     try:
         if process_stop_event.is_set():
             return
-        lease_task = asyncio.create_task(_lease_monitor(process_stop_event, owner_stop_event, lease))
+        from main import app
+
+        tasks.append(asyncio.create_task(_lease_monitor(process_stop_event, owner_stop_event, lease), name='coordinator-lease'))
         await init_db()
         if process_stop_event.is_set() or owner_stop_event.is_set():
             raise RuntimeError('Runtime coordinator lease was lost during database startup')
@@ -252,8 +281,18 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
         if process_stop_event.is_set() or owner_stop_event.is_set():
             raise RuntimeError('Runtime coordinator lease was lost during gRPC startup')
         listener = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.JOB)
-        listener_task = asyncio.create_task(runtime_ipc.serve_api_notifications(listener, owner_stop_event, _handle_coordinator_notification))
-        dispatcher_task = asyncio.create_task(RuntimeOutboxDispatcher().run(owner_stop_event))
+        chat_consumer = await asyncio.to_thread(ChatTurnConsumer, app, coordinator_generation)
+        telegram_runtime = TelegramIntegrationRuntime(coordinator_generation)
+        handler = partial(_handle_coordinator_notification, chat_wake=chat_consumer.wake, telegram_wake=telegram_runtime.wake)
+        tasks.extend(
+            [
+                asyncio.create_task(runtime_ipc.serve_api_notifications(listener, owner_stop_event, handler), name='coordinator-notifications'),
+                asyncio.create_task(RuntimeOutboxDispatcher().run(owner_stop_event), name='runtime-outbox'),
+                asyncio.create_task(NotificationDeliveryDispatcher().run(owner_stop_event), name='notification-delivery'),
+                asyncio.create_task(chat_consumer.run(owner_stop_event), name='chat-turn-consumer'),
+                asyncio.create_task(telegram_runtime.run(owner_stop_event), name='telegram-integration'),
+            ]
+        )
         logger.info(
             'Runtime coordinator started pid=%s grpc=%s:%s coordinator_generation=%s lease=postgres-advisory-lock engine-owner=worker-service',
             os.getpid(),
@@ -261,17 +300,12 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
             settings.internal_grpc_port,
             coordinator_generation,
         )
-        done, _pending = await asyncio.wait(
-            {process_stop_task, owner_stop_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if process_stop_task in done:
-            owner_stop_event.set()
+        await _supervise_epoch(tasks, process_stop_task, owner_stop_task)
     finally:
         owner_stop_event.set()
-        for task in (process_stop_task, owner_stop_task):
-            if not task.done():
-                task.cancel()
+        for control_task in (process_stop_task, owner_stop_task):
+            if not control_task.done():
+                control_task.cancel()
         await asyncio.gather(process_stop_task, owner_stop_task, return_exceptions=True)
         # Withdraw the control-plane endpoint before stopping engines. An old
         # owner must not accept new lifecycle/claim RPCs while a replacement
@@ -280,9 +314,18 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
             await grpc_server.stop(grace=0.5)
             grpc_server = None
         await runtime_ipc.stop_api_server(listener, listener=RuntimeListenerKind.JOB)
-        tasks = [task for task in (listener_task, dispatcher_task, lease_task) if task is not None]
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            _done, pending = await asyncio.wait(tasks, timeout=15.0)
+            for task in pending:
+                task.cancel()
+            if pending:
+                _done, still_running = await asyncio.wait(pending, timeout=5.0)
+                if still_running:
+                    process_stop_event.set()
+                    logger.error('Coordinator actors exceeded shutdown deadline: %s', [task.get_name() for task in still_running])
+            for task in tasks:
+                if task.done() and not task.cancelled():
+                    task.exception()
         set_active_runtime_coordinator_generation(None)
         await asyncio.to_thread(lease.release)
         logger.info('Runtime coordinator stopped generation=%s', coordinator_generation)

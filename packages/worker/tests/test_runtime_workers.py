@@ -611,29 +611,42 @@ def _job() -> ClaimedBuildJob:
 async def test_cancelled_build_only_stops_its_exclusive_engine(monkeypatch) -> None:
     claim = _job()
     calls: list[tuple[str, object]] = []
+    control_type_errors: list[TypeError] = []
 
     class Manager:
-        def cancel_engine_job(self, identity, **kwargs) -> bool:
-            calls.append(("cancel_engine_job", (identity, kwargs)))
+        def cancel_engine_job(self, identity, *, namespace: str | None = None, job_id: str) -> bool:
+            calls.append(("cancel_engine_job", (identity, namespace, job_id)))
             return True
 
-        def shutdown_engine(self, identity, **kwargs) -> None:
-            calls.append(("shutdown_engine", (identity, kwargs)))
+        def shutdown_engine(self, identity, *, namespace: str | None = None) -> None:
+            calls.append(("shutdown_engine", (identity, namespace)))
 
         def shutdown_all(self) -> None:
             calls.append(("shutdown_all", None))
+
+    async def run_control_in_thread(function, /, *args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except TypeError as exc:
+            control_type_errors.append(exc)
+            raise
 
     async def cancelled_job(**_kwargs) -> None:
         raise asyncio.CancelledError
 
     monkeypatch.setattr(build_execution, "_run_queued_build_job", cancelled_job)
+    monkeypatch.setattr(build_execution, "run_control_in_thread", run_control_in_thread)
 
     with pytest.raises(asyncio.CancelledError):
         await build_execution.run_queued_build_job(manager=cast(Any, Manager()), worker_id="worker-1", claim=claim)
 
-    assert [name for name, _ in calls] == ["cancel_engine_job", "shutdown_engine"]
-    assert calls[0][1][1] == {"namespace": claim.namespace}
-    assert calls[1][1][1] == {"namespace": claim.namespace}
+    assert [name for name, _ in calls] == ["shutdown_engine"]
+    identity, namespace = cast(tuple[compute_pb2.EngineIdentity, str | None], calls[0][1])
+    assert identity.scope == enums_pb2.ENGINE_SCOPE_BUILD
+    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE
+    assert identity.build_id == claim.build_id
+    assert namespace == claim.namespace
+    assert control_type_errors == []
 
 
 @pytest.mark.asyncio

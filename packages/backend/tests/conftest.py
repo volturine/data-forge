@@ -91,7 +91,7 @@ def _register_backend_sqlmodel_metadata() -> None:
     from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
     from backend_core.persistence.udfs.models import Udf
     from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
-    from modules.chat.models import ChatSession
+    from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn
 
     del Analysis
     del AnalysisDataSource
@@ -103,6 +103,9 @@ def _register_backend_sqlmodel_metadata() -> None:
     del BuildJob
     del BuildRun
     del ChatSession
+    del ChatTurn
+    del ChatMessage
+    del ChatEvent
     del DataSource
     del DataSourceColumnMetadata
     del EngineInstance
@@ -130,11 +133,14 @@ def _backend_settings_tables() -> list[Any]:
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
     from backend_core.persistence.settings.models import AppSettings
     from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
-    from modules.chat.models import ChatSession
+    from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn
 
     table_names = {
         AppSettings.__tablename__,
         ChatSession.__tablename__,
+        ChatTurn.__tablename__,
+        ChatMessage.__tablename__,
+        ChatEvent.__tablename__,
         EngineInstance.__tablename__,
         McpPendingAction.__tablename__,
         User.__tablename__,
@@ -149,19 +155,9 @@ def _backend_settings_tables() -> list[Any]:
 
 
 def _reset_backend_settings_state(engine: Engine) -> None:
-    from backend_core.settings_store import invalidate_resolved_settings_cache
-    from modules.chat.sessions import session_store
-
-    for live in session_store._live.values():
-        live.cancel_task()
-        live.close_stream()
-    session_store._live.clear()
-
     with engine.begin() as conn:
         for table in reversed(_backend_settings_tables()):
             conn.execute(table.delete())
-
-    invalidate_resolved_settings_cache()
 
 
 class _UnavailableRuntimeAvailabilityProbe:

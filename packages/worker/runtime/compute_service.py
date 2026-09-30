@@ -1425,6 +1425,13 @@ def _resolve_pipeline_datasource_config(
             "analysis_tab_id": output_to_tab[datasource_id],
             **overrides,
         }
+    from runtime.worker_runtime_client import frozen_datasource_metadata
+
+    frozen = frozen_datasource_metadata(get_namespace(), datasource_id)
+    if frozen is not None:
+        selectors = {"branch", "snapshot_id", "snapshot_timestamp_ms", "time_travel_snapshot_id", "time_travel_snapshot_timestamp_ms", "reader"}
+        selection = {key: value for key, value in overrides.items() if key in selectors}
+        return {"source_type": frozen.source_type, **(frozen.config or {}), **selection}
     source_type = datasource.get("source_type")
     if isinstance(source_type, str) and source_type.strip():
         return {"source_type": source_type, **overrides}
@@ -1462,7 +1469,11 @@ def _resolve_step_source_config(
     payload = _pipeline_datasource_payload(analysis_pipeline, source_id)
     if isinstance(payload, dict):
         return _resolve_pipeline_datasource_config(session, analysis_pipeline, payload)
-    metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=source_id)
+    from runtime.worker_runtime_client import frozen_datasource_metadata
+
+    metadata = frozen_datasource_metadata(get_namespace(), source_id)
+    if metadata is None:
+        metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=source_id)
     if not metadata.found or metadata.source_type is None or metadata.config is None:
         return None
     return {"source_type": metadata.source_type, **metadata.config}

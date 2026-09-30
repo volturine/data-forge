@@ -7,6 +7,7 @@ from backend_core.smtp import send_smtp_message
 
 EMAIL_DELIVERY_KIND = 'email_delivery'
 TELEGRAM_DELIVERY_KIND = 'telegram_delivery'
+EXTERNAL_DELIVERY_KINDS = frozenset({EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND})
 _TELEGRAM_BASE_URL = 'https://api.telegram.org'
 _REDACTED = '[REDACTED]'
 

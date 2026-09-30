@@ -259,6 +259,28 @@ def test_engine_instance_serialization_parses_persisted_status_token() -> None:
 
     assert row.status_kind() == EngineInstanceStatus.RUNNING
     assert serialize_engine_instance(row, defaults={})['status'] == 'healthy'
+    assert serialize_engine_instance(row, defaults={})['analysis_id'] == 'analysis-1'
+
+
+def test_datasource_engine_instance_serialization_omits_analysis_identity() -> None:
+    row = EngineInstance(
+        id='worker-1:default:datasource_preview:datasource-1',
+        worker_id='worker-1',
+        namespace='default',
+        analysis_id='',
+        engine_scope='datasource_preview',
+        engine_reuse_policy='shared',
+        datasource_id='datasource-1',
+        status=EngineInstanceStatus.RUNNING.value,
+        last_seen_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+    status = serialize_engine_instance(row, defaults={})
+
+    assert status['analysis_id'] is None
+    assert status['resource_id'] == 'datasource-1'
+    assert status['datasource_id'] == 'datasource-1'
 
 
 def test_build_run_owns_terminal_event_updates() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import grpc
 import pytest
@@ -78,6 +79,92 @@ async def test_request_validation_runs_off_loop_with_bounded_parallelism(monkeyp
     assert max_active == data_plane_server._VALIDATION_WORKERS
     assert validation_threads
     assert loop_thread not in validation_threads
+
+
+@pytest.mark.asyncio
+async def test_blocking_lane_bounds_executor_queue_under_burst() -> None:
+    executor = ThreadPoolExecutor(max_workers=1)
+    lane = data_plane_server._BlockingLane(executor, max_in_flight=3)
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_call() -> None:
+        started.set()
+        assert release.wait(timeout=5)
+
+    calls = [asyncio.create_task(data_plane_server._run_blocking(lane, blocking_call)) for _ in range(20)]
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        await asyncio.sleep(0.05)
+        assert executor._work_queue.qsize() <= 2
+        assert lane.semaphore(asyncio.get_running_loop())._value == 0
+    finally:
+        release.set()
+        await asyncio.gather(*calls)
+        await asyncio.to_thread(executor.shutdown, True)
+
+
+@pytest.mark.asyncio
+async def test_pending_blocking_call_cancellation_does_not_leak_admission() -> None:
+    executor = ThreadPoolExecutor(max_workers=1)
+    lane = data_plane_server._BlockingLane(executor, max_in_flight=1)
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_call() -> None:
+        started.set()
+        assert release.wait(timeout=5)
+
+    running = asyncio.create_task(data_plane_server._run_blocking(lane, blocking_call))
+    pending = asyncio.create_task(data_plane_server._run_blocking(lane, lambda: None))
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        await asyncio.sleep(0)
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        release.set()
+        await running
+        assert await data_plane_server._run_blocking(lane, lambda: "admitted") == "admitted"
+    finally:
+        release.set()
+        await asyncio.gather(running, pending, return_exceptions=True)
+        await asyncio.to_thread(executor.shutdown, True)
+
+
+@pytest.mark.asyncio
+async def test_running_call_holds_admission_until_thread_settles() -> None:
+    executor = ThreadPoolExecutor(max_workers=2)
+    lane = data_plane_server._BlockingLane(executor, max_in_flight=1)
+    started = threading.Event()
+    release = threading.Event()
+    later_started = threading.Event()
+
+    def blocking_call() -> None:
+        started.set()
+        assert release.wait(timeout=5)
+
+    running = asyncio.create_task(data_plane_server._run_blocking(lane, blocking_call))
+    later = None
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        running.cancel()
+        later = asyncio.create_task(data_plane_server._run_blocking(lane, later_started.set))
+        await asyncio.sleep(0.05)
+        assert not later_started.is_set()
+        assert lane.semaphore(asyncio.get_running_loop())._value == 0
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await running
+        await later
+        assert later_started.is_set()
+    finally:
+        release.set()
+        tasks = [running]
+        if later is not None:
+            tasks.append(later)
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.to_thread(executor.shutdown, True)
 
 
 @pytest.mark.asyncio
@@ -199,3 +286,152 @@ async def test_object_store_delete_rejects_external_prefix(monkeypatch: pytest.M
 
     with pytest.raises(RuntimeError, match="PERMISSION_DENIED: Prefix is outside the worker-managed storage prefix"):
         await ObjectStoreServicer().DeletePrefix(object_store_pb2.ObjectStoreUrl(url="s3://external-bucket/data/file.csv"), context)
+
+
+@pytest.mark.asyncio
+async def test_object_store_upload_requires_explicit_commit_and_streams_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    calls: list[object] = []
+
+    class Upload:
+        def __init__(self, target_url: str, *, content_type: str | None, max_bytes: int) -> None:
+            calls.append(("start", target_url, content_type, max_bytes))
+
+        def write(self, data: bytes) -> None:
+            calls.append(("chunk", data))
+
+        def commit(self) -> str:
+            calls.append(("commit",))
+            return "s3://analytics/uploads/data.csv"
+
+        def abort(self) -> None:
+            calls.append(("abort",))
+
+    async def allow_request(_context) -> None:
+        return None
+
+    monkeypatch.setattr(data_plane_server, "_require_internal_token", allow_request)
+    monkeypatch.setattr(data_plane_server.object_store, "MultipartObjectUpload", Upload)
+
+    async def frames():
+        yield object_store_pb2.ObjectStoreUploadRequest(
+            start=object_store_pb2.ObjectStoreUploadStart(
+                target=object_store_pb2.ObjectStoreUrl(url="s3://analytics/uploads/data.csv"),
+                content_type="text/csv",
+                max_bytes=64,
+            )
+        )
+        yield object_store_pb2.ObjectStoreUploadRequest(chunk=object_store_pb2.ObjectStoreUploadChunk(data=b"data"))
+        yield object_store_pb2.ObjectStoreUploadRequest(commit=object_store_pb2.ObjectStoreUploadCommit())
+
+    response = await ObjectStoreServicer().UploadObject(frames(), context)
+
+    assert response.url == "s3://analytics/uploads/data.csv"
+    assert calls == [
+        ("start", "s3://analytics/uploads/data.csv", "text/csv", 64),
+        ("chunk", b"data"),
+        ("commit",),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_object_store_upload_cancellation_aborts_only_open_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    calls: list[str] = []
+
+    class Upload:
+        def __init__(self, *_args, **_kwargs) -> None:
+            calls.append("start")
+
+        def write(self, _data: bytes) -> None:
+            calls.append("chunk")
+
+        def commit(self) -> str:
+            raise AssertionError("cancelled upload must not commit")
+
+        def abort(self) -> None:
+            calls.append("abort")
+
+    async def allow_request(_context) -> None:
+        return None
+
+    monkeypatch.setattr(data_plane_server, "_require_internal_token", allow_request)
+    monkeypatch.setattr(data_plane_server.object_store, "MultipartObjectUpload", Upload)
+
+    async def frames():
+        yield object_store_pb2.ObjectStoreUploadRequest(
+            start=object_store_pb2.ObjectStoreUploadStart(
+                target=object_store_pb2.ObjectStoreUrl(url="s3://analytics/uploads/data.csv"),
+                max_bytes=64,
+            )
+        )
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await ObjectStoreServicer().UploadObject(frames(), context)
+
+    assert calls == ["start", "abort"]
+
+
+@pytest.mark.asyncio
+async def test_upload_abort_waits_for_cancelled_chunk_write_to_settle(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(monkeypatch)
+    write_started = threading.Event()
+    release_write = threading.Event()
+    abort_started = threading.Event()
+    calls: list[str] = []
+    calls_lock = threading.Lock()
+    executor = ThreadPoolExecutor(max_workers=2)
+    lane = data_plane_server._BlockingLane(executor, max_in_flight=1)
+
+    class Upload:
+        def __init__(self, *_args, **_kwargs) -> None:
+            calls.append("start")
+
+        def write(self, _data: bytes) -> None:
+            write_started.set()
+            assert release_write.wait(timeout=5)
+            with calls_lock:
+                calls.append("write-settled")
+
+        def commit(self) -> str:
+            raise AssertionError("cancelled upload must not commit")
+
+        def abort(self) -> None:
+            abort_started.set()
+            with calls_lock:
+                calls.append("abort")
+
+    async def allow_request(_context) -> None:
+        return None
+
+    monkeypatch.setattr(data_plane_server, "_require_internal_token", allow_request)
+    monkeypatch.setattr(data_plane_server.object_store, "MultipartObjectUpload", Upload)
+    monkeypatch.setattr(data_plane_server, "_OBJECT_STORE_LANE", lane)
+
+    async def frames():
+        yield object_store_pb2.ObjectStoreUploadRequest(
+            start=object_store_pb2.ObjectStoreUploadStart(
+                target=object_store_pb2.ObjectStoreUrl(url="s3://analytics/uploads/data.csv"),
+                max_bytes=64,
+            )
+        )
+        yield object_store_pb2.ObjectStoreUploadRequest(chunk=object_store_pb2.ObjectStoreUploadChunk(data=b"data"))
+        await asyncio.Event().wait()
+
+    call = asyncio.create_task(ObjectStoreServicer().UploadObject(frames(), context))
+    try:
+        assert await asyncio.to_thread(write_started.wait, 2)
+        call.cancel()
+        await asyncio.sleep(0.05)
+        assert not call.done()
+        assert not abort_started.is_set()
+        release_write.set()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+        assert abort_started.is_set()
+        assert calls == ["start", "write-settled", "abort"]
+    finally:
+        release_write.set()
+        await asyncio.gather(call, return_exceptions=True)
+        await asyncio.to_thread(executor.shutdown, True)

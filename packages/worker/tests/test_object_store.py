@@ -101,3 +101,67 @@ def test_bucket_readiness_does_not_serialize_different_buckets(monkeypatch) -> N
     assert results == ["alpha", "bravo"]
     assert sorted(calls) == ["alpha", "bravo"]
     assert max_active == 2
+
+
+def test_multipart_object_upload_streams_bounded_parts_and_commits(monkeypatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Client:
+        def create_multipart_upload(self, **kwargs):
+            calls.append(("create", kwargs))
+            return {"UploadId": "upload-1"}
+
+        def upload_part(self, **kwargs):
+            calls.append(("part", kwargs))
+            return {"ETag": f'"{kwargs["PartNumber"]}"'}
+
+        def complete_multipart_upload(self, **kwargs):
+            calls.append(("complete", kwargs))
+
+    monkeypatch.setattr(object_store, "ensure_bucket_exists", lambda _bucket: None)
+    monkeypatch.setattr(object_store, "_client", lambda: Client())
+    monkeypatch.setattr(object_store, "_MULTIPART_PART_SIZE", 4)
+
+    upload = object_store.MultipartObjectUpload("s3://analytics/uploads/data.csv", content_type="text/csv", max_bytes=6)
+    upload.write(b"abcd")
+    upload.write(b"ef")
+    result = upload.commit()
+    upload.abort()
+
+    assert result == "s3://analytics/uploads/data.csv"
+    assert [call[1]["Body"] for call in calls if call[0] == "part"] == [b"abcd", b"ef"]
+    assert calls[-1] == (
+        "complete",
+        {
+            "Bucket": "analytics",
+            "Key": "uploads/data.csv",
+            "UploadId": "upload-1",
+            "MultipartUpload": {
+                "Parts": [
+                    {"PartNumber": 1, "ETag": '"1"'},
+                    {"PartNumber": 2, "ETag": '"2"'},
+                ]
+            },
+        },
+    )
+
+
+def test_multipart_object_upload_aborts_after_limit_exceeded(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class Client:
+        def create_multipart_upload(self, **_kwargs):
+            return {"UploadId": "upload-1"}
+
+        def abort_multipart_upload(self, **_kwargs):
+            calls.append("abort")
+
+    monkeypatch.setattr(object_store, "ensure_bucket_exists", lambda _bucket: None)
+    monkeypatch.setattr(object_store, "_client", lambda: Client())
+    upload = object_store.MultipartObjectUpload("s3://analytics/uploads/data.csv", content_type=None, max_bytes=3)
+
+    with pytest.raises(ValueError, match="exceeds 3 byte limit"):
+        upload.write(b"four")
+    upload.abort()
+
+    assert calls == ["abort"]

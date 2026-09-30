@@ -28,6 +28,7 @@ class TestSettings:
                 'DATA_DIR',
                 'DEFAULT_NAMESPACE',
                 'UPLOAD_CHUNK_SIZE',
+                'UPLOAD_MAX_FILE_SIZE_BYTES',
                 'LOG_LEVEL',
                 'LOG_ICEBERG_PATH',
                 'PUBLIC_IDB_DEBUG',
@@ -43,6 +44,7 @@ class TestSettings:
         assert settings.database_url == 'postgresql+psycopg://user:pass@host:5432/db'
         assert settings.data_dir.exists()
         assert settings.upload_chunk_size == 5 * 1024 * 1024
+        assert settings.upload_max_file_size_bytes == 2 * 1024 * 1024 * 1024
         assert settings.lock_ttl_seconds == 30
         assert settings.lock_heartbeat_interval_seconds == 10
         assert settings.public_idb_debug is False
@@ -187,6 +189,21 @@ class TestSettings:
 
         with pytest.raises(ValidationError, match='port must be <= 65535'):
             Settings()
+
+    def test_upload_max_file_size_matches_data_plane_ceiling(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('UPLOAD_MAX_FILE_SIZE_BYTES', str(2 * 1024 * 1024 * 1024))
+
+        settings = Settings()
+        assert settings.upload_max_file_size_bytes == 2 * 1024 * 1024 * 1024
+
+        monkeypatch.setenv('UPLOAD_MAX_FILE_SIZE_BYTES', str(2 * 1024 * 1024 * 1024 + 1))
+        with pytest.raises(ValidationError, match='upload_max_file_size_bytes must be <= 2147483648'):
+            Settings()
+
+        monkeypatch.setenv('UPLOAD_MAX_FILE_SIZE_BYTES', '0')
+        settings = Settings()
+        assert settings.upload_max_file_size_bytes == 0
 
     def test_directory_paths_are_path_objects(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)

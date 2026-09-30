@@ -13,6 +13,7 @@ _MODEL_MODULES = (
     'backend_core.persistence.analysis_versions.models',
     'backend_core.persistence.build_jobs.models',
     'backend_core.persistence.build_runs.models',
+    'modules.chat.models',
     'backend_core.persistence.compute_requests.models',
     'backend_core.persistence.datasource.models',
     'backend_core.persistence.engine_instances.models',
@@ -52,6 +53,12 @@ _SHARED_TABLES = {
     'runtime_namespace_work_wakes',
     'runtime_coordinator_state',
     'runtime_workers',
+    'chat_sessions',
+    'chat_turns',
+    'chat_messages',
+    'chat_events',
+    'telegram_poll_offsets',
+    'telegram_detection_requests',
 }
 _TENANT_TABLES = {
     'analyses',

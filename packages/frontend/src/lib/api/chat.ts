@@ -12,6 +12,8 @@ export interface ChatSession {
 export interface ChatHistoryResponse {
 	session_id: string;
 	history: ChatEvent[];
+	last_event_id: number;
+	history_gap: boolean;
 }
 
 export interface ChatMessageEvent {
@@ -89,6 +91,11 @@ export interface ChatErrorEvent {
 	content: string;
 }
 
+export interface ChatHistoryGapEvent {
+	type: 'history_gap';
+	oldest_event_id: number;
+}
+
 export type ChatEvent =
 	| ChatMessageEvent
 	| ChatToolCallEvent
@@ -100,7 +107,8 @@ export type ChatEvent =
 	| ChatUiPatchEvent
 	| ChatUsageEvent
 	| ChatDoneEvent
-	| ChatErrorEvent;
+	| ChatErrorEvent
+	| ChatHistoryGapEvent;
 
 export interface SessionActionResponse {
 	status: string;
@@ -228,6 +236,7 @@ export function listSessions(): ResultAsync<ChatSessionInfo[], ApiError> {
 	return apiRequest<ChatSessionInfo[]>('/v1/ai/chat/sessions');
 }
 
-export function openEventStream(sessionId: string): EventSource {
-	return createOwnedEventSource(buildBackendUrl(`/v1/ai/chat/stream/${sessionId}`));
+export function openEventStream(sessionId: string, after = 0): EventSource {
+	const cursor = after > 0 ? `?after=${after}` : '';
+	return createOwnedEventSource(buildBackendUrl(`/v1/ai/chat/stream/${sessionId}${cursor}`));
 }

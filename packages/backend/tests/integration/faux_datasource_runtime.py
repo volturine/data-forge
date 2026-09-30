@@ -10,6 +10,7 @@ from typing import Any
 
 import polars as pl
 import pytest
+from openpyxl.utils.cell import range_boundaries
 from sqlmodel import Session
 
 from backend_core.domain.datasource.source_types import DataSourceType
@@ -19,8 +20,12 @@ from modules.datasource.schema_protocol import schema_info_payload
 
 
 class FauxDatasourceRuntime:
+    def __init__(self) -> None:
+        self.preflights: dict[str, Any] = {}
+        self.preflight_calls: list[tuple[str, dict[str, object]]] = []
+
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from modules.datasource import routes
+        from modules.datasource import preflight, routes
 
         monkeypatch.setattr(routes, 'create_remote_file_datasource', self.create_file_datasource)
         monkeypatch.setattr(routes, 'create_remote_database_datasource', self.create_database_datasource)
@@ -28,6 +33,96 @@ class FauxDatasourceRuntime:
         monkeypatch.setattr(routes, 'get_remote_datasource_schema', self.get_datasource_schema)
         monkeypatch.setattr(routes, 'ingest_remote_datasource', self.ingest_datasource)
         monkeypatch.setattr(routes, 'get_remote_column_stats', self.get_column_stats)
+        monkeypatch.setattr(preflight, 'create_preflight', self.create_preflight)
+        monkeypatch.setattr(preflight, 'get_preflight', self.get_preflight)
+        monkeypatch.setattr(preflight, 'clear_preflight', self.clear_preflight)
+        monkeypatch.setattr(preflight, 'execute_excel_preflight', self.execute_excel_preflight)
+        monkeypatch.setattr(routes, 'create_preflight', self.create_preflight)
+        monkeypatch.setattr(routes, 'get_preflight', self.get_preflight)
+        monkeypatch.setattr(routes, 'clear_preflight', self.clear_preflight)
+        monkeypatch.setattr(routes, 'execute_excel_preflight', self.execute_excel_preflight)
+
+    async def create_preflight(
+        self,
+        session: Session,
+        *,
+        source_path: str,
+        selection: dict[str, object],
+        runtime_probe: object,
+        delete_source: bool,
+    ) -> tuple[str, Any, dict[str, object]]:
+        from modules.datasource.preflight import ExcelPreflight
+
+        del session, runtime_probe
+        preflight_id = str(uuid.uuid4())
+        self.preflight_calls.append(('initial', dict(selection)))
+        preflight = ExcelPreflight(
+            source_path=source_path,
+            sheets=['Sheet1'],
+            tables={},
+            named_ranges=[],
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+            delete_source=delete_source,
+        )
+        self.preflights[preflight_id] = preflight
+        return preflight_id, preflight, self._preflight_result(selection)
+
+    async def get_preflight(self, preflight_id: str) -> Any | None:
+        return self.preflights.get(preflight_id)
+
+    async def clear_preflight(self, preflight_id: str, *, delete_source: bool = True) -> None:
+        del delete_source
+        self.preflights.pop(preflight_id, None)
+
+    async def execute_excel_preflight(
+        self,
+        session: Session,
+        *,
+        preflight_id: str,
+        source_path: str,
+        action: int,
+        selection: dict[str, object],
+        runtime_probe: object,
+        delete_source: bool = False,
+        datasource_id: str | None = None,
+    ) -> dict[str, object]:
+        del session, preflight_id, source_path, runtime_probe, delete_source, datasource_id
+        self.preflight_calls.append((str(action), dict(selection)))
+        return self._preflight_result(selection)
+
+    @staticmethod
+    def _preflight_result(selection: dict[str, object]) -> dict[str, object]:
+        def selection_int(key: str, default: int) -> int:
+            value = selection.get(key)
+            return value if isinstance(value, int) else default
+
+        cell_range = selection.get('cell_range')
+        if isinstance(cell_range, str) and cell_range:
+            bounds_text = cell_range.rsplit('!', 1)[-1]
+            min_col, min_row, max_col, max_row = range_boundaries(bounds_text)
+            min_col = min_col or 1
+            min_row = min_row or 1
+            max_col = max_col or min_col
+            max_row = max_row or min_row
+            start_row, start_col = min_row - 1, min_col - 1
+            end_row, end_col = max_row - 1, max_col - 1
+        else:
+            start_row = selection_int('start_row', 0)
+            start_col = selection_int('start_col', 0)
+            end_col = selection_int('end_col', 1)
+            end_row = selection_int('end_row', 2)
+        return {
+            'sheet_name': selection.get('sheet_name') or 'Sheet1',
+            'start_row': start_row,
+            'start_col': start_col,
+            'end_col': end_col,
+            'detected_end_row': end_row,
+            'preview_rows': [
+                {'cells': ['id', 'name']},
+                {'cells': ['1', 'A']},
+                {'cells': ['2', 'B']},
+            ],
+        }
 
     async def create_file_datasource(
         self,

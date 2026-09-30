@@ -201,6 +201,10 @@ message WorkerPublishDatasourceCreateRequest {
   google.protobuf.Struct config = 6 [(buf.validate.field).required = true];
   optional string owner_id = 7 [(buf.validate.field).string.min_len = 1];
   SchemaInfo schema_info = 8;
+  string compute_request_id = 9 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 10 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 11 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 12 [(buf.validate.field).int64.gte = 1];
 }
 
 message WorkerPublishDatasourceCreateResponse {
@@ -229,6 +233,11 @@ message WorkerPublishDatasourceSchemaCacheRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
   SchemaInfo schema_info = 3 [(buf.validate.field).required = true];
+  int64 expected_revision = 4 [(buf.validate.field).int64.gte = 1];
+  string compute_request_id = 5 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 6 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 7 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 8 [(buf.validate.field).int64.gte = 1];
 }
 
 message WorkerPublishDatasourceSchemaCacheResponse {

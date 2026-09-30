@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from zoneinfo import ZoneInfo
 
 import psycopg
@@ -498,6 +498,70 @@ class _DeferredFormattingQueueHandler(logging.handlers.QueueHandler):
         return copy.copy(record)
 
 
+class _BoundedFormattingQueueHandler(_DeferredFormattingQueueHandler):
+    """Queue log records without waiting for a slow listener thread."""
+
+    def __init__(self, log_queue: queue.Queue[logging.LogRecord]) -> None:
+        super().__init__(log_queue)
+        self._dropped = 0
+        self._reported_dropped = 0
+        self._drop_lock = threading.Lock()
+
+    @property
+    def dropped(self) -> int:
+        with self._drop_lock:
+            return self._dropped
+
+    def enqueue(self, record: logging.LogRecord) -> None:
+        try:
+            self.queue.put_nowait(record)
+        except queue.Full:
+            with self._drop_lock:
+                self._dropped += 1
+
+    def take_drop_report(self) -> int | None:
+        with self._drop_lock:
+            dropped = self._dropped
+            if dropped == 0 or dropped & (dropped - 1) != 0:
+                return None
+            if dropped == self._reported_dropped:
+                return None
+            self._reported_dropped = dropped
+            return dropped
+
+
+class _BoundedQueueListener(logging.handlers.QueueListener):
+    def __init__(
+        self,
+        log_queue: queue.Queue[logging.LogRecord],
+        *handlers: logging.Handler,
+        overflow_handler: _BoundedFormattingQueueHandler,
+    ) -> None:
+        super().__init__(log_queue, *handlers)
+        self._overflow_handler = overflow_handler
+
+    def handle(self, record: logging.LogRecord) -> None:
+        super().handle(record)
+        dropped = self._overflow_handler.take_drop_report()
+        if dropped is not None:
+            report = logging.LogRecord(
+                'backend_core.logging',
+                logging.WARNING,
+                __file__,
+                0,
+                'Backend log queue overflow; dropped_total=%s',
+                (dropped,),
+                None,
+            )
+            self.handlers[0].handle(report)
+
+    def enqueue_sentinel(self) -> None:
+        # Shutdown runs from the atexit hook; wait for space so accepted log
+        # records drain before the listener exits.
+        log_queue = cast(queue.Queue[logging.LogRecord | None], self.queue)
+        log_queue.put(None)
+
+
 class RequestTimingMiddleware:
     """Report API requests that can threaten the Uvicorn worker heartbeat.
 
@@ -901,8 +965,14 @@ def configure_logging() -> DatabaseLogWriter:
             console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         _console_handler = console_handler
 
-        _queue_handler = _DeferredFormattingQueueHandler(queue.Queue())
-        _listener = logging.handlers.QueueListener(_queue_handler.queue, console_handler, DatabaseLogHandler(_writer))
+        log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=settings.log_queue_max_size)
+        _queue_handler = _BoundedFormattingQueueHandler(log_queue)
+        _listener = _BoundedQueueListener(
+            log_queue,
+            console_handler,
+            DatabaseLogHandler(_writer),
+            overflow_handler=_queue_handler,
+        )
         _listener.start()
         if not _atexit_registered:
             atexit.register(shutdown_logging)
